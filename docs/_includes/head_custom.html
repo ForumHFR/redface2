@@ -1,0 +1,31 @@
+<script>
+(function() {
+  var stored = localStorage.getItem('jtd-theme');
+  if (stored) {
+    jtd.setTheme(stored);
+  } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    jtd.setTheme('dark');
+  }
+
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+    if (!localStorage.getItem('jtd-theme')) {
+      jtd.setTheme(e.matches ? 'dark' : 'light');
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function() {
+    var btn = document.createElement('button');
+    btn.className = 'btn btn-outline ml-2';
+    btn.style.cssText = 'position:fixed;bottom:1rem;right:1rem;z-index:999;font-size:1.2rem;padding:0.4rem 0.6rem;border-radius:0.5rem;cursor:pointer;';
+    btn.textContent = jtd.getTheme() === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19';
+    btn.title = 'Changer de thème';
+    btn.addEventListener('click', function() {
+      var next = jtd.getTheme() === 'dark' ? 'light' : 'dark';
+      jtd.setTheme(next);
+      localStorage.setItem('jtd-theme', next);
+      btn.textContent = next === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19';
+    });
+    document.body.appendChild(btn);
+  });
+})();
+</script>

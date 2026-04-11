@@ -1,6 +1,7 @@
 ---
 title: Accueil
 nav_order: 1
+mermaid: true
 ---
 
 # Redface 2

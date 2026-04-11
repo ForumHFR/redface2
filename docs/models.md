@@ -1,6 +1,7 @@
 ---
 title: "Modèles de données"
 nav_order: 5
+mermaid: true
 ---
 
 # Modèles de données

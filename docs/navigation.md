@@ -1,6 +1,7 @@
 ---
 title: Navigation
 nav_order: 4
+mermaid: true
 ---
 
 # Navigation

@@ -1,6 +1,7 @@
 ---
 title: Pattern MVI
 nav_order: 6
+mermaid: true
 ---
 
 # Pattern MVI
