@@ -1,0 +1,29 @@
+title: Redface 2
+description: "Le futur client Android pour Hardware.fr — Specifications et architecture"
+remote_theme: just-the-docs/just-the-docs
+
+url: "https://forumhfr.github.io"
+baseurl: "/redface2"
+
+aux_links:
+  "GitHub":
+    - "https://github.com/ForumHFR/redface2"
+  "Redface v1":
+    - "https://github.com/ForumHFR/Redface"
+
+color_scheme: dark
+
+mermaid:
+  version: "11"
+
+nav_sort: order
+
+footer_content: "Redface 2 &mdash; Un projet communautaire pour Hardware.fr"
+
+back_to_top: true
+back_to_top_text: "Haut de page"
+
+heading_anchors: true
+
+search:
+  heading_level: 3
