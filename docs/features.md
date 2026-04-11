@@ -60,6 +60,26 @@ Système d'alertes intelligent sur les topics suivis. Dépasse les simples drape
 - Filtres : par auteur, par mot-clé, par topic
 - Intégration avec le système de drapeaux natif
 
+### Hébergement d'images
+
+HFR ne propose aucun hébergement d'images natif. Historiquement, la communauté utilisait [reho.st](https://reho.st) — un service qui n'accepte plus les uploads manuels mais qui continue de servir les images existantes et permet le "rehost" (préfixer une URL avec `https://reho.st/` pour en créer une copie permanente).
+
+Deux hébergeurs communautaires HFR sont actifs :
+- **Rehost by dib** (diberie) — hébergeur et rehost dédié à la communauté HFR
+- **super-h.fr** — hébergeur/rehost alternatif
+
+En fallback ou au choix de l'utilisateur : **Imgur**.
+
+**Intégration dans l'app :**
+- Upload d'images directement depuis l'éditeur (appareil photo, galerie, presse-papiers)
+- Choix du provider : diberie, super-h.fr, imgur (configurable dans les préférences)
+- **Rehost** : coller une URL d'image → l'app la rehost automatiquement via le provider choisi et insère le BBCode `[img]`
+- **Bibliothèque d'images** : historique de tous les uploads avec miniatures, dates, et liens
+- **Tokens de suppression** : chaque upload conserve le token de suppression du provider, permettant de supprimer l'image plus tard depuis l'app
+- Stockage de la bibliothèque dans Room, synchronisable via MPStorage pour retrouver ses images sur un autre appareil
+- Compression/redimensionnement automatique avant upload (configurable)
+- Copie du lien BBCode en un tap (`[img]url[/img]` ou `[url=original][img]thumb[/img][/url]`)
+
 ### Intégration MPStorage
 
 MPStorage est une bibliothèque cross-plateforme (issue de hfr-redkit) qui utilise un MP HFR dédié comme backend de stockage : les données sont sérialisées en JSON dans le corps d'un message privé spécialement créé pour l'occasion. Cela permet de synchroniser des préférences et métadonnées (drapeaux MultiMP, bookmarks, etc.) entre navigateurs, appareils et scripts sans serveur tiers.

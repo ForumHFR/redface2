@@ -243,3 +243,34 @@ data class SearchResult(
     val numreponse: Int,
 )
 ```
+
+---
+
+## Hébergement d'images
+
+```kotlin
+data class HostedImage(
+    val id: String,
+    val url: String,
+    val thumbnailUrl: String?,
+    val originalUrl: String?,
+    val provider: ImageProvider,
+    val deleteToken: String?,
+    val uploadedAt: Instant,
+    val sizeBytes: Long,
+    val topicRef: TopicRef?,
+)
+
+enum class ImageProvider {
+    DIBERIE,    // rehost by dib
+    SUPER_H,    // super-h.fr
+    IMGUR,      // imgur.com
+    REHOST,     // reho.st (rehost uniquement, préfixe URL)
+}
+
+data class TopicRef(
+    val cat: Int,
+    val post: Int,
+    val title: String,
+)
+```

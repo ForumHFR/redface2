@@ -96,6 +96,7 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 - [ ] Create topic — nouveau topic avec catégorie, sujet, contenu, sondage optionnel
 - [ ] Toolbar BBCode — boutons de formatage dans l'éditeur
 - [ ] Preview BBCode — avant-première du rendu
+- [ ] Hébergement d'images — upload, rehost, bibliothèque (diberie, super-h.fr, imgur)
 - [ ] Recherche
 
 **Livrable :** une app complète pour lire ET écrire sur le forum.
