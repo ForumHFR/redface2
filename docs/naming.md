@@ -6,31 +6,31 @@ nav_order: 8
 # Choix du nom
 {: .fs-8 }
 
-Le nom definitif de l'app n'est pas encore decide. Voici les candidats.
+Le nom définitif de l'app n'est pas encore décidé. Voici les candidats.
 {: .fs-5 .fw-300 }
 
 ---
 
 ## Candidats
 
-### Continuite Redface
+### Continuité Redface
 
 | Nom | Note |
 |-----|------|
-| **Redface 2** | Le choix safe. Continuite directe, tout le monde comprend. |
-| **Redfaced** | Jeu de mots : "red-faced" = gene/surpris en anglais. Leger, humouristique. |
-| **Redfacepalm** | Le facepalm rouge. Tres HFR comme ambiance — on a tous fait ce geste en lisant un topic. |
+| **Redface 2** | Le choix safe. Continuité directe, tout le monde comprend. |
+| **Redfaced** | Jeu de mots : "red-faced" = gêné/surpris en anglais. Léger, humoristique. |
+| **Redfacepalm** | Le facepalm rouge. Très HFR comme ambiance — on a tous fait ce geste en lisant un topic. |
 
 ### Humour et culture HFR
 
 | Nom | Note |
 |-----|------|
-| **Redneck** | Assumé. Rien a voir avec le terme americain — c'est le cou rouge de celui qui passe trop de temps penche sur son ecran. |
-| **Facerouge** | Traduction litterale brute. Charme naif, franchouillard. |
-| **:o** | Le smiley originel. Minimaliste, iconique, impossible a googler. |
-| **Drapo / Drapal** | C'est le coeur de l'app : on check ses drapos. "Drapal" est le verbe consacre sur HFR. |
+| **Redneck** | Assumé. Rien à voir avec le terme américain — c'est le cou rouge de celui qui passe trop de temps penché sur son écran. |
+| **Facerouge** | Traduction littérale brute. Charme naïf, franchouillard. |
+| **:o** | Le smiley originel. Minimaliste, iconique, impossible à googler. |
+| **Drapo / Drapal** | C'est le cœur de l'app : on check ses drapos. "Drapal" est le verbe consacré sur HFR. |
 
-### Sequelles cinematographiques
+### Séquelles cinématographiques
 
 | Nom | Note |
 |-----|------|
@@ -41,18 +41,18 @@ Le nom definitif de l'app n'est pas encore decide. Voici les candidats.
 
 | Nom | Note |
 |-----|------|
-| **Vermillon** | Nuance de rouge raffinnee. Fait echo a "Cyan" (le drapeau bleu qu'on aurait pu appeler bleu). Elegant. |
+| **Vermillon** | Nuance de rouge raffinée. Fait écho à "Cyan" (le drapeau bleu qu'on aurait pu appeler bleu). Élégant. |
 
 ---
 
-## Comment decider ?
+## Comment décider ?
 
-Le nom sera choisi par la communaute. Un sondage sera lance sur le topic HFR dedie quand les specs seront stabilisees.
+Le nom sera choisi par la communauté. Un sondage sera lancé sur le topic HFR dédié quand les specs seront stabilisées.
 
-Criteres :
+Critères :
 - Reconnaissable par les utilisateurs Redface existants
-- Memorable
+- Mémorable
 - Disponible sur le Play Store
 - Fonctionne comme nom de package Android
 
-Vous avez une idee ? Ouvrez une issue avec le label `naming`.
+Vous avez une idée ? Ouvrez une issue avec le label `naming`.

@@ -1,12 +1,12 @@
 ---
-title: "Modeles de donnees"
+title: "Modèles de données"
 nav_order: 5
 ---
 
-# Modeles de donnees
+# Modèles de données
 {: .fs-8 }
 
-Structures du domaine metier.
+Structures du domaine métier.
 {: .fs-5 .fw-300 }
 
 ---
@@ -92,8 +92,8 @@ data class FlaggedTopic(
 )
 
 enum class FlagType {
-    CYAN,       // l'utilisateur a participe au topic
-    FAVORITE,   // marque d'une etoile jaune
+    CYAN,       // l'utilisateur a participé au topic
+    FAVORITE,   // marque d'une étoile jaune
     READ,       // drapeau rouge, marque de lecture
 }
 ```
@@ -126,7 +126,7 @@ data class Post(
 
 ---
 
-## Creation et edition
+## Création et édition
 
 ```kotlin
 data class NewTopic(
@@ -152,7 +152,7 @@ data class PollData(
 
 ---
 
-## Categories
+## Catégories
 
 ```kotlin
 data class Category(
@@ -170,7 +170,7 @@ data class SubCategory(
 
 ---
 
-## Messages prives
+## Messages privés
 
 ```kotlin
 data class PrivateMessage(
@@ -199,7 +199,7 @@ data class NewMultiMP(
 
 ## MultiMP Storage
 
-HFR ne gere pas nativement l'etat lu/non-lu des MultiMPs. L'app stocke cette information localement.
+HFR ne gère pas nativement l'état lu/non-lu des MultiMPs. L'app stocke cette information localement.
 
 ```kotlin
 data class MultiMPFlag(

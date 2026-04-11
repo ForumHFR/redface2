@@ -6,52 +6,52 @@ nav_order: 2
 # Stack technique
 {: .fs-8 }
 
-Chaque choix a ete evalue, compare et verrouille. Voici le detail.
+Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 {: .fs-5 .fw-300 }
 
 ---
 
 ## Vue d'ensemble
 
-| Brique | Choix | Alternative ecartee | Raison |
+| Brique | Choix | Alternative écartée | Raison |
 |--------|-------|-------------------|--------|
 | Langage | **Kotlin** | Java | Standard Android depuis 2019, null safety, coroutines |
-| UI | **Jetpack Compose** | XML layouts | Direction officielle Google, declaratif, plus maintenable |
-| Architecture | **MVI** | MVVM | Flux unidirectionnel, etat previsible, ideal pour un forum reader |
+| UI | **Jetpack Compose** | XML layouts | Direction officielle Google, déclaratif, plus maintenable |
+| Architecture | **MVI** | MVVM | Flux unidirectionnel, état prévisible, idéal pour un forum reader |
 | Navigation | **Compose Navigation** | Circuit, Decompose | Deep linking natif, type-safe (v2.8+), back stack solide |
-| DI | **Hilt (KSP)** | Koin | Erreurs a la compilation, integration Jetpack, standard contributeurs |
-| HTTP | **OkHttp 4** | Retrofit, Ktor | Pas d'API REST a mapper, scraping HTML direct + cookies |
+| DI | **Hilt (KSP)** | Koin | Erreurs à la compilation, intégration Jetpack, standard contributeurs |
+| HTTP | **OkHttp 4** | Retrofit, Ktor | Pas d'API REST à mapper, scraping HTML direct + cookies |
 | Parsing HTML | **Jsoup** | Regex, custom parser | Standard JVM, CSS selectors, battle-tested |
-| Cache locale | **Room** | DataStore, SQLDelight | Standard Android, integration Flow, migrations |
+| Cache locale | **Room** | DataStore, SQLDelight | Standard Android, intégration Flow, migrations |
 | Images | **Coil** | Glide | Natif Compose, coroutines, plus idiomatique Kotlin |
-| Async | **Coroutines + Flow** | RxJava | Standard Kotlin, plus leger, meilleure integration Compose |
-| minSdk | **29** | 26, 31 | Android 10 : Scoped Storage, TLS 1.3, dark theme natif |
+| Async | **Coroutines + Flow** | RxJava | Standard Kotlin, plus léger, meilleure intégration Compose |
+| minSdk | **29** | 26, 31 | Android 10 : Scoped Storage, TLS 1.3, dark thème natif |
 
 ---
 
-## Detail des choix
+## Détail des choix
 
 ### Kotlin
 
-Pas de debat ici. Google a declare Kotlin "preferred language" pour Android en 2019. Java est toujours supporte mais toutes les nouvelles APIs, les exemples officiels et les bibliotheques modernes sont Kotlin-first.
+Pas de débat ici. Google a déclaré Kotlin "preferred language" pour Android en 2019. Java est toujours supporté mais toutes les nouvelles APIs, les exemples officiels et les bibliothèques modernes sont Kotlin-first.
 
 Avantages concrets pour Redface 2 :
 - **Null safety** : fini les NPE sur des champs HTML manquants
 - **Coroutines** : async propre sans callback hell (adieu RxJava)
 - **Extension functions** : enrichir les types Android sans sous-classes
-- **Data classes** : modeles domaine en une ligne
+- **Data classes** : modèles domaine en une ligne
 - **Sealed classes** : MVI Intents et Effects type-safe
 
 ### Jetpack Compose
 
-Le toolkit UI declaratif de Google. Remplace XML layouts + `findViewById` + ButterKnife + les adapters RecyclerView.
+Le toolkit UI déclaratif de Google. Remplace XML layouts + `findViewById` + ButterKnife + les adapters RecyclerView.
 
 ```kotlin
 // Avant (XML + Java)
 TextView textView = findViewById(R.id.post_content);
 textView.setText(post.getContent());
 
-// Apres (Compose)
+// Après (Compose)
 @Composable
 fun PostContent(post: Post) {
     Text(text = post.content)
@@ -59,66 +59,66 @@ fun PostContent(post: Post) {
 ```
 
 Pour un forum reader, Compose apporte :
-- **LazyColumn** : equivalent de RecyclerView mais declaratif, gere des milliers de posts
-- **Recomposition intelligente** : seuls les composants dont l'etat change sont redessinés
+- **LazyColumn** : équivalent de RecyclerView mais déclaratif, gère des milliers de posts
+- **Recomposition intelligente** : seuls les composants dont l'état change sont redessinés
 - **Theming Material 3** : dark mode, dynamic colors, typographie
 - **Preview** : voir le rendu directement dans l'IDE
 
-### MVI plutot que MVVM
+### MVI plutôt que MVVM
 
-MVVM (Model-View-ViewModel) est le pattern Android classique. MVI (Model-View-Intent) ajoute une contrainte : **le flux de donnees est unidirectionnel**.
+MVVM (Model-View-ViewModel) est le pattern Android classique. MVI (Model-View-Intent) ajoute une contrainte : **le flux de données est unidirectionnel**.
 
 ```
-MVVM : View ↔ ViewModel ↔ Model  (bidirectionnel, etat disperse)
-MVI  : Intent → ViewModel → State → View  (unidirectionnel, etat centralise)
+MVVM : View ↔ ViewModel ↔ Model  (bidirectionnel, état dispersé)
+MVI  : Intent → ViewModel → State → View  (unidirectionnel, état centralisé)
 ```
 
-Pour un forum reader, MVI est superieur :
-- L'etat d'un ecran "Topic" est complexe (posts, page, loading, erreur, scroll position)
-- Les actions utilisateur sont bien definies (charger page, quoter, repondre, flag)
-- Le debugging est simple : on inspecte l'etat, on rejoue les intents
+Pour un forum reader, MVI est supérieur :
+- L'état d'un écran "Topic" est complexe (posts, page, loading, erreur, scroll position)
+- Les actions utilisateur sont bien définies (charger page, quoter, répondre, flag)
+- Le debugging est simple : on inspecte l'état, on rejoue les intents
 - Les tests sont des fonctions pures : intent + state actuel → nouveau state
 
 ### Compose Navigation (pas Circuit, pas Decompose)
 
-Trois options evaluees :
+Trois options évaluées :
 
 | | Compose Navigation | Circuit (Slack) | Decompose |
 |---|---|---|---|
 | Deep linking | Natif, first-class | Manuel | Manuel |
-| Type safety | Oui (v2.8+, serializable routes) | Oui | Oui |
-| Back stack | Solide, gere par le framework | Bon | Excellent |
-| Courbe d'apprentissage | Moderee, bien documentee | Raide (pattern Presenter) | Raide (component tree) |
-| Communaute | Enorme (Google) | Moyenne (Slack) | Petite |
+| Type safety | Oui (v2.8+, sérialisable routes) | Oui | Oui |
+| Back stack | Solide, géré par le framework | Bon | Excellent |
+| Courbe d'apprentissage | Modérée, bien documentée | Raide (pattern Presenter) | Raide (component tree) |
+| Communauté | Énorme (Google) | Moyenne (Slack) | Petite |
 | KMP | Non (Android only) | Oui | Oui |
 
 **Compose Navigation gagne** pour Redface 2 :
-- Le deep linking est critique : les URLs HFR (`forum.hardware.fr/forum1.php?cat=13&post=12345&page=3`) doivent ouvrir directement le bon ecran
+- Le deep linking est critique : les URLs HFR (`forum.hardware.fr/forum1.php?cat=13&post=12345&page=3`) doivent ouvrir directement le bon écran
 - Pas besoin de KMP (on reste Android natif)
-- La plus grande base de contributeurs potentiels connait deja ce framework
-- Les type-safe routes (v2.8+) eliminent les strings magiques
+- La plus grande base de contributeurs potentiels connait déjà ce framework
+- Les type-safe routes (v2.8+) éliminent les strings magiques
 
-### Hilt plutot que Koin
+### Hilt plutôt que Koin
 
 | | Hilt | Koin |
 |---|---|---|
 | Validation | **Compilation** (erreurs avant le runtime) | Runtime (crash en prod) |
-| Build time | Bon avec KSP (plus de KAPT) | Leger |
+| Build time | Bon avec KSP (plus de KAPT) | Léger |
 | Integration Android | ViewModel, WorkManager, Navigation — tout cable | Manuel |
-| Contributeurs | Standard reconnu, doc Google | Moins repandu |
+| Contributeurs | Standard reconnu, doc Google | Moins répandu |
 | Cold start | Aucun overhead runtime | ~200ms sur grosse app |
 
-Hilt avec KSP (pas KAPT) resout le probleme historique de build time. La securite a la compilation et l'integration native avec Jetpack font la difference pour un projet open-source.
+Hilt avec KSP (pas KAPT) résout le problème historique de build time. La sécurité à la compilation et l'intégration native avec Jetpack font la différence pour un projet open-source.
 
 ### OkHttp 4 direct (sans Retrofit)
 
-Choix contre-intuitif. Retrofit est le standard Android pour le reseau. Mais Retrofit ajoute de la valeur quand on consomme une **API REST structuree** avec des endpoints types.
+Choix contre-intuitif. Retrofit est le standard Android pour le réseau. Mais Retrofit ajoute de la valeur quand on consomme une **API REST structurée** avec des endpoints types.
 
 HFR n'a pas d'API. Redface fait du **scraping HTML** :
-- `GET /forum1.php?cat=13&post=12345&page=3` → HTML brut a parser
-- `POST /bddpost.php` → formulaire avec champs caches
+- `GET /forum1.php?cat=13&post=12345&page=3` → HTML brut à parser
+- `POST /bddpost.php` → formulaire avec champs cachés
 
-Avec Retrofit, on definirait des interfaces qui retournent `ResponseBody`... pour ensuite parser le HTML manuellement. Autant utiliser OkHttp directement avec une couche d'abstraction propre.
+Avec Retrofit, on définirait des interfaces qui retournent `ResponseBody`... pour ensuite parser le HTML manuellement. Autant utiliser OkHttp directement avec une couche d'abstraction propre.
 
 ```kotlin
 // Ce qu'on ferait avec Retrofit (inutilement verbeux)
@@ -147,7 +147,7 @@ OkHttp fournit aussi le **CookieJar** pour la gestion de session HFR — essenti
 
 ### Jsoup
 
-Standard inconteste pour le parsing HTML sur la JVM. CSS selectors, manipulation DOM, robuste face au HTML malformed (et celui de HFR l'est).
+Standard incontesté pour le parsing HTML sur la JVM. CSS selectors, manipulation DOM, robuste face au HTML malformed (et celui de HFR l'est).
 
 ```kotlin
 // Extraire les posts d'une page HFR
@@ -162,13 +162,13 @@ val posts = document.select("table.messagetable").map { table ->
 
 ### Room
 
-Base de donnees locale pour le cache et le stockage persistant :
-- **Cache des topics** : relecture instantanee sans reseau
+Base de données locale pour le cache et le stockage persistant :
+- **Cache des topics** : relecture instantanée sans réseau
 - **MPStorage** : tracking lu/non-lu des MultiMPs (pas natif HFR)
 - **Bookmarks** : signets locaux sur des posts
-- **Preferences** : reglages utilisateur
+- **Préférences** : réglages utilisateur
 
-Room s'integre nativement avec **Flow** pour des donnees reactives :
+Room s'intègre nativement avec **Flow** pour des données réactives :
 
 ```kotlin
 @Query("SELECT * FROM flagged_topics ORDER BY last_date DESC")
@@ -177,24 +177,24 @@ fun observeFlags(): Flow<List<FlaggedTopicEntity>>
 
 ### Coil
 
-Chargeur d'images concu pour Compose et les coroutines. Plus leger et plus idiomatique que Glide pour un projet Kotlin-first.
+Chargeur d'images conçu pour Compose et les coroutines. Plus léger et plus idiomatique que Glide pour un projet Kotlin-first.
 
 Utilise pour :
 - Avatars des utilisateurs
 - Images dans les posts
 - **Smileys HFR** (cache agressif, ils ne changent jamais)
-- Previews d'images en plein ecran
+- Previews d'images en plein écran
 
 ### minSdk 29 (Android 10)
 
-Analyse detaillee dans [l'issue #241 de Redface v1](https://github.com/ForumHFR/Redface/issues/241).
+Analyse détaillée dans [l'issue #241 de Redface v1](https://github.com/ForumHFR/Redface/issues/241).
 
 Pourquoi 29 et pas moins :
 - **Scoped Storage** disponible (opt-in) — pas besoin de permission stockage
-- **TLS 1.3 garanti** — securite reseau sans configuration
-- **Dark theme natif** — `isSystemInDarkTheme()` fonctionne
+- **TLS 1.3 garanti** — sécurité réseau sans configuration
+- **Dark thème natif** — `isSystemInDarkTheme()` fonctionne
 - **Supprime multidex** — build plus simple
-- **Biometric API** — pour securiser le login HFR
+- **Biometric API** — pour sécuriser le login HFR
 
 Pourquoi pas 31+ :
 - 29 couvre **96%+ des appareils actifs** en 2026
@@ -204,11 +204,11 @@ Pourquoi pas 31+ :
 
 ## Objectifs de performance
 
-| Metrique | Cible |
+| Métrique | Cible |
 |----------|-------|
 | Cold start | < 1.5s |
 | Scroll FPS | 60fps constant (120fps sur appareils compatibles) |
 | Chargement topic (cache) | < 100ms |
-| Chargement topic (reseau) | < 2s |
+| Chargement topic (réseau) | < 2s |
 | Taille APK | < 15MB |
-| Memoire max | < 200MB |
+| Mémoire max | < 200MB |

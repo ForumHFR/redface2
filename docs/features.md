@@ -6,76 +6,76 @@ nav_order: 7
 # Features communautaires
 {: .fs-8 }
 
-Les meilleurs ajouts des userscripts HFR, integres nativement.
+Les meilleurs ajouts des userscripts HFR, intégrés nativement.
 {: .fs-5 .fw-300 }
 
 ---
 
 ## Contexte
 
-La communaute HFR a developpe de nombreux userscripts qui enrichissent l'experience du forum. Ces scripts ajoutent des fonctionnalites que le forum ne propose pas nativement : alertes qualite, bookmarks sur des posts, blacklist d'utilisateurs, et plus encore.
+La communauté HFR a développé de nombreux userscripts qui enrichissent l'expérience du forum. Ces scripts ajoutent des fonctionnalités que le forum ne propose pas nativement : alertes qualité, bookmarks sur des posts, blacklist d'utilisateurs, et plus encore.
 
-Redface 2 a l'ambition d'integrer les plus populaires de ces features **nativement dans l'app**, sans que l'utilisateur ait besoin d'installer quoi que ce soit.
+Redface 2 a l'ambition d'intégrer les plus populaires de ces features **nativement dans l'app**, sans que l'utilisateur ait besoin d'installer quoi que ce soit.
 
 ---
 
-## Features identifiees
+## Features identifiées
 
 ### Alertes Qualitay
 
-Permettre aux utilisateurs de signaler un post qui merite d'etre lu. Un forumeur peut lancer une "alerte qualitay" sur un post remarquable.
+Permettre aux utilisateurs de signaler un post qui mérite d'être lu. Un forumeur peut lancer une "alerte qualitay" sur un post remarquable.
 
-**Integration dans l'app :**
+**Intégration dans l'app :**
 - Bouton sur chaque post pour lancer/voir une alerte
-- Indicateur visuel sur les posts signales
-- Vue dediee pour retrouver les posts signales
+- Indicateur visuel sur les posts signalés
+- Vue dédiée pour retrouver les posts signalés
 
 ### Bookmarks
 
-Sauvegarder des posts specifiques pour y revenir plus tard. Equivalent d'un marque-page sur un post precis.
+Sauvegarder des posts spécifiques pour y revenir plus tard. Équivalent d'un marque-page sur un post précis.
 
-**Integration dans l'app :**
+**Intégration dans l'app :**
 - Bouton bookmark sur chaque post
 - Stockage local (Room)
-- Vue dediee avec tri par date/topic
+- Vue dédiée avec tri par date/topic
 - Synchronisation possible via compte GitHub (futur)
 
 ### Blacklist
 
-Masquer les posts d'un utilisateur. L'experience de lecture est amelioree sans les messages indesirables.
+Masquer les posts d'un utilisateur. L'expérience de lecture est améliorée sans les messages indésirables.
 
-**Integration dans l'app :**
+**Intégration dans l'app :**
 - Action "blacklister" sur le profil/post d'un utilisateur
-- Posts masques avec option "afficher quand meme"
-- Gestion de la liste dans les parametres
+- Posts masqués avec option "afficher quand même"
+- Gestion de la liste dans les paramètres
 - Stockage local (Room)
 
 ### Redflag
 
-Systeme d'alertes intelligent sur les topics suivis. Depasse les simples drapeaux HFR avec des notifications configurables.
+Système d'alertes intelligent sur les topics suivis. Dépasse les simples drapeaux HFR avec des notifications configurables.
 
-**Integration dans l'app :**
-- Detection de nouveaux messages sur les topics suivis
+**Intégration dans l'app :**
+- Détection de nouveaux messages sur les topics suivis
 - Notifications push (via WorkManager + polling)
-- Filtres : par auteur, par mot-cle, par topic
-- Integration avec le systeme de drapeaux natif
+- Filtres : par auteur, par mot-clé, par topic
+- Intégration avec le système de drapeaux natif
 
 ### MPStorage natif
 
-Tracking lu/non-lu des MultiMPs. HFR ne gere pas cette information nativement.
+Tracking lu/non-lu des MultiMPs. HFR ne gère pas cette information nativement.
 
-**Integration dans l'app :**
+**Intégration dans l'app :**
 - Stockage local dans Room (remplace l'approche userscript via localStorage ou worker Cloudflare)
 - Vue MultiMP avec indicateurs lu/non-lu
-- Marquage automatique a la lecture
+- Marquage automatique à la lecture
 
 ---
 
 ## Architecture d'extensions
 
-Pour supporter ces features (et les futures contributions de la communaute), Redface 2 utilise une architecture modulaire.
+Pour supporter ces features (et les futures contributions de la communauté), Redface 2 utilise une architecture modulaire.
 
-Chaque feature communautaire est un **module Gradle isole** :
+Chaque feature communautaire est un **module Gradle isolé** :
 
 ```
 :feature:bookmarks
@@ -86,7 +86,7 @@ Chaque feature communautaire est un **module Gradle isole** :
 
 ### Points d'extension
 
-Les features communautaires interagissent avec l'app via des interfaces standardisees :
+Les features communautaires interagissent avec l'app via des interfaces standardisées :
 
 ```kotlin
 // Enrichir le rendu d'un post
@@ -95,9 +95,9 @@ interface PostDecorator {
 }
 
 data class PostDecoration(
-    val badges: List<Badge> = emptyList(),     // badges affiches sur le post
+    val badges: List<Badge> = emptyList(),     // badges affichés sur le post
     val actions: List<PostAction> = emptyList(), // actions dans le menu du post
-    val hidden: Boolean = false,                // post masque (blacklist)
+    val hidden: Boolean = false,                // post masqué (blacklist)
 )
 
 // Enrichir la toolbar d'un topic
@@ -118,46 +118,46 @@ abstract class BookmarkModule {
 }
 ```
 
-Le systeme collecte automatiquement toutes les contributions via `@IntoSet` — ajouter une feature ne demande aucune modification du code existant.
+Le système collecte automatiquement toutes les contributions via `@IntoSet` — ajouter une feature ne demande aucune modification du code existant.
 
 ---
 
 ## Features non-userscript
 
-En plus des features inspirees des userscripts, Redface 2 ajoutera :
+En plus des features inspirées des userscripts, Redface 2 ajoutera :
 
 ### Mode offline
 
-- Cache complete des topics lus
+- Cache complet des topics lus
 - Lecture sans connexion
-- File d'attente pour les reponses (envoi quand le reseau revient)
+- File d'attente pour les réponses (envoi quand le réseau revient)
 
-### Theme dynamique
+### Thème dynamique
 
 - Material You (couleurs dynamiques selon le wallpaper)
-- Theme sombre AMOLED (noir pur)
-- Theme "HFR classique" (pour les nostalgiques)
+- Thème sombre AMOLED (noir pur)
+- Thème "HFR classique" (pour les nostalgiques)
 
 ### Notifications
 
 - Polling configurable (5min, 15min, 30min, 1h)
-- Notification par topic/auteur/mot-cle
-- Mode "ne pas deranger" par plage horaire
+- Notification par topic/auteur/mot-clé
+- Mode "ne pas déranger" par plage horaire
 
 ### Partage intelligent
 
-- Partager un lien vers un post specifique
-- Capture d'ecran d'un post avec mise en forme
+- Partager un lien vers un post spécifique
+- Capture d'écran d'un post avec mise en forme
 - Copie du BBCode brut
 
 ---
 
 ## Proposer une feature
 
-Le topic HFR recensant les userscripts et addons communautaires sera utilise comme reference pour identifier les features a integrer.
+Le topic HFR recensant les userscripts et addons communautaires sera utilisé comme référence pour identifier les features à intégrer.
 
 Pour proposer une nouvelle feature :
 1. Ouvrir une issue sur ce repo avec le label `feature`
-2. Decrire le use case et l'UX souhaitee
+2. Décrire le use case et l'UX souhaitée
 3. Si c'est une adaptation d'un userscript existant, lier le script original
-4. Discussion ouverte avec la communaute avant implementation
+4. Discussion ouverte avec la communauté avant implémentation

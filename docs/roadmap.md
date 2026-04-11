@@ -6,7 +6,7 @@ nav_order: 9
 # Roadmap
 {: .fs-8 }
 
-Phases de developpement, de la fondation au polish.
+Phases de développement, de la fondation au polish.
 {: .fs-5 .fw-300 }
 
 ---
@@ -24,10 +24,10 @@ gantt
     Phase 1 — Core               :p1, 2026-05, 2026-08
 
     section Interaction
-    Phase 2 — Ecriture           :p2, 2026-08, 2026-10
+    Phase 2 — Écriture           :p2, 2026-08, 2026-10
     Phase 3 — Messages           :p3, 2026-10, 2026-12
 
-    section Communaute
+    section Communauté
     Phase 4 — Extensions         :p4, 2027-01, 2027-03
     Phase 5 — Polish             :p5, 2027-03, 2027-05
 ```
@@ -36,16 +36,16 @@ gantt
 
 ## Phase 0 — Bootstrap
 
-**Objectif :** un squelette d'app qui compile, avec CI, theme et navigation.
+**Objectif :** un squelette d'app qui compile, avec CI, thème et navigation.
 
 - [ ] Structure Gradle multi-modules
 - [ ] CI GitHub Actions (build, lint, tests)
-- [ ] Theme Material 3 (clair, sombre, AMOLED)
-- [ ] Navigation graph (bottom nav + ecrans vides)
+- [ ] Thème Material 3 (clair, sombre, AMOLED)
+- [ ] Navigation graph (bottom nav + écrans vides)
 - [ ] Hilt wiring
 - [ ] Design system de base (typographie, couleurs, composants)
 
-**Livrable :** une app qui demarre, affiche la bottom nav, et navigue entre des ecrans placeholder.
+**Livrable :** une app qui démarre, affiche la bottom nav, et navigue entre des écrans placeholder.
 
 ---
 
@@ -54,71 +54,71 @@ gantt
 **Objectif :** lire le forum. C'est 80% du use case.
 
 - [ ] Login HFR (cookies persistants)
-- [ ] Ecran Drapeaux (accueil) — tri par date/categorie, filtres
-- [ ] Ecran Topic — lecture, pagination, scroll fluide
+- [ ] Écran Drapeaux (accueil) — tri par date/catégorie, filtres
+- [ ] Écran Topic — lecture, pagination, scroll fluide
 - [ ] PostRenderer — rendu BBCode natif en Compose
-- [ ] Ecran Forum — categories, sous-categories, liste de topics
+- [ ] Écran Forum — catégories, sous-catégories, liste de topics
 - [ ] Cache Room — topics et drapeaux
 - [ ] Deep linking (URLs HFR → app)
 - [ ] Prefetch pages suivantes
 - [ ] Images + smileys (Coil)
 
-**Livrable :** une app utilisable pour **lire** le forum au quotidien. Pas encore de possibilite d'ecrire.
+**Livrable :** une app utilisable pour **lire** le forum au quotidien. Pas encore de possibilité d'écrire.
 
 ### PostRenderer — le sous-chantier critique
 
-Le rendu natif Compose du BBCode HFR est le composant le plus complexe de toute l'app. Il doit gerer :
+Le rendu natif Compose du BBCode HFR est le composant le plus complexe de toute l'app. Il doit gérer :
 
-| Element | Complexite |
+| Élément | Complexité |
 |---------|-----------|
-| Texte formate (gras, italique, souligne, couleur, taille) | Moyenne |
-| Citations imbriquees | Elevee |
+| Texte formaté (gras, italique, souligné, couleur, taille) | Moyenne |
+| Citations imbriquées | Élevée |
 | Blocs de code | Faible |
 | Images inline | Moyenne |
 | Smileys HFR | Moyenne (cache + mapping) |
 | URLs cliquables | Faible |
-| Spoilers (clic pour reveler) | Moyenne |
+| Spoilers (clic pour révéler) | Moyenne |
 | Listes | Faible |
 
-Le PostRenderer sera developpe de maniere incrementale : texte brut d'abord, puis formatage, puis citations, puis images.
+Le PostRenderer sera développé de manière incrémentale : texte brut d'abord, puis formatage, puis citations, puis images.
 
 ---
 
-## Phase 2 — Ecriture
+## Phase 2 — Écriture
 
 **Objectif :** interagir avec le forum.
 
-- [ ] Reply — repondre a un topic
-- [ ] Quote — citer un post → reply pre-rempli
-- [ ] Edit — editer son propre post
-- [ ] Edit FP — editer le first post (sujet, contenu, sondage)
-- [ ] Create topic — nouveau topic avec categorie, sujet, contenu, sondage optionnel
-- [ ] Toolbar BBCode — boutons de formatage dans l'editeur
-- [ ] Preview BBCode — avant-premiere du rendu
+- [ ] Reply — répondre à un topic
+- [ ] Quote — citer un post → reply pré-rempli
+- [ ] Edit — éditer son propre post
+- [ ] Edit FP — éditer le first post (sujet, contenu, sondage)
+- [ ] Create topic — nouveau topic avec catégorie, sujet, contenu, sondage optionnel
+- [ ] Toolbar BBCode — boutons de formatage dans l'éditeur
+- [ ] Preview BBCode — avant-première du rendu
 - [ ] Recherche
 
-**Livrable :** une app complete pour lire ET ecrire sur le forum.
+**Livrable :** une app complète pour lire ET écrire sur le forum.
 
 ---
 
 ## Phase 3 — Messages
 
-**Objectif :** les messages prives, classiques et multi.
+**Objectif :** les messages privés, classiques et multi.
 
 - [ ] Inbox MPs classiques — liste, lecture, reply
-- [ ] Nouveau MP — creation
+- [ ] Nouveau MP — création
 - [ ] MultiMPs — liste avec vue drapeaux, lecture, reply, quote
-- [ ] Nouveau MultiMP — creation (2+ destinataires)
+- [ ] Nouveau MultiMP — création (2+ destinataires)
 - [ ] MPStorage natif — tracking lu/non-lu en Room
 - [ ] Notifications MP
 
-**Livrable :** gestion complete des MPs, y compris les MultiMPs avec etat lu/non-lu.
+**Livrable :** gestion complète des MPs, y compris les MultiMPs avec état lu/non-lu.
 
 ---
 
 ## Phase 4 — Extensions communautaires
 
-**Objectif :** les features inspirees des userscripts HFR.
+**Objectif :** les features inspirées des userscripts HFR.
 
 - [ ] Architecture d'extensions (PostDecorator, TopicToolbarContributor)
 - [ ] Bookmarks — sauvegarder des posts
@@ -126,34 +126,34 @@ Le PostRenderer sera developpe de maniere incrementale : texte brut d'abord, pui
 - [ ] Alertes Qualitay — signaler un post remarquable
 - [ ] Redflag — alertes intelligentes sur topics suivis
 
-**Livrable :** les features communautaires les plus demandees, integrees nativement.
+**Livrable :** les features communautaires les plus demandées, intégrées nativement.
 
 ---
 
 ## Phase 5 — Polish
 
-**Objectif :** l'experience utilisateur raffinee.
+**Objectif :** l'expérience utilisateur raffinée.
 
 - [ ] Animations et transitions
-- [ ] Mode offline complet (lecture + file d'attente d'ecriture)
+- [ ] Mode offline complet (lecture + file d'attente d'écriture)
 - [ ] Notifications push configurables
-- [ ] Theme dynamique (Material You)
-- [ ] Theme "HFR classique"
+- [ ] Thème dynamique (Material You)
+- [ ] Thème "HFR classique"
 - [ ] Widgets Android
-- [ ] Migration automatique des donnees Redface v1
-- [ ] Tests de performance (scroll, cold start, memoire)
+- [ ] Migration automatique des données Redface v1
+- [ ] Tests de performance (scroll, cold start, mémoire)
 - [ ] Publication Play Store
 
-**Livrable :** une app prete pour le grand public.
+**Livrable :** une app prête pour le grand public.
 
 ---
 
 ## Participation
 
-Chaque phase sera trackee via les [issues GitHub](https://github.com/ForumHFR/redface2/issues) et des milestones. Les contributions sont les bienvenues a partir de la Phase 1.
+Chaque phase sera trackée via les [issues GitHub](https://github.com/ForumHFR/redface2/issues) et des milestones. Les contributions sont les bienvenues à partir de la Phase 1.
 
 Pour contribuer :
-1. Choisir une issue non assignee
+1. Choisir une issue non assignée
 2. Commenter pour signaler qu'on la prend
 3. Ouvrir une PR sur une branche feature
 4. Review par un mainteneur

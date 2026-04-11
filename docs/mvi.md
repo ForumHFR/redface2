@@ -13,7 +13,7 @@ Model-View-Intent : le pattern d'architecture UI de Redface 2.
 
 ## Principe
 
-MVI impose un **flux de donnees unidirectionnel**. L'utilisateur emet des Intents, le ViewModel produit un nouveau State, Compose dessine le State.
+MVI impose un **flux de données unidirectionnel**. L'utilisateur émet des Intents, le ViewModel produit un nouveau State, Compose dessine le State.
 
 ```mermaid
 graph LR
@@ -24,13 +24,13 @@ graph LR
 
 Trois concepts :
 
-- **State** : l'etat complet de l'ecran. Immutable. Un seul objet `data class`.
+- **State** : l'état complet de l'écran. Immutable. Un seul objet `data class`.
 - **Intent** : une action de l'utilisateur. `sealed interface`. Pur, sans logique.
-- **Effect** : un evenement one-shot (navigation, snackbar, vibration). Ne fait pas partie du state car il ne doit pas etre rejoue a la recomposition.
+- **Effect** : un événement one-shot (navigation, snackbar, vibration). Ne fait pas partie du state car il ne doit pas être rejoué à la recomposition.
 
 ---
 
-## Ecran Drapeaux (accueil)
+## Écran Drapeaux (accueil)
 
 ```kotlin
 // ── State ──────────────────────────────────────────
@@ -181,7 +181,7 @@ private fun FlagsContent(
 
 ---
 
-## Ecran Topic (lecture)
+## Écran Topic (lecture)
 
 ```kotlin
 data class TopicState(
@@ -218,9 +218,9 @@ sealed interface TopicEffect {
 
 ---
 
-## Ecran Editor (reply / edit / FP)
+## Écran Editor (reply / edit / FP)
 
-L'editeur est partage entre reply, edit et edit FP. Le mode determine les champs visibles.
+L'éditeur est partagé entre reply, edit et edit FP. Le mode détermine les champs visibles.
 
 ```kotlin
 data class EditorState(
@@ -235,9 +235,9 @@ data class EditorState(
 
 enum class EditorMode {
     Reply,      // nouveau message
-    Edit,       // editer un post existant
-    EditFP,     // editer le first post (sujet + sondage)
-    NewTopic,   // creer un topic
+    Edit,       // éditer un post existant
+    EditFP,     // éditer le first post (sujet + sondage)
+    NewTopic,   // créer un topic
 }
 
 sealed interface EditorIntent {
@@ -251,7 +251,7 @@ sealed interface EditorIntent {
 
 ---
 
-## Ecran Messages
+## Écran Messages
 
 ```kotlin
 data class MessagesState(
@@ -277,7 +277,7 @@ sealed interface MessagesIntent {
 
 ## Convention
 
-Chaque feature suit la meme structure de fichiers :
+Chaque feature suit la même structure de fichiers :
 
 ```
 feature/topic/
@@ -288,4 +288,4 @@ feature/topic/
   └── TopicRepository.kt    // Interface repository
 ```
 
-Cette convention garantit la coherence et facilite l'onboarding des contributeurs.
+Cette convention garantit la cohérence et facilite l'onboarding des contributeurs.
