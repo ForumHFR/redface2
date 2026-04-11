@@ -13,52 +13,121 @@ Les meilleurs ajouts des userscripts HFR, intégrés nativement.
 
 ## Contexte
 
-La communauté HFR a développé de nombreux userscripts qui enrichissent l'expérience du forum. Ces scripts ajoutent des fonctionnalités que le forum ne propose pas nativement : alertes qualité, bookmarks sur des posts, blacklist d'utilisateurs, et plus encore.
+La communauté HFR a développé **126 userscripts** recensés sur le [topic dédié](https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=13&subcat=432&post=116015) maintenu par roger21. Ces scripts, accumulés sur des années, ajoutent des fonctionnalités essentielles que le forum ne propose pas nativement.
 
-Redface 2 a l'ambition d'intégrer les plus populaires de ces features **nativement dans l'app**, sans que l'utilisateur ait besoin d'installer quoi que ce soit.
+Redface 2 intègre les plus populaires et les plus utiles **nativement dans l'app**. Ce catalogue est basé sur le sondage de popularité du topic (77 répondants) et les retours de la communauté.
 
 ---
 
-## Features identifiées
+## Lecture et affichage
 
-### Alertes Qualitay
+### Indicateurs lu/non-lu
 
-Permettre aux utilisateurs de signaler un post qui mérite d'être lu. Un forumeur peut lancer une "alerte qualitay" sur un post remarquable.
+*Inspiré de : Last Post Highlight (pop. 22), New Page Number (pop. 33)*
 
-**Intégration dans l'app :**
-- Bouton sur chaque post pour lancer/voir une alerte
-- Indicateur visuel sur les posts signalés
-- Vue dédiée pour retrouver les posts signalés
+- Distinction visuelle claire entre posts lus et non lus dans un topic
+- Nombre de pages non lues affiché sur chaque drapeau
+- Ligne de séparation entre le dernier post lu et les nouveaux
+- Ouverture directe au premier post non lu
 
-### Bookmarks
+### Ego Quote — "On parle de vous"
 
-Sauvegarder des posts spécifiques pour y revenir plus tard. Équivalent d'un marque-page sur un post précis.
+*Inspiré de : Ego Quote (pop. 32), Ego Posts (pop. 12)*
 
-**Intégration dans l'app :**
-- Bouton bookmark sur chaque post
-- Stockage local (Room)
-- Vue dédiée avec tri par date/topic
-- Synchronisation possible via compte GitHub (futur)
+- Posts qui vous citent mis en évidence (couleur, badge)
+- Vos propres posts visuellement distincts
+- Notification optionnelle quand quelqu'un vous cite (dans les drapeaux)
 
-### Blacklist
+### Color Tag — Colorer les pseudos
 
-Masquer les posts d'un utilisateur. L'expérience de lecture est améliorée sans les messages indésirables.
+*Inspiré de : Color Tag (pop. 21)*
 
-**Intégration dans l'app :**
-- Action "blacklister" sur le profil/post d'un utilisateur
-- Posts masqués avec option "afficher quand même"
-- Gestion de la liste dans les paramètres
-- Stockage local (Room)
+- Attribuer une couleur et/ou une note à un pseudo
+- Coloration visible partout : posts, drapeaux, MPs
+- Catégoriser les utilisateurs (ami, expert, troll…)
+- Stockage Room, synchronisable via MPStorage
 
-### Redflag
+### Infos profil rapides
 
-Système d'alertes intelligent sur les topics suivis. Dépasse les simples drapeaux HFR avec des notifications configurables.
+*Inspiré de : Infos rapides mod_r21 (pop. 32)*
 
-**Intégration dans l'app :**
-- Détection de nouveaux messages sur les topics suivis
-- Notifications push (via WorkManager + polling)
-- Filtres : par auteur, par mot-clé, par topic
-- Intégration avec le système de drapeaux natif
+- Tap sur un pseudo → popup avec infos profil (statut, inscription, avatar, stats)
+- Accès rapide aux actions : MP, blacklist, color tag
+- Pas besoin de quitter le topic pour voir un profil
+
+### Liens explicites
+
+*Inspiré de : Liens explicites mod_r21 (pop. 26)*
+
+- Les liens internes HFR affichent un texte descriptif au lieu de l'URL brute
+- Exemple : `forum1.php?cat=13&post=116015` → "Topic des userscripts (Programmation)"
+- Les liens externes affichent le titre de la page quand disponible
+
+### Spoilers
+
+*Inspiré de : Spoiler Reductor (pop. 7), No Spoiler (pop. 2)*
+
+- Spoilers repliés par défaut (tap pour révéler)
+- Option dans les préférences : toujours afficher les spoilers
+- Animation fluide à l'ouverture/fermeture
+
+---
+
+## Éditeur et rédaction
+
+### Preview live
+
+*Inspiré de : Aperçu rapide mod_r21 (pop. 32)*
+
+- Prévisualisation en temps réel du BBCode pendant la rédaction
+- Rendu identique à ce que les autres verront
+- Toggle preview / éditeur
+
+### Smart paste
+
+*Inspiré de : Copie/Colle (pop. 41) — le script le plus populaire*
+
+- Coller une image → upload automatique via le provider d'images configuré, insertion du BBCode `[img]`
+- Coller une URL YouTube/Twitch → proposition d'embed ou insertion du lien
+- Coller une URL d'image → proposition de rehost + insertion
+- Coller du texte formaté → conversion en BBCode
+- Fonctionne aussi en drag & drop
+
+### Smileys favoris
+
+*Inspiré de : Vos smileys favoris mod_r21 (pop. 26), Wiki smileys & raccourcis (pop. 28)*
+
+- Liste personnelle de smileys favoris (accès rapide dans l'éditeur)
+- Raccourcis clavier pour les smileys fréquents
+- Recherche de smileys par mot-clé (wiki smileys HFR)
+- Statistiques d'utilisation (les plus utilisés remontent)
+- Synchronisation via MPStorage
+
+### Suppression rapide de posts
+
+*Inspiré de : Suppression rapide de posts (pop. 25)*
+
+- Supprimer son propre post en un tap (avec confirmation)
+- Pas besoin de passer par la page d'édition
+
+---
+
+## Médias
+
+### Embed vidéo
+
+*Inspiré de : Video Link Replacer mod_r21 (pop. 40) — 2e script le plus populaire*
+
+- Les liens YouTube, Dailymotion, Twitch, Vimeo, Streamable, Coub sont remplacés par un lecteur intégré
+- Lecture inline sans quitter l'app
+- Miniature + bouton play (pas d'autoplay)
+
+### Lecteur audio/vidéo HTML5
+
+*Inspiré de : HTML5 Media Link Replacer (pop. 29)*
+
+- Les liens vers des fichiers média (mp3, wav, ogg, mp4, webm) deviennent des lecteurs natifs
+- Lecture inline dans le post
 
 ### Hébergement d'images
 
@@ -82,6 +151,8 @@ En fallback ou au choix de l'utilisateur : **Imgur**.
 
 ### Recherche et insertion de GIFs
 
+*Inspiré de : [HFR] Giphy (pop. 12)*
+
 Poster un GIF sur HFR demande aujourd'hui de quitter l'app, chercher le GIF ailleurs, copier l'URL et revenir coller le BBCode. Redface 2 intègre la recherche de GIFs directement dans l'éditeur.
 
 **Providers :**
@@ -98,6 +169,104 @@ Poster un GIF sur HFR demande aujourd'hui de quitter l'app, chercher le GIF aill
 - Historique des GIFs récemment utilisés (accès rapide)
 - Favoris de GIFs (stockage Room, synchronisable via MPStorage)
 
+---
+
+## Drapeaux et navigation
+
+### Drapeaux compacts
+
+*Inspiré de : Sujets compacts (pop. 18)*
+
+- Option pour masquer les catégories sans nouveaux messages
+- Vue condensée qui ne montre que l'activité récente
+
+### Real New Answer — détection de citations
+
+*Inspiré de : Real New Answer (pop. 19)*
+
+- Indicateur sur la page des drapeaux quand un de vos posts a été cité depuis votre dernière visite
+- Distinction entre "nouveau message dans le topic" et "quelqu'un vous a répondu"
+
+### Permaliens
+
+*Inspiré de : Permalien (pop. 10)*
+
+- Lien permanent sur chaque post (partage facile)
+- Copie en un tap
+- Deep link vers le post exact dans l'app
+
+### Navigation au clavier (tablettes)
+
+*Inspiré de : [HFR] Navigation (pop. 5)*
+
+- Raccourcis clavier pour naviguer : page suivante/précédente, drapeaux, retour
+- Utile sur tablettes avec clavier
+
+---
+
+## Filtrage
+
+### Blacklist avancée
+
+*Inspiré de : Bloque liste mod_r21 (pop. 16), Black List (pop. 15)*
+
+- Masquer les posts d'utilisateurs avec configuration fine
+- Filtrage par catégorie, par topic, ou global
+- Posts masqués avec option "afficher quand même"
+- Notes sur les pseudos bloqués (pourquoi bloqué)
+- Gestion des citations de bloqués dans les posts d'autres utilisateurs
+
+### Filtre de contenu
+
+*Inspiré de : Anti HS mod_r21 (pop. 11)*
+
+- Règles configurables pour filtrer les messages indésirables
+- Filtrage par mots-clés, nombre de citations, présence de vidéos/GIFs
+- Par topic (masquer le hors-sujet sur un topic technique par exemple)
+
+---
+
+## Social
+
+### Alertes Qualitay
+
+*Inspiré de : Alerte Qualitay mod_r21 (pop. 19)*
+
+Signaler un post qui mérite d'être lu. Un forumeur peut lancer une "alerte qualitay" sur un post remarquable.
+
+- Bouton sur chaque post pour lancer/voir une alerte
+- Indicateur visuel sur les posts signalés
+- Vue dédiée pour retrouver les posts signalés
+- Intégration du [flux RSS des AQ](https://aq.super-h.fr/rss.php)
+
+### Bookmarks
+
+*Inspiré de : [HFR] Bookmarks (pop. 7)*
+
+- Sauvegarder des posts spécifiques pour y revenir plus tard
+- Stockage Room, synchronisable via MPStorage (compatibilité avec le script existant)
+- Vue dédiée avec tri par date/topic
+
+### Stats utilisateur
+
+*Inspiré de : [HFR] Stats (pop. 15)*
+
+- Statistiques d'un membre : nombre de posts, topics, ancienneté, activité
+- Accessible depuis le popup profil rapide
+
+---
+
+## Système
+
+### Redflag — alertes intelligentes
+
+Système d'alertes intelligent sur les topics suivis. Dépasse les simples drapeaux HFR avec des notifications configurables.
+
+- Détection de nouveaux messages sur les topics suivis
+- Notifications push (via WorkManager + polling)
+- Filtres : par auteur, par mot-clé, par topic
+- Intégration avec le système de drapeaux natif
+
 ### Intégration MPStorage
 
 MPStorage est une bibliothèque cross-plateforme (issue de hfr-redkit) qui utilise un MP HFR dédié comme backend de stockage : les données sont sérialisées en JSON dans le corps d'un message privé spécialement créé pour l'occasion. Cela permet de synchroniser des préférences et métadonnées (drapeaux MultiMP, bookmarks, etc.) entre navigateurs, appareils et scripts sans serveur tiers.
@@ -106,6 +275,15 @@ MPStorage est une bibliothèque cross-plateforme (issue de hfr-redkit) qui utili
 - Lire et écrire dans le même MP de stockage que les userscripts (compatibilité cross-plateforme)
 - Cache Room locale pour les accès rapides, synchronisation périodique avec le MP
 - Vue MultiMP avec indicateurs lu/non-lu calculés depuis les données MPStorage
+
+### Résumé quotidien par IA
+
+*Inspiré de : [HFR] Résumé quotidien par topic (pop. 2, mais innovant)*
+
+- Résumé automatique des topics suivis généré par IA (Claude)
+- Configurable : quels topics résumer, fréquence, longueur
+- Utile pour les topics très actifs (100+ posts/jour)
+- Peut s'appuyer sur hfr-mcp pour la lecture et l'IA pour la synthèse
 
 ---
 
@@ -120,6 +298,10 @@ Chaque feature communautaire est un **module Gradle isolé** :
 :feature:blacklist
 :feature:redflag
 :feature:qualitay
+:feature:imagehost
+:feature:gifpicker
+:feature:colortag
+:feature:stats
 ```
 
 ### Points d'extension
@@ -136,27 +318,22 @@ data class PostDecoration(
     val badges: List<Badge> = emptyList(),     // badges affichés sur le post
     val actions: List<PostAction> = emptyList(), // actions dans le menu du post
     val hidden: Boolean = false,                // post masqué (blacklist)
+    val highlighted: Boolean = false,           // post mis en évidence (ego quote, qualitay)
+    val highlightColor: Color? = null,          // couleur de mise en évidence
 )
 
 // Enrichir la toolbar d'un topic
 interface TopicToolbarContributor {
     fun actions(topic: Topic): List<ToolbarAction>
 }
-```
 
-Chaque module feature enregistre ses decorators et contributors via Hilt :
-
-```kotlin
-@Module
-@InstallIn(SingletonComponent::class)
-abstract class BookmarkModule {
-    @Binds
-    @IntoSet
-    abstract fun bindDecorator(impl: BookmarkDecorator): PostDecorator
+// Enrichir la toolbar de l'éditeur
+interface EditorToolbarContributor {
+    fun actions(): List<EditorAction>
 }
 ```
 
-Le système collecte automatiquement toutes les contributions via `@IntoSet` — ajouter une feature ne demande aucune modification du code existant.
+Chaque module feature enregistre ses contributions via Hilt `@IntoSet` — ajouter une feature ne demande aucune modification du code existant.
 
 ---
 
@@ -190,9 +367,13 @@ En plus des features inspirées des userscripts, Redface 2 ajoutera :
 
 ---
 
-## Proposer une feature
+## Source
 
-Le topic HFR recensant les userscripts et addons communautaires sera utilisé comme référence pour identifier les features à intégrer.
+Ce catalogue est basé sur l'analyse du [topic "Pimp my HFR"](https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=13&subcat=432&post=116015) maintenu par roger21, qui recense 126 userscripts de 15+ auteurs. Les popularités indiquées proviennent du sondage intégré au topic (77 répondants).
+
+Auteurs principaux de la scène userscript HFR : **roger21** (~40 scripts), **toyonos** (~15), **PetitJean** (~10), **DdsT** (5), **garath_** (5), **WirIpse** (4 + MPStorage), **XaTriX** (2).
+
+## Proposer une feature
 
 Pour proposer une nouvelle feature :
 1. Ouvrir une issue sur ce repo avec le label `feature`
