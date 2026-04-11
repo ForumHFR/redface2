@@ -102,7 +102,7 @@ graph TB
 | `:core:model` | Modèles domaine purs (`Topic`, `Post`, `Category`, `Flag`, `MP`). Aucune dépendance Android. | rien |
 | `:core:network` | `HfrClient` : requêtes HTTP, cookies, session, login. Encapsule OkHttp. | `:core:model` |
 | `:core:parser` | `HfrParser` : transforme le HTML HFR en modèles domaine via Jsoup. | `:core:model` |
-| `:core:database` | Room DB, DAOs, entities, mappers entity↔model. Cache locale + MPStorage. | `:core:model` |
+| `:core:database` | Room DB, DAOs, entities, mappers entity↔model. Cache locale + cache MPStorage. | `:core:model` |
 | `:core:ui` | Thème Material 3, composants partagés, `PostRenderer` (BBCode → Compose). | `:core:model` |
 
 ### Modules feature

@@ -60,14 +60,14 @@ Système d'alertes intelligent sur les topics suivis. Dépasse les simples drape
 - Filtres : par auteur, par mot-clé, par topic
 - Intégration avec le système de drapeaux natif
 
-### MPStorage natif
+### Intégration MPStorage
 
-Tracking lu/non-lu des MultiMPs. HFR ne gère pas cette information nativement.
+MPStorage est une bibliothèque cross-plateforme (issue de hfr-redkit) qui utilise un MP HFR dédié comme backend de stockage : les données sont sérialisées en JSON dans le corps d'un message privé spécialement créé pour l'occasion. Cela permet de synchroniser des préférences et métadonnées (drapeaux MultiMP, bookmarks, etc.) entre navigateurs, appareils et scripts sans serveur tiers.
 
 **Intégration dans l'app :**
-- Stockage local dans Room (remplace l'approche userscript via localStorage ou worker Cloudflare)
-- Vue MultiMP avec indicateurs lu/non-lu
-- Marquage automatique à la lecture
+- Lire et écrire dans le même MP de stockage que les userscripts (compatibilité cross-plateforme)
+- Cache Room locale pour les accès rapides, synchronisation périodique avec le MP
+- Vue MultiMP avec indicateurs lu/non-lu calculés depuis les données MPStorage
 
 ---
 

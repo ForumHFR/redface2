@@ -197,11 +197,18 @@ data class NewMultiMP(
 
 ---
 
-## MultiMP Storage
+## MPStorage
 
-HFR ne gère pas nativement l'état lu/non-lu des MultiMPs. L'app stocke cette information localement.
+MPStorage est une bibliothèque cross-plateforme qui utilise un **MP HFR dédié** comme backend de stockage. Les données (drapeaux MultiMP, bookmarks, préférences) sont sérialisées en JSON dans le corps de ce message privé. Cela permet la synchronisation entre appareils sans serveur tiers.
 
 ```kotlin
+// Données stockées dans le MP de stockage (format JSON)
+data class MPStorageData(
+    val multiMPFlags: Map<Int, MultiMPFlag>,
+    val bookmarks: List<Bookmark>,
+    val preferences: Map<String, String>,
+)
+
 data class MultiMPFlag(
     val mpId: Int,
     val lastReadDate: Instant,
@@ -209,9 +216,7 @@ data class MultiMPFlag(
 )
 ```
 
-Le calcul du non-lu : `lastDate du MP > lastReadDate du flag` → non lu.
-
-Cette approche remplace le MPStorage des userscripts (qui utilisait `localStorage` ou un worker Cloudflare) par une base Room locale, plus fiable et plus rapide.
+L'app synchronise ces données avec le MP de stockage HFR et les cache localement dans Room pour des accès rapides. Cela garantit la compatibilité avec les userscripts existants qui utilisent le même mécanisme.
 
 ---
 

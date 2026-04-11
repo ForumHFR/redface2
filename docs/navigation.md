@@ -158,7 +158,7 @@ Deux onglets :
 
 **MultiMPs :**
 - Vue style drapeaux : fils de groupe triés par dernier message
-- État lu/non-lu géré via **MPStorage local** (Room)
+- État lu/non-lu géré via **MPStorage** (données synchronisées depuis un MP HFR dédié, cachées en Room)
 - Chaque MultiMP se comporte comme un topic : pagination, quote, reply
 - Nouveau MultiMP : destinataires (2+) + sujet + contenu
 

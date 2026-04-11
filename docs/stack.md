@@ -164,7 +164,7 @@ val posts = document.select("table.messagetable").map { table ->
 
 Base de données locale pour le cache et le stockage persistant :
 - **Cache des topics** : relecture instantanée sans réseau
-- **MPStorage** : tracking lu/non-lu des MultiMPs (pas natif HFR)
+- **MPStorage** : cache locale des données synchronisées via le MP de stockage HFR (drapeaux MultiMP, bookmarks)
 - **Bookmarks** : signets locaux sur des posts
 - **Préférences** : réglages utilisateur
 

@@ -40,7 +40,7 @@ redface2/
     model/                # Modèles domaine
     network/              # OkHttp, session HFR
     parser/               # Jsoup, HTML → modèles
-    database/             # Room, cache, MPStorage
+    database/             # Room, cache, sync MPStorage
     ui/                   # Thème, composants partagés, PostRenderer
   feature/
     forum/                # Catégories, topics

@@ -109,7 +109,7 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 - [ ] Nouveau MP — création
 - [ ] MultiMPs — liste avec vue drapeaux, lecture, reply, quote
 - [ ] Nouveau MultiMP — création (2+ destinataires)
-- [ ] MPStorage natif — tracking lu/non-lu en Room
+- [ ] Intégration MPStorage — synchronisation avec le MP de stockage HFR + cache Room
 - [ ] Notifications MP
 
 **Livrable :** gestion complète des MPs, y compris les MultiMPs avec état lu/non-lu.
