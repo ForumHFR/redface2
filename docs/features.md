@@ -80,6 +80,24 @@ En fallback ou au choix de l'utilisateur : **Imgur**.
 - Compression/redimensionnement automatique avant upload (configurable)
 - Copie du lien BBCode en un tap (`[img]url[/img]` ou `[url=original][img]thumb[/img][/url]`)
 
+### Recherche et insertion de GIFs
+
+Poster un GIF sur HFR demande aujourd'hui de quitter l'app, chercher le GIF ailleurs, copier l'URL et revenir coller le BBCode. Redface 2 intègre la recherche de GIFs directement dans l'éditeur.
+
+**Providers :**
+- [**DieudoGifs**](https://dieudogifs.be/) — moteur de GIFs communautaire HFR avec tags, votes et recherche. Source privilégiée car les GIFs sont déjà adaptés à la culture du forum.
+- **Giphy** — le plus grand catalogue de GIFs au monde
+- **Tenor** — intégré dans Google, bon catalogue
+
+**Intégration dans l'app :**
+- Bouton GIF dans la toolbar de l'éditeur → ouvre un panneau de recherche
+- Recherche par mots-clés avec preview animé
+- Choix du provider (DieudoGifs par défaut, Giphy et Tenor en alternatives)
+- Navigation par tags/catégories (DieudoGifs) ou trending (Giphy/Tenor)
+- Tap sur un GIF → insère automatiquement le BBCode `[img]url[/img]`
+- Historique des GIFs récemment utilisés (accès rapide)
+- Favoris de GIFs (stockage Room, synchronisable via MPStorage)
+
 ### Intégration MPStorage
 
 MPStorage est une bibliothèque cross-plateforme (issue de hfr-redkit) qui utilise un MP HFR dédié comme backend de stockage : les données sont sérialisées en JSON dans le corps d'un message privé spécialement créé pour l'occasion. Cela permet de synchroniser des préférences et métadonnées (drapeaux MultiMP, bookmarks, etc.) entre navigateurs, appareils et scripts sans serveur tiers.
