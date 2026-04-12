@@ -141,20 +141,56 @@ Le code de [Redface v1](https://github.com/ForumHFR/Redface) contient ~10 transf
 
 ### Fixtures HTML pour le parser
 
-Le parser HTML est testé contre des **fixtures capturées depuis HFR** (pas inventées) :
+Le parser HTML est testé contre des **fixtures capturées depuis de vraies pages HFR** (jamais fabriquées par une IA). Chaque page nécessitant une authentification est capturée en version logué **et** non-logué quand la distinction est pertinente (contenu différent, champs manquants, redirections).
 
 ```
 core/parser/src/test/resources/fixtures/
-    topic_page.html
-    flags_page.html
-    edit_page.html
-    login_success.html
-    search_results.html
-    mp_list.html
-    categories.html
 ```
 
-Quand un bug de parsing est corrigé, le HTML problématique est ajouté aux fixtures avec un test de non-régression. Un **smoke test CI hebdomadaire** vérifie que les sélecteurs CSS critiques matchent toujours sur une vraie page HFR publique.
+**Reprises de Redface v1** (17 fixtures, `app/src/test/resources/` dans ForumHFR/Redface) :
+
+| Fixture | Page HFR | Auth ? |
+|---------|----------|--------|
+| `topic_multipage.html` | Topic multi-pages | logué + non-logué |
+| `topic_singlepage.html` | Topic 1 seule page | non-logué |
+| `topic_posts.html` | Posts d'un topic (40/page) | logué + non-logué |
+| `edit_post.html` | Page d'édition d'un post | logué uniquement |
+| `quote.html` | Contenu de citation BBCode | logué uniquement |
+| `categories.html` | Page d'accueil (catégories) | non-logué |
+| `topic_list.html` | Liste de topics d'une sous-catégorie | logué + non-logué |
+| `profile_standard.html` | Profil utilisateur standard | non-logué |
+| `profile_admin.html` | Profil admin/modo | non-logué |
+| `mp_list.html` | Liste des MPs classiques | logué uniquement |
+| `mp_conversation.html` | Conversation MP | logué uniquement |
+| `smiley_search.html` | Résultats recherche de smileys | non-logué |
+| `rehost_response.html` | Réponse reho.st | non-logué |
+
+**Nouvelles fixtures v2** (pages non couvertes par v1) :
+
+| Fixture | Page HFR | Auth ? | Pourquoi |
+|---------|----------|--------|----------|
+| `flags_page.html` | `/forum1f.php` (drapeaux) | logué uniquement | Écran d'accueil, pas dans v1 |
+| `flags_page_empty.html` | Drapeaux vides | logué uniquement | Cas edge : aucun drapeau |
+| `search_results.html` | `/search.php` | logué + non-logué | Recherche |
+| `login_success.html` | Réponse login OK | — | Détection succès auth |
+| `login_failure.html` | Réponse login échoué | — | Détection échec auth |
+| `edit_fp.html` | Édition First Post (sujet + sondage) | logué uniquement | Distinct de l'édition normale |
+| `new_topic.html` | Page de création de topic | logué uniquement | Formulaire avec sous-catégories |
+| `multimp_conversation.html` | MultiMP | logué uniquement | Différent des MPs classiques |
+| `topic_with_poll.html` | Topic avec sondage | logué + non-logué | Parsing du sondage |
+| `topic_last_page.html` | Dernière page (< 40 posts) | non-logué | Pagination edge case |
+| `topic_deleted_posts.html` | Page avec posts supprimés | non-logué | Décalage de numérotation |
+| `modo_not_flagged.html` | modo.php — formulaire d'alerte | logué uniquement | Redflag : post pas encore alerté |
+| `modo_flagged.html` | modo.php — déjà alerté | logué uniquement | Redflag : post alerté |
+| `modo_join.html` | modo.php — rejoindre une alerte | logué uniquement | Redflag : alerte en cours |
+
+**Total : ~30 fixtures** (13 reprises de v1 + 14 nouvelles, certaines en double logué/non-logué).
+
+**Règles :**
+- Les fixtures sont capturées depuis le vrai site HFR, jamais fabriquées
+- Quand un bug de parsing est corrigé, le HTML problématique est ajouté aux fixtures avec un test de non-régression
+- Un **smoke test CI hebdomadaire** vérifie que les sélecteurs CSS critiques matchent toujours sur une vraie page HFR publique
+- Les fixtures logué ne doivent **jamais** contenir de cookies, tokens ou identifiants réels — nettoyer avant commit
 
 ---
 
