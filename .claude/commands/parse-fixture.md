@@ -36,7 +36,7 @@ Types possibles :
 - Topic (`forum1.php`) — présence de `table.messagetable`, ancres `a[name^=t]`, pagination topic
 - Liste de topics (`forum2.php`) — présence de `tr.sujet`, colonnes topic/auteur/date
 - Drapeaux (`forum1f.php`) — présence de `tr.sujet` + `td.sujetCase7` (icône drapeau, spécifique aux drapeaux)
-- Profil / paramètres (`editprofil.php`, `profil.php`) — formulaires profil, pages settings
+- Profil public (`profil.php`) — page de profil utilisateur
 - MPs (`message.php`) — liste ou conversation de messages privés
 - Recherche (`search.php`) — résultats de recherche
 - Login / auth — page de validation ou échec login
@@ -231,7 +231,7 @@ Résumé :
 
 ### 11. Écrire le résultat dans un fichier
 
-**Toujours** écrire l'analyse complète (étapes 1-9) dans un fichier markdown persistant :
+**Toujours** écrire l'analyse complète (étapes 1-10) dans un fichier markdown persistant :
 
 - Fichier de sortie : même chemin que la fixture avec le suffixe `.analysis.md`
   - `flags_page.html` → `flags_page.analysis.md`
