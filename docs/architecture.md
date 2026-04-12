@@ -315,14 +315,14 @@ sequenceDiagram
 
     App->>OkHttp: login(user, pass)
     OkHttp->>HFR: POST /login_validation.php
-    HFR-->>OkHttp: Set-Cookie: md_user=...; md_pass=...
+    HFR-->>OkHttp: Set-Cookie md_user, md_pass
     OkHttp->>OkHttp: CookieJar stocke les cookies
 
     Note over App,HFR: Toutes les requêtes suivantes incluent les cookies
 
     App->>OkHttp: fetchFlags()
-    OkHttp->>HFR: GET /forum1f.php (+ cookies)
-    HFR-->>OkHttp: HTML (drapeaux)
+    OkHttp->>HFR: GET /forum1f.php + cookies
+    HFR-->>OkHttp: HTML drapeaux
     OkHttp-->>App: HTML brut
 ```
 
