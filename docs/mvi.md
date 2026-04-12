@@ -71,7 +71,7 @@ sealed interface FlagsEffect {
 ```kotlin
 @HiltViewModel
 class FlagsViewModel @Inject constructor(
-    private val flagsRepository: FlagsRepository,
+    private val flagRepository: FlagRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(FlagsState())
@@ -102,7 +102,7 @@ class FlagsViewModel @Inject constructor(
     private fun refresh() {
         viewModelScope.launch {
             _state.update { it.copy(isRefreshing = true) }
-            flagsRepository.getFlags()
+            flagRepository.getFlags()
                 .onSuccess { flags ->
                     _state.update { it.copy(flags = flags, isRefreshing = false, error = null) }
                     updateFilteredFlags()
@@ -132,7 +132,7 @@ class FlagsViewModel @Inject constructor(
             delay(5_000)
 
             // 3. Timeout expiré → exécuter côté serveur
-            flagsRepository.removeFlag(topic)
+            flagRepository.removeFlag(topic)
                 .onFailure {
                     // Rollback si le réseau échoue
                     _state.update { it.copy(flags = it.flags + topic) }
@@ -324,8 +324,7 @@ feature/topic/
   ├── TopicScreen.kt        // @Composable, collecte state + effects
   ├── TopicContent.kt       // @Composable stateless, previewable
   ├── TopicViewModel.kt     // MVI ViewModel
-  ├── TopicState.kt         // State + Intent + Effect
-  └── TopicRepository.kt    // Interface repository
+  └── TopicState.kt         // State + Intent + Effect
 ```
 
 Cette convention garantit la cohérence et facilite l'onboarding des contributeurs.

@@ -77,7 +77,6 @@ feature/topic/
   TopicContent.kt         # @Composable stateless, previewable
   TopicViewModel.kt       # MVI ViewModel
   TopicState.kt           # State + Intent + Effect
-  TopicRepository.kt      # Interface repository
 ```
 
 ### Style de code

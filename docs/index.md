@@ -50,18 +50,21 @@ graph TB
         A[Jetpack Compose] --> B[MVI ViewModels]
     end
     subgraph "Domaine"
-        B --> C[Repositories]
+        B --> C["Repositories (interfaces)"]
     end
     subgraph "Données"
-        C --> D[OkHttp 4 + Jsoup]
-        C --> E[Room Cache]
+        D["Repository implémentations"]
+        D --> E[OkHttp 4 + Jsoup]
+        D --> G[Room Cache]
     end
-    D --> F["forum.hardware.fr"]
+    C -.->|implémente| D
+    E --> F["forum.hardware.fr"]
     style A fill:#e74c3c,color:#fff
     style B fill:#e67e22,color:#fff
     style C fill:#f1c40f,color:#000
-    style D fill:#2ecc71,color:#fff
-    style E fill:#3498db,color:#fff
+    style D fill:#16a085,color:#fff
+    style E fill:#2ecc71,color:#fff
+    style G fill:#3498db,color:#fff
     style F fill:#95a5a6,color:#fff
 ```
 
