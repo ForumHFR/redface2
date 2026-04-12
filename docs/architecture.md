@@ -14,7 +14,7 @@ Modules Gradle, couches, data flow et stratégie de cache.
 
 ## Couches
 
-L'application suit une architecture en 3 couches strictes. Chaque couche ne peut dépendre que de la couche en dessous.
+L'application suit une architecture en 3 couches strictes. Chaque couche ne peut dépendre que de la couche en dessous. Les frontières sont **enforces par les modules Gradle** — pas de convention implicite.
 
 ```mermaid
 graph TB
@@ -25,23 +25,27 @@ graph TB
         S --> VM
     end
     subgraph "Domaine"
-        R["Repositories (interfaces)"]
+        RI["Repository interfaces"]
+        M["Modèles domaine"]
     end
     subgraph "Données"
         direction LR
+        IMPL["Repository implémentations"]
         NET["HfrClient (OkHttp)"]
         PARSE["HfrParser (Jsoup)"]
         DB["Room Database"]
+        IMPL --> NET
+        IMPL --> PARSE
+        IMPL --> DB
     end
-    VM --> R
-    R --> NET
-    R --> PARSE
-    R --> DB
+    VM --> RI
+    RI --> M
+    IMPL -.->|implémente| RI
 ```
 
-- **Presentation** : Compose UI + ViewModels MVI. Ne connait pas OkHttp, Jsoup ou Room.
-- **Domaine** : Interfaces de repositories + modèles. Aucune dépendance framework.
-- **Données** : Implémentations concrètes. Gère le réseau, le parsing et le cache.
+- **Presentation** (`:feature:*`) : Compose UI + ViewModels MVI. Ne connait que les interfaces de repositories et les modèles domaine.
+- **Domaine** (`:core:domain` + `:core:model`) : Interfaces de repositories + modèles purs. Aucune dépendance framework. Frontière de compilation.
+- **Données** (`:core:data` + `:core:network` + `:core:parser` + `:core:database`) : Implémentations concrètes. Les features ne dépendent jamais de cette couche directement — Hilt injecte les implémentations.
 
 ---
 
@@ -56,39 +60,39 @@ graph TB
     APP --> FA[":feature:auth"]
     APP --> FS[":feature:settings"]
     APP --> FSR[":feature:search"]
+    APP --> CDATA[":core:data"]
 
-    FF --> CM[":core:model"]
-    FF --> CN[":core:network"]
-    FF --> CP[":core:parser"]
-    FF --> CD[":core:database"]
+    FF --> CDOM[":core:domain"]
     FF --> CU[":core:ui"]
 
-    FT --> CM
-    FT --> CN
-    FT --> CP
-    FT --> CD
+    FT --> CDOM
     FT --> CU
+    FT --> CEXT[":core:extension"]
 
-    FE --> CM
-    FE --> CN
+    FE --> CDOM
     FE --> CU
+    FE --> CEXT
 
-    FM --> CM
-    FM --> CN
-    FM --> CP
-    FM --> CD
+    FM --> CDOM
     FM --> CU
 
-    FA --> CN
+    FA --> CDOM
     FA --> CU
 
+    FS --> CDOM
     FS --> CU
-    FS --> CD
 
-    FSR --> CM
-    FSR --> CN
-    FSR --> CP
+    FSR --> CDOM
     FSR --> CU
+
+    CDOM --> CM[":core:model"]
+    CEXT --> CM
+    CU --> CM
+
+    CDATA --> CDOM
+    CDATA --> CN[":core:network"]
+    CDATA --> CP[":core:parser"]
+    CDATA --> CD[":core:database"]
 
     CN --> CM
     CP --> CM
@@ -96,10 +100,13 @@ graph TB
 
     style APP fill:#e74c3c,color:#fff
     style CM fill:#f39c12,color:#fff
+    style CDOM fill:#e67e22,color:#fff
+    style CDATA fill:#16a085,color:#fff
     style CN fill:#2ecc71,color:#fff
     style CP fill:#27ae60,color:#fff
     style CD fill:#3498db,color:#fff
     style CU fill:#9b59b6,color:#fff
+    style CEXT fill:#8e44ad,color:#fff
 ```
 
 ### Modules core
@@ -107,34 +114,76 @@ graph TB
 | Module | Responsabilité | Dépend de |
 |--------|---------------|-----------|
 | `:core:model` | Modèles domaine purs (`Topic`, `Post`, `Category`, `Flag`, `MP`). Aucune dépendance Android. | rien |
+| `:core:domain` | Interfaces de repositories (`TopicRepository`, `FlagRepository`, `AuthRepository`...) et règles métier partagées. Aucune dépendance framework. | `:core:model` |
+| `:core:data` | Implémentations des repositories. Orchestre réseau, parser et cache. Fournit les bindings Hilt. | `:core:domain`, `:core:network`, `:core:parser`, `:core:database` |
 | `:core:network` | `HfrClient` : requêtes HTTP, cookies, session, login. Encapsule OkHttp. | `:core:model` |
 | `:core:parser` | `HfrParser` : transforme le HTML HFR en modèles domaine via Jsoup. | `:core:model` |
 | `:core:database` | Room DB, DAOs, entities, mappers entity↔model. Cache locale + cache MPStorage. | `:core:model` |
 | `:core:ui` | Thème Material 3, composants partagés, `PostRenderer` (BBCode → Compose). | `:core:model` |
+| `:core:extension` | Interfaces d'extension : `PostDecorator`, `TopicToolbarContributor`, `EditorToolbarContributor`. | `:core:model` |
 
-### Modules feature
+### Modules feature (base)
+
+Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (composants partagés). Elles ne connaissent pas la couche données — Hilt injecte les implémentations depuis `:core:data`.
 
 | Module | Écrans | Dépend de |
 |--------|--------|-----------|
-| `:feature:forum` | Catégories, sous-catégories, liste de topics | `:core:*` |
-| `:feature:topic` | Lecture de topic, pagination, création de topic | `:core:*` |
-| `:feature:editor` | Reply, edit, edit FP (sujet, sondage), preview BBCode | `:core:model`, `:core:network`, `:core:ui` |
-| `:feature:messages` | MPs classiques, MultiMPs (vue drapeaux), création MP/MultiMP | `:core:*` |
-| `:feature:auth` | Login HFR | `:core:network`, `:core:ui` |
-| `:feature:search` | Recherche dans les topics et posts, filtres | `:core:model`, `:core:network`, `:core:parser`, `:core:ui` |
-| `:feature:settings` | Préférences, thème, gestion cache | `:core:ui`, `:core:database` |
+| `:feature:forum` | Catégories, sous-catégories, liste de topics | `:core:domain`, `:core:ui` |
+| `:feature:topic` | Lecture de topic, pagination | `:core:domain`, `:core:ui`, `:core:extension` |
+| `:feature:editor` | Reply, edit, edit FP, preview BBCode, création topic | `:core:domain`, `:core:ui`, `:core:extension` |
+| `:feature:messages` | MPs classiques, MultiMPs, création MP/MultiMP | `:core:domain`, `:core:ui` |
+| `:feature:auth` | Login HFR | `:core:domain`, `:core:ui` |
+| `:feature:search` | Recherche dans les topics et posts, filtres | `:core:domain`, `:core:ui` |
+| `:feature:settings` | Préférences, thème, gestion cache | `:core:domain`, `:core:ui` |
+
+### Modules feature (extensions communautaires)
+
+Chaque extension est un module Gradle isolé. Elles s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant.
+
+| Module | Fonction | Dépend de |
+|--------|----------|-----------|
+| `:feature:bookmarks` | Sauvegarder des posts | `:core:extension`, `:core:model`, `:core:database` |
+| `:feature:blacklist` | Masquer des utilisateurs | `:core:extension`, `:core:model`, `:core:database` |
+| `:feature:qualitay` | Signaler un post remarquable | `:core:extension`, `:core:model`, `:core:network` |
+| `:feature:redflag` | Alertes intelligentes (via CF Worker) | `:core:extension`, `:core:model`, `:core:network` |
+| `:feature:colortag` | Colorer et annoter les pseudos | `:core:extension`, `:core:model`, `:core:database` |
+| `:feature:imagehost` | Upload et bibliothèque d'images | `:core:model`, `:core:network`, `:core:ui` |
+| `:feature:gifpicker` | Recherche et insertion de GIFs | `:core:model`, `:core:network`, `:core:ui` |
+| `:feature:stats` | Statistiques utilisateur | `:core:model`, `:core:network` |
 
 ### Module app
 
 `:app` est le point d'entrée. Il :
-- Configure Hilt (DI)
+- Configure Hilt (DI) — inclut `:core:data` pour le wiring des implémentations
 - Définit le `NavGraph` (navigation globale)
 - Contient `MainActivity`
-- Dépend de tous les modules feature
+- Dépend de tous les modules feature (base + extensions)
 
 ---
 
 ## Séparation des responsabilités
+
+### `:core:domain` — interfaces
+
+Les interfaces de repositories vivent dans le module domaine. Aucune dépendance framework.
+
+```kotlin
+// Dans :core:domain — le contrat
+interface TopicRepository {
+    suspend fun getTopic(cat: Int, post: Int, page: Int): Result<Topic>
+    suspend fun prefetchNextPage(cat: Int, post: Int, page: Int)
+}
+
+interface FlagRepository {
+    suspend fun getFlags(): Result<List<FlaggedTopic>>
+    suspend fun removeFlag(topic: FlaggedTopic): Result<Unit>
+}
+
+interface AuthRepository {
+    suspend fun login(username: String, password: String): Result<Unit>
+    suspend fun isLoggedIn(): Boolean
+}
+```
 
 ### `:core:network` — HfrClient
 
@@ -168,15 +217,19 @@ class HfrParser @Inject constructor() {
 }
 ```
 
-### Repository — assemble le tout
+### `:core:data` — implémentations
+
+Les implémentations de repositories orchestrent réseau, parser et cache. Elles vivent dans `:core:data`, jamais dans les features.
 
 ```kotlin
-class TopicRepository @Inject constructor(
+// Dans :core:data — l'implémentation
+class TopicRepositoryImpl @Inject constructor(
     private val client: HfrClient,
     private val parser: HfrParser,
     private val topicDao: TopicDao,
-) {
-    suspend fun getTopic(cat: Int, post: Int, page: Int): Result<Topic> {
+) : TopicRepository {
+
+    override suspend fun getTopic(cat: Int, post: Int, page: Int): Result<Topic> {
         // 1. Vérifier le cache
         topicDao.getCached(cat, post, page)?.let { return Result.success(it) }
 
@@ -192,6 +245,31 @@ class TopicRepository @Inject constructor(
         }
     }
 }
+```
+
+Le binding Hilt connecte l'interface à l'implémentation :
+
+```kotlin
+// Dans :core:data
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class RepositoryModule {
+    @Binds
+    abstract fun bindTopicRepository(impl: TopicRepositoryImpl): TopicRepository
+
+    @Binds
+    abstract fun bindFlagRepository(impl: FlagRepositoryImpl): FlagRepository
+}
+```
+
+Les ViewModels dans les features ne connaissent que l'interface :
+
+```kotlin
+// Dans :feature:topic — ne dépend que de :core:domain
+@HiltViewModel
+class TopicViewModel @Inject constructor(
+    private val topicRepository: TopicRepository,  // interface, pas impl
+) : ViewModel() { ... }
 ```
 
 ---

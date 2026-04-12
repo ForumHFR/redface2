@@ -310,12 +310,20 @@ Chaque feature communautaire est un **module Gradle isolé** :
 
 ### Points d'extension
 
-Les features communautaires interagissent avec l'app via des interfaces standardisées :
+Les features communautaires interagissent avec l'app via des interfaces standardisées, définies dans `:core:extension` :
 
 ```kotlin
+// Contexte fourni à chaque décorateur (informations par post)
+data class DecorationContext(
+    val post: Post,
+    val currentUser: String,   // pseudo connecté
+    val cat: Int,
+    val topicId: Int,
+)
+
 // Enrichir le rendu d'un post
 interface PostDecorator {
-    fun decorate(post: Post): PostDecoration
+    fun decorate(context: DecorationContext): PostDecoration
 }
 
 data class PostDecoration(
@@ -337,7 +345,29 @@ interface EditorToolbarContributor {
 }
 ```
 
-Chaque module feature enregistre ses contributions via Hilt `@IntoSet` — ajouter une feature ne demande aucune modification du code existant.
+Chaque décorateur est un `@Singleton` injecté par Hilt avec ses propres dépendances. L'enregistrement se fait via `@IntoSet` — ajouter une extension ne demande **aucune modification du code existant** :
+
+```kotlin
+// Dans :feature:blacklist — exemple concret
+@Singleton
+class BlacklistDecorator @Inject constructor(
+    private val blacklistDao: BlacklistDao,
+) : PostDecorator {
+    override fun decorate(context: DecorationContext): PostDecoration {
+        val isBlocked = blacklistDao.isBlocked(context.post.author)
+        return PostDecoration(hidden = isBlocked)
+    }
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class BlacklistModule {
+    @Binds @IntoSet
+    abstract fun bindDecorator(impl: BlacklistDecorator): PostDecorator
+}
+```
+
+Le `TopicViewModel` collecte tous les décorateurs et les applique en séquence. Les résultats sont mergés — un post peut être highlighted par Ego Quote **et** avoir un badge Qualitay simultanément.
 
 ---
 
