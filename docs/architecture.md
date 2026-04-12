@@ -32,10 +32,10 @@ graph TB
         NET["HfrClient (OkHttp)"]
         PARSE["HfrParser (Jsoup)"]
         DB["Room Database"]
-        NET --> PARSE
     end
     VM --> R
     R --> NET
+    R --> PARSE
     R --> DB
 ```
 
