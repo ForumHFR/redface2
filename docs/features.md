@@ -381,11 +381,33 @@ En plus des features inspirées des userscripts, Redface 2 ajoutera :
 - Lecture sans connexion
 - File d'attente pour les réponses (envoi quand le réseau revient)
 
-### Thème dynamique
+### Thèmes dynamiques et customisables
 
 - Material You (couleurs dynamiques selon le wallpaper)
 - Thème sombre AMOLED (noir pur)
 - Thème "HFR classique" (pour les nostalgiques)
+
+**Thèmes YAML personnalisés** (proposé par la communauté) :
+
+Les utilisateurs peuvent créer et partager des thèmes via un fichier YAML. Jetpack Compose rend l'intégration de thèmes dynamiques triviale grâce à `MaterialTheme` et `CompositionLocal`.
+
+```yaml
+name: "HFR Classique"
+colors:
+  primary: "#CC0000"
+  background: "#F0F0F0"
+  surface: "#FFFFFF"
+  flagCyan: "#00BCD4"
+  flagFavorite: "#FFD700"
+spacing:
+  postPadding: 8
+  compact: true
+icons: "material"  # material | outline | rounded
+```
+
+- Import/export de thèmes en un tap (coller un YAML depuis le forum, c'est facile)
+- Galerie de thèmes communautaires (les presets Material You, AMOLED et HFR classique sont des thèmes YAML intégrés)
+- Potentiel pour migrer les utilisateurs HFR4droid attachés à leur customisation
 
 ### Notifications
 

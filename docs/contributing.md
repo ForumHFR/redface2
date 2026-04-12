@@ -114,10 +114,30 @@ feature/topic/
 
 ### Tests
 
-- Tests unitaires pour les ViewModels (intents → state)
-- Tests unitaires pour les parsers (HTML → modèles)
-- Tests d'intégration pour les repositories
+**Stack de tests :**
+- **JUnit 4** — framework de test (standard Android instrumenté)
+- **MockK** — mocking Kotlin-first
+- **Robolectric** — tests Android sans émulateur (quand on ne peut pas mocker les composants Android)
+- **Turbine** — test des `Flow` et `StateFlow` (assertions sur les émissions)
+- **Compose Testing** — tests UI pour les écrans critiques
+
+**Couverture :**
+- **100%** sur les modules métier : parser, database, ViewModels
+- Tests d'intégration pour les repositories (network + parser + cache)
+- Tests UI pour les écrans critiques et les interactions clés
+
+**Stratégie :**
+- Tests unitaires pour les ViewModels : intent → state (fonction pure)
+- Tests unitaires pour les parsers : HTML fixture → modèle attendu
+- Tests d'intégration pour les repositories : cache-then-network, retry, erreurs
 - Tests UI pour les écrans critiques (Compose testing)
+
+### Héritage Redface v1
+
+Le code de [Redface v1](https://github.com/ForumHFR/Redface) contient ~10 transformers de parsing, 17 fixtures HTML et 13 tests. Cette base est reprise comme point de départ :
+- Les **fixtures HTML** servent de référence pour les edge cases du parser HFR
+- La **logique de parsing** (gestion des posts supprimés, pages instables, encoding) est analysée pour ne pas réinventer la roue
+- Les edge cases identifiés dans les tests v1 deviennent des cas de test dans v2
 
 ### Fixtures HTML pour le parser
 

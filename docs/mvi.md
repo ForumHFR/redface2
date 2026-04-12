@@ -14,7 +14,7 @@ Model-View-Intent : le pattern d'architecture UI de Redface 2.
 
 ## Principe
 
-MVI impose un **flux de données unidirectionnel**. L'utilisateur émet des Intents, le ViewModel produit un nouveau State, Compose dessine le State.
+MVI impose un **flux de données unidirectionnel** (UDF — Unidirectional Data Flow). L'utilisateur émet des Intents, le ViewModel produit un nouveau State, Compose dessine le State.
 
 ```mermaid
 graph LR
@@ -28,6 +28,15 @@ Trois concepts :
 - **State** : l'état complet de l'écran. Immutable. Un seul objet `data class`.
 - **Intent** : une action de l'utilisateur. `sealed interface`. Pur, sans logique.
 - **Effect** : un événement one-shot (navigation, snackbar, vibration). Ne fait pas partie du state car il ne doit pas être rejoué à la recomposition.
+
+### Note terminologique
+
+Ce que ce document appelle "MVI" est techniquement du **MVVM + UDF** — le pattern recommandé par Google pour Compose. La distinction est principalement terminologique :
+
+- **MVVM classique** : ViewModel expose des `LiveData`/`StateFlow`, la View observe. Le flux peut être bidirectionnel.
+- **MVI / MVVM+UDF** : le flux est strictement unidirectionnel. Les actions passent par des Intents (ou Events), le ViewModel produit un nouveau State immutable. C'est ce que fait ce projet.
+
+Le code est le même. On utilise le terme "MVI" dans ce projet par convention, mais un développeur habitué au MVVM Android retrouvera ses repères.
 
 ---
 

@@ -110,6 +110,18 @@ Trois options évaluées :
 
 Hilt avec KSP (pas KAPT) résout le problème historique de build time. La sécurité à la compilation et l'intégration native avec Jetpack font la différence pour un projet open-source.
 
+**Note** : Koin a évolué significativement. Le [compiler plugin K2](https://insert-koin.io/docs/reference/koin-annotations/start) (1.0.0-RC1) permet la génération du graphe de DI à la compilation, éliminant le risque de crash runtime. Koin est également KMP-natif. Si le projet évolue vers KMP, Koin deviendra le choix naturel. Hilt reste le choix pour la v1 Android-only grâce à son intégration Jetpack et sa base de contributeurs plus large.
+
+### Perspectives KMP
+
+La stack actuelle est Android-only. Cependant, l'architecture est conçue pour faciliter une migration KMP future :
+
+- `:core:model` et `:core:domain` sont purs Kotlin/JVM, sans dépendance Android
+- `:core:parser` utilise Jsoup (JVM-only), mais [Ksoup](https://github.com/fleeksoft/ksoup) (v0.2.6, API compatible Jsoup, KMP-natif) est une alternative crédible à valider
+- Le passage KMP serait un refactor de dépendances, pas une réécriture
+
+La décision KMP est reportée post-v1, confirmée par les retours communautaires (Corran Horn, ezzz).
+
 ### OkHttp 4 direct (sans Retrofit)
 
 Choix contre-intuitif. Retrofit est le standard Android pour le réseau. Mais Retrofit ajoute de la valeur quand on consomme une **API REST structurée** avec des endpoints types.

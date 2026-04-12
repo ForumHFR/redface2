@@ -136,9 +136,9 @@ Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (com
 | `:feature:search` | Recherche dans les topics et posts, filtres | `:core:domain`, `:core:ui` |
 | `:feature:settings` | Préférences, thème, gestion cache | `:core:domain`, `:core:ui` |
 
-### Modules feature (extensions communautaires)
+### Modules feature (extensions communautaires — Phase 4)
 
-Chaque extension est un module Gradle isolé. Elles s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant.
+Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le projet compte 15 modules (8 core + 7 features base). Les extensions sont des modules Gradle isolés qui s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant.
 
 | Module | Fonction | Dépend de |
 |--------|----------|-----------|
