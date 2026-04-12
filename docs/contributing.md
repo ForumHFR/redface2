@@ -184,7 +184,21 @@ core/parser/src/test/resources/fixtures/
 | `modo_flagged.html` | modo.php — déjà alerté | logué uniquement | Redflag : post alerté |
 | `modo_join.html` | modo.php — rejoindre une alerte | logué uniquement | Redflag : alerte en cours |
 
-**Total : ~30 fixtures** (13 reprises de v1 + 14 nouvelles, certaines en double logué/non-logué).
+**Profil et paramètres** (pages `editprofil.php`, loguées uniquement) :
+
+| Fixture | Page HFR | Contenu |
+|---------|----------|---------|
+| `profile_settings_p1.html` | `editprofil.php?page=1` | Infos générales : email, date naissance, sexe, ville, profession, loisirs |
+| `profile_settings_p2.html` | `editprofil.php?page=2` | Infos forum : citation, signature (BBCode), config matérielle |
+| `profile_settings_p3.html` | `editprofil.php?page=3` | Paramètres : réponses/page, avatars, signatures, thème CSS, jeu d'icônes, langue, fuseau, notifs MP |
+| `profile_settings_p4.html` | `editprofil.php?page=4` | **Déprécié** — messageries instantanées (ICQ, MSN, etc.). Page accessible mais plus utilisée. Conservée pour exhaustivité. |
+| `profile_settings_p5.html` | `editprofil.php?page=5` | Gestion d'images : avatar, smileys persos, smileys favoris, wiki smileys |
+| `profile_settings_p6.html` | `editprofil.php?page=6` | Notifications : mots-clés (max 3) pour alerte par mail/MP à la création de topics |
+| `profile_settings_p7.html` | `editprofil.php?page=7` | Personnalisation barre d'outils : 15 icônes repositionnables (9 positions + masquer) |
+| `contact_list.html` | `contactlist.php` | Liste de contacts : ajout/suppression, statut en ligne, liens MP |
+| `modo_history.html` | `modo/historique.php` | Historique des sanctions : modérateur, catégorie, date, raison |
+
+**Total : ~39 fixtures** (13 reprises de v1 + 14 nouvelles + 9 profil/paramètres + doublons logué/non-logué).
 
 **Règles :**
 - Les fixtures sont capturées depuis le vrai site HFR, jamais fabriquées
