@@ -14,6 +14,7 @@ Objectif :
 ## Règles
 
 - Lire aussi `docs/models.md` et `docs/contributing.md`
+- Lire aussi `docs/navigation.md` et `docs/mvi.md` si la fixture correspond à un écran déjà spécifié
 - Ne pas faire une analyse HTML générique exhaustive : se concentrer sur les données **parser-relevant**
 - Distinguer les signaux **forts** des signaux **faibles**
 - Si le type de page reste ambigu, le dire explicitement avec un niveau de confiance
@@ -34,13 +35,16 @@ Déterminer le type de page en croisant :
 Types possibles :
 - Topic (`forum1.php`) — présence de `table.messagetable`, ancres `a[name^=t]`, pagination topic
 - Liste de topics (`forum2.php`) — présence de `tr.sujet`, colonnes topic/auteur/date
-- Drapeaux (`forum1f.php`) — présence de `tr.sujet` + contexte "Mes sujets", drapeaux, filtres
+- Drapeaux (`forum1f.php`) — présence de `tr.sujet` + `td.sujetCase7` (icône drapeau, spécifique aux drapeaux)
 - Profil / paramètres (`editprofil.php`, `profil.php`) — formulaires profil, pages settings
 - MPs (`message.php`) — liste ou conversation de messages privés
 - Recherche (`search.php`) — résultats de recherche
 - Login / auth — page de validation ou échec login
 - `modo.php` — formulaire ou état de modération
 - Création / édition (`edit_post`, `edit_fp`, `new_topic`)
+- Settings profil (`editprofil.php?page=1-7`) — formulaires de paramètres utilisateur
+- Liste de contacts (`contactlist.php`) — gestion des contacts
+- Historique sanctions (`modo/historique.php`) — tableau des sanctions
 - Autre — décrire
 
 Format :
@@ -67,7 +71,23 @@ Format :
 |--------------------|--------------------|-------------|
 ```
 
-### 3. Extraire les données parser-relevant
+### 3. Extraire les données JS inline
+
+HFR embarque des données dans des balises `<script>` (pas dans le DOM). Chercher et extraire :
+- `listenumreponse` — tableau JS des numreponse de la page
+- Variables de configuration topic (cat, post, page, numreponse courant)
+- `hash_check` s'il est en JS plutôt qu'en hidden field
+- Toute autre variable JS contenant des données métier
+
+Format :
+```
+| Variable JS | Contenu | Exemple | Utilité parser |
+|-------------|---------|---------|----------------|
+```
+
+Si aucune donnée JS pertinente : noter "Aucune donnée JS inline détectée".
+
+### 4. Extraire les données parser-relevant
 
 Pour chaque donnée utile au parsing ou aux modèles :
 - nom du champ
@@ -89,7 +109,7 @@ Format :
 |--------|-------------------------|------|---------|----------|--------|
 ```
 
-### 4. Extraire les champs de formulaire
+### 5. Extraire les champs de formulaire
 
 Si la page contient un formulaire, lister :
 - `name`
@@ -105,7 +125,7 @@ Format :
 |-------|-------|-----------|-------------------|--------|---------|
 ```
 
-### 5. Comparer avec les modèles existants
+### 6. Comparer avec les modèles existants
 
 Lire `docs/models.md` et répondre explicitement :
 - quels champs extraits existent déjà dans les data classes
@@ -126,7 +146,7 @@ Champs attendus par les specs mais absents de cette page :
 - [...]
 ```
 
-### 6. Identifier le parser cible
+### 7. Identifier le parser cible
 
 Déterminer quel parser doit consommer cette fixture :
 - parser existant si évident
@@ -147,10 +167,11 @@ Exemples :
 - `SearchResultParser`
 - `MessageParser`
 - `LoginParser`
-- `ProfileParser`
+- `ProfileParser` (profil public)
+- `ProfileSettingsParser` (pages editprofil p1-p7, contactlist, historique sanctions)
 - `ModoParser`
 
-### 7. Détecter les variantes logué / non-logué
+### 8. Détecter les variantes logué / non-logué
 
 Identifier :
 - ce qui n'apparaît que connecté
@@ -168,7 +189,7 @@ Fixture jumelle recommandée :
 - si oui : [type de variante à capturer]
 ```
 
-### 8. Nettoyage et données sensibles
+### 9. Nettoyage et données sensibles
 
 Lister ce qu'il faut nettoyer avant commit :
 - cookies
@@ -184,7 +205,7 @@ Données sensibles à nettoyer :
 - [...]
 ```
 
-### 9. Recommandation parser / tests
+### 10. Recommandation parser / tests
 
 Conclure de manière actionnable :
 - faut-il garder cette fixture
@@ -208,7 +229,7 @@ Résumé :
 - Recommandation finale : [action concrète]
 ```
 
-### 10. Écrire le résultat dans un fichier
+### 11. Écrire le résultat dans un fichier
 
 **Toujours** écrire l'analyse complète (étapes 1-9) dans un fichier markdown persistant :
 
@@ -217,3 +238,5 @@ Résumé :
   - `profil-p3/FORUM HardWare.fr.html` → `profil-p3/FORUM HardWare.fr.analysis.md`
 - Le fichier contient l'intégralité de l'analyse structurée
 - Ne pas compter sur le contexte conversationnel — le fichier doit être autosuffisant
+- Par défaut, ce fichier est un artefact de travail local
+- Ne le commit que si l'utilisateur le demande explicitement ou si le repo adopte une convention claire pour versionner ces analyses
