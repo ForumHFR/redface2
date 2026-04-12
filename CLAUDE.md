@@ -14,14 +14,46 @@
 - Documentation : GitHub Pages via `docs/` (Jekyll + just-the-docs)
 - Langue : code en anglais, issues et docs en francais
 
+## Setup
+
+```bash
+# Pas de build applicatif — phase spec uniquement
+# Preview Jekyll (necessite Ruby + Bundler)
+cd docs && bundle install && bundle exec jekyll serve
+```
+
+## Structure des specs
+
+```
+docs/
+  index.md           # Page d'accueil, diagramme simplifie
+  stack.md           # Choix techniques justifies
+  architecture.md    # Modules Gradle, couches, data flow, session, securite, erreurs
+  navigation.md      # Ecrans, deep linking, back stack
+  models.md          # Data classes Kotlin (source de verite pour les types)
+  mvi.md             # Pattern MVI, exemples ViewModel/Screen/State
+  features.md        # Features communautaires, architecture d'extensions
+  naming.md          # Candidats pour le nom de l'app
+  roadmap.md         # Phases de developpement
+  contributing.md    # Conventions, tests, accessibilite, localisation
+  _config.yml        # Config Jekyll (version des specs dans le footer)
+```
+
 ## Stack (verrouillee)
 
 Kotlin, Jetpack Compose, MVI, Compose Navigation, Hilt (KSP), OkHttp 4, Jsoup, Room, Coil, Coroutines + Flow, minSdk 29
 
+## Tests
+
+Pas de tests encore (phase spec). Strategie definie dans `docs/contributing.md` :
+- JUnit 4 + MockK + Robolectric + Turbine
+- Couverture 100% sur parser, database, ViewModels
+- Fixtures HTML capturees depuis HFR reel, jamais fabriquees
+
 ## Conventions
 
 - Issues et commentaires : toujours mentionner qui a demande l'action si generee par IA
-- Conventional Commits : `feat:`, `fix:`, `docs:`, `chore:`
+- Conventional Commits : `feat:`, `fix:`, `docs:`, `chore:`, `test:`
 - Branche principale : `main`
 
 ---
@@ -69,8 +101,8 @@ Kotlin, Jetpack Compose, MVI, Compose Navigation, Hilt (KSP), OkHttp 4, Jsoup, R
 
 ### Regles specifiques au projet
 
-- **BBCode HFR** : `[fixed]` est un bloc (block-level), jamais inline. Pour du monospace inline, utiliser `[b]`.
-- **Smileys** : ne jamais ajouter de smiley HFR non verifie dans les specs ou exemples.
+- **BBCode HFR** : `[fixed]` est un bloc (block-level), jamais inline. Pour du monospace inline, utiliser `[b]`. `[size=X]` n'existe pas. Color se ferme avec `[/#XXXXXX]` (meme code couleur).
+- **Smileys** : ne jamais ajouter de smiley HFR non verifie dans les specs ou exemples. Smileys surs : `:)`, `:(`, `:o`, `:D`, `;)`, `:p`, `:jap:`, `:fou:`, `:pfff:`, `:sweat:`, `:bounce:`, `:pt1cable:`.
 - **Langue** : docs en francais avec accents. Code, noms de variables, noms de classes en anglais.
 - **`numreponse`** : est unique par **categorie**, pas globalement sur le forum. Le mentionner quand pertinent.
 - **Deep links** : Compose Navigation ne supporte pas les fragments (`#t{id}`). Toujours prevoir un traitement custom dans MainActivity.
