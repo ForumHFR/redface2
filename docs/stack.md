@@ -145,6 +145,8 @@ suspend fun getTopicPage(cat: Int, post: Int, page: Int): Document {
 
 OkHttp fournit aussi le **CookieJar** pour la gestion de session HFR — essentiel pour l'authentification.
 
+**Note** : OkHttp 5 (Kotlin-first, meilleur support coroutines) sera évalué au moment du bootstrap (Phase 0). Si la version stable est disponible, elle sera adoptée directement. La migration depuis OkHttp 4 est mineure (API compatible).
+
 ### Jsoup
 
 Standard incontesté pour le parsing HTML sur la JVM. CSS selectors, manipulation DOM, robuste face au HTML malformed (et celui de HFR l'est).
@@ -179,7 +181,7 @@ fun observeFlags(): Flow<List<FlaggedTopicEntity>>
 
 Chargeur d'images conçu pour Compose et les coroutines. Plus léger et plus idiomatique que Glide pour un projet Kotlin-first.
 
-Utilise pour :
+Utilisé pour :
 - Avatars des utilisateurs
 - Images dans les posts
 - **Smileys HFR** (cache agressif, ils ne changent jamais)
@@ -212,3 +214,14 @@ Pourquoi pas 31+ :
 | Chargement topic (réseau) | < 2s |
 | Taille APK | < 15MB |
 | Mémoire max | < 200MB |
+
+### Stratégie mémoire
+
+Pour tenir les objectifs mémoire, en particulier sur les appareils bas de gamme :
+
+- **Coil** : `ImageLoader` custom avec `memoryCache { maxSizePercent(context, 0.15) }` et `diskCache { maxSizeBytes(100L * 1024 * 1024) }` (100 MB disque)
+- **LazyColumn** : `key(post.numreponse)` et `contentType` sur chaque item pour optimiser le recyclage Compose
+- **Cache Room** : LRU sur les pages de topic — max 50 pages en cache, éviction par date d'accès
+- **Images dans les posts** : thumbnails dans la liste, pleine résolution uniquement en plein écran
+
+Profiling en debug avec **LeakCanary** et **StrictMode**. Optimisation du cold start avec **Baseline Profiles**.

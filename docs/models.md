@@ -26,6 +26,8 @@ classDiagram
         +FlagType flagType
         +Int unreadCount
         +String categoryName
+        +Int lastReadPage
+        +Int totalPages
     }
 
     class Topic {
@@ -42,10 +44,13 @@ classDiagram
     class Post {
         +Int numreponse
         +String author
-        +String date
+        +Instant date
         +String content
         +String? avatarUrl
         +Boolean isEditable
+        +Boolean isOwnPost
+        +List~String~ quotedAuthors
+        +Int postIndex
     }
 
     class Category {
@@ -64,6 +69,7 @@ classDiagram
         +Int id
         +String subject
         +List~String~ participants
+        +String lastAuthor
         +Instant lastDate
         +Boolean isRead
         +Boolean isMultiMP
@@ -90,6 +96,8 @@ data class FlaggedTopic(
     val flagType: FlagType,
     val unreadCount: Int,
     val categoryName: String,
+    val lastReadPage: Int,      // page de la dernière lecture
+    val totalPages: Int,        // nombre total de pages
 )
 
 enum class FlagType {
@@ -118,10 +126,13 @@ data class Topic(
 data class Post(
     val numreponse: Int,
     val author: String,
-    val date: String,
+    val date: Instant,         // parsé depuis "dd-MM-yyyy à HH:mm:ss"
     val content: String,
     val avatarUrl: String?,
     val isEditable: Boolean,
+    val isOwnPost: Boolean,              // comparaison auteur vs user connecté
+    val quotedAuthors: List<String>,     // extraits des [quotemsg=]
+    val postIndex: Int,                  // (page-1)*40 + position sur la page
 )
 ```
 
@@ -148,6 +159,20 @@ data class PollData(
     val question: String,
     val options: List<String>,
     val multipleChoice: Boolean,
+)
+
+data class Poll(
+    val question: String,
+    val options: List<PollOption>,
+    val multipleChoice: Boolean,
+    val totalVotes: Int,
+    val hasVoted: Boolean,
+)
+
+data class PollOption(
+    val text: String,
+    val votes: Int,
+    val percentage: Float,
 )
 ```
 
@@ -178,8 +203,9 @@ data class PrivateMessage(
     val id: Int,
     val subject: String,
     val participants: List<String>,
+    val lastAuthor: String,     // dernier expéditeur
     val lastDate: Instant,
-    val isRead: Boolean,
+    val isRead: Boolean,        // HFR natif (classic) ou MPStorage (multi)
     val isMultiMP: Boolean,
 )
 
@@ -205,15 +231,30 @@ MPStorage est une bibliothèque cross-plateforme qui utilise un **MP HFR dédié
 ```kotlin
 // Données stockées dans le MP de stockage (format JSON)
 data class MPStorageData(
-    val multiMPFlags: Map<Int, MultiMPFlag>,
+    val multiMPFlags: Map<Int, MultiMPFlag>,  // clé = mpId
     val bookmarks: List<Bookmark>,
-    val preferences: Map<String, String>,
+    val settings: MPStorageSettings,
 )
 
 data class MultiMPFlag(
-    val mpId: Int,
+    // mpId est la clé du Map, pas besoin de le dupliquer
     val lastReadDate: Instant,
     val pinned: Boolean,
+)
+
+data class MPStorageSettings(
+    val compactFlags: Boolean = false,
+    val defaultImageHost: String = "diberie",
+)
+
+data class Bookmark(
+    val cat: Int,
+    val post: Int,              // topic ID
+    val numreponse: Int,        // post ID
+    val topicTitle: String,
+    val author: String,
+    val preview: String,
+    val createdAt: Instant,
 )
 ```
 
@@ -233,14 +274,13 @@ data class SearchQuery(
 )
 
 data class SearchResult(
-    val postId: Int,
+    val cat: Int,
+    val post: Int,              // topic ID
+    val numreponse: Int,        // post ID dans la catégorie
     val topicTitle: String,
     val author: String,
-    val date: String,
+    val date: Instant,
     val preview: String,
-    val cat: Int,
-    val post: Int,
-    val numreponse: Int,
 )
 ```
 
@@ -265,7 +305,7 @@ enum class ImageProvider {
     DIBERIE,    // rehost by dib
     SUPER_H,    // super-h.fr
     IMGUR,      // imgur.com
-    REHOST,     // reho.st (rehost uniquement, préfixe URL)
+    REHOST,     // reho.st (rehost par préfixe URL uniquement, plus d'upload manuel)
 }
 
 data class TopicRef(

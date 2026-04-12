@@ -89,6 +89,7 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 
 **Objectif :** interagir avec le forum.
 
+- [ ] Recherche — titres de topics et contenu de posts, filtres par catégorie/auteur/date
 - [ ] Reply — répondre à un topic
 - [ ] Quote — citer un post → reply pré-rempli
 - [ ] Edit — éditer son propre post
@@ -97,7 +98,6 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 - [ ] Toolbar BBCode — boutons de formatage dans l'éditeur
 - [ ] Preview BBCode — avant-première du rendu
 - [ ] Hébergement d'images — upload, rehost, bibliothèque (diberie, super-h.fr, imgur)
-- [ ] Recherche
 
 **Livrable :** une app complète pour lire ET écrire sur le forum.
 

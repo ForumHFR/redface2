@@ -55,6 +55,7 @@ graph TB
     APP --> FM[":feature:messages"]
     APP --> FA[":feature:auth"]
     APP --> FS[":feature:settings"]
+    APP --> FSR[":feature:search"]
 
     FF --> CM[":core:model"]
     FF --> CN[":core:network"]
@@ -83,6 +84,11 @@ graph TB
 
     FS --> CU
     FS --> CD
+
+    FSR --> CM
+    FSR --> CN
+    FSR --> CP
+    FSR --> CU
 
     CN --> CM
     CP --> CM
@@ -115,6 +121,7 @@ graph TB
 | `:feature:editor` | Reply, edit, edit FP (sujet, sondage), preview BBCode | `:core:model`, `:core:network`, `:core:ui` |
 | `:feature:messages` | MPs classiques, MultiMPs (vue drapeaux), création MP/MultiMP | `:core:*` |
 | `:feature:auth` | Login HFR | `:core:network`, `:core:ui` |
+| `:feature:search` | Recherche dans les topics et posts, filtres | `:core:model`, `:core:network`, `:core:parser`, `:core:ui` |
 | `:feature:settings` | Préférences, thème, gestion cache | `:core:ui`, `:core:database` |
 
 ### Module app
@@ -242,3 +249,43 @@ sequenceDiagram
 ```
 
 Les cookies sont persistés via un `PersistentCookieJar` (Room ou fichier) pour éviter de se re-logguer à chaque lancement.
+
+### Stockage sécurisé des credentials
+
+Les cookies et credentials HFR sont chiffrés au repos via `EncryptedSharedPreferences` (AndroidX Security) :
+
+```kotlin
+val masterKey = MasterKey.Builder(context)
+    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+    .build()
+
+val securePrefs = EncryptedSharedPreferences.create(
+    context, "hfr_credentials", masterKey,
+    PrefKeyEncryptionScheme.AES256_SIV,
+    PrefValueEncryptionScheme.AES256_GCM,
+)
+```
+
+Le `PersistentCookieJar` sérialise les cookies dans ces préférences chiffrées. Le mot de passe HFR (pour le re-login automatique en cas d'expiration de session) y est également stocké.
+
+L'utilisation de la **Biometric API** pour protéger l'accès à l'app est envisagée pour une version ultérieure. Le stockage est conçu pour qu'une clé biométrique puisse être ajoutée sans migration.
+
+---
+
+## Gestion des erreurs
+
+### Session expirée
+
+Un `Interceptor` OkHttp détecte la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Il tente un re-login transparent avec les credentials stockés. Si le re-login échoue, un événement `SessionExpired` est émis et le `NavGraph` redirige vers l'écran de login.
+
+### HFR indisponible
+
+Le repository retourne `Result.failure` → le ViewModel affiche les données du cache Room + une bannière "HFR indisponible, données en cache". Retry automatique avec backoff exponentiel (2s, 4s, 8s, max 60s).
+
+### Rate limiting
+
+Interceptor OkHttp avec détection des réponses HTTP 429 et des patterns de blocage HFR. File d'attente côté client avec rate limit (max 2 req/s vers HFR). Backoff automatique sur 429.
+
+### Breakage du parser
+
+`HfrParser` wrappe chaque méthode dans `runCatching`. Sur échec, le HTML brut est loggé en mode debug pour diagnostic. Un smoke test CI hebdomadaire vérifie que les sélecteurs CSS critiques (`HfrSelectors`) matchent toujours sur une vraie page HFR publique.

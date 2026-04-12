@@ -51,6 +51,22 @@ redface2/
     settings/             # Préférences
 ```
 
+### Gestion des dépendances
+
+Le projet utilise un **Gradle version catalog** (`libs.versions.toml`) pour centraliser les versions de toutes les dépendances. Avec 14+ modules, c'est indispensable pour éviter la duplication et les conflits de versions.
+
+```toml
+# gradle/libs.versions.toml (extrait)
+[versions]
+kotlin = "2.1.0"
+compose-bom = "2026.04.00"
+hilt = "2.52"
+room = "2.7.0"
+okhttp = "4.12.0"
+coil = "3.0.0"
+jsoup = "1.18.0"
+```
+
 ### Convention par feature
 
 Chaque feature suit la même organisation :
@@ -72,6 +88,22 @@ feature/topic/
 - **Pas de code commenté** : si c'est supprimé, c'est supprimé
 - **Pas de TODO dans le code** : ouvrir une issue à la place
 
+### Accessibilité
+
+- Tous les éléments interactifs : `contentDescription` ou `semantics { }` en Compose
+- Touch targets minimum 48dp
+- Contraste WCAG AA (4.5:1 texte, 3:1 gros texte)
+- Support du scaling de police (pas de tailles en `dp` pour le texte, toujours `sp`)
+- Navigation TalkBack : headings sémantiques, custom actions pour les posts
+- Lint a11y activé en CI dès Phase 0
+
+### Localisation
+
+- Toutes les chaînes UI dans `strings.xml` dès Phase 0 (français par défaut)
+- `values-en/strings.xml` pour le listing Play Store (anglais)
+- Pas de strings hardcodées dans les Composables — détecté par lint
+- L'app est conçue pour la communauté francophone HFR, mais la structure i18n est en place dès le départ
+
 ### Workflow Git
 
 - Branche principale : `main`
@@ -87,6 +119,23 @@ feature/topic/
 - Tests unitaires pour les parsers (HTML → modèles)
 - Tests d'intégration pour les repositories
 - Tests UI pour les écrans critiques (Compose testing)
+
+### Fixtures HTML pour le parser
+
+Le parser HTML est testé contre des **fixtures capturées depuis HFR** (pas inventées) :
+
+```
+core/parser/src/test/resources/fixtures/
+    topic_page.html
+    flags_page.html
+    edit_page.html
+    login_success.html
+    search_results.html
+    mp_list.html
+    categories.html
+```
+
+Quand un bug de parsing est corrigé, le HTML problématique est ajouté aux fixtures avec un test de non-régression. Un **smoke test CI hebdomadaire** vérifie que les sélecteurs CSS critiques matchent toujours sur une vraie page HFR publique.
 
 ---
 

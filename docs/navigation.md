@@ -115,7 +115,7 @@ L'écran central de l'app. Affiche les posts d'un topic avec pagination.
 **Actions sur un post :**
 - **Quoter** → ouvre l'éditeur avec la citation pré-remplie
 - **Editer** (si c'est notre post) → ouvre l'éditeur avec le contenu actuel
-- **Editer le FP** (si c'est notre topic, post #0) → éditeur spécial avec sujet + sondage
+- **Editer le FP** (si `isFirstPostOwner`) → éditeur spécial avec sujet + sondage
 - **Copier le texte**
 - **Voir l'image en plein écran**
 - **Partager le lien du post**
@@ -181,7 +181,7 @@ Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
 | `forum.hardware.fr/forum1.php?cat=X&post=Y` | Topic page 1 |
 | `forum.hardware.fr/forum2.php?config=hfr.inc&cat=X&subcat=Y` | Liste topics |
 | `forum.hardware.fr/forum1f.php` | Drapeaux |
-| `forum.hardware.fr/forum1.php?cat=X&post=Y#t12345` | Post spécifique |
+| `forum.hardware.fr/forum1.php?cat=X&post=Y#t12345` | Post spécifique (traitement custom, voir ci-dessous) |
 
 Implémentation via Compose Navigation deep links :
 
@@ -201,6 +201,36 @@ composable(
     )
 }
 ```
+
+### Cas particulier : lien vers un post spécifique
+
+Compose Navigation ne supporte pas les fragments (`#t{numreponse}`) dans les deep links. Les URLs de type `forum.hardware.fr/forum1.php?cat=X&post=Y#t12345` nécessitent un traitement custom dans `MainActivity` :
+
+```kotlin
+// MainActivity.kt
+private fun handleDeepLink(intent: Intent) {
+    val uri = intent.data ?: return
+    val fragment = uri.fragment // "t2781509"
+    val scrollToPost = fragment?.removePrefix("t")?.toIntOrNull()
+
+    val cat = uri.getQueryParameter("cat")
+    val post = uri.getQueryParameter("post")
+    val page = uri.getQueryParameter("page") ?: "1"
+
+    navController.navigate(
+        "topic/$cat/$post/$page" +
+            (scrollToPost?.let { "?scrollTo=$it" } ?: "")
+    )
+}
+```
+
+La route Topic accepte un paramètre optionnel `scrollTo` :
+
+```
+topic/{cat}/{post}/{page}?scrollTo={numreponse}
+```
+
+Le `TopicScreen` reçoit le `numreponse` cible et scroll jusqu'au bon post après chargement de la page.
 
 ---
 

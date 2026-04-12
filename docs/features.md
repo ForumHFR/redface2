@@ -267,6 +267,10 @@ Système d'alertes intelligent sur les topics suivis. Dépasse les simples drape
 - Filtres : par auteur, par mot-clé, par topic
 - Intégration avec le système de drapeaux natif
 
+L'app s'appuie sur l'**API du worker Cloudflare** du projet [hfr-redflag](https://github.com/XaaT/hfr-redflag) existant pour récupérer les statuts d'alerte (crowdsourced). L'app est un client HTTP du worker, comme le userscript :
+- `GET /check?cat={cat}&ids=...` → statuts connus
+- `POST /report` → remonter les résultats de scan
+
 ### Intégration MPStorage
 
 MPStorage est une bibliothèque cross-plateforme (issue de hfr-redkit) qui utilise un MP HFR dédié comme backend de stockage : les données sont sérialisées en JSON dans le corps d'un message privé spécialement créé pour l'occasion. Cela permet de synchroniser des préférences et métadonnées (drapeaux MultiMP, bookmarks, etc.) entre navigateurs, appareils et scripts sans serveur tiers.
@@ -283,7 +287,7 @@ MPStorage est une bibliothèque cross-plateforme (issue de hfr-redkit) qui utili
 - Résumé automatique des topics suivis généré par IA (Claude)
 - Configurable : quels topics résumer, fréquence, longueur
 - Utile pour les topics très actifs (100+ posts/jour)
-- Peut s'appuyer sur hfr-mcp pour la lecture et l'IA pour la synthèse
+- **Expérimental / futur** — nécessite un backend dédié ou un appel API direct (clé utilisateur). Non inclus dans la roadmap active.
 
 ---
 
