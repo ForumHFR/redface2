@@ -95,23 +95,27 @@ Ces migrations ne peuvent pas être faites indépendamment les unes des autres. 
 
 ## 3. "Archi modulaire, c'est quoi ? Qu'est-ce qui est monolithique ?"
 
-### Redface v1 : monolithique (fait vérifié)
+Précision de vocabulaire d'abord : "monolithique" est un terme flou. Redface v1 n'est pas du code spaghetti — il y a une séparation logique réelle par packages. Le vrai axe, c'est **convention vs contrainte**.
+
+### Redface v1 : single-module Gradle, séparation par convention
 
 Source : [ForumHFR/Redface/settings.gradle](https://github.com/ForumHFR/Redface/blob/master/settings.gradle).
 
 - **1 seul module Gradle** : `:app`
 - Tout le code dans `app/src/main/java/com/ayuget/redface/`
-- Organisé en packages Java (`account`, `cache`, `data`, `network`, `ui`, etc.) mais sans séparation Gradle
-- Impossible d'isoler la couche réseau ou le parser pour les tester/réutiliser indépendamment
+- Organisé en packages Java (`account`, `cache`, `data`, `network`, `ui`, etc.) — séparation logique existe
+- Mais packages Java = **convention** : rien n'empêche une classe UI d'importer `OkHttpClient` directement
+- Pas de frontière au build : la séparation dépend uniquement de la discipline du contributeur
 
-### Conséquences pratiques
+### Conséquences pratiques de l'absence de frontières
 
-- **Tests unitaires lents** : tout recompile, tout s'exécute dans le même module
-- **Cycles de dépendances possibles** (classes UI qui importent du réseau directement)
-- **Pas de réutilisation** : le parser v1 ne peut pas être utilisé hors de Redface (une autre app devrait copier-coller le code)
-- **Onboarding difficile** : un nouveau contributeur doit comprendre tout le code pour toucher un bout
+- **Entropie logicielle** : sans contrainte de build, le couplage glisse avec les années. Phénomène universel, observable dans tout projet vivant.
+- **Tests unitaires lents** : tout recompile, tout s'exécute dans le même classpath
+- **Pas d'isolation des tests** : les mocks fuient entre couches, un test "unitaire" dépend du graphe complet de l'app
+- **Pas de réutilisation** : le parser v1 ne peut pas être extrait pour être utilisé ailleurs (couplé au cache, au réseau, à l'UI au fil du temps)
+- **Onboarding difficile** : un nouveau contributeur doit comprendre tout le code pour toucher un bout, parce que rien ne délimite ce qu'il peut ignorer
 
-### Redface v2 : 23 modules Gradle
+### Redface v2 : 23 modules Gradle, séparation contrainte au build
 
 Détaillé dans [architecture.md](architecture.md). En résumé :
 
@@ -119,7 +123,18 @@ Détaillé dans [architecture.md](architecture.md). En résumé :
 - 7 modules `:feature:*` de base (forum, topic, editor, messages, auth, search, settings)
 - 8 modules `:feature:*` d'extensions (bookmarks, blacklist, qualitay, redflag, etc.)
 
-Chaque feature ne dépend que de `:core:domain` + `:core:ui`. Impossible d'importer du réseau dans un écran par erreur — Gradle l'interdit à la compilation.
+Ce qu'apportent les modules Gradle **en plus** des packages :
+
+| Aspect | Packages (v1) | Modules Gradle (v2) |
+|--------|---------------|---------------------|
+| Séparation logique | ✅ | ✅ |
+| Enforcement à la compilation | ❌ (tout peut importer tout) | ✅ (Gradle refuse un import non déclaré) |
+| Build incrémental | ❌ (tout recompile) | ✅ (seul le module modifié recompile) |
+| Visibilité `internal` Kotlin | ❌ | ✅ (scoped au module) |
+| Réutilisation hors de l'app | ❌ | ✅ (`:core:parser` publiable comme lib) |
+| Tests isolés par couche | ❌ | ✅ |
+
+Chaque feature ne dépend que de `:core:domain` + `:core:ui`. Impossible d'importer du réseau dans un écran par erreur — **Gradle l'interdit à la compilation, pas le relecteur en review**.
 
 ### Contre-argument honnête
 
@@ -189,7 +204,7 @@ Sur la base des 4 points ci-dessus :
 
 - **Problèmes de v1** : réels, documentés, pas résolus malgré les années (✅ justifie une action)
 - **Risque de mauvais choix** : mitigé par un process explicite, mais pas éliminé
-- **Monolithique** : fait technique vérifié — v1 est monolithique, v2 est modulaire
+- **Modularité** : v1 est single-module Gradle (séparation par convention), v2 est multi-module (séparation contrainte au build)
 - **Contributeurs** : risque assumé, plan de mitigation posé, jalon de réévaluation à 6 mois
 
 **Décision** : poursuivre le rewrite en mode ouvert et prudent. Les specs avant le code, la communauté avant les décisions, les signaux de contribution comme check de santé.
