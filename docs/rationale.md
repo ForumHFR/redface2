@@ -64,7 +64,34 @@ Chaque brique dépend des autres :
 
 Ces migrations ne peuvent pas être faites indépendamment les unes des autres. En pratique, un refactoring incrémental sur Redface v1 serait une réécriture progressive où l'app resterait partiellement cassée pendant des mois.
 
-**Alternative considérée et écartée** : ne rien faire et laisser v1 vivre en mode maintenance. Écarté car les bugs critiques actuels rendent l'app inutilisable sur certains appareils (Hyper OS 2 #225), et aucun nouveau contributeur ne vient réparer ça.
+### Alternative 1 considérée et écartée : ne rien faire
+
+Laisser v1 vivre en mode maintenance. Écarté car les bugs critiques actuels rendent l'app inutilisable sur certains appareils (Hyper OS 2 #225), et aucun nouveau contributeur ne vient réparer ça.
+
+### Alternative 2 considérée : faire tourner un LLM sur v1
+
+Objection légitime : en 2026, un LLM peut patcher du code Java/RxJava 1. Pourquoi ne pas l'utiliser pour corriger les bugs v1 et ajouter des features plutôt que de tout réécrire ?
+
+**Ce que ça résoudrait** :
+
+| Bug | Fix possible par LLM sur v1 ? |
+|-----|-------------------------------|
+| [#239](https://github.com/ForumHFR/Redface/issues/239) images reho.st 403 | ✅ Oui, patch localisé |
+| [#237](https://github.com/ForumHFR/Redface/issues/237) crash download | ✅ Oui, patch localisé |
+| [#236](https://github.com/ForumHFR/Redface/issues/236) scroll qui saute | ⚠️ Probablement, mais touche l'EndlessScroll custom |
+| [#171](https://github.com/ForumHFR/Redface/issues/171) EndlessScroll cassé depuis 2016 | ❌ Composant custom legacy, non résolu en 9 ans par le mainteneur lui-même |
+| [#225](https://github.com/ForumHFR/Redface/issues/225) inutilisable sous Hyper OS 2 | ❌ Touche le rendu WebView/couches système, lié à minSdk 16 et APIs obsolètes |
+| [#152](https://github.com/ForumHFR/Redface/issues/152) notifications mail cassées | ❓ Protocole HFR, probablement patchable |
+
+**Ce que ça ne résoudrait pas** :
+
+1. **La stack reste morte.** Un LLM peut migrer RxJava 1 → Coroutines, mais RxJava 1 est transversal. Pendant la migration, l'app reste à moitié cassée. Fait tout en même temps = rewrite. Fait incrémentalement = l'app instable plusieurs mois.
+
+2. **Les contributeurs ne viennent pas écrire du Java + RxJava 1 en 2026.** Même si un LLM corrige 10 bugs, un dev Android actuel ne va pas apprendre une stack fin-de-vie pour contribuer. Les [PRs externes de 2019-2021](https://github.com/ForumHFR/Redface/pulls?q=is%3Apr+is%3Aclosed+is%3Amerged+sort%3Acreated-asc) toujours ouvertes montrent que le problème n'est pas l'écriture de code — c'est la review et le merge.
+
+3. **Un LLM a besoin d'un cadre solide.** Il bosse mieux avec specs + tests + architecture claire. v1 n'a pas de tests (17 fixtures seulement), pas d'architecture documentée, pas de couches enforced. Donner une feature complexe à un LLM sur ce substrat = génération plausible mais casse silencieuse. v2 avec 3 couches enforced, 39 fixtures, specs publiques = un LLM a un feedback loop solide.
+
+**Écarté, mais pas mutuellement exclusif** : rien n'interdit de patcher v1 en parallèle si quelqu'un veut le faire. Les deux projets peuvent coexister. v2 n'est pas "l'abandon de v1", c'est "où on investit l'effort de développement".
 
 ---
 
