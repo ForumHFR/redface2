@@ -163,64 +163,66 @@ Le parser HTML est testé contre des **fixtures capturées depuis de vraies page
 core/parser/src/test/resources/fixtures/
 ```
 
-**Reprises de Redface v1** (17 fixtures, `app/src/test/resources/` dans ForumHFR/Redface) :
+**Reprises de Redface v1** (13 fixtures testées dans `app/src/test/resources/` de ForumHFR/Redface, v1 en compte 17 physiquement, 4 non testées) :
 
-| Fixture | Page HFR | Auth ? |
-|---------|----------|--------|
-| `topic_multipage.html` | Topic multi-pages | logué + non-logué |
-| `topic_singlepage.html` | Topic 1 seule page | non-logué |
-| `topic_posts.html` | Posts d'un topic (40/page) | logué + non-logué |
-| `edit_post.html` | Page d'édition d'un post | logué uniquement |
-| `quote.html` | Contenu de citation BBCode | logué uniquement |
-| `categories.html` | Page d'accueil (catégories) | non-logué |
-| `topic_list.html` | Liste de topics d'une sous-catégorie | logué + non-logué |
-| `profile_standard.html` | Profil utilisateur standard | non-logué |
-| `profile_admin.html` | Profil admin/modo | non-logué |
-| `mp_list.html` | Liste des MPs classiques | logué uniquement |
-| `mp_conversation.html` | Conversation MP | logué uniquement |
-| `smiley_search.html` | Résultats recherche de smileys | non-logué |
-| `rehost_response.html` | Réponse reho.st | non-logué |
+| Fixture | Page HFR | Auth ? | Source HFR (exemple à capturer) |
+|---------|----------|--------|---------------------------------|
+| `topic_multipage.html` | Topic multi-pages | logué + non-logué | `cat=23, post=35395` (>1 page) |
+| `topic_singlepage.html` | Topic 1 seule page | non-logué | topic court cat=23 |
+| `topic_posts.html` | Posts d'un topic | logué + non-logué | `cat=23, post=35395, page=1` |
+| `edit_post.html` | Page d'édition d'un post | logué uniquement | `message.php?numreponse=X` sur propre post |
+| `quote.html` | Contenu de citation BBCode | logué uniquement | `message.php?quote=X` |
+| `categories.html` | Page d'accueil (catégories) | non-logué | `/hfr/` |
+| `topic_list.html` | Liste topics d'une sous-catégorie | logué + non-logué | `forum2.php?cat=23&subcat=0` |
+| `profile_standard.html` | Profil utilisateur standard | non-logué | `hfr/profil-<id>.htm` (membre) |
+| `profile_admin.html` | Profil admin/modo | non-logué | `hfr/profil-<id>.htm` (modo) |
+| `mp_list.html` | Liste des MPs classiques | logué uniquement | `message.php` |
+| `mp_conversation.html` | Conversation MP | logué uniquement | `message.php?cat=prive&post=<mp_id>` |
+| `smiley_search.html` | Résultats recherche de smileys | non-logué | `message-smi-mp-aj.php?search=X` |
+| `rehost_response.html` | Réponse reho.st | non-logué | `reho.st` HTML de réponse |
 
 **Nouvelles fixtures v2** (pages non couvertes par v1) :
 
-| Fixture | Page HFR | Auth ? | Pourquoi |
-|---------|----------|--------|----------|
-| `flags_page.html` | `/forum1f.php` (drapeaux) | logué uniquement | Écran d'accueil, pas dans v1 |
-| `flags_page_empty.html` | Drapeaux vides | logué uniquement | Cas edge : aucun drapeau |
-| `search_results.html` | `/search.php` | logué + non-logué | Recherche |
-| `login_success.html` | Réponse login OK | — | Détection succès auth |
-| `login_failure.html` | Réponse login échoué | — | Détection échec auth |
-| `edit_fp.html` | Édition First Post (sujet + sondage) | logué uniquement | Distinct de l'édition normale |
-| `new_topic.html` | Page de création de topic | logué uniquement | Formulaire avec sous-catégories |
-| `multimp_conversation.html` | MultiMP | logué uniquement | Différent des MPs classiques |
-| `topic_with_poll.html` | Topic avec sondage | logué + non-logué | Parsing du sondage |
-| `topic_last_page.html` | Dernière page (< 40 posts) | non-logué | Pagination edge case |
-| `topic_deleted_posts.html` | Page avec posts supprimés | non-logué | Décalage de numérotation |
-| `modo_not_flagged.html` | modo.php — formulaire d'alerte | logué uniquement | Redflag : post pas encore alerté |
-| `modo_flagged.html` | modo.php — déjà alerté | logué uniquement | Redflag : post alerté |
-| `modo_join.html` | modo.php — rejoindre une alerte | logué uniquement | Redflag : alerte en cours |
+| Fixture | Page HFR | Auth ? | Pourquoi | Source HFR (à capturer) |
+|---------|----------|--------|----------|-------------------------|
+| `flags_page.html` | `/forum1f.php` (drapeaux) | logué uniquement | Écran d'accueil, pas dans v1 | `forum1f.php?owntopic=1` |
+| `flags_page_empty.html` | Drapeaux vides | logué uniquement | Cas edge : aucun drapeau | compte neuf ou nettoyé |
+| `search_results.html` | `/search.php` | logué + non-logué | Recherche | `search.php?search=redface` |
+| `login_success.html` | Réponse login OK | — | Détection succès auth | Après POST login OK |
+| `login_failure.html` | Réponse login échoué | — | Détection échec auth | Après POST bad pass |
+| `edit_fp.html` | Édition First Post (sujet + sondage) | logué uniquement | Distinct de l'édition normale | propre topic avec sondage |
+| `new_topic.html` | Page de création de topic | logué uniquement | Formulaire avec sous-catégories | `forum1.php?cat=23&action=new` |
+| `multimp_conversation.html` | MultiMP | logué uniquement | Différent des MPs classiques | MultiMP existant |
+| `topic_with_poll.html` | Topic avec sondage | logué + non-logué | Parsing du sondage | topic public avec sondage |
+| `topic_last_page.html` | Dernière page (< 40 posts) | non-logué | Pagination edge case | dernière page d'un topic |
+| `topic_deleted_posts.html` | Page avec posts supprimés | non-logué | Décalage de numérotation | topic modéré connu |
+| `modo_not_flagged.html` | modo.php — formulaire d'alerte | logué uniquement | Redflag : post pas encore alerté | `modo.php?numreponse=X` |
+| `modo_flagged.html` | modo.php — déjà alerté | logué uniquement | Redflag : post alerté | `modo.php?numreponse=X` (déjà alerté) |
+| `modo_join.html` | modo.php — rejoindre une alerte | logué uniquement | Redflag : alerte en cours | `modo.php?numreponse=X` (alerte ouverte) |
 
 **Profil et paramètres** (pages `editprofil.php`, loguées uniquement) :
 
-| Fixture | Page HFR | Contenu |
-|---------|----------|---------|
-| `profile_settings_p1.html` | `editprofil.php?page=1` | Infos générales : email, date naissance, sexe, ville, profession, loisirs |
-| `profile_settings_p2.html` | `editprofil.php?page=2` | Infos forum : citation, signature (BBCode), config matérielle |
-| `profile_settings_p3.html` | `editprofil.php?page=3` | Paramètres : réponses/page, avatars, signatures, thème CSS, jeu d'icônes, langue, fuseau, notifs MP |
-| `profile_settings_p4.html` | `editprofil.php?page=4` | **Déprécié** — messageries instantanées (ICQ, MSN, etc.). Page accessible mais plus utilisée. Conservée pour exhaustivité. |
-| `profile_settings_p5.html` | `editprofil.php?page=5` | Gestion d'images : avatar, smileys persos, smileys favoris, wiki smileys |
-| `profile_settings_p6.html` | `editprofil.php?page=6` | Notifications : mots-clés (max 3) pour alerte par mail/MP à la création de topics |
-| `profile_settings_p7.html` | `editprofil.php?page=7` | Personnalisation barre d'outils : 15 icônes repositionnables (9 positions + masquer) |
-| `contact_list.html` | `contactlist.php` | Liste de contacts : ajout/suppression, statut en ligne, liens MP |
-| `modo_history.html` | `modo/historique.php` | Historique des sanctions : modérateur, catégorie, date, raison |
+| Fixture | Page HFR | Contenu | Source HFR |
+|---------|----------|---------|------------|
+| `profile_settings_p1.html` | `editprofil.php?page=1` | Infos générales : email, date naissance, sexe, ville, profession, loisirs | compte de test |
+| `profile_settings_p2.html` | `editprofil.php?page=2` | Infos forum : citation, signature (BBCode), config matérielle | idem |
+| `profile_settings_p3.html` | `editprofil.php?page=3` | Paramètres : réponses/page, avatars, signatures, thème CSS, jeu d'icônes, langue, fuseau, notifs MP | idem |
+| `profile_settings_p4.html` | `editprofil.php?page=4` | **Déprécié** — messageries instantanées (ICQ, MSN). Page existe encore. Fixture capturée pour exhaustivité, **aucun test de régression requis**. | idem |
+| `profile_settings_p5.html` | `editprofil.php?page=5` | Gestion d'images : avatar, smileys persos, smileys favoris, wiki smileys | idem |
+| `profile_settings_p6.html` | `editprofil.php?page=6` | Notifications : mots-clés (max 3) pour alerte par mail/MP à la création de topics | idem |
+| `profile_settings_p7.html` | `editprofil.php?page=7` | Personnalisation barre d'outils : 15 icônes repositionnables (9 positions + masquer) | idem |
+| `contact_list.html` | `contactlist.php` | Liste de contacts : ajout/suppression, statut en ligne, liens MP | idem |
+| `modo_history.html` | `modo/historique.php` | Historique des sanctions : modérateur, catégorie, date, raison | modérateur test |
 
-**Total : ~39 fixtures** (13 reprises de v1 + 14 nouvelles + 9 profil/paramètres + doublons logué/non-logué).
+**Total : ~36 fixtures** (13 reprises testées de v1 + 14 nouvelles + 9 profil/paramètres).
 
 **Règles :**
-- Les fixtures sont capturées depuis le vrai site HFR, jamais fabriquées
-- Quand un bug de parsing est corrigé, le HTML problématique est ajouté aux fixtures avec un test de non-régression
-- Un **smoke test CI hebdomadaire** vérifie que les sélecteurs CSS critiques matchent toujours sur une vraie page HFR publique
-- Les fixtures logué ne doivent **jamais** contenir de cookies, tokens ou identifiants réels — nettoyer avant commit
+- Les fixtures sont capturées depuis le vrai site HFR, **jamais** fabriquées par une IA ou à la main.
+- Capture via MCP `hfr-mcp` : `hfr_read cat=X post=Y page=Z output=path/to/fixture.html` écrit le HTML brut.
+- Chaque fixture est accompagnée d'un fichier `.source.txt` frère ou d'un commentaire HTML en tête précisant `cat`, `post`, `numreponse`, date de capture.
+- Les fixtures loguées ne doivent **jamais** contenir de cookies, tokens `hash_check`, emails, identifiants réels — nettoyer avant commit (voir skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.claude/skills/parse-fixture/SKILL.md) étape 9).
+- Quand un bug de parsing est corrigé, le HTML problématique est ajouté aux fixtures avec un test de non-régression.
+- Un **smoke test CI hebdomadaire** vérifie que les sélecteurs CSS critiques matchent toujours sur une vraie page HFR publique.
 
 ---
 

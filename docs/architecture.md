@@ -400,38 +400,15 @@ Interceptor OkHttp avec détection des réponses HTTP 429 et des patterns de blo
 
 ---
 
-## Protocole HFR — constantes et contraintes
+## Protocole HFR
 
-HFR n'a pas d'API publique. Redface 2 fait du scraping HTML et doit respecter plusieurs invariants du protocole. Détails complets dans [protocol-hfr.md]({{ site.baseurl }}/protocol-hfr). Les points critiques à ne pas perdre :
+HFR n'a pas d'API publique. Redface 2 fait du scraping HTML et doit respecter plusieurs invariants du protocole :
 
-### `hash_check` — anti-CSRF
+- **`hash_check`** — token anti-CSRF présent dans chaque page GET autorisant un POST (édition, création). Obligatoire dans tous les POST. Fail fast si absent.
+- **`verifrequet = "1100"`** — constante anti-bot statique dans tous les POST.
+- **`numreponse`** — unique **par catégorie**, pas globalement. Clé composite `(cat, numreponse)` en base.
+- **`listenumreponse`** — tableau JS inline listant les `numreponse` de la page (optimisation, non utilisée en v1).
+- **Session** — cookies `md_user` + `md_pass`. Interceptor OkHttp détecte 302 ou absence de `md_user` → re-login transparent avec credentials du DataStore chiffré → sinon événement `SessionExpired`.
+- **Prefetch non-authentifié** — règle critique, voir § Prefetch intelligent ci-dessus.
 
-Chaque POST vers HFR (reply, edit, flag, MP) doit inclure un token `hash_check` extrait d'une page GET précédente (pages d'édition, profil, nouveau topic). Pattern d'extraction :
-
-```html
-<input type="hidden" name="hash_check" value="<token>" />
-```
-
-Absence du token → échec silencieux côté serveur (200 OK, mais pas de modification). `HfrClient` doit refuser les POST sans `hash_check` explicitement (fail fast, pas silencieux).
-
-### `verifrequet` — constante anti-bot
-
-Tous les POST incluent `verifrequet=1100` comme champ form. Valeur en dur, pas dynamique. Ne pas oublier.
-
-### `numreponse` — unique par catégorie, pas globalement
-
-Le `numreponse` d'un post est unique **au sein d'une catégorie** (cat=X). Deux posts dans deux catégories différentes peuvent avoir le même `numreponse`. Le triplet `(cat, post, numreponse)` est unique globalement. Conséquence : en base Room, `numreponse` seul n'est pas une clé primaire — utiliser `@PrimaryKey(autoGenerate = false)` avec un index composite `(cat, numreponse)`.
-
-### `listenumreponse` — optimisation JS inline
-
-Chaque page topic HFR embarque un script inline :
-
-```html
-<script>var listenumreponse = [1234567, 1234570, ...];</script>
-```
-
-Le tableau contient les `numreponse` des posts de la page. Extraire via regex sur `<script>` permet d'identifier les posts à actualiser sans requête supplémentaire. v1 ne l'utilisait pas — opportunité pour v2. Exploité par le skill `/parse-fixture`.
-
-### Session et 403
-
-Un `Interceptor` OkHttp détecte la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Re-login transparent avec les credentials stockés dans le DataStore chiffré. Si le re-login échoue, événement `SessionExpired` → `NavGraph` redirige vers l'écran de login.
+**Référence complète** : [protocol-hfr.md]({{ site.baseurl }}/protocol-hfr) couvre endpoints, form fields par endpoint, smileys, edge cases (posts supprimés, emails obfusqués, pagination, `cryptlink`), et fixtures.
