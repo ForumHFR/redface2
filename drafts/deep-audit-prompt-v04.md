@@ -250,7 +250,7 @@ Cible : quand le premier commit de code applicatif sera fait (Phase 0), le LLM d
 
 #### Format de chaque finding
 
-```
+````
 ### [Sévérité] [Titre court]
 
 - **Fichier** : docs/mvi.md:123
@@ -266,7 +266,7 @@ Cible : quand le premier commit de code applicatif sera fait (Phase 0), le LLM d
 - **Impact si non corrigé** : [ce qui casse]
 - **Effort estimé** : [petit/moyen/gros]
 - **Dépendances** : [autres findings liés]
-```
+````
 
 #### Checks spécifiques à appliquer
 
@@ -360,7 +360,7 @@ Une fois validé :
 - `[fixed]` est block-only. Pour monospace inline → `[b]`.
 - `[size=X]` n'existe pas.
 - Color : `[#CC0000]texte[/#CC0000]` (fermer avec la même couleur).
-- Smileys sûrs uniquement : `:)`, `:(`, `:o`, `:D`, `;)`, `:p`, `:jap:`, `:fou:`, `:pfff:`, `:sweat:`, `:bounce:`, `:pt1cable:`, `:love:`, `:ouch:`.
+- Smileys sûrs uniquement (liste CLAUDE.md) : `:)`, `:(`, `:o`, `:D`, `;)`, `:p`, `:jap:`, `:fou:`, `:pfff:`, `:sweat:`, `:bounce:`, `:pt1cable:`. Ne rien ajouter à cette liste sans vérifier sur HFR d'abord.
 - `:fleche:`, `:flechd:` n'existent pas — ne pas les utiliser.
 
 ### Git
