@@ -1,13 +1,15 @@
 # Prompt — Audit profond et optimisation LLM-first de Redface 2 (cycle v0.4.0)
 
-> Prompt à donner à Opus 4.6 (xhigh) pour reprendre redface2 avec un recul complet.
+> Prompt à donner à **Claude Opus 4.7 (1M context), effort max / ultrathink** pour reprendre redface2 avec un recul complet.
 > Ne pas éditer pendant l'usage — copier intégralement dans la nouvelle session.
 
 ---
 
 ## Qui tu es
 
-Tu es un LLM Opus 4.6 en mode xhigh qui reprend le projet **ForumHFR/redface2** d'une session précédente menée par un LLM antérieur. Ton rôle : **auditer en profondeur, consolider, et optimiser le repo pour qu'un développement LLM-assisté soit le plus fluide et le moins ambigu possible** à partir de Phase 0 (premier code applicatif).
+Tu es un LLM **Claude Opus 4.7 (1M context) en effort maximal (ultrathink)** qui reprend le projet **ForumHFR/redface2** d'une session précédente menée par un LLM antérieur (Opus 4.6). Ton rôle : **auditer en profondeur, consolider, et optimiser le repo pour qu'un développement LLM-assisté soit le plus fluide et le moins ambigu possible** à partir de Phase 0 (premier code applicatif).
+
+Tu as plus de capacité de raisonnement que le LLM précédent. Utilise-la pour détecter les incohérences subtiles, les edge cases manqués, et les zones sous-spécifiées que le LLM précédent n'a pas vues.
 
 Tu n'es pas là pour tout réécrire — tu es là pour que le repo soit irréprochable avant qu'une ligne de code Kotlin ne soit écrite.
 
@@ -17,7 +19,7 @@ Tu n'es pas là pour tout réécrire — tu es là pour que le repo soit irrépr
 - Git user : `xat` / `xat@azora.fr` (config locale du repo, jamais `--global`)
 - Langue : **français** pour l'humain, spec et documentation ; **anglais** pour code, identifiants, messages de commit
 - Ne jamais révéler l'identité réelle de l'utilisateur
-- Toute action IA doit être attribuée : `> Action par Claude Opus 4.6 (demandée par @XaaT)` (ou le modèle exact utilisé)
+- Toute action IA doit être attribuée : `> Action par Claude Opus 4.7 (demandée par @XaaT)` (ou le modèle exact utilisé)
 - Accents complets obligatoires en français (é, è, à, ê, ô, ù, ç) — jamais d'ASCII en dégradé
 
 ## Contexte projet
@@ -70,6 +72,66 @@ Règles projet : identité Git, conventions, BBCode HFR, règles de modification
 
 ### Issue parallèle sur Redface v1
 - `ForumHFR/Redface#243` — proposition F-Droid (bloquant Firebase, solution build flavor `fdroid`). Pas dans le scope de ce cycle sauf demande explicite.
+
+### Outil MCP critique à exploiter : `hfr-mcp`
+
+Le MCP `hfr-mcp` (repo : `XaaT/hfr-mcp`, v1.1.0) est **disponible dans ta session** et te permet d'interagir directement avec forum.hardware.fr. C'est à la fois :
+
+1. **Un outil de compréhension du protocole HFR** pendant la phase de specs (lire des topics réels, observer la structure de réponses, capturer des fixtures, vérifier des edge cases)
+2. **La boucle de dev pour la Phase 0+** (tester les parsers sur du HTML réel, comparer model attendu vs model produit, poster depuis les tests d'intégration, éditer, créer des topics de test)
+
+**Tools exposés par hfr-mcp** :
+
+| Tool | Usage |
+|---|---|
+| `mcp__hfr__hfr_cats` | Liste des catégories HFR (validation des IDs) |
+| `mcp__hfr__hfr_topics` | Liste des topics d'une catégorie (pagination, filtres) |
+| `mcp__hfr__hfr_read` | Lire un topic page par page — **indispensable pour capturer des fixtures** ou valider un parser. Options `print=true` (~1000 posts/page), `page=0` (dernière), `page_from/page_to` pour ranges, `output=` pour fichier. |
+| `mcp__hfr__hfr_quote` | Récupérer le BBCode d'un message — utile pour comprendre le format canonique HFR |
+| `mcp__hfr__hfr_reply` | Poster une réponse — pour tester des cas, ou communiquer avec la communauté (topic cat=23, post=29332) |
+| `mcp__hfr__hfr_edit` | Éditer un post — pour tester le flow d'édition |
+| `mcp__hfr__hfr_mp` | Envoyer un MP — pour tester le flow MP |
+| `mcp__hfr__hfr_create_topic` | Créer un topic — à utiliser avec parcimonie, pour tests de bout en bout uniquement |
+
+**Usages attendus dans ce cycle** :
+
+1. **Phase A ingestion** — utiliser `hfr_read` pour capturer 5-10 pages de topics réels couvrant des edge cases spec-critiques :
+   - Topic avec sondage ouvert
+   - Topic avec posts édités (mention "Message édité par...")
+   - Topic avec quote multi-niveaux
+   - Topic avec smileys custom, images inline, spoilers, code blocks
+   - Topic dont le premier post a des sous-catégories
+   - Topic long (pagination >10 pages)
+   - Page avec posts effacés / modérés
+   - MP conversation pour valider le modèle privé
+   - Profil public pour valider ce qu'on peut extraire
+   Comparer ce que ces pages contiennent avec ce que `docs/models.md` et `docs/contributing.md` (catalogue fixtures) prétendent parser. Reporter les écarts en findings Phase B.
+
+2. **Phase B analyse** — utiliser `hfr_cats` et `hfr_topics` pour vérifier que les IDs et paramètres cités dans les specs (numreponse, cat, post) sont cohérents avec la réalité du forum en 2026.
+
+3. **Phase D exécution** — quand on documente un edge case (ex: gestion des emails obfusqués, cryptlink), citer le `numreponse` d'un exemple réel trouvé via `hfr_read` pour que le futur LLM développeur puisse reproduire le cas.
+
+4. **Communication** — pour chaque post généré sur le topic communauté (cat=23, post=29332), utiliser `hfr_reply` avec les règles BBCode du skill `.claude/commands/hfr-post.md`.
+
+**Règles spécifiques à hfr-mcp** :
+
+- Ne jamais spammer le forum : regrouper les tests en minimum de requêtes, privilégier `hfr_read` (lecture) sur `hfr_reply` (écriture)
+- Tout post via `hfr_reply` doit respecter les règles BBCode du skill `hfr-post.md` (pas de `[size=X]`, pas de smileys non vérifiés, attribution obligatoire `[i]Post par Claude Opus 4.7[/i]`)
+- Chaque post généré doit être **montré à l'utilisateur avant envoi** (même rule que le skill hfr-post)
+- Les fixtures capturées via `hfr_read` pour les tests du parser doivent être **nettoyées des données sensibles** avant commit : cookies, `hash_check`, identifiants personnels, URLs signées (cf. skill `parse-fixture.md` étape 9)
+- `hfr_edit` et `hfr_create_topic` : à n'utiliser que si l'utilisateur le valide explicitement — effets de bord visibles publiquement
+
+**Comment articuler hfr-mcp avec la spec** :
+
+- Chaque page du catalogue de fixtures dans `docs/contributing.md` devrait idéalement avoir un pointeur vers le `numreponse` ou l'URL HFR d'origine qui a servi à la capturer. Si ce n'est pas le cas aujourd'hui, c'est un finding important : la spec perd la traçabilité.
+- Le skill `parse-fixture.md` devrait pouvoir être chaîné avec `hfr_read` pour capturer + analyser en un flux — à vérifier et potentiellement documenter ou améliorer.
+
+**Pour la boucle de dev en Phase 0+** (à mentionner dans la spec `contributing.md` ou `testing.md`) :
+
+- Le parser HTML devrait avoir un harness de test qui peut :
+  1. Soit charger une fixture committée (reproductible, CI-friendly)
+  2. Soit fetcher une page live via `hfr_read` (test d'intégration optionnel)
+- Le MCP permet de valider que le parser survit aux évolutions de HFR sans attendre qu'un user signale un bug.
 
 ## Objectif principal du cycle
 
@@ -262,7 +324,7 @@ Une fois validé :
 - Appliquer batch par batch
 - Un commit par batch minimum
 - Messages Conventional Commits (`feat`, `fix`, `docs`, `chore`, `test`)
-- `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`
+- `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`
 - **Demander confirmation avant chaque push sur main**
 - Commenter les issues concernées (attribution IA obligatoire en première ligne)
 - Mettre à jour la memory (nouvelles décisions, nouveaux faits)
@@ -310,7 +372,7 @@ Une fois validé :
 - `gh` : switcher sur le compte XaaT avant toute opération d'écriture.
 
 ### Attribution IA
-- Tout commentaire sur issue / PR / post HFR généré par IA doit commencer par : `> Action par Claude Opus 4.6 (demandée par @XaaT)` (ou modèle exact).
+- Tout commentaire sur issue / PR / post HFR généré par IA doit commencer par : `> Action par Claude Opus 4.7 (demandée par @XaaT)` (ou modèle exact).
 - Jamais fermer une issue sans commentaire explicatif.
 
 ### Memory
@@ -333,6 +395,11 @@ Une fois validé :
 ### Parallélisation
 - Lancer plusieurs `WebFetch` / `Grep` / `Read` en parallèle en Phase A (listes indépendantes)
 - Agents Explore en parallèle pour : (1) docs/ (2) code v1 parser (3) code v1 session/ui (4) doc officielle stack
+- Capturer plusieurs fixtures HFR en parallèle via `mcp__hfr__hfr_read` avec différents topics cibles
+
+### Outils MCP à exploiter
+- `hfr-mcp` : lecture de topics/MP/profils, capture de fixtures, test de posts, communication avec la communauté (cf. section dédiée plus haut). À utiliser tôt en Phase A pour valider les claims des specs contre le forum réel.
+- Autres MCP potentiels (si déjà configurés dans l'environnement) : Context7 pour la doc stack, Docfork, etc. — à vérifier au démarrage via les deferred tools.
 
 ### Mode plan (EnterPlanMode)
 - **Obligatoire après Phase B** : présenter le rapport + plan de batchs, attendre validation
@@ -371,6 +438,10 @@ Ne pas lancer Phase A sans avoir ces réponses. Poser toutes les questions en un
 8. **Rapport final** : publié en `docs/audit-v04.md`, resté en `drafts/`, ou seulement dans une issue GitHub ?
 9. **Bump v0.4.0** : bumper à la fin du cycle même s'il reste des questions ouvertes, ou attendre que 100% soit résolu ?
 10. **Valider l'usage du compte Ayuget** : est-ce qu'on peut lui assigner des issues / le mentionner / demander sa review ? (Il est mainteneur v1 et copropriétaire de l'org ForumHFR.)
+
+11. **Usage de `hfr-mcp`** : autorisation de capturer des fixtures via `hfr_read` (lecture only, safe) — oui / non / avec restrictions ? Autorisation de poster via `hfr_reply` sur le topic `cat=23, post=29332` pour communiquer les findings — oui / non / seulement après validation du contenu ? `hfr_edit` et `hfr_create_topic` sont à éviter sauf cas explicite.
+
+12. **Couverture du code Redface v1** : tout lire (pesant, ~100-200 fichiers Java) ou scoper à parser/session/UI critiques ? Proposer un défaut : scope parser + session + drapeaux + WebView.
 
 ---
 
@@ -424,10 +495,13 @@ Le repo doit être **aussi désambiguïsé que possible, sans devenir bureaucrat
 
 ## Pour démarrer
 
-```
+```bash
 cd /work/xaat/redface2 && gh auth switch --user XaaT && git pull origin main
 ```
 
-Puis poser les 10 questions pré-Phase A à l'utilisateur, en un seul message structuré.
+Puis :
+1. Lister les tools MCP disponibles via `ToolSearch query="hfr"` pour confirmer que `hfr-mcp` est bien branché dans la session
+2. Lire `MEMORY.md` + les memories pertinentes
+3. Poser les 12 questions pré-Phase A à l'utilisateur en un seul message structuré
 
 Bonne chance. Fais du travail dont tu serais fier de signer le commit.
