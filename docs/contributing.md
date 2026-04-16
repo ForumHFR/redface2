@@ -136,6 +136,8 @@ feature/topic/
 - **Robolectric** — tests Android sans émulateur (quand on ne peut pas mocker les composants Android)
 - **Turbine** — test des `Flow` et `StateFlow` (assertions sur les émissions)
 - **Compose Testing** — tests UI pour les écrans critiques
+- **Roborazzi** — screenshot tests Compose (4 variants par écran : compact light/dark + medium light + fontScale 2.0). Détecte les régressions visuelles M3.
+- **Konsist** — enforcement architecture au build (règles sur imports, visibilité, dépendances modules, tokens M3 centralisés dans `:core:ui`). Voir [architecture.md]({{ site.baseurl }}/architecture) pour les règles concrètes.
 
 **Couverture :**
 - **100%** sur les modules métier : parser, database, ViewModels

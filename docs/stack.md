@@ -13,19 +13,23 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 
 ## Vue d'ensemble
 
-| Brique | Choix | Alternative écartée | Raison |
+| Brique | Choix (version 04/2026) | Alternative écartée | Raison |
 |--------|-------|-------------------|--------|
-| Langage | **Kotlin** | Java | Standard Android depuis 2019, null safety, coroutines |
-| UI | **Jetpack Compose** | XML layouts | Direction officielle Google, déclaratif, plus maintenable |
-| Architecture | **MVI** | MVVM | Flux unidirectionnel, état prévisible, idéal pour un forum reader |
-| Navigation | **Compose Navigation** | Circuit, Decompose | Deep linking natif, type-safe (v2.8+), back stack solide |
-| DI | **Hilt (KSP)** | Koin | Erreurs à la compilation, intégration Jetpack, standard contributeurs |
-| HTTP | **OkHttp 4** | Retrofit, Ktor | Pas d'API REST à mapper, scraping HTML direct + cookies |
-| Parsing HTML | **Jsoup** | Regex, custom parser | Standard JVM, CSS selectors, battle-tested |
-| Cache locale | **Room** | DataStore, SQLDelight | Standard Android, intégration Flow, migrations |
-| Images | **Coil** | Glide | Natif Compose, coroutines, plus idiomatique Kotlin |
+| Langage | **Kotlin 2.3.20** | Java | Standard Android depuis 2019, null safety, coroutines |
+| UI | **Jetpack Compose** (compose-bom 2026.03.01) | XML layouts | Direction officielle Google, déclaratif, plus maintenable |
+| Design system | **Material 3 1.4** + **Material 3 Adaptive 1.2** | Material 2 | Standard 2026, dynamic color, canonical layouts (list-detail, supporting pane) |
+| Architecture | **MVI** (MVVM+UDF) | MVVM classique | Flux unidirectionnel, état prévisible, idéal pour un forum reader |
+| Navigation | **Compose Navigation 2.9** (type-safe routes) | Circuit, Decompose | Deep linking natif, type-safe avec `@Serializable` + `toRoute()`, back stack solide, predictive back |
+| DI | **Hilt 2.56 (KSP)** | Koin | Erreurs à la compilation, intégration Jetpack, standard contributeurs |
+| HTTP | **OkHttp 4.12** (arbitrage v5.3 en Phase 0) | Retrofit, Ktor | Pas d'API REST à mapper, scraping HTML direct + cookies |
+| Parsing HTML | **Jsoup 1.22.1** | Regex, custom parser | Standard JVM, CSS selectors, battle-tested |
+| Cache locale | **Room 2.8.4** | DataStore, SQLDelight | Standard Android, intégration Flow, migrations |
+| Stockage sécurisé | **DataStore 1.2.1 + Tink + Keystore** | EncryptedSharedPreferences (**déprécié**) | ESP déprécié par Google en 04/2025 |
+| Images | **Coil 3.4** | Glide | Natif Compose, coroutines, plus idiomatique Kotlin |
 | Async | **Coroutines + Flow** | RxJava | Standard Kotlin, plus léger, meilleure intégration Compose |
-| minSdk | **29** | 26, 31 | Android 10 : Scoped Storage, TLS 1.3, dark thème natif |
+| Enforcement archi | **Konsist 0.17** | ArchUnit | Kotlin-first, voit les sealed/data/internal ; ArchUnit = bytecode-only, perd la finesse Kotlin |
+| Screenshot testing | **Roborazzi 1.30** | Paparazzi | Supporte interactions + Robolectric + Hilt ; Paparazzi pas d'interactions |
+| minSdk | **29** | 26, 31 | Android 10 : Scoped Storage, TLS 1.3, dark thème natif, ~88-90% parc 04/2026 |
 
 ---
 
@@ -78,6 +82,33 @@ Pour un forum reader, MVI est supérieur :
 - Les actions utilisateur sont bien définies (charger page, quoter, répondre, flag)
 - Le debugging est simple : on inspecte l'état, on rejoue les intents
 - Les tests sont des fonctions pures : intent + state actuel → nouveau state
+
+### Material 3 Adaptive (tablettes, pliables, desktop Android)
+
+Depuis Material 3 Adaptive 1.0 stable (oct. 2024, actuellement 1.2.0), Google expose trois **canonical layouts** + un scaffold adaptatif :
+
+| API | Usage dans Redface 2 |
+|---|---|
+| `NavigationSuiteScaffold` (artifact `material3-adaptive-navigation-suite`) | Remplace conditionnellement `NavigationBar` (Compact) / `NavigationRail` (Medium) / `PermanentNavigationDrawer` (Expanded) en fonction de `WindowSizeClass`. Utilisé dans `MainActivity`. |
+| `ListDetailPaneScaffold` | Écran Drapeaux → Topic : liste à gauche + détail à droite en Medium/Expanded, stack classique en Compact. |
+| `SupportingPaneScaffold` | Éditeur Compact : contenu à gauche + preview BBCode à droite sur tablette. |
+| `WindowSizeClass` | Breakpoints standards : Compact (< 600dp), Medium (600–840dp), Expanded (≥ 840dp). |
+
+Tous ces composants sont annotés `@ExperimentalMaterial3AdaptiveApi` ou `@ExperimentalMaterial3Api` — à `@OptIn` explicitement.
+
+### Edge-to-edge Android 15+
+
+Sur API ≥ 35 (`targetSdk = 35`), Android impose l'edge-to-edge par défaut. Appeler `enableEdgeToEdge()` (artifact `androidx.activity 1.10+`) dans `MainActivity.onCreate()` avant `setContent`. Les composants M3 (`TopAppBar`, `NavigationBar`, `BottomAppBar`, `Scaffold`) consomment les insets automatiquement ; les écrans custom utilisent `Modifier.navigationBarsPadding()` / `imePadding()`.
+
+### Predictive back
+
+Android 14+ propose des animations de retour prévisuelles. En Compose :
+
+- `PredictiveBackHandler` (Compose) pour gérer la progression custom
+- `BackHandler` pour un callback standard
+- Manifest : `android:enableOnBackInvokedCallback="true"` dans `<application>`
+
+Les écrans de navigation standard n'ont pas besoin de custom — Compose Navigation 2.9 le gère nativement.
 
 ### Compose Navigation (pas Circuit, pas Decompose)
 
@@ -157,7 +188,7 @@ suspend fun getTopicPage(cat: Int, post: Int, page: Int): Document {
 
 OkHttp fournit aussi le **CookieJar** pour la gestion de session HFR — essentiel pour l'authentification.
 
-**Note** : OkHttp 5 (Kotlin-first, meilleur support coroutines) sera évalué au moment du bootstrap (Phase 0). Si la version stable est disponible, elle sera adoptée directement. La migration depuis OkHttp 4 est mineure (API compatible).
+**État 04/2026** : OkHttp 5.3.2 est stable depuis juillet 2025. La migration 4.12 → 5.x est majoritairement transparente (CookieJar, Interceptor API-compatible) ; points d'attention : `callTimeout()` utilise `kotlin.time.Duration`, MockWebServer a changé de package (`mockwebserver3`), KMP n'est plus supporté dans 5.x. **Arbitrage Phase 0** : rester 4.12 (moins de risques, migration facile plus tard) ou basculer 5.3 (Happy Eyeballs, DoH, coroutines first-class). Choix par défaut : **4.12**, à ré-évaluer si KMP est exclu définitivement.
 
 ### Jsoup
 

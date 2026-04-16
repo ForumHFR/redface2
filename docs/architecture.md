@@ -119,7 +119,7 @@ graph TB
 | `:core:network` | `HfrClient` : requêtes HTTP, cookies, session, login. Encapsule OkHttp. | `:core:model` |
 | `:core:parser` | `HfrParser` : transforme le HTML HFR en modèles domaine via Jsoup. | `:core:model` |
 | `:core:database` | Room DB, DAOs, entities, mappers entity↔model. Cache locale + cache MPStorage. | `:core:model` |
-| `:core:ui` | Thème Material 3, composants partagés, `PostRenderer` (BBCode → Compose). | `:core:model` |
+| `:core:ui` | Thème Material 3 (6 sous-packages : `theme/`, `components/`, `adaptive/`, `semantics/`, `util/`, `extensions/`), composants partagés, `PostRenderer` (BBCode → Compose). Seul module autorisé à instancier `ColorScheme`, `Typography`, `Shapes`. | `:core:model` |
 | `:core:extension` | Interfaces d'extension : `PostDecorator`, `TopicToolbarContributor`, `EditorToolbarContributor`. | `:core:model` |
 
 ### Modules feature (base)
@@ -397,6 +397,52 @@ Interceptor OkHttp avec détection des réponses HTTP 429 et des patterns de blo
 ### Breakage du parser
 
 `HfrParser` wrappe chaque méthode dans `runCatching`. Sur échec, le HTML brut est loggé en mode debug pour diagnostic. Un smoke test CI hebdomadaire vérifie que les sélecteurs CSS critiques (`HfrSelectors`) matchent toujours sur une vraie page HFR publique.
+
+---
+
+## Enforcement architecture au build
+
+Les règles d'architecture décrites plus haut (3 couches strictes, features → `:core:domain` + `:core:ui` uniquement, tokens M3 centralisés dans `:core:ui`) sont **enforcées mécaniquement** par **[Konsist](https://docs.konsist.lemonappdev.com/)** (Kotlin-first, AST parsing) — pas par une convention markdown.
+
+Choix Konsist plutôt que ArchUnit :
+- Konsist voit les spécificités Kotlin : `sealed`/`data`/`internal`/`object`, extensions, expect/actual KMP.
+- ArchUnit lit le bytecode (post-`javac`/`kotlinc`) et perd la sémantique Kotlin.
+- Konsist est Kotlin-first, intègre plus simplement avec la stack Redface 2.
+
+Règles prévues dans `build-logic/src/main/kotlin/redface/Architecture.kt` (exemples) :
+
+```kotlin
+class ArchitectureTest {
+    @Test fun `features n'importent pas :core:data`() {
+        Konsist.scopeFromProject()
+            .files
+            .filter { it.path.contains("/feature/") }
+            .imports
+            .assertFalse { it.name.startsWith("redface.core.data.") }
+    }
+
+    @Test fun `ColorScheme Typography Shapes instantiés uniquement dans :core:ui`() {
+        Konsist.scopeFromProject()
+            .files
+            .filter { !it.path.contains("/core/ui/") }
+            .functions()
+            .assertFalse { func ->
+                func.hasReturnType { it.name in setOf("ColorScheme", "Typography", "Shapes") }
+            }
+    }
+
+    @Test fun `prefetch utilise AnonymousClient`() {
+        Konsist.scopeFromProject()
+            .functions()
+            .filter { it.name.startsWith("prefetch") }
+            .assertTrue { fn ->
+                fn.parameters.any { it.hasAnnotationOf(AnonymousClient::class) }
+            }
+    }
+}
+```
+
+Les tests Konsist tournent en CI dès Phase 0 et bloquent les PR qui violent les règles.
 
 ---
 

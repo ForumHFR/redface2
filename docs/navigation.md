@@ -183,24 +183,35 @@ Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
 | `forum.hardware.fr/forum1f.php` | Drapeaux |
 | `forum.hardware.fr/forum1.php?cat=X&post=Y#t12345` | Post spécifique (traitement custom, voir ci-dessous) |
 
-Implémentation via Compose Navigation deep links :
+Implémentation via Compose Navigation 2.9 **type-safe routes** (`@Serializable` + `kotlinx.serialization`) :
 
 ```kotlin
-composable(
-    route = "topic/{cat}/{post}/{page}",
+@Serializable
+data class TopicRoute(
+    val cat: Int,
+    val post: Int,
+    val page: Int = 1,
+    val scrollTo: Int? = null,  // numreponse cible pour deep link #t{numreponse}
+)
+
+composable<TopicRoute>(
     deepLinks = listOf(
-        navDeepLink {
-            uriPattern = "https://forum.hardware.fr/forum1.php?cat={cat}&post={post}&page={page}"
-        }
+        navDeepLink<TopicRoute>(
+            basePath = "https://forum.hardware.fr/forum1.php",
+        )
     ),
-) { backStackEntry ->
+) { entry ->
+    val route = entry.toRoute<TopicRoute>()
     TopicScreen(
-        cat = backStackEntry.arguments?.getString("cat")?.toInt() ?: 0,
-        post = backStackEntry.arguments?.getString("post")?.toInt() ?: 0,
-        page = backStackEntry.arguments?.getString("page")?.toInt() ?: 1,
+        cat = route.cat,
+        post = route.post,
+        page = route.page,
+        scrollTo = route.scrollTo,
     )
 }
 ```
+
+Avantages de l'API type-safe (v2.8+) : pas de strings magiques, compilation-safe, refactor IDE possible, sérialisation automatique des params.
 
 ### Cas particulier : lien vers un post spécifique
 
@@ -224,13 +235,28 @@ private fun handleDeepLink(intent: Intent) {
 }
 ```
 
-La route Topic accepte un paramètre optionnel `scrollTo` :
+La route `TopicRoute` accepte un paramètre optionnel `scrollTo: Int?` (voir définition ci-dessus). Le `TopicScreen` reçoit le `numreponse` cible et scroll jusqu'au bon post après chargement de la page.
 
-```
-topic/{cat}/{post}/{page}?scrollTo={numreponse}
+### Predictive back
+
+Compose Navigation 2.9 gère le predictive back (Android 14+) nativement — aucun code custom requis pour les écrans standards. Seuls les écrans à interaction custom (ex : éditeur avec draft) utilisent `PredictiveBackHandler` pour gérer la progression et proposer un dialog "Abandonner les modifications ?" :
+
+```kotlin
+@Composable
+fun EditorScreen(...) {
+    var showDiscardDialog by remember { mutableStateOf(false) }
+
+    PredictiveBackHandler(enabled = draftContent.isNotEmpty()) { progress ->
+        progress.collect { /* animation personnalisée si besoin */ }
+        // à la fin : décider si on pop ou on montre le dialog
+        showDiscardDialog = true
+    }
+
+    // ... rest of the screen
+}
 ```
 
-Le `TopicScreen` reçoit le `numreponse` cible et scroll jusqu'au bon post après chargement de la page.
+Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application>`.
 
 ---
 
