@@ -13,7 +13,7 @@ Justification honnête du projet, avec les doutes assumés.
 
 ## Contexte
 
-Réécrire une app depuis zéro est une décision lourde. C'est le **syndrome du rewrite** — classique, documenté ([Joel Spolsky 2000](https://www.joelonsoftware.com/2000/04/06/things-you-should-never-do-part-i/)), souvent une erreur. Cette page documente les raisons de cette décision et les risques assumés, suite aux questions légitimes soulevées par la communauté (notamment [gig-gic](https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=29332)).
+Réécrire une app depuis zéro est une décision lourde. C'est le **syndrome du rewrite** — classique, documenté ([Joel Spolsky 2000](https://www.joelonsoftware.com/2000/04/06/things-you-should-never-do-part-i/)), souvent une erreur. Cette page documente les raisons de cette décision et les risques assumés, suite aux questions légitimes soulevées par la communauté sur [le topic Redface 2](https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35395) (notamment gig-gic, Corran Horn, ezzz).
 
 Ce document doit exister **avant** le code, pas après.
 

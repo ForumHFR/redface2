@@ -211,8 +211,9 @@ Pourquoi 29 et pas moins :
 - **Biometric API** — pour sécuriser le login HFR
 
 Pourquoi pas 31+ :
-- 29 couvre **96%+ des appareils actifs** en 2026
+- 29 couvre **~88–90% des appareils actifs** en 2026 (source : [Android distribution dashboard](https://developer.android.com/about/dashboards), [apilevels.com](https://apilevels.com/))
 - Pas de gain majeur entre 29 et 31 pour notre use case
+- Monter à 31+ exclurait encore 8–10% d'appareils sans bénéfice technique tangible
 
 ---
 

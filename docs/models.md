@@ -124,15 +124,15 @@ data class Topic(
 )
 
 data class Post(
-    val numreponse: Int,
+    val numreponse: Int,                 // unique par (cat), PAS globalement — clé composite (cat, numreponse) au niveau base
     val author: String,
-    val date: Instant,         // parsé depuis "dd-MM-yyyy à HH:mm:ss"
-    val content: String,
+    val date: Instant,                   // parsé depuis "dd-MM-yyyy à HH:mm:ss"
+    val content: String,                 // BBCode brut, rendu par PostRenderer
     val avatarUrl: String?,
-    val isEditable: Boolean,
-    val isOwnPost: Boolean,              // comparaison auteur vs user connecté
+    val isEditable: Boolean,             // calculé client-side : post.author == currentUser && !isLocked
+    val isOwnPost: Boolean,              // calculé client-side : post.author == currentUser
     val quotedAuthors: List<String>,     // extraits des [quotemsg=]
-    val postIndex: Int,                  // (page-1)*40 + position sur la page
+    val postIndex: Int,                  // (page-1) * postsPerPage + position — postsPerPage vient des préférences HFR de l'utilisateur, PAS une constante (voir UserSettings)
 )
 ```
 

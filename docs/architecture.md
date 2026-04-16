@@ -301,6 +301,24 @@ Utilisateur ouvre ses drapeaux
 
 Le prefetch respecte les conditions réseau : désactivé en mode économie de données ou réseau lent.
 
+#### Règle critique : prefetch **non-authentifié**
+
+Les requêtes de prefetch ne doivent **jamais** inclure les cookies de session HFR. Raison : HFR met à jour les drapeaux (topics marqués lus) sur toute requête authentifiée. Un prefetch avec session marquerait silencieusement les topics comme lus, ce qui est le bug exact que Redface v1 présentait.
+
+Implémentation : un `OkHttpClient` dédié au prefetch, avec un `CookieJar` vide (ou une instance séparée). `HfrClient` expose deux méthodes :
+
+```kotlin
+class HfrClient @Inject constructor(...) {
+    // Requêtes authentifiées (drapeaux, reply, edit, MPs...)
+    suspend fun fetchTopicPage(cat: Int, post: Int, page: Int): String
+
+    // Requêtes non-authentifiées — pour prefetch uniquement
+    suspend fun prefetchTopicPage(cat: Int, post: Int, page: Int): String
+}
+```
+
+Un test Konsist enforce la règle : les appels `prefetch*` doivent utiliser l'instance non-authentifiée. Corran Horn l'a rappelé sur le topic HFR : « en utilisant un cookie d'un compte anonyme pour pas péter les drapeaux ».
+
 ---
 
 ## Gestion de session
@@ -326,27 +344,39 @@ sequenceDiagram
     OkHttp-->>App: HTML brut
 ```
 
-Les cookies sont persistés via un `PersistentCookieJar` (Room ou fichier) pour éviter de se re-logguer à chaque lancement.
+Les cookies sont persistés via un `PersistentCookieJar` adossé au DataStore chiffré (voir § Stockage sécurisé ci-dessous) pour éviter de se re-logguer à chaque lancement.
 
 ### Stockage sécurisé des credentials
 
-Les cookies et credentials HFR sont chiffrés au repos via `EncryptedSharedPreferences` (AndroidX Security) :
+Les cookies et credentials HFR sont chiffrés au repos via **DataStore + Google Tink + Android Keystore**.
+
+> **Note** : `EncryptedSharedPreferences` (AndroidX Security) est **déprécié depuis avril 2025** (`security-crypto 1.1.0-alpha07`). Raisons officielles Google : StrictMode violations sur le thread principal, crashs "keyset corruption" sur certains OEMs. Le remplacement recommandé est DataStore + Tink + Keystore.
+
+Architecture de stockage :
 
 ```kotlin
-val masterKey = MasterKey.Builder(context)
-    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-    .build()
+// 1. Clé maître dans Android Keystore (non extractible)
+private fun getOrCreateMasterKey(): SecretKey { ... }
 
-val securePrefs = EncryptedSharedPreferences.create(
-    context, "hfr_credentials", masterKey,
-    PrefKeyEncryptionScheme.AES256_SIV,
-    PrefValueEncryptionScheme.AES256_GCM,
+// 2. Tink pour le chiffrement AEAD des valeurs
+private fun buildAead(masterKey: SecretKey): Aead { ... }
+
+// 3. DataStore (Proto ou Preferences) pour la persistance
+@Serializable
+data class SecureCredentials(
+    val cookies: List<SerializedCookie>,  // cookies HFR
+    val hashedPassword: ByteArray,         // chiffré via Aead
+)
+
+val secureStore: DataStore<SecureCredentials> = context.dataStore(
+    filename = "hfr_credentials.pb",
+    serializer = EncryptedSerializer(aead),
 )
 ```
 
-Le `PersistentCookieJar` sérialise les cookies dans ces préférences chiffrées. Le mot de passe HFR (pour le re-login automatique en cas d'expiration de session) y est également stocké.
+Le `PersistentCookieJar` sérialise les cookies dans ce DataStore chiffré. Le mot de passe HFR (pour le re-login automatique en cas d'expiration de session) y est également stocké.
 
-L'utilisation de la **Biometric API** pour protéger l'accès à l'app est envisagée pour une version ultérieure. Le stockage est conçu pour qu'une clé biométrique puisse être ajoutée sans migration.
+L'utilisation de la **Biometric API** pour protéger l'accès à l'app est envisagée pour une version ultérieure. Le stockage est conçu pour qu'une clé biométrique puisse être ajoutée sans migration (Keystore supporte les clés biometric-gated nativement).
 
 ---
 
@@ -367,3 +397,41 @@ Interceptor OkHttp avec détection des réponses HTTP 429 et des patterns de blo
 ### Breakage du parser
 
 `HfrParser` wrappe chaque méthode dans `runCatching`. Sur échec, le HTML brut est loggé en mode debug pour diagnostic. Un smoke test CI hebdomadaire vérifie que les sélecteurs CSS critiques (`HfrSelectors`) matchent toujours sur une vraie page HFR publique.
+
+---
+
+## Protocole HFR — constantes et contraintes
+
+HFR n'a pas d'API publique. Redface 2 fait du scraping HTML et doit respecter plusieurs invariants du protocole. Détails complets dans [protocol-hfr.md]({{ site.baseurl }}/protocol-hfr). Les points critiques à ne pas perdre :
+
+### `hash_check` — anti-CSRF
+
+Chaque POST vers HFR (reply, edit, flag, MP) doit inclure un token `hash_check` extrait d'une page GET précédente (pages d'édition, profil, nouveau topic). Pattern d'extraction :
+
+```html
+<input type="hidden" name="hash_check" value="<token>" />
+```
+
+Absence du token → échec silencieux côté serveur (200 OK, mais pas de modification). `HfrClient` doit refuser les POST sans `hash_check` explicitement (fail fast, pas silencieux).
+
+### `verifrequet` — constante anti-bot
+
+Tous les POST incluent `verifrequet=1100` comme champ form. Valeur en dur, pas dynamique. Ne pas oublier.
+
+### `numreponse` — unique par catégorie, pas globalement
+
+Le `numreponse` d'un post est unique **au sein d'une catégorie** (cat=X). Deux posts dans deux catégories différentes peuvent avoir le même `numreponse`. Le triplet `(cat, post, numreponse)` est unique globalement. Conséquence : en base Room, `numreponse` seul n'est pas une clé primaire — utiliser `@PrimaryKey(autoGenerate = false)` avec un index composite `(cat, numreponse)`.
+
+### `listenumreponse` — optimisation JS inline
+
+Chaque page topic HFR embarque un script inline :
+
+```html
+<script>var listenumreponse = [1234567, 1234570, ...];</script>
+```
+
+Le tableau contient les `numreponse` des posts de la page. Extraire via regex sur `<script>` permet d'identifier les posts à actualiser sans requête supplémentaire. v1 ne l'utilisait pas — opportunité pour v2. Exploité par le skill `/parse-fixture`.
+
+### Session et 403
+
+Un `Interceptor` OkHttp détecte la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Re-login transparent avec les credentials stockés dans le DataStore chiffré. Si le re-login échoue, événement `SessionExpired` → `NavGraph` redirige vers l'écran de login.

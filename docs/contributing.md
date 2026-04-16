@@ -56,16 +56,32 @@ redface2/
 Le projet utilise un **Gradle version catalog** (`libs.versions.toml`) pour centraliser les versions de toutes les dépendances. Avec 14+ modules, c'est indispensable pour éviter la duplication et les conflits de versions.
 
 ```toml
-# gradle/libs.versions.toml (extrait)
+# gradle/libs.versions.toml (extrait — versions stables avril 2026)
 [versions]
-kotlin = "2.1.0"
-compose-bom = "2026.04.00"
-hilt = "2.52"
-room = "2.7.0"
-okhttp = "4.12.0"
-coil = "3.0.0"
-jsoup = "1.18.0"
+kotlin = "2.3.20"                       # stable mars 2026
+agp = "9.1.0"                           # Android Gradle Plugin, requires Gradle 9.1+, JDK 17
+gradle = "9.4.1"
+compose-bom = "2026.03.01"              # 2026.04.00 pas encore publiée
+compose-material3-adaptive = "1.2.0"    # WindowSizeClass, NavigationSuiteScaffold, ListDetailPaneScaffold
+navigation = "2.9.7"                    # type-safe routes stables depuis 2.8
+hilt = "2.56"
+androidx-hilt = "1.3.0"
+room = "2.8.4"
+okhttp = "4.12.0"                       # alternative : "5.3.2" (stable juillet 2025, arbitrage Phase 0)
+coil = "3.4.0"                          # + coil-network-okhttp
+jsoup = "1.22.1"
+coroutines = "1.10.2"
+lifecycle-runtime-compose = "2.9.0"     # pour collectAsStateWithLifecycle
+activity-compose = "1.10.0"             # pour enableEdgeToEdge
+datastore = "1.2.1"                     # pour SecureCredentials
+tink = "1.12.0"                         # chiffrement AEAD des credentials
+turbine = "1.2.1"
+mockk = "1.13.13"
+konsist = "0.17.3"                      # enforcement architecture
+roborazzi = "1.30.0"                    # screenshot tests M3
 ```
+
+**Source of truth** : ce tableau est la référence canonique pour le `libs.versions.toml`. Les versions alignées avec [stack.md]({{ site.baseurl }}/stack) sont la version cible ; tout upgrade ultérieur est fait via PR dédiée `chore(deps)`.
 
 ### Convention par feature
 
