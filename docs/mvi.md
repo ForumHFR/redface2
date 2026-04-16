@@ -128,6 +128,9 @@ class FlagsViewModel @Inject constructor(
         }
     }
 
+    // Les Jobs de cancellation du timer "undo" vivent hors StateFlow car ils ne font pas
+    // partie de l'état UI observable — seule leur existence est pertinente pour annuler.
+    // Équivalent d'une map de transactions en cours (pattern mutex/debounce).
     private val pendingRemovals = mutableMapOf<Int, Job>()
 
     private fun removeFlag(topic: FlaggedTopic) {
@@ -165,6 +168,20 @@ class FlagsViewModel @Inject constructor(
                 .sortedWith(comparatorFor(state.sortMode))
             state.copy(filteredFlags = filtered)
         }
+    }
+
+    // Helpers pure — testables isolément.
+    private fun matchesFilter(topic: FlaggedTopic, filter: FlagFilter): Boolean = when (filter) {
+        FlagFilter.ALL       -> true
+        FlagFilter.CYAN      -> topic.flagType == FlagType.CYAN
+        FlagFilter.FAVORITE  -> topic.flagType == FlagType.FAVORITE
+        FlagFilter.READ      -> topic.flagType == FlagType.READ
+    }
+
+    private fun comparatorFor(mode: SortMode): Comparator<FlaggedTopic> = when (mode) {
+        SortMode.BY_DATE     -> compareByDescending { it.lastDate }
+        SortMode.BY_CATEGORY -> compareBy<FlaggedTopic> { it.categoryName }
+            .thenByDescending { it.lastDate }
     }
 }
 ```

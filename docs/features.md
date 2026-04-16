@@ -140,9 +140,9 @@ Deux hébergeurs communautaires HFR sont actifs :
 En fallback ou au choix de l'utilisateur : **Imgur**.
 
 **Intégration dans l'app :**
-- Upload d'images directement depuis l'éditeur (appareil photo, galerie, presse-papiers)
-- Choix du provider : diberie, super-h.fr, imgur (configurable dans les préférences)
-- **Rehost** : coller une URL d'image → l'app la rehost automatiquement via le provider choisi et insère le BBCode `[img]`
+- Upload d'images directement depuis l'éditeur (appareil photo, galerie, presse-papiers) via `UploadProvider` (interface séparée de `RehostProvider` — certains providers ne font que rehost, ex : reho.st)
+- Choix du provider upload : diberie, super-h.fr, imgur (configurable dans les préférences)
+- **Rehost** : coller une URL d'image → l'app la rehost automatiquement via un `RehostProvider` choisi et insère le BBCode `[img]`
 - **Bibliothèque d'images** : historique de tous les uploads avec miniatures, dates, et liens
 - **Tokens de suppression** : chaque upload conserve le token de suppression du provider, permettant de supprimer l'image plus tard depuis l'app
 - Stockage de la bibliothèque dans Room, synchronisable via MPStorage pour retrouver ses images sur un autre appareil

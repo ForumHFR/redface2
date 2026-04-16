@@ -203,10 +203,21 @@ data class PrivateMessage(
     val id: Int,
     val subject: String,
     val participants: List<String>,
-    val lastAuthor: String,     // dernier expéditeur
+    val lastAuthor: String,         // dernier expéditeur
     val lastDate: Instant,
-    val isRead: Boolean,        // HFR natif (classic) ou MPStorage (multi)
+    val isRead: Boolean,            // HFR natif (classic) ou MPStorage (multi)
     val isMultiMP: Boolean,
+    val messages: List<PMMessage>,  // conversation chargée à l'ouverture, peut être vide dans les listes
+    val page: Int = 1,              // page courante dans la conversation
+    val totalPages: Int = 1,
+)
+
+data class PMMessage(
+    val numreponse: Int,
+    val author: String,
+    val date: Instant,
+    val content: String,            // BBCode brut, rendu par PostRenderer
+    val isEditable: Boolean,        // calculé client-side : author == currentUser
 )
 
 data class NewMP(
@@ -294,19 +305,12 @@ data class HostedImage(
     val url: String,
     val thumbnailUrl: String?,
     val originalUrl: String?,
-    val provider: ImageProvider,
-    val deleteToken: String?,
+    val providerId: String,         // identifiant du provider ayant servi l'upload ou le rehost
+    val deleteToken: String?,       // null si le provider ne supporte pas la suppression (ex : rehost)
     val uploadedAt: Instant,
     val sizeBytes: Long,
     val topicRef: TopicRef?,
 )
-
-enum class ImageProvider {
-    DIBERIE,    // rehost by dib
-    SUPER_H,    // super-h.fr
-    IMGUR,      // imgur.com
-    REHOST,     // reho.st (rehost par préfixe URL uniquement, plus d'upload manuel)
-}
 
 data class TopicRef(
     val cat: Int,
@@ -314,3 +318,42 @@ data class TopicRef(
     val title: String,
 )
 ```
+
+### Providers — interfaces séparées
+
+Les capacités varient d'un provider à l'autre : certains supportent l'upload **et** le rehost, d'autres uniquement le rehost. Une seule interface `ImageProvider` avec des méthodes qui échouent sur certains providers serait fragile. On sépare en **deux interfaces distinctes**, implémentées indépendamment :
+
+```kotlin
+// :core:domain
+interface UploadProvider {
+    val id: String                  // "diberie", "superh", "imgur"
+    val displayName: String
+
+    /** Upload une image depuis les octets bruts. Retourne l'image hébergée. */
+    suspend fun upload(bytes: ByteArray, filename: String?): Result<HostedImage>
+
+    /** Supprime une image si le provider le supporte et si deleteToken est valide. */
+    suspend fun delete(image: HostedImage): Result<Unit>
+}
+
+interface RehostProvider {
+    val id: String                  // "rehost", "diberie-rehost", "superh-rehost"
+    val displayName: String
+
+    /** Rehost une image déjà en ligne par son URL. Retourne l'image copiée. */
+    suspend fun rehost(sourceUrl: String): Result<HostedImage>
+}
+```
+
+Un provider peut implémenter **les deux** interfaces si HFR expose les deux flux (exemple : `DiberieUploadProvider` implémente `UploadProvider`, `DiberieRehostProvider` implémente `RehostProvider`, ils peuvent partager un `HttpClient` commun).
+
+Providers prévus en Phase 2 :
+
+| `id` | Interface(s) | Notes |
+|---|---|---|
+| `diberie` | `UploadProvider` + `RehostProvider` | Rehost by dib (communauté HFR) |
+| `superh` | `UploadProvider` + `RehostProvider` | super-h.fr |
+| `imgur` | `UploadProvider` | API Imgur, fallback |
+| `rehost` | `RehostProvider` | reho.st historique (plus d'upload manuel) |
+
+Enregistrement via Hilt `@IntoSet` (cf. [features.md]({{ site.baseurl }}/features#architecture-dextensions)) : ajouter un provider ne modifie pas le code existant.
