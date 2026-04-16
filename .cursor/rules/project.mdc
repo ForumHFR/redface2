@@ -1,0 +1,10 @@
+---
+description: Redface 2 project rules — imports AGENTS.md as source of truth
+alwaysApply: true
+---
+
+@AGENTS.md
+
+Ce fichier est automatiquement chargé par Cursor en mode Agent. Il importe `AGENTS.md` à la racine du repo comme source of truth. Toutes les règles projet (identité Git, conventions, BBCode HFR, règles de modification de specs, règles d'audit, attribution IA, contributeurs multi-LLM) sont définies là.
+
+Pour l'index des skills disponibles, voir `SKILLS.md`.

@@ -1,3 +1,10 @@
+---
+name: parse-fixture
+description: Analyser une fixture HTML HFR (type de page, sélecteurs CSS, parser cible, variantes logué/non-logué, données sensibles à nettoyer). Use when user provides an HTML file from forum.hardware.fr for parser spec alignment.
+argument-hint: chemin vers le fichier HTML à analyser
+disable-model-invocation: true
+---
+
 # Analyse d'une fixture HTML HFR
 
 Analyse un fichier HTML capturé depuis forum.hardware.fr dans le contexte de `redface2`.
