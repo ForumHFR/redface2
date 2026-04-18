@@ -23,7 +23,7 @@ Redface v1 a rendu service à la communauté HFR pendant des années. Mais sa st
 |---|---|---|
 | Langage | Java 11 | **Kotlin** |
 | UI | XML + ButterKnife | **Jetpack Compose** |
-| Réseau | Retrofit 1.9 (!), OkHttp 3 | **OkHttp 4** |
+| Réseau | Retrofit 1.9 (!), OkHttp 3 | **OkHttp 5** |
 | Async | RxJava 1 | **Coroutines + Flow** |
 | Injection | Dagger 2 | **Hilt (KSP)** |
 | Event bus | Otto | **StateFlow** |
@@ -54,7 +54,7 @@ graph TB
     end
     subgraph "Données"
         D["Repository implémentations"]
-        D --> E[OkHttp 4 + Jsoup]
+        D --> E[OkHttp 5 + Jsoup]
         D --> G[Room Cache]
     end
     C -.->|implémente| D
