@@ -26,8 +26,8 @@ Pivot vers méthodologie hybride (SDD + Prototype + TDD). Allègement cross-docs
 - `architecture.md` : sections Protocole HFR et règle Prefetch non-authentifié dédoublonnées — `protocol-hfr.md` reste la source unique.
 - Phase 5 Polish détaillée avec sous-items Play Store (Fastlane vs Gradle Play Publisher, beta testing, compte développeur ForumHFR).
 - Décisions design [#9](https://github.com/ForumHFR/redface2/issues/9) documentées dans `stack.md` (seed `#A62C2C`, dynamic OFF, Roboto, BBCode hybride).
-- **Navigation** : Compose Navigation 2.9 type-safe → **Compose Navigation 3 (1.1.0 stable depuis 08/04/2026)**. Réécriture `docs/navigation.md` (`NavDisplay` + `SceneStrategy` + `rememberNavBackStack`, deep linking via parsing `Uri` manuel + push de routes typées, intégration `ListDetailPaneScaffold` M3 Adaptive). Cf. [#23](https://github.com/ForumHFR/redface2/issues/23).
-- **HTTP** : OkHttp 4.12 → **OkHttp 5.3+** (stable depuis 07/2025, Happy Eyeballs, DoH, HTTP/3 en cours). Pas de dette de migration : on démarre neuf. Cf. [#23](https://github.com/ForumHFR/redface2/issues/23).
+- **Navigation** : Compose Navigation 2.9 type-safe → **Compose Navigation 3 (1.1.0 stable depuis 08/04/2026)**. Réécriture `docs/navigation.md` alignée sur l'API stable : routes `@Serializable` implémentant `NavKey`, `NavBackStack<NavKey>`, pipeline `rememberSceneState` + `rememberNavigationEventState` + `NavigationBackHandler`, `SinglePaneSceneStrategy`, deep linking via parsing `Uri` manuel, intégration `ListDetailPaneScaffold` M3 Adaptive. Cf. [#23](https://github.com/ForumHFR/redface2/issues/23) + commit [`2464ac9`](https://github.com/ForumHFR/redface2/commit/2464ac9).
+- **HTTP** : OkHttp 4.12 → **OkHttp 5.3+** (stable depuis 07/2025, Happy Eyeballs, DoH, `callTimeout` via `kotlin.time.Duration`, `mockwebserver3`). Publié comme projet Kotlin Multiplatform ; le report KMP côté Redface ([#2](https://github.com/ForumHFR/redface2/issues/2)) est un choix de scope, pas une incompatibilité. Pas de dette de migration : on démarre neuf. Cf. [#23](https://github.com/ForumHFR/redface2/issues/23) + commit [`2464ac9`](https://github.com/ForumHFR/redface2/commit/2464ac9).
 - **Stockage credentials** : simplification finale — uniquement **cookies de session HFR chiffrés** (DataStore + Keystore + Cipher AES/GCM). Pas de password stocké, pas de re-login transparent, pas de biométrie. À l'expiration de session, l'utilisateur ré-entre son mot de passe. `docs/architecture.md` et `docs/protocol-hfr.md` mis à jour. Cf. [#23](https://github.com/ForumHFR/redface2/issues/23).
 - `docs/features.md` : nouvelle sous-section "Chargement d'images lourdes" (preview + tap-to-full, auto-detect thumbs HFR, data saver mode). Cf. [#23](https://github.com/ForumHFR/redface2/issues/23).
 
@@ -45,6 +45,14 @@ Pivot vers méthodologie hybride (SDD + Prototype + TDD). Allègement cross-docs
 - `drafts/audit-v04.md` et `drafts/deep-audit-prompt-v04.md` (archivés dans tag `archive/drafts-v0.4.0`).
 - Gantt avec dates calendaires dans `roadmap.md` (remplacé par dashboard).
 - Phase 5 "Migration automatique Redface v1" (hors scope) dans `roadmap.md`.
+
+### Fixed
+- **Cohérence AGENTS.md** : clause "Couverture 100% sur parser, database, ViewModels" contredisait la section Méthodologie ("pas d'objectif 100%"). Alignée sur la couverture hybride différenciée (100% transformers parser uniquement, guidée par risque ailleurs). Commit [`079ed4e`](https://github.com/ForumHFR/redface2/commit/079ed4e).
+- **Cohérence `contributing.md`** : "smoke test CI hebdomadaire" (l.225) contredisait le cron mensuel `0 2 1 * *` défini l.144. Aligné sur mensuel. Commit [`079ed4e`](https://github.com/ForumHFR/redface2/commit/079ed4e).
+- **Modèles canoniques** : `UserSettings` (référencé dans `protocol-hfr.md` l.313 et `models.md` l.147) et `EditInfo` (retourné par `HfrParser.parseEditPage` dans `architecture.md` l.214) étaient cités sans définition. Data classes canoniques ajoutées dans `models.md` (postsPerPage, isFirstPost, subject?, poll?, etc.). Commit [`079ed4e`](https://github.com/ForumHFR/redface2/commit/079ed4e).
+- **API Compose Navigation 3** : exemples `docs/navigation.md` alignés sur l'API stable 1.1.0 (`NavKey`, `NavBackStack<NavKey>`, `rememberSceneState`, `NavigationBackHandler`, `SinglePaneSceneStrategy`). Les versions antérieures utilisaient `backStack.push()` et `SceneStrategy.SingleTop` qui n'existent pas dans la stable. Commit [`2464ac9`](https://github.com/ForumHFR/redface2/commit/2464ac9).
+- **OkHttp 5 KMP** : l'affirmation "non-compat KMP" dans `stack.md` était factuellement fausse — OkHttp 5 est publié comme projet KMP. Le report KMP côté Redface est un choix de scope, pas une incompatibilité. Commit [`2464ac9`](https://github.com/ForumHFR/redface2/commit/2464ac9).
+- **Source déprécation EncryptedSharedPreferences** : `architecture.md` citait `1.1.0-alpha07` (04/2025). Corrigé sur la source officielle `1.1.0-beta01` (04/06/2025) puis deprecated en `1.1.0`. Les raisons StrictMode + keyset corruption deviennent des signaux terrain, pas la formulation officielle Google. Commit [`2464ac9`](https://github.com/ForumHFR/redface2/commit/2464ac9).
 
 ---
 
