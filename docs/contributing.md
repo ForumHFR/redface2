@@ -222,7 +222,7 @@ core/parser/src/test/resources/fixtures/
 - Chaque fixture est accompagnée d'un fichier `.source.txt` frère ou d'un commentaire HTML en tête précisant `cat`, `post`, `numreponse`, date de capture.
 - Les fixtures loguées ne doivent **jamais** contenir de cookies, tokens `hash_check`, emails, identifiants réels — nettoyer avant commit (voir skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/parse-fixture/SKILL.md) étape 9).
 - Quand un bug de parsing est corrigé, le HTML problématique est ajouté aux fixtures avec un test de non-régression.
-- Un **smoke test CI hebdomadaire** vérifie que les sélecteurs CSS critiques matchent toujours sur une vraie page HFR publique.
+- Un **smoke test CI mensuel** (cf. cron `0 2 1 * *` ci-dessus) vérifie que les sélecteurs CSS critiques matchent toujours sur une vraie page HFR publique.
 
 ---
 

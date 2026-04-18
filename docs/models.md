@@ -188,6 +188,21 @@ data class PollOption(
 )
 ```
 
+`EditInfo` est retourné par `HfrParser.parseEditPage(html)` (cf. [architecture.md]({{ site.baseurl }}/architecture#core-parser--hfrparser)). Il capture l'état pré-rempli du formulaire d'édition HFR et ce qui doit être renvoyé côté `bdd.php` (cf. [protocol-hfr.md]({{ site.baseurl }}/protocol-hfr#post-bddphp-edit)).
+
+```kotlin
+data class EditInfo(
+    val cat: Int,
+    val post: Int,                   // ID topic
+    val numreponse: Int,             // ID post édité (unique par cat)
+    val content: String,             // BBCode brut pré-rempli dans le textarea
+    val isFirstPost: Boolean,        // édition du premier post (FP) ?
+    val subject: String?,            // non-null uniquement si isFirstPost
+    val subcat: Int?,                // non-null uniquement si isFirstPost (change de sous-cat possible)
+    val poll: Poll?,                 // non-null si isFirstPost avec sondage existant
+)
+```
+
 ---
 
 ## Catégories
@@ -282,6 +297,24 @@ data class Bookmark(
 ```
 
 L'app synchronise ces données avec le MP de stockage HFR et les cache localement dans Room pour des accès rapides. Cela garantit la compatibilité avec les userscripts existants qui utilisent le même mécanisme.
+
+---
+
+## Paramètres utilisateur
+
+`UserSettings` capture les réglages du compte HFR qui influencent le rendu côté client. Le parser lit ces valeurs depuis `editprofil.php?page=3` à la connexion et les stocke en cache (Room + DataStore). **Aucun champ ne doit être hardcodé** dans le code applicatif — notamment `postsPerPage` (cf. [protocol-hfr.md]({{ site.baseurl }}/protocol-hfr#postsperpage-configurable)).
+
+```kotlin
+data class UserSettings(
+    val postsPerPage: Int,           // 20 / 40 / 60 — réglable HFR, défaut 40
+    val showAvatars: Boolean,        // affichage des avatars dans les topics
+    val showSignatures: Boolean,     // affichage des signatures
+    val timezone: String,            // ex: "Europe/Paris"
+    val language: String,            // "fr" | "en"
+)
+```
+
+**Note** : le modèle est volontairement minimaliste pour la Phase 1. Les réglages secondaires (thème CSS HFR, jeu d'icônes, notifications MP, notifications mots-clés, fuseau numérique, réglages de signature) seront ajoutés Phase 2+ lors de l'implémentation de l'écran Paramètres, suivant la règle prototype-first de la méthodologie.
 
 ---
 

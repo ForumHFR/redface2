@@ -57,7 +57,7 @@ Kotlin, Jetpack Compose, MVI, Compose Navigation 3, Hilt (KSP), OkHttp 5, Jsoup,
 
 Pas de tests encore (phase spec). Strategie definie dans `docs/contributing.md` :
 - JUnit 4 + MockK + Robolectric + Turbine
-- Couverture 100% sur parser, database, ViewModels
+- Couverture **hybride differenciee** : 100% sur les transformers du parser HFR (fixtures dictent l'exhaustivite), guidee par risque ailleurs (ViewModels, mappers, repositories). **Pas d'objectif 100% global.** Voir section "Methodologie" plus bas.
 - Fixtures HTML capturees depuis HFR reel, jamais fabriquees
 
 ## Conventions
@@ -81,6 +81,19 @@ Ce projet utilise une méthodologie triple-hybride, documentée comme ADR-000 (v
 - **Coverage guidée par risque**, pas par chiffre. Pas d'objectif "100%". Couvrir les edge cases réels identifiés et les fixtures HFR capturées.
 - **ADRs formalisent les décisions après** qu'elles soient prises avec contexte réel, pas avant. Pas de RFC pré-code.
 - Pas de nouveau cycle d'audit de specs sans déclencheur concret (bug récurrent, confusion onboarding).
+
+### Charte anti-derive IA-first
+
+- **Le reel prime sur la prose** : pas de nouvelle couche de spec sur un sujet incertain sans spike, fixture reelle ou verification doc officielle.
+- **Un sujet = une source canonique** : pour chaque theme structurant (methodologie, navigation, stack, modeles), un document de reference unique ; les autres fichiers pointent vers lui au lieu de dupliquer.
+- **Pas de decision implicite** : une decision n'est "actee" que si l'issue, l'ADR ou la page canonique correspondante a ete mise a jour explicitement.
+- **Spike avant architecture** : si un choix depend d'un comportement reel du parser, du rendu, du cache, de Room ou de Navigation, on prototype d'abord, on documente ensuite.
+- **Pas de snippet decoratif** : tout exemple Kotlin doit etre conceptuellement compilable, aligne sur les types du repo et sur l'API stable actuelle.
+- **Pas de claim sans preuve** : "teste", "verifie", "supporte", "stable" ou "compatible" ne sont utilises que si la commande, la fixture ou la doc officielle a reellement ete consultee.
+- **Les issues suivent les specs, pas l'inverse** : une issue ouverte qui ne reflete plus l'etat courant des specs doit etre mise a jour, scindee ou fermee avant de devenir du travail actif.
+- **Les drafts ne gouvernent rien** : un fichier dans `drafts/` reste non normatif tant qu'il n'a pas ete promu explicitement dans `docs/`.
+- **Le noyau avant l'ecosysteme** : pas d'extensions, de release automation, de theming avance ou d'infra sophistiquee tant que le flux principal n'est pas prouve.
+- **Validation separee** : le meme agent ne doit pas produire, corriger et valider seul un changement structurant ; utiliser une review humaine ou un agent distinct.
 
 ### Architecture et conception
 
