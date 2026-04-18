@@ -38,6 +38,16 @@ Ce que ce document appelle "MVI" est techniquement du **MVVM + UDF** — le patt
 
 Le code est le même. On utilise le terme "MVI" dans ce projet par convention, mais un développeur habitué au MVVM Android retrouvera ses repères.
 
+### Méthodologie MVI hybride
+
+Conformément à la [méthodologie triple-hybride]({{ site.baseurl }}/rationale#méthodologie) (SDD + Prototype + TDD) :
+
+- **Spec les contrats** (types `State`, `Intent`, `Effect`) — c'est le contrat public du ViewModel, utile pour le Screen et les tests. Ces types sont documentés ci-dessous pour chaque écran.
+- **TDD les helpers purs** (`matchesFilter`, `comparatorFor`, mappers, reducers déterministes). Red → Green → Refactor, testables isolément.
+- **Prototype le Screen Compose**. L'UI émerge du code, pas de la spec — l'exemple complet ci-dessous montre les *patterns* (`send(intent)`, `ObserveAsEvents`, `PullToRefreshBox`) mais la mise en page réelle est itérée à partir de la Phase 1.
+
+Les exemples ViewModel ci-dessous sont **des squelettes illustratifs** — certains détails (timer 5 s, rollback, mutex) sont documentés parce qu'ils encodent des patterns non-triviaux, pas parce qu'ils sont figés dans la pierre.
+
 ---
 
 ## Écran Drapeaux (accueil)
@@ -188,62 +198,14 @@ class FlagsViewModel @Inject constructor(
 
 ### Screen (Compose)
 
-```kotlin
-@Composable
-fun FlagsScreen(
-    viewModel: FlagsViewModel = hiltViewModel(),
-    onNavigateToTopic: (cat: Int, post: Int, page: Int) -> Unit,
-) {
-    val state by viewModel.state.collectAsStateWithLifecycle()
+Le Screen Compose émerge en **Phase 1+ (prototype-first)**, conformément à la [méthodologie hybride](#méthodologie-mvi-hybride). Les patterns invariants qu'il doit respecter :
 
-    // Effects one-shot, lifecycle-aware (ne traite pas en arrière-plan)
-    ObserveAsEvents(viewModel.effects) { effect ->
-        when (effect) {
-            is FlagsEffect.NavigateToTopic ->
-                onNavigateToTopic(effect.cat, effect.post, effect.page)
-            is FlagsEffect.ShowUndo -> { /* snackbar */ }
-            is FlagsEffect.Error -> { /* snackbar */ }
-        }
-    }
+- Collecter le state via `collectAsStateWithLifecycle()` (pas `collectAsState()` seul)
+- Observer les effects via [`ObserveAsEvents`](#utilitaire--observeasevents) (pas `LaunchedEffect` nu — évite la navigation fantôme en arrière-plan)
+- Splitter en `<Name>Screen` (stateful, `hiltViewModel()`) et `<Name>Content` (stateless, `@Preview`-able) — voir [Convention](#convention)
+- Utiliser les APIs Material 3 actuelles (`PullToRefreshBox`, pas Accompanist `SwipeRefresh` déprécié)
 
-    FlagsContent(
-        state = state,
-        onIntent = viewModel::send,
-    )
-}
-
-@Composable
-private fun FlagsContent(
-    state: FlagsState,
-    onIntent: (FlagsIntent) -> Unit,
-) {
-    Column {
-        // Toolbar : tri + filtre
-        FlagsToolbar(
-            sortMode = state.sortMode,
-            filter = state.filter,
-            onSortChange = { onIntent(FlagsIntent.SetSort(it)) },
-            onFilterChange = { onIntent(FlagsIntent.SetFilter(it)) },
-        )
-
-        // Liste des drapeaux
-        PullToRefreshBox(
-            isRefreshing = state.isRefreshing,
-            onRefresh = { onIntent(FlagsIntent.Refresh) },
-        ) {
-            LazyColumn {
-                items(state.filteredFlags) { topic ->
-                    FlagItem(
-                        topic = topic,
-                        onClick = { onIntent(FlagsIntent.OpenTopic(topic)) },
-                        onDismiss = { onIntent(FlagsIntent.RemoveFlag(topic)) },
-                    )
-                }
-            }
-        }
-    }
-}
-```
+La mise en page concrète (`Column` vs `Scaffold`, composants `FlagsToolbar`, `FlagItem`, etc.) est itérée à partir du code dès Phase 1, pas figée ici.
 
 ---
 
