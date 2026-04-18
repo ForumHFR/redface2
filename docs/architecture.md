@@ -340,7 +340,7 @@ Les cookies sont persistés via un `PersistentCookieJar` adossé au DataStore ch
 
 **Ce qui n'est pas stocké** : le mot de passe en clair de l'utilisateur. À l'expiration de session (cookies invalidés côté HFR), l'app redirige vers l'écran de login — l'utilisateur ré-entre son mot de passe. Pas de re-login transparent silencieux.
 
-> **Note** : `EncryptedSharedPreferences` (AndroidX Security) est **déprécié depuis avril 2025** (`security-crypto 1.1.0-alpha07`). Raisons officielles Google : StrictMode violations sur le thread principal, crashs "keyset corruption" sur certains OEMs.
+> **Note** : `EncryptedSharedPreferences` (AndroidX Security) est déprécié à partir de `security-crypto 1.1.0-beta01` (04/06/2025), puis marqué deprecated en `1.1.0`. La release note officielle demande de préférer les APIs plateforme et l'usage direct d'Android Keystore ; les problèmes de StrictMode et de corruption de keyset observés sur le terrain restent des signaux supplémentaires, pas la formulation officielle canonique.
 
 **Implémentation** :
 

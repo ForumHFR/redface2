@@ -19,9 +19,9 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 | UI | **Jetpack Compose** (via compose-bom) | XML layouts | Direction officielle Google, déclaratif, plus maintenable |
 | Design system | **Material 3** + **Material 3 Adaptive 1.2+** | Material 2 | Standard 2026, dynamic color, canonical layouts (list-detail, supporting pane). Décisions design détaillées ci-dessous. |
 | Architecture | **MVI** (MVVM+UDF) | MVVM classique | Flux unidirectionnel, état prévisible, idéal pour un forum reader |
-| Navigation | **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026) | Circuit, Decompose, Navigation 2.x | Compose-first : back stack en state (`List<BackStackEntry>`), `NavDisplay` + `SceneStrategy`, Shared Elements entre scenes, intégration M3 Adaptive directe (list-detail, supporting pane) |
+| Navigation | **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026) | Circuit, Decompose, Navigation 2.x | Compose-first : back stack en state (`NavBackStack<NavKey>`), scenes calculées via `rememberSceneState`, Shared Elements entre scenes, intégration M3 Adaptive directe (list-detail, supporting pane) |
 | DI | **Hilt (KSP)** | Koin | Erreurs à la compilation, intégration Jetpack, standard contributeurs |
-| HTTP | **OkHttp 5** (5.3+) | Retrofit, Ktor | Pas d'API REST à mapper, scraping HTML direct + cookies. Stable depuis 07/2025 (HTTP/3 en cours, `callTimeout` via `kotlin.time.Duration`). |
+| HTTP | **OkHttp 5** (5.3+) | Retrofit, Ktor | Pas d'API REST à mapper, scraping HTML direct + cookies. Stable depuis 07/2025 (`callTimeout` via `kotlin.time.Duration`, `mockwebserver3`). |
 | Parsing HTML | **Jsoup** | Regex, custom parser | Standard JVM, CSS selectors, battle-tested |
 | Cache locale | **Room** | DataStore, SQLDelight | Standard Android, intégration Flow, migrations |
 | Stockage sécurisé | **DataStore + Keystore** (cookies HFR, pas de password stocké) | EncryptedSharedPreferences (**déprécié**), Tink (overkill 1 secret) | Décision Option A : re-login manuel à l'expiration session. Cf. [#24 thème 13](https://github.com/ForumHFR/redface2/issues/24) |
@@ -33,7 +33,7 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 | Screenshot testing | **Non retenu MVP** (Roborazzi reconsidéré Phase 4+) | — | Compose Preview + review manuelle suffisent en Phase 1-3 |
 | minSdk | **29** | 26, 31 | Android 10 : Scoped Storage, TLS 1.3, dark thème natif, ~88-90% parc 04/2026 |
 
-> **Versions précises** : le Gradle version catalog `gradle/libs.versions.toml` sera créé en Phase 0 comme source de vérité unique. Ce tableau garde les versions **major.minor** quand elles sont structurelles (Material 3 Adaptive 1.2+ pour les canonical layouts, Compose Navigation 3 pour les back stacks en state, OkHttp 5 pour HTTP/3). Les patches stables 2026 sont à résoudre via Context7/Docfork quand on interroge les docs officielles (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)).
+> **Versions précises** : le Gradle version catalog `gradle/libs.versions.toml` sera créé en Phase 0 comme source de vérité unique. Ce tableau garde les versions **major.minor** quand elles sont structurelles (Material 3 Adaptive 1.2+ pour les canonical layouts, Compose Navigation 3 pour les back stacks en state, OkHttp 5 pour le client HTTP + `CookieJar`). Les patches stables 2026 sont à résoudre via Context7/Docfork quand on interroge les docs officielles (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)).
 
 ---
 
@@ -136,20 +136,20 @@ Quatre options évaluées :
 |---|---|---|---|---|
 | Paradigme | Compose-first, back stack en state | Fragment-inspired, graph DSL | Presenter pattern | Component tree |
 | Deep linking | Parsing URI manuel → route typée | `NavDeepLink` DSL | Manuel | Manuel |
-| Type safety | `@Serializable` data classes comme `BackStackEntry.key` | `@Serializable` + `toRoute()` (2.8+) | Oui | Oui |
-| Back stack | Explicite `List<BackStackEntry>` en `State` | Opaque (framework-managed) | Bon | Excellent |
+| Type safety | `@Serializable` + `NavKey` | `@Serializable` + `toRoute()` (2.8+) | Oui | Oui |
+| Back stack | Explicite `NavBackStack<NavKey>` en `State` | Opaque (framework-managed) | Bon | Excellent |
 | M3 Adaptive | Intégration native (`ListDetailPaneScaffold` proprement binding) | Bricolage | Manuel | Manuel |
 | Shared Elements | Oui (`SharedTransitionScope` entre scenes) | Limité | Manuel | Manuel |
 | Stabilité | **1.1.0 stable** (08/04/2026) | Mature | Stable | Stable |
 | Courbe | Modérée, API plus simple qu'avant | Modérée | Raide | Raide |
-| KMP | Non (Android only) | Non | Oui | Oui |
+| KMP | Runtime KMP ; UI Android-first | Non | Oui | Oui |
 
 **Compose Navigation 3 gagne** pour Redface 2 :
 - **Compose-first** : cohérent avec 100% Compose ; le back stack est du state observable normal, on peut le persist/restaurer trivialement
 - **M3 Adaptive** : `ListDetailPaneScaffold` (essentiel pour drapeaux/topic en tablette) se branche directement sur des sous-back-stacks
 - **Shared Elements** : transitions topic list → topic view propres (Material Motion patterns)
-- **Type safety** : les routes sont juste des `data class @Serializable`, la clé du `BackStackEntry<Any>` les typent
-- **Deep linking** : HFR ayant des fragments URI non supportés (`#t{numreponse}`) de toute façon, on parse la `Uri` entrante manuellement et on pousse une route typée — plus simple qu'avant avec Nav 2.x
+- **Type safety** : les routes implémentent `NavKey` et sont `@Serializable`, donc le back stack reste typé et sérialisable
+- **Deep linking** : HFR ayant des fragments URI non supportés (`#t{numreponse}`) de toute façon, on parse la `Uri` entrante manuellement et on ajoute une route typée au back stack — plus simple qu'avant avec Nav 2.x
 
 Voir `docs/navigation.md` pour les exemples concrets (`NavDisplay`, `SceneStrategy`, deep linking, predictive back).
 
@@ -212,7 +212,7 @@ suspend fun getTopicPage(cat: Int, post: Int, page: Int): Document {
 
 OkHttp fournit aussi le **CookieJar** pour la gestion de session HFR — essentiel pour l'authentification.
 
-**Version retenue (04/2026)** : **OkHttp 5.3+** — stable depuis 07/2025, 10 mois de retours prod. KMP reporté post-v1 ([#2](https://github.com/ForumHFR/redface2/issues/2)) donc la non-compat KMP de 5.x n'est pas bloquante. Gains vs 4.x : Happy Eyeballs (dual-stack IPv4/IPv6), DoH opt-in, `callTimeout()` via `kotlin.time.Duration`, `mockwebserver3` aligné avec le test runner. API Interceptor/CookieJar API-compatible avec 4.x — pas de dette de migration à prévoir puisqu'on démarre neuf.
+**Version retenue (04/2026)** : **OkHttp 5.3+** — stable depuis 07/2025, avec des gains concrets vs 4.x : Happy Eyeballs (dual-stack IPv4/IPv6), DoH opt-in, `callTimeout()` via `kotlin.time.Duration`, `mockwebserver3` aligné avec le test runner. KMP reste reporté post-v1 ([#2](https://github.com/ForumHFR/redface2/issues/2)) pour des raisons de scope ; ce report n'est pas lié à une incompatibilité d'OkHttp 5, publié comme projet Kotlin Multiplatform. API Interceptor/CookieJar API-compatible avec 4.x — pas de dette de migration à prévoir puisqu'on démarre neuf.
 
 ### Jsoup
 

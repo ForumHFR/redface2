@@ -183,47 +183,74 @@ Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
 | `forum.hardware.fr/forum1f.php` | Drapeaux |
 | `forum.hardware.fr/forum1.php?cat=X&post=Y#t12345` | Post spécifique (traitement custom, voir ci-dessous) |
 
-Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026). Les routes sont des `data class @Serializable` utilisées comme **clés** de `BackStackEntry` :
+Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026). Les routes sont des types `@Serializable` qui implémentent `NavKey` :
 
 ```kotlin
 // Routes type-safe
-@Serializable data object FlagsListRoute
+@Serializable data object FlagsListRoute : NavKey
 @Serializable data class TopicRoute(
     val cat: Int,
     val post: Int,
     val page: Int = 1,
     val scrollTo: Int? = null,  // numreponse cible pour #t{numreponse}
-)
-@Serializable data class CategoryRoute(val cat: Int, val subcat: Int? = null)
-@Serializable data class EditorRoute(val mode: EditorMode, val cat: Int, val post: Int? = null)
-@Serializable data object MessagesRoute
+) : NavKey
+@Serializable data class CategoryRoute(val cat: Int, val subcat: Int? = null) : NavKey
+@Serializable data class EditorRoute(val mode: EditorMode, val cat: Int, val post: Int? = null) : NavKey
+@Serializable data object MessagesRoute : NavKey
 ```
 
-Le `NavDisplay` prend le back stack en state explicite et un résolveur de contenu :
+Le back stack est porté par `NavBackStack<NavKey>`, transformé en `NavEntry`, puis rendu via `rememberSceneState` + `NavDisplay` :
 
 ```kotlin
 @Composable
-fun RedfaceNavHost(startRoute: Any = FlagsListRoute) {
-    val backStack = rememberNavBackStack<Any>(startRoute)
-
-    NavDisplay(
+fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
+    val entries = rememberDecoratedNavEntries(
         backStack = backStack,
-        onBackStackChange = { backStack.value = it },
-        sceneStrategy = SceneStrategy.SingleTop,
-    ) { entry ->
-        when (val route = entry.key) {
-            FlagsListRoute -> FlagsScreen(
-                onOpenTopic = { t -> backStack.push(TopicRoute(t.cat, t.postId, t.lastReadPage)) },
-            )
-            is TopicRoute -> TopicScreen(
-                cat = route.cat, post = route.post, page = route.page, scrollTo = route.scrollTo,
-                onReply = { postId -> backStack.push(EditorRoute(EditorMode.Reply, route.cat, postId)) },
-            )
-            is CategoryRoute -> CategoryScreen(route.cat, route.subcat)
-            is EditorRoute -> EditorScreen(route)
-            MessagesRoute -> MessagesScreen()
+        entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator()),
+    ) { key ->
+        NavEntry(key) {
+            when (val route = key) {
+                FlagsListRoute -> FlagsScreen(
+                    onOpenTopic = { topic ->
+                        backStack.add(TopicRoute(topic.cat, topic.postId, topic.lastReadPage))
+                    },
+                )
+                is TopicRoute -> TopicScreen(
+                    cat = route.cat,
+                    post = route.post,
+                    page = route.page,
+                    scrollTo = route.scrollTo,
+                    onReply = { postId ->
+                        backStack.add(EditorRoute(EditorMode.Reply, route.cat, postId))
+                    },
+                )
+                is CategoryRoute -> CategoryScreen(route.cat, route.subcat)
+                is EditorRoute -> EditorScreen(route)
+                MessagesRoute -> MessagesScreen()
+            }
         }
     }
+    val sceneState = rememberSceneState(
+        entries = entries,
+        sceneStrategies = listOf(SinglePaneSceneStrategy()),
+        onBack = { backStack.removeLastOrNull() },
+    )
+    val navigationEventState = rememberNavigationEventState(
+        currentInfo = SceneInfo(sceneState.currentScene),
+        backInfo = sceneState.previousScenes.map(::SceneInfo),
+    )
+
+    NavigationBackHandler(
+        navigationEventState = navigationEventState,
+        isBackEnabled = sceneState.currentScene.previousEntries.isNotEmpty(),
+        onBackCompleted = {
+            repeat(entries.size - sceneState.currentScene.previousEntries.size) {
+                backStack.removeLastOrNull()
+            }
+        }
+    )
+
+    NavDisplay(sceneState, navigationEventState)
 }
 ```
 
@@ -235,23 +262,23 @@ fun RedfaceNavHost(startRoute: Any = FlagsListRoute) {
 
 ### Cas particulier : lien vers un post spécifique
 
-Nav 3 (comme Nav 2.x) **ne gère pas les fragments URI** (`#t{numreponse}`) nativement : on parse l'URI dans `MainActivity` et on pousse la route typée :
+Nav 3 (comme Nav 2.x) **ne gère pas les fragments URI** (`#t{numreponse}`) nativement : on parse l'URI dans `MainActivity` et on ajoute la route typée au back stack :
 
 ```kotlin
 // MainActivity.kt
 @Composable
 fun RedfaceApp(intent: Intent?) {
-    val backStack = rememberNavBackStack<Any>(FlagsListRoute)
+    val backStack = rememberNavBackStack(FlagsListRoute)
 
     LaunchedEffect(intent) {
         val uri = intent?.data ?: return@LaunchedEffect
-        parseHfrDeepLink(uri)?.let { backStack.push(it) }
+        parseHfrDeepLink(uri)?.let(backStack::add)
     }
 
-    NavDisplay(backStack = backStack, /* ... */) { /* ... */ }
+    RedfaceNavHost(backStack = backStack)
 }
 
-fun parseHfrDeepLink(uri: Uri): Any? = when (uri.path) {
+fun parseHfrDeepLink(uri: Uri): NavKey? = when (uri.path) {
     "/forum1.php" -> {
         val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
         val post = uri.getQueryParameter("post")?.toIntOrNull() ?: return null
@@ -296,23 +323,37 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 
 ```kotlin
 @Composable
-fun AdaptiveNavHost() {
-    val backStack = rememberNavBackStack<Any>(FlagsListRoute)
+fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
     val isExpanded = currentWindowAdaptiveInfo().windowSizeClass.windowWidthSizeClass !=
         WindowWidthSizeClass.COMPACT
 
     if (isExpanded) {
         ListDetailPaneScaffold(
-            listPane = { FlagsScreen(onOpenTopic = { backStack.push(TopicRoute(...)) }) },
-            detailPane = {
-                NavDisplay(
-                    backStack = backStack.value.filter { it.key !is FlagsListRoute },
-                    /* ... */
+            listPane = {
+                FlagsScreen(
+                    onOpenTopic = { topic ->
+                        backStack.add(TopicRoute(topic.cat, topic.postId, topic.lastReadPage))
+                    },
                 )
+            },
+            detailPane = {
+                when (val current = backStack.lastOrNull()) {
+                    is TopicRoute -> TopicScreen(
+                        cat = current.cat,
+                        post = current.post,
+                        page = current.page,
+                        scrollTo = current.scrollTo,
+                        onReply = { postId ->
+                            backStack.add(EditorRoute(EditorMode.Reply, current.cat, postId))
+                        },
+                    )
+                    is EditorRoute -> EditorScreen(current)
+                    else -> Text("Select a topic")
+                }
             },
         )
     } else {
-        NavDisplay(backStack = backStack, /* ... */) { /* ... */ }
+        RedfaceNavHost(backStack = backStack)
     }
 }
 ```
@@ -321,12 +362,12 @@ fun AdaptiveNavHost() {
 
 ## Back Stack
 
-Nav 3 expose le back stack comme un `List<BackStackEntry<Any>>` observable. Règles Redface 2 :
+Nav 3 expose le back stack comme un `NavBackStack<NavKey>` observable, puis le runtime le transforme en `List<NavEntry<NavKey>>` pour le rendu. Règles Redface 2 :
 
 - **Bottom nav** : chaque onglet conserve son propre back stack (un `NavDisplay` par onglet, ou un `SceneStrategy` qui segmente par préfixe)
 - **Retour depuis un topic** : retour à la liste (drapeaux, forum, recherche) à la même position de scroll — la scène précédente reste en mémoire tant qu'elle est dans le back stack
 - **Retour depuis reply/edit** : retour au topic à la même page
-- **Deep link** : push de la route typée sur le back stack existant, sans écraser — si l'utilisateur fait back, il retourne à l'écran d'accueil (drapeaux)
+- **Deep link** : ajout de la route typée sur le back stack existant, sans écraser — si l'utilisateur fait back, il retourne à l'écran d'accueil (drapeaux)
 
 ```mermaid
 graph LR
