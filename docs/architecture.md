@@ -301,23 +301,9 @@ Utilisateur ouvre ses drapeaux
 
 Le prefetch respecte les conditions réseau : désactivé en mode économie de données ou réseau lent.
 
-#### Règle critique : prefetch **non-authentifié**
+#### Règle critique : prefetch non-authentifié
 
-Les requêtes de prefetch ne doivent **jamais** inclure les cookies de session HFR. Raison : HFR met à jour les drapeaux (topics marqués lus) sur toute requête authentifiée. Un prefetch avec session marquerait silencieusement les topics comme lus, ce qui est le bug exact que Redface v1 présentait.
-
-Implémentation : un `OkHttpClient` dédié au prefetch, avec un `CookieJar` vide (ou une instance séparée). `HfrClient` expose deux méthodes :
-
-```kotlin
-class HfrClient @Inject constructor(...) {
-    // Requêtes authentifiées (drapeaux, reply, edit, MPs...)
-    suspend fun fetchTopicPage(cat: Int, post: Int, page: Int): String
-
-    // Requêtes non-authentifiées — pour prefetch uniquement
-    suspend fun prefetchTopicPage(cat: Int, post: Int, page: Int): String
-}
-```
-
-Un test Konsist enforce la règle : les appels `prefetch*` doivent utiliser l'instance non-authentifiée. Corran Horn l'a rappelé sur le topic HFR : « en utilisant un cookie d'un compte anonyme pour pas péter les drapeaux ».
+Les requêtes de prefetch ne doivent **jamais** inclure les cookies de session — sinon HFR marque silencieusement les topics comme lus. Implémentation avec deux instances `OkHttpClient` (`@AuthenticatedClient` / `@AnonymousClient`) et test Konsist d'enforcement : voir [protocol-hfr.md § Règle critique prefetch non-authentifié]({{ site.baseurl }}/protocol-hfr#règle-critique--prefetch-non-authentifié).
 
 ---
 
@@ -448,13 +434,6 @@ Les tests Konsist tournent en CI dès Phase 0 et bloquent les PR qui violent les
 
 ## Protocole HFR
 
-HFR n'a pas d'API publique. Redface 2 fait du scraping HTML et doit respecter plusieurs invariants du protocole :
+HFR n'a pas d'API publique. Redface 2 fait du scraping HTML et doit respecter plusieurs invariants (CSRF `hash_check`, anti-bot `verifrequet`, `numreponse` par catégorie, cookies de session, prefetch non-authentifié).
 
-- **`hash_check`** — token anti-CSRF présent dans chaque page GET autorisant un POST (édition, création). Obligatoire dans tous les POST. Fail fast si absent.
-- **`verifrequet = "1100"`** — constante anti-bot statique dans tous les POST.
-- **`numreponse`** — unique **par catégorie**, pas globalement. Clé composite `(cat, numreponse)` en base.
-- **`listenumreponse`** — tableau JS inline listant les `numreponse` de la page (optimisation, non utilisée en v1).
-- **Session** — cookies `md_user` + `md_pass`. Interceptor OkHttp détecte 302 ou absence de `md_user` → re-login transparent avec credentials du DataStore chiffré → sinon événement `SessionExpired`.
-- **Prefetch non-authentifié** — règle critique, voir § Prefetch intelligent ci-dessus.
-
-**Référence complète** : [protocol-hfr.md]({{ site.baseurl }}/protocol-hfr) couvre endpoints, form fields par endpoint, smileys, edge cases (posts supprimés, emails obfusqués, pagination, `cryptlink`), et fixtures.
+**Source de vérité** : [protocol-hfr.md]({{ site.baseurl }}/protocol-hfr) — endpoints (`forum1.php`, `forum2.php`, `bddpost.php`, …), form fields par endpoint, `hash_check`, `verifrequet`, `numreponse`, `listenumreponse`, sessions, smileys, edge cases (posts supprimés, emails obfusqués, pagination, `cryptlink`), fixtures.
