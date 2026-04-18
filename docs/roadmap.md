@@ -14,24 +14,46 @@ Phases de développement, de la fondation au polish.
 
 ## Vue d'ensemble
 
+Les phases sont **ordonnées par dépendances techniques**, pas datées. Le rythme réel dépend des contributeurs et des dépendances externes (ex. MPStorage2 dans hfr-redkit à finaliser avant la Phase 3). Cohérent avec la [méthodologie triple-hybride]({{ site.baseurl }}/rationale#méthodologie) (prototype-driven).
+
+### Dashboard des phases
+
+| Phase | Objectif | Taille | Dépend de | Statut |
+|---|---|---|---|---|
+| **0 — Bootstrap** | Squelette qui compile, CI, thème, navigation | S | — | À faire |
+| **1 — Core** | Lecture du forum (drapeaux, topics, forum, deep links) | XL | Phase 0 | À faire |
+| **2 — Écriture** | Post / edit / quote / create topic / recherche | L | Phase 1 | À faire |
+| **3 — Messages** | MPs classiques + MultiMPs avec sync | M | Phase 2 + **MPStorage2** (hfr-redkit) | À faire |
+| **4 — Extensions** | Bookmarks, Blacklist, Qualitay, Redflag | L | Phase 3 + **hfr-redflag Worker** | À faire |
+| **5 — Polish** | Animations, offline, thème dynamique, Play Store | M | Phases 2, 3, 4 | À faire |
+
+**Taille** : S = petit sous-chantier, M = quelques composants, L = plusieurs features indépendantes, XL = écran majeur + parseurs + cache (ex. `PostRenderer` BBCode natif).
+
+### Graphe des dépendances
+
 ```mermaid
-gantt
-    title Redface 2 — Roadmap
-    dateFormat YYYY-MM
-    axisFormat %b %Y
+flowchart LR
+    P0["Phase 0<br/>Bootstrap"]
+    P1["Phase 1<br/>Core lecture"]
+    P2["Phase 2<br/>Écriture"]
+    P3["Phase 3<br/>Messages"]
+    P4["Phase 4<br/>Extensions"]
+    P5["Phase 5<br/>Polish"]
 
-    section Fondation
-    Phase 0 — Bootstrap          :p0, 2026-04, 2026-05
-    Phase 1 — Core               :p1, 2026-05, 2026-08
+    MPS[("MPStorage2<br/>hfr-redkit")]
+    RFL[("hfr-redflag<br/>CF Worker")]
 
-    section Interaction
-    Phase 2 — Écriture           :p2, 2026-08, 2026-10
-    Phase 3 — Messages           :p3, 2026-10, 2026-12
+    P0 --> P1 --> P2 --> P3 --> P4 --> P5
+    MPS -.prérequis.-> P3
+    RFL -.prérequis.-> P4
+    P2 --> P5
+    P3 --> P5
 
-    section Communauté
-    Phase 4 — Extensions         :p4, 2027-01, 2027-03
-    Phase 5 — Polish             :p5, 2027-03, 2027-05
+    classDef external fill:#fef3c7,stroke:#d97706
+    class MPS,RFL external
 ```
+
+Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances externes** hors de ce repo — leur état bloque le démarrage de la phase qui les consomme.
 
 ---
 
