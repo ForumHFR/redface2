@@ -6,64 +6,67 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## [Unreleased] — cycle #24 simplification post-v0.4.0
+
+Pivot vers méthodologie hybride (SDD + Prototype + TDD). Allègement cross-docs et convention cross-client pour les skills.
+
+### Added
+- Méthodologie triple-hybride formalisée dans `AGENTS.md`, `README.md`, `docs/contributing.md`, `docs/rationale.md`.
+- **Detekt** + **Android Lint** (a11y critique) ajoutés Phase 0 dans `stack.md` et `contributing.md`.
+- Règle "Vérification API actuelle" avec mot-clé "stable release" (Context7 / Docfork) dans `AGENTS.md`.
+- Smileys HFR : distinction explicite builtin (`:code:`) vs perso (`[:name]`) dans `AGENTS.md`.
+- **RedMark** comme candidat de nom ([#21](https://github.com/ForumHFR/redface2/issues/21), attribution Dintr-un-lemn) dans `naming.md`.
+- `docs/roadmap.md` : dashboard des phases (taille S/M/L/XL) + flowchart mermaid des dépendances internes et externes (MPStorage2, hfr-redflag Worker).
+
+### Changed
+- Skills migrés de `.claude/skills/` vers **`.agents/skills/`** (convention cross-client [agentskills.io](https://agentskills.io/specification)). `.claude/skills` devient un symlink vers `../.agents/skills` pour Claude Code.
+- Stack versions : patches retirés de `stack.md` et `contributing.md`, pointeur vers futur `gradle/libs.versions.toml` comme source of truth.
+- **Konsist gardé Phase 0** (revirement cf. [#22](https://github.com/ForumHFR/redface2/issues/22)) — enforcement structurel multi-LLM.
+- `mvi.md` : encadré méthodologie hybride en tête, Screen Compose détaillé remplacé par liste des patterns invariants (prototype-first).
+- `architecture.md` : sections Protocole HFR et règle Prefetch non-authentifié dédoublonnées — `protocol-hfr.md` reste la source unique.
+- Phase 5 Polish détaillée avec sous-items Play Store (Fastlane vs Gradle Play Publisher, beta testing, compte développeur ForumHFR).
+- Décisions design [#9](https://github.com/ForumHFR/redface2/issues/9) documentées dans `stack.md` (seed `#A62C2C`, dynamic OFF, Roboto, BBCode hybride).
+
+### Decided
+- **Credentials Option A** : DataStore + Keystore (sans Tink) pour simplifier la stack.
+- **Roborazzi** non retenu MVP (re-évaluable Phase 4+).
+- Coverage hybride différenciée (100% parser/TDD, guidée par risque ailleurs), pas de gate chiffré.
+- Smoke test HFR : mensuel (cron `0 2 1 * *`) pour sélecteurs CSS + catégories/sous-catégories.
+- Nombre élevé de modules Gradle conservé ([#4](https://github.com/ForumHFR/redface2/issues/4)).
+
+### Removed
+- `drafts/audit-v04.md` et `drafts/deep-audit-prompt-v04.md` (archivés dans tag `archive/drafts-v0.4.0`).
+- Gantt avec dates calendaires dans `roadmap.md` (remplacé par dashboard).
+- Phase 5 "Migration automatique Redface v1" (hors scope) dans `roadmap.md`.
+
+---
+
 ## v0.4.0 — 2026-04-16
 
-Cycle d'audit profond mené par Claude Opus 4.7 (1M context, effort max). 53 findings, plan 8 batchs, 42 findings résolus. Rapport archivé dans le tag `archive/drafts-v0.4.0`.
+Audit profond : 42/53 findings résolus sur 6 batches. Drafts d'audit archivés dans le tag `archive/drafts-v0.4.0`.
 
-### Batch 1 — Corrections critiques specs (`db192e5`)
-- **Sécurité credentials** : `EncryptedSharedPreferences` remplacé par **DataStore + Google Tink + Android Keystore** (ESP déprécié par Google en 04/2025, StrictMode violations + crashs keyset corruption sur OEMs).
-- **Topic HFR** : `cat=23, post=29332` corrigé en `cat=23, post=35395` dans `rationale.md`. Le 29332 est le topic **Redface v1** d'Ayuget (2015), le 35395 le topic **Redface 2** créé par XaTriX le 11-04-2026.
-- **Stack** : versions de `contributing.md` alignées sur stable 04/2026 (Kotlin 2.3.20, compose-bom 2026.03.01, Hilt 2.56, Room 2.8.4, Coil 3.4.0, Jsoup 1.22.1, +DataStore, +Tink, +Konsist, +Roborazzi).
-- **Chiffre minSdk** : couverture Android 10+ corrigée à ~88-90% (au lieu de 96% incorrect).
-- **Protocole HFR** : nouvelle section dans `architecture.md` pour `hash_check`, `verifrequet=1100`, `numreponse` unique par catégorie, `listenumreponse`, règle prefetch non-authentifié.
-- **Modèles** : `Post.numreponse` commenté (scope catégorie), `isEditable`/`isOwnPost` clarifiés (client-side), `postsPerPage` paramétrable (réglage utilisateur HFR).
+### Added
+- `docs/protocol-hfr.md` (390 lignes) : endpoints HFR, form fields par endpoint, `hash_check`, `verifrequet`, `numreponse`, `listenumreponse`, `cryptlink`, smileys (2 sources), sessions, détection 403, edge cases, fixtures.
+- Material 3 Adaptive (`NavigationSuiteScaffold`, `ListDetailPaneScaffold`, `SupportingPaneScaffold`, `WindowSizeClass`), Edge-to-edge Android 15+, Predictive back (`PredictiveBackHandler`) dans `stack.md` et `navigation.md`.
+- Compose Navigation 2.9 type-safe dans `navigation.md` (`@Serializable TopicRoute`, `toRoute()`).
+- Enforcement architecture : **Konsist** (vs ArchUnit) avec exemples de règles dans `architecture.md`.
+- Screenshot testing : **Roborazzi** (4 variants/écran) dans `contributing.md`.
+- 5 skills au format [agentskills.io](https://agentskills.io/specification) (`hfr-post`, `bump-version`, `spec-audit`, `spec-check`, `parse-fixture`) + 2 stubs (`m3-check`, `m3-screen`).
+- `SKILLS.md` racine (index humain multi-LLM), `.github/ISSUE_TEMPLATE/` (feature, bug, spec-question).
 
-### Batch 2 — Infra multi-LLM (`380117b`)
-- `AGENTS.md` devient **source of truth** (anciennement `CLAUDE.md`), avec section "Contributeurs multi-LLM" (attribution par fournisseur, invocation skills par outil, configuration par éditeur).
-- `CLAUDE.md`, `GEMINI.md` : symlinks vers `AGENTS.md`.
-- `.github/copilot-instructions.md` : symlink vers `../AGENTS.md`.
-- `.cursor/rules/project.mdc` : `alwaysApply: true` + body `@AGENTS.md`.
-- `SKILLS.md` racine : index humain multi-LLM des skills + mode d'emploi par éditeur.
-- Migration `.claude/commands/` → `.claude/skills/<slug>/SKILL.md` au format [agentskills.io](https://agentskills.io/specification) (spec Anthropic 18/12/2025, portable Claude Code, Cursor, Codex, Copilot coding agent, Gemini CLI, Junie).
-- 5 skills migrés avec corrections :
-  - `hfr-post` : topic 35395 explicite + warning sur 29332, règle fausse "pas d'accents BBCode" retirée (HFR supporte les accents), attribution `Claude Opus <version>` générique.
-  - `bump-version` : Co-Authored-By Opus 4.7, étape CHANGELOG ajoutée, rappel confirmation avant push.
-  - `spec-audit`, `spec-check`, `parse-fixture` : bodies intacts, frontmatter agentskills ajouté.
-- 2 stubs ajoutés, cités par `drafts/material3-ui-ux.md` :
-  - `m3-check` : audit Material 3 sur Compose (19 règles critiques, rapport par sévérité).
-  - `m3-screen` : bootstrap écran Compose complet (State/Intent/ViewModel/Screen/Content/Previews).
-- `.github/ISSUE_TEMPLATE/` : `feature.md`, `bug.md`, `spec-question.md`.
+### Changed
+- `AGENTS.md` devient **source of truth** multi-LLM (anciennement `CLAUDE.md`). `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md` deviennent des symlinks.
+- Stack versions alignées sur stable 04/2026 : Kotlin 2.3.20, compose-bom 2026.03.01, Hilt 2.56, Room 2.8.4, Coil 3.4.0, Jsoup 1.22.1, +DataStore, +Tink, +Konsist, +Roborazzi.
+- `:core:ui` détaille 6 sous-packages (`theme/`, `components/`, `adaptive/`, `semantics/`, `util/`, `extensions/`).
+- `PrivateMessage` enrichi avec `messages: List<PMMessage>`, `page`, `totalPages`.
 
-### Batch 4 — Documentation protocole HFR (`9788245`)
-- **`docs/protocol-hfr.md`** (nouveau, nav_order 11) : page complète 390+ lignes couvrant endpoints (`forum1.php`, `forum2.php`, `forum1f.php`, `bddpost.php`, `bdd.php`, `message.php`, `login_validation.php`, `user/addflag.php`, `modo.php`), form fields par endpoint, `hash_check`, `verifrequet`, `numreponse` scope, `listenumreponse`, `cryptlink`, smileys (2 sources), sessions/cookies, détection 403 et recovery, règle prefetch non-auth avec exemple `HfrClient` à 2 `OkHttpClient`, edge cases (posts édités, supprimés, emails obfusqués, pagination, `postsPerPage`), fixtures.
-- `docs/rationale.md` : nav_order 11 → 12 (libère 11 pour protocol-hfr).
-- `docs/architecture.md` : section "Protocole HFR" raccourcie en résumé + pointeur vers `docs/protocol-hfr.md` (détails complets là-bas).
-- `docs/contributing.md` : catalogue fixtures enrichi avec colonne **"Source HFR"** (ex `cat=23 post=35395`, `message.php?numreponse=X`) pour chaque fixture. Écart 17 v1 physiques vs 13 testées clarifié. `profile_settings_p4` marquée "aucun test de régression requis" (page dépréciée par HFR). Règles fixtures renforcées (`.source.txt` par fixture, capture via `hfr-mcp` obligatoire, nettoyage données sensibles via skill `/parse-fixture`).
+### Fixed
+- Topic HFR : `cat=23, post=29332` (Redface v1 d'Ayuget, 2015) → `cat=23, post=35395` (Redface 2, XaTriX 11/04/2026).
+- Couverture Android 10+ : 96% (incorrect) → ~88-90%.
+- `ImageProvider` enum → deux interfaces séparées `UploadProvider` et `RehostProvider` (violation de typing : `ImageProvider.REHOST` ne supportait pas `upload`).
 
-### Batch 5 — Stack moderne 2026 (`634bdc6`)
-- `stack.md` : tableau Vue d'ensemble avec versions 04/2026 + lignes "Design system" (M3 + Adaptive), "Stockage sécurisé" (DataStore+Tink+Keystore), "Enforcement archi" (Konsist), "Screenshot testing" (Roborazzi).
-- `stack.md` : nouvelles sections **Material 3 Adaptive** (NavigationSuiteScaffold, ListDetailPaneScaffold, SupportingPaneScaffold, WindowSizeClass breakpoints), **Edge-to-edge Android 15+** (`enableEdgeToEdge()`, insets), **Predictive back** (`PredictiveBackHandler`, manifest `enableOnBackInvokedCallback`).
-- `stack.md` : note OkHttp mise à jour (5.3.2 stable depuis 07/2025, arbitrage Phase 0, défaut 4.12).
-- `navigation.md` : exemple deep linking en **Compose Navigation 2.9 type-safe** (`@Serializable TopicRoute` + `toRoute()`) remplace l'ancienne API string-based.
-- `navigation.md` : nouvelle sous-section "Predictive back" avec exemple `PredictiveBackHandler` pour écrans à draft custom.
-- `contributing.md` : ajout **Roborazzi** (screenshot tests 4 variants/écran) et **Konsist** (enforcement architecture) à la stack de tests.
-- `architecture.md` : `:core:ui` détaille les **6 sous-packages** (`theme/`, `components/`, `adaptive/`, `semantics/`, `util/`, `extensions/`) + règle "seul module à instancier `ColorScheme`, `Typography`, `Shapes`".
-- `architecture.md` : nouvelle section **"Enforcement architecture au build"** avec décision **Konsist** (vs ArchUnit), rationale Kotlin-first, et exemples concrets de règles Konsist (features n'importent pas `:core:data`, tokens M3 centralisés, prefetch `@AnonymousClient`).
-
-### Batch 6 — Affinages modèles et MVI (`ec2c48b`)
-- `models.md` : `PrivateMessage` enrichi avec `messages: List<PMMessage>`, `page`, `totalPages`. Nouveau data class `PMMessage` (numreponse, author, date, content BBCode, isEditable client-side).
-- `models.md` : `ImageProvider` enum supprimé, remplacé par deux interfaces séparées **`UploadProvider`** (upload + delete) et **`RehostProvider`** (rehost URL) — le pattern `ImageProvider.REHOST` qui ne supporte pas `upload` était une violation de typing. Un provider peut implémenter les deux si HFR expose les deux flux.
-- `features.md` : mention du split `UploadProvider`/`RehostProvider` dans la section hébergement d'images.
-- `mvi.md` : commentaire expliquant pourquoi `FlagsViewModel.pendingRemovals` vit hors StateFlow (Jobs de cancellation, pas de l'état UI observable, pattern mutex/debounce).
-- `mvi.md` : définition explicite des helpers pure **`matchesFilter`** (par `FlagFilter` enum) et **`comparatorFor`** (par `SortMode`) — testables isolément.
-
-### Hors scope (reporté cycle v0.5.0)
-- ~~Promotion `drafts/material3-ui-ux.md` → `docs/material3.md`~~ — **résolu différemment** : 4 décisions actées dans [#9](https://github.com/ForumHFR/redface2/issues/9) (seed `#A62C2C`, dynamic OFF, Roboto, BBCode hybride), documentées dans `docs/stack.md` section "Décisions design". Draft préservé comme référence pédagogique, non promu.
-- F-Droid Redface v1 (issue [Redface#243](https://github.com/ForumHFR/Redface/issues/243)).
-- Création skills `/new-feature`, `/new-parser`, `/spec-diff` (O2, O3, O4 de l'audit).
-- Harnesses de test `BaseParserTest`, `BaseViewModelTest` (O6).
-- ADR formelles dans `docs/adr/` (O14).
-- Commentaires sur issues #14, #2, #9, #17, #18, #20, #21 (Batch 7 de l'audit — à traiter par XaaT).
+### Security
+- Sécurité credentials : `EncryptedSharedPreferences` (déprécié par Google 04/2025, StrictMode violations + crashs keyset corruption OEMs) remplacé par **DataStore + Google Tink + Android Keystore** (révisé en Option A sans Tink dans cycle #24).
 
 ---
 
