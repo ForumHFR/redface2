@@ -1,6 +1,6 @@
 # Skills — Redface 2
 
-Index humain des skills disponibles. Les skills vivent dans `.claude/skills/<name>/SKILL.md` au format [agentskills.io](https://agentskills.io/specification) et sont portables entre Claude Code, Cursor (Agent mode), OpenAI Codex, GitHub Copilot coding agent, Gemini CLI et JetBrains Junie.
+Index humain des skills disponibles. Les skills vivent dans `.agents/skills/<name>/SKILL.md` au format [agentskills.io](https://agentskills.io/specification) — emplacement recommandé par la spec pour l'interop cross-client. Claude Code les lit via le symlink `.claude/skills → ../.agents/skills`. Portables entre Claude Code, Cursor (Agent mode), OpenAI Codex, GitHub Copilot coding agent, Gemini CLI et JetBrains Junie.
 
 Le source of truth des règles projet est [`AGENTS.md`](AGENTS.md).
 
@@ -10,13 +10,13 @@ Le source of truth des règles projet est [`AGENTS.md`](AGENTS.md).
 
 | Nom | Résumé | Phase | Fichier |
 |---|---|---|---|
-| `spec-audit` | Audit complet des specs — détecte incohérences, lacunes, optimisations | Toute phase | [.claude/skills/spec-audit/SKILL.md](.claude/skills/spec-audit/SKILL.md) |
-| `spec-check` | Vérifie la cohérence cross-file des specs (noms, types, diagrammes) | Après chaque modif spec | [.claude/skills/spec-check/SKILL.md](.claude/skills/spec-check/SKILL.md) |
-| `parse-fixture` | Analyse une fixture HTML HFR (type page, selectors, parser cible, cas logué/non-logué) | Phase 1+ | [.claude/skills/parse-fixture/SKILL.md](.claude/skills/parse-fixture/SKILL.md) |
-| `hfr-post` | Rédige et poste un message sur le topic HFR Redface 2 (cat=23, post=35395) | Communication | [.claude/skills/hfr-post/SKILL.md](.claude/skills/hfr-post/SKILL.md) |
-| `bump-version` | Bump de la version des specs + commit + push | Fin de cycle | [.claude/skills/bump-version/SKILL.md](.claude/skills/bump-version/SKILL.md) |
-| `m3-check` | Audit Material 3 sur un écran/composant Compose (19 règles, rapport markdown) | Phase 0+ | [.claude/skills/m3-check/SKILL.md](.claude/skills/m3-check/SKILL.md) |
-| `m3-screen` | Génère un écran Compose complet (State/Intent/ViewModel/Screen/Previews) | Phase 1+ | [.claude/skills/m3-screen/SKILL.md](.claude/skills/m3-screen/SKILL.md) |
+| `spec-audit` | Audit complet des specs — détecte incohérences, lacunes, optimisations | Toute phase | [.agents/skills/spec-audit/SKILL.md](.agents/skills/spec-audit/SKILL.md) |
+| `spec-check` | Vérifie la cohérence cross-file des specs (noms, types, diagrammes) | Après chaque modif spec | [.agents/skills/spec-check/SKILL.md](.agents/skills/spec-check/SKILL.md) |
+| `parse-fixture` | Analyse une fixture HTML HFR (type page, selectors, parser cible, cas logué/non-logué) | Phase 1+ | [.agents/skills/parse-fixture/SKILL.md](.agents/skills/parse-fixture/SKILL.md) |
+| `hfr-post` | Rédige et poste un message sur le topic HFR Redface 2 (cat=23, post=35395) | Communication | [.agents/skills/hfr-post/SKILL.md](.agents/skills/hfr-post/SKILL.md) |
+| `bump-version` | Bump de la version des specs + commit + push | Fin de cycle | [.agents/skills/bump-version/SKILL.md](.agents/skills/bump-version/SKILL.md) |
+| `m3-check` | Audit Material 3 sur un écran/composant Compose (19 règles, rapport markdown) | Phase 0+ | [.agents/skills/m3-check/SKILL.md](.agents/skills/m3-check/SKILL.md) |
+| `m3-screen` | Génère un écran Compose complet (State/Intent/ViewModel/Screen/Previews) | Phase 1+ | [.agents/skills/m3-screen/SKILL.md](.agents/skills/m3-screen/SKILL.md) |
 
 ---
 
@@ -48,7 +48,7 @@ Le label `copilot` + la description du skill déclenche l'auto-matching. Alterna
 ```
 
 ### JetBrains Junie
-Les skills sont détectés automatiquement dans `.claude/skills/`. Invocation via l'UI Junie.
+Les skills sont détectés automatiquement dans `.agents/skills/`. Invocation via l'UI Junie.
 
 ### aider / Continue.dev
 Aucune détection automatique des skills. Pour un LLM sur ces outils, copier manuellement le contenu du `SKILL.md` concerné dans le chat.
@@ -57,7 +57,7 @@ Aucune détection automatique des skills. Pour un LLM sur ces outils, copier man
 
 ## Créer un nouveau skill
 
-1. Créer le répertoire `.claude/skills/<slug>/`.
+1. Créer le répertoire `.agents/skills/<slug>/`.
 2. Créer `SKILL.md` avec frontmatter :
    ```yaml
    ---

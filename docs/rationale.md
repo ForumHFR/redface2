@@ -103,12 +103,14 @@ Objection légitime : en 2026, un LLM peut patcher du code Java/RxJava 1. Pourqu
 
 | Mécanisme | Objectif |
 |-----------|----------|
-| **Specs publiques avant le code** | Les décisions sont débattues et documentées avant l'implémentation |
+| **Méthodologie hybride SDD + Prototype + TDD** | Spec les invariants critiques (protocole HFR, sécurité, archi), prototype ce qui émerge du code (UI, perf), TDD sur les fonctions pures. Cf. [`AGENTS.md`](https://github.com/ForumHFR/redface2/blob/main/AGENTS.md) + ADR-000 |
+| **Specs publiques** | Les décisions structurelles sont débattues et documentées. Pas de pré-spec exhaustive avant code. |
 | **Review communautaire** | Des devs expérimentés (Ayuget, Corran Horn, ezzz, gig-gic) challengent les choix |
-| **Audits réguliers** | Audits des specs eux-mêmes ([#14](https://github.com/ForumHFR/redface2/issues/14), [#17](https://github.com/ForumHFR/redface2/issues/17)) pour détecter les erreurs avant qu'elles deviennent du code |
-| **Reprise des fixtures v1** | 17 fixtures HTML de Redface v1 servent de base de tests, garantissant que le comportement éprouvé est préservé |
-| **Stack enforcement au build** | [#20](https://github.com/ForumHFR/redface2/issues/20) — règles d'architecture en tests (Konsist/ArchUnit), pas en convention Markdown |
-| **Attribution IA obligatoire** | [#16](https://github.com/ForumHFR/redface2/issues/16) — chaque commit/PR généré par IA mentionne le modèle, permettant de tracer les erreurs |
+| **Audits ciblés** | Audits des specs ([#14](https://github.com/ForumHFR/redface2/issues/14), [#17](https://github.com/ForumHFR/redface2/issues/17), cycle simplification [#24](https://github.com/ForumHFR/redface2/issues/24)) — uniquement sur déclencheur concret, pas en boucle ouverte |
+| **Reprise des fixtures v1** | 17 fixtures HTML de Redface v1 + ~19 nouvelles capturées depuis HFR réel, servent de base de tests (TDD parser) |
+| **Enforcement au build (Konsist)** | [#22](https://github.com/ForumHFR/redface2/issues/22) — règles d'architecture en tests Konsist (packages/layers/annotations), pas en convention Markdown. Neutralise les biais des LLMs multi-modèles contributeurs |
+| **Attribution IA obligatoire** | Chaque commit/PR généré par IA mentionne le modèle exact ([`AGENTS.md`](https://github.com/ForumHFR/redface2/blob/main/AGENTS.md) section "Attribution et traçabilité"), permettant de tracer les erreurs |
+| **ADRs formalisées** | `docs/adr/` tracé les décisions structurelles avec contexte et conséquences réelles, pas spéculatives ([#27](https://github.com/ForumHFR/redface2/issues/27)) |
 
 ### Ce qu'on ne peut pas garantir
 

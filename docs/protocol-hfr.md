@@ -193,7 +193,7 @@ val listeNumreponse: List<Int> = Regex("""listenumreponse\[\d+\]\s*=\s*(\d+)""")
     .toList()
 ```
 
-Voir le skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.claude/skills/parse-fixture/SKILL.md) (étape 3) pour la procédure d'extraction des variables JS inline.
+Voir le skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/parse-fixture/SKILL.md) (étape 3) pour la procédure d'extraction des variables JS inline.
 
 ---
 
@@ -322,7 +322,7 @@ Les fixtures de test du parser vivent dans `core/parser/src/test/resources/fixtu
 
 Catalogue complet : voir [`contributing.md#fixtures-html-pour-le-parser`](contributing.md#fixtures-html-pour-le-parser).
 
-Pour capturer une fixture : utiliser le MCP `hfr-mcp` avec `hfr_read output=path/to/fixture.html` (écrit le HTML brut), puis appliquer le skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.claude/skills/parse-fixture/SKILL.md) pour générer l'analyse structurée.
+Pour capturer une fixture : utiliser le MCP `hfr-mcp` avec `hfr_read output=path/to/fixture.html` (écrit le HTML brut), puis appliquer le skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/parse-fixture/SKILL.md) pour générer l'analyse structurée.
 
 ---
 
@@ -331,5 +331,5 @@ Pour capturer une fixture : utiliser le MCP `hfr-mcp` avec `hfr_read output=path
 - [Redface v1 code](https://github.com/ForumHFR/Redface/tree/master/app/src/main/java/com/ayuget/redface/data/api/hfr)
 - [Redface v1 fixtures](https://github.com/ForumHFR/Redface/tree/master/app/src/test/resources)
 - [MesDiscussions SDK (Wayback Machine)](https://web.archive.org/web/*/mesdiscussions.net) — ancienne doc partielle des paramètres URL HFR
-- Skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.claude/skills/parse-fixture/SKILL.md) pour l'analyse d'une fixture
+- Skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/parse-fixture/SKILL.md) pour l'analyse d'une fixture
 - MCP [`hfr-mcp`](https://github.com/XaaT/hfr-mcp) pour interagir avec forum.hardware.fr depuis les agents LLM

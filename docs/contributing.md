@@ -53,35 +53,9 @@ redface2/
 
 ### Gestion des dépendances
 
-Le projet utilise un **Gradle version catalog** (`libs.versions.toml`) pour centraliser les versions de toutes les dépendances. Avec 14+ modules, c'est indispensable pour éviter la duplication et les conflits de versions.
+Le projet utilisera un **Gradle version catalog** (`gradle/libs.versions.toml`) créé en Phase 0 comme **source de vérité unique** des versions. Choix de stack et versions structurelles (major.minor) documentés dans [stack.md]({{ site.baseurl }}/stack) — les patches exacts sont résolus dans le TOML au bootstrap et maintenus via Renovate/Dependabot.
 
-```toml
-# gradle/libs.versions.toml (extrait — versions stables avril 2026)
-[versions]
-kotlin = "2.3.20"                       # stable mars 2026
-agp = "9.1.0"                           # Android Gradle Plugin, requires Gradle 9.1+, JDK 17
-gradle = "9.4.1"
-compose-bom = "2026.03.01"              # 2026.04.00 pas encore publiée
-compose-material3-adaptive = "1.2.0"    # WindowSizeClass, NavigationSuiteScaffold, ListDetailPaneScaffold
-navigation = "2.9.7"                    # type-safe routes stables depuis 2.8
-hilt = "2.56"
-androidx-hilt = "1.3.0"
-room = "2.8.4"
-okhttp = "4.12.0"                       # alternative : "5.3.2" (stable juillet 2025, arbitrage Phase 0)
-coil = "3.4.0"                          # + coil-network-okhttp
-jsoup = "1.22.1"
-coroutines = "1.10.2"
-lifecycle-runtime-compose = "2.9.0"     # pour collectAsStateWithLifecycle
-activity-compose = "1.10.0"             # pour enableEdgeToEdge
-datastore = "1.2.1"                     # pour SecureCredentials
-tink = "1.12.0"                         # chiffrement AEAD des credentials
-turbine = "1.2.1"
-mockk = "1.13.13"
-konsist = "0.17.3"                      # enforcement architecture
-roborazzi = "1.30.0"                    # screenshot tests M3
-```
-
-**Source of truth** : ce tableau est la référence canonique pour le `libs.versions.toml`. Les versions alignées avec [stack.md]({{ site.baseurl }}/stack) sont la version cible ; tout upgrade ultérieur est fait via PR dédiée `chore(deps)`.
+**Pourquoi pas de tableau de versions exact ici** : une doc qui liste `kotlin = "2.3.20"` dérive en 3 mois. La source unique est le fichier `libs.versions.toml` du repo, interrogeable aussi via Context7/Docfork (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)) pour générer du code aligné avec les APIs stables courantes.
 
 ### Convention par feature
 
@@ -94,6 +68,19 @@ feature/topic/
   TopicViewModel.kt       # MVI ViewModel
   TopicState.kt           # State + Intent + Effect
 ```
+
+### Méthodologie
+
+Redface 2 utilise une **méthodologie triple-hybride SDD + Prototype + TDD** documentée dans [`AGENTS.md`](https://github.com/ForumHFR/redface2/blob/main/AGENTS.md) (section "Methodologie") et formalisée comme ADR-000 dans `docs/adr/` (bootstrap via [#27](https://github.com/ForumHFR/redface2/issues/27)) :
+
+- **Spec ce qui doit tenir** (protocole HFR, architecture layers, sécurité, contrats externes)
+- **Prototype ce qu'on découvre** (UI, schéma Room, perf, interactions features) — règle des 30 minutes
+- **TDD sélectif** sur fonctions pures (parser, BBCode AST, ViewModels, helpers, mappers)
+- **Test-after** sur intégrations (repositories, deep linking, flows auth)
+- **Coverage guidée par risque**, pas par chiffre
+- **ADRs formalisent après décision**, pas avant
+
+Lire `AGENTS.md` avant une contribution structurante.
 
 ### Style de code
 
@@ -130,25 +117,36 @@ feature/topic/
 
 ### Tests
 
-**Stack de tests :**
-- **JUnit 4** — framework de test (standard Android instrumenté)
+**Stack de tests (Phase 0) :**
+- **JUnit 4** — framework de test
 - **MockK** — mocking Kotlin-first
-- **Robolectric** — tests Android sans émulateur (quand on ne peut pas mocker les composants Android)
-- **Turbine** — test des `Flow` et `StateFlow` (assertions sur les émissions)
-- **Compose Testing** — tests UI pour les écrans critiques
-- **Roborazzi** — screenshot tests Compose (4 variants par écran : compact light/dark + medium light + fontScale 2.0). Détecte les régressions visuelles M3.
-- **Konsist** — enforcement architecture au build (règles sur imports, visibilité, dépendances modules, tokens M3 centralisés dans `:core:ui`). Voir [architecture.md]({{ site.baseurl }}/architecture) pour les règles concrètes.
+- **Robolectric** — tests Android sans émulateur
+- **Turbine** — test des `Flow` et `StateFlow`
+- **Compose Testing** — tests UI pour les écrans critiques (Phase 1+)
 
-**Couverture :**
-- **100%** sur les modules métier : parser, database, ViewModels
-- Tests d'intégration pour les repositories (network + parser + cache)
-- Tests UI pour les écrans critiques et les interactions clés
+**Enforcement au build (Phase 0) :**
+- **Konsist** — règles d'architecture (imports inter-modules, annotations Hilt, layers, tokens M3 centralisés dans `:core:ui`, `@AnonymousClient` sur prefetch). Voir [architecture.md]({{ site.baseurl }}/architecture) pour les règles. Adopté Phase 0 pour neutraliser les biais multi-LLM.
+- **Detekt** — style Kotlin + deprecations (`runBlocking`, `GlobalScope`, `LiveData`, imports dépréciés).
+- **Android Lint** — a11y + i18n + correctness. `MissingContentDescription`, `TouchTargetSizeCheck`, `HardcodedText` en `error` (abort build). Config `lintOptions` dans `build.gradle.kts`.
+
+**Couverture (hybride différenciée) :**
+- **100% sur les transformers du parser HFR** — naturel, fixtures dictent exhaustivité
+- **Guidée par risque ailleurs** (ViewModels, mappers, repositories) — tests sur edge cases réels + fixtures, pas de quota chiffré
+- Outil de mesure (Kover) pour info, pas comme gate CI
 
 **Stratégie :**
-- Tests unitaires pour les ViewModels : intent → state (fonction pure)
-- Tests unitaires pour les parsers : HTML fixture → modèle attendu
-- Tests d'intégration pour les repositories : cache-then-network, retry, erreurs
-- Tests UI pour les écrans critiques (Compose testing)
+- **TDD sélectif** sur fonctions pures (parser, BBCode AST, ViewModels, helpers, mappers) — red → green → refactor
+- **Test-after** sur intégrations (repositories cache/network, deep linking)
+- **Pas de TDD** sur UI Compose (Compose Preview + review visuelle suffisent ; Roborazzi non retenu en MVP, à reconsidérer Phase 4+ si régressions visuelles multi-features)
+
+**Smoke test mensuel HFR (Phase 1 fin) :**
+
+Workflow GitHub Actions (`cron: '0 2 1 * *'`, 1er du mois, 2h UTC) qui vérifie contre HFR réel :
+
+- Sélecteurs CSS critiques (`HfrSelectors`) matchent toujours
+- Liste catégories + sous-catégories (`HfrCategories.ALL` hardcodée) matche le HTML de la page d'accueil — détecte les ajouts/renommages HFR rares mais impactants
+
+Alerte via issue GitHub auto si diff détecté. Activé dès que `HfrSelectors` est significatif (~10 entrées) + parser cats codé, typiquement fin Phase 1.
 
 ### Héritage Redface v1
 
@@ -222,7 +220,7 @@ core/parser/src/test/resources/fixtures/
 - Les fixtures sont capturées depuis le vrai site HFR, **jamais** fabriquées par une IA ou à la main.
 - Capture via MCP `hfr-mcp` : `hfr_read cat=X post=Y page=Z output=path/to/fixture.html` écrit le HTML brut.
 - Chaque fixture est accompagnée d'un fichier `.source.txt` frère ou d'un commentaire HTML en tête précisant `cat`, `post`, `numreponse`, date de capture.
-- Les fixtures loguées ne doivent **jamais** contenir de cookies, tokens `hash_check`, emails, identifiants réels — nettoyer avant commit (voir skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.claude/skills/parse-fixture/SKILL.md) étape 9).
+- Les fixtures loguées ne doivent **jamais** contenir de cookies, tokens `hash_check`, emails, identifiants réels — nettoyer avant commit (voir skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/parse-fixture/SKILL.md) étape 9).
 - Quand un bug de parsing est corrigé, le HTML problématique est ajouté aux fixtures avec un test de non-régression.
 - Un **smoke test CI hebdomadaire** vérifie que les sélecteurs CSS critiques matchent toujours sur une vraie page HFR publique.
 

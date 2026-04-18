@@ -142,9 +142,12 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 - [ ] Thème dynamique (Material You)
 - [ ] Thème "HFR classique"
 - [ ] Widgets Android
-- [ ] Migration automatique des données Redface v1
 - [ ] Tests de performance (scroll, cold start, mémoire)
-- [ ] Publication Play Store
+- [ ] Release automation
+  - Signed release build (keystore en GitHub Secrets)
+  - Publication Play Store (arbitrage Fastlane vs Gradle Play Publisher)
+  - Beta testing (Play Console internal testing privilégié vs Firebase App Distribution)
+  - Création compte développeur ForumHFR si inexistant
 
 **Livrable :** une app prête pour le grand public.
 

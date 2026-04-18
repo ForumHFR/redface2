@@ -8,7 +8,7 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## v0.4.0 — 2026-04-16
 
-Cycle d'audit profond mené par Claude Opus 4.7 (1M context, effort max). Rapport complet : [`drafts/audit-v04.md`](drafts/audit-v04.md) (53 findings, plan 8 batchs). 42 findings résolus.
+Cycle d'audit profond mené par Claude Opus 4.7 (1M context, effort max). 53 findings, plan 8 batchs, 42 findings résolus. Rapport archivé dans le tag `archive/drafts-v0.4.0`.
 
 ### Batch 1 — Corrections critiques specs (`db192e5`)
 - **Sécurité credentials** : `EncryptedSharedPreferences` remplacé par **DataStore + Google Tink + Android Keystore** (ESP déprécié par Google en 04/2025, StrictMode violations + crashs keyset corruption sur OEMs).
@@ -58,7 +58,7 @@ Cycle d'audit profond mené par Claude Opus 4.7 (1M context, effort max). Rappor
 - `mvi.md` : définition explicite des helpers pure **`matchesFilter`** (par `FlagFilter` enum) et **`comparatorFor`** (par `SortMode`) — testables isolément.
 
 ### Hors scope (reporté cycle v0.5.0)
-- Promotion `drafts/material3-ui-ux.md` → `docs/material3.md` (questions ouvertes à trancher : seed color, dynamic color par défaut, font family, BBCode rendering).
+- ~~Promotion `drafts/material3-ui-ux.md` → `docs/material3.md`~~ — **résolu différemment** : 4 décisions actées dans [#9](https://github.com/ForumHFR/redface2/issues/9) (seed `#A62C2C`, dynamic OFF, Roboto, BBCode hybride), documentées dans `docs/stack.md` section "Décisions design". Draft préservé comme référence pédagogique, non promu.
 - F-Droid Redface v1 (issue [Redface#243](https://github.com/ForumHFR/Redface/issues/243)).
 - Création skills `/new-feature`, `/new-parser`, `/spec-diff` (O2, O3, O4 de l'audit).
 - Harnesses de test `BaseParserTest`, `BaseViewModelTest` (O6).

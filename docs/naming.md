@@ -20,6 +20,7 @@ Le nom définitif de l'app n'est pas encore décidé. Voici les candidats.
 | **Redface 2** | Le choix safe. Continuité directe, tout le monde comprend. |
 | **Redfaced** | Jeu de mots : "red-faced" = gêné/surpris en anglais. Léger, humoristique. |
 | **Redfacepalm** | Le facepalm rouge. Très HFR comme ambiance — on a tous fait ce geste en lisant un topic. |
+| **RedMark** | Hommage à M.arc. Jeu de mots Redface + Marc anglicisé. Proposé par [Dintr-un-lemn](https://github.com/ForumHFR/redface2/issues/21). |
 
 ### Humour et culture HFR
 

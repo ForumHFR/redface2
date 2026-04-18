@@ -13,23 +13,27 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 
 ## Vue d'ensemble
 
-| Brique | Choix (version 04/2026) | Alternative écartée | Raison |
+| Brique | Choix | Alternative écartée | Raison |
 |--------|-------|-------------------|--------|
-| Langage | **Kotlin 2.3.20** | Java | Standard Android depuis 2019, null safety, coroutines |
-| UI | **Jetpack Compose** (compose-bom 2026.03.01) | XML layouts | Direction officielle Google, déclaratif, plus maintenable |
-| Design system | **Material 3 1.4** + **Material 3 Adaptive 1.2** | Material 2 | Standard 2026, dynamic color, canonical layouts (list-detail, supporting pane) |
+| Langage | **Kotlin** | Java | Standard Android depuis 2019, null safety, coroutines |
+| UI | **Jetpack Compose** (via compose-bom) | XML layouts | Direction officielle Google, déclaratif, plus maintenable |
+| Design system | **Material 3** + **Material 3 Adaptive 1.2+** | Material 2 | Standard 2026, dynamic color, canonical layouts (list-detail, supporting pane). Décisions design détaillées ci-dessous. |
 | Architecture | **MVI** (MVVM+UDF) | MVVM classique | Flux unidirectionnel, état prévisible, idéal pour un forum reader |
-| Navigation | **Compose Navigation 2.9** (type-safe routes) | Circuit, Decompose | Deep linking natif, type-safe avec `@Serializable` + `toRoute()`, back stack solide, predictive back |
-| DI | **Hilt 2.56 (KSP)** | Koin | Erreurs à la compilation, intégration Jetpack, standard contributeurs |
-| HTTP | **OkHttp 4.12** (arbitrage v5.3 en Phase 0) | Retrofit, Ktor | Pas d'API REST à mapper, scraping HTML direct + cookies |
-| Parsing HTML | **Jsoup 1.22.1** | Regex, custom parser | Standard JVM, CSS selectors, battle-tested |
-| Cache locale | **Room 2.8.4** | DataStore, SQLDelight | Standard Android, intégration Flow, migrations |
-| Stockage sécurisé | **DataStore 1.2.1 + Tink + Keystore** | EncryptedSharedPreferences (**déprécié**) | ESP déprécié par Google en 04/2025 |
-| Images | **Coil 3.4** | Glide | Natif Compose, coroutines, plus idiomatique Kotlin |
+| Navigation | **Compose Navigation 2.9+** (type-safe routes) | Circuit, Decompose | Deep linking natif, type-safe avec `@Serializable` + `toRoute()`, back stack solide, predictive back |
+| DI | **Hilt (KSP)** | Koin | Erreurs à la compilation, intégration Jetpack, standard contributeurs |
+| HTTP | **OkHttp 4** (arbitrage v5 en Phase 0) | Retrofit, Ktor | Pas d'API REST à mapper, scraping HTML direct + cookies |
+| Parsing HTML | **Jsoup** | Regex, custom parser | Standard JVM, CSS selectors, battle-tested |
+| Cache locale | **Room** | DataStore, SQLDelight | Standard Android, intégration Flow, migrations |
+| Stockage sécurisé | **DataStore + Keystore** (cookies HFR, pas de password stocké) | EncryptedSharedPreferences (**déprécié**), Tink (overkill 1 secret) | Décision Option A : re-login manuel à l'expiration session. Cf. [#24 thème 13](https://github.com/ForumHFR/redface2/issues/24) |
+| Images | **Coil 3+** | Glide | Natif Compose, coroutines, plus idiomatique Kotlin |
 | Async | **Coroutines + Flow** | RxJava | Standard Kotlin, plus léger, meilleure intégration Compose |
-| Enforcement archi | **Konsist 0.17** | ArchUnit | Kotlin-first, voit les sealed/data/internal ; ArchUnit = bytecode-only, perd la finesse Kotlin |
-| Screenshot testing | **Roborazzi 1.30** | Paparazzi | Supporte interactions + Robolectric + Hilt ; Paparazzi pas d'interactions |
+| Enforcement archi | **Konsist** | ArchUnit | Kotlin-first, voit les sealed/data/internal ; ArchUnit = bytecode-only, perd la finesse Kotlin |
+| Style + deprecations | **Detekt** | ktlint | Plus riche, règles custom possibles |
+| A11y + i18n + correctness | **Android Lint** (natif) | — | Déjà présent, config `lintOptions` |
+| Screenshot testing | **Non retenu MVP** (Roborazzi reconsidéré Phase 4+) | — | Compose Preview + review manuelle suffisent en Phase 1-3 |
 | minSdk | **29** | 26, 31 | Android 10 : Scoped Storage, TLS 1.3, dark thème natif, ~88-90% parc 04/2026 |
+
+> **Versions précises** : le Gradle version catalog `gradle/libs.versions.toml` sera créé en Phase 0 comme source de vérité unique. Ce tableau garde les versions **major.minor** quand elles sont structurelles (Material 3 Adaptive 1.2+ pour les canonical layouts, Compose Navigation 2.9+ pour les type-safe routes, OkHttp 4 vs 5 pour l'arbitrage Phase 0). Les patches stables 2026 sont à résoudre via Context7/Docfork quand on interroge les docs officielles (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)).
 
 ---
 
@@ -82,6 +86,20 @@ Pour un forum reader, MVI est supérieur :
 - Les actions utilisateur sont bien définies (charger page, quoter, répondre, flag)
 - Le debugging est simple : on inspecte l'état, on rejoue les intents
 - Les tests sont des fonctions pures : intent + state actuel → nouveau state
+
+### Décisions design (tranchées [#9](https://github.com/ForumHFR/redface2/issues/9))
+
+Les 4 choix design de base sont actés pour Phase 0 :
+
+| Décision | Valeur | Pourquoi |
+|---|---|---|
+| Seed color HFR | `#A62C2C` (rouge brique HFR) | Cohérent avec le nom "Redface". Material Theme Builder génère tout le `ColorScheme` depuis cette seed. À revoir si le naming final (#1) s'en écarte. |
+| Dynamic color par défaut | **OFF** (opt-in settings Phase 5) | Préserve l'identité visuelle HFR constante ; Material You reste disponible via toggle utilisateur |
+| Font family | **Roboto** (système Android) | 0 KB APK impact. Roboto Flex / Inter = trendy sans bénéfice technique pour une app forum |
+| BBCode rendering | **Hybride** `AnnotatedString` inline + composables block | Cf. [#3](https://github.com/ForumHFR/redface2/issues/3) (PostRenderer prototype) pour le détail |
+| Thèmes v1 | **Clair, Sombre, AMOLED** | Material You et HFR Classique reportés Phase 5 polish (1-2 jours d'ajout chacun, pas d'imbrication architecturale) |
+
+Le draft `drafts/material3-ui-ux.md` contient les détails étendus (30 color roles, 15 typography styles, motion tokens, adaptive layouts) — c'est un document de référence pédagogique, pas une spec canonique.
 
 ### Material 3 Adaptive (tablettes, pliables, desktop Android)
 

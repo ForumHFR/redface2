@@ -2,8 +2,9 @@
 This file is the source of truth for AI agent instructions across all supported LLM providers.
 CLAUDE.md (Claude Code), GEMINI.md (Gemini CLI) et .github/copilot-instructions.md (GitHub Copilot)
 sont des symlinks vers AGENTS.md. Le fichier .cursor/rules/project.mdc l'importe via `@AGENTS.md`.
-Les skills vivent dans .claude/skills/<name>/SKILL.md au format agentskills.io (portable Claude Code,
-Cursor, Codex, Copilot coding agent, Gemini CLI).
+Les skills vivent dans .agents/skills/<name>/SKILL.md au format agentskills.io — convention
+cross-client pour interoperabilite multi-outil (Claude Code via symlink .claude/skills/,
+Cursor, Codex, Copilot coding agent, Gemini CLI, Junie).
 Voir SKILLS.md à la racine pour l'index humain des skills.
 -->
 
@@ -69,6 +70,18 @@ Pas de tests encore (phase spec). Strategie definie dans `docs/contributing.md` 
 
 ## Regles pour modifications de specs
 
+### Methodologie : hybride SDD + Prototype + TDD
+
+Ce projet utilise une méthodologie triple-hybride, documentée comme ADR-000 (voir `docs/adr/` une fois bootstrappé via [#27](https://github.com/ForumHFR/redface2/issues/27)) :
+
+- **Spec ce qui doit tenir** (SDD sélectif) : protocole HFR, architecture layers, sécurité credentials, contrats externes (MPStorage format), domain language. Ces zones sont spec-first parce qu'une erreur = bug silencieux irréversible ou dette massive.
+- **Prototype ce qu'on découvre** : UI/UX Compose, schéma Room, perf, interactions features, rendu BBCode. Le design émerge du 2e use case, jamais du 0e. Règle des 30 min : face à une feature nouvelle, coder 30 min d'abord ; spec seulement ce qui débloque les 30 suivantes.
+- **TDD sélectif** sur les fonctions pures : parser (HTML → domain), BBCode → AST, ViewModels MVI, helpers (`matchesFilter`, `comparatorFor`), date parser, mappers. Red → Green → Refactor. **Ne pas** faire de TDD sur UI Compose (utiliser Roborazzi), Hilt wiring, Navigation, animations (vérif visuelle).
+- **Test-after** sur les integrations : repositories réseau+parser+cache, deep linking, flows authentifiés — écrire les tests après l'impl avec des mocks réalistes.
+- **Coverage guidée par risque**, pas par chiffre. Pas d'objectif "100%". Couvrir les edge cases réels identifiés et les fixtures HFR capturées.
+- **ADRs formalisent les décisions après** qu'elles soient prises avec contexte réel, pas avant. Pas de RFC pré-code.
+- Pas de nouveau cycle d'audit de specs sans déclencheur concret (bug récurrent, confusion onboarding).
+
 ### Architecture et conception
 
 - Avant de proposer un changement d'architecture, lire **tous** les fichiers `docs/` pour comprendre les dependances croisees. Un changement dans `architecture.md` a des impacts sur `models.md`, `mvi.md`, `contributing.md`, `features.md` et `navigation.md`.
@@ -111,7 +124,10 @@ Pas de tests encore (phase spec). Strategie definie dans `docs/contributing.md` 
 ### Regles specifiques au projet
 
 - **BBCode HFR** : `[fixed]` est un bloc (block-level), jamais inline. Pour du monospace inline, utiliser `[b]`. `[size=X]` n'existe pas. Color se ferme avec `[/#XXXXXX]` (meme code couleur).
-- **Smileys** : ne jamais ajouter de smiley HFR non verifie dans les specs ou exemples. Smileys surs : `:)`, `:(`, `:o`, `:D`, `;)`, `:p`, `:jap:`, `:fou:`, `:pfff:`, `:sweat:`, `:bounce:`, `:pt1cable:`.
+- **Smileys HFR** : deux syntaxes distinctes — builtin (~25, syntaxe `:code:` comme `:jap:`, `:o`, `:D`, `:bounce:`, `:pt1cable:`) et perso (centaines, syntaxe `[:smiley_name]`). Ne jamais inventer un code smiley — vérifier sur HFR réel ou laisser en placeholder.
+- **Tests exécutés, pas juste compilés** : l'IA ne claim jamais "testé" sans avoir réellement exécuté la commande de test et lu le résultat. Un test qui compile n'est pas un test qui passe. En cas d'impossibilité d'exécuter (env manquant, fixture absente, etc.), dire explicitement "tests ecrits mais non execute".
+- **Fixtures HTML** : capturees depuis HFR reel via `hfr-mcp` (`hfr_read ... output=path`), jamais inventees par une IA ou ecrites a la main. Nettoyer les donnees sensibles (cookies, hash_check, emails, identifiants) avant commit. Voir skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/parse-fixture/SKILL.md).
+- **Vérification API actuelle** : quand tu écris un exemple de code ou du code de prod avec une API dont tu n'es pas sûr à 100% (existe-t-elle ? est-elle dépréciée ?), vérifier via la documentation officielle actuelle. MCP recommandés : Context7 ou Docfork (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)). **Toujours préciser "stable release"** dans la requête — Context7 indexe aussi les pre-release/snapshots (ex: Kotlin 2.4-SNAPSHOT alors que la stable courante est 2.3.x). Cette vérification prend 10 secondes et évite les pièges (SwipeRefresh, EncryptedSharedPreferences, APIs inexistantes).
 - **Langue** : docs en francais avec accents. Code, noms de variables, noms de classes en anglais.
 - **`numreponse`** : est unique par **categorie**, pas globalement sur le forum. Le mentionner quand pertinent.
 - **Deep links** : Compose Navigation ne supporte pas les fragments (`#t{id}`). Toujours prevoir un traitement custom dans MainActivity.
@@ -142,14 +158,14 @@ Le prénom du demandeur (`@XaaT`) peut varier si un autre contributeur utilise u
 
 ### Skills et commandes
 
-Les skills du projet vivent dans `.claude/skills/<name>/SKILL.md` au format [agentskills.io](https://agentskills.io/specification). Ils sont portables entre Claude Code, Cursor, Codex, Copilot (coding agent), Gemini CLI et Junie. Index humain : voir [SKILLS.md](SKILLS.md).
+Les skills du projet vivent dans `.agents/skills/<name>/SKILL.md` au format [agentskills.io](https://agentskills.io/specification), emplacement recommandé par la spec pour l'interop cross-client. Claude Code les découvre via le symlink `.claude/skills → ../.agents/skills`. Portables entre Claude Code, Cursor, Codex, Copilot (coding agent), Gemini CLI et Junie. Index humain : voir [SKILLS.md](SKILLS.md).
 
 Invocation :
 
 | Outil | Invocation |
 |---|---|
 | Claude Code | `/<skill-name>` |
-| Cursor (Agent mode) | Le skill est chargé via `.claude/skills/` + description dans `AGENTS.md` |
+| Cursor (Agent mode) | Le skill est chargé via `.agents/skills/` + description dans `AGENTS.md` |
 | OpenAI Codex | `@codex use skill <name>` ou via tool call si intégré |
 | GitHub Copilot coding agent | Issue label `copilot` → skill auto-matché via description |
 | Gemini CLI | `/skill <name>` |
@@ -158,7 +174,7 @@ Invocation :
 
 | Outil | Fichier lu | Notes |
 |---|---|---|
-| Claude Code | `CLAUDE.md` (symlink → `AGENTS.md`) | + `.claude/skills/` |
+| Claude Code | `CLAUDE.md` (symlink → `AGENTS.md`) | Skills via `.claude/skills/` → symlink vers `.agents/skills/` |
 | OpenAI Codex | `AGENTS.md` | Support natif depuis 2025 |
 | GitHub Copilot | `.github/copilot-instructions.md` (symlink → `AGENTS.md`) + `AGENTS.md` (coding agent) | Auto-détecté depuis 08/2025 |
 | Gemini CLI | `GEMINI.md` (symlink → `AGENTS.md`) | Hiérarchique |

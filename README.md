@@ -27,6 +27,10 @@ Le projet est en **phase de spécification**. Le code viendra après validation 
 
 Redface v1 tourne sur une stack de 2015 : Java 11, Retrofit 1.9, RxJava 1, ButterKnife, Otto, minSdk 16. Chaque brique est obsolète ou dépréciée. Un refactoring incrémental serait plus coûteux qu'une réécriture.
 
+## Méthodologie
+
+Développement **hybride SDD + Prototype + TDD** (triple-hybride). Spec ce qui doit tenir (protocole HFR, architecture, sécurité), prototype ce qu'on découvre (UI, perf), TDD sur les fonctions pures (parsers, ViewModels). Détails dans [`AGENTS.md`](AGENTS.md) et l'ADR-000 (à créer en Phase 0).
+
 ## Participer
 
 Les contributions aux specs sont ouvertes. Voir les [issues](https://github.com/ForumHFR/redface2/issues) ou la page [Contribuer](https://forumhfr.github.io/redface2/contributing).

@@ -1,8 +1,20 @@
 # Material 3 — Rapport UI/UX et plan d'enforcement pour Redface 2
 
-> **Statut** : DRAFT — non publié dans les specs. À valider avec la communauté avant intégration en `docs/material3.md`.
-> **Auteur** : Claude Opus 4.6 (demandé par XaaT)
-> **Date** : 2026-04-15
+> **Statut** : DRAFT de référence — ne sera pas forcément promu en `docs/material3.md`, et pas avant Phase 0 au plus tôt.
+>
+> Ce document sert de **matériel de lecture** pour comprendre les concepts Material 3 (30 color roles, 15 typography styles, shapes, motion, adaptive layouts) et leur application à Redface 2. Certaines sections sont délibérément détaillées au-delà du strict nécessaire — c'est voulu, pour servir de référence pédagogique.
+>
+> **Décisions actées** (issue [#9](https://github.com/ForumHFR/redface2/issues/9), clôturée) :
+> - Seed color : `#A62C2C`
+> - Dynamic color : OFF par défaut, opt-in dans settings Phase 5
+> - Font family : Roboto (système Android, 0 KB APK impact)
+> - BBCode rendering : hybride AnnotatedString inline + composables block (voir [#3](https://github.com/ForumHFR/redface2/issues/3))
+> - Thèmes v1 : Clair + Sombre + AMOLED. Material You et HFR Classique reportés Phase 5.
+>
+> Les "10 couches d'enforcement" décrites plus bas sont à prendre comme **inspirations**, pas comme obligations — l'arbitrage Konsist/Roborazzi/CI est tracké dans [#24](https://github.com/ForumHFR/redface2/issues/24) thème 3.
+>
+> **Auteur** : Claude Opus 4.6 (demandé par XaaT), disclaimer ajouté par Claude Opus 4.7
+> **Date** : 2026-04-15, disclaimer 2026-04-17
 > **Cible** : Phase 0 — avant le premier commit de code applicatif
 
 ## Sommaire
@@ -204,12 +216,11 @@ Vérification automatisable via règle custom ou manuelle par screenshot tests +
 
 | Famille | Usage | Licence |
 |---|---|---|
-| Google Sans Text (=Roboto flex) | UI par défaut | Apache 2.0 |
-| Google Sans Display | Display et headline | Apache 2.0 |
-| JetBrains Mono ou Roboto Mono | Code inline et block | OFL |
-| Optionnel : Inter | Alternative UI si Roboto jugé daté | OFL |
+| Roboto (système Android) | UI par défaut | Apache 2.0 |
+| Roboto Mono (système) | Code inline et block | Apache 2.0 |
+| Optionnel : Roboto Flex, Inter | Alternative UI si Roboto standard jugé daté | Apache 2.0 / OFL |
 
-**Décision** : Roboto flex par défaut (inclus dans Compose), JetBrains Mono embarqué pour le monospace.
+**Décision (actée #9)** : **Roboto** système Android par défaut — 0 KB impact APK. Roboto Mono pour le monospace. Pas de font embarquée en v1 (Roboto Flex + Inter = overkill pour un forum reader, à reconsidérer Phase 5 polish si besoin de typo différenciante).
 
 ### 4.4 Font scaling
 
@@ -971,7 +982,7 @@ val DarkColorScheme = darkColorScheme(
 ### 13.2 `Typography.kt`
 
 ```kotlin
-private val RedfaceFontFamily = FontFamily.Default // Roboto flex
+private val RedfaceFontFamily = FontFamily.Default // Roboto système Android
 
 val RedfaceTypography = Typography(
     displayLarge = TextStyle(fontFamily = RedfaceFontFamily, fontSize = 57.sp, lineHeight = 64.sp, letterSpacing = (-0.25).sp),
