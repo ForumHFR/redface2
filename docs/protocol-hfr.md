@@ -241,8 +241,10 @@ Deux sources distinctes :
 Un `Interceptor` OkHttp :
 
 1. Détecte HTTP 302 vers `/login.php` ou absence du pseudo dans la réponse.
-2. Tente un re-login avec les credentials stockés dans le DataStore chiffré (voir [architecture.md#stockage-sécurisé-des-credentials](architecture.md#stockage-sécurisé-des-credentials)).
-3. Si le re-login échoue : émet un événement `SessionExpired` → `NavGraph` redirige vers l'écran de login + efface le cache Room.
+2. Émet un événement `SessionExpired`.
+3. Le `NavGraph` redirige vers l'écran de login et efface le cache Room.
+
+L'utilisateur ré-entre son mot de passe (Option A : pas de re-login transparent, le password n'est pas stocké — voir [architecture.md#stockage-sécurisé-des-credentials](architecture.md#stockage-sécurisé-des-credentials)).
 
 ### 403 / rate limiting
 

@@ -183,73 +183,105 @@ Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
 | `forum.hardware.fr/forum1f.php` | Drapeaux |
 | `forum.hardware.fr/forum1.php?cat=X&post=Y#t12345` | Post spécifique (traitement custom, voir ci-dessous) |
 
-Implémentation via Compose Navigation 2.9 **type-safe routes** (`@Serializable` + `kotlinx.serialization`) :
+Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026). Les routes sont des `data class @Serializable` utilisées comme **clés** de `BackStackEntry` :
 
 ```kotlin
-@Serializable
-data class TopicRoute(
+// Routes type-safe
+@Serializable data object FlagsListRoute
+@Serializable data class TopicRoute(
     val cat: Int,
     val post: Int,
     val page: Int = 1,
-    val scrollTo: Int? = null,  // numreponse cible pour deep link #t{numreponse}
+    val scrollTo: Int? = null,  // numreponse cible pour #t{numreponse}
 )
-
-composable<TopicRoute>(
-    deepLinks = listOf(
-        navDeepLink<TopicRoute>(
-            basePath = "https://forum.hardware.fr/forum1.php",
-        )
-    ),
-) { entry ->
-    val route = entry.toRoute<TopicRoute>()
-    TopicScreen(
-        cat = route.cat,
-        post = route.post,
-        page = route.page,
-        scrollTo = route.scrollTo,
-    )
-}
+@Serializable data class CategoryRoute(val cat: Int, val subcat: Int? = null)
+@Serializable data class EditorRoute(val mode: EditorMode, val cat: Int, val post: Int? = null)
+@Serializable data object MessagesRoute
 ```
 
-Avantages de l'API type-safe (v2.8+) : pas de strings magiques, compilation-safe, refactor IDE possible, sérialisation automatique des params.
-
-### Cas particulier : lien vers un post spécifique
-
-Compose Navigation ne supporte pas les fragments (`#t{numreponse}`) dans les deep links. Les URLs de type `forum.hardware.fr/forum1.php?cat=X&post=Y#t12345` nécessitent un traitement custom dans `MainActivity` :
-
-```kotlin
-// MainActivity.kt
-private fun handleDeepLink(intent: Intent) {
-    val uri = intent.data ?: return
-    val fragment = uri.fragment // "t2781509"
-    val scrollToPost = fragment?.removePrefix("t")?.toIntOrNull()
-
-    val cat = uri.getQueryParameter("cat")
-    val post = uri.getQueryParameter("post")
-    val page = uri.getQueryParameter("page") ?: "1"
-
-    navController.navigate(
-        "topic/$cat/$post/$page" +
-            (scrollToPost?.let { "?scrollTo=$it" } ?: "")
-    )
-}
-```
-
-La route `TopicRoute` accepte un paramètre optionnel `scrollTo: Int?` (voir définition ci-dessus). Le `TopicScreen` reçoit le `numreponse` cible et scroll jusqu'au bon post après chargement de la page.
-
-### Predictive back
-
-Compose Navigation 2.9 gère le predictive back (Android 14+) nativement — aucun code custom requis pour les écrans standards. Seuls les écrans à interaction custom (ex : éditeur avec draft) utilisent `PredictiveBackHandler` pour gérer la progression et proposer un dialog "Abandonner les modifications ?" :
+Le `NavDisplay` prend le back stack en state explicite et un résolveur de contenu :
 
 ```kotlin
 @Composable
-fun EditorScreen(...) {
+fun RedfaceNavHost(startRoute: Any = FlagsListRoute) {
+    val backStack = rememberNavBackStack<Any>(startRoute)
+
+    NavDisplay(
+        backStack = backStack,
+        onBackStackChange = { backStack.value = it },
+        sceneStrategy = SceneStrategy.SingleTop,
+    ) { entry ->
+        when (val route = entry.key) {
+            FlagsListRoute -> FlagsScreen(
+                onOpenTopic = { t -> backStack.push(TopicRoute(t.cat, t.postId, t.lastReadPage)) },
+            )
+            is TopicRoute -> TopicScreen(
+                cat = route.cat, post = route.post, page = route.page, scrollTo = route.scrollTo,
+                onReply = { postId -> backStack.push(EditorRoute(EditorMode.Reply, route.cat, postId)) },
+            )
+            is CategoryRoute -> CategoryScreen(route.cat, route.subcat)
+            is EditorRoute -> EditorScreen(route)
+            MessagesRoute -> MessagesScreen()
+        }
+    }
+}
+```
+
+**Avantages Nav 3 vs Nav 2.x pour Redface 2** :
+- Le back stack est du **state observable standard** — facile à persister/restaurer, à inspecter pour debug, à manipuler dans des tests
+- `SceneStrategy` permet de composer des mises en page multi-pane sans hiérarchiser les graphs
+- Intégration directe avec `ListDetailPaneScaffold` (Material 3 Adaptive) — la liste et le détail vivent dans le même back stack mais s'affichent en parallèle sur tablette
+- Shared Elements entre scenes via `SharedTransitionScope` (transitions topic list → topic view propres)
+
+### Cas particulier : lien vers un post spécifique
+
+Nav 3 (comme Nav 2.x) **ne gère pas les fragments URI** (`#t{numreponse}`) nativement : on parse l'URI dans `MainActivity` et on pousse la route typée :
+
+```kotlin
+// MainActivity.kt
+@Composable
+fun RedfaceApp(intent: Intent?) {
+    val backStack = rememberNavBackStack<Any>(FlagsListRoute)
+
+    LaunchedEffect(intent) {
+        val uri = intent?.data ?: return@LaunchedEffect
+        parseHfrDeepLink(uri)?.let { backStack.push(it) }
+    }
+
+    NavDisplay(backStack = backStack, /* ... */) { /* ... */ }
+}
+
+fun parseHfrDeepLink(uri: Uri): Any? = when (uri.path) {
+    "/forum1.php" -> {
+        val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
+        val post = uri.getQueryParameter("post")?.toIntOrNull() ?: return null
+        val page = uri.getQueryParameter("page")?.toIntOrNull() ?: 1
+        val scrollTo = uri.fragment?.removePrefix("t")?.toIntOrNull()
+        TopicRoute(cat = cat, post = post, page = page, scrollTo = scrollTo)
+    }
+    "/forum2.php" -> CategoryRoute(
+        cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null,
+        subcat = uri.getQueryParameter("subcat")?.toIntOrNull(),
+    )
+    "/forum1f.php" -> FlagsListRoute
+    else -> null
+}
+```
+
+Le `TopicScreen` reçoit le `scrollTo` (numreponse cible) et scroll jusqu'au bon post après chargement de la page.
+
+### Predictive back
+
+Nav 3 intègre `PredictiveBackHandler` via `NavDisplay` — aucun code custom requis pour les écrans standards. Seuls les écrans à interaction custom (ex : éditeur avec draft) ajoutent leur propre handler :
+
+```kotlin
+@Composable
+fun EditorScreen(state: EditorState, onIntent: (EditorIntent) -> Unit) {
     var showDiscardDialog by remember { mutableStateOf(false) }
 
-    PredictiveBackHandler(enabled = draftContent.isNotEmpty()) { progress ->
+    PredictiveBackHandler(enabled = state.content.isNotEmpty()) { progress ->
         progress.collect { /* animation personnalisée si besoin */ }
-        // à la fin : décider si on pop ou on montre le dialog
-        showDiscardDialog = true
+        showDiscardDialog = true  // à la fin, on demande confirmation
     }
 
     // ... rest of the screen
@@ -258,16 +290,43 @@ fun EditorScreen(...) {
 
 Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application>`.
 
+### Multi-pane adaptatif (tablette, foldables)
+
+`NavDisplay` se compose avec `ListDetailPaneScaffold` (Material 3 Adaptive 1.2+). Le même back stack alimente la list pane et la detail pane selon `WindowSizeClass` :
+
+```kotlin
+@Composable
+fun AdaptiveNavHost() {
+    val backStack = rememberNavBackStack<Any>(FlagsListRoute)
+    val isExpanded = currentWindowAdaptiveInfo().windowSizeClass.windowWidthSizeClass !=
+        WindowWidthSizeClass.COMPACT
+
+    if (isExpanded) {
+        ListDetailPaneScaffold(
+            listPane = { FlagsScreen(onOpenTopic = { backStack.push(TopicRoute(...)) }) },
+            detailPane = {
+                NavDisplay(
+                    backStack = backStack.value.filter { it.key !is FlagsListRoute },
+                    /* ... */
+                )
+            },
+        )
+    } else {
+        NavDisplay(backStack = backStack, /* ... */) { /* ... */ }
+    }
+}
+```
+
 ---
 
 ## Back Stack
 
-Le back stack est géré par Compose Navigation avec des règles spécifiques :
+Nav 3 expose le back stack comme un `List<BackStackEntry<Any>>` observable. Règles Redface 2 :
 
-- **Bottom nav** : chaque onglet conserve son propre back stack
-- **Retour depuis un topic** : retour à la liste (drapeaux, forum, recherche) à la même position de scroll
+- **Bottom nav** : chaque onglet conserve son propre back stack (un `NavDisplay` par onglet, ou un `SceneStrategy` qui segmente par préfixe)
+- **Retour depuis un topic** : retour à la liste (drapeaux, forum, recherche) à la même position de scroll — la scène précédente reste en mémoire tant qu'elle est dans le back stack
 - **Retour depuis reply/edit** : retour au topic à la même page
-- **Deep link** : back → écran d'accueil (drapeaux)
+- **Deep link** : push de la route typée sur le back stack existant, sans écraser — si l'utilisateur fait back, il retourne à l'écran d'accueil (drapeaux)
 
 ```mermaid
 graph LR

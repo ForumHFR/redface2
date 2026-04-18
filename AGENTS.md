@@ -51,7 +51,7 @@ docs/
 
 ## Stack (verrouillee)
 
-Kotlin, Jetpack Compose, MVI, Compose Navigation, Hilt (KSP), OkHttp 4, Jsoup, Room, Coil, Coroutines + Flow, minSdk 29
+Kotlin, Jetpack Compose, MVI, Compose Navigation 3, Hilt (KSP), OkHttp 5, Jsoup, Room, Coil, Coroutines + Flow, minSdk 29
 
 ## Tests
 
@@ -130,10 +130,10 @@ Ce projet utilise une méthodologie triple-hybride, documentée comme ADR-000 (v
 - **Vérification API actuelle** : quand tu écris un exemple de code ou du code de prod avec une API dont tu n'es pas sûr à 100% (existe-t-elle ? est-elle dépréciée ?), vérifier via la documentation officielle actuelle. MCP recommandés : Context7 ou Docfork (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)). **Toujours préciser "stable release"** dans la requête — Context7 indexe aussi les pre-release/snapshots (ex: Kotlin 2.4-SNAPSHOT alors que la stable courante est 2.3.x). Cette vérification prend 10 secondes et évite les pièges (SwipeRefresh, EncryptedSharedPreferences, APIs inexistantes).
 - **Langue** : docs en francais avec accents. Code, noms de variables, noms de classes en anglais.
 - **`numreponse`** : est unique par **categorie**, pas globalement sur le forum. Le mentionner quand pertinent.
-- **Deep links** : Compose Navigation ne supporte pas les fragments (`#t{id}`). Toujours prevoir un traitement custom dans MainActivity.
+- **Deep links** : Compose Navigation 3 (comme 2.x) ne gere pas les fragments URI (`#t{id}`) nativement — parser l'URI manuellement dans `MainActivity` et pousser la route typee dans le back stack.
 - **Prefetch** : utiliser des requetes non authentifiees pour eviter de marquer les drapeaux comme lus.
-- **OkHttp** : version 4 verrouillee, revisable en Phase 0 si OkHttp 5 est stable.
-- **Deprecations** : ne jamais utiliser de composants deprecies (Accompanist SwipeRefresh, EncryptedSharedPreferences, etc.) dans les exemples. Utiliser les alternatives 2026 : PullToRefreshBox, DataStore+Tink+Keystore, Compose Navigation type-safe.
+- **OkHttp** : version 5 (5.3+) verrouillee. Stable depuis 07/2025.
+- **Deprecations** : ne jamais utiliser de composants deprecies (Accompanist SwipeRefresh, EncryptedSharedPreferences, etc.) dans les exemples. Utiliser les alternatives 2026 : PullToRefreshBox, DataStore + Keystore (Option A credentials, sans Tink), Compose Navigation 3.
 
 ---
 

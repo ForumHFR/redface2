@@ -149,6 +149,25 @@ En fallback ou au choix de l'utilisateur : **Imgur**.
 - Compression/redimensionnement automatique avant upload (configurable)
 - Copie du lien BBCode en un tap (`[img]url[/img]` ou `[url=original][img]thumb[/img][/url]`)
 
+### Chargement d'images lourdes (topics image)
+
+Les topics image HFR (`topics-image`) peuvent contenir 50+ images, certaines de plusieurs MB. Charger 10-15 MB à chaque scroll sur mobile est inacceptable (data, RAM, batterie).
+
+**Stratégie v1 (prototype-first, à itérer Phase 1)** :
+
+- **Preview + tap-to-full** par défaut : Coil 3 affiche un thumbnail redimensionné à la taille du container (typiquement 400-600 px), full size au tap — pattern Reddit/Tapatalk
+- **Auto-detect thumbs HFR** : quand le BBCode utilise une balise qui fournit déjà une URL thumb (ex : `[url=full][img]thumb[/img][/url]`), utiliser directement le thumb sans re-download du full
+- **Data saver mode** : réglage utilisateur dans les préférences
+  - `wifi only` : télécharger les images uniquement en Wi-Fi (data cellulaire = placeholder tap-to-load)
+  - `preview only` : toujours afficher le thumbnail, jamais le full automatiquement
+  - `full` : comportement par défaut (preview + tap-to-full)
+
+**Non retenu** :
+- Proxy tiers (wsrv.nl, images.weserv.nl) pour resize server-side : dépendance externe, privacy (URLs HFR via un tiers), certaines images HFR authentifiées ne passent pas
+- Préchargement agressif de toutes les images : coût data disproportionné sur mobile
+
+**Fixtures à capturer** : une page type `topic-image` (50+ images lourdes) dans les fixtures pour benchmarker le scroll, la RAM et le temps de parsing.
+
 ### Recherche et insertion de GIFs
 
 *Inspiré de : [HFR] Giphy (pop. 12)*

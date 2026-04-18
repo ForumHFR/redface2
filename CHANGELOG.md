@@ -26,13 +26,20 @@ Pivot vers méthodologie hybride (SDD + Prototype + TDD). Allègement cross-docs
 - `architecture.md` : sections Protocole HFR et règle Prefetch non-authentifié dédoublonnées — `protocol-hfr.md` reste la source unique.
 - Phase 5 Polish détaillée avec sous-items Play Store (Fastlane vs Gradle Play Publisher, beta testing, compte développeur ForumHFR).
 - Décisions design [#9](https://github.com/ForumHFR/redface2/issues/9) documentées dans `stack.md` (seed `#A62C2C`, dynamic OFF, Roboto, BBCode hybride).
+- **Navigation** : Compose Navigation 2.9 type-safe → **Compose Navigation 3 (1.1.0 stable depuis 08/04/2026)**. Réécriture `docs/navigation.md` (`NavDisplay` + `SceneStrategy` + `rememberNavBackStack`, deep linking via parsing `Uri` manuel + push de routes typées, intégration `ListDetailPaneScaffold` M3 Adaptive). Cf. [#23](https://github.com/ForumHFR/redface2/issues/23).
+- **HTTP** : OkHttp 4.12 → **OkHttp 5.3+** (stable depuis 07/2025, Happy Eyeballs, DoH, HTTP/3 en cours). Pas de dette de migration : on démarre neuf. Cf. [#23](https://github.com/ForumHFR/redface2/issues/23).
+- **Stockage credentials** : simplification finale — uniquement **cookies de session HFR chiffrés** (DataStore + Keystore + Cipher AES/GCM). Pas de password stocké, pas de re-login transparent, pas de biométrie. À l'expiration de session, l'utilisateur ré-entre son mot de passe. `docs/architecture.md` et `docs/protocol-hfr.md` mis à jour. Cf. [#23](https://github.com/ForumHFR/redface2/issues/23).
+- `docs/features.md` : nouvelle sous-section "Chargement d'images lourdes" (preview + tap-to-full, auto-detect thumbs HFR, data saver mode). Cf. [#23](https://github.com/ForumHFR/redface2/issues/23).
 
 ### Decided
-- **Credentials Option A** : DataStore + Keystore (sans Tink) pour simplifier la stack.
+- **Credentials Option A** : DataStore + Keystore (sans Tink, sans password stocké, sans biométrie) pour simplifier la stack.
+- **Navigation 3** retenu pour démarrage neuf (stable depuis 10 jours, Compose-first).
+- **OkHttp 5** retenu ; Ktor reporté avec KMP post-v1.
 - **Roborazzi** non retenu MVP (re-évaluable Phase 4+).
 - Coverage hybride différenciée (100% parser/TDD, guidée par risque ailleurs), pas de gate chiffré.
 - Smoke test HFR : mensuel (cron `0 2 1 * *`) pour sélecteurs CSS + catégories/sous-catégories.
 - Nombre élevé de modules Gradle conservé ([#4](https://github.com/ForumHFR/redface2/issues/4)).
+- **Images lourdes** : preview + tap-to-full par défaut, data saver mode en settings, pas de proxy tiers (privacy).
 
 ### Removed
 - `drafts/audit-v04.md` et `drafts/deep-audit-prompt-v04.md` (archivés dans tag `archive/drafts-v0.4.0`).
