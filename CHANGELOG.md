@@ -12,6 +12,25 @@ Aucun changement documenté pour l'instant.
 
 ---
 
+## v0.5.1 — 2026-04-19
+
+Réorganisation du site publié : séparation `specs/` / `guides/` et ADRs replacées à la racine `docs/adr/`.
+
+### Added
+- `docs/specs/index.md` comme index des pages canoniques publiées. Commit [`b2eab39`](https://github.com/ForumHFR/redface2/commit/b2eab39).
+- `docs/guides/index.md` comme index des guides de contribution et de contexte. Commit [`b2eab39`](https://github.com/ForumHFR/redface2/commit/b2eab39).
+
+### Changed
+- Site Jekyll réorganisé en deux familles visibles : `docs/specs/` pour les pages canoniques et `docs/guides/` pour les pages d'accompagnement. Commit [`b2eab39`](https://github.com/ForumHFR/redface2/commit/b2eab39).
+- ADRs déplacées de `docs/specs/adr/` vers `docs/adr/` pour revenir à une convention de repo plus classique tout en gardant leur rattachement conceptuel aux specs. Commit [`491067a`](https://github.com/ForumHFR/redface2/commit/491067a).
+- `docs/index.md`, `README.md`, `AGENTS.md`, `CHANGELOG.md`, `docs/specs/stack.md`, `docs/specs/architecture.md`, `docs/specs/methodology.md`, `docs/guides/contributing.md` et `docs/guides/rationale.md` recâblés sur les nouvelles URLs publiques `/specs/*`, `/guides/*` et `/adr/*`.
+
+### Fixed
+- Les URLs publiques des ADRs reviennent en `/adr/*` au lieu de `/specs/adr/*`.
+- La navigation du site sépare désormais clairement les pages canoniques des guides de contribution et de contexte.
+
+---
+
 ## v0.5.0 — 2026-04-19
 
 Pivot vers méthodologie hybride (SDD + Prototype + TDD). Allègement cross-docs et convention cross-client pour les skills.
@@ -20,7 +39,7 @@ Pivot vers méthodologie hybride (SDD + Prototype + TDD). Allègement cross-docs
 - Méthodologie triple-hybride formalisée dans `AGENTS.md`, `README.md`, `docs/guides/contributing.md`, `docs/guides/rationale.md`.
 - `docs/specs/methodology.md` comme **source canonique** de la méthode du projet. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
 - `docs/specs/scope.md` comme **source canonique** du scope produit et des use cases. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
-- `docs/specs/adr/` bootstrappé avec `ADR-000`, `001`, `002`, `008`, `009`. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
+- `docs/adr/` bootstrappé avec `ADR-000`, `001`, `002`, `008`, `009`. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
 - **Detekt** + **Android Lint** (a11y critique) ajoutés Phase 0 dans `stack.md` et `contributing.md`.
 - Règle "Vérification API actuelle" avec mot-clé "stable release" (Context7 / Docfork) dans `AGENTS.md`.
 - Smileys HFR : distinction explicite builtin (`:code:`) vs perso (`[:name]`) dans `AGENTS.md`.
