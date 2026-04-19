@@ -20,3 +20,5 @@ Cette section regroupe ce qui fait foi pour le projet :
 - les ADRs
 
 Pour les guides de contribution, de contexte et de nommage, voir la section [Guides]({{ site.baseurl }}/guides).
+
+Les ADRs sont publiées séparément dans [docs/adr/]({{ site.baseurl }}/adr), tout en restant rattachées conceptuellement aux spécifications.

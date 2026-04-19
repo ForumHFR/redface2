@@ -140,7 +140,7 @@ Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (com
 
 ### Modules feature (extensions communautaires — Phase 4)
 
-Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le projet compte 15 modules (8 core + 7 features base). Les extensions sont des modules Gradle isolés qui s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant. La décision de découpage v1 est formalisée dans [ADR-001]({{ site.baseurl }}/specs/adr/001-modules-gradle-v1).
+Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le projet compte 15 modules (8 core + 7 features base). Les extensions sont des modules Gradle isolés qui s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant. La décision de découpage v1 est formalisée dans [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1).
 
 | Module | Fonction | Dépend de |
 |--------|----------|-----------|
@@ -336,7 +336,7 @@ Les cookies sont persistés via un `PersistentCookieJar` adossé au DataStore ch
 
 ### Stockage sécurisé des credentials
 
-**Option A retenue** (cycle [#24](https://github.com/ForumHFR/redface2/issues/24) thème 13, formalisée dans [ADR-002]({{ site.baseurl }}/specs/adr/002-credentials-option-a)) : stack minimaliste **DataStore + Android Keystore**, **pas de Tink**, **pas de password stocké**.
+**Option A retenue** (cycle [#24](https://github.com/ForumHFR/redface2/issues/24) thème 13, formalisée dans [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a)) : stack minimaliste **DataStore + Android Keystore**, **pas de Tink**, **pas de password stocké**.
 
 **Ce qui est stocké** : uniquement les **cookies de session HFR** (`md_user`, `md_pass`) — nécessaires pour rester connecté entre deux lancements de l'app.
 

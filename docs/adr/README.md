@@ -3,7 +3,7 @@ title: ADRs
 parent: Spécifications
 nav_order: 11
 has_children: true
-permalink: /specs/adr
+permalink: /adr
 ---
 
 # Architecture Decision Records
@@ -29,8 +29,8 @@ Règles du repo :
 
 | ADR | Sujet |
 |---|---|
-| [ADR-000]({{ site.baseurl }}/specs/adr/000-methodologie-triple-hybride) | Méthodologie triple-hybride SDD + Prototype + TDD |
-| [ADR-001]({{ site.baseurl }}/specs/adr/001-modules-gradle-v1) | Découpage Gradle v1 : 15 modules avant les extensions |
-| [ADR-002]({{ site.baseurl }}/specs/adr/002-credentials-option-a) | Credentials Option A : DataStore + Keystore, sans password stocké |
-| [ADR-008]({{ site.baseurl }}/specs/adr/008-compose-navigation-3) | Compose Navigation 3 retenu pour la navigation |
-| [ADR-009]({{ site.baseurl }}/specs/adr/009-okhttp-5-3-plus) | OkHttp 5.3+ retenu comme client HTTP principal |
+| [ADR-000]({{ site.baseurl }}/adr/000-methodologie-triple-hybride) | Méthodologie triple-hybride SDD + Prototype + TDD |
+| [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1) | Découpage Gradle v1 : 15 modules avant les extensions |
+| [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a) | Credentials Option A : DataStore + Keystore, sans password stocké |
+| [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3) | Compose Navigation 3 retenu pour la navigation |
+| [ADR-009]({{ site.baseurl }}/adr/009-okhttp-5-3-plus) | OkHttp 5.3+ retenu comme client HTTP principal |

@@ -21,12 +21,12 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 | UI | **Jetpack Compose** (via compose-bom) | XML layouts | Direction officielle Google, déclaratif, plus maintenable |
 | Design system | **Material 3** + **Material 3 Adaptive 1.2+** | Material 2 | Standard 2026, dynamic color, canonical layouts (list-detail, supporting pane). Décisions design détaillées ci-dessous. |
 | Architecture | **MVI** (MVVM+UDF) | MVVM classique | Flux unidirectionnel, état prévisible, idéal pour un forum reader |
-| Navigation | **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026) | Circuit, Decompose, Navigation 2.x | Compose-first : back stack en state (`NavBackStack<NavKey>`), scenes calculées via `rememberSceneState`, Shared Elements entre scenes, intégration M3 Adaptive directe (list-detail, supporting pane). Cf. [ADR-008]({{ site.baseurl }}/specs/adr/008-compose-navigation-3). |
+| Navigation | **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026) | Circuit, Decompose, Navigation 2.x | Compose-first : back stack en state (`NavBackStack<NavKey>`), scenes calculées via `rememberSceneState`, Shared Elements entre scenes, intégration M3 Adaptive directe (list-detail, supporting pane). Cf. [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3). |
 | DI | **Hilt (KSP)** | Koin | Erreurs à la compilation, intégration Jetpack, standard contributeurs |
 | HTTP | **OkHttp 5** (5.3+) | Retrofit, Ktor | Pas d'API REST à mapper, scraping HTML direct + cookies. Stable depuis 07/2025 (`callTimeout` via `kotlin.time.Duration`, `mockwebserver3`). |
 | Parsing HTML | **Jsoup** | Regex, custom parser | Standard JVM, CSS selectors, battle-tested |
 | Cache locale | **Room** | DataStore, SQLDelight | Standard Android, intégration Flow, migrations |
-| Stockage sécurisé | **DataStore + Keystore** (cookies HFR, pas de password stocké) | EncryptedSharedPreferences (**déprécié**), Tink (overkill 1 secret) | Décision Option A : re-login manuel à l'expiration session. Cf. [ADR-002]({{ site.baseurl }}/specs/adr/002-credentials-option-a). |
+| Stockage sécurisé | **DataStore + Keystore** (cookies HFR, pas de password stocké) | EncryptedSharedPreferences (**déprécié**), Tink (overkill 1 secret) | Décision Option A : re-login manuel à l'expiration session. Cf. [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a). |
 | Images | **Coil 3+** | Glide | Natif Compose, coroutines, plus idiomatique Kotlin |
 | Async | **Coroutines + Flow** | RxJava | Standard Kotlin, plus léger, meilleure intégration Compose |
 | Enforcement archi | **Konsist** | ArchUnit | Kotlin-first, voit les sealed/data/internal ; ArchUnit = bytecode-only, perd la finesse Kotlin |
@@ -153,7 +153,7 @@ Quatre options évaluées :
 - **Type safety** : les routes implémentent `NavKey` et sont `@Serializable`, donc le back stack reste typé et sérialisable
 - **Deep linking** : HFR ayant des fragments URI non supportés (`#t{numreponse}`) de toute façon, on parse la `Uri` entrante manuellement et on ajoute une route typée au back stack — plus simple qu'avant avec Nav 2.x
 
-Voir `docs/specs/navigation.md` pour les exemples concrets (`NavDisplay`, `SceneStrategy`, deep linking, predictive back) et [ADR-008]({{ site.baseurl }}/specs/adr/008-compose-navigation-3) pour la décision.
+Voir `docs/specs/navigation.md` pour les exemples concrets (`NavDisplay`, `SceneStrategy`, deep linking, predictive back) et [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3) pour la décision.
 
 ### Hilt plutôt que Koin
 
@@ -214,7 +214,7 @@ suspend fun getTopicPage(cat: Int, post: Int, page: Int): Document {
 
 OkHttp fournit aussi le **CookieJar** pour la gestion de session HFR — essentiel pour l'authentification.
 
-**Version retenue (04/2026)** : **OkHttp 5.3+** — stable depuis 07/2025, avec des gains concrets vs 4.x : Happy Eyeballs (dual-stack IPv4/IPv6), DoH opt-in, `callTimeout()` via `kotlin.time.Duration`, `mockwebserver3` aligné avec le test runner. KMP reste reporté post-v1 ([#2](https://github.com/ForumHFR/redface2/issues/2)) pour des raisons de scope ; ce report n'est pas lié à une incompatibilité d'OkHttp 5, publié comme projet Kotlin Multiplatform. API Interceptor/CookieJar API-compatible avec 4.x — pas de dette de migration à prévoir puisqu'on démarre neuf. Décision formalisée dans [ADR-009]({{ site.baseurl }}/specs/adr/009-okhttp-5-3-plus).
+**Version retenue (04/2026)** : **OkHttp 5.3+** — stable depuis 07/2025, avec des gains concrets vs 4.x : Happy Eyeballs (dual-stack IPv4/IPv6), DoH opt-in, `callTimeout()` via `kotlin.time.Duration`, `mockwebserver3` aligné avec le test runner. KMP reste reporté post-v1 ([#2](https://github.com/ForumHFR/redface2/issues/2)) pour des raisons de scope ; ce report n'est pas lié à une incompatibilité d'OkHttp 5, publié comme projet Kotlin Multiplatform. API Interceptor/CookieJar API-compatible avec 4.x — pas de dette de migration à prévoir puisqu'on démarre neuf. Décision formalisée dans [ADR-009]({{ site.baseurl }}/adr/009-okhttp-5-3-plus).
 
 ### Jsoup
 

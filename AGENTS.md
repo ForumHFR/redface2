@@ -79,7 +79,7 @@ Pas de tests encore (phase spec). Strategie definie dans `docs/guides/contributi
 
 ### Methodologie canonique
 
-La méthode du projet est documentée dans `docs/specs/methodology.md` et formalisée dans `docs/specs/adr/000-methodologie-triple-hybride.md`.
+La méthode du projet est documentée dans `docs/specs/methodology.md` et formalisée dans `docs/adr/000-methodologie-triple-hybride.md`.
 
 Dans `AGENTS.md`, on ne garde que les conséquences opérationnelles pour les agents :
 - lire `docs/specs/methodology.md` avant tout changement structurant de spec

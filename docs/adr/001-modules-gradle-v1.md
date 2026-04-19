@@ -3,7 +3,7 @@ title: ADR-001
 parent: ADRs
 grand_parent: Spécifications
 nav_order: 1
-permalink: /specs/adr/001-modules-gradle-v1
+permalink: /adr/001-modules-gradle-v1
 ---
 
 # ADR-001 — Découpage Gradle v1 : 15 modules avant les extensions

@@ -77,7 +77,7 @@ feature/topic/
 
 ### Méthodologie
 
-La méthode canonique du projet est documentée dans [Méthodologie]({{ site.baseurl }}/specs/methodology) et formalisée dans [ADR-000]({{ site.baseurl }}/specs/adr/000-methodologie-triple-hybride).
+La méthode canonique du projet est documentée dans [Méthodologie]({{ site.baseurl }}/specs/methodology) et formalisée dans [ADR-000]({{ site.baseurl }}/adr/000-methodologie-triple-hybride).
 
 Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode du projet. Pour une contribution structurante, lire `docs/specs/methodology.md` puis `AGENTS.md`.
 

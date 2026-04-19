@@ -3,7 +3,7 @@ title: ADR-008
 parent: ADRs
 grand_parent: Spécifications
 nav_order: 8
-permalink: /specs/adr/008-compose-navigation-3
+permalink: /adr/008-compose-navigation-3
 ---
 
 # ADR-008 — Compose Navigation 3 retenu pour la navigation

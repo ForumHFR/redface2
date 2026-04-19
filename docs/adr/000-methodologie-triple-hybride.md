@@ -3,7 +3,7 @@ title: ADR-000
 parent: ADRs
 grand_parent: Spécifications
 nav_order: 0
-permalink: /specs/adr/000-methodologie-triple-hybride
+permalink: /adr/000-methodologie-triple-hybride
 ---
 
 # ADR-000 — Méthodologie triple-hybride SDD + Prototype + TDD

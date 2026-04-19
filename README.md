@@ -34,7 +34,7 @@ Redface v1 tourne sur une stack de 2015 : Java 11, Retrofit 1.9, RxJava 1, Butte
 
 ## Méthodologie
 
-La méthode canonique du projet est documentée dans [Méthodologie](https://forumhfr.github.io/redface2/specs/methodology) et formalisée dans [ADR-000](https://forumhfr.github.io/redface2/specs/adr/000-methodologie-triple-hybride). `AGENTS.md` garde les règles opérationnelles pour les agents, pas la méthode complète.
+La méthode canonique du projet est documentée dans [Méthodologie](https://forumhfr.github.io/redface2/specs/methodology) et formalisée dans [ADR-000](https://forumhfr.github.io/redface2/adr/000-methodologie-triple-hybride). `AGENTS.md` garde les règles opérationnelles pour les agents, pas la méthode complète.
 
 ## Participer
 

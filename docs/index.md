@@ -96,7 +96,7 @@ Les contributions aux specs sont les bienvenues — ouvrez une issue ou commente
 - [Protocole HFR]({{ site.baseurl }}/specs/protocol-hfr) — Contrats externes, endpoints et edge cases
 - [Roadmap]({{ site.baseurl }}/specs/roadmap) — Phases de développement
 - [Extensions communautaires]({{ site.baseurl }}/specs/extensions) — Les addons userscript qui deviennent natifs
-- [ADRs]({{ site.baseurl }}/specs/adr) — Les décisions structurantes déjà prises
+- [ADRs]({{ site.baseurl }}/adr) — Les décisions structurantes déjà prises
 
 ### Guides
 

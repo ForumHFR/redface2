@@ -3,7 +3,7 @@ title: ADR-009
 parent: ADRs
 grand_parent: Spécifications
 nav_order: 9
-permalink: /specs/adr/009-okhttp-5-3-plus
+permalink: /adr/009-okhttp-5-3-plus
 ---
 
 # ADR-009 — OkHttp 5.3+ retenu comme client HTTP principal
