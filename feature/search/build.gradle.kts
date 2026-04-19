@@ -1,14 +1,9 @@
 plugins {
-    alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.compose)
+    id("redface.android.compose.library")
 }
 
 android {
     namespace = "fr.forumhfr.redface2.feature.search"
-
-    buildFeatures {
-        compose = true
-    }
 }
 
 dependencies {

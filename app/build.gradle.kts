@@ -1,5 +1,5 @@
 plugins {
-    alias(libs.plugins.android.application)
+    id("redface.android.application")
 }
 
 android {

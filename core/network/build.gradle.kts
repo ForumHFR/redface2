@@ -1,5 +1,5 @@
 plugins {
-    alias(libs.plugins.kotlin.jvm)
+    id("redface.kotlin.jvm.library")
 }
 
 dependencies {
