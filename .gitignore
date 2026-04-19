@@ -1,2 +1,8 @@
 .codex
 scripts/phase-minus-1-dashboard.sh
+.gradle/
+.gradle-user/
+.gradle-tmp/
+.kotlin/
+local.properties
+**/build/
