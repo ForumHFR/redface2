@@ -10,11 +10,9 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 
 # Redface 2
 
-## Identite Git/GitHub
+## Git et GitHub
 
 - **Organisation GitHub** : ForumHFR
-- **Git user.name** : xat
-- **Git user.email** : xat@azora.fr
 - Utiliser la config git locale (repo), jamais `--global`
 
 ## Projet
@@ -135,7 +133,7 @@ Dans `AGENTS.md`, on ne garde que les conséquences opérationnelles pour les ag
 
 - Commits : toujours terminer par `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>` (ou le modele exact utilise).
 - Commits d'audit : lister les numeros de points corriges dans le message (ex: "#1: fix diagram, #3: add filteredFlags").
-- Issues : tout commentaire genere par IA commence par `> Action par Claude (demande par @XaaT)`.
+- Issues : tout commentaire genere par IA commence par la ligne d'attribution correspondant au fournisseur, avec `@<demandeur>` remplace par le pseudo GitHub du contributeur qui a demande l'action.
 - Ne jamais fermer une issue sans commentaire explicatif, meme si auto-closed par un commit.
 
 ### Regles specifiques au projet
@@ -164,14 +162,14 @@ Tout commentaire sur issue, PR ou post HFR généré par un LLM doit commencer p
 
 | Fournisseur | Ligne d'attribution |
 |---|---|
-| Claude Code | `> Action par Claude Opus <version> (demandée par @XaaT)` |
-| OpenAI Codex | `> Action par GPT-5 Codex (demandée par @XaaT)` |
-| GitHub Copilot coding agent | `> Action par GitHub Copilot Agent (demandée par @XaaT)` |
-| Gemini CLI | `> Action par Gemini <version> (demandée par @XaaT)` |
-| Cursor agent | `> Action par Cursor Agent (<modèle sous-jacent>, demandée par @XaaT)` |
-| aider | `> Action par aider (<modèle sous-jacent>, demandée par @XaaT)` |
+| Claude Code | `> Action par Claude Opus <version> (demandée par @<demandeur>)` |
+| OpenAI Codex | `> Action par GPT-5 Codex (demandée par @<demandeur>)` |
+| GitHub Copilot coding agent | `> Action par GitHub Copilot Agent (demandée par @<demandeur>)` |
+| Gemini CLI | `> Action par Gemini <version> (demandée par @<demandeur>)` |
+| Cursor agent | `> Action par Cursor Agent (<modèle sous-jacent>, demandée par @<demandeur>)` |
+| aider | `> Action par aider (<modèle sous-jacent>, demandée par @<demandeur>)` |
 
-Le prénom du demandeur (`@XaaT`) peut varier si un autre contributeur utilise un agent.
+Remplacer `@<demandeur>` par le pseudo GitHub du contributeur qui a demandé l'action avant publication.
 
 ### Skills et commandes
 

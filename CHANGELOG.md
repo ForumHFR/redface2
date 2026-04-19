@@ -8,7 +8,8 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-Aucun changement documenté pour l'instant.
+### Changed
+- `AGENTS.md` ne prescrit plus une identité git personnelle (`xat`, `xat@azora.fr`) et les lignes d'attribution IA utilisent désormais `@<demandeur>` pour mieux refléter le caractère multi-contributeur du repo.
 
 ---
 
