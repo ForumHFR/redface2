@@ -114,6 +114,12 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 - PR obligatoire pour merger dans `main`
 - Review par au moins un mainteneur
 
+### Licence des contributions
+
+- Le client Android Redface 2 est publié sous **`GPL-3.0-only`**.
+- Toute contribution acceptée au code ou aux fichiers de spec du repo est distribuée sous cette même licence.
+- Si un futur composant réseau dédié apparaît, sa licence sera tranchée séparément et ne doit pas être présumée depuis celle du client.
+
 ### Tests
 
 **Stack de tests (Phase 0) :**

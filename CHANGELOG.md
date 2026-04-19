@@ -8,8 +8,12 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
+### Added
+- `LICENSE` ajouté à la racine avec le texte officiel **GNU GPL v3**, et `docs/adr/010-licence-client-android.md` formalise le choix de licence du client Android.
+
 ### Changed
 - `AGENTS.md` ne prescrit plus une identité git personnelle (`xat`, `xat@azora.fr`) et les lignes d'attribution IA utilisent désormais `@<demandeur>` pour mieux refléter le caractère multi-contributeur du repo.
+- La licence du client Android Redface 2 passe de la mention implicite `Apache 2.0` à **`GPL-3.0-only`** dans le repo (`AGENTS.md`, `README.md`, `docs/guides/contributing.md`).
 
 ---
 

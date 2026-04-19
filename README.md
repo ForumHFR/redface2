@@ -42,4 +42,6 @@ Les contributions aux specs sont ouvertes. Voir les [issues](https://github.com/
 
 ## Licence
 
-Apache 2.0 (comme Redface v1)
+`GPL-3.0-only`
+
+Le choix vise à garder le client Android communautaire et à éviter les forks applicatifs fermés. La question d'un éventuel service réseau futur est traitée séparément.

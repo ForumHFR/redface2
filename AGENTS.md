@@ -18,7 +18,7 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 ## Projet
 
 - Phase actuelle : **specifications** (pas encore de code)
-- Licence : Apache 2.0
+- Licence : GPL-3.0-only
 - Documentation : GitHub Pages via `docs/` (Jekyll + just-the-docs)
 - Langue : code en anglais, issues et docs en francais
 
