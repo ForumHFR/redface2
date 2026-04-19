@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-nav_order: 9
+nav_order: 12
 mermaid: true
 ---
 
@@ -14,7 +14,9 @@ Phases de développement, de la fondation au polish.
 
 ## Vue d'ensemble
 
-Les phases sont **ordonnées par dépendances techniques**, pas datées. Le rythme réel dépend des contributeurs et des dépendances externes (ex. MPStorage2 dans hfr-redkit à finaliser avant la Phase 3). Cohérent avec la [méthodologie triple-hybride]({{ site.baseurl }}/rationale#méthodologie) (prototype-driven).
+Les phases sont **ordonnées par dépendances techniques**, pas datées. Le rythme réel dépend des contributeurs et des dépendances externes (ex. MPStorage2 dans hfr-redkit à finaliser avant la Phase 3). Cohérent avec la [méthodologie triple-hybride]({{ site.baseurl }}/methodology) (prototype-driven).
+
+Pour la liste des capabilities et des non-goals, voir le [scope fonctionnel]({{ site.baseurl }}/scope).
 
 ### Dashboard des phases
 

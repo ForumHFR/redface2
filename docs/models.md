@@ -14,7 +14,7 @@ Structures du domaine métier.
 
 ## À définir avec les écrans
 
-Certains modèles référencés dans `navigation.md` et `features.md` sont volontairement laissés à définir au moment d'implémenter leurs écrans, pour éviter la dette de spec pré-code :
+Certains modèles référencés dans `navigation.md` et `extensions.md` sont volontairement laissés à définir au moment d'implémenter leurs écrans, pour éviter la dette de spec pré-code :
 
 - **`TopicSummary`** — une ligne dans une liste de topics (titre, auteur, dernière date, nombre non-lus). ≠ `Topic` qui contient tous les posts d'une page. Nécessaire Phase 1 pour le Forum et la liste des topics d'une sous-catégorie.
 - **`UserProfile`** — données du popup profil rapide (avatar, date inscription, nombre posts, localisation). Nécessaire Phase 1 pour la feature "Infos profil rapides".
@@ -401,4 +401,4 @@ Providers prévus en Phase 2 :
 | `imgur` | `UploadProvider` | API Imgur, fallback |
 | `rehost` | `RehostProvider` | reho.st historique (plus d'upload manuel) |
 
-Enregistrement via Hilt `@IntoSet` (cf. [features.md]({{ site.baseurl }}/features#architecture-dextensions)) : ajouter un provider ne modifie pas le code existant.
+Enregistrement via Hilt `@IntoSet` (cf. [extensions.md]({{ site.baseurl }}/extensions#architecture-dextensions)) : ajouter un provider ne modifie pas le code existant.

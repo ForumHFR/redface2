@@ -39,13 +39,17 @@ docs/
   index.md           # Page d'accueil, diagramme simplifie
   stack.md           # Choix techniques justifies
   architecture.md    # Modules Gradle, couches, data flow, session, securite, erreurs
+  methodology.md     # Methode canonique : spec/prototype/TDD
+  scope.md           # Scope produit et use cases
+  protocol-hfr.md    # Contrats externes, endpoints, edge cases
   navigation.md      # Ecrans, deep linking, back stack
   models.md          # Data classes Kotlin (source de verite pour les types)
   mvi.md             # Pattern MVI, exemples ViewModel/Screen/State
-  features.md        # Features communautaires, architecture d'extensions
+  extensions.md      # Extensions communautaires et architecture d'extensions
   naming.md          # Candidats pour le nom de l'app
   roadmap.md         # Phases de developpement
   contributing.md    # Conventions, tests, accessibilite, localisation
+  adr/               # Architecture Decision Records
   _config.yml        # Config Jekyll (version des specs dans le footer)
 ```
 
@@ -57,7 +61,7 @@ Kotlin, Jetpack Compose, MVI, Compose Navigation 3, Hilt (KSP), OkHttp 5, Jsoup,
 
 Pas de tests encore (phase spec). Strategie definie dans `docs/contributing.md` :
 - JUnit 4 + MockK + Robolectric + Turbine
-- Couverture **hybride differenciee** : 100% sur les transformers du parser HFR (fixtures dictent l'exhaustivite), guidee par risque ailleurs (ViewModels, mappers, repositories). **Pas d'objectif 100% global.** Voir section "Methodologie" plus bas.
+- Couverture **hybride differenciee** : 100% sur les transformers du parser HFR (fixtures dictent l'exhaustivite), guidee par risque ailleurs (ViewModels, mappers, repositories). **Pas d'objectif 100% global.** Voir `docs/methodology.md`.
 - Fixtures HTML capturees depuis HFR reel, jamais fabriquees
 
 ## Conventions
@@ -70,17 +74,14 @@ Pas de tests encore (phase spec). Strategie definie dans `docs/contributing.md` 
 
 ## Regles pour modifications de specs
 
-### Methodologie : hybride SDD + Prototype + TDD
+### Methodologie canonique
 
-Ce projet utilise une méthodologie triple-hybride, documentée comme ADR-000 (voir `docs/adr/` une fois bootstrappé via [#27](https://github.com/ForumHFR/redface2/issues/27)) :
+La méthode du projet est documentée dans `docs/methodology.md` et formalisée dans `docs/adr/000-methodologie-triple-hybride.md`.
 
-- **Spec ce qui doit tenir** (SDD sélectif) : protocole HFR, architecture layers, sécurité credentials, contrats externes (MPStorage format), domain language. Ces zones sont spec-first parce qu'une erreur = bug silencieux irréversible ou dette massive.
-- **Prototype ce qu'on découvre** : UI/UX Compose, schéma Room, perf, interactions features, rendu BBCode. Le design émerge du 2e use case, jamais du 0e. Règle des 30 min : face à une feature nouvelle, coder 30 min d'abord ; spec seulement ce qui débloque les 30 suivantes.
-- **TDD sélectif** sur les fonctions pures : parser (HTML → domain), BBCode → AST, ViewModels MVI, helpers (`matchesFilter`, `comparatorFor`), date parser, mappers. Red → Green → Refactor. **Ne pas** faire de TDD sur UI Compose (utiliser Roborazzi), Hilt wiring, Navigation, animations (vérif visuelle).
-- **Test-after** sur les integrations : repositories réseau+parser+cache, deep linking, flows authentifiés — écrire les tests après l'impl avec des mocks réalistes.
-- **Coverage guidée par risque**, pas par chiffre. Pas d'objectif "100%". Couvrir les edge cases réels identifiés et les fixtures HFR capturées.
-- **ADRs formalisent les décisions après** qu'elles soient prises avec contexte réel, pas avant. Pas de RFC pré-code.
-- Pas de nouveau cycle d'audit de specs sans déclencheur concret (bug récurrent, confusion onboarding).
+Dans `AGENTS.md`, on ne garde que les conséquences opérationnelles pour les agents :
+- lire `docs/methodology.md` avant tout changement structurant de spec
+- appliquer le bon mode de travail selon le sujet (spec / prototype / TDD / test-after), sans redéfinir la méthode ici
+- ne pas dupliquer la méthodologie dans d'autres pages ; elles doivent pointer vers la source canonique
 
 ### Charte anti-derive IA-first
 
@@ -97,9 +98,9 @@ Ce projet utilise une méthodologie triple-hybride, documentée comme ADR-000 (v
 
 ### Architecture et conception
 
-- Avant de proposer un changement d'architecture, lire **tous** les fichiers `docs/` pour comprendre les dependances croisees. Un changement dans `architecture.md` a des impacts sur `models.md`, `mvi.md`, `contributing.md`, `features.md` et `navigation.md`.
+- Avant de proposer un changement d'architecture, lire **tous** les fichiers `docs/` pour comprendre les dependances croisees. Un changement dans `architecture.md` a des impacts sur `models.md`, `mvi.md`, `contributing.md`, `extensions.md` et `navigation.md`.
 - Apres chaque modification, verifier la coherence des elements suivants entre les fichiers :
-  - Noms des modules Gradle (identiques dans `architecture.md`, `features.md`, `contributing.md`)
+  - Noms des modules Gradle (identiques dans `architecture.md`, `extensions.md`, `contributing.md`)
   - Noms des modeles (identiques dans `models.md`, `mvi.md`, `architecture.md`)
   - Noms des repositories et interfaces (identiques partout)
   - Dependances entre modules (diagramme mermaid = tableau texte = descriptions)

@@ -1,15 +1,19 @@
 ---
-title: Features communautaires
-nav_order: 7
+title: Extensions communautaires
+nav_order: 8
 ---
 
-# Features communautaires
+# Extensions communautaires
 {: .fs-8 }
 
-Les meilleurs ajouts des userscripts HFR, intégrés nativement.
+Catalogue des extensions communautaires et optionnelles prévues à partir de la Phase 4.
 {: .fs-5 .fw-300 }
 
 ---
+
+> Cette page liste uniquement les **extensions communautaires** et les fonctionnalités optionnelles inspirées des userscripts HFR.
+>
+> Pour l'inventaire complet des capabilities de base de l'app, voir le [scope fonctionnel]({{ site.baseurl }}/scope).
 
 ## Contexte
 

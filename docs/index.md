@@ -38,7 +38,7 @@ Retrofit 1.9 n'est plus maintenu depuis 2016. RxJava 1 depuis 2018. ButterKnife 
 Redface 2 est conçu pour :
 
 - **La vitesse** — Scroll fluide à 120fps, prefetch intelligent, cache agressif. L'objectif : que le forum semble local.
-- **Les features communautaires** — Les meilleurs ajouts des userscripts HFR (alertes qualitay, bookmarks, blacklist, redflag...) intégrés nativement.
+- **Les extensions communautaires** — Les meilleurs ajouts des userscripts HFR (alertes qualitay, bookmarks, blacklist, redflag...) intégrés nativement.
 - **La maintenabilité** — Architecture modulaire, testable, où chaque feature est isolée. Facile à comprendre pour un nouveau contributeur.
 - **L'ouverture** — Système d'extensions pour que la communauté ajoute ses propres features sans toucher au cœur de l'app.
 
@@ -85,10 +85,13 @@ Les contributions aux specs sont les bienvenues — ouvrez une issue ou commente
 
 - [Stack technique]({{ site.baseurl }}/stack) — Pourquoi chaque techno a été choisie
 - [Architecture]({{ site.baseurl }}/architecture) — Couches, modules, data flow
+- [Scope fonctionnel]({{ site.baseurl }}/scope) — Ce que l'app doit permettre de faire
+- [Protocole HFR]({{ site.baseurl }}/protocol-hfr) — Contrats externes, endpoints et edge cases
 - [Navigation]({{ site.baseurl }}/navigation) — Écrans, flows, deep linking
 - [Modèles de données]({{ site.baseurl }}/models) — Structures du domaine
 - [Pattern MVI]({{ site.baseurl }}/mvi) — Architecture UI en détail
-- [Features communautaires]({{ site.baseurl }}/features) — Les addons userscript qui deviennent natifs
+- [Extensions communautaires]({{ site.baseurl }}/extensions) — Les addons userscript qui deviennent natifs
 - [Nommage]({{ site.baseurl }}/naming) — Le futur nom de l'app
+- [Méthodologie]({{ site.baseurl }}/methodology) — Comment le projet spécifie, prototype et teste
 - [Roadmap]({{ site.baseurl }}/roadmap) — Phases de développement
 - [Contribuer]({{ site.baseurl }}/contributing) — Comment participer

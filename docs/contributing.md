@@ -1,6 +1,6 @@
 ---
 title: Contribuer
-nav_order: 10
+nav_order: 13
 ---
 
 # Contribuer
@@ -38,16 +38,20 @@ redface2/
   app/                    # Point d'entrée, DI, navigation
   core/
     model/                # Modèles domaine
+    domain/               # Interfaces de repositories, règles métier
+    data/                 # Implémentations de repositories
     network/              # OkHttp, session HFR
     parser/               # Jsoup, HTML → modèles
     database/             # Room, cache, sync MPStorage
     ui/                   # Thème, composants partagés, PostRenderer
+    extension/            # Points d'extension (Phase 4)
   feature/
     forum/                # Catégories, topics
     topic/                # Lecture de topic
     editor/               # Reply, edit, FP, création topic
     messages/             # MPs, MultiMPs
     auth/                 # Login
+    search/               # Recherche
     settings/             # Préférences
 ```
 
@@ -71,16 +75,9 @@ feature/topic/
 
 ### Méthodologie
 
-Redface 2 utilise une **méthodologie triple-hybride SDD + Prototype + TDD** documentée dans [`AGENTS.md`](https://github.com/ForumHFR/redface2/blob/main/AGENTS.md) (section "Methodologie") et formalisée comme ADR-000 dans `docs/adr/` (bootstrap via [#27](https://github.com/ForumHFR/redface2/issues/27)) :
+La méthode canonique du projet est documentée dans [Méthodologie]({{ site.baseurl }}/methodology) et formalisée dans [ADR-000]({{ site.baseurl }}/adr/000-methodologie-triple-hybride).
 
-- **Spec ce qui doit tenir** (protocole HFR, architecture layers, sécurité, contrats externes)
-- **Prototype ce qu'on découvre** (UI, schéma Room, perf, interactions features) — règle des 30 minutes
-- **TDD sélectif** sur fonctions pures (parser, BBCode AST, ViewModels, helpers, mappers)
-- **Test-after** sur intégrations (repositories, deep linking, flows auth)
-- **Coverage guidée par risque**, pas par chiffre
-- **ADRs formalisent après décision**, pas avant
-
-Lire `AGENTS.md` avant une contribution structurante.
+Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode du projet. Pour une contribution structurante, lire `docs/methodology.md` puis `AGENTS.md`.
 
 ### Style de code
 

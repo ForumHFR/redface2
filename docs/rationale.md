@@ -1,6 +1,6 @@
 ---
 title: Pourquoi Redface 2 ?
-nav_order: 12
+nav_order: 14
 ---
 
 # Pourquoi Redface 2 ?
@@ -103,14 +103,14 @@ Objection légitime : en 2026, un LLM peut patcher du code Java/RxJava 1. Pourqu
 
 | Mécanisme | Objectif |
 |-----------|----------|
-| **Méthodologie hybride SDD + Prototype + TDD** | Spec les invariants critiques (protocole HFR, sécurité, archi), prototype ce qui émerge du code (UI, perf), TDD sur les fonctions pures. Cf. [`AGENTS.md`](https://github.com/ForumHFR/redface2/blob/main/AGENTS.md) + ADR-000 |
+| **Méthodologie hybride SDD + Prototype + TDD** | La méthode canonique est documentée dans [Méthodologie]({{ site.baseurl }}/methodology) et formalisée dans ADR-000. Cette page ne fait qu'expliquer pourquoi ce choix existe. |
 | **Specs publiques** | Les décisions structurelles sont débattues et documentées. Pas de pré-spec exhaustive avant code. |
 | **Review communautaire** | Des devs expérimentés (Ayuget, Corran Horn, ezzz, gig-gic) challengent les choix |
 | **Audits ciblés** | Audits des specs ([#14](https://github.com/ForumHFR/redface2/issues/14), [#17](https://github.com/ForumHFR/redface2/issues/17), cycle simplification [#24](https://github.com/ForumHFR/redface2/issues/24)) — uniquement sur déclencheur concret, pas en boucle ouverte |
 | **Reprise des fixtures v1** | 17 fixtures HTML de Redface v1 + ~19 nouvelles capturées depuis HFR réel, servent de base de tests (TDD parser) |
 | **Enforcement au build (Konsist)** | [#22](https://github.com/ForumHFR/redface2/issues/22) — règles d'architecture en tests Konsist (packages/layers/annotations), pas en convention Markdown. Neutralise les biais des LLMs multi-modèles contributeurs |
 | **Attribution IA obligatoire** | Chaque commit/PR généré par IA mentionne le modèle exact ([`AGENTS.md`](https://github.com/ForumHFR/redface2/blob/main/AGENTS.md) section "Attribution et traçabilité"), permettant de tracer les erreurs |
-| **ADRs formalisées** | `docs/adr/` tracé les décisions structurelles avec contexte et conséquences réelles, pas spéculatives ([#27](https://github.com/ForumHFR/redface2/issues/27)) |
+| **ADRs formalisées** | [ADRs]({{ site.baseurl }}/adr/) trace les décisions structurelles avec contexte et conséquences réelles, pas spéculatives ([#27](https://github.com/ForumHFR/redface2/issues/27)) |
 
 ### Ce qu'on ne peut pas garantir
 
