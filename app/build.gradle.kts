@@ -1,5 +1,6 @@
 plugins {
-    id("redface.android.application")
+    id("redface.android.compose.application")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 android {
@@ -14,6 +15,7 @@ android {
 
 dependencies {
     implementation(project(":core:data"))
+    implementation(project(":core:ui"))
 
     implementation(project(":feature:forum"))
     implementation(project(":feature:topic"))
@@ -22,4 +24,13 @@ dependencies {
     implementation(project(":feature:auth"))
     implementation(project(":feature:search"))
     implementation(project(":feature:settings"))
+
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.activity.compose)
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.material3.adaptive.navigation.suite)
+    implementation(libs.androidx.navigation3.runtime)
+    implementation(libs.androidx.navigation3.ui)
+    implementation(libs.kotlinx.serialization.core)
 }

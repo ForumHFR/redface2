@@ -1,0 +1,5 @@
+<resources>
+    <string name="messages_title">Messages</string>
+    <string name="messages_body">Bootstrap du tab MPs / MultiMPs. Le détail réel des conversations viendra ensuite.</string>
+    <string name="messages_open_topic">Ouvrir un topic partagé</string>
+</resources>

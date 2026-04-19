@@ -1,0 +1,10 @@
+<resources>
+    <string name="forum_title">Forum</string>
+    <string name="forum_body">Parcours hierarchique categories, sous-categories et topics. Ce placeholder valide le tab root et l ouverture d une liste ciblee.</string>
+    <string name="forum_open_category">Ouvrir une sous-catégorie</string>
+    <string name="forum_open_topic">Ouvrir un topic exemple</string>
+    <string name="category_title">Catégorie %1$d</string>
+    <string name="category_body_without_subcat">Aucune sous-catégorie précisée par le deep link.</string>
+    <string name="category_body_with_subcat">Sous-catégorie ciblée : %1$d.</string>
+    <string name="category_open_topic">Ouvrir le topic de la liste</string>
+</resources>

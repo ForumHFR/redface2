@@ -1,0 +1,5 @@
+<resources>
+    <string name="editor_title">Éditeur %1$s</string>
+    <string name="editor_body_without_post">Mode éditeur sur la catégorie %1$d sans post cible.</string>
+    <string name="editor_body_with_post">Mode éditeur sur la catégorie %1$d pour le post %2$d.</string>
+</resources>

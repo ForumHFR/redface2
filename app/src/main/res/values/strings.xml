@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">Redface 2</string>
+    <string name="nav_flags">Drapeaux</string>
+    <string name="nav_forum">Forum</string>
+    <string name="nav_search">Recherche</string>
+    <string name="nav_messages">Messages</string>
+    <string name="flags_title">Drapeaux</string>
+    <string name="flags_body">Accueil logue de l application. Ce placeholder valide le premier onglet et l ouverture vers un topic ou une categorie.</string>
+    <string name="flags_open_unread_topic">Ouvrir un topic non lu</string>
+    <string name="flags_open_category">Ouvrir la catégorie suivie</string>
+</resources>

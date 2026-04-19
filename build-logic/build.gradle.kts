@@ -15,6 +15,10 @@ gradlePlugin {
             id = "redface.android.application"
             implementationClass = "fr.forumhfr.redface2.buildlogic.RedfaceAndroidApplicationConventionPlugin"
         }
+        register("redfaceAndroidComposeApplication") {
+            id = "redface.android.compose.application"
+            implementationClass = "fr.forumhfr.redface2.buildlogic.RedfaceAndroidComposeApplicationConventionPlugin"
+        }
         register("redfaceAndroidLibrary") {
             id = "redface.android.library"
             implementationClass = "fr.forumhfr.redface2.buildlogic.RedfaceAndroidLibraryConventionPlugin"

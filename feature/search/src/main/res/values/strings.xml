@@ -1,0 +1,5 @@
+<resources>
+    <string name="search_title">Recherche</string>
+    <string name="search_body">Validation du tab recherche et de l ouverture d un resultat vers un topic precis.</string>
+    <string name="search_open_result">Ouvrir un résultat exemple</string>
+</resources>

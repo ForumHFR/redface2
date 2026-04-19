@@ -1,0 +1,6 @@
+<resources>
+    <string name="topic_title">Topic %1$d</string>
+    <string name="topic_body">Lecture du topic en catégorie %1$d, page %2$d.</string>
+    <string name="topic_scroll_to">Scroll ciblé demandé vers le post %1$d.</string>
+    <string name="topic_reply">Répondre depuis ce topic</string>
+</resources>

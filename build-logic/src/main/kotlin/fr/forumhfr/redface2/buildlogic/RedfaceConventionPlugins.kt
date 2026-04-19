@@ -59,6 +59,19 @@ class RedfaceAndroidApplicationConventionPlugin : Plugin<Project> {
     }
 }
 
+class RedfaceAndroidComposeApplicationConventionPlugin : Plugin<Project> {
+    override fun apply(target: Project) = with(target) {
+        pluginManager.apply("redface.android.application")
+        pluginManager.apply("org.jetbrains.kotlin.plugin.compose")
+
+        extensions.configure<ApplicationExtension> {
+            buildFeatures {
+                compose = true
+            }
+        }
+    }
+}
+
 class RedfaceAndroidLibraryConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) = with(target) {
         pluginManager.apply("com.android.library")
