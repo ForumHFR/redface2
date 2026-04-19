@@ -1,6 +1,9 @@
 ---
 title: ADR-000
-nav_exclude: true
+parent: ADRs
+grand_parent: Spécifications
+nav_order: 0
+permalink: /specs/adr/000-methodologie-triple-hybride
 ---
 
 # ADR-000 — Méthodologie triple-hybride SDD + Prototype + TDD
@@ -32,11 +35,11 @@ Redface 2 adopte une méthodologie **triple-hybride** :
 - **Coverage guidée par risque**, pas par quota global
 - **ADRs a posteriori**, jamais comme RFC pré-code
 
-La page canonique est [`docs/methodology.md`]({{ site.baseurl }}/methodology).
+La page canonique est [`docs/specs/methodology.md`]({{ site.baseurl }}/specs/methodology).
 
 ## Conséquences
 
-- la méthode n'est plus dupliquée dans `README.md`, `AGENTS.md`, `docs/contributing.md` et `docs/rationale.md`
+- la méthode n'est plus dupliquée dans `README.md`, `AGENTS.md`, `docs/guides/contributing.md` et `docs/guides/rationale.md`
 - les écrans Compose, le schéma Room et le rendu BBCode doivent être validés par prototype avant d'être figés
 - les parsers, helpers purs, mappers et reducers MVI sont de bons candidats au TDD strict
 - un audit de specs n'est plus un réflexe ; il doit avoir un déclencheur concret

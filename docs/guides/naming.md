@@ -1,6 +1,8 @@
 ---
 title: Nommage
-nav_order: 9
+parent: Guides
+nav_order: 2
+permalink: /guides/naming
 ---
 
 # Choix du nom

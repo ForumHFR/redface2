@@ -36,20 +36,23 @@ cd docs && bundle install && bundle exec jekyll serve
 
 ```
 docs/
-  index.md           # Page d'accueil, diagramme simplifie
-  stack.md           # Choix techniques justifies
-  architecture.md    # Modules Gradle, couches, data flow, session, securite, erreurs
-  methodology.md     # Methode canonique : spec/prototype/TDD
-  scope.md           # Scope produit et use cases
-  protocol-hfr.md    # Contrats externes, endpoints, edge cases
-  navigation.md      # Ecrans, deep linking, back stack
-  models.md          # Data classes Kotlin (source de verite pour les types)
-  mvi.md             # Pattern MVI, exemples ViewModel/Screen/State
-  extensions.md      # Extensions communautaires et architecture d'extensions
-  naming.md          # Candidats pour le nom de l'app
-  roadmap.md         # Phases de developpement
-  contributing.md    # Conventions, tests, accessibilite, localisation
-  adr/               # Architecture Decision Records
+  index.md           # Accueil du site
+  specs/             # Pages canoniques qui font foi
+    methodology.md   # Methode canonique : spec/prototype/TDD
+    scope.md         # Scope produit et use cases
+    stack.md         # Choix techniques justifies
+    architecture.md  # Modules Gradle, couches, data flow, securite, erreurs
+    navigation.md    # Ecrans, deep linking, back stack
+    models.md        # Data classes Kotlin (source de verite pour les types)
+    mvi.md           # Pattern MVI, exemples ViewModel/Screen/State
+    protocol-hfr.md  # Contrats externes, endpoints, edge cases
+    roadmap.md       # Phases de developpement
+    extensions.md    # Extensions communautaires et architecture d'extensions
+    adr/             # Architecture Decision Records
+  guides/            # Pages d'accompagnement
+    contributing.md  # Conventions, tests, accessibilite, localisation
+    rationale.md     # Pourquoi la reecriture
+    naming.md        # Candidats pour le nom de l'app
   _config.yml        # Config Jekyll (version des specs dans le footer)
 ```
 
@@ -59,9 +62,9 @@ Kotlin, Jetpack Compose, MVI, Compose Navigation 3, Hilt (KSP), OkHttp 5, Jsoup,
 
 ## Tests
 
-Pas de tests encore (phase spec). Strategie definie dans `docs/contributing.md` :
+Pas de tests encore (phase spec). Strategie definie dans `docs/guides/contributing.md` :
 - JUnit 4 + MockK + Robolectric + Turbine
-- Couverture **hybride differenciee** : 100% sur les transformers du parser HFR (fixtures dictent l'exhaustivite), guidee par risque ailleurs (ViewModels, mappers, repositories). **Pas d'objectif 100% global.** Voir `docs/methodology.md`.
+- Couverture **hybride differenciee** : 100% sur les transformers du parser HFR (fixtures dictent l'exhaustivite), guidee par risque ailleurs (ViewModels, mappers, repositories). **Pas d'objectif 100% global.** Voir `docs/specs/methodology.md`.
 - Fixtures HTML capturees depuis HFR reel, jamais fabriquees
 
 ## Conventions
@@ -76,10 +79,10 @@ Pas de tests encore (phase spec). Strategie definie dans `docs/contributing.md` 
 
 ### Methodologie canonique
 
-La méthode du projet est documentée dans `docs/methodology.md` et formalisée dans `docs/adr/000-methodologie-triple-hybride.md`.
+La méthode du projet est documentée dans `docs/specs/methodology.md` et formalisée dans `docs/specs/adr/000-methodologie-triple-hybride.md`.
 
 Dans `AGENTS.md`, on ne garde que les conséquences opérationnelles pour les agents :
-- lire `docs/methodology.md` avant tout changement structurant de spec
+- lire `docs/specs/methodology.md` avant tout changement structurant de spec
 - appliquer le bon mode de travail selon le sujet (spec / prototype / TDD / test-after), sans redéfinir la méthode ici
 - ne pas dupliquer la méthodologie dans d'autres pages ; elles doivent pointer vers la source canonique
 
@@ -98,7 +101,7 @@ Dans `AGENTS.md`, on ne garde que les conséquences opérationnelles pour les ag
 
 ### Architecture et conception
 
-- Avant de proposer un changement d'architecture, lire **tous** les fichiers `docs/` pour comprendre les dependances croisees. Un changement dans `architecture.md` a des impacts sur `models.md`, `mvi.md`, `contributing.md`, `extensions.md` et `navigation.md`.
+- Avant de proposer un changement d'architecture, lire **tous** les fichiers `docs/` pour comprendre les dependances croisees. Un changement dans `docs/specs/architecture.md` a des impacts sur `docs/specs/models.md`, `docs/specs/mvi.md`, `docs/guides/contributing.md`, `docs/specs/extensions.md` et `docs/specs/navigation.md`.
 - Apres chaque modification, verifier la coherence des elements suivants entre les fichiers :
   - Noms des modules Gradle (identiques dans `architecture.md`, `extensions.md`, `contributing.md`)
   - Noms des modeles (identiques dans `models.md`, `mvi.md`, `architecture.md`)
@@ -126,7 +129,7 @@ Dans `AGENTS.md`, on ne garde que les conséquences opérationnelles pour les ag
 - Pour chaque point identifie : decrire le probleme, citer le fichier et la ligne, proposer un fix concret.
 - Avant de pousser les corrections, faire une self-review : relire chaque fichier modifie et verifier qu'aucune incohérence n'a ete introduite par les corrections elles-memes.
 - Utiliser un agent de review separe pour valider les changements (le meme agent qui corrige ne devrait pas valider).
-- Apres un audit multi-fichiers, toujours verifier : `contributing.md` (structure de fichiers), `index.md` (vue d'ensemble), et les diagrammes mermaid dans chaque fichier.
+- Apres un audit multi-fichiers, toujours verifier : `docs/guides/contributing.md` (structure de fichiers), `docs/index.md` (vue d'ensemble), et les diagrammes mermaid dans chaque fichier.
 
 ### Attribution et tracabilite
 

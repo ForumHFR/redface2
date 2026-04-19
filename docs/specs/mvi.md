@@ -1,6 +1,8 @@
 ---
 title: Pattern MVI
-nav_order: 6
+parent: Spécifications
+nav_order: 5
+permalink: /specs/mvi
 mermaid: true
 ---
 
@@ -40,7 +42,7 @@ Le code est le même. On utilise le terme "MVI" dans ce projet par convention, m
 
 ### Méthodologie MVI hybride
 
- Conformément à la [méthodologie triple-hybride]({{ site.baseurl }}/methodology) (SDD + Prototype + TDD) :
+ Conformément à la [méthodologie triple-hybride]({{ site.baseurl }}/specs/methodology) (SDD + Prototype + TDD) :
 
 - **Spec les contrats** (types `State`, `Intent`, `Effect`) — c'est le contrat public du ViewModel, utile pour le Screen et les tests. Ces types sont documentés ci-dessous pour chaque écran.
 - **TDD les helpers purs** (`matchesFilter`, `comparatorFor`, mappers, reducers déterministes). Red → Green → Refactor, testables isolément.

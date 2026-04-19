@@ -1,6 +1,8 @@
 ---
 title: Architecture
-nav_order: 3
+parent: Spécifications
+nav_order: 2
+permalink: /specs/architecture
 mermaid: true
 ---
 
@@ -138,7 +140,7 @@ Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (com
 
 ### Modules feature (extensions communautaires — Phase 4)
 
-Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le projet compte 15 modules (8 core + 7 features base). Les extensions sont des modules Gradle isolés qui s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant. La décision de découpage v1 est formalisée dans [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1).
+Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le projet compte 15 modules (8 core + 7 features base). Les extensions sont des modules Gradle isolés qui s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant. La décision de découpage v1 est formalisée dans [ADR-001]({{ site.baseurl }}/specs/adr/001-modules-gradle-v1).
 
 | Module | Fonction | Dépend de |
 |--------|----------|-----------|
@@ -303,7 +305,7 @@ Le prefetch respecte les conditions réseau : désactivé en mode économie de d
 
 #### Règle critique : prefetch non-authentifié
 
-Les requêtes de prefetch ne doivent **jamais** inclure les cookies de session — sinon HFR marque silencieusement les topics comme lus. Implémentation avec deux instances `OkHttpClient` (`@AuthenticatedClient` / `@AnonymousClient`) et test Konsist d'enforcement : voir [protocol-hfr.md § Règle critique prefetch non-authentifié]({{ site.baseurl }}/protocol-hfr#règle-critique--prefetch-non-authentifié).
+Les requêtes de prefetch ne doivent **jamais** inclure les cookies de session — sinon HFR marque silencieusement les topics comme lus. Implémentation avec deux instances `OkHttpClient` (`@AuthenticatedClient` / `@AnonymousClient`) et test Konsist d'enforcement : voir [protocol-hfr.md § Règle critique prefetch non-authentifié]({{ site.baseurl }}/specs/protocol-hfr#règle-critique--prefetch-non-authentifié).
 
 ---
 
@@ -334,7 +336,7 @@ Les cookies sont persistés via un `PersistentCookieJar` adossé au DataStore ch
 
 ### Stockage sécurisé des credentials
 
-**Option A retenue** (cycle [#24](https://github.com/ForumHFR/redface2/issues/24) thème 13, formalisée dans [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a)) : stack minimaliste **DataStore + Android Keystore**, **pas de Tink**, **pas de password stocké**.
+**Option A retenue** (cycle [#24](https://github.com/ForumHFR/redface2/issues/24) thème 13, formalisée dans [ADR-002]({{ site.baseurl }}/specs/adr/002-credentials-option-a)) : stack minimaliste **DataStore + Android Keystore**, **pas de Tink**, **pas de password stocké**.
 
 **Ce qui est stocké** : uniquement les **cookies de session HFR** (`md_user`, `md_pass`) — nécessaires pour rester connecté entre deux lancements de l'app.
 
@@ -452,4 +454,4 @@ Les tests Konsist tournent en CI dès Phase 0 et bloquent les PR qui violent les
 
 HFR n'a pas d'API publique. Redface 2 fait du scraping HTML et doit respecter plusieurs invariants (CSRF `hash_check`, anti-bot `verifrequet`, `numreponse` par catégorie, cookies de session, prefetch non-authentifié).
 
-**Source de vérité** : [protocol-hfr.md]({{ site.baseurl }}/protocol-hfr) — endpoints (`forum1.php`, `forum2.php`, `bddpost.php`, …), form fields par endpoint, `hash_check`, `verifrequet`, `numreponse`, `listenumreponse`, sessions, smileys, edge cases (posts supprimés, emails obfusqués, pagination, `cryptlink`), fixtures.
+**Source de vérité** : [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr) — endpoints (`forum1.php`, `forum2.php`, `bddpost.php`, …), form fields par endpoint, `hash_check`, `verifrequet`, `numreponse`, `listenumreponse`, sessions, smileys, edge cases (posts supprimés, emails obfusqués, pagination, `cryptlink`), fixtures.

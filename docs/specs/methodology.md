@@ -1,6 +1,8 @@
 ---
 title: Méthodologie
-nav_order: 10
+parent: Spécifications
+nav_order: 8
+permalink: /specs/methodology
 ---
 
 # Méthodologie
@@ -68,13 +70,13 @@ Quand un nouveau sujet arrive, commencer par cette question :
 
 | Sujet | Approche | Pourquoi |
 |---|---|---|
-| **Protocole HFR** (`docs/protocol-hfr.md`) | Spec-first | Contrat externe mal documenté ; une erreur casse l'app silencieusement. |
+| **Protocole HFR** (`docs/specs/protocol-hfr.md`) | Spec-first | Contrat externe mal documenté ; une erreur casse l'app silencieusement. |
 | **Parser HFR** (`HfrParser.parseTopicPage`) | TDD strict | Fonction pure, fixtures réelles, edge cases identifiables. Cf. [#15](https://github.com/ForumHFR/redface2/issues/15). |
 | **BBCode → AST** | TDD strict | Transformation pure ; facile à verrouiller par tests ciblés. |
 | **Écran Drapeaux** | Prototype-first | L'ergonomie réelle n'émerge pas d'une spec statique. |
 | **PostRenderer Compose** | Prototype-first | Le rendu de posts en UI réelle se découvre de manière incrémentale sur de vraies fixtures. Cf. [#3](https://github.com/ForumHFR/redface2/issues/3). |
 | **Schéma Room** | Prototype-first | Le bon grain de stockage dépend des premiers use cases réellement codés. Cf. [#26](https://github.com/ForumHFR/redface2/issues/26). |
-| **Stockage credentials** | Spec-first | Une décision de sécurité implicite devient vite une faille implicite. Option A tranchée dans [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a). |
+| **Stockage credentials** | Spec-first | Une décision de sécurité implicite devient vite une faille implicite. Option A tranchée dans [ADR-002]({{ site.baseurl }}/specs/adr/002-credentials-option-a). |
 | **ViewModel Flags** | TDD sélectif | Reducers, filtres et tri sont déterministes et faciles à tester. |
 | **TopicRepository** | Test-after | Orchestration réseau + parser + cache ; utile de tester une fois le flux réel en place. |
 | **Deep linking** | Test-after | Le comportement se vérifie mieux après support de plusieurs URLs réelles. |
@@ -127,7 +129,7 @@ Par défaut, la prochaine vraie réévaluation a du sens **après la Phase 1**, 
 
 ## Références
 
-- [ADR-000]({{ site.baseurl }}/adr/000-methodologie-triple-hybride) — formalisation de cette méthode
+- [ADR-000]({{ site.baseurl }}/specs/adr/000-methodologie-triple-hybride) — formalisation de cette méthode
 - [#29](https://github.com/ForumHFR/redface2/issues/29) — issue de promotion
-- [#27](https://github.com/ForumHFR/redface2/issues/27) — bootstrap `docs/adr/`
-- [Contribuer]({{ site.baseurl }}/contributing) — workflow et stratégie de tests
+- [#27](https://github.com/ForumHFR/redface2/issues/27) — bootstrap `docs/specs/adr/`
+- [Contribuer]({{ site.baseurl }}/guides/contributing) — workflow et stratégie de tests

@@ -1,6 +1,9 @@
 ---
 title: ADR-002
-nav_exclude: true
+parent: ADRs
+grand_parent: Spécifications
+nav_order: 2
+permalink: /specs/adr/002-credentials-option-a
 ---
 
 # ADR-002 — Credentials Option A : DataStore + Keystore, sans password stocké

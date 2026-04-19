@@ -1,6 +1,8 @@
 ---
 title: "Modèles de données"
-nav_order: 5
+parent: Spécifications
+nav_order: 4
+permalink: /specs/models
 mermaid: true
 ---
 
@@ -188,7 +190,7 @@ data class PollOption(
 )
 ```
 
-`EditInfo` est retourné par `HfrParser.parseEditPage(html)` (cf. [architecture.md]({{ site.baseurl }}/architecture#core-parser--hfrparser)). Il capture l'état pré-rempli du formulaire d'édition HFR et ce qui doit être renvoyé côté `bdd.php` (cf. [protocol-hfr.md]({{ site.baseurl }}/protocol-hfr#post-bddphp-edit)).
+`EditInfo` est retourné par `HfrParser.parseEditPage(html)` (cf. [architecture.md]({{ site.baseurl }}/specs/architecture#core-parser--hfrparser)). Il capture l'état pré-rempli du formulaire d'édition HFR et ce qui doit être renvoyé côté `bdd.php` (cf. [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#post-bddphp-edit)).
 
 ```kotlin
 data class EditInfo(
@@ -302,7 +304,7 @@ L'app synchronise ces données avec le MP de stockage HFR et les cache localemen
 
 ## Paramètres utilisateur
 
-`UserSettings` capture les réglages du compte HFR qui influencent le rendu côté client. Le parser lit ces valeurs depuis `editprofil.php?page=3` à la connexion et les stocke en cache (Room + DataStore). **Aucun champ ne doit être hardcodé** dans le code applicatif — notamment `postsPerPage` (cf. [protocol-hfr.md]({{ site.baseurl }}/protocol-hfr#postsperpage-configurable)).
+`UserSettings` capture les réglages du compte HFR qui influencent le rendu côté client. Le parser lit ces valeurs depuis `editprofil.php?page=3` à la connexion et les stocke en cache (Room + DataStore). **Aucun champ ne doit être hardcodé** dans le code applicatif — notamment `postsPerPage` (cf. [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#postsperpage-configurable)).
 
 ```kotlin
 data class UserSettings(
@@ -401,4 +403,4 @@ Providers prévus en Phase 2 :
 | `imgur` | `UploadProvider` | API Imgur, fallback |
 | `rehost` | `RehostProvider` | reho.st historique (plus d'upload manuel) |
 
-Enregistrement via Hilt `@IntoSet` (cf. [extensions.md]({{ site.baseurl }}/extensions#architecture-dextensions)) : ajouter un provider ne modifie pas le code existant.
+Enregistrement via Hilt `@IntoSet` (cf. [extensions.md]({{ site.baseurl }}/specs/extensions#architecture-dextensions)) : ajouter un provider ne modifie pas le code existant.

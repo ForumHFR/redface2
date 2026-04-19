@@ -1,6 +1,9 @@
 ---
 title: ADR-008
-nav_exclude: true
+parent: ADRs
+grand_parent: Spécifications
+nav_order: 8
+permalink: /specs/adr/008-compose-navigation-3
 ---
 
 # ADR-008 — Compose Navigation 3 retenu pour la navigation

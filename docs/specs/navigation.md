@@ -1,6 +1,8 @@
 ---
 title: Navigation
-nav_order: 4
+parent: Spécifications
+nav_order: 3
+permalink: /specs/navigation
 mermaid: true
 ---
 

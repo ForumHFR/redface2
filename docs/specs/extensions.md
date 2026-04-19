@@ -1,6 +1,8 @@
 ---
 title: Extensions communautaires
-nav_order: 8
+parent: Spécifications
+nav_order: 7
+permalink: /specs/extensions
 ---
 
 # Extensions communautaires
@@ -13,7 +15,7 @@ Catalogue des extensions communautaires et optionnelles prévues à partir de la
 
 > Cette page liste uniquement les **extensions communautaires** et les fonctionnalités optionnelles inspirées des userscripts HFR.
 >
-> Pour l'inventaire complet des capabilities de base de l'app, voir le [scope fonctionnel]({{ site.baseurl }}/scope).
+> Pour l'inventaire complet des capabilities de base de l'app, voir le [scope fonctionnel]({{ site.baseurl }}/specs/scope).
 
 ## Contexte
 

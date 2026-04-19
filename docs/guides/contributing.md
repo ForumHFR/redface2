@@ -1,6 +1,8 @@
 ---
 title: Contribuer
-nav_order: 13
+parent: Guides
+nav_order: 1
+permalink: /guides/contributing
 ---
 
 # Contribuer
@@ -18,7 +20,7 @@ Le projet est en phase de spec. Le code n'est pas encore écrit. Les contributio
 - **Commenter les issues** : donner son avis sur les choix techniques, proposer des alternatives
 - **Proposer des features** : ouvrir une issue avec le label `feature`
 - **Signaler des oublis** : quelque chose manque dans les specs ? Dites-le
-- **Proposer un nom** : voir la [page nommage]({{ site.baseurl }}/naming)
+- **Proposer un nom** : voir la [page nommage]({{ site.baseurl }}/guides/naming)
 
 ---
 
@@ -57,7 +59,7 @@ redface2/
 
 ### Gestion des dépendances
 
-Le projet utilisera un **Gradle version catalog** (`gradle/libs.versions.toml`) créé en Phase 0 comme **source de vérité unique** des versions. Choix de stack et versions structurelles (major.minor) documentés dans [stack.md]({{ site.baseurl }}/stack) — les patches exacts sont résolus dans le TOML au bootstrap et maintenus via Renovate/Dependabot.
+Le projet utilisera un **Gradle version catalog** (`gradle/libs.versions.toml`) créé en Phase 0 comme **source de vérité unique** des versions. Choix de stack et versions structurelles (major.minor) documentés dans [stack.md]({{ site.baseurl }}/specs/stack) — les patches exacts sont résolus dans le TOML au bootstrap et maintenus via Renovate/Dependabot.
 
 **Pourquoi pas de tableau de versions exact ici** : une doc qui liste `kotlin = "2.3.20"` dérive en 3 mois. La source unique est le fichier `libs.versions.toml` du repo, interrogeable aussi via Context7/Docfork (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)) pour générer du code aligné avec les APIs stables courantes.
 
@@ -75,9 +77,9 @@ feature/topic/
 
 ### Méthodologie
 
-La méthode canonique du projet est documentée dans [Méthodologie]({{ site.baseurl }}/methodology) et formalisée dans [ADR-000]({{ site.baseurl }}/adr/000-methodologie-triple-hybride).
+La méthode canonique du projet est documentée dans [Méthodologie]({{ site.baseurl }}/specs/methodology) et formalisée dans [ADR-000]({{ site.baseurl }}/specs/adr/000-methodologie-triple-hybride).
 
-Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode du projet. Pour une contribution structurante, lire `docs/methodology.md` puis `AGENTS.md`.
+Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode du projet. Pour une contribution structurante, lire `docs/specs/methodology.md` puis `AGENTS.md`.
 
 ### Style de code
 
@@ -122,7 +124,7 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 - **Compose Testing** — tests UI pour les écrans critiques (Phase 1+)
 
 **Enforcement au build (Phase 0) :**
-- **Konsist** — règles d'architecture (imports inter-modules, annotations Hilt, layers, tokens M3 centralisés dans `:core:ui`, `@AnonymousClient` sur prefetch). Voir [architecture.md]({{ site.baseurl }}/architecture) pour les règles. Adopté Phase 0 pour neutraliser les biais multi-LLM.
+- **Konsist** — règles d'architecture (imports inter-modules, annotations Hilt, layers, tokens M3 centralisés dans `:core:ui`, `@AnonymousClient` sur prefetch). Voir [architecture.md]({{ site.baseurl }}/specs/architecture) pour les règles. Adopté Phase 0 pour neutraliser les biais multi-LLM.
 - **Detekt** — style Kotlin + deprecations (`runBlocking`, `GlobalScope`, `LiveData`, imports dépréciés).
 - **Android Lint** — a11y + i18n + correctness. `MissingContentDescription`, `TouchTargetSizeCheck`, `HardcodedText` en `error` (abort build). Config `lintOptions` dans `build.gradle.kts`.
 

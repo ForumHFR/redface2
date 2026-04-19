@@ -1,6 +1,8 @@
 ---
 title: Protocole HFR
-nav_order: 11
+parent: Spécifications
+nav_order: 9
+permalink: /specs/protocol-hfr
 ---
 
 # Protocole HFR

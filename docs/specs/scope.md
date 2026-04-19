@@ -1,6 +1,8 @@
 ---
 title: Scope fonctionnel
-nav_order: 7
+parent: Spécifications
+nav_order: 6
+permalink: /specs/scope
 ---
 
 # Scope fonctionnel
@@ -21,10 +23,10 @@ Elle sert à :
 - vérifier qu'on n'oublie pas un use case entre les phases
 
 Pour le détail technique :
-- Écrans et navigation → [Navigation]({{ site.baseurl }}/navigation)
-- Extensions communautaires → [Extensions]({{ site.baseurl }}/extensions)
-- Edge cases protocole HFR → [Protocole HFR]({{ site.baseurl }}/protocol-hfr)
-- Phases et ordonnancement → [Roadmap]({{ site.baseurl }}/roadmap)
+- Écrans et navigation → [Navigation]({{ site.baseurl }}/specs/navigation)
+- Extensions communautaires → [Extensions]({{ site.baseurl }}/specs/extensions)
+- Edge cases protocole HFR → [Protocole HFR]({{ site.baseurl }}/specs/protocol-hfr)
+- Phases et ordonnancement → [Roadmap]({{ site.baseurl }}/specs/roadmap)
 
 ## Acteurs
 
@@ -39,7 +41,7 @@ Pas de "modérateur" comme acteur distinct en v1 : un modo utilise les mêmes é
 
 Groupées par domaine. Une ligne par use case.
 
-Quand `docs/roadmap.md` tranche explicitement une phase, cette page s'aligne dessus. Quand la roadmap ne détaille pas encore un point précis, la phase indiquée ici reste **indicative**.
+Quand `docs/specs/roadmap.md` tranche explicitement une phase, cette page s'aligne dessus. Quand la roadmap ne détaille pas encore un point précis, la phase indiquée ici reste **indicative**.
 
 ### Lecture
 
@@ -92,7 +94,7 @@ Quand `docs/roadmap.md` tranche explicitement une phase, cette page s'aligne des
 
 ### Extensions communautaires (Phase 4)
 
-Détails dans [Extensions]({{ site.baseurl }}/extensions). Résumé :
+Détails dans [Extensions]({{ site.baseurl }}/specs/extensions). Résumé :
 
 - **Bookmarks** — sauvegarder un post hors drapeaux.
 - **Blacklist** — masquer les posts d'un utilisateur.

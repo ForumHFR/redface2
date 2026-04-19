@@ -10,7 +10,8 @@ mermaid: true
 Le futur client Android pour Hardware.fr.
 {: .fs-6 .fw-300 }
 
-[Voir la stack technique]({{ site.baseurl }}/stack){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[Voir les spécifications]({{ site.baseurl }}/specs){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[Voir les guides]({{ site.baseurl }}/guides){: .btn .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [Voir sur GitHub](https://github.com/ForumHFR/redface2){: .btn .fs-5 .mb-4 .mb-md-0 }
 
 ---
@@ -83,15 +84,22 @@ Les contributions aux specs sont les bienvenues — ouvrez une issue ou commente
 
 ## Sommaire
 
-- [Stack technique]({{ site.baseurl }}/stack) — Pourquoi chaque techno a été choisie
-- [Architecture]({{ site.baseurl }}/architecture) — Couches, modules, data flow
-- [Scope fonctionnel]({{ site.baseurl }}/scope) — Ce que l'app doit permettre de faire
-- [Protocole HFR]({{ site.baseurl }}/protocol-hfr) — Contrats externes, endpoints et edge cases
-- [Navigation]({{ site.baseurl }}/navigation) — Écrans, flows, deep linking
-- [Modèles de données]({{ site.baseurl }}/models) — Structures du domaine
-- [Pattern MVI]({{ site.baseurl }}/mvi) — Architecture UI en détail
-- [Extensions communautaires]({{ site.baseurl }}/extensions) — Les addons userscript qui deviennent natifs
-- [Nommage]({{ site.baseurl }}/naming) — Le futur nom de l'app
-- [Méthodologie]({{ site.baseurl }}/methodology) — Comment le projet spécifie, prototype et teste
-- [Roadmap]({{ site.baseurl }}/roadmap) — Phases de développement
-- [Contribuer]({{ site.baseurl }}/contributing) — Comment participer
+### Spécifications
+
+- [Méthodologie]({{ site.baseurl }}/specs/methodology) — Comment le projet spécifie, prototype et teste
+- [Scope fonctionnel]({{ site.baseurl }}/specs/scope) — Ce que l'app doit permettre de faire
+- [Stack technique]({{ site.baseurl }}/specs/stack) — Pourquoi chaque techno a été choisie
+- [Architecture]({{ site.baseurl }}/specs/architecture) — Couches, modules, data flow
+- [Navigation]({{ site.baseurl }}/specs/navigation) — Écrans, flows, deep linking
+- [Modèles de données]({{ site.baseurl }}/specs/models) — Structures du domaine
+- [Pattern MVI]({{ site.baseurl }}/specs/mvi) — Architecture UI en détail
+- [Protocole HFR]({{ site.baseurl }}/specs/protocol-hfr) — Contrats externes, endpoints et edge cases
+- [Roadmap]({{ site.baseurl }}/specs/roadmap) — Phases de développement
+- [Extensions communautaires]({{ site.baseurl }}/specs/extensions) — Les addons userscript qui deviennent natifs
+- [ADRs]({{ site.baseurl }}/specs/adr) — Les décisions structurantes déjà prises
+
+### Guides
+
+- [Contribuer]({{ site.baseurl }}/guides/contributing) — Comment participer
+- [Pourquoi Redface 2 ?]({{ site.baseurl }}/guides/rationale) — Le contexte et les doutes assumés
+- [Nommage]({{ site.baseurl }}/guides/naming) — Le futur nom de l'app

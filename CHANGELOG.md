@@ -17,30 +17,30 @@ Aucun changement documenté pour l'instant.
 Pivot vers méthodologie hybride (SDD + Prototype + TDD). Allègement cross-docs et convention cross-client pour les skills.
 
 ### Added
-- Méthodologie triple-hybride formalisée dans `AGENTS.md`, `README.md`, `docs/contributing.md`, `docs/rationale.md`.
-- `docs/methodology.md` comme **source canonique** de la méthode du projet. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
-- `docs/scope.md` comme **source canonique** du scope produit et des use cases. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
-- `docs/adr/` bootstrappé avec `ADR-000`, `001`, `002`, `008`, `009`. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
+- Méthodologie triple-hybride formalisée dans `AGENTS.md`, `README.md`, `docs/guides/contributing.md`, `docs/guides/rationale.md`.
+- `docs/specs/methodology.md` comme **source canonique** de la méthode du projet. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
+- `docs/specs/scope.md` comme **source canonique** du scope produit et des use cases. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
+- `docs/specs/adr/` bootstrappé avec `ADR-000`, `001`, `002`, `008`, `009`. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
 - **Detekt** + **Android Lint** (a11y critique) ajoutés Phase 0 dans `stack.md` et `contributing.md`.
 - Règle "Vérification API actuelle" avec mot-clé "stable release" (Context7 / Docfork) dans `AGENTS.md`.
 - Smileys HFR : distinction explicite builtin (`:code:`) vs perso (`[:name]`) dans `AGENTS.md`.
 - **RedMark** comme candidat de nom ([#21](https://github.com/ForumHFR/redface2/issues/21), attribution Dintr-un-lemn) dans `naming.md`.
-- `docs/roadmap.md` : dashboard des phases (taille S/M/L/XL) + flowchart mermaid des dépendances internes et externes (MPStorage2, hfr-redflag Worker).
+- `docs/specs/roadmap.md` : dashboard des phases (taille S/M/L/XL) + flowchart mermaid des dépendances internes et externes (MPStorage2, hfr-redflag Worker).
 
 ### Changed
 - Skills migrés de `.claude/skills/` vers **`.agents/skills/`** (convention cross-client [agentskills.io](https://agentskills.io/specification)). `.claude/skills` devient un symlink vers `../.agents/skills` pour Claude Code.
 - Stack versions : patches retirés de `stack.md` et `contributing.md`, pointeur vers futur `gradle/libs.versions.toml` comme source of truth.
 - **Konsist gardé Phase 0** (revirement cf. [#22](https://github.com/ForumHFR/redface2/issues/22)) — enforcement structurel multi-LLM.
-- `docs/features.md` devient `docs/extensions.md` pour clarifier que cette page couvre les **extensions communautaires**, pas le scope produit global. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
-- `README.md`, `docs/index.md`, `docs/contributing.md`, `docs/rationale.md`, `AGENTS.md`, `docs/stack.md`, `docs/architecture.md`, `docs/models.md`, `docs/mvi.md` et `docs/roadmap.md` recâblés autour des nouvelles sources canoniques. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
+- `docs/features.md` devient `docs/specs/extensions.md` pour clarifier que cette page couvre les **extensions communautaires**, pas le scope produit global. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
+- `README.md`, `docs/index.md`, `docs/guides/contributing.md`, `docs/guides/rationale.md`, `AGENTS.md`, `docs/specs/stack.md`, `docs/specs/architecture.md`, `docs/specs/models.md`, `docs/specs/mvi.md` et `docs/specs/roadmap.md` recâblés autour des nouvelles sources canoniques. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
 - `mvi.md` : encadré méthodologie hybride en tête, Screen Compose détaillé remplacé par liste des patterns invariants (prototype-first).
 - `architecture.md` : sections Protocole HFR et règle Prefetch non-authentifié dédoublonnées — `protocol-hfr.md` reste la source unique.
 - Phase 5 Polish détaillée avec sous-items Play Store (Fastlane vs Gradle Play Publisher, beta testing, compte développeur ForumHFR).
 - Décisions design [#9](https://github.com/ForumHFR/redface2/issues/9) documentées dans `stack.md` (seed `#A62C2C`, dynamic OFF, Roboto, BBCode hybride).
-- **Navigation** : Compose Navigation 2.9 type-safe → **Compose Navigation 3 (1.1.0 stable depuis 08/04/2026)**. Réécriture `docs/navigation.md` alignée sur l'API stable : routes `@Serializable` implémentant `NavKey`, `NavBackStack<NavKey>`, pipeline `rememberSceneState` + `rememberNavigationEventState` + `NavigationBackHandler`, `SinglePaneSceneStrategy`, deep linking via parsing `Uri` manuel, intégration `ListDetailPaneScaffold` M3 Adaptive. Cf. [#23](https://github.com/ForumHFR/redface2/issues/23) + commit [`2464ac9`](https://github.com/ForumHFR/redface2/commit/2464ac9).
+- **Navigation** : Compose Navigation 2.9 type-safe → **Compose Navigation 3 (1.1.0 stable depuis 08/04/2026)**. Réécriture `docs/specs/navigation.md` alignée sur l'API stable : routes `@Serializable` implémentant `NavKey`, `NavBackStack<NavKey>`, pipeline `rememberSceneState` + `rememberNavigationEventState` + `NavigationBackHandler`, `SinglePaneSceneStrategy`, deep linking via parsing `Uri` manuel, intégration `ListDetailPaneScaffold` M3 Adaptive. Cf. [#23](https://github.com/ForumHFR/redface2/issues/23) + commit [`2464ac9`](https://github.com/ForumHFR/redface2/commit/2464ac9).
 - **HTTP** : OkHttp 4.12 → **OkHttp 5.3+** (stable depuis 07/2025, Happy Eyeballs, DoH, `callTimeout` via `kotlin.time.Duration`, `mockwebserver3`). Publié comme projet Kotlin Multiplatform ; le report KMP côté Redface ([#2](https://github.com/ForumHFR/redface2/issues/2)) est un choix de scope, pas une incompatibilité. Pas de dette de migration : on démarre neuf. Cf. [#23](https://github.com/ForumHFR/redface2/issues/23) + commit [`2464ac9`](https://github.com/ForumHFR/redface2/commit/2464ac9).
-- **Stockage credentials** : simplification finale — uniquement **cookies de session HFR chiffrés** (DataStore + Keystore + Cipher AES/GCM). Pas de password stocké, pas de re-login transparent, pas de biométrie. À l'expiration de session, l'utilisateur ré-entre son mot de passe. `docs/architecture.md` et `docs/protocol-hfr.md` mis à jour. Cf. [#23](https://github.com/ForumHFR/redface2/issues/23).
-- `docs/features.md` : nouvelle sous-section "Chargement d'images lourdes" (preview + tap-to-full, auto-detect thumbs HFR, data saver mode). Cf. [#23](https://github.com/ForumHFR/redface2/issues/23).
+- **Stockage credentials** : simplification finale — uniquement **cookies de session HFR chiffrés** (DataStore + Keystore + Cipher AES/GCM). Pas de password stocké, pas de re-login transparent, pas de biométrie. À l'expiration de session, l'utilisateur ré-entre son mot de passe. `docs/specs/architecture.md` et `docs/specs/protocol-hfr.md` mis à jour. Cf. [#23](https://github.com/ForumHFR/redface2/issues/23).
+- `docs/specs/extensions.md` : nouvelle sous-section "Chargement d'images lourdes" (preview + tap-to-full, auto-detect thumbs HFR, data saver mode). Cf. [#23](https://github.com/ForumHFR/redface2/issues/23).
 
 ### Decided
 - **Credentials Option A** : DataStore + Keystore (sans Tink, sans password stocké, sans biométrie) pour simplifier la stack.
@@ -62,7 +62,7 @@ Pivot vers méthodologie hybride (SDD + Prototype + TDD). Allègement cross-docs
 - **Cohérence AGENTS.md** : clause "Couverture 100% sur parser, database, ViewModels" contredisait la section Méthodologie ("pas d'objectif 100%"). Alignée sur la couverture hybride différenciée (100% transformers parser uniquement, guidée par risque ailleurs). Commit [`079ed4e`](https://github.com/ForumHFR/redface2/commit/079ed4e).
 - **Cohérence `contributing.md`** : "smoke test CI hebdomadaire" (l.225) contredisait le cron mensuel `0 2 1 * *` défini l.144. Aligné sur mensuel. Commit [`079ed4e`](https://github.com/ForumHFR/redface2/commit/079ed4e).
 - **Modèles canoniques** : `UserSettings` (référencé dans `protocol-hfr.md` l.313 et `models.md` l.147) et `EditInfo` (retourné par `HfrParser.parseEditPage` dans `architecture.md` l.214) étaient cités sans définition. Data classes canoniques ajoutées dans `models.md` (postsPerPage, isFirstPost, subject?, poll?, etc.). Commit [`079ed4e`](https://github.com/ForumHFR/redface2/commit/079ed4e).
-- **API Compose Navigation 3** : exemples `docs/navigation.md` alignés sur l'API stable 1.1.0 (`NavKey`, `NavBackStack<NavKey>`, `rememberSceneState`, `NavigationBackHandler`, `SinglePaneSceneStrategy`). Les versions antérieures utilisaient `backStack.push()` et `SceneStrategy.SingleTop` qui n'existent pas dans la stable. Commit [`2464ac9`](https://github.com/ForumHFR/redface2/commit/2464ac9).
+- **API Compose Navigation 3** : exemples `docs/specs/navigation.md` alignés sur l'API stable 1.1.0 (`NavKey`, `NavBackStack<NavKey>`, `rememberSceneState`, `NavigationBackHandler`, `SinglePaneSceneStrategy`). Les versions antérieures utilisaient `backStack.push()` et `SceneStrategy.SingleTop` qui n'existent pas dans la stable. Commit [`2464ac9`](https://github.com/ForumHFR/redface2/commit/2464ac9).
 - **OkHttp 5 KMP** : l'affirmation "non-compat KMP" dans `stack.md` était factuellement fausse — OkHttp 5 est publié comme projet KMP. Le report KMP côté Redface est un choix de scope, pas une incompatibilité. Commit [`2464ac9`](https://github.com/ForumHFR/redface2/commit/2464ac9).
 - **Source déprécation EncryptedSharedPreferences** : `architecture.md` citait `1.1.0-alpha07` (04/2025). Corrigé sur la source officielle `1.1.0-beta01` (04/06/2025) puis deprecated en `1.1.0`. Les raisons StrictMode + keyset corruption deviennent des signaux terrain, pas la formulation officielle Google. Commit [`2464ac9`](https://github.com/ForumHFR/redface2/commit/2464ac9).
 
@@ -73,7 +73,7 @@ Pivot vers méthodologie hybride (SDD + Prototype + TDD). Allègement cross-docs
 Audit profond : 42/53 findings résolus sur 6 batches. Drafts d'audit archivés dans le tag `archive/drafts-v0.4.0`.
 
 ### Added
-- `docs/protocol-hfr.md` (390 lignes) : endpoints HFR, form fields par endpoint, `hash_check`, `verifrequet`, `numreponse`, `listenumreponse`, `cryptlink`, smileys (2 sources), sessions, détection 403, edge cases, fixtures.
+- `docs/specs/protocol-hfr.md` (390 lignes) : endpoints HFR, form fields par endpoint, `hash_check`, `verifrequet`, `numreponse`, `listenumreponse`, `cryptlink`, smileys (2 sources), sessions, détection 403, edge cases, fixtures.
 - Material 3 Adaptive (`NavigationSuiteScaffold`, `ListDetailPaneScaffold`, `SupportingPaneScaffold`, `WindowSizeClass`), Edge-to-edge Android 15+, Predictive back (`PredictiveBackHandler`) dans `stack.md` et `navigation.md`.
 - Compose Navigation 2.9 type-safe dans `navigation.md` (`@Serializable TopicRoute`, `toRoute()`).
 - Enforcement architecture : **Konsist** (vs ArchUnit) avec exemples de règles dans `architecture.md`.
