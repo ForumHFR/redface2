@@ -6,12 +6,21 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
-## [Unreleased] — cycle #24 simplification post-v0.4.0
+## [Unreleased]
+
+Aucun changement documenté pour l'instant.
+
+---
+
+## v0.5.0 — 2026-04-19
 
 Pivot vers méthodologie hybride (SDD + Prototype + TDD). Allègement cross-docs et convention cross-client pour les skills.
 
 ### Added
 - Méthodologie triple-hybride formalisée dans `AGENTS.md`, `README.md`, `docs/contributing.md`, `docs/rationale.md`.
+- `docs/methodology.md` comme **source canonique** de la méthode du projet. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
+- `docs/scope.md` comme **source canonique** du scope produit et des use cases. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
+- `docs/adr/` bootstrappé avec `ADR-000`, `001`, `002`, `008`, `009`. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
 - **Detekt** + **Android Lint** (a11y critique) ajoutés Phase 0 dans `stack.md` et `contributing.md`.
 - Règle "Vérification API actuelle" avec mot-clé "stable release" (Context7 / Docfork) dans `AGENTS.md`.
 - Smileys HFR : distinction explicite builtin (`:code:`) vs perso (`[:name]`) dans `AGENTS.md`.
@@ -22,6 +31,8 @@ Pivot vers méthodologie hybride (SDD + Prototype + TDD). Allègement cross-docs
 - Skills migrés de `.claude/skills/` vers **`.agents/skills/`** (convention cross-client [agentskills.io](https://agentskills.io/specification)). `.claude/skills` devient un symlink vers `../.agents/skills` pour Claude Code.
 - Stack versions : patches retirés de `stack.md` et `contributing.md`, pointeur vers futur `gradle/libs.versions.toml` comme source of truth.
 - **Konsist gardé Phase 0** (revirement cf. [#22](https://github.com/ForumHFR/redface2/issues/22)) — enforcement structurel multi-LLM.
+- `docs/features.md` devient `docs/extensions.md` pour clarifier que cette page couvre les **extensions communautaires**, pas le scope produit global. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
+- `README.md`, `docs/index.md`, `docs/contributing.md`, `docs/rationale.md`, `AGENTS.md`, `docs/stack.md`, `docs/architecture.md`, `docs/models.md`, `docs/mvi.md` et `docs/roadmap.md` recâblés autour des nouvelles sources canoniques. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
 - `mvi.md` : encadré méthodologie hybride en tête, Screen Compose détaillé remplacé par liste des patterns invariants (prototype-first).
 - `architecture.md` : sections Protocole HFR et règle Prefetch non-authentifié dédoublonnées — `protocol-hfr.md` reste la source unique.
 - Phase 5 Polish détaillée avec sous-items Play Store (Fastlane vs Gradle Play Publisher, beta testing, compte développeur ForumHFR).
@@ -47,6 +58,7 @@ Pivot vers méthodologie hybride (SDD + Prototype + TDD). Allègement cross-docs
 - Phase 5 "Migration automatique Redface v1" (hors scope) dans `roadmap.md`.
 
 ### Fixed
+- Navigation Jekyll réordonnée avec `nav_order` uniques pour les pages publiées après ajout de `scope.md`, `methodology.md` et renommage `extensions.md`. Commit [`917e2b4`](https://github.com/ForumHFR/redface2/commit/917e2b4).
 - **Cohérence AGENTS.md** : clause "Couverture 100% sur parser, database, ViewModels" contredisait la section Méthodologie ("pas d'objectif 100%"). Alignée sur la couverture hybride différenciée (100% transformers parser uniquement, guidée par risque ailleurs). Commit [`079ed4e`](https://github.com/ForumHFR/redface2/commit/079ed4e).
 - **Cohérence `contributing.md`** : "smoke test CI hebdomadaire" (l.225) contredisait le cron mensuel `0 2 1 * *` défini l.144. Aligné sur mensuel. Commit [`079ed4e`](https://github.com/ForumHFR/redface2/commit/079ed4e).
 - **Modèles canoniques** : `UserSettings` (référencé dans `protocol-hfr.md` l.313 et `models.md` l.147) et `EditInfo` (retourné par `HfrParser.parseEditPage` dans `architecture.md` l.214) étaient cités sans définition. Data classes canoniques ajoutées dans `models.md` (postsPerPage, isFirstPost, subject?, poll?, etc.). Commit [`079ed4e`](https://github.com/ForumHFR/redface2/commit/079ed4e).
