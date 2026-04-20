@@ -1,5 +1,6 @@
 plugins {
     id("redface.android.compose.application")
+    id("redface.android.hilt.application")
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
