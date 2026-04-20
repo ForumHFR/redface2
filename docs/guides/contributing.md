@@ -35,9 +35,9 @@ Le projet est en phase de spec. Le code n'est pas encore écrit. Les contributio
 
 ### Environnement Docker optionnel
 
-Le chemin de référence mainteneur repose sur **`ghcr.io/cirruslabs/android-sdk:36`**. C'est la même image qui a servi à valider `:app:assembleDebug` pendant [#4](https://github.com/ForumHFR/redface2/issues/4) et [#5](https://github.com/ForumHFR/redface2/issues/5).
+Le chemin de référence mainteneur repose sur **`ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31`**. L'image a servi à valider `:app:assembleDebug` pendant [#4](https://github.com/ForumHFR/redface2/issues/4) et [#5](https://github.com/ForumHFR/redface2/issues/5), puis a été **épinglée** et codifiée dans [#35](https://github.com/ForumHFR/redface2/issues/35).
 
-- **Image de base** : `ghcr.io/cirruslabs/android-sdk:36` (JDK 21 + Android SDK 36)
+- **Image de base** : `ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31` (manifest list multi-arch vérifiée le 2026-04-20 : `amd64` + `arm64`, JDK 21 + Android SDK 36)
 - **Dockerfile** : [Dockerfile](https://github.com/ForumHFR/redface2/blob/main/Dockerfile) à la racine, volontairement minimal
 - **Wrapper local** : `scripts/docker-dev.sh`
 - **Dev container** : `.devcontainer/devcontainer.json`
@@ -52,7 +52,7 @@ Exemples :
 ./scripts/docker-dev.sh ./gradlew lintDebug testDebugUnitTest
 ```
 
-Le script monte le repo dans `/workspace` et persiste les caches Gradle / Android dans `.gradle-user/`, déjà ignoré par git.
+Le script monte le repo dans `/workspace`, persiste les caches Gradle / Android dans `.gradle-user/` et exécute le container avec l'UID/GID de l'utilisateur hôte pour éviter les fichiers root-owned sur Linux. En rootless Podman, `--userns keep-id` est ajouté automatiquement pour garder le mapping d'identité.
 
 ### Structure du projet
 
@@ -167,13 +167,13 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 - **Compose Testing** — tests UI pour les écrans critiques (Phase 1+)
 
 **Enforcement au build (Phase 0) :**
-- **Konsist** — règles d'architecture (imports inter-modules, annotations Hilt, layers, tokens M3 centralisés dans `:core:ui`, `@AnonymousClient` sur prefetch). Voir [architecture.md]({{ site.baseurl }}/specs/architecture) pour les règles. Adopté Phase 0 pour neutraliser les biais multi-LLM.
+- **Konsist** — règles d'architecture (imports inter-modules, `:core:extension` limité à `topic/editor`, tokens M3 centralisés dans `:core:ui`). Voir [architecture.md]({{ site.baseurl }}/specs/architecture) pour les règles. La règle `@AnonymousClient` sur prefetch sera activée dès que le code réseau/prefetch existera réellement.
 - **Detekt** — style Kotlin + deprecations (`runBlocking`, `GlobalScope`, `LiveData`, imports dépréciés).
 - **Android Lint** — a11y + i18n + correctness. `MissingContentDescription`, `TouchTargetSizeCheck`, `HardcodedText` en `error` (abort build). Config `lintOptions` dans `build.gradle.kts`.
 
 **CI Phase 0 :**
 - workflow GitHub Actions sur push `main` et PR
-- exécution dans le même env Docker de référence (`ghcr.io/cirruslabs/android-sdk:36`)
+- exécution dans le même env Docker de référence, épinglé par digest
 - pipeline actuelle : `detektAll`, `lintDebug`, `testDebugUnitTest` (inclut les checks Konsist), `:app:assembleDebug`
 - **Dependabot** configuré pour `gradle` et `github-actions`
 

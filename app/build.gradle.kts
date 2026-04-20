@@ -35,5 +35,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.core)
 
     testImplementation(libs.junit4)
+    testImplementation(libs.mockk)
     testImplementation(libs.konsist)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.turbine)
 }
