@@ -11,6 +11,8 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 ### Added
 - `LICENSE` ajouté à la racine avec le texte officiel **GNU GPL v3**, et `docs/adr/010-licence-client-android.md` formalise le choix de licence du client Android.
 - `docs/guides/contributing.md` documente désormais le workflow **MCP documentaire optionnel** : Context7 recommandé, Docfork en fallback, lien vers les setups officiels et cas validés sur AGP 9 / built-in Kotlin et Navigation 3.
+- bootstrap **Dev env Docker + Dev Container** : `Dockerfile`, `scripts/docker-dev.sh` et `.devcontainer/devcontainer.json` standardisent l'env Android sur `ghcr.io/cirruslabs/android-sdk:36`.
+- CI minimale Phase 0 : workflow GitHub Actions (`detektAll`, `lintDebug`, `testDebugUnitTest`, `:app:assembleDebug`) + `Dependabot` pour `gradle` et `github-actions`.
 
 ### Changed
 - `AGENTS.md` ne prescrit plus une identité git personnelle (`xat`, `xat@azora.fr`) et les lignes d'attribution IA utilisent désormais `@<demandeur>` pour mieux refléter le caractère multi-contributeur du repo.

@@ -1,0 +1,21 @@
+{
+  "name": "redface2-android",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "mounts": [
+    "source=${localWorkspaceFolder}/.gradle-user/devcontainer-gradle,target=/root/.gradle,type=bind",
+    "source=${localWorkspaceFolder}/.gradle-user/devcontainer-android,target=/root/.android,type=bind"
+  ],
+  "remoteUser": "root",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}

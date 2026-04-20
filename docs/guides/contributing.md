@@ -33,6 +33,27 @@ Le projet est en phase de spec. Le code n'est pas encore écrit. Les contributio
 - Un appareil ou émulateur Android API 29+
 - Un compte HFR (pour tester)
 
+### Environnement Docker optionnel
+
+Le chemin de référence mainteneur repose sur **`ghcr.io/cirruslabs/android-sdk:36`**. C'est la même image qui a servi à valider `:app:assembleDebug` pendant [#4](https://github.com/ForumHFR/redface2/issues/4) et [#5](https://github.com/ForumHFR/redface2/issues/5).
+
+- **Image de base** : `ghcr.io/cirruslabs/android-sdk:36` (JDK 21 + Android SDK 36)
+- **Dockerfile** : [Dockerfile](https://github.com/ForumHFR/redface2/blob/main/Dockerfile) à la racine, volontairement minimal
+- **Wrapper local** : `scripts/docker-dev.sh`
+- **Dev container** : `.devcontainer/devcontainer.json`
+
+Exemples :
+
+```bash
+# Build debug dans le container de référence
+./scripts/docker-dev.sh
+
+# Lancer une commande Gradle arbitraire dans le même env
+./scripts/docker-dev.sh ./gradlew lintDebug testDebugUnitTest
+```
+
+Le script monte le repo dans `/workspace` et persiste les caches Gradle / Android dans `.gradle-user/`, déjà ignoré par git.
+
 ### Structure du projet
 
 ```
@@ -149,6 +170,12 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 - **Konsist** — règles d'architecture (imports inter-modules, annotations Hilt, layers, tokens M3 centralisés dans `:core:ui`, `@AnonymousClient` sur prefetch). Voir [architecture.md]({{ site.baseurl }}/specs/architecture) pour les règles. Adopté Phase 0 pour neutraliser les biais multi-LLM.
 - **Detekt** — style Kotlin + deprecations (`runBlocking`, `GlobalScope`, `LiveData`, imports dépréciés).
 - **Android Lint** — a11y + i18n + correctness. `MissingContentDescription`, `TouchTargetSizeCheck`, `HardcodedText` en `error` (abort build). Config `lintOptions` dans `build.gradle.kts`.
+
+**CI Phase 0 :**
+- workflow GitHub Actions sur push `main` et PR
+- exécution dans le même env Docker de référence (`ghcr.io/cirruslabs/android-sdk:36`)
+- pipeline actuelle : `detektAll`, `lintDebug`, `testDebugUnitTest` (inclut les checks Konsist), `:app:assembleDebug`
+- **Dependabot** configuré pour `gradle` et `github-actions`
 
 **Couverture (hybride différenciée) :**
 - **100% sur les transformers du parser HFR** — naturel, fixtures dictent exhaustivité

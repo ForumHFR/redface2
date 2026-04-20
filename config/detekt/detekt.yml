@@ -1,0 +1,25 @@
+config:
+  validation: true
+  warningsAsErrors: true
+
+complexity:
+  LongMethod:
+    active: false
+  TooManyFunctions:
+    active: false
+
+naming:
+  FunctionNaming:
+    ignoreAnnotated:
+      - Composable
+      - Test
+
+style:
+  MagicNumber:
+    active: false
+  ForbiddenImport:
+    active: true
+    imports:
+      - androidx.compose.material.*
+      - kotlinx.coroutines.GlobalScope
+      - androidx.lifecycle.LiveData
