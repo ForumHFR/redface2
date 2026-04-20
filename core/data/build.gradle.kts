@@ -1,5 +1,6 @@
 plugins {
     id("redface.android.library")
+    id("redface.android.hilt.library")
 }
 
 android {
@@ -11,4 +12,5 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:parser"))
     implementation(project(":core:database"))
+    implementation(libs.kotlinx.coroutines.core)
 }

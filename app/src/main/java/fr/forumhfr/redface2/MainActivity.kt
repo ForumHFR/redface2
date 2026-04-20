@@ -8,8 +8,10 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dagger.hilt.android.AndroidEntryPoint
 import fr.forumhfr.redface2.navigation.RedfaceApp
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private var latestIntent by mutableStateOf<Intent?>(null)
 

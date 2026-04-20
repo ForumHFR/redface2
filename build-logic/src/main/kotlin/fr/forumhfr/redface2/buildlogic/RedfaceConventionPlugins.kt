@@ -110,6 +110,30 @@ class RedfaceAndroidComposeLibraryConventionPlugin : Plugin<Project> {
     }
 }
 
+class RedfaceAndroidHiltApplicationConventionPlugin : Plugin<Project> {
+    override fun apply(target: Project) = with(target) {
+        pluginManager.withPlugin("com.android.application") {
+            pluginManager.apply("com.google.devtools.ksp")
+            pluginManager.apply("com.google.dagger.hilt.android")
+
+            dependencies.add("implementation", libs.library("hilt-android"))
+            dependencies.add("ksp", libs.library("hilt-android-compiler"))
+        }
+    }
+}
+
+class RedfaceAndroidHiltLibraryConventionPlugin : Plugin<Project> {
+    override fun apply(target: Project) = with(target) {
+        pluginManager.withPlugin("com.android.library") {
+            pluginManager.apply("com.google.devtools.ksp")
+            pluginManager.apply("com.google.dagger.hilt.android")
+
+            dependencies.add("implementation", libs.library("hilt-android"))
+            dependencies.add("ksp", libs.library("hilt-android-compiler"))
+        }
+    }
+}
+
 class RedfaceKotlinJvmLibraryConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) = with(target) {
         pluginManager.apply("org.jetbrains.kotlin.jvm")
@@ -132,3 +156,6 @@ private val Project.libs: VersionCatalog
 
 private fun VersionCatalog.versionInt(alias: String): Int =
     findVersion(alias).get().requiredVersion.toInt()
+
+private fun VersionCatalog.library(alias: String) =
+    findLibrary(alias).get().get()
