@@ -63,6 +63,22 @@ Le projet utilisera un **Gradle version catalog** (`gradle/libs.versions.toml`) 
 
 **Pourquoi pas de tableau de versions exact ici** : une doc qui liste `kotlin = "2.3.20"` dérive en 3 mois. La source unique est le fichier `libs.versions.toml` du repo, interrogeable aussi via Context7/Docfork (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)) pour générer du code aligné avec les APIs stables courantes.
 
+### MCP documentaire optionnel
+
+Pour les contributeurs qui travaillent avec un agent IA, l'outil recommandé par défaut est **Context7**. **Docfork** reste un fallback crédible si votre client l'intègre mieux. Aucun des deux n'est un prérequis du projet.
+
+- **Context7 (recommandé)** : setup officiel via [`ctx7 setup`](https://context7.com/docs/clients/cli) avec choix entre mode **MCP** et **CLI + Skills**. Documentation d'installation et configuration manuelle : [installation Context7](https://context7.com/docs/installation).
+- **Docfork (fallback)** : setup officiel via [`npx dgrep setup --cursor`](https://github.com/docfork/docfork) ou équivalent `--claude` / `--opencode`, avec outils `search_docs` et `fetch_doc`. Configuration manuelle MCP : `https://mcp.docfork.com/mcp`.
+- **Règle d'usage** : préciser **`stable release`** dans la requête, et si possible l'ID exact de la lib ou sa version majeure/minor pour éviter les snapshots et pre-releases.
+- **Source of truth** : ces MCP servent à vérifier une API actuelle, pas à décider seuls de l'architecture. Les choix de projet restent dans les pages canoniques (`stack`, `architecture`, `methodology`) et le `libs.versions.toml`.
+
+**Cas validés côté mainteneur** :
+
+- pendant [#4](https://github.com/ForumHFR/redface2/issues/4), la doc officielle Android sur **built-in Kotlin dans AGP 9** a servi à confirmer que `org.jetbrains.kotlin.android` ne devait plus être appliqué. La page [Migrate to built-in Kotlin](https://developer.android.com/build/migrate-to-built-in-kotlin) indique qu'AGP 9 active Kotlin built-in et que le plugin `org.jetbrains.kotlin.android` n'est plus requis.
+- pendant [#5](https://github.com/ForumHFR/redface2/issues/5), Context7 a servi à recaler le setup **Navigation 3** (plugin serialization côté app, dépendances stables `navigation3-runtime` / `navigation3-ui`) et à éviter plusieurs faux détails d'API avant implémentation.
+
+Ces vérifications ont été répercutées dans le bootstrap Gradle et le code livré.
+
 ### Convention par feature
 
 Chaque feature suit la même organisation :
