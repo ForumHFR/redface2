@@ -4,11 +4,70 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 5
     groups:
-      gradle:
+      build-toolchain:
+        patterns:
+          - "com.android.*"
+          - "com.android.tools.build:gradle"
+          - "org.jetbrains.kotlin.*"
+          - "org.jetbrains.kotlin:kotlin-gradle-plugin"
+          - "org.jetbrains.kotlin.plugin.compose:*"
+          - "com.google.devtools.ksp"
+          - "com.google.dagger.hilt.android"
+      androidx-ui-navigation:
+        patterns:
+          - "androidx.activity:activity-compose"
+          - "androidx.compose:*"
+          - "androidx.compose.material3*"
+          - "androidx.navigation3:*"
+      androidx-core-storage:
+        patterns:
+          - "androidx.core:core-ktx"
+          - "androidx.room:*"
+      network-imaging:
+        patterns:
+          - "com.squareup.okhttp3:*"
+          - "org.jsoup:jsoup"
+          - "io.coil-kt.coil3:*"
+      kotlin-runtime:
+        patterns:
+          - "org.jetbrains.kotlinx:*"
+      test-quality:
+        patterns:
+          - "junit:junit"
+          - "io.mockk:*"
+          - "org.robolectric:robolectric"
+          - "app.cash.turbine:turbine"
+          - "io.gitlab.arturbosch.detekt:*"
+          - "com.lemonappdev:konsist"
+      gradle-misc:
         patterns:
           - "*"
+        exclude-patterns:
+          - "com.android.*"
+          - "com.android.tools.build:gradle"
+          - "org.jetbrains.kotlin.*"
+          - "org.jetbrains.kotlin:kotlin-gradle-plugin"
+          - "org.jetbrains.kotlin.plugin.compose:*"
+          - "com.google.devtools.ksp"
+          - "com.google.dagger.hilt.android"
+          - "androidx.activity:activity-compose"
+          - "androidx.compose:*"
+          - "androidx.compose.material3*"
+          - "androidx.navigation3:*"
+          - "androidx.core:core-ktx"
+          - "androidx.room:*"
+          - "com.squareup.okhttp3:*"
+          - "org.jsoup:jsoup"
+          - "io.coil-kt.coil3:*"
+          - "org.jetbrains.kotlinx:*"
+          - "junit:junit"
+          - "io.mockk:*"
+          - "org.robolectric:robolectric"
+          - "app.cash.turbine:turbine"
+          - "io.gitlab.arturbosch.detekt:*"
+          - "com.lemonappdev:konsist"
 
   - package-ecosystem: "github-actions"
     directory: "/"

@@ -14,6 +14,7 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 - bootstrap **Dev env Docker + Dev Container** : `Dockerfile`, `scripts/docker-dev.sh` et `.devcontainer/devcontainer.json` standardisent l'env Android sur `ghcr.io/cirruslabs/android-sdk:36`.
 - CI minimale Phase 0 : workflow GitHub Actions (`detektAll`, `lintDebug`, `testDebugUnitTest`, `:app:assembleDebug`) + `Dependabot` pour `gradle` et `github-actions`.
 - stack de tests Phase 0 effectivement bootstrapée dans le repo : **MockK**, **Robolectric** et **Turbine** rejoignent `JUnit 4` et `Konsist` dans le version catalog.
+- workflow PR préparé avec `.github/pull_request_template.md` et `.github/CODEOWNERS`.
 
 ### Changed
 - `AGENTS.md` ne prescrit plus une identité git personnelle (`xat`, `xat@azora.fr`) et les lignes d'attribution IA utilisent désormais `@<demandeur>` pour mieux refléter le caractère multi-contributeur du repo.
@@ -21,6 +22,7 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 - l'image Docker / CI de référence est désormais **épinglée par digest** et documentée comme manifest list multi-arch (`amd64` + `arm64`).
 - le wrapper `docker-dev.sh` et le dev container ne tournent plus en root par défaut.
 - `Dependabot` est recalibré en cadence mensuelle groupée et la CI annule les runs obsolètes sur la même ref.
+- `Dependabot` n'ouvre plus une seule PR Gradle fourre-tout : les mises à jour sont désormais regroupées par lanes cohérentes (`build-toolchain`, `androidx-ui-navigation`, `network-imaging`, `test-quality`, etc.) pour faciliter la review.
 - les checks Konsist Phase 0 n'acceptent plus des scopes vides silencieux et assertent désormais explicitement un scope non vide avant d'appliquer les règles.
 
 ---
