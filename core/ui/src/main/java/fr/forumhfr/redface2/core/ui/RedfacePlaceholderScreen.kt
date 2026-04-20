@@ -13,17 +13,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun RedfaceTheme(content: @Composable () -> Unit) {
-    MaterialTheme(content = content)
-}
-
-@Composable
 fun RedfacePlaceholderScreen(
     title: String,
     body: String,
     actions: @Composable ColumnScope.() -> Unit = {},
 ) {
-    Surface(modifier = Modifier.fillMaxSize()) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.surface,
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -33,10 +31,12 @@ fun RedfacePlaceholderScreen(
             Text(
                 text = title,
                 style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
                 text = body,
                 style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             actions()
         }
