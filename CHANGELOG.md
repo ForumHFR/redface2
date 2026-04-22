@@ -19,6 +19,7 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 ### Changed
 - `AGENTS.md` ne prescrit plus une identité git personnelle (`xat`, `xat@azora.fr`) et les lignes d'attribution IA utilisent désormais `@<demandeur>` pour mieux refléter le caractère multi-contributeur du repo.
 - La licence du client Android Redface 2 passe de la mention implicite `Apache 2.0` à **`GPL-3.0-only`** dans le repo (`AGENTS.md`, `README.md`, `docs/guides/contributing.md`).
+- le bootstrap Hilt Phase 0 s'aligne sur **Hilt 2.59.2** dans le version catalog, et `docs/specs/stack.md` reflète désormais cette référence d'implémentation.
 - l'image Docker / CI de référence est désormais **épinglée par digest** et documentée comme manifest list multi-arch (`amd64` + `arm64`).
 - le wrapper `docker-dev.sh` et le dev container ne tournent plus en root par défaut.
 - `Dependabot` est recalibré en cadence mensuelle groupée et la CI annule les runs obsolètes sur la même ref.
