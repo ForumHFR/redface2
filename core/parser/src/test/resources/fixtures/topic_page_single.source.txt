@@ -1,0 +1,4 @@
+Source: forum.hardware.fr (fixture publique reprise de ForumHFR/Redface)
+Original fixture: app/src/test/resources/hfr_single_page_topic.html
+Captured page: forum2.php?config=hfr.inc&cat=1&post=999395&page=1
+Notes: single-page topic fixture, hash_check sanitized for redface2
