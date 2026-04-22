@@ -2,7 +2,7 @@
 agp = "9.1.0"
 kotlin = "2.3.20"
 ksp = "2.3.6"
-hilt = "2.57.2"
+hilt = "2.59.2"
 android-minSdk = "29"
 android-targetSdk = "36"
 android-compileSdk = "36"
@@ -23,6 +23,7 @@ mockk = "1.14.9"
 robolectric = "4.16.1"
 turbine = "1.2.1"
 konsist = "0.17.3"
+javax-inject = "1"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -37,6 +38,8 @@ hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 android-gradle-plugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
 kotlin-compose-gradle-plugin = { module = "org.jetbrains.kotlin.plugin.compose:org.jetbrains.kotlin.plugin.compose.gradle.plugin", version.ref = "kotlin" }
+ksp-gradle-plugin = { module = "com.google.devtools.ksp:com.google.devtools.ksp.gradle.plugin", version.ref = "ksp" }
+hilt-android-gradle-plugin = { module = "com.google.dagger:hilt-android-gradle-plugin", version.ref = "hilt" }
 
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx-core" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
@@ -53,11 +56,12 @@ robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectr
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
 detekt-cli = { module = "io.gitlab.arturbosch.detekt:detekt-cli", version.ref = "detekt" }
+javax-inject = { module = "javax.inject:javax.inject", version.ref = "javax-inject" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
-hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }
+hilt-android-compiler = { module = "com.google.dagger:hilt-android-compiler", version.ref = "hilt" }
 
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }

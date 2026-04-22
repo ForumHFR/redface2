@@ -7,6 +7,8 @@ dependencies {
     implementation(libs.android.gradle.plugin)
     implementation(libs.kotlin.gradle.plugin)
     implementation(libs.kotlin.compose.gradle.plugin)
+    implementation(libs.ksp.gradle.plugin)
+    implementation(libs.hilt.android.gradle.plugin)
 }
 
 gradlePlugin {
@@ -26,6 +28,14 @@ gradlePlugin {
         register("redfaceAndroidComposeLibrary") {
             id = "redface.android.compose.library"
             implementationClass = "fr.forumhfr.redface2.buildlogic.RedfaceAndroidComposeLibraryConventionPlugin"
+        }
+        register("redfaceAndroidHiltApplication") {
+            id = "redface.android.hilt.application"
+            implementationClass = "fr.forumhfr.redface2.buildlogic.RedfaceAndroidHiltApplicationConventionPlugin"
+        }
+        register("redfaceAndroidHiltLibrary") {
+            id = "redface.android.hilt.library"
+            implementationClass = "fr.forumhfr.redface2.buildlogic.RedfaceAndroidHiltLibraryConventionPlugin"
         }
         register("redfaceKotlinJvmLibrary") {
             id = "redface.kotlin.jvm.library"

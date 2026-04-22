@@ -167,6 +167,8 @@ Voir `docs/specs/navigation.md` pour les exemples concrets (`NavDisplay`, `Scene
 
 Hilt avec KSP (pas KAPT) résout le problème historique de build time. La sécurité à la compilation et l'intégration native avec Jetpack font la différence pour un projet open-source.
 
+Le bootstrap de code Phase 0 s'aligne actuellement sur **Hilt 2.59.2** dans le version catalog. Cette version sert de référence d'implémentation tant que le couple Kotlin/AGP 9 reste en place.
+
 **Note** : Koin a évolué significativement. Le [compiler plugin K2](https://insert-koin.io/docs/reference/koin-annotations/start) (1.0.0-RC1) permet la génération du graphe de DI à la compilation, éliminant le risque de crash runtime. Koin est également KMP-natif. Si le projet évolue vers KMP, Koin deviendra le choix naturel. Hilt reste le choix pour la v1 Android-only grâce à son intégration Jetpack et sa base de contributeurs plus large.
 
 ### Perspectives KMP
