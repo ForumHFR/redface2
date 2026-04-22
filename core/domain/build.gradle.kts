@@ -4,4 +4,5 @@ plugins {
 
 dependencies {
     api(project(":core:model"))
+    api(libs.javax.inject)
 }
