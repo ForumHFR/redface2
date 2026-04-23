@@ -97,7 +97,7 @@ internal fun TopicHtmlRenderer(
     }
 }
 
-private sealed interface TopicContentBlock {
+internal sealed interface TopicContentBlock {
     data class Paragraph(
         val html: String,
     ) : TopicContentBlock
@@ -108,12 +108,35 @@ private sealed interface TopicContentBlock {
     ) : TopicContentBlock
 }
 
-private fun parseBlocks(html: String): List<TopicContentBlock> {
+internal fun parseTopicBlocks(html: String): List<TopicContentBlock> {
     val body = Jsoup.parseBodyFragment(html).body()
-    return body.childNodes()
-        .mapNotNull(::parseBlock)
-        .filterNot { block -> block is TopicContentBlock.Paragraph && block.html.isBlank() }
+    val blocks = mutableListOf<TopicContentBlock>()
+    val paragraphBuffer = StringBuilder()
+
+    fun flushParagraph() {
+        val htmlFragment = paragraphBuffer.toString().trim()
+        if (htmlFragment.isNotBlank()) {
+            blocks += TopicContentBlock.Paragraph(htmlFragment)
+        }
+        paragraphBuffer.clear()
+    }
+
+    body.childNodes().forEach { node ->
+        when (val block = parseBlock(node)) {
+            null -> flushParagraph()
+            is TopicContentBlock.Quote -> {
+                flushParagraph()
+                blocks += block
+            }
+            is TopicContentBlock.Paragraph -> paragraphBuffer.append(block.html)
+        }
+    }
+
+    flushParagraph()
+    return blocks
 }
+
+private fun parseBlocks(html: String): List<TopicContentBlock> = parseTopicBlocks(html)
 
 private fun parseBlock(node: Node): TopicContentBlock? {
     val element = node as? Element
