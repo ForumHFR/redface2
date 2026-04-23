@@ -21,6 +21,8 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import fr.forumhfr.redface2.core.domain.fixtures.FixedTopicFixtures
+import fr.forumhfr.redface2.core.domain.fixtures.TopicFixtureRepository
 import fr.forumhfr.redface2.FlagsScreen
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -29,6 +31,7 @@ import fr.forumhfr.redface2.feature.forum.CategoryScreen
 import fr.forumhfr.redface2.feature.forum.ForumScreen
 import fr.forumhfr.redface2.feature.messages.MessagesScreen
 import fr.forumhfr.redface2.feature.search.SearchScreen
+import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import kotlinx.serialization.Serializable
 
@@ -91,7 +94,10 @@ private data class ParsedDeepLink(
 )
 
 @Composable
-fun RedfaceApp(intent: Intent?) {
+fun RedfaceApp(
+    intent: Intent?,
+    topicFixtureRepository: TopicFixtureRepository,
+) {
     RedfaceTheme {
         val flagsBackStack = rememberNavBackStack(FlagsListRoute)
         val forumBackStack = rememberNavBackStack(ForumRoute)
@@ -133,7 +139,10 @@ fun RedfaceApp(intent: Intent?) {
         ) {
             Surface(modifier = Modifier.padding(horizontal = 8.dp)) {
                 val activeBackStack = backStacks.getValue(currentDestination)
-                RedfaceNavHost(backStack = activeBackStack)
+                RedfaceNavHost(
+                    backStack = activeBackStack,
+                    topicFixtureRepository = topicFixtureRepository,
+                )
             }
         }
     }
@@ -142,6 +151,7 @@ fun RedfaceApp(intent: Intent?) {
 @Composable
 private fun RedfaceNavHost(
     backStack: NavBackStack<NavKey>,
+    topicFixtureRepository: TopicFixtureRepository,
 ) {
     NavDisplay(
         backStack = backStack,
@@ -154,7 +164,13 @@ private fun RedfaceNavHost(
             entry<FlagsListRoute> {
                 FlagsScreen(
                     onOpenUnreadTopic = {
-                        backStack.add(TopicRoute(cat = 23, post = 35395, page = 3))
+                        backStack.add(
+                            TopicRoute(
+                                cat = FixedTopicFixtures.cat,
+                                post = FixedTopicFixtures.post,
+                                page = 1,
+                            ),
+                        )
                     },
                     onOpenTrackedCategory = {
                         backStack.add(CategoryRoute(cat = 23, subcat = 0))
@@ -167,21 +183,40 @@ private fun RedfaceNavHost(
                         backStack.add(CategoryRoute(cat = 23, subcat = 0))
                     },
                     onOpenTopic = {
-                        backStack.add(TopicRoute(cat = 23, post = 35395, page = 1))
+                        backStack.add(
+                            TopicRoute(
+                                cat = FixedTopicFixtures.cat,
+                                post = FixedTopicFixtures.post,
+                                page = 1,
+                            ),
+                        )
                     },
                 )
             }
             entry<SearchRoute> {
                 SearchScreen(
                     onOpenResult = {
-                        backStack.add(TopicRoute(cat = 23, post = 35395, page = 5, scrollTo = 12345))
+                        backStack.add(
+                            TopicRoute(
+                                cat = FixedTopicFixtures.cat,
+                                post = FixedTopicFixtures.post,
+                                page = 146,
+                                scrollTo = 18085119,
+                            ),
+                        )
                     },
                 )
             }
             entry<MessagesRoute> {
                 MessagesScreen(
                     onOpenTopic = {
-                        backStack.add(TopicRoute(cat = 23, post = 35395, page = 2))
+                        backStack.add(
+                            TopicRoute(
+                                cat = FixedTopicFixtures.cat,
+                                post = FixedTopicFixtures.post,
+                                page = 2,
+                            ),
+                        )
                     },
                 )
             }
@@ -190,22 +225,42 @@ private fun RedfaceNavHost(
                     cat = route.cat,
                     subcat = route.subcat,
                     onOpenTopic = {
-                        backStack.add(TopicRoute(cat = route.cat, post = 35395, page = 1))
+                        backStack.add(
+                            TopicRoute(
+                                cat = FixedTopicFixtures.cat,
+                                post = FixedTopicFixtures.post,
+                                page = 1,
+                            ),
+                        )
                     },
                 )
             }
             entry<TopicRoute> { route ->
                 TopicScreen(
-                    cat = route.cat,
-                    post = route.post,
-                    page = route.page,
-                    scrollTo = route.scrollTo,
+                    request = TopicRequest(
+                        cat = route.cat,
+                        post = route.post,
+                        page = route.page,
+                        scrollTo = route.scrollTo,
+                    ),
+                    topicFixtureRepository = topicFixtureRepository,
                     onReply = { postId ->
                         backStack.add(
                             EditorRoute(
                                 mode = EditorMode.Reply,
                                 cat = route.cat,
                                 post = postId,
+                            ),
+                        )
+                    },
+                    onOpenPage = { targetPage ->
+                        backStack.removeAt(backStack.lastIndex)
+                        backStack.add(
+                            TopicRoute(
+                                cat = route.cat,
+                                post = route.post,
+                                page = targetPage,
+                                scrollTo = null,
                             ),
                         )
                     },

@@ -29,4 +29,4 @@ jobs:
         uses: gradle/actions/setup-gradle@v5
 
       - name: Verify
-        run: ./gradlew detektAll lintDebug testDebugUnitTest :app:assembleDebug
+        run: ./gradlew detektAll lintDebug test testDebugUnitTest :app:assembleDebug
