@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.parser
 
+import fr.forumhfr.redface2.core.model.Poll
+import fr.forumhfr.redface2.core.model.PollOption
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.parser.common.HfrDateParser
@@ -7,6 +9,7 @@ import fr.forumhfr.redface2.core.parser.common.HfrSelectors
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import org.jsoup.nodes.TextNode
 
 class TopicPageParser(
     private val postContentParser: PostContentParser = PostContentParser(),
@@ -26,7 +29,7 @@ class TopicPageParser(
             page = pageInfo.current,
             totalPages = pageInfo.total,
             isFirstPostOwner = false,
-            poll = null,
+            poll = parsePoll(document),
         )
     }
 
@@ -107,6 +110,80 @@ class TopicPageParser(
             ?.toIntOrNull()
             ?: error("Required input not found for $selector")
     }
+
+    private fun parsePoll(document: Document): Poll? {
+        val pollElement = document.selectFirst(HfrSelectors.POLL) ?: return null
+        val question = pollElement
+            .selectFirst(HfrSelectors.POLL_QUESTION)
+            ?.text()
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+
+        val optionBars = pollElement.select(HfrSelectors.POLL_OPTION_BAR)
+        val optionLabels = pollElement.select(HfrSelectors.POLL_OPTION_LABEL)
+        return if (question == null || optionBars.isEmpty() || optionBars.size != optionLabels.size) {
+            null
+        } else {
+            val options = optionBars.mapIndexed { index, optionBar ->
+                val percentText = optionBar
+                    .select(HfrSelectors.POLL_OPTION_PERCENT)
+                    .firstOrNull()
+                    ?.text()
+                    .orEmpty()
+                val votesText = optionBar
+                    .select(HfrSelectors.POLL_OPTION_PERCENT)
+                    .lastOrNull()
+                    ?.text()
+                    .orEmpty()
+
+                PollOption(
+                    text = optionLabels[index].text().trim(),
+                    votes = firstInt(votesText),
+                    percentage = firstFloat(percentText),
+                )
+            }
+
+            val trailingText = pollElement.childNodes()
+                .filterIsInstance<TextNode>()
+                .joinToString(" ") { it.text() }
+            val summaryText = buildString {
+                append(pollElement.text())
+                append(' ')
+                append(trailingText)
+            }
+
+            Poll(
+                question = question,
+                options = options,
+                multipleChoice = choiceCount(summaryText) > 1,
+                totalVotes = firstInt(
+                    Regex("""Total\s*:\s*(\d+)\s+votes""")
+                        .find(summaryText)
+                        ?.groupValues
+                        ?.getOrNull(1)
+                        .orEmpty(),
+                ),
+                hasVoted = false,
+            )
+        }
+    }
+
+    private fun firstInt(text: String): Int =
+        Regex("""(\d+)""").find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+
+    private fun firstFloat(text: String): Float =
+        Regex("""(\d+(?:[.,]\d+)?)""").find(text)?.groupValues?.get(1)
+            ?.replace(',', '.')
+            ?.toFloatOrNull()
+            ?: 0f
+
+    private fun choiceCount(text: String): Int =
+        Regex("""Sondage à\s+(\d+)\s+choix""", RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+            ?: 1
 }
 
 private data class PageInfo(

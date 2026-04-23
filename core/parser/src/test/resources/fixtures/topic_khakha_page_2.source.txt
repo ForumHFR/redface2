@@ -1,0 +1,4 @@
+Source: https://forum.hardware.fr/hfr/Discussions/Viepratique/unique-defequer-serenite-sujet_84540_2.htm
+Captured: 2026-04-23
+Auth: logged-out
+Sanitization: verified logged-out capture; no cookies, session identifiers or account-specific private data detected; empty hash_check inputs preserved; browser "Save Page Complete" asset directory kept as-is for DOM fidelity
