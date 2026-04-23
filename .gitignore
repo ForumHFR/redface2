@@ -6,3 +6,4 @@ scripts/phase-minus-1-dashboard.sh
 .kotlin/
 local.properties
 **/build/
+core/parser/src/test/resources/fixtures/*_files/
