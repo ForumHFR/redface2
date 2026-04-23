@@ -18,7 +18,7 @@ class TopicPageParser(
     fun parse(html: String): Topic {
         val document = Jsoup.parse(html)
         val pageInfo = parsePageInfo(document)
-        val posts = parsePosts(document, pageInfo.current)
+        val posts = parsePosts(document)
 
         return Topic(
             cat = requireInputValue(document, HfrSelectors.CATEGORY_ID_INPUT),
@@ -35,28 +35,20 @@ class TopicPageParser(
 
     private fun parsePosts(
         document: Document,
-        currentPage: Int,
     ): List<Post> {
         val postTables = document
             .select(HfrSelectors.POST_TABLE)
             .filter { postTable -> postTable.selectFirst(HfrSelectors.POST_ANCHOR) != null }
-        val pageSize = postTables.size.coerceAtLeast(1)
 
-        return postTables.mapIndexed { index, postTable ->
+        return postTables.map { postTable ->
             parsePost(
                 postTable = postTable,
-                currentPage = currentPage,
-                pageSize = pageSize,
-                indexOnPage = index,
             )
         }
     }
 
     private fun parsePost(
         postTable: Element,
-        currentPage: Int,
-        pageSize: Int,
-        indexOnPage: Int,
     ): Post {
         val content = postContentParser.parse(postTable.selectFirst(HfrSelectors.POST_CONTENT))
 
@@ -77,7 +69,7 @@ class TopicPageParser(
             isEditable = false,
             isOwnPost = false,
             quotedAuthors = content.quotedAuthors,
-            postIndex = ((currentPage - 1) * pageSize) + indexOnPage + 1,
+            postIndex = null,
         )
     }
 
