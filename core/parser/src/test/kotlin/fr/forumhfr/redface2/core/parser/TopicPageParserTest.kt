@@ -53,6 +53,50 @@ class TopicPageParserTest {
         assertTrue(topic.posts.any { post -> "Origan" in post.quotedAuthors })
     }
 
+    @Test
+    fun `parse khakha opening page`() {
+        val topic = parser.parse(fixture("topic_khakha_page_1.html"))
+
+        assertEquals(13, topic.cat)
+        assertEquals(84540, topic.post)
+        assertEquals("[Topic Unique] Déféquer en toute sérénité, topic du kaka", topic.title)
+        assertEquals(1, topic.page)
+        assertEquals(152, topic.totalPages)
+        assertEquals(40, topic.posts.size)
+        assertEquals(16625217, topic.posts.first().numreponse)
+        assertEquals("Mora1651", topic.posts.first().author)
+        assertTrue(topic.posts.any { post -> post.content.contains(":o") || post.content.contains("[:aloy]") })
+    }
+
+    @Test
+    fun `parse khakha page with poll`() {
+        val topic = parser.parse(fixture("topic_khakha_page_2.html"))
+
+        assertEquals(2, topic.page)
+        assertEquals(152, topic.totalPages)
+        assertEquals(41, topic.posts.size)
+        assertEquals(16628071, topic.posts.first().numreponse)
+        requireNotNull(topic.poll).also { poll ->
+            assertEquals("Aimez-vous l'odeur de vos excréments?", poll.question)
+            assertEquals(9, poll.options.size)
+            assertTrue(poll.multipleChoice)
+            assertEquals(176, poll.totalVotes)
+            assertEquals("1. Non, c'est dégueu!", poll.options.first().text)
+            assertEquals(34, poll.options.first().votes)
+        }
+    }
+
+    @Test
+    fun `parse khakha late page with nested quotes`() {
+        val topic = parser.parse(fixture("topic_khakha_page_146.html"))
+
+        assertEquals(146, topic.page)
+        assertEquals(152, topic.totalPages)
+        assertEquals(41, topic.posts.size)
+        assertEquals(18085006, topic.posts.first().numreponse)
+        assertTrue(topic.posts.any { post -> "justhynbrydhou" in post.quotedAuthors })
+    }
+
     private fun fixture(name: String): String {
         return requireNotNull(javaClass.getResource("/fixtures/$name")) {
             "Fixture not found: $name"

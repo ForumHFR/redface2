@@ -18,4 +18,10 @@ object HfrSelectors {
     const val POST_CITATION_AUTHOR = "table.citation b.s1 a.Topic"
     const val POST_EDITED = "div.edited"
     const val POST_SIGNATURE = "span.signature"
+
+    const val POLL = "div.sondage"
+    const val POLL_QUESTION = "b.s2"
+    const val POLL_OPTION_BAR = ".sondageLeft"
+    const val POLL_OPTION_LABEL = ".sondageRight"
+    const val POLL_OPTION_PERCENT = ".sondageTop"
 }
