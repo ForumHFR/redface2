@@ -310,9 +310,15 @@ private fun TopicPostCard(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = stringResource(
-                    R.string.topic_post_header,
-                    post.postIndex,
+                text = post.postIndex?.let { postIndex ->
+                    stringResource(
+                        R.string.topic_post_header_with_index,
+                        postIndex,
+                        post.author,
+                        post.numreponse,
+                    )
+                } ?: stringResource(
+                    R.string.topic_post_header_without_index,
                     post.author,
                     post.numreponse,
                 ),

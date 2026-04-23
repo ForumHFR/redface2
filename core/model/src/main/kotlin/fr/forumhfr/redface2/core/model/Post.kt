@@ -11,5 +11,5 @@ data class Post(
     val isEditable: Boolean,
     val isOwnPost: Boolean,
     val quotedAuthors: List<String>,
-    val postIndex: Int,
+    val postIndex: Int?,
 )

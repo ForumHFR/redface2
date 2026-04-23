@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.parser
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -95,6 +96,13 @@ class TopicPageParserTest {
         assertEquals(41, topic.posts.size)
         assertEquals(18085006, topic.posts.first().numreponse)
         assertTrue(topic.posts.any { post -> "justhynbrydhou" in post.quotedAuthors })
+    }
+
+    @Test
+    fun `leave global post index unresolved when parsing an isolated topic page`() {
+        val topic = parser.parse(fixture("topic_khakha_page_2.html"))
+
+        assertNull(topic.posts.first().postIndex)
     }
 
     private fun fixture(name: String): String {
