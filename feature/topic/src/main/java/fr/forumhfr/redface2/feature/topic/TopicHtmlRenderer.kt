@@ -22,6 +22,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import android.net.Uri
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
@@ -199,7 +200,7 @@ private fun AnnotatedString.Builder.appendElement(
         }
 
         "a" -> {
-            val href = element.attr("href").ifBlank { null }
+            val href = sanitizeLinkHref(element.attr("href"))
             if (href == null) {
                 appendNodes(element.childNodes(), linkStyles)
             } else {
@@ -234,3 +235,14 @@ private fun AnnotatedString.Builder.appendNormalizedText(text: String) {
     }
     append(normalized.trim())
 }
+
+private fun sanitizeLinkHref(rawHref: String): String? =
+    rawHref.trim()
+        .takeIf(String::isNotBlank)
+        ?.let { href ->
+            when {
+                href.startsWith("/") -> "https://forum.hardware.fr$href"
+                runCatching { Uri.parse(href) }.getOrNull()?.scheme?.lowercase() in setOf("http", "https") -> href
+                else -> null
+            }
+        }

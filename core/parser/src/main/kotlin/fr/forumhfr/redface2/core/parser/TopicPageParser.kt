@@ -149,7 +149,7 @@ class TopicPageParser(
                 options = options,
                 multipleChoice = choiceCount(summaryText) > 1,
                 totalVotes = firstInt(
-                    Regex("""Total\s*:\s*(\d+)\s+votes""")
+                    Regex("""Total\s*[:\s]\s*(\d+)\s+votes?""", RegexOption.IGNORE_CASE)
                         .find(summaryText)
                         ?.groupValues
                         ?.getOrNull(1)
