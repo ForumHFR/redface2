@@ -37,8 +37,6 @@ import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 @Composable
 fun TopicScreen(
@@ -68,15 +66,13 @@ fun TopicScreen(
         key1 = request.page,
         key2 = topicFixtureRepository,
     ) {
-        value = withContext(Dispatchers.Default) {
-            runCatching { topicFixtureRepository.loadTopicPage(request.page) }
-                .fold(
-                    onSuccess = TopicScreenState::Loaded,
-                    onFailure = { error ->
-                        TopicScreenState.Error(error.message ?: "Unknown error")
-                    },
-                )
-        }
+        value = runCatching { topicFixtureRepository.loadTopicPage(request.page) }
+            .fold(
+                onSuccess = TopicScreenState::Loaded,
+                onFailure = { error ->
+                    TopicScreenState.Error(error.message ?: "Unknown error")
+                },
+            )
     }
 
     LaunchedEffect(state, request.scrollTo) {
@@ -349,6 +345,6 @@ private sealed interface TopicScreenState {
 
 private val topicDateFormatter = DateTimeFormatter
     .ofPattern("dd/MM/yyyy HH:mm:ss", Locale.FRANCE)
-    .withZone(ZoneId.systemDefault())
+    .withZone(ZoneId.of("Europe/Paris"))
 
 private fun java.time.Instant.asTopicDate(): String = topicDateFormatter.format(this)
