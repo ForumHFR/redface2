@@ -14,4 +14,6 @@ dependencies {
 
     implementation(libs.jsoup)
     implementation(libs.kotlinx.coroutines.android)
+
+    testImplementation(libs.junit4)
 }

@@ -22,7 +22,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import android.net.Uri
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
@@ -49,11 +48,7 @@ internal fun TopicHtmlRenderer(
         blocks.forEach { block ->
             when (block) {
                 is TopicContentBlock.Paragraph -> {
-                    val text = remember(block.html, linkStyles) {
-                        buildAnnotatedString {
-                            appendInlineHtml(block.html, linkStyles)
-                        }
-                    }
+                    val text = remember(block.html, linkStyles) { renderInlineTopicHtml(block.html, linkStyles) }
                     if (text.isNotBlank()) {
                         Text(
                             text = text,
@@ -157,6 +152,13 @@ private fun parseQuoteBlock(element: Element): TopicContentBlock? {
     }
 }
 
+internal fun renderInlineTopicHtml(
+    html: String,
+    linkStyles: TextLinkStyles,
+): AnnotatedString = buildAnnotatedString {
+    appendInlineHtml(html, linkStyles)
+}
+
 private fun AnnotatedString.Builder.appendInlineHtml(
     html: String,
     linkStyles: TextLinkStyles,
@@ -228,12 +230,18 @@ private fun AnnotatedString.Builder.appendNormalizedText(text: String) {
     if (normalized.isBlank()) {
         return
     }
+    val hasLeadingSpace = normalized.startsWith(' ')
+    val hasTrailingSpace = normalized.endsWith(' ')
+    val content = normalized.trim()
     val current = toString()
-    val shouldPrefixSpace = current.isNotEmpty() && current.last() !in listOf(' ', '\n') && !normalized.startsWith(' ')
+    val shouldPrefixSpace = hasLeadingSpace && current.isNotEmpty() && current.last() !in listOf(' ', '\n')
     if (shouldPrefixSpace) {
         append(' ')
     }
-    append(normalized.trim())
+    append(content)
+    if (hasTrailingSpace) {
+        append(' ')
+    }
 }
 
 private fun sanitizeLinkHref(rawHref: String): String? =
@@ -242,7 +250,8 @@ private fun sanitizeLinkHref(rawHref: String): String? =
         ?.let { href ->
             when {
                 href.startsWith("/") -> "https://forum.hardware.fr$href"
-                runCatching { Uri.parse(href) }.getOrNull()?.scheme?.lowercase() in setOf("http", "https") -> href
+                href.startsWith("http://", ignoreCase = true) -> href
+                href.startsWith("https://", ignoreCase = true) -> href
                 else -> null
             }
         }
