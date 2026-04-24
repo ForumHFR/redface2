@@ -37,6 +37,7 @@ import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 
 @Composable
 fun TopicScreen(
@@ -70,6 +71,9 @@ fun TopicScreen(
             .fold(
                 onSuccess = TopicScreenState::Loaded,
                 onFailure = { error ->
+                    if (error is CancellationException) {
+                        throw error
+                    }
                     TopicScreenState.Error(error.message ?: "Unknown error")
                 },
             )

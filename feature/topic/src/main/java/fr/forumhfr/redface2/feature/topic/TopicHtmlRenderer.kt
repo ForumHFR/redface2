@@ -164,7 +164,9 @@ private fun parseQuoteBlock(element: Element): TopicContentBlock? {
             ?.substringBefore(" a écrit")
             ?.trim()
             ?.takeIf(String::isNotEmpty)
-        cell.select("b.s1").remove()
+        cell.children()
+            .firstOrNull { it.tagName() == "b" && it.hasClass("s1") }
+            ?.remove()
         while (cell.children().firstOrNull()?.tagName() == "br") {
             cell.children().firstOrNull()?.remove()
         }
