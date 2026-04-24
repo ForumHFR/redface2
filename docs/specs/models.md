@@ -91,10 +91,21 @@ classDiagram
         +Instant lastDate
         +Boolean isRead
         +Boolean isMultiMP
+        +List~PMMessage~ messages
+    }
+
+    class PMMessage {
+        +Int numreponse
+        +String author
+        +Instant date
+        +PostContent content
+        +Boolean isEditable
     }
 
     Topic --> Post : contient
     Post --> PostContent : rend
+    PrivateMessage --> PMMessage : contient
+    PMMessage --> PostContent : rend
     Topic --> Poll : optionnel
     Category --> SubCategory : contient
     FlaggedTopic --> FlagType : type
@@ -160,7 +171,12 @@ data class PostContent(
 
 sealed interface PostBlock {
     data class Paragraph(val inlines: List<PostInline>) : PostBlock
-    data class Quote(val author: String?, val content: PostContent) : PostBlock
+    data class Quote(
+        val author: String?,
+        val numreponse: Int?,            // depuis [quotemsg=N,P,auteur], null si la source HTML ne l'expose pas
+        val page: Int?,                  // idem, sert à reconstruire un lien vers le post cité quand disponible
+        val content: PostContent,
+    ) : PostBlock
     data class Spoiler(val label: String?, val content: PostContent) : PostBlock
     data class CodeBlock(val text: String) : PostBlock
     data class Image(val url: String, val description: String?) : PostBlock
@@ -172,13 +188,19 @@ sealed interface PostInline {
     data class Emphasis(val children: List<PostInline>) : PostInline
     data class Underline(val children: List<PostInline>) : PostInline
     data class Strike(val children: List<PostInline>) : PostInline
-    data class Color(val argb: Long, val children: List<PostInline>) : PostInline
+    data class Color(val colorHex: String, val children: List<PostInline>) : PostInline
     data class Link(val url: String, val children: List<PostInline>) : PostInline
-    data class Smiley(val code: String, val imageUrl: String?) : PostInline
+    data class InlineImage(val url: String, val description: String?) : PostInline
+    data class Smiley(val kind: SmileyKind, val imageUrl: String?) : PostInline
+}
+
+sealed interface SmileyKind {
+    data class Builtin(val code: String) : SmileyKind   // syntaxe HFR : :jap:, :o, :D
+    data class Perso(val name: String) : SmileyKind     // syntaxe HFR : [:corran_horn]
 }
 ```
 
-`PostContent` est le contrat cible décrit par [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast). Le slice de topic fixe issu de la Phase 0 peut encore transporter temporairement un fragment HTML brut ; cette dette est suivie par [#65](https://github.com/ForumHFR/redface2/issues/65).
+`PostContent` est le contrat cible décrit par [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast). Le slice de topic fixe issu de la Phase 0 peut encore transporter temporairement un fragment HTML brut ; cette dette est suivie par [#65](https://github.com/ForumHFR/redface2/issues/65). `PostInline.Color.colorHex` conserve la couleur sous forme textuelle normalisée (`#RRGGBB` ou `#AARRGGBB`) pour préserver le round-trip BBCode HFR.
 
 ---
 

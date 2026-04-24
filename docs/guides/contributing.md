@@ -64,7 +64,7 @@ redface2/
     domain/               # Interfaces de repositories, règles métier
     data/                 # Implémentations de repositories
     network/              # OkHttp, session HFR
-    parser/               # Jsoup, HTML/BBCode HFR → modèles + PostContent
+    parser/               # Jsoup, HTML HFR → modèles + PostContent ; BBCode éditeur en Phase 2
     database/             # Room, cache, sync MPStorage
     ui/                   # Thème, composants partagés, PostRenderer
     extension/            # Points d'extension (Phase 4)

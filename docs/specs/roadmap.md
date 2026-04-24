@@ -83,7 +83,7 @@ Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances e
 - [ ] Login HFR (cookies persistants)
 - [ ] Écran Drapeaux (accueil) — tri par date/catégorie, filtres
 - [ ] Écran Topic — lecture, pagination, scroll fluide
-- [ ] PostRenderer — rendu natif `PostContent` en Compose
+- [ ] PostRenderer — rendu natif `PostContent` en Compose (cf. [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast))
 - [ ] Écran Forum — catégories, sous-catégories, liste de topics
 - [ ] Cache Room — topics et drapeaux
 - [ ] Deep linking (URLs HFR → app)

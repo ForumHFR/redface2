@@ -98,7 +98,7 @@ Les 4 choix design de base sont actés pour Phase 0 :
 | Seed color HFR | `#A62C2C` (rouge brique HFR) | Cohérent avec le nom "Redface". Material Theme Builder génère tout le `ColorScheme` depuis cette seed. À revoir si le naming final (#1) s'en écarte. |
 | Dynamic color par défaut | **OFF** (opt-in settings Phase 5) | Préserve l'identité visuelle HFR constante ; Material You reste disponible via toggle utilisateur |
 | Font family | **Roboto** (système Android) | 0 KB APK impact. Roboto Flex / Inter = trendy sans bénéfice technique pour une app forum |
-| Rendu de posts | **`PostContent` AST** + `AnnotatedString` inline + composables block | HTML HFR et BBCode éditeur convergent vers la même AST. Cf. [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast) et [#3](https://github.com/ForumHFR/redface2/issues/3). |
+| Rendu de posts | **`PostContent` AST** + `AnnotatedString` inline + composables block | Contrat cible acté, implémentation Phase 1. HTML HFR et BBCode éditeur convergent vers la même AST, avec le parser BBCode différable jusqu'à l'éditeur Phase 2. Cf. [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast) et [#3](https://github.com/ForumHFR/redface2/issues/3). |
 | Thèmes v1 | **Clair, Sombre, AMOLED** | Material You et HFR Classique reportés Phase 5 polish (1-2 jours d'ajout chacun, pas d'imbrication architecturale) |
 
 Le draft `drafts/material3-ui-ux.md` contient les détails étendus (30 color roles, 15 typography styles, motion tokens, adaptive layouts) — c'est un document de référence pédagogique, pas une spec canonique.
