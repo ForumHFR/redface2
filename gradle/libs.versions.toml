@@ -1,6 +1,6 @@
 [versions]
-agp = "9.1.0"
-kotlin = "2.3.20"
+agp = "9.2.0"
+kotlin = "2.3.21"
 ksp = "2.3.7"
 hilt = "2.59.2"
 android-minSdk = "29"
