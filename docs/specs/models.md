@@ -59,12 +59,16 @@ classDiagram
         +Int numreponse
         +String author
         +Instant date
-        +String content
+        +PostContent content
         +String? avatarUrl
         +Boolean isEditable
         +Boolean isOwnPost
         +List~String~ quotedAuthors
         +Int postIndex
+    }
+
+    class PostContent {
+        +List~PostBlock~ blocks
     }
 
     class Category {
@@ -90,6 +94,7 @@ classDiagram
     }
 
     Topic --> Post : contient
+    Post --> PostContent : rend
     Topic --> Poll : optionnel
     Category --> SubCategory : contient
     FlaggedTopic --> FlagType : type
@@ -141,14 +146,39 @@ data class Post(
     val numreponse: Int,                 // unique par (cat), PAS globalement — clé composite (cat, numreponse) au niveau base
     val author: String,
     val date: Instant,                   // parsé depuis "dd-MM-yyyy à HH:mm:ss"
-    val content: String,                 // BBCode brut, rendu par PostRenderer
+    val content: PostContent,            // AST sémantique, rendu par PostRenderer (cf. ADR-011)
     val avatarUrl: String?,
     val isEditable: Boolean,             // calculé client-side : post.author == currentUser && !isLocked
     val isOwnPost: Boolean,              // calculé client-side : post.author == currentUser
-    val quotedAuthors: List<String>,     // extraits des [quotemsg=]
+    val quotedAuthors: List<String>,     // dérivé de PostContent pour recherche, filtres et décorateurs
     val postIndex: Int,                  // (page-1) * postsPerPage + position — postsPerPage vient des préférences HFR de l'utilisateur, PAS une constante (voir UserSettings)
 )
+
+data class PostContent(
+    val blocks: List<PostBlock>,
+)
+
+sealed interface PostBlock {
+    data class Paragraph(val inlines: List<PostInline>) : PostBlock
+    data class Quote(val author: String?, val content: PostContent) : PostBlock
+    data class Spoiler(val label: String?, val content: PostContent) : PostBlock
+    data class CodeBlock(val text: String) : PostBlock
+    data class Image(val url: String, val description: String?) : PostBlock
+}
+
+sealed interface PostInline {
+    data class Text(val value: String) : PostInline
+    data class Strong(val children: List<PostInline>) : PostInline
+    data class Emphasis(val children: List<PostInline>) : PostInline
+    data class Underline(val children: List<PostInline>) : PostInline
+    data class Strike(val children: List<PostInline>) : PostInline
+    data class Color(val argb: Long, val children: List<PostInline>) : PostInline
+    data class Link(val url: String, val children: List<PostInline>) : PostInline
+    data class Smiley(val code: String, val imageUrl: String?) : PostInline
+}
 ```
+
+`PostContent` est le contrat cible décrit par [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast). Le slice de topic fixe issu de la Phase 0 peut encore transporter temporairement un fragment HTML brut ; cette dette est suivie par [#65](https://github.com/ForumHFR/redface2/issues/65).
 
 ---
 
@@ -245,7 +275,7 @@ data class PMMessage(
     val numreponse: Int,
     val author: String,
     val date: Instant,
-    val content: String,            // BBCode brut, rendu par PostRenderer
+    val content: PostContent,       // AST sémantique, rendu par PostRenderer
     val isEditable: Boolean,        // calculé client-side : author == currentUser
 )
 

@@ -35,3 +35,4 @@ Règles du repo :
 | [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3) | Compose Navigation 3 retenu pour la navigation |
 | [ADR-009]({{ site.baseurl }}/adr/009-okhttp-5-3-plus) | OkHttp 5.3+ retenu comme client HTTP principal |
 | [ADR-010]({{ site.baseurl }}/adr/010-licence-client-android) | GPL-3.0-only retenue pour le client Android |
+| [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast) | AST sémantique `PostContent` comme contrat de rendu |

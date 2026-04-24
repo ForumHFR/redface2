@@ -29,11 +29,11 @@ D'autres zones doivent être **découvertes en codant** :
 - l'UI Compose
 - le schéma Room
 - les arbitrages de perf
-- le rendu BBCode
+- le rendu de posts
 
 Enfin, certaines briques gagnent à être **testées en TDD strict** parce qu'elles sont pures et déterministes :
 - parser HTML → domaine
-- BBCode → AST
+- HTML/BBCode HFR → AST `PostContent`
 - reducers / helpers MVI
 - mappers
 
@@ -46,8 +46,8 @@ Cette page est la **source canonique** de la méthode du projet. L'ADR-000 en fo
 | Règle | Application |
 |---|---|
 | **1. Spec ce qui doit tenir** *(SDD sélectif)* | Protocole HFR, architecture des couches, sécurité credentials, contrats externes, langage métier. Une erreur ici crée de la dette silencieuse. |
-| **2. Prototype ce qu'on découvre** | UI/UX Compose, schéma Room, perf, interactions features, rendu BBCode. Le design émerge du 2e use case, pas du 0e. |
-| **3. TDD sélectif sur fonctions pures** | Parser (HTML → domain), BBCode → AST, ViewModels MVI, helpers (`matchesFilter`, `comparatorFor`), date parser, mappers. Red → Green → Refactor. |
+| **2. Prototype ce qu'on découvre** | UI/UX Compose, schéma Room, perf, interactions features, rendu de posts. Le design émerge du 2e use case, pas du 0e. |
+| **3. TDD sélectif sur fonctions pures** | Parser (HTML → domaine), HTML/BBCode → AST `PostContent`, ViewModels MVI, helpers (`matchesFilter`, `comparatorFor`), date parser, mappers. Red → Green → Refactor. |
 | **4. Test-after sur intégrations** | Repositories réseau+parser+cache, deep linking, flows authentifiés. Les tests viennent après l'impl, avec des mocks ou fixtures réalistes. |
 | **5. Coverage guidée par risque** | Pas d'objectif "100%". On couvre les edge cases réels, les régressions plausibles et les fixtures HFR capturées. |
 | **6. ADRs a posteriori** | Les ADRs formalisent les décisions après arbitrage réel. Pas de RFC spéculative avant code. |
@@ -72,7 +72,7 @@ Quand un nouveau sujet arrive, commencer par cette question :
 |---|---|---|
 | **Protocole HFR** (`docs/specs/protocol-hfr.md`) | Spec-first | Contrat externe mal documenté ; une erreur casse l'app silencieusement. |
 | **Parser HFR** (`HfrParser.parseTopicPage`) | TDD strict | Fonction pure, fixtures réelles, edge cases identifiables. Cf. [#15](https://github.com/ForumHFR/redface2/issues/15). |
-| **BBCode → AST** | TDD strict | Transformation pure ; facile à verrouiller par tests ciblés. |
+| **HTML/BBCode → `PostContent` AST** | TDD strict | Transformation pure ; facile à verrouiller par fixtures et tests ciblés. Cf. [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast). |
 | **Écran Drapeaux** | Prototype-first | L'ergonomie réelle n'émerge pas d'une spec statique. |
 | **PostRenderer Compose** | Prototype-first | Le rendu de posts en UI réelle se découvre de manière incrémentale sur de vraies fixtures. Cf. [#3](https://github.com/ForumHFR/redface2/issues/3). |
 | **Schéma Room** | Prototype-first | Le bon grain de stockage dépend des premiers use cases réellement codés. Cf. [#26](https://github.com/ForumHFR/redface2/issues/26). |

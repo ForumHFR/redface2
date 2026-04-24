@@ -115,13 +115,13 @@ graph TB
 
 | Module | Responsabilité | Dépend de |
 |--------|---------------|-----------|
-| `:core:model` | Modèles domaine purs (`Topic`, `Post`, `Category`, `Flag`, `MP`). Aucune dépendance Android. | rien |
+| `:core:model` | Modèles domaine purs (`Topic`, `Post`, `PostContent`, `Category`, `Flag`, `MP`). Aucune dépendance Android. | rien |
 | `:core:domain` | Interfaces de repositories (`TopicRepository`, `FlagRepository`, `AuthRepository`...) et règles métier partagées. Aucune dépendance framework. | `:core:model` |
 | `:core:data` | Implémentations des repositories. Orchestre réseau, parser et cache. Fournit les bindings Hilt. | `:core:domain`, `:core:network`, `:core:parser`, `:core:database` |
 | `:core:network` | `HfrClient` : requêtes HTTP, cookies, session, login. Encapsule OkHttp. | `:core:model` |
-| `:core:parser` | `HfrParser` : transforme le HTML HFR en modèles domaine via Jsoup. | `:core:model` |
+| `:core:parser` | `HfrParser` : transforme le HTML HFR et le BBCode HFR en modèles domaine, dont l'AST `PostContent`. | `:core:model` |
 | `:core:database` | Room DB, DAOs, entities, mappers entity↔model. Cache locale + cache MPStorage. | `:core:model` |
-| `:core:ui` | Thème Material 3 (6 sous-packages : `theme/`, `components/`, `adaptive/`, `semantics/`, `util/`, `extensions/`), composants partagés, `PostRenderer` (BBCode → Compose). Seul module autorisé à instancier `ColorScheme`, `Typography`, `Shapes`. | `:core:model` |
+| `:core:ui` | Thème Material 3 (6 sous-packages : `theme/`, `components/`, `adaptive/`, `semantics/`, `util/`, `extensions/`), composants partagés, `PostRenderer` (`PostContent` → Compose). Seul module autorisé à instancier `ColorScheme`, `Typography`, `Shapes`. | `:core:model` |
 | `:core:extension` | Interfaces d'extension : `PostDecorator`, `TopicToolbarContributor`, `EditorToolbarContributor`. | `:core:model` |
 
 ### Modules feature (base)
@@ -206,11 +206,13 @@ class HfrClient @Inject constructor(
 
 ### `:core:parser` — HfrParser
 
-Le parser transforme le HTML en modèles domaine. Isolé de toute logique réseau.
+Le parser transforme le HTML HFR et le BBCode HFR en modèles domaine. Isolé de toute logique réseau et UI.
 
 ```kotlin
 class HfrParser @Inject constructor() {
     fun parseTopicPage(html: String): Topic
+    fun parsePostContentFromHtml(html: String): PostContent
+    fun parsePostContentFromBbcode(bbcode: String): PostContent
     fun parseFlags(html: String): List<FlaggedTopic>
     fun parseCategories(html: String): List<Category>
     fun parseEditPage(html: String): EditInfo

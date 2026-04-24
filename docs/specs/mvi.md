@@ -259,7 +259,7 @@ data class EditorState(
     val subject: String = "",           // visible en mode EditFP
     val poll: PollData? = null,         // visible en mode EditFP
     val isSending: Boolean = false,
-    val preview: String? = null,        // rendu BBCode preview
+    val preview: PostContent? = null,   // AST de preview issue du BBCode courant, rendu par PostRenderer
     val error: String? = null,
 )
 

@@ -300,7 +300,7 @@ Pattern dans le HTML des posts : `Message édité par <auteur> le DD-MM-YYYY à 
 
 ### Posts supprimés / modérés
 
-Structure HTML altérée : le `<table class="messagetable">` peut ne plus contenir que le bandeau d'auteur + une mention de suppression. Le parser doit gérer ce cas sans crasher — `Post.content` devient vide ou marqueur sentinel `"[Message supprimé]"`.
+Structure HTML altérée : le `<table class="messagetable">` peut ne plus contenir que le bandeau d'auteur + une mention de suppression. Le parser doit gérer ce cas sans crasher — `Post.content` devient un `PostContent` vide ou un bloc sentinel `"Message supprimé"`.
 
 ### Emails obfusqués
 

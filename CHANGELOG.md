@@ -9,6 +9,7 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 ## [Unreleased]
 
 ### Added
+- `docs/adr/011-postcontent-ast.md` formalise `PostContent` comme AST sémantique commune pour le rendu des posts, alimentée par le HTML HFR lu et le BBCode éditeur.
 - `LICENSE` ajouté à la racine avec le texte officiel **GNU GPL v3**, et `docs/adr/010-licence-client-android.md` formalise le choix de licence du client Android.
 - `docs/guides/contributing.md` documente désormais le workflow **MCP documentaire optionnel** : Context7 recommandé, Docfork en fallback, lien vers les setups officiels et cas validés sur AGP 9 / built-in Kotlin et Navigation 3.
 - bootstrap **Dev env Docker + Dev Container** : `Dockerfile`, `scripts/docker-dev.sh` et `.devcontainer/devcontainer.json` standardisent l'env Android sur `ghcr.io/cirruslabs/android-sdk:36`.
@@ -25,6 +26,7 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 - `Dependabot` est recalibré en cadence mensuelle groupée et la CI annule les runs obsolètes sur la même ref.
 - `Dependabot` n'ouvre plus une seule PR Gradle fourre-tout : les mises à jour sont désormais regroupées par lanes cohérentes (`build-toolchain`, `androidx-ui-navigation`, `network-imaging`, `test-quality`, etc.) pour faciliter la review.
 - les checks Konsist Phase 0 n'acceptent plus des scopes vides silencieux et assertent désormais explicitement un scope non vide avant d'appliquer les règles.
+- les specs `models`, `architecture`, `mvi`, `stack`, `methodology`, `roadmap` et `protocol-hfr` s'alignent sur le contrat `PostContent` au lieu de traiter `Post.content` comme une chaîne HTML ou BBCode brute.
 
 ---
 
