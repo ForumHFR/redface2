@@ -4,4 +4,7 @@ plugins {
 
 dependencies {
     api(project(":core:model"))
+    implementation(libs.jsoup)
+
+    testImplementation(libs.junit4)
 }
