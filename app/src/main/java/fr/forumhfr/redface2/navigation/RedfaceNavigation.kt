@@ -22,7 +22,6 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.core.domain.fixtures.FixedTopicFixtures
-import fr.forumhfr.redface2.core.domain.fixtures.TopicFixtureRepository
 import fr.forumhfr.redface2.FlagsScreen
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -94,10 +93,7 @@ private data class ParsedDeepLink(
 )
 
 @Composable
-fun RedfaceApp(
-    intent: Intent?,
-    topicFixtureRepository: TopicFixtureRepository,
-) {
+fun RedfaceApp(intent: Intent?) {
     RedfaceTheme {
         val flagsBackStack = rememberNavBackStack(FlagsListRoute)
         val forumBackStack = rememberNavBackStack(ForumRoute)
@@ -139,20 +135,14 @@ fun RedfaceApp(
         ) {
             Surface(modifier = Modifier.padding(horizontal = 8.dp)) {
                 val activeBackStack = backStacks.getValue(currentDestination)
-                RedfaceNavHost(
-                    backStack = activeBackStack,
-                    topicFixtureRepository = topicFixtureRepository,
-                )
+                RedfaceNavHost(backStack = activeBackStack)
             }
         }
     }
 }
 
 @Composable
-private fun RedfaceNavHost(
-    backStack: NavBackStack<NavKey>,
-    topicFixtureRepository: TopicFixtureRepository,
-) {
+private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
     NavDisplay(
         backStack = backStack,
         onBack = {
@@ -243,7 +233,6 @@ private fun RedfaceNavHost(
                         page = route.page,
                         scrollTo = route.scrollTo,
                     ),
-                    topicFixtureRepository = topicFixtureRepository,
                     onReply = { postId ->
                         backStack.add(
                             EditorRoute(
