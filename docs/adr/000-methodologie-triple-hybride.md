@@ -40,7 +40,7 @@ La page canonique est [`docs/specs/methodology.md`]({{ site.baseurl }}/specs/met
 ## Conséquences
 
 - la méthode n'est plus dupliquée dans `README.md`, `AGENTS.md`, `docs/guides/contributing.md` et `docs/guides/rationale.md`
-- les écrans Compose, le schéma Room et le rendu BBCode doivent être validés par prototype avant d'être figés
+- les écrans Compose, le schéma Room et le rendu de posts doivent être validés par prototype avant d'être figés
 - les parsers, helpers purs, mappers et reducers MVI sont de bons candidats au TDD strict
 - un audit de specs n'est plus un réflexe ; il doit avoir un déclencheur concret
 - les changements structurants demandent une validation séparée du producteur du changement

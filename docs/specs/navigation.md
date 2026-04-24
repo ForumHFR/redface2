@@ -148,7 +148,7 @@ Formulaire complet :
 - **Sujet** : titre du topic
 - **Contenu** : éditeur BBCode avec toolbar
 - **Sondage** (optionnel) : question + options + choix multiple oui/non
-- **Preview** : avant-première du rendu BBCode
+- **Preview** : avant-première du rendu du BBCode
 
 ### Messages
 

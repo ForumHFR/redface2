@@ -64,7 +64,7 @@ redface2/
     domain/               # Interfaces de repositories, règles métier
     data/                 # Implémentations de repositories
     network/              # OkHttp, session HFR
-    parser/               # Jsoup, HTML → modèles
+    parser/               # Jsoup, HTML HFR → modèles + PostContent ; BBCode éditeur en Phase 2
     database/             # Room, cache, sync MPStorage
     ui/                   # Thème, composants partagés, PostRenderer
     extension/            # Points d'extension (Phase 4)
@@ -183,7 +183,7 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 - Outil de mesure (Kover) pour info, pas comme gate CI
 
 **Stratégie :**
-- **TDD sélectif** sur fonctions pures (parser, BBCode AST, ViewModels, helpers, mappers) — red → green → refactor
+- **TDD sélectif** sur fonctions pures (parser, PostContent AST, ViewModels, helpers, mappers) — red → green → refactor
 - **Test-after** sur intégrations (repositories cache/network, deep linking)
 - **Pas de TDD** sur UI Compose (Compose Preview + review visuelle suffisent ; Roborazzi non retenu en MVP, à reconsidérer Phase 4+ si régressions visuelles multi-features)
 

@@ -31,7 +31,7 @@ Pour la liste des capabilities et des non-goals, voir le [scope fonctionnel]({{ 
 | **4 — Extensions** | Bookmarks, Blacklist, Qualitay, Redflag | L | Phase 3 + **hfr-redflag Worker** | À faire |
 | **5 — Polish** | Animations, offline, thème dynamique, Play Store | M | Phases 2, 3, 4 | À faire |
 
-**Taille** : S = petit sous-chantier, M = quelques composants, L = plusieurs features indépendantes, XL = écran majeur + parseurs + cache (ex. `PostRenderer` BBCode natif).
+**Taille** : S = petit sous-chantier, M = quelques composants, L = plusieurs features indépendantes, XL = écran majeur + parseurs + cache (ex. `PostRenderer` natif).
 
 ### Graphe des dépendances
 
@@ -83,7 +83,7 @@ Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances e
 - [ ] Login HFR (cookies persistants)
 - [ ] Écran Drapeaux (accueil) — tri par date/catégorie, filtres
 - [ ] Écran Topic — lecture, pagination, scroll fluide
-- [ ] PostRenderer — rendu BBCode natif en Compose
+- [ ] PostRenderer — rendu natif `PostContent` en Compose (cf. [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast))
 - [ ] Écran Forum — catégories, sous-catégories, liste de topics
 - [ ] Cache Room — topics et drapeaux
 - [ ] Deep linking (URLs HFR → app)
@@ -94,7 +94,7 @@ Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances e
 
 ### PostRenderer — le sous-chantier critique
 
-Le rendu natif Compose du BBCode HFR est le composant le plus complexe de toute l'app. Il doit gérer :
+Le rendu natif Compose du contenu HFR est le composant le plus complexe de toute l'app. Il doit gérer :
 
 | Élément | Complexité |
 |---------|-----------|
