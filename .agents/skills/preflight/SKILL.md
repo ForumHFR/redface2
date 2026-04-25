@@ -56,10 +56,11 @@ Vérifier que ces tools sont exposés dans la session courante. La méthode dép
 | Check | Test | Attendu | Fix si KO |
 |---|---|---|---|
 | Working tree propre | `git status -s` | vide ou modifs intentionnelles | manuel |
-| Pas en retard de `main` selon les refs locales | `git status -sb` | pas de `behind` | si la session autorise les opérations réseau git, lancer `git fetch origin` puis `git pull --ff-only` |
-| Pas de stash résiduel inattendu | `git stash list` | vide ou justifié | manuel |
+| Pas en retard de l'upstream configuré selon les refs locales | `git status -sb` | pas de `behind` par rapport à `origin/<branche>` | si la session autorise les opérations réseau git, lancer `git fetch origin` puis `git pull --ff-only` |
+| Écart informatif avec `origin/main` | `git rev-list --left-right --count origin/main...HEAD` | utile surtout sur feature branch ; interpréter `<behind> <ahead>` sans bloquer automatiquement | rebase/merge depuis `origin/main` seulement si pertinent pour le travail en cours |
+| Pas de stash résiduel inattendu | `git stash list` | vide ou chaque stash est explicitement justifié | manuel |
 | Worktrees cohérents | `git worktree list` | pas de worktree fantôme sur des branches mortes | `git worktree prune` |
-| Permissions `.gradle/` saines | `stat -c '%U' .gradle 2>/dev/null` | utilisateur courant ou inexistant | si appartenance autre utilisateur (ex: artefacts Docker possédés par `nobody`) : passer par un worktree clean (`git worktree add --detach …`) au lieu de toucher au workspace principal |
+| Permissions `.gradle/` saines | `stat -c '%U' .gradle 2>/dev/null` | utilisateur courant ou inexistant | si appartenance autre utilisateur, `UNKNOWN` ou UID numérique (ex: artefacts Docker/Podman possédés par `nobody`) : passer par un worktree clean (`git worktree add --detach …`) au lieu de toucher au workspace principal |
 
 ### 4. Identité git/GitHub — cohérence
 
@@ -93,9 +94,14 @@ Si le contributeur maintient une convention privée (alias dédié), elle vit da
 
 ### Repo
 ✅ working tree propre
-✅ main à jour avec origin/main
+✅ branche à jour avec son upstream configuré
+ℹ️ écart avec origin/main: 0 behind / 2 ahead — feature branch volontaire
 ✅ pas de stash résiduel
-⚠️ .gradle possédé par <autre utilisateur> — utiliser un worktree clean pour le build
+⚠️ .gradle possédé par <autre utilisateur|UNKNOWN|uid numérique> — utiliser un worktree clean pour le build
+
+Variante si un stash existe :
+ℹ️ stash@{0} "pr-XX pre-cleanup" présent — jugé justifié par l'agent
+⚠️ stash@{1} "WIP" présent — justification inconnue, clarifier avant action destructive
 
 ### Identité (cohérence)
 ✅ gh actif = <login>, git local = <name>/<email>
