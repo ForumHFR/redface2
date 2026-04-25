@@ -9,6 +9,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.fixtures.FixedTopicFixtures
 import fr.forumhfr.redface2.core.domain.fixtures.TopicFixtureRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +25,8 @@ class TopicViewModel @AssistedInject constructor(
     private val _state = MutableStateFlow(TopicUiState.initial(request))
     val state: StateFlow<TopicUiState> = _state.asStateFlow()
 
+    private var loadJob: Job? = null
+
     init {
         loadCurrentPage()
     }
@@ -36,11 +39,23 @@ class TopicViewModel @AssistedInject constructor(
 
     private fun loadCurrentPage() {
         if (!FixedTopicFixtures.isFixedTopic(request.cat, request.post)) {
-            _state.update { it.copy(mode = TopicUiState.Mode.Placeholder) }
+            loadJob?.cancel()
+            _state.update {
+                it.copy(
+                    mode = TopicUiState.Mode.Placeholder,
+                    availablePages = emptyList(),
+                )
+            }
             return
         }
-        _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
-        viewModelScope.launch {
+        loadJob?.cancel()
+        _state.update {
+            it.copy(
+                mode = TopicUiState.Mode.Loading,
+                availablePages = FixedTopicFixtures.availablePages,
+            )
+        }
+        loadJob = viewModelScope.launch {
             val outcome = runCatching { topicFixtureRepository.loadTopicPage(request.page) }
                 .fold(
                     onSuccess = { topic -> TopicUiState.Mode.Loaded(topic) },

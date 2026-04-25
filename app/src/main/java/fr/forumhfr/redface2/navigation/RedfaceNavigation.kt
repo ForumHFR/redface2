@@ -16,10 +16,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.core.domain.fixtures.FixedTopicFixtures
 import fr.forumhfr.redface2.FlagsScreen
@@ -150,6 +152,10 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                 backStack.removeAt(backStack.lastIndex)
             }
         },
+        entryDecorators = listOf(
+            rememberSaveableStateHolderNavEntryDecorator(),
+            rememberViewModelStoreNavEntryDecorator(),
+        ),
         entryProvider = entryProvider {
             entry<FlagsListRoute> {
                 FlagsScreen(

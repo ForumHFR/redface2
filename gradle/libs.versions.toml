@@ -9,7 +9,7 @@ android-targetSdk = "36"
 android-compileSdk = "36"
 androidx-core = "1.18.0"
 androidx-activity = "1.13.0"
-androidx-lifecycle = "2.9.0"
+androidx-lifecycle = "2.10.0"
 compose-bom = "2026.04.01"
 navigation3 = "1.1.1"
 material3-adaptive = "1.2.0"
@@ -49,6 +49,7 @@ androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = 
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
 androidx-navigation3-runtime = { module = "androidx.navigation3:navigation3-runtime", version.ref = "navigation3" }
 androidx-navigation3-ui = { module = "androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
+androidx-lifecycle-viewmodel-navigation3 = { module = "androidx.lifecycle:lifecycle-viewmodel-navigation3", version.ref = "androidx-lifecycle" }
 androidx-material3-adaptive = { module = "androidx.compose.material3.adaptive:adaptive", version.ref = "material3-adaptive" }
 androidx-material3-adaptive-navigation-suite = { module = "androidx.compose.material3:material3-adaptive-navigation-suite" }
 kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kotlinx-serialization" }

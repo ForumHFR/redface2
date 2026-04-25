@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.feature.topic
 
-import fr.forumhfr.redface2.core.domain.fixtures.FixedTopicFixtures
 import fr.forumhfr.redface2.core.model.Topic
 
 data class TopicUiState(
@@ -23,14 +22,11 @@ data class TopicUiState(
     }
 
     companion object {
-        fun initial(
-            request: TopicRequest,
-            availablePages: List<Int> = FixedTopicFixtures.availablePages,
-        ): TopicUiState =
+        fun initial(request: TopicRequest): TopicUiState =
             TopicUiState(
                 request = request,
                 mode = Mode.Loading,
-                availablePages = availablePages,
+                availablePages = emptyList(),
             )
     }
 }
