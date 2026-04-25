@@ -111,7 +111,7 @@ feature/topic/
     TopicContent.kt         # @Composable stateless, previewable (si extrait)
     TopicViewModel.kt       # MVI ViewModel (Hilt-injected via @HiltViewModel)
     TopicUiState.kt         # State UI + Intents (consolider dans le même fichier tant que c'est court ; extraire en TopicIntent.kt si > ~80 lignes)
-    TopicRequest.kt         # Paramètre d'entrée / clé Navigation 3 (NavKey + arguments serializable)
+    TopicRequest.kt         # Paramètre d'entrée du screen, dérivé de la route Nav3 (la NavKey vit dans app/.../navigation/, cf. § ci-dessous)
   src/test/kotlin/fr/forumhfr/redface2/feature/topic/
     TopicViewModelTest.kt
 ```
