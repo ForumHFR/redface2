@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
@@ -23,13 +24,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import fr.forumhfr.redface2.core.domain.fixtures.FixedTopicFixtures
-import fr.forumhfr.redface2.core.domain.fixtures.TopicFixtureRepository
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
@@ -37,50 +37,38 @@ import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlinx.coroutines.CancellationException
 
 @Composable
 fun TopicScreen(
     request: TopicRequest,
-    topicFixtureRepository: TopicFixtureRepository,
     onReply: (Int) -> Unit,
     onOpenPage: (Int) -> Unit,
 ) {
-    if (!FixedTopicFixtures.isFixedTopic(request.cat, request.post)) {
-        RedfacePlaceholderScreen(
-            title = stringResource(R.string.topic_title, request.post),
-            body = stringResource(R.string.topic_body_placeholder, request.cat, request.page),
-        ) {
-            request.scrollTo?.let {
-                Text(text = stringResource(R.string.topic_scroll_to, it))
-            }
-            Button(onClick = { onReply(request.post) }) {
-                Text(text = stringResource(R.string.topic_reply))
-            }
-        }
-        return
-    }
+    val viewModel = hiltViewModel<TopicViewModel, TopicViewModel.Factory>(
+        creationCallback = { factory -> factory.create(request) },
+    )
+    val state by viewModel.state.collectAsStateWithLifecycle()
 
+    TopicContent(
+        state = state,
+        onIntent = viewModel::send,
+        onReply = { onReply(request.post) },
+        onOpenPage = onOpenPage,
+    )
+}
+
+@Composable
+internal fun TopicContent(
+    state: TopicUiState,
+    onIntent: (TopicIntent) -> Unit,
+    onReply: () -> Unit,
+    onOpenPage: (Int) -> Unit,
+) {
+    val request = state.request
     val lazyListState = rememberLazyListState()
-    val state by produceState<TopicScreenState>(
-        initialValue = TopicScreenState.Loading,
-        key1 = request.page,
-        key2 = topicFixtureRepository,
-    ) {
-        value = runCatching { topicFixtureRepository.loadTopicPage(request.page) }
-            .fold(
-                onSuccess = TopicScreenState::Loaded,
-                onFailure = { error ->
-                    if (error is CancellationException) {
-                        throw error
-                    }
-                    TopicScreenState.Error(error.message ?: "Unknown error")
-                },
-            )
-    }
 
-    LaunchedEffect(state, request.scrollTo) {
-        val topic = (state as? TopicScreenState.Loaded)?.topic ?: return@LaunchedEffect
+    LaunchedEffect(state.mode, request.scrollTo) {
+        val topic = (state.mode as? TopicUiState.Mode.Loaded)?.topic ?: return@LaunchedEffect
         val target = request.scrollTo ?: return@LaunchedEffect
         val index = topic.posts.indexOfFirst { it.numreponse == target }
         if (index >= 0) {
@@ -92,8 +80,22 @@ fun TopicScreen(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
     ) {
-        when (val uiState = state) {
-            TopicScreenState.Loading -> {
+        when (val mode = state.mode) {
+            TopicUiState.Mode.Placeholder -> {
+                RedfacePlaceholderScreen(
+                    title = stringResource(R.string.topic_title, request.post),
+                    body = stringResource(R.string.topic_body_placeholder, request.cat, request.page),
+                ) {
+                    request.scrollTo?.let { target ->
+                        Text(text = stringResource(R.string.topic_scroll_to, target))
+                    }
+                    Button(onClick = onReply) {
+                        Text(text = stringResource(R.string.topic_reply))
+                    }
+                }
+            }
+
+            TopicUiState.Mode.Loading -> {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -110,23 +112,27 @@ fun TopicScreen(
                 }
             }
 
-            is TopicScreenState.Error -> {
+            is TopicUiState.Mode.Error -> {
                 RedfacePlaceholderScreen(
                     title = stringResource(R.string.topic_fixed_title),
-                    body = stringResource(R.string.topic_error_body, request.page, uiState.message),
+                    body = stringResource(R.string.topic_error_body, request.page, mode.message),
                 ) {
                     TopicPageButtons(
+                        availablePages = state.availablePages,
                         currentPage = request.page,
                         onOpenPage = onOpenPage,
                     )
+                    OutlinedButton(onClick = { onIntent(TopicIntent.Retry) }) {
+                        Text(text = stringResource(R.string.topic_retry))
+                    }
                 }
             }
 
-            is TopicScreenState.Loaded -> {
-                TopicLoadedScreen(
-                    topic = uiState.topic,
-                    scrollTo = request.scrollTo,
-                    onReply = { onReply(request.post) },
+            is TopicUiState.Mode.Loaded -> {
+                TopicLoadedContent(
+                    state = state,
+                    topic = mode.topic,
+                    onReply = onReply,
                     onOpenPage = onOpenPage,
                     listState = lazyListState,
                 )
@@ -136,13 +142,14 @@ fun TopicScreen(
 }
 
 @Composable
-private fun TopicLoadedScreen(
+private fun TopicLoadedContent(
+    state: TopicUiState,
     topic: Topic,
-    scrollTo: Int?,
     onReply: () -> Unit,
     onOpenPage: (Int) -> Unit,
-    listState: androidx.compose.foundation.lazy.LazyListState,
+    listState: LazyListState,
 ) {
+    val scrollTo = state.request.scrollTo
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -155,6 +162,7 @@ private fun TopicLoadedScreen(
         item {
             TopicHeaderCard(
                 topic = topic,
+                availablePages = state.availablePages,
                 scrollTo = scrollTo,
                 onReply = onReply,
                 onOpenPage = onOpenPage,
@@ -175,6 +183,7 @@ private fun TopicLoadedScreen(
 @Composable
 private fun TopicHeaderCard(
     topic: Topic,
+    availablePages: List<Int>,
     scrollTo: Int?,
     onReply: () -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -209,6 +218,7 @@ private fun TopicHeaderCard(
                 )
             }
             TopicPageButtons(
+                availablePages = availablePages,
                 currentPage = topic.page,
                 onOpenPage = onOpenPage,
             )
@@ -224,11 +234,12 @@ private fun TopicHeaderCard(
 
 @Composable
 private fun TopicPageButtons(
+    availablePages: List<Int>,
     currentPage: Int,
     onOpenPage: (Int) -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FixedTopicFixtures.availablePages.forEach { page ->
+        availablePages.forEach { page ->
             if (page == currentPage) {
                 Button(onClick = {}) {
                     Text(text = page.toString())
@@ -333,18 +344,6 @@ private fun TopicPostCard(
             TopicHtmlRenderer(html = post.content)
         }
     }
-}
-
-private sealed interface TopicScreenState {
-    data object Loading : TopicScreenState
-
-    data class Loaded(
-        val topic: Topic,
-    ) : TopicScreenState
-
-    data class Error(
-        val message: String,
-    ) : TopicScreenState
 }
 
 private val topicDateFormatter = DateTimeFormatter

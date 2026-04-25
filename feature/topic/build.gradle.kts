@@ -1,5 +1,6 @@
 plugins {
     id("redface.android.compose.library")
+    id("redface.android.hilt.library")
 }
 
 android {
@@ -12,8 +13,13 @@ dependencies {
     implementation(project(":core:ui"))
     implementation(project(":core:extension"))
 
+    implementation(libs.androidx.hilt.navigation.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.jsoup)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit4)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.turbine)
 }

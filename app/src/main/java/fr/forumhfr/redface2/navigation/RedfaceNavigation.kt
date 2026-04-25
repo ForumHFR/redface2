@@ -16,13 +16,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.core.domain.fixtures.FixedTopicFixtures
-import fr.forumhfr.redface2.core.domain.fixtures.TopicFixtureRepository
 import fr.forumhfr.redface2.FlagsScreen
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -94,10 +95,7 @@ private data class ParsedDeepLink(
 )
 
 @Composable
-fun RedfaceApp(
-    intent: Intent?,
-    topicFixtureRepository: TopicFixtureRepository,
-) {
+fun RedfaceApp(intent: Intent?) {
     RedfaceTheme {
         val flagsBackStack = rememberNavBackStack(FlagsListRoute)
         val forumBackStack = rememberNavBackStack(ForumRoute)
@@ -139,20 +137,14 @@ fun RedfaceApp(
         ) {
             Surface(modifier = Modifier.padding(horizontal = 8.dp)) {
                 val activeBackStack = backStacks.getValue(currentDestination)
-                RedfaceNavHost(
-                    backStack = activeBackStack,
-                    topicFixtureRepository = topicFixtureRepository,
-                )
+                RedfaceNavHost(backStack = activeBackStack)
             }
         }
     }
 }
 
 @Composable
-private fun RedfaceNavHost(
-    backStack: NavBackStack<NavKey>,
-    topicFixtureRepository: TopicFixtureRepository,
-) {
+private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
     NavDisplay(
         backStack = backStack,
         onBack = {
@@ -160,6 +152,10 @@ private fun RedfaceNavHost(
                 backStack.removeAt(backStack.lastIndex)
             }
         },
+        entryDecorators = listOf(
+            rememberSaveableStateHolderNavEntryDecorator(),
+            rememberViewModelStoreNavEntryDecorator(),
+        ),
         entryProvider = entryProvider {
             entry<FlagsListRoute> {
                 FlagsScreen(
@@ -243,7 +239,6 @@ private fun RedfaceNavHost(
                         page = route.page,
                         scrollTo = route.scrollTo,
                     ),
-                    topicFixtureRepository = topicFixtureRepository,
                     onReply = { postId ->
                         backStack.add(
                             EditorRoute(

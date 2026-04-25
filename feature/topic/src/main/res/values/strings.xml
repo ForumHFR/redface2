@@ -13,4 +13,5 @@
     <string name="topic_poll_summary">%1$d votes au total • %2$s</string>
     <string name="topic_poll_multiple_choices">multi-choix</string>
     <string name="topic_poll_single_choice">choix unique</string>
+    <string name="topic_retry">Réessayer</string>
 </resources>
