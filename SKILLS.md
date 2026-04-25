@@ -18,6 +18,8 @@ Le source of truth des règles projet est [`AGENTS.md`](AGENTS.md).
 | `m3-check` | Audit Material 3 sur un écran/composant Compose (19 règles, rapport markdown) | Phase 0+ | [.agents/skills/m3-check/SKILL.md](.agents/skills/m3-check/SKILL.md) |
 | `m3-screen` | Génère un écran Compose complet (State/Intent/ViewModel/Screen/Previews) | Phase 1+ | [.agents/skills/m3-screen/SKILL.md](.agents/skills/m3-screen/SKILL.md) |
 | `preflight` | Vérifie l'environnement de l'agent (MCP, comptes, CLI, repo) avant une session structurante | Toute phase | [.agents/skills/preflight/SKILL.md](.agents/skills/preflight/SKILL.md) |
+| `radar` | Scanne issues/PRs/branches/CI/roadmap et produit un rapport en 4 buckets (urgent / court terme / roadmap / gros chantiers). Modes collecte (objectif) ou score (subjectif). | Toute phase | [.agents/skills/radar/SKILL.md](.agents/skills/radar/SKILL.md) |
+| `spec-reality` | Vérifie l'alignement specs + ADR ↔ code réel (modules Gradle, libs.versions.toml, modèles Kotlin, dépréciations). Sortie par sévérité. | Avant bump version, refacto structurelle | [.agents/skills/spec-reality/SKILL.md](.agents/skills/spec-reality/SKILL.md) |
 
 ---
 
