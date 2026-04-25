@@ -59,6 +59,7 @@ Lister les inputs canoniques :
 Pour chaque module mentionné dans `docs/specs/architecture.md` (diagramme + tableau + texte) ET dans `docs/adr/001-modules-gradle-v1.md` :
 - Si le module **est documenté** mais **absent** de `settings.gradle.kts` → `Critique` (la doc est mensongère). Distinction : un module commenté avec `// Phase 4 …` est documenté comme « non bootstrap » et **n'est pas un écart**.
 - Si le module **existe** dans `settings.gradle.kts` mais **non documenté** → `Important` (ADR-001 énumère 15 modules ; tout module qui n'apparaît pas dans cette liste doit être ajouté à la spec ou retiré du code).
+- ⚠️ **Exception `:app`** : ADR-001 n'énumère que les modules `:core:*` et `:feature:*` (15 modules). Le module `:app` (l'entrypoint application) est documenté dans `docs/specs/architecture.md` (diagramme + texte) mais pas dans la liste ADR-001. Ne **pas** le signaler comme « non documenté » — il est l'entrypoint et hors périmètre ADR-001 par construction.
 
 #### 2.2 Versions — `libs.versions.toml` ↔ `stack.md` / ADRs
 
@@ -85,8 +86,20 @@ Pour chaque classe du `classDiagram` mermaid de `models.md` :
 - Si la classe est annotée « À définir avec les écrans » (cf. § « À définir avec les écrans » de `models.md`) **et n'a pas encore de fichier Kotlin** → ne pas signaler, c'est volontaire.
 - Sinon, vérifier qu'un fichier `core/model/**/<ClassName>.kt` ou `core/domain/**/<ClassName>.kt` existe, et que les champs cités dans le diagramme apparaissent dans la `data class`.
 - Champ documenté absent du code → `Important`.
-- Champ dans le code absent de la spec → `Mineur` (peut être du detail d'implémentation, mais à signaler quand même).
+- Champ dans le code absent de la spec → `Mineur` (peut être du détail d'implémentation, mais à signaler quand même).
 - Type différent (ex. `String` côté spec, `Instant` côté code) → `Important`.
+
+Commande pour lister les classes Kotlin existantes (à comparer aux classes du `classDiagram`) :
+
+```bash
+find core/model core/domain -name '*.kt' -exec grep -hE '^(data class|sealed class|enum class) [A-Z][A-Za-z0-9]*' {} \; | sort -u
+```
+
+Pour lister les champs d'une `data class` donnée et les confronter au diagramme :
+
+```bash
+awk '/^data class <ClassName>\(/,/^\)/' core/model/**/<ClassName>.kt core/domain/**/<ClassName>.kt 2>/dev/null
+```
 
 #### 2.4 Repositories — `architecture.md` / `mvi.md` ↔ `core/domain`
 
@@ -119,7 +132,7 @@ Regex à exécuter :
 
 - `grep -rnE 'EncryptedSharedPreferences|SwipeRefresh' core/ feature/ app/ 2>/dev/null` — `EncryptedSharedPreferences` et Accompanist `SwipeRefresh` ne devraient apparaître nulle part. Toute occurrence = `Critique`.
 - `grep -rnE 'com\.google\.accompanist\.swiperefresh' core/ feature/ app/ 2>/dev/null` — l'import Accompanist legacy. `Critique` si trouvé.
-- Compose Navigation **2.x** string-based : ⚠️ ne **pas** utiliser une regex naïve sur `androidx.navigation.` — Navigation 3 utilise aussi ce préfixe (`androidx.navigation3.runtime`, `androidx.navigation3.ui`) ainsi que des sous-packages compatibles (ex. `androidx.navigation.compose` lors de la coexistence). Pattern recommandé pour cibler l'API 2.x : `grep -rnE 'NavGraphBuilder|composable\("[^"]+"|navController\.navigate\("[^"]+"' core/ feature/ app/ 2>/dev/null` (rememberNavController + composable("route_string") + navigate("route_string") sont le triplet diagnostic de l'API 2.x). À recouper visuellement — quelques faux positifs possibles (ex. analytics qui logue une route littérale). `Critique` si confirmé.
+- Compose Navigation **2.x** string-based : ⚠️ ne **pas** utiliser une regex naïve sur `androidx.navigation.` — Navigation 3 utilise aussi ce préfixe (`androidx.navigation3.runtime`, `androidx.navigation3.ui`) ainsi que des sous-packages compatibles (ex. `androidx.navigation.compose` lors de la coexistence). Pattern recommandé pour cibler l'API 2.x : `grep -rnE 'NavGraphBuilder|composable\("[^"]+"|navController\.navigate\("[^"]+"' core/ feature/ app/ 2>/dev/null` — le triplet diagnostic est `NavGraphBuilder` (DSL de construction du graphe), `composable("route_string")` (déclaration de destination par String) et `navigate("route_string")` (navigation par String). À recouper visuellement — quelques faux positifs possibles (ex. analytics qui logue une route littérale). `Critique` si confirmé.
 
 ### 3. Sévérité
 
