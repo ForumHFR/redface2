@@ -120,8 +120,8 @@ Convention de nommage MVI retenue (Phase 1, validée sur `:feature:topic`) :
 
 - **`<Feature>UiState`** plutôt que `<Feature>State` — cohérent avec Compose et avec le wording « UI state » utilisé dans la spec MVI.
 - **`<Feature>Intent`** = actions utilisateur internes au ViewModel. Vit dans `<Feature>UiState.kt` tant que la liste est courte ; extraire en `<Feature>Intent.kt` quand le fichier dépasse ~80 lignes ou quand la sealed hierarchy a plus de 5-6 cas.
-- **`<Feature>Request`** = paramètre d'entrée de l'écran (clé `NavKey` Navigation 3, arguments de navigation). Toujours dans son propre fichier — c'est un contrat externe lu par `MainActivity`/`NavDisplay`.
-- **Effects** (one-shot side-effects vers la vue) : à introduire **uniquement quand le besoin émerge** (snackbar, navigation programmatique, finish). Ne pas les anticiper en Phase 1 si la feature n'en a pas besoin (cf. AGENTS.md § « Don't design for hypothetical future requirements »).
+- **`<Feature>Request`** = DTO d'entrée du screen, **dérivé** de la `NavKey` Navigation 3 (la clé Nav3 vit côté `app/` dans `RedfaceNavigation.kt` sous le nom `<Feature>Route : RedfaceNavKey` — cf. ADR-008). Le `Request` est ce que `MainActivity` extrait de la route et passe au `<Feature>Screen` ; toujours dans son propre fichier (contrat externe).
+- **Effects** (one-shot side-effects vers la vue : snackbar, navigation programmatique, finish) : à introduire **uniquement quand le besoin émerge**. Ne pas les anticiper en Phase 1 si la feature n'en a pas besoin (cohérent avec `AGENTS.md` § « Charte anti-derive IA-first » → « Spike avant architecture » et « Le noyau avant l'écosystème »).
 
 ### Méthodologie
 
