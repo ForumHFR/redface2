@@ -214,7 +214,7 @@ La mise en page concrète (`Column` vs `Scaffold`, composants `FlagsToolbar`, `F
 ## Écran Topic (lecture)
 
 ```kotlin
-data class TopicState(
+data class TopicUiState(
     val title: String = "",
     val posts: List<Post> = emptyList(),
     val currentPage: Int = 1,
@@ -307,14 +307,15 @@ sealed interface MessagesIntent {
 
 ## Convention
 
-Chaque feature suit la même structure de fichiers :
+Chaque feature suit la même structure de fichiers (source set : `src/main/kotlin/`, cf. [`contributing.md`]({{ site.baseurl }}/guides/contributing#convention-par-feature) pour les règles de nommage détaillées) :
 
 ```
-feature/topic/
+feature/topic/src/main/kotlin/fr/forumhfr/redface2/feature/topic/
   ├── TopicScreen.kt        // @Composable, collecte state + effects
-  ├── TopicContent.kt       // @Composable stateless, previewable
-  ├── TopicViewModel.kt     // MVI ViewModel
-  └── TopicState.kt         // State + Intent + Effect
+  ├── TopicContent.kt       // @Composable stateless, previewable (si extrait)
+  ├── TopicViewModel.kt     // MVI ViewModel (Hilt-injected via @HiltViewModel)
+  ├── TopicUiState.kt       // État UI + Intents (consolidés tant que court)
+  └── TopicRequest.kt       // Paramètre d'entrée du screen (DTO dérivé de la NavKey)
 ```
 
 Cette convention garantit la cohérence et facilite l'onboarding des contributeurs.
