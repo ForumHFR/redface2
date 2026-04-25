@@ -56,10 +56,10 @@ Aucune détection automatique des skills. Pour un LLM sur ces outils, copier man
 
 ---
 
-## Créer un nouveau skill
+## Créer ou modifier un skill
 
-1. Créer le répertoire `.agents/skills/<slug>/`.
-2. Créer `SKILL.md` avec frontmatter :
+1. Créer le répertoire `.agents/skills/<slug>/` (ou éditer un skill existant).
+2. Créer / mettre à jour `SKILL.md` avec frontmatter :
    ```yaml
    ---
    name: <slug>
@@ -69,8 +69,8 @@ Aucune détection automatique des skills. Pour un LLM sur ces outils, copier man
    ---
    ```
 3. Body du skill en markdown standard, sans limite de taille.
-4. Ajouter une ligne à ce `SKILLS.md`.
-5. Tester l'invocation sur au moins Claude Code avant de commit.
+4. Ajouter ou mettre à jour la ligne correspondante dans ce `SKILLS.md`.
+5. **Tester avant push** — exécuter le skill dans la session courante (au moins sur Claude Code), confronter le rapport produit aux checks documentés, et corriger les écarts (commande KO, formulation ambiguë, cas non couvert) avant d'ouvrir la PR. La description de la PR mentionne le rapport obtenu (ou le bug détecté) pour preuve. Cette étape s'applique aussi aux modifications d'un skill existant — un skill non testé qui passe la review n'a pas été vérifié, et les bugs sont silencieux jusqu'à la prochaine session sous stress.
 
 ---
 
