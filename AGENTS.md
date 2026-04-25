@@ -73,6 +73,12 @@ Pas de tests encore (phase spec). Strategie definie dans `docs/guides/contributi
 
 ---
 
+## Préflight
+
+Si tu n'es pas certain de ton environnement (MCP `hfr` / `context7` chargés, compte `gh` actif et bon, identité git locale définie, état du repo), invoque le skill [`/preflight`](.agents/skills/preflight/SKILL.md) avant d'attaquer une session structurante. Il vérifie les prérequis et reporte OK/MISSING avec fix concrets, sans modifier l'environnement. Le skill ne prescrit aucune identité particulière — il vérifie qu'elle est définie et cohérente avec ce que le contributeur veut utiliser pour ce repo (les conventions privées d'un contributeur, ex. alias dédié, vivent dans ses propres instructions agent).
+
+---
+
 ## Regles pour modifications de specs
 
 ### Methodologie canonique

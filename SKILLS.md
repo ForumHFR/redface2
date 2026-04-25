@@ -17,6 +17,7 @@ Le source of truth des règles projet est [`AGENTS.md`](AGENTS.md).
 | `bump-version` | Bump de la version des specs + commit + push | Fin de cycle | [.agents/skills/bump-version/SKILL.md](.agents/skills/bump-version/SKILL.md) |
 | `m3-check` | Audit Material 3 sur un écran/composant Compose (19 règles, rapport markdown) | Phase 0+ | [.agents/skills/m3-check/SKILL.md](.agents/skills/m3-check/SKILL.md) |
 | `m3-screen` | Génère un écran Compose complet (State/Intent/ViewModel/Screen/Previews) | Phase 1+ | [.agents/skills/m3-screen/SKILL.md](.agents/skills/m3-screen/SKILL.md) |
+| `preflight` | Vérifie l'environnement de l'agent (MCP, comptes, CLI, repo) avant une session structurante | Toute phase | [.agents/skills/preflight/SKILL.md](.agents/skills/preflight/SKILL.md) |
 
 ---
 
