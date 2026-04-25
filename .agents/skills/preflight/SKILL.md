@@ -38,7 +38,7 @@ Vérifier que ces tools sont exposés dans la session courante. La méthode dép
 | MCP | Tools clés | Pourquoi | Fix si absent |
 |---|---|---|---|
 | `hfr` | `mcp__hfr__hfr_read`, `hfr_reply`, `hfr_edit`, `hfr_topics`, `hfr_cats`, `hfr_quote`, `hfr_mp`, `hfr_create_topic` | Capture fixtures HTML réelles, post/edit, lecture topic communauté | voir [hfr-mcp](https://github.com/XaaT/hfr-mcp), ajouter dans la config MCP de l'agent |
-| `context7` ou `docfork` | resolve-library-id, get-library-docs (Context7) ou équivalent | Vérif APIs stables (cf. règle "Vérification API actuelle" dans `AGENTS.md`) | configurer dans la config MCP de l'agent |
+| `context7` ou `docfork` | Context7 : `resolve-library-id` / `resolve_library_id`, `get-library-docs` / `query_docs` selon l'agent ; Docfork : équivalent | Vérif APIs stables (cf. règle "Vérification API actuelle" dans `AGENTS.md`) | configurer dans la config MCP de l'agent |
 
 ### 2. CLI / binaires
 
@@ -56,7 +56,7 @@ Vérifier que ces tools sont exposés dans la session courante. La méthode dép
 | Check | Test | Attendu | Fix si KO |
 |---|---|---|---|
 | Working tree propre | `git status -s` | vide ou modifs intentionnelles | manuel |
-| Pas en retard de `main` | `git fetch origin && git status -sb` | pas de `behind` | `git pull --ff-only` |
+| Pas en retard de `main` selon les refs locales | `git status -sb` | pas de `behind` | si la session autorise les opérations réseau git, lancer `git fetch origin` puis `git pull --ff-only` |
 | Pas de stash résiduel inattendu | `git stash list` | vide ou justifié | manuel |
 | Worktrees cohérents | `git worktree list` | pas de worktree fantôme sur des branches mortes | `git worktree prune` |
 | Permissions `.gradle/` saines | `stat -c '%U' .gradle 2>/dev/null` | utilisateur courant ou inexistant | si appartenance autre utilisateur (ex: artefacts Docker possédés par `nobody`) : passer par un worktree clean (`git worktree add --detach …`) au lieu de toucher au workspace principal |
@@ -113,6 +113,6 @@ Variantes du verdict :
 
 ## Notes
 
-- Le skill **ne modifie rien** : il diagnostique et propose des fix. C'est l'agent ou l'humain qui décide d'appliquer.
+- Le skill **ne modifie rien par défaut** : il diagnostique et propose des fix. Les checks réseau qui rafraîchissent les refs (`git fetch`) ou l'état local ne doivent être lancés qu'avec accord explicite ou règle d'outil déjà autorisée. C'est l'agent ou l'humain qui décide d'appliquer.
 - Couvrir d'autres environnements (CI GitHub Actions, agent cloud) reste hors scope tant qu'on n'en a pas besoin.
 - Si un nouveau MCP devient prérequis du projet, l'ajouter à la table § 1.
