@@ -118,7 +118,7 @@ Tous ces composants sont annotés `@ExperimentalMaterial3AdaptiveApi` ou `@Exper
 
 ### Edge-to-edge Android 15+
 
-Sur API ≥ 35 (`targetSdk = 35`), Android impose l'edge-to-edge par défaut. Appeler `enableEdgeToEdge()` (artifact `androidx.activity 1.10+`) dans `MainActivity.onCreate()` avant `setContent`. Les composants M3 (`TopAppBar`, `NavigationBar`, `BottomAppBar`, `Scaffold`) consomment les insets automatiquement ; les écrans custom utilisent `Modifier.navigationBarsPadding()` / `imePadding()`.
+Sur API ≥ 35 (le projet vise `targetSdk = 36`, soumis à la même contrainte), Android impose l'edge-to-edge par défaut. Appeler `enableEdgeToEdge()` (artifact `androidx.activity 1.10+`) dans `MainActivity.onCreate()` avant `setContent`. Les composants M3 (`TopAppBar`, `NavigationBar`, `BottomAppBar`, `Scaffold`) consomment les insets automatiquement ; les écrans custom utilisent `Modifier.navigationBarsPadding()` / `imePadding()`.
 
 ### Predictive back
 
