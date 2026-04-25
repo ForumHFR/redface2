@@ -18,10 +18,10 @@ class PostContentParserTest {
         val topic = pageParser.parse(fixture("topic_khakha_page_1.html"))
 
         topic.posts.forEach { post ->
-            assertNotNull("post #${post.numreponse} should have an AST", post.contentAst)
+            assertNotNull("post #${post.numreponse} should have an AST", post.content)
             assertTrue(
                 "post #${post.numreponse} AST should have at least one block",
-                post.contentAst.blocks.isNotEmpty(),
+                post.content.blocks.isNotEmpty(),
             )
         }
     }
@@ -31,10 +31,10 @@ class PostContentParserTest {
         val topic = pageParser.parse(fixture("topic_khakha_page_146.html"))
 
         val withQuote = topic.posts
-            .firstOrNull { post -> post.contentAst.blocks.any { it is PostBlock.Quote } }
+            .firstOrNull { post -> post.content.blocks.any { it is PostBlock.Quote } }
 
         assertNotNull("at least one post on page 146 should contain a quote block", withQuote)
-        val quote = withQuote!!.contentAst.blocks
+        val quote = withQuote!!.content.blocks
             .filterIsInstance<PostBlock.Quote>()
             .first()
         assertNotNull("quote should have an author", quote.author)
@@ -51,7 +51,7 @@ class PostContentParserTest {
         val topic = pageParser.parse(fixture("topic_khakha_page_146.html"))
 
         val spoilers = topic.posts.flatMap { post ->
-            post.contentAst.allBlocks().filterIsInstance<PostBlock.Spoiler>()
+            post.content.allBlocks().filterIsInstance<PostBlock.Spoiler>()
         }
         assertTrue("page 146 fixture contains at least one spoiler block", spoilers.isNotEmpty())
         val spoiler = spoilers.first()
@@ -64,7 +64,7 @@ class PostContentParserTest {
         val topic = pageParser.parse(fixture("topic_khakha_page_146.html"))
 
         val codes = topic.posts
-            .flatMap { post -> post.contentAst.allInlines() }
+            .flatMap { post -> post.content.allInlines() }
             .filterIsInstance<PostInline.Smiley>()
             .mapNotNull { (it.kind as? SmileyKind.Builtin)?.code }
             .toSet()
@@ -81,7 +81,7 @@ class PostContentParserTest {
         val topic = pageParser.parse(fixture("topic_khakha_page_1.html"))
 
         val codes = topic.posts
-            .flatMap { post -> post.contentAst.allInlines() }
+            .flatMap { post -> post.content.allInlines() }
             .filterIsInstance<PostInline.Smiley>()
             .mapNotNull { (it.kind as? SmileyKind.Builtin)?.code }
             .toSet()
@@ -94,7 +94,7 @@ class PostContentParserTest {
         val topic = pageParser.parse(fixture("topic_khakha_page_1.html"))
 
         val persoSmiley = topic.posts
-            .flatMap { post -> post.contentAst.allInlines() }
+            .flatMap { post -> post.content.allInlines() }
             .filterIsInstance<PostInline.Smiley>()
             .firstOrNull { it.kind is SmileyKind.Perso }
 
@@ -111,7 +111,7 @@ class PostContentParserTest {
         val topic = pageParser.parse(fixture("topic_khakha_page_2.html"))
 
         val builtinSmiley = topic.posts
-            .flatMap { post -> post.contentAst.allInlines() }
+            .flatMap { post -> post.content.allInlines() }
             .filterIsInstance<PostInline.Smiley>()
             .firstOrNull { it.kind is SmileyKind.Builtin }
 
@@ -153,7 +153,7 @@ class PostContentParserTest {
         val topic = pageParser.parse(fixture("topic_khakha_page_1.html"))
 
         val underlines = topic.posts
-            .flatMap { post -> post.contentAst.allInlines() }
+            .flatMap { post -> post.content.allInlines() }
             .filterIsInstance<PostInline.Underline>()
 
         assertTrue(
@@ -250,9 +250,9 @@ class PostContentParserTest {
         val topic = pageParser.parse(fixture("topic_khakha_page_2.html"))
 
         topic.posts
-            .filter { post -> post.contentAst.blocks.any { it is PostBlock.Quote } }
+            .filter { post -> post.content.blocks.any { it is PostBlock.Quote } }
             .forEach { post ->
-                val authorsFromAst = post.contentAst.blocks
+                val authorsFromAst = post.content.blocks
                     .filterIsInstance<PostBlock.Quote>()
                     .mapNotNull { it.author }
                     .distinct()
@@ -269,7 +269,7 @@ class PostContentParserTest {
         val topic = pageParser.parse(fixture("topic_page_multipage.html"))
 
         val anonymousQuotes = topic.posts
-            .flatMap { post -> post.contentAst.allBlocks() }
+            .flatMap { post -> post.content.allBlocks() }
             .filterIsInstance<PostBlock.Quote>()
             .filter { it.author == null }
 
@@ -295,7 +295,7 @@ class PostContentParserTest {
         val topic = pageParser.parse(fixture("topic_page_multipage.html"))
 
         val codes = topic.posts
-            .flatMap { post -> post.contentAst.allInlines() }
+            .flatMap { post -> post.content.allInlines() }
             .filterIsInstance<PostInline.Smiley>()
             .mapNotNull { (it.kind as? SmileyKind.Builtin)?.code }
             .toSet()
@@ -317,7 +317,7 @@ class PostContentParserTest {
         val topic = pageParser.parse(fixture("topic_posts_page.html"))
 
         val variantPerso = topic.posts
-            .flatMap { post -> post.contentAst.allInlines() }
+            .flatMap { post -> post.content.allInlines() }
             .filterIsInstance<PostInline.Smiley>()
             .mapNotNull { it.kind as? SmileyKind.Perso }
             .firstOrNull { ':' in it.name }
