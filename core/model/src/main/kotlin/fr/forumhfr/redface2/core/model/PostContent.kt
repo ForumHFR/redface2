@@ -24,6 +24,8 @@ sealed interface PostBlock {
 sealed interface PostInline {
     data class Text(val value: String) : PostInline
 
+    data object LineBreak : PostInline
+
     data class Strong(val children: List<PostInline>) : PostInline
 
     data class Emphasis(val children: List<PostInline>) : PostInline

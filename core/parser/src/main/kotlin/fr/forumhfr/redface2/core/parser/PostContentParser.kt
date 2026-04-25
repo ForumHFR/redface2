@@ -13,9 +13,9 @@ class PostContentParser {
     fun parse(contentElement: Element?): ParsedPostContent {
         if (contentElement == null) {
             return ParsedPostContent(
-                content = "[Message supprimé]",
+                content = DELETED_PLACEHOLDER,
                 quotedAuthors = emptyList(),
-                ast = PostContent(blocks = emptyList()),
+                ast = deletedFallbackAst(),
             )
         }
 
@@ -23,10 +23,11 @@ class PostContentParser {
             select("${HfrSelectors.POST_EDITED}, ${HfrSelectors.POST_SIGNATURE}").remove()
         }
 
-        val ast = PostContent(blocks = parseBlocks(sanitized.childNodes()))
+        val parsedBlocks = parseBlocks(sanitized.childNodes())
+        val ast = if (parsedBlocks.isEmpty()) deletedFallbackAst() else PostContent(blocks = parsedBlocks)
         val quotedAuthors = collectQuotedAuthors(ast)
 
-        val htmlFallback = sanitized.html().trim().ifEmpty { "[Message supprimé]" }
+        val htmlFallback = sanitized.html().trim().ifEmpty { DELETED_PLACEHOLDER }
 
         return ParsedPostContent(
             content = htmlFallback,
@@ -34,6 +35,10 @@ class PostContentParser {
             ast = ast,
         )
     }
+
+    private fun deletedFallbackAst(): PostContent = PostContent(
+        blocks = listOf(PostBlock.Paragraph(listOf(PostInline.Text(DELETED_PLACEHOLDER)))),
+    )
 
     private fun parseBlocks(nodes: List<Node>): List<PostBlock> {
         val blocks = mutableListOf<PostBlock>()
@@ -186,7 +191,10 @@ class PostContentParser {
 
     @Suppress("CyclomaticComplexMethod")
     private fun parseInlineElement(element: Element): List<PostInline> = when (element.tagName()) {
-        "br" -> emptyList()
+        // <br> at the top of a block flushes the current paragraph (handled in parseBlocks);
+        // when nested inside an inline parent (e.g. <strong>foo<br>bar</strong>) we keep it as
+        // an explicit line break so the renderer can preserve the author's formatting.
+        "br" -> listOf(PostInline.LineBreak)
         "b", "strong" -> listOf(PostInline.Strong(parseInlineChildren(element)))
         "i", "em" -> listOf(PostInline.Emphasis(parseInlineChildren(element)))
         "u" -> listOf(PostInline.Underline(parseInlineChildren(element)))
@@ -234,10 +242,9 @@ class PostContentParser {
             }
 
             BUILTIN_SMILEY_REGEX.matches(alt) -> {
-                // alt = ":code:" or ":code" — strip leading ":" and the optional trailing ":"
-                val withoutLeadingColon = alt.substring(1)
-                val code = withoutLeadingColon.removeSuffix(":")
-                if (code.isEmpty()) null else PostInline.Smiley(SmileyKind.Builtin(code), imageUrl)
+                // The BBCode token is the canonical identity (`:)`, `;)`, `:jap:`, `:??:` …);
+                // stripping the colons would collapse `:)` and `;)` to the same `)`.
+                PostInline.Smiley(SmileyKind.Builtin(alt), imageUrl)
             }
 
             else -> null
@@ -252,10 +259,15 @@ class PostContentParser {
     }
 
     private fun parseSpan(element: Element): List<PostInline> {
+        val children = parseInlineChildren(element)
+        // HFR renders [u]...[/u] as <span class="u">…</span>. Without this branch the underline
+        // semantics would be silently dropped (parseSpan only knew about color styles).
+        if (element.hasClass("u")) {
+            return listOf(PostInline.Underline(children))
+        }
         val style = element.attr("style")
         val color = STYLE_COLOR_REGEX.find(style)?.groupValues?.getOrNull(1)?.trim()
         val normalized = normalizeColorHex(color)
-        val children = parseInlineChildren(element)
         return if (normalized == null) children else listOf(PostInline.Color(normalized, children))
     }
 
@@ -336,16 +348,18 @@ class PostContentParser {
     }
 
     private companion object {
+        const val DELETED_PLACEHOLDER = "[Message supprimé]"
+
         val WHITESPACE_REGEX = Regex("\\s+")
         val HEX_REGEX = Regex("[0-9a-fA-F]+")
         val STYLE_COLOR_REGEX = Regex("""color\s*:\s*(#?[0-9a-fA-F]{3,8})""")
 
-        // HFR builtin smileys (~25 codes) appear as alt="<token>" in the rendered HTML.
-        // Their alt is anchored to the value, never embedded in surrounding text.
-        // Examples seen in real fixtures: :jap:, :love:, :sol:, :lol:, :spamafote: (with closing colon)
-        // and :), :D, :o, :/, :??: (no closing colon, includes punctuation).
-        // The regex therefore accepts 1..15 chars from a permissive set; matches() anchors the whole alt.
-        val BUILTIN_SMILEY_REGEX = Regex("""^:[\w)(/?]{1,15}:?$""")
+        // HFR builtin smileys (~25 tokens) appear as alt="<token>" in the rendered HTML.
+        // Two shapes coexist:
+        //   - emoticons starting with `:` or `;` (`:)`, `;)`, `:D`, `:/`, `:o`)
+        //   - named codes wrapped in colons (`:jap:`, `:lol:`, `:spamafote:`, `:??:`)
+        // The character set covers the punctuation actually observed in the fixtures.
+        val BUILTIN_SMILEY_REGEX = Regex("""^[:;][\w)(/?;\-']{1,15}:?$""")
 
         // HFR custom smileys are wrapped as alt="[:name]" — name may contain spaces and punctuation.
         val PERSO_SMILEY_REGEX = Regex("""^\[:[^]]+]$""")
@@ -368,7 +382,19 @@ internal fun sanitizeLinkHref(rawHref: String): String? =
         }
 
 internal fun sanitizeImageHref(rawSrc: String): String? =
-    rawSrc.trim().takeIf(String::isNotBlank)
+    rawSrc.trim()
+        .takeIf(String::isNotBlank)
+        ?.let { src ->
+            // Same whitelist as sanitizeLinkHref: only http(s) and absolute HFR paths reach the
+            // renderer / Coil. data:, file:, content:, javascript:, fixture-relative paths are
+            // rejected so a malicious or unexpected scheme cannot smuggle through `<img src>`.
+            when {
+                src.startsWith("/") -> "https://forum.hardware.fr$src"
+                src.startsWith("http://", ignoreCase = true) -> src
+                src.startsWith("https://", ignoreCase = true) -> src
+                else -> null
+            }
+        }
 
 data class ParsedPostContent(
     val content: String,

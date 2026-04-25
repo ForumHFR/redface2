@@ -60,7 +60,7 @@ class PostContentParserTest {
     }
 
     @Test
-    fun `mono-character builtin smileys are recognised`() {
+    fun `mono-character builtin smileys are recognised with their BBCode token`() {
         val topic = pageParser.parse(fixture("topic_khakha_page_146.html"))
 
         val codes = topic.posts
@@ -69,11 +69,24 @@ class PostContentParserTest {
             .mapNotNull { (it.kind as? SmileyKind.Builtin)?.code }
             .toSet()
 
-        // page 146 fixture contains :), :D, :o — all single-character builtins which the
-        // initial naive regex (:[a-zA-Z0-9_]+:) silently dropped to InlineImage.
-        assertTrue("expected :) builtin on page 146, found codes=$codes", codes.contains(")"))
-        assertTrue("expected :D builtin on page 146, found codes=$codes", codes.contains("D"))
-        assertTrue("expected :o builtin on page 146, found codes=$codes", codes.contains("o"))
+        // page 146 fixture contains :), :D, :o — keep the leading colon so the BBCode token is the
+        // canonical id (a naive strip would collapse :) and ;) to the same ")").
+        assertTrue("expected :) builtin on page 146, found codes=$codes", codes.contains(":)"))
+        assertTrue("expected :D builtin on page 146, found codes=$codes", codes.contains(":D"))
+        assertTrue("expected :o builtin on page 146, found codes=$codes", codes.contains(":o"))
+    }
+
+    @Test
+    fun `semicolon-prefixed wink is recognised as a builtin distinct from colon-prefixed`() {
+        val topic = pageParser.parse(fixture("topic_khakha_page_1.html"))
+
+        val codes = topic.posts
+            .flatMap { post -> post.contentAst.allInlines() }
+            .filterIsInstance<PostInline.Smiley>()
+            .mapNotNull { (it.kind as? SmileyKind.Builtin)?.code }
+            .toSet()
+
+        assertTrue("expected ;) builtin on page 1, found codes=$codes", codes.contains(";)"))
     }
 
     @Test
@@ -104,7 +117,99 @@ class PostContentParserTest {
 
         assertNotNull("page 2 fixture contains :spamafote: builtin smiley", builtinSmiley)
         val code = (builtinSmiley!!.kind as SmileyKind.Builtin).code
-        assertFalse("builtin code should not contain colons", code.contains(':'))
+        // The BBCode token (with surrounding colons or leading `;`) is the canonical identity
+        // — stripping the marker would conflate `:)` and `;)` to the same `)`.
+        assertTrue(
+            "builtin code should keep its BBCode marker, got=$code",
+            code.startsWith(':') || code.startsWith(';'),
+        )
+    }
+
+    @Test
+    fun `inline br nested inside a styled span is kept as LineBreak`() {
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            """
+            <div id="para123">
+                <strong>premier<br>second</strong>
+            </div>
+            """.trimIndent(),
+        )
+
+        val result = parser.parse(element)
+
+        val strong = result.ast.allInlines().filterIsInstance<PostInline.Strong>().first()
+        val kinds = strong.children.map { it::class.simpleName }
+        // Without LineBreak handling, the <br> would be dropped and the two text fragments
+        // would collapse into a single Text — losing the author-intended visual break.
+        assertTrue(
+            "Strong children should expose a LineBreak between the two Text fragments, got=$kinds",
+            strong.children.any { it is PostInline.LineBreak },
+        )
+    }
+
+    @Test
+    fun `span class u is recognised as Underline`() {
+        val topic = pageParser.parse(fixture("topic_khakha_page_1.html"))
+
+        val underlines = topic.posts
+            .flatMap { post -> post.contentAst.allInlines() }
+            .filterIsInstance<PostInline.Underline>()
+
+        assertTrue(
+            "page 1 fixture uses <span class=\"u\"> for underline — at least one expected",
+            underlines.isNotEmpty(),
+        )
+    }
+
+    @Test
+    fun `inline image with non-http scheme is rejected`() {
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            """
+            <div id="para123">
+                <img src="data:image/png;base64,AAA" alt="">
+                <img src="javascript:alert(1)" alt="">
+                <img src="/forum2/icone.gif" alt="ok">
+            </div>
+            """.trimIndent(),
+        )
+
+        val result = parser.parse(element)
+
+        val imageUrls = result.ast.allInlines()
+            .filterIsInstance<PostInline.InlineImage>()
+            .map { it.url }
+        assertFalse(
+            "data: image src must be dropped before reaching the renderer",
+            imageUrls.any { it.startsWith("data:", ignoreCase = true) },
+        )
+        assertFalse(
+            "javascript: image src must be dropped before reaching the renderer",
+            imageUrls.any { it.startsWith("javascript:", ignoreCase = true) },
+        )
+        assertTrue(
+            "absolute HFR path should be normalised to forum.hardware.fr",
+            imageUrls.contains("https://forum.hardware.fr/forum2/icone.gif"),
+        )
+    }
+
+    @Test
+    fun `null content yields a deleted placeholder paragraph`() {
+        val parser = PostContentParser()
+
+        val result = parser.parse(null)
+
+        assertTrue(
+            "AST should not be empty so the renderer never falls back to a blank post",
+            result.ast.blocks.isNotEmpty(),
+        )
+        val text = result.ast.blocks
+            .filterIsInstance<PostBlock.Paragraph>()
+            .flatMap { it.inlines }
+            .filterIsInstance<PostInline.Text>()
+            .joinToString("") { it.value }
+        assertEquals("[Message supprimé]", text)
     }
 
     @Test
