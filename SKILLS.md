@@ -18,6 +18,8 @@ Le source of truth des règles projet est [`AGENTS.md`](AGENTS.md).
 | `m3-check` | Audit Material 3 sur un écran/composant Compose (19 règles, rapport markdown) | Phase 0+ | [.agents/skills/m3-check/SKILL.md](.agents/skills/m3-check/SKILL.md) |
 | `m3-screen` | Génère un écran Compose complet (State/Intent/ViewModel/Screen/Previews) | Phase 1+ | [.agents/skills/m3-screen/SKILL.md](.agents/skills/m3-screen/SKILL.md) |
 | `preflight` | Vérifie l'environnement de l'agent (MCP, comptes, CLI, repo) avant une session structurante | Toute phase | [.agents/skills/preflight/SKILL.md](.agents/skills/preflight/SKILL.md) |
+| `radar` | Scanne issues/PRs/branches/CI/roadmap et produit un rapport en 4 buckets (urgent / court terme / roadmap / gros chantiers). Modes collecte (objectif) ou score (subjectif). | Toute phase | [.agents/skills/radar/SKILL.md](.agents/skills/radar/SKILL.md) |
+| `spec-reality` | Vérifie l'alignement specs + ADR ↔ code réel (modules Gradle, libs.versions.toml, modèles Kotlin, dépréciations). Sortie par sévérité. | Avant bump version, refacto structurelle | [.agents/skills/spec-reality/SKILL.md](.agents/skills/spec-reality/SKILL.md) |
 
 ---
 
@@ -56,10 +58,10 @@ Aucune détection automatique des skills. Pour un LLM sur ces outils, copier man
 
 ---
 
-## Créer un nouveau skill
+## Créer ou modifier un skill
 
-1. Créer le répertoire `.agents/skills/<slug>/`.
-2. Créer `SKILL.md` avec frontmatter :
+1. Créer le répertoire `.agents/skills/<slug>/` (ou éditer un skill existant).
+2. Créer / mettre à jour `SKILL.md` avec frontmatter :
    ```yaml
    ---
    name: <slug>
@@ -69,8 +71,8 @@ Aucune détection automatique des skills. Pour un LLM sur ces outils, copier man
    ---
    ```
 3. Body du skill en markdown standard, sans limite de taille.
-4. Ajouter une ligne à ce `SKILLS.md`.
-5. Tester l'invocation sur au moins Claude Code avant de commit.
+4. Ajouter ou mettre à jour la ligne correspondante dans ce `SKILLS.md`.
+5. **Tester avant push** — exécuter le skill dans la session courante (au moins sur Claude Code), confronter le rapport produit aux checks documentés, et corriger les écarts (commande KO, formulation ambiguë, cas non couvert) avant d'ouvrir la PR. La description de la PR mentionne le rapport obtenu (ou le bug détecté) pour preuve. Cette étape s'applique aussi aux modifications d'un skill existant — un skill non testé qui passe la review n'a pas été vérifié, et les bugs sont silencieux jusqu'à la prochaine session sous stress.
 
 ---
 

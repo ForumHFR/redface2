@@ -70,6 +70,9 @@ Pas de tests encore (phase spec). Strategie definie dans `docs/guides/contributi
 - Issues et commentaires : toujours mentionner qui a demande l'action si generee par IA
 - Conventional Commits : `feat:`, `fix:`, `docs:`, `chore:`, `test:`
 - Branche principale : `main`
+- **Pas de push direct sur `main`** : toute modification (code, doc, skill, ADR, fixture) passe par une **pull request** avec CI verte avant merge. Cette règle vaut aussi pour les changements jugés triviaux (typo, ajout d'une ligne dans une table) : la PR donne un point d'historique reviewable et fait tourner la CI. La branch protection actuelle n'enforce pas techniquement cette règle (`enforce_admins: false` pour garder un échappatoire d'urgence), c'est une discipline de projet. Toute exception (revert critique, hotfix bloquant, ou absence prolongée de reviewer humain) doit être : (1) justifiée dans le message du commit ou du merge, et (2) tracée dans une issue post-mortem ouverte le jour même si l'exception devient récurrente.
+- **Review en mono-maintainer** : si le maintainer principal opère sous deux comptes GitHub (par exemple un alias dédié au projet + une identité personnelle), les PR du compte projet peuvent être approuvées depuis le compte personnel pour satisfaire la règle "1 review approuvée + CI verte" sans bloquer le workflow. Si aucun reviewer n'est disponible ni sous l'autre compte ni dans la communauté, le merge `--admin` est acceptable comme exception au sens du point précédent.
+- **Modifier un skill = tester avant la PR** : toute modification d'un skill `.agents/skills/<name>/SKILL.md` doit être exécutée dans la session courante (dry-run) pour valider que les commandes documentées marchent et que le rapport produit colle aux checks. Le rapport (ou le bug trouvé) est mentionné dans la description de la PR. Voir `SKILLS.md` § "Créer ou modifier un skill".
 
 ---
 
@@ -137,7 +140,7 @@ Dans `AGENTS.md`, on ne garde que les conséquences opérationnelles pour les ag
 
 ### Attribution et tracabilite
 
-- Commits : toujours terminer par `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>` (ou le modele exact utilise).
+- Commits : toujours terminer par `Co-Authored-By: <Modèle exact utilisé> <noreply@<provider>.com>` (par exemple `Claude Opus 4.7 <noreply@anthropic.com>`, `GPT-5 Codex <noreply@openai.com>`). Mettre à jour la ligne quand le modèle change — pas de version figée.
 - Commits d'audit : lister les numeros de points corriges dans le message (ex: "#1: fix diagram, #3: add filteredFlags").
 - Issues : tout commentaire genere par IA commence par la ligne d'attribution correspondant au fournisseur, avec `@<demandeur>` remplace par le pseudo GitHub du contributeur qui a demande l'action.
 - Ne jamais fermer une issue sans commentaire explicatif, meme si auto-closed par un commit.

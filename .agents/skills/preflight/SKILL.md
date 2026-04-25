@@ -38,7 +38,15 @@ Vérifier que ces tools sont exposés dans la session courante. La méthode dép
 | MCP | Tools clés | Pourquoi | Fix si absent |
 |---|---|---|---|
 | `hfr` | `mcp__hfr__hfr_read`, `hfr_reply`, `hfr_edit`, `hfr_topics`, `hfr_cats`, `hfr_quote`, `hfr_mp`, `hfr_create_topic` | Capture fixtures HTML réelles, post/edit, lecture topic communauté | voir [hfr-mcp](https://github.com/XaaT/hfr-mcp), ajouter dans la config MCP de l'agent |
-| `context7` ou `docfork` | Context7 : `resolve-library-id` / `resolve_library_id`, `get-library-docs` / `query_docs` selon l'agent ; Docfork : équivalent | Vérif APIs stables (cf. règle "Vérification API actuelle" dans `AGENTS.md`) | configurer dans la config MCP de l'agent |
+| `context7` ou `docfork` | Context7 : `resolve-library-id` / `resolve_library_id` et `query-docs` / `query_docs` selon le client (noms canoniques côté serveur vs wrappers exposés ; ex. `mcp__context7__resolve-library-id` côté Claude Code, `mcp__context7__resolve_library_id` côté Codex) ; Docfork : équivalent | Vérif APIs stables (cf. règle "Vérification API actuelle" dans `AGENTS.md`) | configurer dans la config MCP de l'agent |
+
+**Versions des binaires MCP locaux.** Les MCP avec un binary local stdio (cas `hfr`) doivent être maintenus à jour. Les MCP HTTP (Context7, Docfork) sont server-side et n'ont pas de version client à vérifier.
+
+| MCP | Version locale | Latest release | Fix si désaligné |
+|---|---|---|---|
+| `hfr` | `hfr-mcp --version` → `hfr-mcp X.Y.Z` (sans préfixe `v`) | `gh release view --repo XaaT/hfr-mcp --json tagName --jq .tagName` → `vX.Y.Z` (avec préfixe `v` — stripper avant comparaison) | mettre à jour le binary local (`go install github.com/XaaT/hfr-mcp/cmd/hfr-mcp@latest` ou `gh release download`) **et vérifier que la config MCP de chaque agent pointe sur le binary à jour** (cas réel : `~/.claude.json` ou `~/.codex/config.toml` peut hardcoder un chemin absolu vers une version obsolète alors que `$PATH` a la nouvelle — la dérive est silencieuse jusqu'à ce qu'une feature nouvelle manque) |
+
+L'agent qui exécute le check doit aussi vérifier **quel binary la config MCP appelle réellement** (parser `~/.claude.json` `mcpServers.<name>.command`, équivalent côté autre agent) et le comparer au binary qui répondrait au `which hfr-mcp` côté shell. Un mismatch chemin absolu vs `$PATH` est exactement ce qui peut faire qu'un client tape sur l'ancienne version sans que le user le sache.
 
 ### 2. CLI / binaires
 
@@ -82,7 +90,11 @@ Si le contributeur maintient une convention privée (alias dédié), elle vit da
 ## Preflight Redface 2
 
 ### MCP
-✅ hfr — mcp__hfr__hfr_read exposé
+✅ hfr v<X.Y.Z> — à jour vs latest release v<X.Y.Z> (binary appelé : <path>/hfr-mcp), tools mcp__hfr__hfr_* exposés
+✅ context7 — connecté (HTTP, pas de version client à vérifier)
+
+Variantes :
+⚠️ hfr v<old> — latest release v<new>, binary local obsolète. Vérifier aussi que la config MCP active (~/.claude.json, ~/.codex/config.toml, etc.) ne hardcode pas un chemin absolu vers la version périmée.
 ❌ context7 — non exposé. Fix: configurer dans la config MCP de l'agent
 
 ### CLI
