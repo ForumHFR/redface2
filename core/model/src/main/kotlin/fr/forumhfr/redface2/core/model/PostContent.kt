@@ -16,8 +16,6 @@ sealed interface PostBlock {
 
     data class Spoiler(val label: String?, val content: PostContent) : PostBlock
 
-    data class CodeBlock(val text: String) : PostBlock
-
     data class Image(val url: String, val description: String?) : PostBlock
 }
 

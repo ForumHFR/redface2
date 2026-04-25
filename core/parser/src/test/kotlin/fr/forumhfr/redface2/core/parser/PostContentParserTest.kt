@@ -246,7 +246,7 @@ class PostContentParserTest {
     }
 
     @Test
-    fun `quotedAuthors mirrors quote authors from AST`() {
+    fun `quotedAuthors equals the distinct list of quote authors from the AST`() {
         val topic = pageParser.parse(fixture("topic_khakha_page_2.html"))
 
         topic.posts
@@ -255,13 +255,110 @@ class PostContentParserTest {
                 val authorsFromAst = post.contentAst.blocks
                     .filterIsInstance<PostBlock.Quote>()
                     .mapNotNull { it.author }
-                authorsFromAst.forEach { expected ->
-                    assertTrue(
-                        "post #${post.numreponse}: $expected should be in quotedAuthors",
-                        post.quotedAuthors.contains(expected),
-                    )
-                }
+                    .distinct()
+                assertEquals(
+                    "post #${post.numreponse}: quotedAuthors must mirror AST quote authors exactly",
+                    authorsFromAst,
+                    post.quotedAuthors,
+                )
             }
+    }
+
+    @Test
+    fun `anonymous quote table is recognised as a Quote without author`() {
+        val topic = pageParser.parse(fixture("topic_page_multipage.html"))
+
+        val anonymousQuotes = topic.posts
+            .flatMap { post -> post.contentAst.allBlocks() }
+            .filterIsInstance<PostBlock.Quote>()
+            .filter { it.author == null }
+
+        assertTrue(
+            "topic_page_multipage fixture contains <table class=\"quote\"> witness posts",
+            anonymousQuotes.isNotEmpty(),
+        )
+        val anonymous = anonymousQuotes.first()
+        // Anonymous [quote] has no a.Topic — page/numreponse stay null too.
+        assertEquals("anonymous quote should have no page", null, anonymous.page)
+        assertEquals("anonymous quote should have no numreponse", null, anonymous.numreponse)
+        assertTrue(
+            "anonymous quote content should not be empty",
+            anonymous.content.blocks.isNotEmpty(),
+        )
+    }
+
+    @Test
+    fun `case-mismatched alt and title yield the title-cased builtin token`() {
+        // Witness post on topic_page_multipage.html ships <img alt=":d" title=":D"> for the
+        // legacy lowercase variant of the biggrin emoticon. The AST must not produce two
+        // distinct builtins for what HFR stores as the same drawable.
+        val topic = pageParser.parse(fixture("topic_page_multipage.html"))
+
+        val codes = topic.posts
+            .flatMap { post -> post.contentAst.allInlines() }
+            .filterIsInstance<PostInline.Smiley>()
+            .mapNotNull { (it.kind as? SmileyKind.Builtin)?.code }
+            .toSet()
+
+        assertTrue(
+            "title-cased :D should be the canonical token, found codes=$codes",
+            codes.contains(":D"),
+        )
+        assertFalse(
+            "lowercase :d should not surface as a separate builtin token, codes=$codes",
+            codes.contains(":d"),
+        )
+    }
+
+    @Test
+    fun `perso smiley variant suffix is preserved in the kind name`() {
+        // Fixture topic_posts_page contains [:g0od:2] — HFR uses the trailing :N to pick
+        // a variant of the same custom smiley. The colon must stay inside the name.
+        val topic = pageParser.parse(fixture("topic_posts_page.html"))
+
+        val variantPerso = topic.posts
+            .flatMap { post -> post.contentAst.allInlines() }
+            .filterIsInstance<PostInline.Smiley>()
+            .mapNotNull { it.kind as? SmileyKind.Perso }
+            .firstOrNull { ':' in it.name }
+
+        assertNotNull("expected a perso smiley with a `:N` variant suffix", variantPerso)
+        assertTrue(
+            "variant suffix should be kept inside the perso name, got=${variantPerso!!.name}",
+            variantPerso.name.matches(Regex(""".+:\d+""")),
+        )
+    }
+
+    @Test
+    fun `non-http schemes other than data and javascript are also rejected`() {
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            """
+            <div id="para123">
+                <a href="mailto:foo@example.com">mail</a>
+                <a href="vbscript:msgbox(1)">vb</a>
+                <a href="file:///etc/passwd">file</a>
+                <img src="mailto:foo@example.com" alt="">
+                <img src="vbscript:msgbox(1)" alt="">
+                <img src="file:///etc/passwd" alt="">
+            </div>
+            """.trimIndent(),
+        )
+
+        val result = parser.parse(element)
+
+        val linkUrls = result.ast.allInlines().filterIsInstance<PostInline.Link>().map { it.url }
+        val imageUrls = result.ast.allInlines().filterIsInstance<PostInline.InlineImage>().map { it.url }
+        listOf("mailto:", "vbscript:", "file:").forEach { scheme ->
+            assertFalse(
+                "$scheme links must not survive the sanitizer, links=$linkUrls",
+                linkUrls.any { it.startsWith(scheme, ignoreCase = true) },
+            )
+            assertFalse(
+                "$scheme image src must not survive the sanitizer, images=$imageUrls",
+                imageUrls.any { it.startsWith(scheme, ignoreCase = true) },
+            )
+        }
     }
 
     private fun fixture(name: String): String =
@@ -310,7 +407,6 @@ private fun walkBlocks(blocks: List<PostBlock>, out: MutableList<PostInline>) {
             is PostBlock.Paragraph -> walkInlines(block.inlines, out)
             is PostBlock.Quote -> walkBlocks(block.content.blocks, out)
             is PostBlock.Spoiler -> walkBlocks(block.content.blocks, out)
-            is PostBlock.CodeBlock -> Unit
             is PostBlock.Image -> Unit
         }
     }

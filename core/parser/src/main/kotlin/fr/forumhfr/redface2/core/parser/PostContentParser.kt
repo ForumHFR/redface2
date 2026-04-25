@@ -98,7 +98,9 @@ class PostContentParser {
 
     private fun classifyDiv(element: Element): NodeKind = when {
         element.selectFirst("table.spoiler") != null -> NodeKind.SPOILER
-        element.selectFirst("table.citation") != null -> NodeKind.QUOTE
+        // HFR renders [quotemsg=...] as <table class="citation"> (with author anchor) and
+        // [quote] (anonymous) as <table class="quote"> — both map to the same Quote block.
+        element.selectFirst("table.citation, table.quote") != null -> NodeKind.QUOTE
         element.attr("style").contains("clear: both") -> NodeKind.IGNORE
         else -> NodeKind.PARAGRAPH_CONTAINER
     }
@@ -116,11 +118,13 @@ class PostContentParser {
     }
 
     private fun parseQuote(element: Element): PostBlock.Quote? {
-        val table = element.selectFirst("table.citation")
+        val table = element.selectFirst("table.citation, table.quote")
         val cell = table?.selectFirst("td")?.clone()
         if (table == null || cell == null) return null
 
         val authorAnchor = table.selectFirst(HfrSelectors.POST_CITATION_AUTHOR)
+        // <table class="quote"> (anonymous [quote]) has no a.Topic, so author/page/numreponse
+        // stay null. The "Citation :" <b class="s1"> label is removed below for both shapes.
         val author = authorAnchor
             ?.text()
             ?.substringBefore(" a écrit")
@@ -191,9 +195,11 @@ class PostContentParser {
 
     @Suppress("CyclomaticComplexMethod")
     private fun parseInlineElement(element: Element): List<PostInline> = when (element.tagName()) {
-        // <br> at the top of a block flushes the current paragraph (handled in parseBlocks);
-        // when nested inside an inline parent (e.g. <strong>foo<br>bar</strong>) we keep it as
-        // an explicit line break so the renderer can preserve the author's formatting.
+        // Two granularities of vertical rhythm coexist:
+        //   - top-level <br> flushes the current paragraph (handled in parseBlocks).
+        //   - <br> nested inside any inline parent (<strong>, <a>, <span>, <font>, …) keeps
+        //     the author's intra-paragraph break as an explicit LineBreak so the renderer
+        //     does not silently merge the two text runs.
         "br" -> listOf(PostInline.LineBreak)
         "b", "strong" -> listOf(PostInline.Strong(parseInlineChildren(element)))
         "i", "em" -> listOf(PostInline.Emphasis(parseInlineChildren(element)))
@@ -231,20 +237,25 @@ class PostContentParser {
 
     private fun parseSmiley(element: Element): PostInline.Smiley? {
         if (element.tagName() != "img") return null
+        // HFR keeps `title` canonical-cased (e.g. ":D") while `alt` can drift to lowercase
+        // (`:d`) on legacy posts. Pick title first so :D and :d don't end up as two distinct
+        // builtin tokens for the same emoticon.
+        val title = element.attr("title").trim()
         val alt = element.attr("alt").trim()
+        val token = title.ifBlank { alt }
         val imageUrl = sanitizeImageHref(element.attr("src"))
         return when {
-            alt.isEmpty() -> null
-            PERSO_SMILEY_REGEX.matches(alt) -> {
-                // alt = "[:name]" → strip "[:" prefix and trailing "]"
-                val name = alt.substring(2, alt.length - 1)
+            token.isEmpty() -> null
+            PERSO_SMILEY_REGEX.matches(token) -> {
+                // token = "[:name]" → strip "[:" prefix and trailing "]"
+                val name = token.substring(2, token.length - 1)
                 PostInline.Smiley(SmileyKind.Perso(name), imageUrl)
             }
 
-            BUILTIN_SMILEY_REGEX.matches(alt) -> {
+            BUILTIN_SMILEY_REGEX.matches(token) -> {
                 // The BBCode token is the canonical identity (`:)`, `;)`, `:jap:`, `:??:` …);
                 // stripping the colons would collapse `:)` and `;)` to the same `)`.
-                PostInline.Smiley(SmileyKind.Builtin(alt), imageUrl)
+                PostInline.Smiley(SmileyKind.Builtin(token), imageUrl)
             }
 
             else -> null
