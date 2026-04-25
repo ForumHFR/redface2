@@ -47,7 +47,7 @@ Lister les inputs canoniques :
 | Versions effectives | `gradle/libs.versions.toml` (section `[versions]`) |
 | Versions documentées | `docs/specs/stack.md` + ADRs avec versions (`009-okhttp-5-3-plus.md`, `008-compose-navigation-3.md`, etc.) |
 | Modèles spec | `docs/specs/models.md` (classes dans le `mermaid classDiagram`) |
-| Modèles code | `find core/model core/domain -name '*.kt'` puis grep des `data class`, `sealed class`, `enum class` |
+| Modèles code | `find core/model core/domain -name '*.kt'` puis grep des `data class`, `sealed class`, `sealed interface`, `enum class` |
 | Repositories spec | `docs/specs/architecture.md` + `docs/specs/mvi.md` |
 | Repositories code | `find core/domain -name '*Repository*.kt'` |
 | ADR statut | `for f in docs/adr/0*.md; do status=$(awk '/^## Statut/{getline; getline; print; exit}' "$f"); echo "$f → $status"; done` (filtrer ceux qui commencent par `Accepté`). ⚠️ Le statut est à 2 lignes après l'en-tête `## Statut` (ligne vide intermédiaire) — un `grep -A1 '## Statut'` retourne la ligne vide, pas le statut. |
@@ -92,7 +92,7 @@ Pour chaque classe du `classDiagram` mermaid de `models.md` :
 Commande pour lister les classes Kotlin existantes (à comparer aux classes du `classDiagram`) :
 
 ```bash
-find core/model core/domain -name '*.kt' -exec grep -hE '^(data class|sealed class|enum class) [A-Z][A-Za-z0-9]*' {} \; | sort -u
+find core/model core/domain -name '*.kt' -exec grep -hE '^(data class|sealed class|sealed interface|enum class) [A-Z][A-Za-z0-9]*' {} \; | sort -u
 ```
 
 Pour lister les champs d'une `data class` donnée et les confronter au diagramme :

@@ -38,7 +38,7 @@ Vérifier que ces tools sont exposés dans la session courante. La méthode dép
 | MCP | Tools clés | Pourquoi | Fix si absent |
 |---|---|---|---|
 | `hfr` | `mcp__hfr__hfr_read`, `hfr_reply`, `hfr_edit`, `hfr_topics`, `hfr_cats`, `hfr_quote`, `hfr_mp`, `hfr_create_topic` | Capture fixtures HTML réelles, post/edit, lecture topic communauté | voir [hfr-mcp](https://github.com/XaaT/hfr-mcp), ajouter dans la config MCP de l'agent |
-| `context7` ou `docfork` | Context7 : `resolve-library-id` et `query-docs` (noms canoniques côté serveur ; le client peut les exposer sous un préfixe — ex. `mcp__context7__resolve-library-id` côté Claude Code) ; Docfork : équivalent | Vérif APIs stables (cf. règle "Vérification API actuelle" dans `AGENTS.md`) | configurer dans la config MCP de l'agent |
+| `context7` ou `docfork` | Context7 : `resolve-library-id` / `resolve_library_id` et `query-docs` / `query_docs` selon le client (noms canoniques côté serveur vs wrappers exposés ; ex. `mcp__context7__resolve-library-id` côté Claude Code, `mcp__context7__resolve_library_id` côté Codex) ; Docfork : équivalent | Vérif APIs stables (cf. règle "Vérification API actuelle" dans `AGENTS.md`) | configurer dans la config MCP de l'agent |
 
 **Versions des binaires MCP locaux.** Les MCP avec un binary local stdio (cas `hfr`) doivent être maintenus à jour. Les MCP HTTP (Context7, Docfork) sont server-side et n'ont pas de version client à vérifier.
 
