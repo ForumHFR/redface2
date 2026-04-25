@@ -7,7 +7,6 @@ import fr.forumhfr.redface2.core.model.SmileyKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -28,7 +27,7 @@ class PostContentParserTest {
     }
 
     @Test
-    fun `quotes in AST preserve author and nest content`() {
+    fun `quotes in AST preserve author numreponse and page from citation href`() {
         val topic = pageParser.parse(fixture("topic_khakha_page_146.html"))
 
         val withQuote = topic.posts
@@ -39,8 +38,42 @@ class PostContentParserTest {
             .filterIsInstance<PostBlock.Quote>()
             .first()
         assertNotNull("quote should have an author", quote.author)
-        assertNull("numreponse is not extractable from rendered HTML", quote.numreponse)
-        assertNull("page is not extractable from rendered HTML", quote.page)
+        // The quote header anchor on page 146 fixtures targets sujet_<post>_<page>.htm#t<numreponse>
+        // so both fields are extractable. Asserting they're populated, not specific values, because
+        // different posts on the page cite different numreponses.
+        assertNotNull("page should be extracted from citation href", quote.page)
+        assertNotNull("numreponse should be extracted from citation href", quote.numreponse)
+        assertEquals("citations on page 146 always reference page 146", 146, quote.page)
+    }
+
+    @Test
+    fun `spoiler block is recognised and not flattened into paragraph`() {
+        val topic = pageParser.parse(fixture("topic_khakha_page_146.html"))
+
+        val spoilers = topic.posts.flatMap { post ->
+            post.contentAst.allBlocks().filterIsInstance<PostBlock.Spoiler>()
+        }
+        assertTrue("page 146 fixture contains at least one spoiler block", spoilers.isNotEmpty())
+        val spoiler = spoilers.first()
+        assertEquals("Spoiler", spoiler.label)
+        assertTrue("spoiler content should not be empty", spoiler.content.blocks.isNotEmpty())
+    }
+
+    @Test
+    fun `mono-character builtin smileys are recognised`() {
+        val topic = pageParser.parse(fixture("topic_khakha_page_146.html"))
+
+        val codes = topic.posts
+            .flatMap { post -> post.contentAst.allInlines() }
+            .filterIsInstance<PostInline.Smiley>()
+            .mapNotNull { (it.kind as? SmileyKind.Builtin)?.code }
+            .toSet()
+
+        // page 146 fixture contains :), :D, :o — all single-character builtins which the
+        // initial naive regex (:[a-zA-Z0-9_]+:) silently dropped to InlineImage.
+        assertTrue("expected :) builtin on page 146, found codes=$codes", codes.contains(")"))
+        assertTrue("expected :D builtin on page 146, found codes=$codes", codes.contains("D"))
+        assertTrue("expected :o builtin on page 146, found codes=$codes", codes.contains("o"))
     }
 
     @Test
@@ -55,6 +88,9 @@ class PostContentParserTest {
         assertNotNull("page 1 fixture contains [:obam haha] perso smileys", persoSmiley)
         val name = (persoSmiley!!.kind as SmileyKind.Perso).name
         assertTrue("perso name should not be wrapped in [: ]", !name.startsWith("[:") && !name.endsWith("]"))
+        // Specifically check the strip preserves the inner space — naive regex bugs would
+        // produce "obam" or "obam haha]" and silently pass the boundary assertion above.
+        assertEquals("obam haha", name)
     }
 
     @Test
@@ -141,6 +177,26 @@ private fun PostContent.allInlines(): List<PostInline> {
     val out = mutableListOf<PostInline>()
     walkBlocks(this.blocks, out)
     return out
+}
+
+/**
+ * Walks the AST depth-first and yields every [PostBlock] node, going into quote/spoiler containers.
+ */
+private fun PostContent.allBlocks(): List<PostBlock> {
+    val out = mutableListOf<PostBlock>()
+    collectBlocks(this.blocks, out)
+    return out
+}
+
+private fun collectBlocks(blocks: List<PostBlock>, out: MutableList<PostBlock>) {
+    blocks.forEach { block ->
+        out += block
+        when (block) {
+            is PostBlock.Quote -> collectBlocks(block.content.blocks, out)
+            is PostBlock.Spoiler -> collectBlocks(block.content.blocks, out)
+            else -> Unit
+        }
+    }
 }
 
 private fun walkBlocks(blocks: List<PostBlock>, out: MutableList<PostInline>) {

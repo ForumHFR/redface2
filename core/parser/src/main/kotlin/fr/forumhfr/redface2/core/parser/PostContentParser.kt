@@ -57,6 +57,11 @@ class PostContentParser {
                     parseQuote(node as Element)?.let(blocks::add)
                 }
 
+                NodeKind.SPOILER -> {
+                    flushParagraph()
+                    parseSpoiler(node as Element)?.let(blocks::add)
+                }
+
                 NodeKind.IMAGE_BLOCK -> {
                     flushParagraph()
                     parseImageBlock(node as Element)?.let(blocks::add)
@@ -77,15 +82,20 @@ class PostContentParser {
 
     private fun classifyNode(node: Node): NodeKind {
         val element = (node as? Element) ?: return if (node is TextNode) NodeKind.INLINE else NodeKind.IGNORE
-        return when {
-            element.tagName() == "br" -> NodeKind.LINE_BREAK
-            element.tagName() == "div" && element.selectFirst("table.citation") != null -> NodeKind.QUOTE
-            element.tagName() == "div" && element.attr("style").contains("clear: both") -> NodeKind.IGNORE
-            element.tagName() == "div" -> NodeKind.PARAGRAPH_CONTAINER
-            element.tagName() == "p" -> NodeKind.PARAGRAPH_CONTAINER
-            element.tagName() == "img" && isStandaloneImage(element) -> NodeKind.IMAGE_BLOCK
+        return when (element.tagName()) {
+            "br" -> NodeKind.LINE_BREAK
+            "div" -> classifyDiv(element)
+            "p" -> NodeKind.PARAGRAPH_CONTAINER
+            "img" -> if (isStandaloneImage(element)) NodeKind.IMAGE_BLOCK else NodeKind.INLINE
             else -> NodeKind.INLINE
         }
+    }
+
+    private fun classifyDiv(element: Element): NodeKind = when {
+        element.selectFirst("table.spoiler") != null -> NodeKind.SPOILER
+        element.selectFirst("table.citation") != null -> NodeKind.QUOTE
+        element.attr("style").contains("clear: both") -> NodeKind.IGNORE
+        else -> NodeKind.PARAGRAPH_CONTAINER
     }
 
     private fun isStandaloneImage(element: Element): Boolean {
@@ -105,12 +115,19 @@ class PostContentParser {
         val cell = table?.selectFirst("td")?.clone()
         if (table == null || cell == null) return null
 
-        val author = table
-            .selectFirst(HfrSelectors.POST_CITATION_AUTHOR)
+        val authorAnchor = table.selectFirst(HfrSelectors.POST_CITATION_AUTHOR)
+        val author = authorAnchor
             ?.text()
             ?.substringBefore(" a écrit")
             ?.trim()
             ?.takeIf(String::isNotEmpty)
+
+        // The citation header anchor links to the cited post:
+        // .../sujet_<topicPost>_<page>.htm#t<numreponse>
+        // Both page and numreponse are extractable from rendered HTML when present.
+        val match = authorAnchor?.attr("href")?.let(CITATION_HREF_REGEX::find)
+        val page = match?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val numreponse = match?.groupValues?.getOrNull(2)?.toIntOrNull()
 
         cell.children()
             .firstOrNull { it.tagName() == "b" && it.hasClass("s1") }
@@ -121,9 +138,37 @@ class PostContentParser {
 
         return PostBlock.Quote(
             author = author,
-            numreponse = null,
-            page = null,
+            numreponse = numreponse,
+            page = page,
             content = PostContent(parseBlocks(cell.childNodes())),
+        )
+    }
+
+    private fun parseSpoiler(element: Element): PostBlock.Spoiler? {
+        val table = element.selectFirst("table.spoiler")
+        val cell = table?.selectFirst("td")?.clone()
+        if (table == null || cell == null) return null
+
+        // Header is <b class="s1Topic">Spoiler :</b> — keep the label without the trailing colon
+        // so the renderer can format it consistently.
+        val labelElement = cell.selectFirst("b.s1Topic")
+        val label = labelElement
+            ?.text()
+            ?.removeSuffix(":")
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+        labelElement?.remove()
+        while (cell.children().firstOrNull()?.tagName() == "br") {
+            cell.children().firstOrNull()?.remove()
+        }
+
+        // The hidden body is wrapped in <div class="Topic masque"> — unwrap it before recursing
+        // so paragraphs/inlines surface at the top level of the Spoiler content.
+        val masque = cell.selectFirst("div.Topic.masque")
+        val source = masque ?: cell
+        return PostBlock.Spoiler(
+            label = label,
+            content = PostContent(parseBlocks(source.childNodes())),
         )
     }
 
@@ -183,13 +228,16 @@ class PostContentParser {
         return when {
             alt.isEmpty() -> null
             PERSO_SMILEY_REGEX.matches(alt) -> {
+                // alt = "[:name]" → strip "[:" prefix and trailing "]"
                 val name = alt.substring(2, alt.length - 1)
                 PostInline.Smiley(SmileyKind.Perso(name), imageUrl)
             }
 
             BUILTIN_SMILEY_REGEX.matches(alt) -> {
-                val code = alt.substring(1, alt.length - 1)
-                PostInline.Smiley(SmileyKind.Builtin(code), imageUrl)
+                // alt = ":code:" or ":code" — strip leading ":" and the optional trailing ":"
+                val withoutLeadingColon = alt.substring(1)
+                val code = withoutLeadingColon.removeSuffix(":")
+                if (code.isEmpty()) null else PostInline.Smiley(SmileyKind.Builtin(code), imageUrl)
             }
 
             else -> null
@@ -281,6 +329,7 @@ class PostContentParser {
         IGNORE,
         LINE_BREAK,
         QUOTE,
+        SPOILER,
         IMAGE_BLOCK,
         INLINE,
         PARAGRAPH_CONTAINER,
@@ -290,8 +339,19 @@ class PostContentParser {
         val WHITESPACE_REGEX = Regex("\\s+")
         val HEX_REGEX = Regex("[0-9a-fA-F]+")
         val STYLE_COLOR_REGEX = Regex("""color\s*:\s*(#?[0-9a-fA-F]{3,8})""")
-        val BUILTIN_SMILEY_REGEX = Regex(":[a-zA-Z0-9_]+:")
-        val PERSO_SMILEY_REGEX = Regex("""\[:[^]]+]""")
+
+        // HFR builtin smileys (~25 codes) appear as alt="<token>" in the rendered HTML.
+        // Their alt is anchored to the value, never embedded in surrounding text.
+        // Examples seen in real fixtures: :jap:, :love:, :sol:, :lol:, :spamafote: (with closing colon)
+        // and :), :D, :o, :/, :??: (no closing colon, includes punctuation).
+        // The regex therefore accepts 1..15 chars from a permissive set; matches() anchors the whole alt.
+        val BUILTIN_SMILEY_REGEX = Regex("""^:[\w)(/?]{1,15}:?$""")
+
+        // HFR custom smileys are wrapped as alt="[:name]" — name may contain spaces and punctuation.
+        val PERSO_SMILEY_REGEX = Regex("""^\[:[^]]+]$""")
+
+        // Citation header href: https://forum.hardware.fr/hfr/.../sujet_<post>_<page>.htm#t<numreponse>
+        val CITATION_HREF_REGEX = Regex("""sujet_\d+_(\d+)\.htm#t(\d+)""")
     }
 }
 
