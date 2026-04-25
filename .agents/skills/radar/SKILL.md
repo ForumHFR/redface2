@@ -13,7 +13,7 @@ Faire le tour rapide de l'état du repo et produire une liste actionnable de **q
 
 Spécialisé Redface 2 :
 - connaît les phases (`docs/specs/roadmap.md`, milestones GitHub `Phase N — *`)
-- connaît les blocages structurels (HfrParser issue #15 bloque PostRenderer #3 et nettoyage #65 ; MPStorage2 dans `XaaT/hfr-redkit` bloque Phase 3 ; `hfr-redflag` Worker bloque Phase 4)
+- détecte les blocages structurels en lisant `docs/specs/roadmap.md` (sections "prérequis externes", graphe mermaid de dépendances) et les corps d'issues du milestone courant (cherche `bloque #N`, `dépend de #N`, `prérequis #N` dans la description, ou les références d'autres issues via `gh issue view <n> --json body`). Ne pas hardcoder les numéros d'issues dans ce skill : ils dérivent dès qu'une issue est scindée ou fermée. Utiliser uniquement la roadmap canonique et les liens entre issues.
 - connaît la méthodologie triple-hybride et le fait que le projet **n'a pas de dates fermes** — les phases sont ordonnées par dépendances, pas datées (cf. `docs/specs/methodology.md`)
 
 ## Quand l'invoquer
@@ -60,7 +60,7 @@ Tous les signaux ci-dessous sont objectifs (vrai/faux, pas d'opinion). Lancer en
 | Issues phases ultérieures (N+1, N+2, …) | une commande par phase, ex. `for p in phase-2 phase-3 phase-4 phase-5; do gh issue list -R ForumHFR/redface2 --state open --label "$p" --json number,title,labels; done`. ⚠️ `gh issue list --label "a,b,c"` filtre en **AND** (intersection), pas en OR — ne pas utiliser en CSV pour une union de phases. | **Gros chantiers** |
 | Branches feature actives | `git branch -r --list 'origin/feature/*' --sort=-committerdate \| head -10` | annoter chaque PR avec sa branche pour repérer les branches sans PR |
 | Branches sans PR | comparer `git branch -r --list 'origin/feature/*'` avec `gh pr list --json headRefName --jq '.[].headRefName'` | **Court terme** (à transformer en PR ou nettoyer) |
-| TODO/FIXME récents (commits derniers 30j) | `git log --since="30 days ago" -p -- '*.kt' '*.md' \| grep -E '^\+.*\b(TODO\|FIXME)\b' \| head -20` | **Court terme** |
+| TODO/FIXME récents (commits derniers 30j) | `git log --since="30 days ago" --pickaxe-regex -S 'TODO\|FIXME' --oneline -- '*.kt' '*.md' \| head -20` puis pour chaque commit intéressant `git show <sha> -- '*.kt' '*.md' \| grep -E '^\+.*\b(TODO\|FIXME)\b'`. ⚠️ Éviter `git log -p` brut sur 30 jours : génère le diff complet de tous les commits `.kt`/`.md` avant de filtrer, lent dès que le repo grossit. `--pickaxe-regex -S` filtre côté Git et ne diff que les commits qui modifient effectivement une occurrence. | **Court terme** |
 | Drafts ADR | `for f in docs/adr/0*.md; do status=$(awk '/^## Statut/{getline; getline; print; exit}' "$f"); echo "$f → $status"; done` puis filtrer ceux dont le statut commence par `Proposé`. ⚠️ Le statut est à 2 lignes après l'en-tête `## Statut` (ligne vide intermédiaire) — un `grep -A1 '## Statut'` ne fonctionne **pas**. | **Gros chantiers** (décisions structurelles à acter) |
 | Dépendances externes | regarder hardcodé : MPStorage2 (`gh repo view XaaT/hfr-redkit --json updatedAt`) et hfr-redflag (`gh repo view XaaT/hfr-redflag --json updatedAt`) | **Gros chantiers** + flag « bloquant Phase N » |
 

@@ -100,7 +100,9 @@ Pour chaque interface `*Repository` mentionnée :
 Pour chaque ADR au statut `Accepté` :
 - Lire la section **Décision** pour extraire les conséquences vérifiables (ex. ADR-002 « DataStore + Keystore, sans password stocké » → vérifier qu'il n'y a aucun usage de `EncryptedSharedPreferences` ni de stockage password en clair).
 - Lire la section **Conséquences** : les points listés sont-ils visibles dans le code (frontières module, injection Hilt, etc.) ?
-- Un ADR `Accepté` contredit par le code = `Critique`.
+- Distinguer **contradiction** vs **manque** :
+  - **Contradiction** = le code implémente activement quelque chose qui contredit l'ADR (ex. ADR dit "DataStore" mais le code utilise `EncryptedSharedPreferences`). Sévérité = `Critique` quelle que soit la phase.
+  - **Manque** = la fonctionnalité dont parle l'ADR n'est pas encore implémentée du tout (ex. l'ADR auth `Accepté` mais aucun module auth n'existe encore). Sévérité = `Important` si la phase courante est censée l'implémenter, sinon `Mineur`. **Ne pas escalader en `Critique` sur un manque** — c'est juste de la dette de phase, pas une régression.
 - Un ADR `Proposé` non encore implémenté = ne pas signaler (c'est l'attendu).
 
 #### 2.6 Conventions feature — `contributing.md` ↔ structure réelle
@@ -113,7 +115,11 @@ Pour chaque convention de fichier dans `docs/guides/contributing.md` :
 
 `AGENTS.md` interdit certains patterns dépréciés (`EncryptedSharedPreferences`, Accompanist `SwipeRefresh`, Compose Navigation string-based, etc.).
 
-- `grep -rE 'EncryptedSharedPreferences|SwipeRefresh|androidx.navigation\.[^3]' core/ feature/ app/ 2>/dev/null` — toute occurrence = `Critique` (régression vs règles projet).
+Regex à exécuter :
+
+- `grep -rnE 'EncryptedSharedPreferences|SwipeRefresh' core/ feature/ app/ 2>/dev/null` — `EncryptedSharedPreferences` et Accompanist `SwipeRefresh` ne devraient apparaître nulle part. Toute occurrence = `Critique`.
+- `grep -rnE 'com\.google\.accompanist\.swiperefresh' core/ feature/ app/ 2>/dev/null` — l'import Accompanist legacy. `Critique` si trouvé.
+- Compose Navigation **2.x** string-based : ⚠️ ne **pas** utiliser une regex naïve sur `androidx.navigation.` — Navigation 3 utilise aussi ce préfixe (`androidx.navigation3.runtime`, `androidx.navigation3.ui`) ainsi que des sous-packages compatibles (ex. `androidx.navigation.compose` lors de la coexistence). Pattern recommandé pour cibler l'API 2.x : `grep -rnE 'NavGraphBuilder|composable\("[^"]+"|navController\.navigate\("[^"]+"' core/ feature/ app/ 2>/dev/null` (rememberNavController + composable("route_string") + navigate("route_string") sont le triplet diagnostic de l'API 2.x). À recouper visuellement — quelques faux positifs possibles (ex. analytics qui logue une route littérale). `Critique` si confirmé.
 
 ### 3. Sévérité
 
