@@ -1,12 +1,13 @@
 package fr.forumhfr.redface2.feature.topic
 
 import app.cash.turbine.test
-import fr.forumhfr.redface2.core.domain.fixtures.FixedTopicFixtures
-import fr.forumhfr.redface2.core.domain.fixtures.TopicFixtureRepository
+import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.model.Topic
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -31,72 +32,96 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `initial load succeeds and exposes loaded state`() = runTest {
-        val topic = fakeTopic(page = 1)
-        val repository = FakeTopicFixtureRepository(responses = listOf(Result.success(topic)))
+    fun `flow emitting one topic exposes loaded state with derived available pages`() = runTest {
+        val topic = fakeTopic(page = 2, totalPages = 5)
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
         val viewModel = TopicViewModel(
-            request = fixedRequest(page = 1),
-            topicFixtureRepository = repository,
+            request = topicRequest(page = 2),
+            topicRepository = repository,
         )
 
         viewModel.state.test {
             val loaded = awaitItem()
             val mode = assertMode<TopicUiState.Mode.Loaded>(loaded)
             assertEquals(topic, mode.topic)
-            assertEquals(FixedTopicFixtures.availablePages, loaded.availablePages)
+            assertEquals(listOf(1, 2, 3, 4, 5), loaded.availablePages)
             cancelAndIgnoreRemainingEvents()
         }
-        assertEquals(listOf(1), repository.pagesRequested)
+        assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), repository.calls)
     }
 
     @Test
-    fun `initial load failure exposes error mode`() = runTest {
-        val repository = FakeTopicFixtureRepository(responses = listOf(Result.failure(IOException("network"))))
-
-        val viewModel = TopicViewModel(
-            request = fixedRequest(page = 1),
-            topicFixtureRepository = repository,
-        )
-
-        viewModel.state.test {
-            val state = awaitItem()
-            val mode = assertMode<TopicUiState.Mode.Error>(state)
-            assertEquals("network", mode.message)
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
-    fun `non-fixed topic request resolves to placeholder without hitting repository`() = runTest {
-        val repository = FakeTopicFixtureRepository(responses = emptyList())
-
-        val viewModel = TopicViewModel(
-            request = TopicRequest(cat = 1, post = 2, page = 1, scrollTo = null),
-            topicFixtureRepository = repository,
-        )
-
-        viewModel.state.test {
-            val state = awaitItem()
-            assertMode<TopicUiState.Mode.Placeholder>(state)
-            cancelAndIgnoreRemainingEvents()
-        }
-        assertTrue(repository.pagesRequested.isEmpty())
-    }
-
-    @Test
-    fun `retry after error replays the current page and succeeds`() = runTest {
-        val topic = fakeTopic(page = 2)
-        val repository = FakeTopicFixtureRepository(
-            responses = listOf(
-                Result.failure(IllegalStateException("boom")),
-                Result.success(topic),
+    fun `flow emitting cache then fresh exposes both Loaded states`() = runTest {
+        val cached = fakeTopic(page = 1, totalPages = 3, title = "cached")
+        val fresh = fakeTopic(page = 1, totalPages = 3, title = "fresh")
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow {
+                    emit(cached)
+                    emit(fresh)
+                },
             ),
         )
 
         val viewModel = TopicViewModel(
-            request = fixedRequest(page = 2),
-            topicFixtureRepository = repository,
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+        )
+
+        val finalLoaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals(fresh, finalLoaded.topic)
+    }
+
+    @Test
+    fun `flow failing without prior emission exposes error mode`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { throw IOException("network") }),
+        )
+
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+        )
+
+        val mode = assertMode<TopicUiState.Mode.Error>(viewModel.state.value)
+        assertEquals("network", mode.message)
+    }
+
+    @Test
+    fun `flow failing after a cached emission keeps the cached Loaded state`() = runTest {
+        val cached = fakeTopic(page = 1, totalPages = 3, title = "cached")
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow {
+                    emit(cached)
+                    throw IOException("refresh failed")
+                },
+            ),
+        )
+
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+        )
+
+        val mode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals(cached, mode.topic)
+    }
+
+    @Test
+    fun `retry after error replays the current page and succeeds`() = runTest {
+        val topic = fakeTopic(page = 2, totalPages = 4)
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { throw IllegalStateException("boom") },
+                flow { emit(topic) },
+            ),
+        )
+
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
         )
 
         assertMode<TopicUiState.Mode.Error>(viewModel.state.value)
@@ -105,23 +130,30 @@ class TopicViewModelTest {
 
         val loadedMode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
         assertEquals(topic, loadedMode.topic)
-        assertEquals(listOf(2, 2), repository.pagesRequested)
+        assertEquals(
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+            repository.calls,
+        )
     }
 
-    private fun fixedRequest(page: Int): TopicRequest = TopicRequest(
-        cat = FixedTopicFixtures.cat,
-        post = FixedTopicFixtures.post,
+    private fun topicRequest(page: Int): TopicRequest = TopicRequest(
+        cat = SAMPLE_CAT,
+        post = SAMPLE_POST,
         page = page,
         scrollTo = null,
     )
 
-    private fun fakeTopic(page: Int): Topic = Topic(
-        cat = FixedTopicFixtures.cat,
-        post = FixedTopicFixtures.post,
-        title = "fake",
+    private fun fakeTopic(
+        page: Int,
+        totalPages: Int,
+        title: String = "fake",
+    ): Topic = Topic(
+        cat = SAMPLE_CAT,
+        post = SAMPLE_POST,
+        title = title,
         posts = emptyList(),
         page = page,
-        totalPages = 3,
+        totalPages = totalPages,
         isFirstPostOwner = false,
         poll = null,
     )
@@ -131,18 +163,25 @@ class TopicViewModelTest {
         assertTrue("expected mode ${T::class.simpleName} but was ${mode::class.simpleName}", mode is T)
         return mode as T
     }
+
+    companion object {
+        private const val SAMPLE_CAT = 13
+        private const val SAMPLE_POST = 84_540
+    }
 }
 
-private class FakeTopicFixtureRepository(
-    responses: List<Result<Topic>>,
-) : TopicFixtureRepository {
-    private val queue = ArrayDeque(responses)
-    val pagesRequested: MutableList<Int> = mutableListOf()
+private class FakeTopicRepository(
+    flowsToReturn: List<Flow<Topic>>,
+) : TopicRepository {
+    private val queue = ArrayDeque(flowsToReturn)
+    val calls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
 
-    override suspend fun loadTopicPage(page: Int): Topic {
-        pagesRequested += page
-        val result = queue.removeFirstOrNull()
-            ?: error("No more fake responses queued")
-        return result.getOrThrow()
+    override fun observeTopicPage(cat: Int, post: Int, page: Int): Flow<Topic> {
+        calls += Triple(cat, post, page)
+        return queue.removeFirstOrNull() ?: error("No more flows queued")
+    }
+
+    override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
+        error("refreshTopicPage not used by ViewModel under test")
     }
 }

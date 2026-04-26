@@ -17,8 +17,6 @@ data class TopicUiState(
         data class Error(
             val message: String,
         ) : Mode
-
-        data object Placeholder : Mode
     }
 
     companion object {

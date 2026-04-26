@@ -87,20 +87,6 @@ internal fun TopicContent(
         color = MaterialTheme.colorScheme.surface,
     ) {
         when (val mode = state.mode) {
-            TopicUiState.Mode.Placeholder -> {
-                RedfacePlaceholderScreen(
-                    title = stringResource(R.string.topic_title, request.post),
-                    body = stringResource(R.string.topic_body_placeholder, request.cat, request.page),
-                ) {
-                    request.scrollTo?.let { target ->
-                        Text(text = stringResource(R.string.topic_scroll_to, target))
-                    }
-                    Button(onClick = onReply) {
-                        Text(text = stringResource(R.string.topic_reply))
-                    }
-                }
-            }
-
             TopicUiState.Mode.Loading -> {
                 Column(
                     modifier = Modifier
@@ -120,7 +106,7 @@ internal fun TopicContent(
 
             is TopicUiState.Mode.Error -> {
                 RedfacePlaceholderScreen(
-                    title = stringResource(R.string.topic_fixed_title),
+                    title = stringResource(R.string.topic_error_title),
                     body = stringResource(R.string.topic_error_body, request.page, mode.message),
                 ) {
                     TopicPageButtons(
@@ -208,7 +194,7 @@ private fun TopicHeaderCard(
             )
             Text(
                 text = stringResource(
-                    R.string.topic_fixture_caption,
+                    R.string.topic_caption,
                     topic.post,
                     topic.page,
                     topic.totalPages,
