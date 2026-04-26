@@ -1,6 +1,7 @@
 plugins {
     id("redface.android.library")
     id("redface.android.hilt.library")
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -13,4 +14,11 @@ dependencies {
     implementation(project(":core:parser"))
     implementation(project(":core:database"))
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.serialization.json)
+
+    testImplementation(libs.junit4)
+    testImplementation(libs.mockk)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.turbine)
 }
