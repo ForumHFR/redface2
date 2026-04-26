@@ -64,8 +64,7 @@ class TopicPageParser(
             date = dateParser.parsePostedAt(
                 postTable.selectFirst(HfrSelectors.POST_TOOLBAR_LEFT)?.text().orEmpty(),
             ),
-            content = content.content,
-            contentAst = content.ast,
+            content = content.ast,
             avatarUrl = postTable.selectFirst(HfrSelectors.POST_AVATAR)?.attr("src"),
             isEditable = false,
             isOwnPost = false,

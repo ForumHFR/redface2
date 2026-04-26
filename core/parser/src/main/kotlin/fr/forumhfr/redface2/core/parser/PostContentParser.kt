@@ -13,7 +13,6 @@ class PostContentParser {
     fun parse(contentElement: Element?): ParsedPostContent {
         if (contentElement == null) {
             return ParsedPostContent(
-                content = DELETED_PLACEHOLDER,
                 quotedAuthors = emptyList(),
                 ast = deletedFallbackAst(),
             )
@@ -27,10 +26,7 @@ class PostContentParser {
         val ast = if (parsedBlocks.isEmpty()) deletedFallbackAst() else PostContent(blocks = parsedBlocks)
         val quotedAuthors = collectQuotedAuthors(ast)
 
-        val htmlFallback = sanitized.html().trim().ifEmpty { DELETED_PLACEHOLDER }
-
         return ParsedPostContent(
-            content = htmlFallback,
             quotedAuthors = quotedAuthors,
             ast = ast,
         )
@@ -408,7 +404,6 @@ internal fun sanitizeImageHref(rawSrc: String): String? =
         }
 
 data class ParsedPostContent(
-    val content: String,
     val quotedAuthors: List<String>,
     val ast: PostContent,
 )
