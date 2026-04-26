@@ -8,9 +8,6 @@ android {
 }
 
 dependencies {
-    api(project(":core:model"))
-    api(project(":core:domain"))
-
     implementation(platform(libs.okhttp.bom))
     api(libs.okhttp)
     implementation(libs.okhttp.logging)

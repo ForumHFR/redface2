@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.network
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 import okhttp3.HttpUrl
@@ -32,7 +33,9 @@ class HfrClient @Inject constructor(
         val client = if (useAuth) authenticated else anonymous
         val request = Request.Builder().url(url).get().build()
         return client.newCall(request).execute().use { response ->
-            check(response.isSuccessful) { "HFR returned ${response.code} for $url" }
+            if (!response.isSuccessful) {
+                throw IOException("HFR returned ${response.code} for $url")
+            }
             response.body.string()
         }
     }

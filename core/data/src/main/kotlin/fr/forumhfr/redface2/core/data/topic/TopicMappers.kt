@@ -8,7 +8,6 @@ import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import java.time.Instant
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
 internal object TopicMappers {
@@ -106,7 +105,4 @@ internal object TopicMappers {
         totalVotes = totalVotes,
         hasVoted = hasVoted,
     )
-
-    @Suppress("unused")
-    private val pollListSerializer = ListSerializer(PollDto.serializer())
 }

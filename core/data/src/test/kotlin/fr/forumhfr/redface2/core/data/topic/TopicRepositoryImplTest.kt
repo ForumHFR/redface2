@@ -104,16 +104,22 @@ class TopicRepositoryImplTest {
             awaitItem()
             awaitComplete()
         }
+        assertEquals("first call should warm the cache with one network request", 1, server.requestCount)
 
         repository.observeTopicPage(1, 999_395, 1).test {
             val cached = awaitItem()
             val fresh = awaitItem()
             assertEquals(cached.title, fresh.title)
             assertEquals(cached.posts.size, fresh.posts.size)
+            // Round-trip the PostContent AST through the Room JSON converter:
+            // the cached read goes through PostContentSerializer.decode while the
+            // fresh read comes straight from HfrParser, so equality proves the
+            // converter preserves the polymorphic block/inline hierarchy.
+            assertEquals(fresh.posts.first().content, cached.posts.first().content)
             awaitComplete()
         }
 
-        assertEquals(2, server.requestCount)
+        assertEquals("second call should hit network exactly once for refresh", 2, server.requestCount)
     }
 
     @Test
