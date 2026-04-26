@@ -186,9 +186,9 @@ Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
 | `forum.hardware.fr/forum2.php?config=hfr.inc&cat=X&subcat=Y` | Liste topics | Phase 1 |
 | `forum.hardware.fr/forum1f.php` | Drapeaux | Phase 1 |
 | `forum.hardware.fr/forum1.php?cat=X&post=Y#t12345` | Post spécifique (traitement custom, voir ci-dessous) | Phase 1 |
-| `forum.hardware.fr/forum2.php?config=hfr.inc&cat=prive&page=Z` | Inbox MP / conversation | Phase 3 |
+| `forum.hardware.fr/forum2.php?config=hfr.inc&cat=prive&page=Z` ⚠️ pattern non vérifié | Inbox MP / conversation | Phase 3 — à confirmer sur MP réel |
 
-Les liens vers MP arrivent en **Phase 3** uniquement (cycle messages privés + MultiMP). Le code de `parseHfrDeepLink` ignore aujourd'hui ces URLs — elles retombent sur le `else -> null` et l'app ouvre l'écran d'accueil par défaut. Le pattern n'est pas figé : il faudra confirmer sur un MP réel à la mise en chantier de la feature `:feature:messages`.
+> **Patterns Phase 3 — à valider sur HFR réel** : la ligne `cat=prive` ci-dessus est une **hypothèse à confirmer**, pas un contrat. Aucun MP réel n'a été observé sur HFR pour valider la forme exacte de l'URL (présence ou non de `&page`, encodage du `post={mp_id}`, comportement quand l'utilisateur n'est pas connecté, etc.). Le pattern sera capturé via `hfr-mcp` au démarrage du cycle `:feature:messages` (Phase 3) et la table mise à jour à ce moment-là. Le code de `parseHfrDeepLink` ignore aujourd'hui ces URLs — elles retombent sur le `else -> null` et l'app ouvre l'écran d'accueil par défaut.
 
 Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026). Les routes sont des types `@Serializable` qui implémentent un sealed interface marqueur `RedfaceNavKey : NavKey` :
 
@@ -365,7 +365,12 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 
 ### Multi-pane adaptatif (tablette, foldables)
 
-> **Statut Phase 5+** — multi-pane n'est pas livré en Phase 1. Le snippet ci-dessous est **illustratif** : il montre comment `NavDisplay` se compose avec `ListDetailPaneScaffold` (Material 3 Adaptive 1.2+) sur le même back stack, en utilisant les signatures **réelles** des screens livrés par Phase 1 (`FlagsScreen`, `TopicScreen` via `TopicRequest`, `EditorScreen`). Quand le mode tablette arrivera, on partira de cette base.
+> **Statut Phase 5+** — multi-pane n'est pas livré en Phase 1. Dans le snippet ci-dessous :
+>
+> - le **pattern de composition** (`NavDisplay` + `ListDetailPaneScaffold` sur le même back stack, switch `WindowSizeClass`) est **illustratif** — c'est ce qui sera implémenté Phase 5+ ;
+> - les **signatures de screens** appelées (`FlagsScreen(onOpenUnreadTopic, onOpenTrackedCategory)`, `TopicScreen(request: TopicRequest, onReply, onOpenPage)`, `EditorScreen(mode: String, cat, post)`) sont les signatures **réelles Phase 1** livrées dans le repo aujourd'hui (cf. `feature/topic/.../TopicScreen.kt`, `app/.../FlagsScreen.kt`, `feature/editor/.../EditorScreen.kt`).
+>
+> Le hardcoding de `FixedTopicFixtures` dans la lambda `onOpenUnreadTopic` reflète la **réalité Phase 1** : `FlagsScreen` est encore un placeholder mock sans modèle `FlaggedTopic`, donc le call-site fournit une fixture jusqu'à ce que la liste réelle des drapeaux arrive. Quand `FlagsScreen` exposera `(topic: FlaggedTopic) -> Unit`, la lambda recevra le topic concerné — voir la note sous le snippet.
 
 ```kotlin
 @Composable
