@@ -1,7 +1,7 @@
 ---
 title: Architecture
 parent: Spécifications
-nav_order: 2
+nav_order: 3
 permalink: /specs/architecture
 mermaid: true
 ---
@@ -121,7 +121,7 @@ graph TB
 | `:core:network` | `HfrClient` : requêtes HTTP, cookies, session, login. Encapsule OkHttp. | `:core:model` |
 | `:core:parser` | `HfrParser` : transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine, dont l'AST `PostContent`. | `:core:model` |
 | `:core:database` | Room DB, DAOs, entities, mappers entity↔model. Cache locale + cache MPStorage. | `:core:model` |
-| `:core:ui` | Thème Material 3 (6 sous-packages : `theme/`, `components/`, `adaptive/`, `semantics/`, `util/`, `extensions/`), composants partagés, `PostRenderer` (`PostContent` → Compose). Seul module autorisé à instancier `ColorScheme`, `Typography`, `Shapes`. | `:core:model` |
+| `:core:ui` | Thème Material 3 (`theme/`) et `PostRenderer` (`post/`, `PostContent` → Compose). D'autres sous-packages (`components/`, `adaptive/`, `semantics/`, `util/`, `extensions/`) sont prévus mais n'apparaîtront qu'au fur et à mesure de l'arrivée des features qui les justifient — pas de module vide en avance. Seul module autorisé à instancier `ColorScheme`, `Typography`, `Shapes`. | `:core:model` |
 | `:core:extension` | Interfaces d'extension : `PostDecorator`, `TopicToolbarContributor`, `EditorToolbarContributor`. | `:core:model` |
 
 ### Modules feature (base)
@@ -142,6 +142,8 @@ Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (com
 
 Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le projet compte 15 modules (8 core + 7 features base). Les extensions sont des modules Gradle isolés qui s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant. La décision de découpage v1 est formalisée dans [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1).
 
+> **État réel des modules en Phase 1 (cycle topic fixe)** : tous les modules core et feature de base sont déclarés dans `settings.gradle.kts`, mais beaucoup ne contiennent encore que le squelette Gradle (`build.gradle.kts`) sans code Kotlin — `:core:network`, `:core:database`, `:core:extension`, `:feature:auth` et `:feature:settings` notamment. C'est volontaire : le découpage est fixé dès le bootstrap (ADR-001) pour figer les frontières, mais le code arrive feature par feature. La prose ci-dessus décrit le **contrat cible** ; la réalité courante est trackée par la roadmap.
+
 | Module | Fonction | Dépend de |
 |--------|----------|-----------|
 | `:feature:bookmarks` | Sauvegarder des posts | `:core:extension`, `:core:model`, `:core:database` |
@@ -157,9 +159,11 @@ Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le
 
 `:app` est le point d'entrée. Il :
 - Configure Hilt (DI) — inclut `:core:data` pour le wiring des implémentations
-- Définit le `NavGraph` (navigation globale)
+- Définit la navigation globale (`RedfaceApp` + `NavDisplay`)
 - Contient `MainActivity`
 - Dépend de tous les modules feature (base + extensions)
+
+> **Note Phase 1 — `FlagsScreen` héberge dans `:app`** : l'écran d'accueil (Drapeaux) vit aujourd'hui dans `app/src/main/kotlin/.../FlagsScreen.kt` et **non** dans un module `:feature:flags`. C'est délibéré tant qu'il reste un placeholder mock (pas de ViewModel, pas de repository, pas d'état non-trivial). Quand le `FlagsViewModel` documenté dans [`mvi.md`]({{ site.baseurl }}/specs/mvi#écran-drapeaux-accueil) sera réellement implémenté (avec `FlagRepository` + intents `Refresh` / `RemoveFlag` / `Undo` + effects de navigation), un module `:feature:flags` sera créé en miroir des autres features (`:feature:forum`, `:feature:topic`, …) pour respecter la frontière "features → `:core:domain` + `:core:ui` only" formalisée plus haut. Cette exception est la même que celle qui s'appliquera transitoirement à tout écran tant que sa logique propre tient en quelques composables stateless.
 
 ---
 
@@ -168,6 +172,8 @@ Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le
 ### `:core:domain` — interfaces
 
 Les interfaces de repositories vivent dans le module domaine. Aucune dépendance framework.
+
+> **Note Phase 1** : ces interfaces sont le **contrat cible**. Le slice topic fixe utilise pour l'instant `TopicFixtureRepository` (fixtures HTML capturées), pas encore `TopicRepository` au-dessus de réseau + cache. Les interfaces ci-dessous arrivent feature par feature, avec leur implémentation `:core:data`.
 
 ```kotlin
 // Dans :core:domain — le contrat
@@ -208,15 +214,17 @@ class HfrClient @Inject constructor(
 
 Le parser transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine. Isolé de toute logique réseau et UI.
 
+> **Statut Phase 1** : seule `parseTopicPage` est livrée (cf. `core/parser/.../HfrParser.kt`). `PostContentParser` et `TopicPageParser` existent comme classes internes du module. Les autres méthodes ci-dessous arrivent feature par feature : `parseFlags` quand `FlagsViewModel` réel arrive (Phase 1 fin), `parseEditPage` Phase 2, `parseMessageList` Phase 3, `parsePostContentFromBbcode` Phase 2 (parser BBCode pour preview éditeur).
+
 ```kotlin
 class HfrParser @Inject constructor() {
-    fun parseTopicPage(html: String): Topic
-    fun parsePostContentFromHtml(html: String): PostContent
+    fun parseTopicPage(html: String): Topic                 // Phase 1 — livrée
+    fun parsePostContentFromHtml(html: String): PostContent // Phase 1 — livrée (interne au module)
     fun parsePostContentFromBbcode(bbcode: String): PostContent // Phase 2 éditeur
-    fun parseFlags(html: String): List<FlaggedTopic>
-    fun parseCategories(html: String): List<Category>
-    fun parseEditPage(html: String): EditInfo
-    fun parseMessageList(html: String): List<PrivateMessage>
+    fun parseFlags(html: String): List<FlaggedTopic>        // Phase 1 fin
+    fun parseCategories(html: String): List<Category>       // Phase 1 fin
+    fun parseEditPage(html: String): EditInfo               // Phase 2
+    fun parseMessageList(html: String): List<PrivateMessage> // Phase 3
     // ...
 }
 ```
@@ -390,7 +398,7 @@ data class SessionCookies(
 
 ### Session expirée
 
-Un `Interceptor` OkHttp détecte la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Il émet un événement `SessionExpired`. Le `NavGraph` redirige vers l'écran de login — l'utilisateur ré-entre son mot de passe (Option A, pas de re-login transparent : le password n'est pas stocké).
+Un `Interceptor` OkHttp détecte la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Il émet un événement `SessionExpired`. `RedfaceApp` réinitialise alors le back stack courant sur la route `Auth` — l'utilisateur ré-entre son mot de passe (Option A, pas de re-login transparent : le password n'est pas stocké).
 
 ### HFR indisponible
 
@@ -415,7 +423,7 @@ Choix Konsist plutôt que ArchUnit :
 - ArchUnit lit le bytecode (post-`javac`/`kotlinc`) et perd la sémantique Kotlin.
 - Konsist est Kotlin-first, intègre plus simplement avec la stack Redface 2.
 
-Règles prévues dans `build-logic/src/main/kotlin/redface/Architecture.kt` (exemples) :
+Règles implémentées dans `app/src/test/kotlin/fr/forumhfr/redface2/ArchitectureKonsistTest.kt` (la surface réelle est plus stricte que les exemples ci-dessous, qui restent illustratifs des invariants visés) :
 
 ```kotlin
 class ArchitectureTest {
@@ -437,6 +445,9 @@ class ArchitectureTest {
             }
     }
 
+    // Activée Phase 1+ avec :core:network — cf. contributing.md § Konsist.
+    // Tant qu'aucun code prefetch n'existe, le test n'a pas de surface à scanner
+    // et ferait échouer Konsist sur scope vide.
     @Test fun `prefetch utilise AnonymousClient`() {
         Konsist.scopeFromProject()
             .functions()

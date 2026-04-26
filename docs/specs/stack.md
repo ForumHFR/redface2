@@ -1,7 +1,7 @@
 ---
 title: Stack technique
 parent: Spécifications
-nav_order: 1
+nav_order: 2
 permalink: /specs/stack
 ---
 
@@ -21,7 +21,7 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 | UI | **Jetpack Compose** (via compose-bom) | XML layouts | Direction officielle Google, déclaratif, plus maintenable |
 | Design system | **Material 3** + **Material 3 Adaptive 1.2+** | Material 2 | Standard 2026, dynamic color, canonical layouts (list-detail, supporting pane). Décisions design détaillées ci-dessous. |
 | Architecture | **MVI** (MVVM+UDF) | MVVM classique | Flux unidirectionnel, état prévisible, idéal pour un forum reader |
-| Navigation | **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026) | Circuit, Decompose, Navigation 2.x | Compose-first : back stack en state (`NavBackStack<NavKey>`), scenes calculées via `rememberSceneState`, Shared Elements entre scenes, intégration M3 Adaptive directe (list-detail, supporting pane). Cf. [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3). |
+| Navigation | **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026) | Circuit, Decompose, Navigation 2.x | Compose-first : back stack en state (`NavBackStack<NavKey>`), rendu single-pane via `NavDisplay(backStack, onBack, entryDecorators, entryProvider { entry<…> })`, multi-pane via `ListDetailPaneScaffold` (M3 Adaptive). Cf. [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3). |
 | DI | **Hilt (KSP)** | Koin | Erreurs à la compilation, intégration Jetpack, standard contributeurs |
 | HTTP | **OkHttp 5** (5.3+) | Retrofit, Ktor | Pas d'API REST à mapper, scraping HTML direct + cookies. Stable depuis 07/2025 (`callTimeout` via `kotlin.time.Duration`, `mockwebserver3`). |
 | Parsing HTML | **Jsoup** | Regex, custom parser | Standard JVM, CSS selectors, battle-tested |
@@ -109,7 +109,7 @@ Depuis Material 3 Adaptive 1.0 stable (oct. 2024, actuellement 1.2.0), Google ex
 
 | API | Usage dans Redface 2 |
 |---|---|
-| `NavigationSuiteScaffold` (artifact `material3-adaptive-navigation-suite`) | Remplace conditionnellement `NavigationBar` (Compact) / `NavigationRail` (Medium) / `PermanentNavigationDrawer` (Expanded) en fonction de `WindowSizeClass`. Utilisé dans `MainActivity`. |
+| `NavigationSuiteScaffold` (artifact `material3-adaptive-navigation-suite`) | Remplace conditionnellement `NavigationBar` (Compact) / `NavigationRail` (Medium) / `PermanentNavigationDrawer` (Expanded) en fonction de `WindowSizeClass`. Utilisé dans `MainActivity`. **Caveat** : ce scaffold ne consomme pas les status bars en mode edge-to-edge — les écrans contenus doivent ajouter `Modifier.statusBarsPadding()` (ou un `Scaffold` interne qui consomme les insets) sinon le contenu passe sous la barre de statut. |
 | `ListDetailPaneScaffold` | Écran Drapeaux → Topic : liste à gauche + détail à droite en Medium/Expanded, stack classique en Compact. |
 | `SupportingPaneScaffold` | Éditeur Compact : contenu à gauche + preview BBCode à droite sur tablette. |
 | `WindowSizeClass` | Breakpoints standards : Compact (< 600dp), Medium (600–840dp), Expanded (≥ 840dp). |
@@ -141,19 +141,20 @@ Quatre options évaluées :
 | Type safety | `@Serializable` + `NavKey` | `@Serializable` + `toRoute()` (2.8+) | Oui | Oui |
 | Back stack | Explicite `NavBackStack<NavKey>` en `State` | Opaque (framework-managed) | Bon | Excellent |
 | M3 Adaptive | Intégration native (`ListDetailPaneScaffold` proprement binding) | Bricolage | Manuel | Manuel |
-| Shared Elements | Oui (`SharedTransitionScope` entre scenes) | Limité | Manuel | Manuel |
+| Shared Elements | Compatible avec `SharedTransitionScope` côté Compose ; pattern non encore exploité dans Redface 2 (Phase 5+) | Limité | Manuel | Manuel |
 | Stabilité | **1.1.0 stable** (08/04/2026) | Mature | Stable | Stable |
 | Courbe | Modérée, API plus simple qu'avant | Modérée | Raide | Raide |
 | KMP | Runtime KMP ; UI Android-first | Non | Oui | Oui |
 
 **Compose Navigation 3 gagne** pour Redface 2 :
 - **Compose-first** : cohérent avec 100% Compose ; le back stack est du state observable normal, on peut le persist/restaurer trivialement
-- **M3 Adaptive** : `ListDetailPaneScaffold` (essentiel pour drapeaux/topic en tablette) se branche directement sur des sous-back-stacks
-- **Shared Elements** : transitions topic list → topic view propres (Material Motion patterns)
-- **Type safety** : les routes implémentent `NavKey` et sont `@Serializable`, donc le back stack reste typé et sérialisable
-- **Deep linking** : HFR ayant des fragments URI non supportés (`#t{numreponse}`) de toute façon, on parse la `Uri` entrante manuellement et on ajoute une route typée au back stack — plus simple qu'avant avec Nav 2.x
+- **API stable simple** : `NavDisplay(backStack, onBack, entryDecorators, entryProvider { entry<…> })` couvre déjà single-pane + predictive back + lifecycle, sans DSL graph à apprendre
+- **Plusieurs back stacks indépendants** : un par onglet de bottom nav (`rememberNavBackStack`), commutés via `NavigationSuiteScaffold` ; chaque onglet conserve son historique de navigation
+- **M3 Adaptive** : `ListDetailPaneScaffold` (essentiel pour drapeaux/topic en tablette) se branche directement sur le même back stack que single-pane
+- **Type safety** : les routes implémentent un sealed interface `RedfaceNavKey : NavKey` `@Serializable`, donc le back stack reste typé et sérialisable
+- **Deep linking** : HFR ayant des fragments URI non supportés (`#t{numreponse}`) de toute façon, on parse la `Uri` entrante dans `RedfaceApp`, on identifie l'onglet cible, et on **réinitialise** le back stack de cet onglet via `resetStack(root, route)` pour que le retour ramène à la racine de l'onglet — voir `navigation.md` pour le code exact
 
-Voir `docs/specs/navigation.md` pour les exemples concrets (`NavDisplay`, `SceneStrategy`, deep linking, predictive back) et [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3) pour la décision.
+Voir `docs/specs/navigation.md` pour les exemples concrets (`NavDisplay`, `entryProvider`, deep linking + `resetStack`, predictive back) et [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3) pour la décision.
 
 ### Hilt plutôt que Koin
 

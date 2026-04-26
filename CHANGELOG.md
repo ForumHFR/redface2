@@ -2,22 +2,33 @@
 
 Toutes les évolutions notables des specs Redface 2.
 
-Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les versions sont celles des specs, pas de l'app (pas encore de code).
+Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les versions sont celles des specs (`docs/_config.yml` `footer_content`). À partir de v0.6.0, elles incluent les changements code/spec couplés : depuis Phase 1, les specs reflètent l'état réel du repo et sont bumpées en lockstep avec les PRs structurantes (cf. `/spec-reality` dans `AGENTS.md`).
 
 ---
 
 ## [Unreleased]
 
+(rien pour le moment)
+
+---
+
+## v0.6.0 — 2026-04-25
+
+Réalignement des specs sur la réalité du code après les PR [#78](https://github.com/ForumHFR/redface2/pull/78) (parser HTML topic + AST `PostContent`) et [#80](https://github.com/ForumHFR/redface2/pull/80) (`PostRenderer` Compose, retrait du fragment HTML brut de `Post.content`, sortie de Jsoup hors `:core:parser`). Phase courante : **Phase 1 — Core lecture**.
+
 ### Added
-- `docs/adr/011-postcontent-ast.md` formalise `PostContent` comme AST sémantique commune pour le rendu des posts, alimentée par le HTML HFR lu et le BBCode éditeur.
+- **Slice topic fixe** livré : `TopicScreen` rend une fixture HFR réelle (`topic_khakha_page_146.html`) via le pipeline complet `:core:parser` → AST `PostContent` → `:core:ui` `PostRenderer`, alimenté par `TopicFixtureRepository` en attendant le repository réseau (PR [#78](https://github.com/ForumHFR/redface2/pull/78) + [#80](https://github.com/ForumHFR/redface2/pull/80)).
+- `docs/adr/011-postcontent-ast.md` formalise `PostContent` comme AST sémantique commune pour le rendu des posts, alimentée par le HTML HFR lu et le BBCode éditeur (livré PR [#78](https://github.com/ForumHFR/redface2/pull/78) / [#80](https://github.com/ForumHFR/redface2/pull/80)).
 - `LICENSE` ajouté à la racine avec le texte officiel **GNU GPL v3**, et `docs/adr/010-licence-client-android.md` formalise le choix de licence du client Android.
 - `docs/guides/contributing.md` documente désormais le workflow **MCP documentaire optionnel** : Context7 recommandé, Docfork en fallback, lien vers les setups officiels et cas validés sur AGP 9 / built-in Kotlin et Navigation 3.
 - bootstrap **Dev env Docker + Dev Container** : `Dockerfile`, `scripts/docker-dev.sh` et `.devcontainer/devcontainer.json` standardisent l'env Android sur `ghcr.io/cirruslabs/android-sdk:36`.
 - CI minimale Phase 0 : workflow GitHub Actions (`detektAll`, `lintDebug`, `testDebugUnitTest`, `:app:assembleDebug`) + `Dependabot` pour `gradle` et `github-actions`.
 - stack de tests Phase 0 effectivement bootstrapée dans le repo : **MockK**, **Robolectric** et **Turbine** rejoignent `JUnit 4` et `Konsist` dans le version catalog.
 - workflow PR préparé avec `.github/pull_request_template.md` et `.github/CODEOWNERS`.
+- `docs/specs/navigation.md` documente le pattern de deep link `cat=prive` pour les MPs (Phase 3).
 
 ### Changed
+- `AGENTS.md` et `docs/guides/contributing.md` reflètent désormais la **Phase 1 — Core lecture** (Phase 0 bootstrap livrée). Setup pointe sur `./gradlew :app:assembleDebug` au lieu de "pas de build applicatif".
 - `AGENTS.md` ne prescrit plus une identité git personnelle (`xat`, `xat@azora.fr`) et les lignes d'attribution IA utilisent désormais `@<demandeur>` pour mieux refléter le caractère multi-contributeur du repo.
 - La licence du client Android Redface 2 passe de la mention implicite `Apache 2.0` à **`GPL-3.0-only`** dans le repo (`AGENTS.md`, `README.md`, `docs/guides/contributing.md`).
 - le bootstrap Hilt Phase 0 s'aligne sur **Hilt 2.59.2** dans le version catalog, et `docs/specs/stack.md` reflète désormais cette référence d'implémentation.
@@ -27,6 +38,17 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 - `Dependabot` n'ouvre plus une seule PR Gradle fourre-tout : les mises à jour sont désormais regroupées par lanes cohérentes (`build-toolchain`, `androidx-ui-navigation`, `network-imaging`, `test-quality`, etc.) pour faciliter la review.
 - les checks Konsist Phase 0 n'acceptent plus des scopes vides silencieux et assertent désormais explicitement un scope non vide avant d'appliquer les règles.
 - les specs `models`, `architecture`, `mvi`, `navigation`, `stack`, `methodology`, `roadmap`, `protocol-hfr` et `contributing` s'alignent sur le contrat `PostContent` au lieu de traiter `Post.content` comme une chaîne HTML ou BBCode brute.
+- `docs/specs/architecture.md` aligne le tableau `:core:ui` sur la réalité (`theme/` + `post/`, autres sous-packages introduits feature par feature) et signale que plusieurs modules core/feature sont déclarés avec un squelette Gradle vide en attendant leur cycle d'implémentation.
+- `docs/specs/navigation.md` réécrit l'exemple Nav 3 sur l'API stable réelle (`NavDisplay(backStack, onBack, entryDecorators, entryProvider)`, `entry<…>`), aligne sur `RedfaceNavKey` sealed, ajoute `ForumRoute` / `SearchRoute` et explicite le couple `TopicRequest` / `TopicScreen.onOpenPage` (alignement spec → code existant).
+- `docs/specs/mvi.md` aligne `EditorMode` sur la réalité (3 valeurs : `Reply`, `Edit`, `EditFirstPost`) et clarifie que la création de topic est un écran distinct, pas un mode de l'éditeur.
+- `docs/specs/stack.md` documente le caveat insets de `NavigationSuiteScaffold` (status bars non consommées par défaut).
+- `docs/specs/models.md` aligne le diagramme mermaid `PrivateMessage` sur la `data class` (ajout `page` + `totalPages`), passe `Post.postIndex` à `Int?` (le parser n'a pas toujours le contexte page/postsPerPage) et déplace `UserProfile` à la Phase 2 (popup profil) avec un renvoi vers l'extension Phase 4.
+- `docs/adr/011-postcontent-ast.md` reformule la dette `Post.content: String` ([#65](https://github.com/ForumHFR/redface2/issues/65)) comme **résorbée** par PR [#80](https://github.com/ForumHFR/redface2/pull/80).
+- `docs/specs/methodology.md` passe en `nav_order: 0` pour apparaître en premier dans le menu Spécifications (méthode foundationale).
+
+### Fixed
+- Spec audit post-#78/#80 ([#84](https://github.com/ForumHFR/redface2/issues/84)) : 21 écarts spec/code détectés et corrigés sans toucher au code.
+- 4e passe `/spec-check` + `/spec-audit` + `/spec-reality` (PR #85) : `AdaptiveNavHost` réécrit avec les vraies signatures (`TopicRequest`, `FlagsScreen.onOpenUnreadTopic`, `EditorScreen(mode = String, cat, post)`), localisation de `FlagsScreen` dans `:app` documentée explicitement (pas de `:feature:flags` tant qu'il reste un placeholder), `TopicUiState` Phase 1 documenté comme slice `(request, mode, availablePages)` distinct du contrat cible Phase 2, `HfrParser` surface réelle (Phase 1 = `parseTopicPage` only) annotée par phase, Konsist emplacement réel (`app/src/test/.../ArchitectureKonsistTest.kt`) corrigé, test prefetch flagué Phase 1+ avec `:core:network`, `mvi.md` ajoute `src/test/kotlin/` + pointeur vers `RedfaceNavigation.kt` pour la NavKey, `extensions.md` clarifie le phasage Phase 1-2 (natif) vs Phase 4 (modules Gradle), `Topic.isFirstPostOwner` figé à `false` Phase 1 noté, `Compose Testing` claim aligné sur "câblé pas consommé", `nav_order` réordonné en séquence pédagogique sans trou (Méthodologie → Scope → Stack → Architecture → Navigation → Models → MVI → Extensions → Protocol → Roadmap), mermaid Navigation Graph annoté pour distinguer flow utilisateur des routes typées, élision `// …` remplacée par un pointeur vers le fichier source.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: "Modèles de données"
 parent: Spécifications
-nav_order: 4
+nav_order: 5
 permalink: /specs/models
 mermaid: true
 ---
@@ -19,7 +19,7 @@ Structures du domaine métier.
 Certains modèles référencés dans `navigation.md` et `extensions.md` sont volontairement laissés à définir au moment d'implémenter leurs écrans, pour éviter la dette de spec pré-code :
 
 - **`TopicSummary`** — une ligne dans une liste de topics (titre, auteur, dernière date, nombre non-lus). ≠ `Topic` qui contient tous les posts d'une page. Nécessaire Phase 1 pour le Forum et la liste des topics d'une sous-catégorie.
-- **`UserProfile`** — données du popup profil rapide (avatar, date inscription, nombre posts, localisation). Nécessaire Phase 1 pour la feature "Infos profil rapides".
+- **`UserProfile`** — données du popup profil rapide (avatar, date inscription, nombre posts, localisation). Nécessaire Phase 2 pour la feature "Voir un profil utilisateur" (listée dans la section [Lecture du scope]({{ site.baseurl }}/specs/scope#lecture)) et son extension Phase 4 ["Infos profil rapides"]({{ site.baseurl }}/specs/extensions#infos-profil-rapides).
 - **`UserStats`** — statistiques détaillées utilisateur (posts par cat, activité, topics créés). Nécessaire Phase 4 pour la feature "Stats utilisateur".
 
 Ces modèles émergeront du premier prototype de chaque écran. Pas de spec préventive à faire maintenant.
@@ -64,7 +64,7 @@ classDiagram
         +Boolean isEditable
         +Boolean isOwnPost
         +List~String~ quotedAuthors
-        +Int postIndex
+        +Int? postIndex
     }
 
     class PostContent {
@@ -92,6 +92,8 @@ classDiagram
         +Boolean isRead
         +Boolean isMultiMP
         +List~PMMessage~ messages
+        +Int page
+        +Int totalPages
     }
 
     class PMMessage {
@@ -149,7 +151,7 @@ data class Topic(
     val posts: List<Post>,
     val page: Int,
     val totalPages: Int,
-    val isFirstPostOwner: Boolean,
+    val isFirstPostOwner: Boolean,   // Phase 1 : figé à false par TopicPageParser tant que parseEditPage n'est pas livrée (Phase 2). Renseigné côté serveur via la page d'édition du FP.
     val poll: Poll?,
 )
 
@@ -162,7 +164,7 @@ data class Post(
     val isEditable: Boolean,             // calculé client-side : post.author == currentUser && !isLocked
     val isOwnPost: Boolean,              // calculé client-side : post.author == currentUser
     val quotedAuthors: List<String>,     // dérivé de PostContent pour recherche, filtres et décorateurs
-    val postIndex: Int,                  // (page-1) * postsPerPage + position — postsPerPage vient des préférences HFR de l'utilisateur, PAS une constante (voir UserSettings)
+    val postIndex: Int?,                 // (page-1) * postsPerPage + position — null quand le parser n'a pas le contexte page/postsPerPage (preview, fixtures isolées). postsPerPage vient des préférences HFR de l'utilisateur, PAS une constante (voir UserSettings)
 )
 
 data class PostContent(

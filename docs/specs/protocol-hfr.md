@@ -1,7 +1,7 @@
 ---
 title: Protocole HFR
 parent: Spécifications
-nav_order: 9
+nav_order: 8
 permalink: /specs/protocol-hfr
 ---
 
@@ -244,7 +244,7 @@ Un `Interceptor` OkHttp :
 
 1. Détecte HTTP 302 vers `/login.php` ou absence du pseudo dans la réponse.
 2. Émet un événement `SessionExpired`.
-3. Le `NavGraph` redirige vers l'écran de login et efface le cache Room.
+3. `RedfaceApp` (`NavDisplay`) réinitialise le back stack courant sur la route `Auth` et efface le cache Room.
 
 L'utilisateur ré-entre son mot de passe (Option A : pas de re-login transparent, le password n'est pas stocké — voir [architecture.md#stockage-sécurisé-des-credentials](architecture.md#stockage-sécurisé-des-credentials)).
 

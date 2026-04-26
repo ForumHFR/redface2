@@ -17,7 +17,7 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 
 ## Projet
 
-- Phase actuelle : **specifications** (pas encore de code)
+- Phase actuelle : **Phase 1 — Core lecture** ([roadmap](docs/specs/roadmap.md)). Phase 0 bootstrap livrée (Gradle multi-modules, CI, thème M3, navigation, Hilt). Slice topic fixe + AST `PostContent` + `PostRenderer` Compose en cours d'intégration.
 - Licence : GPL-3.0-only
 - Documentation : GitHub Pages via `docs/` (Jekyll + just-the-docs)
 - Langue : code en anglais, issues et docs en francais
@@ -25,7 +25,9 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 ## Setup
 
 ```bash
-# Pas de build applicatif — phase spec uniquement
+# Build applicatif local — image Docker pin (cf. .devcontainer/devcontainer.json)
+./gradlew :app:assembleDebug
+
 # Preview Jekyll (necessite Ruby + Bundler)
 cd docs && bundle install && bundle exec jekyll serve
 ```
@@ -46,7 +48,7 @@ docs/
     protocol-hfr.md  # Contrats externes, endpoints, edge cases
     roadmap.md       # Phases de developpement
     extensions.md    # Extensions communautaires et architecture d'extensions
-    adr/             # Architecture Decision Records
+  adr/               # Architecture Decision Records (depuis v0.5.1)
   guides/            # Pages d'accompagnement
     contributing.md  # Conventions, tests, accessibilite, localisation
     rationale.md     # Pourquoi la reecriture
@@ -60,10 +62,14 @@ Kotlin, Jetpack Compose, MVI, Compose Navigation 3, Hilt (KSP), OkHttp 5, Jsoup,
 
 ## Tests
 
-Pas de tests encore (phase spec). Strategie definie dans `docs/guides/contributing.md` :
-- JUnit 4 + MockK + Robolectric + Turbine
-- Couverture **hybride differenciee** : 100% sur les transformers du parser HFR (fixtures dictent l'exhaustivite), guidee par risque ailleurs (ViewModels, mappers, repositories). **Pas d'objectif 100% global.** Voir `docs/specs/methodology.md`.
-- Fixtures HTML capturees depuis HFR reel, jamais fabriquees
+Tests bootstrappes en Phase 0 et consommes des Phase 1 :
+- **Konsist** (`app/src/test/.../ArchitectureKonsistTest.kt`) — frontières architecture, scope non vide.
+- **JUnit 4** + **Turbine** sur le parser (`core/parser/src/test/.../PostContentParserTest.kt`, `TopicPageParserTest.kt`) et les ViewModel slice (`feature/topic/src/test/.../TopicViewModelTest.kt`).
+- **MockK** et **Robolectric** câblés dans `gradle/libs.versions.toml` mais pas encore consommés (arrivent avec les ViewModels et écrans réels Phase 1+).
+
+Strategie complete (TDD/spec/prototype par sous-chantier, fixtures, couverture differenciee) definie dans `docs/specs/methodology.md` et `docs/guides/contributing.md` :
+- Couverture **hybride differenciee** : 100% sur les transformers du parser HFR (fixtures dictent l'exhaustivite), guidee par risque ailleurs (ViewModels, mappers, repositories). **Pas d'objectif 100% global.**
+- Fixtures HTML capturees depuis HFR reel via `hfr-mcp`, jamais fabriquees a la main.
 
 ## Conventions
 
@@ -154,7 +160,7 @@ Dans `AGENTS.md`, on ne garde que les conséquences opérationnelles pour les ag
 - **Vérification API actuelle** : quand tu écris un exemple de code ou du code de prod avec une API dont tu n'es pas sûr à 100% (existe-t-elle ? est-elle dépréciée ?), vérifier via la documentation officielle actuelle. MCP recommandés : Context7 ou Docfork (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)). **Toujours préciser "stable release"** dans la requête — Context7 indexe aussi les pre-release/snapshots (ex: Kotlin 2.4-SNAPSHOT alors que la stable courante est 2.3.x). Cette vérification prend 10 secondes et évite les pièges (SwipeRefresh, EncryptedSharedPreferences, APIs inexistantes).
 - **Langue** : docs en francais avec accents. Code, noms de variables, noms de classes en anglais.
 - **`numreponse`** : est unique par **categorie**, pas globalement sur le forum. Le mentionner quand pertinent.
-- **Deep links** : Compose Navigation 3 (comme 2.x) ne gere pas les fragments URI (`#t{id}`) nativement — parser l'URI manuellement dans `MainActivity` et pousser la route typee dans le back stack.
+- **Deep links** : Compose Navigation 3 (comme 2.x) ne gere pas les fragments URI (`#t{id}`) nativement — parser l'URI dans `RedfaceApp` (et non `MainActivity`, qui ne fait que passer l'`Intent`), identifier l'onglet cible, puis **reinitialiser** le back stack de cet onglet via `resetStack(root, route)` pour que le bouton retour ramene a la racine de l'onglet et non a un etat anterieur arbitraire. Voir `docs/specs/navigation.md` § Cas particulier : lien vers un post specifique.
 - **Prefetch** : utiliser des requetes non authentifiees pour eviter de marquer les drapeaux comme lus.
 - **OkHttp** : version 5 (5.3+) verrouillee. Stable depuis 07/2025.
 - **Deprecations** : ne jamais utiliser de composants deprecies (Accompanist SwipeRefresh, EncryptedSharedPreferences, etc.) dans les exemples. Utiliser les alternatives 2026 : PullToRefreshBox, DataStore + Keystore (Option A credentials, sans Tink), Compose Navigation 3.
