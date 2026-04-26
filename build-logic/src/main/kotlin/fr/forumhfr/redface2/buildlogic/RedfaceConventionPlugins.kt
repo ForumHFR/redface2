@@ -56,6 +56,52 @@ class RedfaceAndroidApplicationConventionPlugin : Plugin<Project> {
                 abortOnError = true
             }
         }
+
+        configureReleaseBundleStamping()
+    }
+}
+
+/**
+ * After every successful `:app:bundleRelease`, copy the produced `app-release.aab` to a
+ * stamped sibling `redface2-v<versionCode>-<YYYYMMDD>-<sha>.aab`. The original output stays
+ * in place so downstream tooling that hard-codes `app-release.aab` (Play Console upload
+ * scripts, signing init scripts, tests) keeps working — the stamped copy is purely for
+ * archival so a contributor can keep several AABs side by side without overwriting.
+ *
+ * versionCode is resolved in [Project.afterEvaluate] (so any local init script that bumps
+ * defaultConfig.versionCode wins) and captured as a plain Int to keep the action body
+ * configuration-cache friendly — wrapping it in a Provider that touches the
+ * ApplicationExtension would pin the project state into the cached task action.
+ */
+private fun Project.configureReleaseBundleStamping() {
+    val outputDir = layout.buildDirectory.dir("outputs/bundle/release")
+    val gitShaProvider = providers.exec {
+        commandLine("git", "-C", rootDir.absolutePath, "rev-parse", "--short", "HEAD")
+        isIgnoreExitValue = true
+    }.standardOutput.asText
+
+    val stamp = tasks.register("stampReleaseBundle") {
+        dependsOn("bundleRelease")
+    }
+    tasks.matching { it.name == "bundleRelease" }.configureEach { finalizedBy(stamp) }
+
+    afterEvaluate {
+        val versionCode = extensions.getByType<ApplicationExtension>().defaultConfig.versionCode ?: 0
+        stamp.configure {
+            doLast {
+                val src = outputDir.get().file("app-release.aab").asFile
+                if (!src.exists()) {
+                    logger.lifecycle("[stamp] no app-release.aab found, skipping")
+                    return@doLast
+                }
+                val sha = gitShaProvider.get().trim().ifEmpty { "nogit" }
+                val date = java.time.LocalDate.now()
+                    .format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+                val dst = src.parentFile.resolve("redface2-v$versionCode-$date-$sha.aab")
+                src.copyTo(dst, overwrite = true)
+                logger.lifecycle("[stamp] ${src.name} -> ${dst.name}")
+            }
+        }
     }
 }
 

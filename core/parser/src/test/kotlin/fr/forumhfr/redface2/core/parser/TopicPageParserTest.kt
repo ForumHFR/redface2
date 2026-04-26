@@ -66,7 +66,26 @@ class TopicPageParserTest {
         assertEquals(40, topic.posts.size)
         assertEquals(16625217, topic.posts.first().numreponse)
         assertEquals("Mora1651", topic.posts.first().author)
-        assertTrue(topic.posts.any { post -> post.content.contains(":o") || post.content.contains("[:aloy]") })
+        // The opening page contains both a builtin :o smiley and the [:aloy] perso variant —
+        // checking the AST guarantees they reach the renderer with their canonical token.
+        val smileyTokens = topic.posts
+            .flatMap { post ->
+                post.content.blocks
+                    .filterIsInstance<fr.forumhfr.redface2.core.model.PostBlock.Paragraph>()
+                    .flatMap { it.inlines }
+                    .filterIsInstance<fr.forumhfr.redface2.core.model.PostInline.Smiley>()
+            }
+            .map { smiley ->
+                when (val kind = smiley.kind) {
+                    is fr.forumhfr.redface2.core.model.SmileyKind.Builtin -> kind.code
+                    is fr.forumhfr.redface2.core.model.SmileyKind.Perso -> "[:${kind.name}]"
+                }
+            }
+            .toSet()
+        assertTrue(
+            "expected :o or [:aloy] in smiley tokens, got=$smileyTokens",
+            ":o" in smileyTokens || "[:aloy]" in smileyTokens,
+        )
     }
 
     @Test
