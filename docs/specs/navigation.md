@@ -370,7 +370,7 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 > - le **pattern de composition** (`NavDisplay` + `ListDetailPaneScaffold` sur le même back stack, switch `WindowSizeClass`) est **illustratif** — c'est ce qui sera implémenté Phase 5+ ;
 > - les **signatures de screens** appelées (`FlagsScreen(onOpenUnreadTopic, onOpenTrackedCategory)`, `TopicScreen(request: TopicRequest, onReply, onOpenPage)`, `EditorScreen(mode: String, cat, post)`) sont les signatures **réelles Phase 1** livrées dans le repo aujourd'hui (cf. `feature/topic/.../TopicScreen.kt`, `app/.../FlagsScreen.kt`, `feature/editor/.../EditorScreen.kt`).
 >
-> Le hardcoding de `FixedTopicFixtures` dans la lambda `onOpenUnreadTopic` reflète la **réalité Phase 1** : `FlagsScreen` est encore un placeholder mock sans modèle `FlaggedTopic`, donc le call-site fournit une fixture jusqu'à ce que la liste réelle des drapeaux arrive. Quand `FlagsScreen` exposera `(topic: FlaggedTopic) -> Unit`, la lambda recevra le topic concerné — voir la note sous le snippet.
+> Le hardcoding `cat = DEMO_TOPIC_CAT, post = DEMO_TOPIC_POST` dans la lambda `onOpenUnreadTopic` reflète la **réalité Phase 1A** : `FlagsScreen` est encore un placeholder mock sans modèle `FlaggedTopic`, donc le call-site pointe sur un topic démo le temps que la liste réelle des drapeaux arrive (Phase 1B). Quand `FlagsScreen` exposera `(topic: FlaggedTopic) -> Unit`, la lambda recevra le topic concerné — voir la note sous le snippet.
 
 ```kotlin
 @Composable
@@ -385,8 +385,8 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
                     onOpenUnreadTopic = {
                         backStack.add(
                             TopicRoute(
-                                cat = FixedTopicFixtures.cat,
-                                post = FixedTopicFixtures.post,
+                                cat = DEMO_TOPIC_CAT,
+                                post = DEMO_TOPIC_POST,
                                 page = 1,
                             ),
                         )
@@ -428,7 +428,7 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
 }
 ```
 
-Quand `FlagsScreen` quittera le slice fixe (PR #80) pour exposer un vrai modèle `FlaggedTopic` (cf. [models.md § À définir avec les écrans]({{ site.baseurl }}/specs/models#à-définir-avec-les-écrans)), la lambda passée à `onOpenUnreadTopic` recevra le topic concerné et `backStack.add(TopicRoute(topic.cat, topic.postId, topic.lastReadPage))` deviendra trivial. Pour l'instant, la fixture `FixedTopicFixtures` est utilisée comme cible, en cohérence avec `RedfaceNavigation.kt`.
+Quand `FlagsScreen` quittera le placeholder mock (Phase 1B) pour exposer un vrai modèle `FlaggedTopic` (cf. [models.md § À définir avec les écrans]({{ site.baseurl }}/specs/models#à-définir-avec-les-écrans)), la lambda passée à `onOpenUnreadTopic` recevra le topic concerné et `backStack.add(TopicRoute(topic.cat, topic.postId, topic.lastReadPage))` deviendra trivial. Pour l'instant, les constantes privées `DEMO_TOPIC_CAT` / `DEMO_TOPIC_POST` (définies en haut de `RedfaceNavigation.kt`) servent de cible — chaque call-site disparaît au fur et à mesure que les Phase 1B/1C livrent les modèles `FlaggedTopic`, `ForumTopic`, `SearchResult`, `MpThread`.
 
 ---
 

@@ -213,7 +213,7 @@ La mise en page concrète (`Column` vs `Scaffold`, composants `FlagsToolbar`, `F
 
 ## Écran Topic (lecture)
 
-> **Statut Phase 1 — slice topic fixe** : le `TopicUiState` réellement exposé par `feature/topic/.../TopicUiState.kt` est aujourd'hui `(request: TopicRequest, mode: Mode, availablePages: List<Int>)` avec `Mode = Loading | Loaded(topic) | Error(message) | Placeholder`, et l'unique intent est `Retry`. Le contrat ci-dessous est la **cible Phase 1 fin / Phase 2** quand pagination, edit FP, flag et image viewer arriveront. La forme actuelle vient du fait que le slice fixe charge une fixture HFR via `TopicFixtureRepository` et n'a pas encore de pagination réseau ni d'actions sur posts. Cohérent avec la méthodologie hybride (squelette illustratif, pas figé).
+> **Statut Phase 1A** : le `TopicUiState` réellement exposé par `feature/topic/.../TopicUiState.kt` est aujourd'hui `(request: TopicRequest, mode: Mode, availablePages: List<Int>)` avec `Mode = Loading | Loaded(topic) | Error(message)`, et l'unique intent est `Retry`. Le ViewModel collecte `TopicRepository.observeTopicPage(...)` (cache-aside : émet le cache puis le fresh) et calcule `availablePages = (1..topic.totalPages).toList()` à chaque émission. Le contrat ci-dessous est la **cible Phase 1 fin / Phase 2** quand pull-to-refresh, edit FP, flag et image viewer arriveront. La forme actuelle reflète qu'il n'y a pas encore d'actions sur posts ni de pagination explicite — cohérent avec la méthodologie hybride (squelette illustratif, pas figé).
 
 ```kotlin
 data class TopicUiState(
