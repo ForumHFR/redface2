@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
@@ -84,7 +86,10 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
             ),
         )
     }
-    val annotated = remember(inlines, linkStyles) { buildInlineText(inlines, linkStyles) }
+    val imageAlt = stringResource(R.string.post_inline_image_alt)
+    val annotated = remember(inlines, linkStyles, imageAlt) {
+        buildInlineText(inlines, linkStyles, imageAlt)
+    }
     val inlineContent = remember(inlines) { collectInlineMedia(inlines) }
     if (annotated.text.isBlank() && inlineContent.isEmpty()) {
         return
@@ -100,11 +105,7 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
 @Composable
 private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
     if (quoteDepth >= MAX_VISIBLE_QUOTE_DEPTH) {
-        Text(
-            text = "Citation imbriquée masquée",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        CollapsedQuoteBlock(block)
         return
     }
     Card(
@@ -120,7 +121,7 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
         ) {
             block.author?.let { author ->
                 Text(
-                    text = "Citation de $author",
+                    text = stringResource(R.string.post_quote_author, author),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -129,6 +130,65 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
                 blocks = block.content.blocks,
                 quoteDepth = quoteDepth + 1,
             )
+        }
+    }
+}
+
+@Composable
+private fun CollapsedQuoteBlock(block: PostBlock.Quote) {
+    // Issue #3 mandates the masked tail beyond N=3 nested quotes stays *collapsible* — the user
+    // must be able to ask for the deeper sub-tree on demand. We reset quoteDepth to 0 once
+    // revealed so the user gets another N levels before the next collapse, instead of an
+    // unbounded recursion that would defeat the depth guard entirely.
+    var revealed by rememberSaveable(block) { mutableStateOf(false) }
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ),
+        modifier = Modifier.clickable { revealed = !revealed },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (revealed) {
+                        stringResource(R.string.post_quote_collapsed_revealed)
+                    } else {
+                        stringResource(R.string.post_quote_collapsed)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = if (revealed) {
+                        stringResource(R.string.post_quote_hide)
+                    } else {
+                        stringResource(R.string.post_quote_show)
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (revealed) {
+                block.author?.let { author ->
+                    Text(
+                        text = stringResource(R.string.post_quote_author, author),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                PostBlocksRenderer(
+                    blocks = block.content.blocks,
+                    quoteDepth = 0,
+                )
+            }
         }
     }
 }
@@ -153,13 +213,17 @@ private fun SpoilerBlock(block: PostBlock.Spoiler, quoteDepth: Int) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = block.label ?: "Spoiler",
+                    text = block.label ?: stringResource(R.string.post_spoiler_default_label),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = if (revealed) "(masquer)" else "(afficher)",
+                    text = if (revealed) {
+                        stringResource(R.string.post_spoiler_hide)
+                    } else {
+                        stringResource(R.string.post_spoiler_show)
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -186,17 +250,19 @@ private fun ImageBlock(block: PostBlock.Image) {
 private fun buildInlineText(
     inlines: List<PostInline>,
     linkStyles: TextLinkStyles,
+    imageAlt: String,
 ): AnnotatedString = buildAnnotatedString {
     val media = MediaCounter()
-    appendInlines(inlines, linkStyles, media)
+    appendInlines(inlines, linkStyles, media, imageAlt)
 }
 
 private fun AnnotatedString.Builder.appendInlines(
     inlines: List<PostInline>,
     linkStyles: TextLinkStyles,
     media: MediaCounter,
+    imageAlt: String,
 ) {
-    inlines.forEach { inline -> appendInline(inline, linkStyles, media) }
+    inlines.forEach { inline -> appendInline(inline, linkStyles, media, imageAlt) }
 }
 
 @Suppress("CyclomaticComplexMethod")
@@ -204,35 +270,36 @@ private fun AnnotatedString.Builder.appendInline(
     inline: PostInline,
     linkStyles: TextLinkStyles,
     media: MediaCounter,
+    imageAlt: String,
 ) {
     when (inline) {
         is PostInline.Text -> append(inline.value)
         PostInline.LineBreak -> append('\n')
         is PostInline.Strong -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-            appendInlines(inline.children, linkStyles, media)
+            appendInlines(inline.children, linkStyles, media, imageAlt)
         }
 
         is PostInline.Emphasis -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-            appendInlines(inline.children, linkStyles, media)
+            appendInlines(inline.children, linkStyles, media, imageAlt)
         }
 
         is PostInline.Underline -> withStyle(SpanStyle(textDecoration = TextDecoration.Underline)) {
-            appendInlines(inline.children, linkStyles, media)
+            appendInlines(inline.children, linkStyles, media, imageAlt)
         }
 
         is PostInline.Strike -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
-            appendInlines(inline.children, linkStyles, media)
+            appendInlines(inline.children, linkStyles, media, imageAlt)
         }
 
         is PostInline.Color -> withStyle(SpanStyle(color = parseColor(inline.colorHex))) {
-            appendInlines(inline.children, linkStyles, media)
+            appendInlines(inline.children, linkStyles, media, imageAlt)
         }
 
         is PostInline.Link -> withLink(LinkAnnotation.Url(inline.url, linkStyles)) {
-            appendInlines(inline.children, linkStyles, media)
+            appendInlines(inline.children, linkStyles, media, imageAlt)
         }
 
-        is PostInline.InlineImage -> appendInlineContent(media.nextImage(), inline.description ?: "[image]")
+        is PostInline.InlineImage -> appendInlineContent(media.nextImage(), inline.description ?: imageAlt)
         is PostInline.Smiley -> {
             val token = inline.kind.token()
             if (inline.imageUrl == null) {

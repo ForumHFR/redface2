@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="post_quote_author">Citation de %1$s</string>
+    <string name="post_quote_collapsed">Citation imbriquée masquée</string>
+    <string name="post_quote_collapsed_revealed">Citations imbriquées</string>
+    <string name="post_quote_show">Afficher</string>
+    <string name="post_quote_hide">Masquer</string>
+    <string name="post_spoiler_default_label">Spoiler</string>
+    <string name="post_spoiler_show">(afficher)</string>
+    <string name="post_spoiler_hide">(masquer)</string>
+    <string name="post_inline_image_alt">[image]</string>
+</resources>
