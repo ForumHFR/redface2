@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -24,6 +25,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -256,10 +261,12 @@ private fun TopicPageButtons(
 
 @Composable
 private fun TopicPollCard(poll: Poll) {
+    var revealed by rememberSaveable(poll) { mutableStateOf(true) }
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
+        modifier = Modifier.clickable { revealed = !revealed },
     ) {
         Column(
             modifier = Modifier
@@ -267,36 +274,53 @@ private fun TopicPollCard(poll: Poll) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = poll.question,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            poll.options.forEach { option ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = poll.question,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = if (revealed) {
+                        stringResource(R.string.topic_poll_hide)
+                    } else {
+                        stringResource(R.string.topic_poll_show)
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (revealed) {
+                poll.options.forEach { option ->
+                    Text(
+                        text = stringResource(
+                            R.string.topic_poll_option,
+                            option.text,
+                            option.percentage,
+                            option.votes,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Text(
                     text = stringResource(
-                        R.string.topic_poll_option,
-                        option.text,
-                        option.percentage,
-                        option.votes,
+                        R.string.topic_poll_summary,
+                        poll.totalVotes,
+                        if (poll.multipleChoice) {
+                            stringResource(R.string.topic_poll_multiple_choices)
+                        } else {
+                            stringResource(R.string.topic_poll_single_choice)
+                        },
                     ),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(
-                text = stringResource(
-                    R.string.topic_poll_summary,
-                    poll.totalVotes,
-                    if (poll.multipleChoice) {
-                        stringResource(R.string.topic_poll_multiple_choices)
-                    } else {
-                        stringResource(R.string.topic_poll_single_choice)
-                    },
-                ),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
