@@ -75,12 +75,15 @@ private fun PostBlocksRenderer(
 
 @Composable
 private fun ParagraphBlock(inlines: List<PostInline>) {
-    val linkStyles = TextLinkStyles(
-        style = SpanStyle(
-            color = MaterialTheme.colorScheme.primary,
-            textDecoration = TextDecoration.Underline,
-        ),
-    )
+    val primary = MaterialTheme.colorScheme.primary
+    val linkStyles = remember(primary) {
+        TextLinkStyles(
+            style = SpanStyle(
+                color = primary,
+                textDecoration = TextDecoration.Underline,
+            ),
+        )
+    }
     val annotated = remember(inlines, linkStyles) { buildInlineText(inlines, linkStyles) }
     val inlineContent = remember(inlines) { collectInlineMedia(inlines) }
     if (annotated.text.isBlank() && inlineContent.isEmpty()) {
@@ -310,13 +313,32 @@ private fun SmileyKind.token(): String = when (this) {
 }
 
 private fun parseColor(hex: String): Color {
+    // Pure-Kotlin parsing keeps :core:ui testable on plain JVM (no Android runtime). The parser
+    // already normalises the input to #RRGGBB or #RRGGBBAA in PostContentParser.normalizeColorHex,
+    // so we do not need android.graphics.Color.parseColor's permissive behaviour.
     val value = hex.removePrefix("#")
     return when (value.length) {
-        6, 8 -> Color(android.graphics.Color.parseColor("#$value"))
+        6 -> Color(0xFF000000L or value.toLong(16))
+        8 -> {
+            // HFR BBCode never carries an alpha channel today; accepting RRGGBBAA is purely
+            // defensive in case a future producer drifts to the longer shape.
+            val rgba = value.toLong(16)
+            val rgb = rgba ushr 8
+            val alpha = rgba and 0xFFL
+            Color((alpha shl 24) or rgb)
+        }
+
         else -> Color.Unspecified
     }
 }
 
+/**
+ * MUST be created fresh per Text/AnnotatedString — sharing it across paragraphs would offset the
+ * IDs emitted by [appendInlineContent] from the keys produced by [collectInlineMedia], leading to
+ * orphan entries (placeholder rendered with no Composable) or stranded Composables (no anchor in
+ * the AnnotatedString). The parallel walks in [appendInline] and [walkInlinesForMedia] match
+ * because they advance the counter under the exact same conditions; do not break that symmetry.
+ */
 private class MediaCounter {
     private var image = 0
     private var smiley = 0
