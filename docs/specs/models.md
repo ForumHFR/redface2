@@ -1,7 +1,7 @@
 ---
 title: "Modèles de données"
 parent: Spécifications
-nav_order: 4
+nav_order: 5
 permalink: /specs/models
 mermaid: true
 ---
@@ -151,7 +151,7 @@ data class Topic(
     val posts: List<Post>,
     val page: Int,
     val totalPages: Int,
-    val isFirstPostOwner: Boolean,
+    val isFirstPostOwner: Boolean,   // Phase 1 : figé à false par TopicPageParser tant que parseEditPage n'est pas livrée (Phase 2). Renseigné côté serveur via la page d'édition du FP.
     val poll: Poll?,
 )
 

@@ -1,7 +1,7 @@
 ---
 title: Architecture
 parent: Spécifications
-nav_order: 2
+nav_order: 3
 permalink: /specs/architecture
 mermaid: true
 ---
@@ -163,6 +163,8 @@ Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le
 - Contient `MainActivity`
 - Dépend de tous les modules feature (base + extensions)
 
+> **Note Phase 1 — `FlagsScreen` héberge dans `:app`** : l'écran d'accueil (Drapeaux) vit aujourd'hui dans `app/src/main/kotlin/.../FlagsScreen.kt` et **non** dans un module `:feature:flags`. C'est délibéré tant qu'il reste un placeholder mock (pas de ViewModel, pas de repository, pas d'état non-trivial). Quand le `FlagsViewModel` documenté dans [`mvi.md`]({{ site.baseurl }}/specs/mvi#écran-drapeaux-accueil) sera réellement implémenté (avec `FlagRepository` + intents `Refresh` / `RemoveFlag` / `Undo` + effects de navigation), un module `:feature:flags` sera créé en miroir des autres features (`:feature:forum`, `:feature:topic`, …) pour respecter la frontière "features → `:core:domain` + `:core:ui` only" formalisée plus haut. Cette exception est la même que celle qui s'appliquera transitoirement à tout écran tant que sa logique propre tient en quelques composables stateless.
+
 ---
 
 ## Séparation des responsabilités
@@ -212,15 +214,17 @@ class HfrClient @Inject constructor(
 
 Le parser transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine. Isolé de toute logique réseau et UI.
 
+> **Statut Phase 1** : seule `parseTopicPage` est livrée (cf. `core/parser/.../HfrParser.kt`). `PostContentParser` et `TopicPageParser` existent comme classes internes du module. Les autres méthodes ci-dessous arrivent feature par feature : `parseFlags` quand `FlagsViewModel` réel arrive (Phase 1 fin), `parseEditPage` Phase 2, `parseMessageList` Phase 3, `parsePostContentFromBbcode` Phase 2 (parser BBCode pour preview éditeur).
+
 ```kotlin
 class HfrParser @Inject constructor() {
-    fun parseTopicPage(html: String): Topic
-    fun parsePostContentFromHtml(html: String): PostContent
+    fun parseTopicPage(html: String): Topic                 // Phase 1 — livrée
+    fun parsePostContentFromHtml(html: String): PostContent // Phase 1 — livrée (interne au module)
     fun parsePostContentFromBbcode(bbcode: String): PostContent // Phase 2 éditeur
-    fun parseFlags(html: String): List<FlaggedTopic>
-    fun parseCategories(html: String): List<Category>
-    fun parseEditPage(html: String): EditInfo
-    fun parseMessageList(html: String): List<PrivateMessage>
+    fun parseFlags(html: String): List<FlaggedTopic>        // Phase 1 fin
+    fun parseCategories(html: String): List<Category>       // Phase 1 fin
+    fun parseEditPage(html: String): EditInfo               // Phase 2
+    fun parseMessageList(html: String): List<PrivateMessage> // Phase 3
     // ...
 }
 ```
@@ -419,7 +423,7 @@ Choix Konsist plutôt que ArchUnit :
 - ArchUnit lit le bytecode (post-`javac`/`kotlinc`) et perd la sémantique Kotlin.
 - Konsist est Kotlin-first, intègre plus simplement avec la stack Redface 2.
 
-Règles prévues dans `build-logic/src/main/kotlin/redface/Architecture.kt` (exemples) :
+Règles implémentées dans `app/src/test/kotlin/fr/forumhfr/redface2/ArchitectureKonsistTest.kt` (la surface réelle est plus stricte que les exemples ci-dessous, qui restent illustratifs des invariants visés) :
 
 ```kotlin
 class ArchitectureTest {
@@ -441,6 +445,9 @@ class ArchitectureTest {
             }
     }
 
+    // Activée Phase 1+ avec :core:network — cf. contributing.md § Konsist.
+    // Tant qu'aucun code prefetch n'existe, le test n'a pas de surface à scanner
+    // et ferait échouer Konsist sur scope vide.
     @Test fun `prefetch utilise AnonymousClient`() {
         Konsist.scopeFromProject()
             .functions()

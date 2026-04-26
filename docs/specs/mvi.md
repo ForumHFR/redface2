@@ -1,7 +1,7 @@
 ---
 title: Pattern MVI
 parent: Spécifications
-nav_order: 5
+nav_order: 6
 permalink: /specs/mvi
 mermaid: true
 ---
@@ -213,6 +213,8 @@ La mise en page concrète (`Column` vs `Scaffold`, composants `FlagsToolbar`, `F
 
 ## Écran Topic (lecture)
 
+> **Statut Phase 1 — slice topic fixe** : le `TopicUiState` réellement exposé par `feature/topic/.../TopicUiState.kt` est aujourd'hui `(request: TopicRequest, mode: Mode, availablePages: List<Int>)` avec `Mode = Loading | Loaded(topic) | Error(message) | Placeholder`, et l'unique intent est `Retry`. Le contrat ci-dessous est la **cible Phase 1 fin / Phase 2** quand pagination, edit FP, flag et image viewer arriveront. La forme actuelle vient du fait que le slice fixe charge une fixture HFR via `TopicFixtureRepository` et n'a pas encore de pagination réseau ni d'actions sur posts. Cohérent avec la méthodologie hybride (squelette illustratif, pas figé).
+
 ```kotlin
 data class TopicUiState(
     val title: String = "",
@@ -319,8 +321,13 @@ feature/topic/src/main/kotlin/fr/forumhfr/redface2/feature/topic/
   ├── TopicContent.kt       // @Composable stateless, previewable (si extrait)
   ├── TopicViewModel.kt     // MVI ViewModel (Hilt-injected via @HiltViewModel)
   ├── TopicUiState.kt       // État UI + Intents (consolidés tant que court)
-  └── TopicRequest.kt       // Paramètre d'entrée du screen (DTO dérivé de la NavKey)
+  └── TopicRequest.kt       // Paramètre d'entrée du screen (DTO dérivé de TopicRoute)
+
+feature/topic/src/test/kotlin/fr/forumhfr/redface2/feature/topic/
+  └── TopicViewModelTest.kt // JUnit 4 + Turbine, fixture-driven
 ```
+
+La `NavKey` (`TopicRoute`) ne vit **pas** dans le module feature : elle est déclarée côté `:app` dans `app/src/main/kotlin/.../navigation/RedfaceNavigation.kt` sous le sealed interface `RedfaceNavKey`. C'est la convention canonique pour Redface 2 — les routes `@Serializable` sont centralisées dans `:app` pour éviter les dépendances circulaires entre features. Détails dans [`contributing.md`]({{ site.baseurl }}/guides/contributing#convention-par-feature).
 
 Cette convention garantit la cohérence et facilite l'onboarding des contributeurs.
 

@@ -1,7 +1,7 @@
 ---
 title: Protocole HFR
 parent: Spécifications
-nav_order: 9
+nav_order: 8
 permalink: /specs/protocol-hfr
 ---
 
