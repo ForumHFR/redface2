@@ -241,28 +241,33 @@ class HfrParser @Inject constructor() {
 Les implémentations de repositories orchestrent réseau, parser et cache. Elles vivent dans `:core:data`, jamais dans les features.
 
 ```kotlin
-// Dans :core:data — l'implémentation
+// Dans :core:data — l'implémentation (Phase 1A)
+@Singleton
 class TopicRepositoryImpl @Inject constructor(
     private val client: HfrClient,
     private val parser: HfrParser,
     private val topicDao: TopicDao,
+    private val clock: Clock,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : TopicRepository {
 
-    override suspend fun getTopic(cat: Int, post: Int, page: Int): Result<Topic> {
-        // 1. Vérifier le cache
-        topicDao.getCached(cat, post, page)?.let { return Result.success(it) }
+    override fun observeTopicPage(cat: Int, post: Int, page: Int): Flow<Topic> = flow {
+        // 1. Si on a une copie en cache, l'émettre tout de suite (UI réactive)
+        val cached = withContext(ioDispatcher) { loadFromCache(cat, post, page) }
+        if (cached != null) emit(cached)
 
-        // 2. Fetch + parse
-        return runCatching {
-            val html = client.fetchTopicPage(cat, post, page)
+        // 2. Re-fetch + re-parse + cache, puis émettre la version fraîche
+        emit(refreshTopicPage(cat, post, page))
+    }
+
+    override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic =
+        withContext(ioDispatcher) {
+            val html = client.getTopicPage(cat, post, page, useAuth = true)
             val topic = parser.parseTopicPage(html)
-
-            // 3. Mettre en cache
-            topicDao.insert(topic.toEntity())
-
+            val (topicEntity, postEntities) = TopicMappers.toEntities(topic, clock.instant())
+            topicDao.upsertTopicPageWithPosts(topicEntity, postEntities)
             topic
         }
-    }
 }
 ```
 
