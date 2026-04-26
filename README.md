@@ -26,7 +26,7 @@ Les spécifications complètes sont disponibles sur le site du projet :
 
 ## État
 
-Le projet est en **phase de spécification**. Le code viendra après validation des specs par la communauté.
+Phase courante : **Phase 1 — Core lecture** ([roadmap](https://forumhfr.github.io/redface2/specs/roadmap)). La Phase 0 (bootstrap : Gradle multi-modules, CI, thème Material 3, navigation, Hilt, AAB stamping) est livrée. Slice topic fixe + AST `PostContent` + `PostRenderer` Compose en cours d'intégration via [#3](https://github.com/ForumHFR/redface2/issues/3) et la série de PRs [#78](https://github.com/ForumHFR/redface2/pull/78) / [#80](https://github.com/ForumHFR/redface2/pull/80).
 
 ## Pourquoi réécrire ?
 

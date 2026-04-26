@@ -159,7 +159,7 @@ Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le
 
 `:app` est le point d'entrée. Il :
 - Configure Hilt (DI) — inclut `:core:data` pour le wiring des implémentations
-- Définit le `NavGraph` (navigation globale)
+- Définit la navigation globale (`RedfaceApp` + `NavDisplay`)
 - Contient `MainActivity`
 - Dépend de tous les modules feature (base + extensions)
 
@@ -394,7 +394,7 @@ data class SessionCookies(
 
 ### Session expirée
 
-Un `Interceptor` OkHttp détecte la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Il émet un événement `SessionExpired`. Le `NavGraph` redirige vers l'écran de login — l'utilisateur ré-entre son mot de passe (Option A, pas de re-login transparent : le password n'est pas stocké).
+Un `Interceptor` OkHttp détecte la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Il émet un événement `SessionExpired`. `RedfaceApp` réinitialise alors le back stack courant sur la route `Auth` — l'utilisateur ré-entre son mot de passe (Option A, pas de re-login transparent : le password n'est pas stocké).
 
 ### HFR indisponible
 
