@@ -1,7 +1,7 @@
 ---
 title: Navigation
 parent: Spécifications
-nav_order: 3
+nav_order: 4
 permalink: /specs/navigation
 mermaid: true
 ---
@@ -79,6 +79,8 @@ graph TB
     style MSGS fill:#9c27b0,color:#fff
     style TOPIC fill:#e74c3c,color:#fff
 ```
+
+> **Lecture du graphe** : ce diagramme décrit le **flow utilisateur**, pas le découpage en `NavKey`. Les sept routes typées réelles sont `FlagsListRoute`, `ForumRoute`, `CategoryRoute`, `TopicRoute`, `SearchRoute`, `MessagesRoute`, `EditorRoute` (cf. § Implémentation ci-dessous). Plusieurs nœuds du graphe sont des **states internes au screen** plutôt que des routes distinctes : `TABMP` / `TABMULTI` correspondent à `MessageTab.CLASSIC` / `MessageTab.MULTI` dans le `MessagesState` ; `CATS` / `SUBCATS` / `TOPICLIST` sont couverts par la même `CategoryRoute(cat, subcat?)`. Le mapping flow → routes typées est explicite dans le code de `entryProvider` plus bas.
 
 ---
 
@@ -297,7 +299,9 @@ fun RedfaceApp(intent: Intent?) {
             route = parsed.route,
         )
     }
-    // … NavigationSuiteScaffold + RedfaceNavHost(backStack = backStacks[currentDestination])
+    // Pour la suite (NavigationSuiteScaffold avec les 4 onglets, Surface wrapper et
+    // RedfaceNavHost(backStack = backStacks.getValue(currentDestination))), voir
+    // app/src/main/kotlin/.../navigation/RedfaceNavigation.kt ligne 126-142.
 }
 
 private data class ParsedDeepLink(val destination: TopLevelDestination, val route: RedfaceNavKey)
@@ -361,7 +365,7 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 
 ### Multi-pane adaptatif (tablette, foldables)
 
-`NavDisplay` se compose avec `ListDetailPaneScaffold` (Material 3 Adaptive 1.2+). Le même back stack alimente la list pane et la detail pane selon `WindowSizeClass` :
+> **Statut Phase 5+** — multi-pane n'est pas livré en Phase 1. Le snippet ci-dessous est **illustratif** : il montre comment `NavDisplay` se compose avec `ListDetailPaneScaffold` (Material 3 Adaptive 1.2+) sur le même back stack, en utilisant les signatures **réelles** des screens livrés par Phase 1 (`FlagsScreen`, `TopicScreen` via `TopicRequest`, `EditorScreen`). Quand le mode tablette arrivera, on partira de cette base.
 
 ```kotlin
 @Composable
@@ -373,23 +377,42 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
         ListDetailPaneScaffold(
             listPane = {
                 FlagsScreen(
-                    onOpenTopic = { topic ->
-                        backStack.add(TopicRoute(topic.cat, topic.postId, topic.lastReadPage))
+                    onOpenUnreadTopic = {
+                        backStack.add(
+                            TopicRoute(
+                                cat = FixedTopicFixtures.cat,
+                                post = FixedTopicFixtures.post,
+                                page = 1,
+                            ),
+                        )
+                    },
+                    onOpenTrackedCategory = {
+                        backStack.add(CategoryRoute(cat = 23, subcat = 0))
                     },
                 )
             },
             detailPane = {
                 when (val current = backStack.lastOrNull()) {
                     is TopicRoute -> TopicScreen(
-                        cat = current.cat,
-                        post = current.post,
-                        page = current.page,
-                        scrollTo = current.scrollTo,
+                        request = TopicRequest(
+                            cat = current.cat,
+                            post = current.post,
+                            page = current.page,
+                            scrollTo = current.scrollTo,
+                        ),
                         onReply = { postId ->
                             backStack.add(EditorRoute(EditorMode.Reply, current.cat, postId))
                         },
+                        onOpenPage = { targetPage ->
+                            backStack.removeAt(backStack.lastIndex)
+                            backStack.add(current.copy(page = targetPage, scrollTo = null))
+                        },
                     )
-                    is EditorRoute -> EditorScreen(current)
+                    is EditorRoute -> EditorScreen(
+                        mode = current.mode.name,
+                        cat = current.cat,
+                        post = current.post,
+                    )
                     else -> Text("Select a topic")
                 }
             },
@@ -399,6 +422,8 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
     }
 }
 ```
+
+Quand `FlagsScreen` quittera le slice fixe (PR #80) pour exposer un vrai modèle `FlaggedTopic` (cf. [models.md § À définir avec les écrans]({{ site.baseurl }}/specs/models#à-définir-avec-les-écrans)), la lambda passée à `onOpenUnreadTopic` recevra le topic concerné et `backStack.add(TopicRoute(topic.cat, topic.postId, topic.lastReadPage))` deviendra trivial. Pour l'instant, la fixture `FixedTopicFixtures` est utilisée comme cible, en cohérence avec `RedfaceNavigation.kt`.
 
 ---
 

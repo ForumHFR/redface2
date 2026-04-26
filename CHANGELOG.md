@@ -48,6 +48,7 @@ Réalignement des specs sur la réalité du code après les PR [#78](https://git
 
 ### Fixed
 - Spec audit post-#78/#80 ([#84](https://github.com/ForumHFR/redface2/issues/84)) : 21 écarts spec/code détectés et corrigés sans toucher au code.
+- 4e passe `/spec-check` + `/spec-audit` + `/spec-reality` (PR #85) : `AdaptiveNavHost` réécrit avec les vraies signatures (`TopicRequest`, `FlagsScreen.onOpenUnreadTopic`, `EditorScreen(mode = String, cat, post)`), localisation de `FlagsScreen` dans `:app` documentée explicitement (pas de `:feature:flags` tant qu'il reste un placeholder), `TopicUiState` Phase 1 documenté comme slice `(request, mode, availablePages)` distinct du contrat cible Phase 2, `HfrParser` surface réelle (Phase 1 = `parseTopicPage` only) annotée par phase, Konsist emplacement réel (`app/src/test/.../ArchitectureKonsistTest.kt`) corrigé, test prefetch flagué Phase 1+ avec `:core:network`, `mvi.md` ajoute `src/test/kotlin/` + pointeur vers `RedfaceNavigation.kt` pour la NavKey, `extensions.md` clarifie le phasage Phase 1-2 (natif) vs Phase 4 (modules Gradle), `Topic.isFirstPostOwner` figé à `false` Phase 1 noté, `Compose Testing` claim aligné sur "câblé pas consommé", `nav_order` réordonné en séquence pédagogique sans trou (Méthodologie → Scope → Stack → Architecture → Navigation → Models → MVI → Extensions → Protocol → Roadmap), mermaid Navigation Graph annoté pour distinguer flow utilisateur des routes typées, élision `// …` remplacée par un pointeur vers le fichier source.
 
 ---
 

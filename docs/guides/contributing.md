@@ -176,7 +176,7 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 - **MockK** — mocking Kotlin-first
 - **Robolectric** — tests Android sans émulateur
 - **Turbine** — test des `Flow` et `StateFlow`
-- **Compose Testing** — tests UI pour les écrans critiques (Phase 1+)
+- **Compose Testing** — câblage prévu pour les tests UI des écrans critiques ; pas encore consommé (aucun test Compose dans le repo aujourd'hui — arrive avec le premier écran qui sort du slice topic fixe)
 
 **Enforcement au build (Phase 0) :**
 - **Konsist** — règles d'architecture (imports inter-modules, `:core:extension` limité à `topic/editor`, tokens M3 centralisés dans `:core:ui`). Voir [architecture.md]({{ site.baseurl }}/specs/architecture) pour les règles. La règle `@AnonymousClient` sur prefetch sera activée dès que le code réseau/prefetch existera réellement.
