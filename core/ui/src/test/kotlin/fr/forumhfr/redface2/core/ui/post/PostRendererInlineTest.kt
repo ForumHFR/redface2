@@ -60,6 +60,33 @@ class PostRendererInlineTest {
     }
 
     @Test
+    fun `smiley with imageUrl nested inside Strong is reachable from both walks`() {
+        // The MediaCounter KDoc warns: appendInline and walkInlinesForMedia must advance the
+        // counter under the EXACT same conditions, including when descending into containers
+        // like Strong / Emphasis / Color / Link. Without this test, the recursion branch in
+        // walkInlinesForMedia (PostRenderer.kt — `is PostInline.Strong -> walkInlinesForMedia(
+        // inline.children, ...)` and friends) could be deleted silently and only the JVM Strong
+        // case here would catch it before Compose runtime divergence at scroll time.
+        val inlines = listOf(
+            PostInline.Strong(
+                children = listOf(
+                    PostInline.Text("hi "),
+                    PostInline.Smiley(
+                        kind = SmileyKind.Builtin(":o"),
+                        imageUrl = "https://forum.hardware.fr/images/perso/o.gif",
+                    ),
+                ),
+            ),
+        )
+
+        val annotated = buildInlineText(inlines, emptyLinkStyles, imageAlt = "img")
+        val media = collectInlineMedia(inlines)
+
+        assertEquals(setOf("post-smiley-0"), media.keys)
+        assertEquals(media.keys, annotated.inlineContentIds())
+    }
+
+    @Test
     fun `inline image emits a post-image placeholder and a matching map entry`() {
         val inlines = listOf(
             PostInline.InlineImage(

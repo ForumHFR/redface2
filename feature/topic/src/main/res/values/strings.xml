@@ -1,5 +1,4 @@
 <resources>
-    <string name="topic_title">Topic %1$d</string>
     <string name="topic_scroll_to">Scroll ciblé demandé vers le post %1$d.</string>
     <string name="topic_reply">Répondre depuis ce topic</string>
     <string name="topic_loading">Chargement…</string>
