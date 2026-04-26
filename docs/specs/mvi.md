@@ -240,7 +240,7 @@ sealed interface TopicIntent {
 sealed interface TopicEffect {
     data class NavigateToReply(val cat: Int, val post: Int, val quote: String?) : TopicEffect
     data class NavigateToEdit(val cat: Int, val post: Int, val numreponse: Int) : TopicEffect
-    data class NavigateToEditFP(val cat: Int, val post: Int) : TopicEffect
+    data class NavigateToEditFirstPost(val cat: Int, val post: Int) : TopicEffect
     data class NavigateToImage(val url: String) : TopicEffect
     data class Error(val message: String) : TopicEffect
 }
@@ -264,11 +264,15 @@ data class EditorState(
 )
 
 enum class EditorMode {
-    Reply,      // nouveau message
-    Edit,       // éditer un post existant
-    EditFP,     // éditer le first post (sujet + sondage)
-    NewTopic,   // créer un topic
+    Reply,           // nouveau message dans un topic existant
+    Edit,            // éditer un post existant
+    EditFirstPost,   // éditer le first post (sujet + sondage + cat + subcat)
 }
+
+// Le mode "création de topic" (NewTopic) n'est pas un EditorMode : c'est un écran distinct
+// (`NewTopicScreen`) avec son propre formulaire (sélecteur cat/subcat hiérarchique, sujet
+// obligatoire) et son propre ViewModel. Il partage seulement le rendu de preview Compose
+// (`PostRenderer` + parser BBCode) avec l'éditeur.
 
 sealed interface EditorIntent {
     data class UpdateContent(val text: String) : EditorIntent

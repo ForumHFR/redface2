@@ -13,18 +13,19 @@ Comment participer au projet.
 
 ---
 
-## Phase actuelle : Spécifications
+## Phase actuelle : Phase 1 — Core lecture
 
-Le projet est en phase de spec. Le code n'est pas encore écrit. Les contributions les plus utiles en ce moment :
+Phase 0 (bootstrap Gradle multi-modules, CI, thème M3, navigation, Hilt) est livrée. Phase 1 — lecture du forum (drapeaux, topics, forum, deep links, `PostRenderer` Compose) est en cours, voir [roadmap]({{ site.baseurl }}/specs/roadmap). Les contributions utiles maintenant :
 
-- **Commenter les issues** : donner son avis sur les choix techniques, proposer des alternatives
+- **Implémenter une issue Phase 1** ouverte (drapeaux, login HFR, écran forum, cache Room…)
 - **Proposer des features** : ouvrir une issue avec le label `feature`
-- **Signaler des oublis** : quelque chose manque dans les specs ? Dites-le
-- **Proposer un nom** : voir la [page nommage]({{ site.baseurl }}/guides/naming)
+- **Signaler des oublis ou divergences spec/code** : skill `/spec-reality` ou commentaire d'issue
+- **Capturer des fixtures HFR réelles** via `hfr-mcp` (skill `/parse-fixture`)
+- **Proposer un nom** d'app : voir la [page nommage]({{ site.baseurl }}/guides/naming)
 
 ---
 
-## Quand le dev commencera
+## Environnement de développement
 
 ### Prérequis
 

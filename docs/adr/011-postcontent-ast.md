@@ -12,7 +12,7 @@ permalink: /adr/011-postcontent-ast
 
 Accepté — 2026-04-24
 
-Périmètre accepté : le contrat cible `PostContent`. L'implémentation complète reste à valider par prototype Phase 1 sur [#3](https://github.com/ForumHFR/redface2/issues/3), après résorption de la dette [#65](https://github.com/ForumHFR/redface2/issues/65).
+Périmètre accepté : le contrat cible `PostContent`. L'implémentation initiale est livrée par la PR [#78](https://github.com/ForumHFR/redface2/pull/78) (parser HTML topic + AST `PostContent`) et la PR [#80](https://github.com/ForumHFR/redface2/pull/80) (`PostRenderer` Compose, suppression de `Post.content: String`, retrait de Jsoup hors `:core:parser`). La dette [#65](https://github.com/ForumHFR/redface2/issues/65) qui demandait le retrait du fragment HTML brut de `Post.content` est résorbée par #80.
 
 ## Contexte
 
@@ -64,7 +64,7 @@ L'AST est sémantique, pas une copie de DOM HTML. Elle représente des blocs et 
 
 La liste exacte des nœuds peut évoluer avec les fixtures réelles, mais la frontière reste stable : les sources HTML et BBCode sont normalisées avant d'atteindre l'UI. Les types Kotlin canoniques vivent dans [models.md]({{ site.baseurl }}/specs/models#topics-et-posts).
 
-Le slice actuel qui garde un fragment HTML dans `Post.content` est une dette de prototype. Il doit être résorbé par [#65](https://github.com/ForumHFR/redface2/issues/65) avant que ce pattern soit reproduit ailleurs.
+Le slice initial gardait un fragment HTML brut dans `Post.content` comme prototype. Cette dette ([#65](https://github.com/ForumHFR/redface2/issues/65)) est résorbée par la PR [#80](https://github.com/ForumHFR/redface2/pull/80) : `Post.content` porte désormais directement un `PostContent` rendu par `PostRenderer` Compose dans `:core:ui`, sans HTML brut côté UI.
 
 ## Conséquences
 

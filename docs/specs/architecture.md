@@ -121,7 +121,7 @@ graph TB
 | `:core:network` | `HfrClient` : requêtes HTTP, cookies, session, login. Encapsule OkHttp. | `:core:model` |
 | `:core:parser` | `HfrParser` : transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine, dont l'AST `PostContent`. | `:core:model` |
 | `:core:database` | Room DB, DAOs, entities, mappers entity↔model. Cache locale + cache MPStorage. | `:core:model` |
-| `:core:ui` | Thème Material 3 (6 sous-packages : `theme/`, `components/`, `adaptive/`, `semantics/`, `util/`, `extensions/`), composants partagés, `PostRenderer` (`PostContent` → Compose). Seul module autorisé à instancier `ColorScheme`, `Typography`, `Shapes`. | `:core:model` |
+| `:core:ui` | Thème Material 3 (`theme/`) et `PostRenderer` (`post/`, `PostContent` → Compose). D'autres sous-packages (`components/`, `adaptive/`, `semantics/`, `util/`, `extensions/`) sont prévus mais n'apparaîtront qu'au fur et à mesure de l'arrivée des features qui les justifient — pas de module vide en avance. Seul module autorisé à instancier `ColorScheme`, `Typography`, `Shapes`. | `:core:model` |
 | `:core:extension` | Interfaces d'extension : `PostDecorator`, `TopicToolbarContributor`, `EditorToolbarContributor`. | `:core:model` |
 
 ### Modules feature (base)
@@ -141,6 +141,8 @@ Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (com
 ### Modules feature (extensions communautaires — Phase 4)
 
 Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le projet compte 15 modules (8 core + 7 features base). Les extensions sont des modules Gradle isolés qui s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant. La décision de découpage v1 est formalisée dans [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1).
+
+> **État réel des modules en Phase 1 (cycle topic fixe)** : tous les modules core et feature de base sont déclarés dans `settings.gradle.kts`, mais beaucoup ne contiennent encore que le squelette Gradle (`build.gradle.kts`) sans code Kotlin — `:core:network`, `:core:database`, `:core:extension`, `:feature:auth` et `:feature:settings` notamment. C'est volontaire : le découpage est fixé dès le bootstrap (ADR-001) pour figer les frontières, mais le code arrive feature par feature. La prose ci-dessus décrit le **contrat cible** ; la réalité courante est trackée par la roadmap.
 
 | Module | Fonction | Dépend de |
 |--------|----------|-----------|
@@ -168,6 +170,8 @@ Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le
 ### `:core:domain` — interfaces
 
 Les interfaces de repositories vivent dans le module domaine. Aucune dépendance framework.
+
+> **Note Phase 1** : ces interfaces sont le **contrat cible**. Le slice topic fixe utilise pour l'instant `TopicFixtureRepository` (fixtures HTML capturées), pas encore `TopicRepository` au-dessus de réseau + cache. Les interfaces ci-dessous arrivent feature par feature, avec leur implémentation `:core:data`.
 
 ```kotlin
 // Dans :core:domain — le contrat

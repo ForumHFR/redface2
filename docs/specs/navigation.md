@@ -177,84 +177,89 @@ Deux onglets :
 
 Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
 
-| Pattern URL | Écran cible |
-|-------------|-------------|
-| `forum.hardware.fr/forum1.php?cat=X&post=Y&page=Z` | Topic page Z |
-| `forum.hardware.fr/forum1.php?cat=X&post=Y` | Topic page 1 |
-| `forum.hardware.fr/forum2.php?config=hfr.inc&cat=X&subcat=Y` | Liste topics |
-| `forum.hardware.fr/forum1f.php` | Drapeaux |
-| `forum.hardware.fr/forum1.php?cat=X&post=Y#t12345` | Post spécifique (traitement custom, voir ci-dessous) |
+| Pattern URL | Écran cible | Statut |
+|-------------|-------------|--------|
+| `forum.hardware.fr/forum1.php?cat=X&post=Y&page=Z` | Topic page Z | Phase 1 |
+| `forum.hardware.fr/forum1.php?cat=X&post=Y` | Topic page 1 | Phase 1 |
+| `forum.hardware.fr/forum2.php?config=hfr.inc&cat=X&subcat=Y` | Liste topics | Phase 1 |
+| `forum.hardware.fr/forum1f.php` | Drapeaux | Phase 1 |
+| `forum.hardware.fr/forum1.php?cat=X&post=Y#t12345` | Post spécifique (traitement custom, voir ci-dessous) | Phase 1 |
+| `forum.hardware.fr/forum2.php?config=hfr.inc&cat=prive&page=Z` | Inbox MP / conversation | Phase 3 |
 
-Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026). Les routes sont des types `@Serializable` qui implémentent `NavKey` :
+Les liens vers MP arrivent en **Phase 3** uniquement (cycle messages privés + MultiMP). Le code de `parseHfrDeepLink` ignore aujourd'hui ces URLs — elles retombent sur le `else -> null` et l'app ouvre l'écran d'accueil par défaut. Le pattern n'est pas figé : il faudra confirmer sur un MP réel à la mise en chantier de la feature `:feature:messages`.
+
+Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026). Les routes sont des types `@Serializable` qui implémentent un sealed interface marqueur `RedfaceNavKey : NavKey` :
 
 ```kotlin
-// Routes type-safe
-@Serializable data object FlagsListRoute : NavKey
+// app/src/main/kotlin/.../navigation/RedfaceNavigation.kt
+@Serializable sealed interface RedfaceNavKey : NavKey
+
+@Serializable data object FlagsListRoute : RedfaceNavKey
+@Serializable data object ForumRoute : RedfaceNavKey
+@Serializable data object SearchRoute : RedfaceNavKey
+@Serializable data object MessagesRoute : RedfaceNavKey
+@Serializable data class CategoryRoute(
+    val cat: Int,
+    val subcat: Int? = null,
+) : RedfaceNavKey
 @Serializable data class TopicRoute(
     val cat: Int,
     val post: Int,
     val page: Int = 1,
-    val scrollTo: Int? = null,  // numreponse cible pour #t{numreponse}
-) : NavKey
-@Serializable data class CategoryRoute(val cat: Int, val subcat: Int? = null) : NavKey
-@Serializable data class EditorRoute(val mode: EditorMode, val cat: Int, val post: Int? = null) : NavKey
-@Serializable data object MessagesRoute : NavKey
+    val scrollTo: Int? = null,            // numreponse cible pour #t{numreponse}
+) : RedfaceNavKey
+@Serializable data class EditorRoute(
+    val mode: EditorMode,
+    val cat: Int,
+    val post: Int? = null,
+) : RedfaceNavKey
+
+@Serializable enum class EditorMode { Reply, Edit, EditFirstPost }
 ```
 
-Le back stack est porté par `NavBackStack<NavKey>`, transformé en `NavEntry`, puis rendu via `rememberSceneState` + `NavDisplay` :
+Chaque onglet de bottom nav a son propre back stack (`rememberNavBackStack`), partagé via une `Map<TopLevelDestination, NavBackStack<NavKey>>` côté `RedfaceApp`. Le rendu se fait via l'API stable `NavDisplay(backStack, onBack, entryDecorators, entryProvider)` — pas besoin du couple `rememberDecoratedNavEntries` + `rememberSceneState` pour le cas single-pane :
 
 ```kotlin
 @Composable
-fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
-    val entries = rememberDecoratedNavEntries(
+private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
+    NavDisplay(
         backStack = backStack,
-        entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator()),
-    ) { key ->
-        NavEntry(key) {
-            when (val route = key) {
-                FlagsListRoute -> FlagsScreen(
-                    onOpenTopic = { topic ->
-                        backStack.add(TopicRoute(topic.cat, topic.postId, topic.lastReadPage))
-                    },
-                )
-                is TopicRoute -> TopicScreen(
-                    cat = route.cat,
-                    post = route.post,
-                    page = route.page,
-                    scrollTo = route.scrollTo,
+        onBack = {
+            if (backStack.size > 1) {
+                backStack.removeAt(backStack.lastIndex)
+            }
+        },
+        entryDecorators = listOf(
+            rememberSaveableStateHolderNavEntryDecorator(),
+            rememberViewModelStoreNavEntryDecorator(),
+        ),
+        entryProvider = entryProvider {
+            entry<FlagsListRoute> { FlagsScreen(onOpenUnreadTopic = { /* ... */ }) }
+            entry<ForumRoute> { ForumScreen(onOpenCategory = { /* ... */ }) }
+            entry<SearchRoute> { SearchScreen(onOpenResult = { /* ... */ }) }
+            entry<MessagesRoute> { MessagesScreen(onOpenTopic = { /* ... */ }) }
+            entry<CategoryRoute> { route -> CategoryScreen(cat = route.cat, subcat = route.subcat, onOpenTopic = { /* ... */ }) }
+            entry<TopicRoute> { route ->
+                TopicScreen(
+                    request = TopicRequest(route.cat, route.post, route.page, route.scrollTo),
                     onReply = { postId ->
                         backStack.add(EditorRoute(EditorMode.Reply, route.cat, postId))
                     },
+                    onOpenPage = { targetPage ->
+                        backStack.removeAt(backStack.lastIndex)
+                        backStack.add(route.copy(page = targetPage, scrollTo = null))
+                    },
                 )
-                is CategoryRoute -> CategoryScreen(route.cat, route.subcat)
-                is EditorRoute -> EditorScreen(route)
-                MessagesRoute -> MessagesScreen()
             }
-        }
-    }
-    val sceneState = rememberSceneState(
-        entries = entries,
-        sceneStrategies = listOf(SinglePaneSceneStrategy()),
-        onBack = { backStack.removeLastOrNull() },
-    )
-    val navigationEventState = rememberNavigationEventState(
-        currentInfo = SceneInfo(sceneState.currentScene),
-        backInfo = sceneState.previousScenes.map(::SceneInfo),
-    )
-
-    NavigationBackHandler(
-        navigationEventState = navigationEventState,
-        isBackEnabled = sceneState.currentScene.previousEntries.isNotEmpty(),
-        onBackCompleted = {
-            repeat(entries.size - sceneState.currentScene.previousEntries.size) {
-                backStack.removeLastOrNull()
+            entry<EditorRoute> { route ->
+                EditorScreen(mode = route.mode.name, cat = route.cat, post = route.post)
             }
-        }
+        },
     )
-
-    NavDisplay(sceneState, navigationEventState)
 }
 ```
+
+`NavigationSuiteScaffold` (Material 3 Adaptive) commute la `currentDestination` (état `rememberSaveable`) et passe le back stack actif à `RedfaceNavHost`. Les autres back stacks restent en mémoire — quand l'utilisateur revient sur l'onglet Forum, il retombe à l'écran où il l'a quitté.
 
 **Avantages Nav 3 vs Nav 2.x pour Redface 2** :
 - Le back stack est du **state observable standard** — facile à persister/restaurer, à inspecter pour debug, à manipuler dans des tests

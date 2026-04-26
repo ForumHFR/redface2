@@ -17,7 +17,7 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 
 ## Projet
 
-- Phase actuelle : **specifications** (pas encore de code)
+- Phase actuelle : **Phase 1 — Core lecture** ([roadmap](docs/specs/roadmap.md)). Phase 0 bootstrap livrée (Gradle multi-modules, CI, thème M3, navigation, Hilt). Slice topic fixe + AST `PostContent` + `PostRenderer` Compose en cours d'intégration.
 - Licence : GPL-3.0-only
 - Documentation : GitHub Pages via `docs/` (Jekyll + just-the-docs)
 - Langue : code en anglais, issues et docs en francais
@@ -25,7 +25,9 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 ## Setup
 
 ```bash
-# Pas de build applicatif — phase spec uniquement
+# Build applicatif local — image Docker pin (cf. .devcontainer/devcontainer.json)
+./gradlew :app:assembleDebug
+
 # Preview Jekyll (necessite Ruby + Bundler)
 cd docs && bundle install && bundle exec jekyll serve
 ```
@@ -46,7 +48,7 @@ docs/
     protocol-hfr.md  # Contrats externes, endpoints, edge cases
     roadmap.md       # Phases de developpement
     extensions.md    # Extensions communautaires et architecture d'extensions
-    adr/             # Architecture Decision Records
+  adr/               # Architecture Decision Records (depuis v0.5.1)
   guides/            # Pages d'accompagnement
     contributing.md  # Conventions, tests, accessibilite, localisation
     rationale.md     # Pourquoi la reecriture
