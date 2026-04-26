@@ -247,7 +247,7 @@ private fun ImageBlock(block: PostBlock.Image) {
     )
 }
 
-private fun buildInlineText(
+internal fun buildInlineText(
     inlines: List<PostInline>,
     linkStyles: TextLinkStyles,
     imageAlt: String,
@@ -311,7 +311,7 @@ private fun AnnotatedString.Builder.appendInline(
     }
 }
 
-private fun collectInlineMedia(inlines: List<PostInline>): Map<String, InlineTextContent> {
+internal fun collectInlineMedia(inlines: List<PostInline>): Map<String, InlineTextContent> {
     val out = mutableMapOf<String, InlineTextContent>()
     val media = MediaCounter()
     walkInlinesForMedia(inlines, out, media)
@@ -379,7 +379,7 @@ private fun SmileyKind.token(): String = when (this) {
     is SmileyKind.Perso -> "[:$name]"
 }
 
-private fun parseColor(hex: String): Color {
+internal fun parseColor(hex: String): Color {
     // Pure-Kotlin parsing keeps :core:ui testable on plain JVM (no Android runtime). The parser
     // already normalises the input to #RRGGBB or #RRGGBBAA in PostContentParser.normalizeColorHex,
     // so we do not need android.graphics.Color.parseColor's permissive behaviour.
