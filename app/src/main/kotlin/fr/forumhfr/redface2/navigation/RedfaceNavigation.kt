@@ -39,8 +39,12 @@ import kotlinx.serialization.Serializable
 // not yet wired. Each "open topic" button currently navigates to a hard-coded HFR thread so
 // the navigation graph itself can be exercised end-to-end. They disappear feature by feature
 // as Phase 1B/1C land the real FlaggedTopic, ForumTopic, SearchResult, MpThread models.
-private const val DEMO_TOPIC_CAT: Int = 13
-private const val DEMO_TOPIC_POST: Int = 84_540
+//
+// The target is the community topic dedicated to Redface 2 itself
+// (https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35395) — recent, short,
+// and the most natural place to dogfood the app on the topic that discusses the app.
+private const val DEMO_TOPIC_CAT: Int = 23
+private const val DEMO_TOPIC_POST: Int = 35_395
 
 @Serializable
 sealed interface RedfaceNavKey : NavKey
@@ -202,8 +206,7 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                             TopicRoute(
                                 cat = DEMO_TOPIC_CAT,
                                 post = DEMO_TOPIC_POST,
-                                page = 146,
-                                scrollTo = 18085119,
+                                page = 1,
                             ),
                         )
                     },
@@ -216,7 +219,7 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                             TopicRoute(
                                 cat = DEMO_TOPIC_CAT,
                                 post = DEMO_TOPIC_POST,
-                                page = 2,
+                                page = 1,
                             ),
                         )
                     },
