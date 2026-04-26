@@ -71,14 +71,11 @@ graph TB
 
 ## État du projet
 
-Ce repository est en phase de **spécification**. Aucun code n'est encore écrit. L'objectif est de :
+Phase courante : **Phase 1 — Core lecture** ([roadmap]({{ site.baseurl }}/specs/roadmap)). La Phase 0 (bootstrap : Gradle multi-modules, CI, thème Material 3, navigation, Hilt) est livrée. Le slice topic fixe + l'AST `PostContent` + le `PostRenderer` Compose sont en cours d'intégration via [#3](https://github.com/ForumHFR/redface2/issues/3) et la série de PRs [#78](https://github.com/ForumHFR/redface2/pull/78) / [#80](https://github.com/ForumHFR/redface2/pull/80).
 
-1. Verrouiller les choix techniques avec la communauté
-2. Définir l'architecture en détail
-3. Planifier les phases de développement
-4. Commencer le dev sur des bases solides
+Les specs restent la source de vérité du projet, mais elles doivent désormais refléter le code réel : tout écart entre une page canonique et le repo est traité comme un bug de spec, pas comme une dette future. Voir [`/spec-reality`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/spec-reality/SKILL.md) pour la procédure d'audit cross-fichier.
 
-Les contributions aux specs sont les bienvenues — ouvrez une issue ou commentez les existantes.
+Les contributions sont les bienvenues : ouvrez une issue, commentez les existantes ou proposez une PR sur le slice courant.
 
 ---
 
