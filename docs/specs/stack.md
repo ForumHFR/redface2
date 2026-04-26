@@ -141,19 +141,20 @@ Quatre options évaluées :
 | Type safety | `@Serializable` + `NavKey` | `@Serializable` + `toRoute()` (2.8+) | Oui | Oui |
 | Back stack | Explicite `NavBackStack<NavKey>` en `State` | Opaque (framework-managed) | Bon | Excellent |
 | M3 Adaptive | Intégration native (`ListDetailPaneScaffold` proprement binding) | Bricolage | Manuel | Manuel |
-| Shared Elements | Oui (`SharedTransitionScope` entre scenes) | Limité | Manuel | Manuel |
+| Shared Elements | Compatible avec `SharedTransitionScope` côté Compose ; pattern non encore exploité dans Redface 2 (Phase 5+) | Limité | Manuel | Manuel |
 | Stabilité | **1.1.0 stable** (08/04/2026) | Mature | Stable | Stable |
 | Courbe | Modérée, API plus simple qu'avant | Modérée | Raide | Raide |
 | KMP | Runtime KMP ; UI Android-first | Non | Oui | Oui |
 
 **Compose Navigation 3 gagne** pour Redface 2 :
 - **Compose-first** : cohérent avec 100% Compose ; le back stack est du state observable normal, on peut le persist/restaurer trivialement
-- **M3 Adaptive** : `ListDetailPaneScaffold` (essentiel pour drapeaux/topic en tablette) se branche directement sur des sous-back-stacks
-- **Shared Elements** : transitions topic list → topic view propres (Material Motion patterns)
-- **Type safety** : les routes implémentent `NavKey` et sont `@Serializable`, donc le back stack reste typé et sérialisable
-- **Deep linking** : HFR ayant des fragments URI non supportés (`#t{numreponse}`) de toute façon, on parse la `Uri` entrante manuellement et on ajoute une route typée au back stack — plus simple qu'avant avec Nav 2.x
+- **API stable simple** : `NavDisplay(backStack, onBack, entryDecorators, entryProvider { entry<…> })` couvre déjà single-pane + predictive back + lifecycle, sans DSL graph à apprendre
+- **Plusieurs back stacks indépendants** : un par onglet de bottom nav (`rememberNavBackStack`), commutés via `NavigationSuiteScaffold` ; chaque onglet conserve son historique de navigation
+- **M3 Adaptive** : `ListDetailPaneScaffold` (essentiel pour drapeaux/topic en tablette) se branche directement sur le même back stack que single-pane
+- **Type safety** : les routes implémentent un sealed interface `RedfaceNavKey : NavKey` `@Serializable`, donc le back stack reste typé et sérialisable
+- **Deep linking** : HFR ayant des fragments URI non supportés (`#t{numreponse}`) de toute façon, on parse la `Uri` entrante dans `RedfaceApp`, on identifie l'onglet cible, et on **réinitialise** le back stack de cet onglet via `resetStack(root, route)` pour que le retour ramène à la racine de l'onglet — voir `navigation.md` pour le code exact
 
-Voir `docs/specs/navigation.md` pour les exemples concrets (`NavDisplay`, `SceneStrategy`, deep linking, predictive back) et [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3) pour la décision.
+Voir `docs/specs/navigation.md` pour les exemples concrets (`NavDisplay`, `entryProvider`, deep linking + `resetStack`, predictive back) et [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3) pour la décision.
 
 ### Hilt plutôt que Koin
 

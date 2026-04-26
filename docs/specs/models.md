@@ -19,7 +19,7 @@ Structures du domaine métier.
 Certains modèles référencés dans `navigation.md` et `extensions.md` sont volontairement laissés à définir au moment d'implémenter leurs écrans, pour éviter la dette de spec pré-code :
 
 - **`TopicSummary`** — une ligne dans une liste de topics (titre, auteur, dernière date, nombre non-lus). ≠ `Topic` qui contient tous les posts d'une page. Nécessaire Phase 1 pour le Forum et la liste des topics d'une sous-catégorie.
-- **`UserProfile`** — données du popup profil rapide (avatar, date inscription, nombre posts, localisation). Nécessaire Phase 2 pour la feature "Voir un profil utilisateur" ([scope]({{ site.baseurl }}/specs/scope#voir-un-profil-utilisateur)) et son extension Phase 4 ["Infos profil rapides"]({{ site.baseurl }}/specs/extensions#infos-profil-rapides).
+- **`UserProfile`** — données du popup profil rapide (avatar, date inscription, nombre posts, localisation). Nécessaire Phase 2 pour la feature "Voir un profil utilisateur" (listée dans la section [Lecture du scope]({{ site.baseurl }}/specs/scope#lecture)) et son extension Phase 4 ["Infos profil rapides"]({{ site.baseurl }}/specs/extensions#infos-profil-rapides).
 - **`UserStats`** — statistiques détaillées utilisateur (posts par cat, activité, topics créés). Nécessaire Phase 4 pour la feature "Stats utilisateur".
 
 Ces modèles émergeront du premier prototype de chaque écran. Pas de spec préventive à faire maintenant.

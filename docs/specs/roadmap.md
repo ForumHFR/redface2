@@ -66,7 +66,7 @@ Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances e
 **Objectif :** un squelette d'app qui compile, avec CI, thème et navigation.
 
 - [x] Structure Gradle multi-modules (8 core + 7 features base déclarés ; certains modules conservent un `build.gradle.kts` vide en attente de leur cycle, cf. ADR-001)
-- [x] CI GitHub Actions (`detektAll`, `lintDebug`, `testDebugUnitTest`, `:app:assembleDebug`)
+- [x] CI GitHub Actions (`detektAll`, `lintDebug`, `test`, `testDebugUnitTest`, `:app:assembleDebug`)
 - [x] Thème Material 3 dans `:core:ui` (clair, sombre, AMOLED — Material You + HFR Classique différés Phase 5)
 - [x] Navigation graph Compose Navigation 3 (bottom nav 4 onglets + back stacks par onglet, cf. [navigation.md]({{ site.baseurl }}/specs/navigation))
 - [x] Hilt wiring (`build-logic` convention plugins, KSP, `@HiltAndroidApp`)
