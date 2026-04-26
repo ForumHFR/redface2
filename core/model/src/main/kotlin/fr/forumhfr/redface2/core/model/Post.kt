@@ -7,6 +7,7 @@ data class Post(
     val author: String,
     val date: Instant,
     val content: String,
+    val contentAst: PostContent,
     val avatarUrl: String?,
     val isEditable: Boolean,
     val isOwnPost: Boolean,
