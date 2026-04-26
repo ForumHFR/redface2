@@ -292,7 +292,7 @@ sealed interface EditorIntent {
 > enum class TopicFormMode { New, EditFirstPost }
 > ```
 >
-> Les deux écrans partagent leurs **capacités** via composables `:core:ui` (`BBCodeToolbar`, `BBCodePreview`, `PollEditor`, `CatSubcatPicker`) et use cases `:core:domain` (`parsePostContentFromBbcode`, `validateBbcode`) — pas de duplication, juste deux contrats de formulaire distincts. Rationale : l'endpoint HFR n'est pas une bonne frontière UI (`Reply` et `NewTopic` passent tous deux par `bddpost.php` mais leurs formulaires diffèrent ; `EditFirstPost` et `NewTopic` partagent presque toute la structure malgré des endpoints différents). La frontière utile est **post-level** vs **topic-level**.
+> Les deux écrans partagent leurs **capacités** via composables `:core:ui` (`BBCodeToolbar`, `BBCodePreview`, `PollEditor`, `CatSubcatPicker`) et use cases `:core:domain` (`validateBbcode`). Le parsing BBCode reste une responsabilité `:core:parser` (`parsePostContentFromBbcode`) exposée aux features via une interface/use case injectée, afin de préserver la frontière `:feature:*` → `:core:domain` + `:core:ui`. Pas de duplication, juste deux contrats de formulaire distincts. Rationale : l'endpoint HFR n'est pas une bonne frontière UI (`Reply` et `NewTopic` passent tous deux par `bddpost.php` mais leurs formulaires diffèrent ; `EditFirstPost` et `NewTopic` partagent presque toute la structure malgré des endpoints différents). La frontière utile est **post-level** vs **topic-level**.
 >
 > Cette section sera révisée quand l'éditeur Phase 2 sera prototypé — c'est cohérent avec la méthodologie hybride (prototype-first sur l'UI). Voir [#86](https://github.com/ForumHFR/redface2/issues/86) pour le suivi.
 

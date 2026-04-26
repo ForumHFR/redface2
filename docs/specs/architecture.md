@@ -126,7 +126,7 @@ graph TB
 
 ### Modules feature (base)
 
-Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (composants partagés). Elles ne connaissent pas la couche données — Hilt injecte les implémentations depuis `:core:data`.
+Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (composants partagés). Exception volontaire : `:feature:topic` et `:feature:editor` peuvent aussi dépendre de `:core:extension`, car ce sont les deux points d'intégration des contributeurs (`PostDecorator`, `TopicToolbarContributor`, `EditorToolbarContributor`). Elles ne connaissent jamais la couche données — Hilt injecte les implémentations depuis `:core:data`.
 
 | Module | Écrans | Dépend de |
 |--------|--------|-----------|
@@ -398,7 +398,7 @@ data class SessionCookies(
 
 ### Session expirée
 
-Un `Interceptor` OkHttp détecte la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Il émet un événement `SessionExpired`. `RedfaceApp` réinitialise alors le back stack courant sur la route `Auth` — l'utilisateur ré-entre son mot de passe (Option A, pas de re-login transparent : le password n'est pas stocké).
+Un `Interceptor` OkHttp détecte la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Il émet un événement `SessionExpired`. Quand le module `:feature:auth` sera implémenté, `RedfaceApp` réinitialisera le back stack courant sur une route d'authentification dédiée — aujourd'hui aucune `AuthRoute` n'existe encore. L'utilisateur ré-entre son mot de passe (Option A, pas de re-login transparent : le password n'est pas stocké).
 
 ### HFR indisponible
 
