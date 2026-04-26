@@ -96,7 +96,6 @@ graph TB
     CDATA --> CP[":core:parser"]
     CDATA --> CD[":core:database"]
 
-    CN --> CM
     CP --> CM
     CD --> CM
 
@@ -118,7 +117,7 @@ graph TB
 | `:core:model` | Modèles domaine purs (`Topic`, `Post`, `PostContent`, `Category`, `Flag`, `MP`). Aucune dépendance Android. | rien |
 | `:core:domain` | Interfaces de repositories (`TopicRepository`, `FlagRepository`, `AuthRepository`...) et règles métier partagées. Aucune dépendance framework. | `:core:model` |
 | `:core:data` | Implémentations des repositories. Orchestre réseau, parser et cache. Fournit les bindings Hilt. | `:core:domain`, `:core:network`, `:core:parser`, `:core:database` |
-| `:core:network` | `HfrClient` : requêtes HTTP, cookies, session, login. Encapsule OkHttp. | `:core:model` |
+| `:core:network` | `HfrClient` : requêtes HTTP, cookies, session, login. Encapsule OkHttp. Renvoie du HTML brut ou `Result<Unit>` — n'expose aucun type domaine. | rien |
 | `:core:parser` | `HfrParser` : transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine, dont l'AST `PostContent`. | `:core:model` |
 | `:core:database` | Room DB, DAOs, entities, mappers entity↔model. Cache locale + cache MPStorage. | `:core:model` |
 | `:core:ui` | Thème Material 3 (`theme/`) et `PostRenderer` (`post/`, `PostContent` → Compose). D'autres sous-packages (`components/`, `adaptive/`, `semantics/`, `util/`, `extensions/`) sont prévus mais n'apparaîtront qu'au fur et à mesure de l'arrivée des features qui les justifient — pas de module vide en avance. Seul module autorisé à instancier `ColorScheme`, `Typography`, `Shapes`. | `:core:model` |
@@ -142,7 +141,7 @@ Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (com
 
 Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le projet compte 15 modules (8 core + 7 features base). Les extensions sont des modules Gradle isolés qui s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant. La décision de découpage v1 est formalisée dans [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1).
 
-> **État réel des modules en Phase 1 (cycle topic fixe)** : tous les modules core et feature de base sont déclarés dans `settings.gradle.kts`, mais beaucoup ne contiennent encore que le squelette Gradle (`build.gradle.kts`) sans code Kotlin — `:core:network`, `:core:database`, `:core:extension`, `:feature:auth` et `:feature:settings` notamment. C'est volontaire : le découpage est fixé dès le bootstrap (ADR-001) pour figer les frontières, mais le code arrive feature par feature. La prose ci-dessus décrit le **contrat cible** ; la réalité courante est trackée par la roadmap.
+> **État réel des modules en Phase 1 (cycle topic réel en cours)** : tous les modules core et feature de base sont déclarés dans `settings.gradle.kts`, mais certains ne contiennent encore que le squelette Gradle (`build.gradle.kts`) sans code Kotlin — `:core:extension`, `:feature:auth` et `:feature:settings` notamment. `:core:network` et `:core:database` ont reçu leur backbone Phase 1A (`HfrClient`, `TopicRepositoryImpl` cache-aside, schema Room v1). C'est volontaire : le découpage est fixé dès le bootstrap (ADR-001) pour figer les frontières, mais le code arrive feature par feature. La prose ci-dessus décrit le **contrat cible** ; la réalité courante est trackée par la roadmap.
 
 | Module | Fonction | Dépend de |
 |--------|----------|-----------|
@@ -198,17 +197,25 @@ interface AuthRepository {
 Le client HTTP ne parse rien. Il retourne du HTML brut ou des confirmations d'action.
 
 ```kotlin
+@Singleton
 class HfrClient @Inject constructor(
-    private val okHttpClient: OkHttpClient,
+    @AuthenticatedClient private val authenticated: OkHttpClient,
+    @AnonymousClient private val anonymous: OkHttpClient,
+    @HfrBaseUrl private val baseUrl: HttpUrl,
 ) {
-    suspend fun fetchTopicPage(cat: Int, post: Int, page: Int): String
-    suspend fun fetchFlags(): String
+    // Phase 1A — livrée
+    suspend fun getTopicPage(cat: Int, post: Int, page: Int, useAuth: Boolean = true): String
+
+    // Phase 1B+ — à implémenter
+    suspend fun getFlags(): String
     suspend fun postReply(cat: Int, post: Int, content: String): Result<Unit>
     suspend fun editPost(cat: Int, post: Int, numreponse: Int, content: String): Result<Unit>
     suspend fun login(username: String, password: String): Result<Unit>
     // ...
 }
 ```
+
+`@AnonymousClient` (cookie jar = `CookieJar.NO_COOKIES`) permet à un caller — typiquement le prefetch de la page suivante — d'aller chercher du HTML sans que HFR ne marque les drapeaux comme lus côté serveur. Les écrans qui doivent honorer la lecture (lecture utilisateur) appellent avec `useAuth = true` (default).
 
 ### `:core:parser` — HfrParser
 
@@ -234,28 +241,33 @@ class HfrParser @Inject constructor() {
 Les implémentations de repositories orchestrent réseau, parser et cache. Elles vivent dans `:core:data`, jamais dans les features.
 
 ```kotlin
-// Dans :core:data — l'implémentation
+// Dans :core:data — l'implémentation (Phase 1A)
+@Singleton
 class TopicRepositoryImpl @Inject constructor(
     private val client: HfrClient,
     private val parser: HfrParser,
     private val topicDao: TopicDao,
+    private val clock: Clock,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : TopicRepository {
 
-    override suspend fun getTopic(cat: Int, post: Int, page: Int): Result<Topic> {
-        // 1. Vérifier le cache
-        topicDao.getCached(cat, post, page)?.let { return Result.success(it) }
+    override fun observeTopicPage(cat: Int, post: Int, page: Int): Flow<Topic> = flow {
+        // 1. Si on a une copie en cache, l'émettre tout de suite (UI réactive)
+        val cached = withContext(ioDispatcher) { loadFromCache(cat, post, page) }
+        if (cached != null) emit(cached)
 
-        // 2. Fetch + parse
-        return runCatching {
-            val html = client.fetchTopicPage(cat, post, page)
+        // 2. Re-fetch + re-parse + cache, puis émettre la version fraîche
+        emit(refreshTopicPage(cat, post, page))
+    }
+
+    override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic =
+        withContext(ioDispatcher) {
+            val html = client.getTopicPage(cat, post, page, useAuth = true)
             val topic = parser.parseTopicPage(html)
-
-            // 3. Mettre en cache
-            topicDao.insert(topic.toEntity())
-
+            val (topicEntity, postEntities) = TopicMappers.toEntities(topic, clock.instant())
+            topicDao.upsertTopicPageWithPosts(topicEntity, postEntities)
             topic
         }
-    }
 }
 ```
 

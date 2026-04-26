@@ -267,26 +267,37 @@ Les requêtes de prefetch (pages suivantes d'un topic, drapeaux préchargés) **
 **Implémentation** :
 
 ```kotlin
-class NetworkModule {
-    @Provides @AuthenticatedClient
-    fun provideAuthClient(@UserCookieJar jar: CookieJar): OkHttpClient = /* ... */
+@Module
+@InstallIn(SingletonComponent::class)
+object NetworkModule {
+    @Provides @Singleton @HfrBaseUrl
+    fun provideHfrBaseUrl(): HttpUrl = HfrConstants.BASE_URL.toHttpUrl()
 
-    @Provides @AnonymousClient
-    fun provideAnonymousClient(): OkHttpClient = OkHttpClient.Builder()
-        .cookieJar(CookieJar.NO_COOKIES)  // ou un CookieJar vide dédié
-        .build()
+    @Provides @Singleton @AuthenticatedClient
+    fun provideAuthClient(base: OkHttpClient, jar: CookieJar): OkHttpClient =
+        base.newBuilder().cookieJar(jar).build()
+
+    @Provides @Singleton @AnonymousClient
+    fun provideAnonymousClient(base: OkHttpClient): OkHttpClient =
+        base.newBuilder().cookieJar(CookieJar.NO_COOKIES).build()
 }
 
+@Singleton
 class HfrClient @Inject constructor(
-    @AuthenticatedClient private val auth: OkHttpClient,
-    @AnonymousClient private val anon: OkHttpClient,
+    @AuthenticatedClient private val authenticated: OkHttpClient,
+    @AnonymousClient private val anonymous: OkHttpClient,
+    @HfrBaseUrl private val baseUrl: HttpUrl,
 ) {
-    suspend fun fetchTopicPage(cat: Int, post: Int, page: Int): String = /* auth */
-    suspend fun prefetchTopicPage(cat: Int, post: Int, page: Int): String = /* anon */
+    suspend fun getTopicPage(
+        cat: Int,
+        post: Int,
+        page: Int,
+        useAuth: Boolean = true,  // false ⇒ @AnonymousClient ⇒ pas de mise à jour des drapeaux
+    ): String { /* ... */ }
 }
 ```
 
-Un test Konsist enforce la règle : tout appel à `prefetch*` doit utiliser `@AnonymousClient`.
+Le contrat se ramène à un **flag de booléen** côté caller : `useAuth = true` (default) pour la lecture explicite, `useAuth = false` pour tout appel de prefetch / pré-chauffage de cache. Un test Konsist enforcera la règle Phase 1A — toute fonction dont le nom commence par `prefetch*` (ou tout call-site marqué prefetch dans le repository) doit passer `useAuth = false`. La règle est trackée dans [#42](https://github.com/ForumHFR/redface2/issues/42) et reste désactivée tant qu'aucun call-site prefetch n'existe — elle s'active avec la PR `1A-bind`.
 
 Confirmé par Corran Horn sur le topic HFR Redface 2 : *« en utilisant un cookie d'un compte anonyme pour pas péter les drapeaux »*.
 
