@@ -6,6 +6,12 @@ plugins {
 
 android {
     namespace = "fr.forumhfr.redface2.core.data"
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -21,4 +27,8 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
+    testImplementation(platform(libs.okhttp.bom))
+    testImplementation(libs.okhttp)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.androidx.test.core)
 }

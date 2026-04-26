@@ -2,9 +2,10 @@ package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
+import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
 import javax.inject.Inject
 import javax.inject.Singleton
-import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -12,6 +13,7 @@ import okhttp3.Request
 class HfrClient @Inject constructor(
     @param:AuthenticatedClient private val authenticated: OkHttpClient,
     @param:AnonymousClient private val anonymous: OkHttpClient,
+    @param:HfrBaseUrl private val baseUrl: HttpUrl,
 ) {
     suspend fun getTopicPage(
         cat: Int,
@@ -19,7 +21,7 @@ class HfrClient @Inject constructor(
         page: Int,
         useAuth: Boolean = true,
     ): String {
-        val url = HfrConstants.BASE_URL.toHttpUrl().newBuilder()
+        val url = baseUrl.newBuilder()
             .addPathSegment("forum2.php")
             .addQueryParameter("config", "hfr.inc")
             .addQueryParameter("cat", cat.toString())

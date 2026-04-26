@@ -9,3 +9,7 @@ annotation class AuthenticatedClient
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class AnonymousClient
+
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class HfrBaseUrl
