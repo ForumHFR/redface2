@@ -13,18 +13,19 @@ Comment participer au projet.
 
 ---
 
-## Phase actuelle : Spécifications
+## Phase actuelle : Phase 1 — Core lecture
 
-Le projet est en phase de spec. Le code n'est pas encore écrit. Les contributions les plus utiles en ce moment :
+Phase 0 (bootstrap Gradle multi-modules, CI, thème M3, navigation, Hilt) est livrée. Phase 1 — lecture du forum (drapeaux, topics, forum, deep links, `PostRenderer` Compose) est en cours, voir [roadmap]({{ site.baseurl }}/specs/roadmap). Les contributions utiles maintenant :
 
-- **Commenter les issues** : donner son avis sur les choix techniques, proposer des alternatives
+- **Implémenter une issue Phase 1** ouverte (drapeaux, login HFR, écran forum, cache Room…)
 - **Proposer des features** : ouvrir une issue avec le label `feature`
-- **Signaler des oublis** : quelque chose manque dans les specs ? Dites-le
-- **Proposer un nom** : voir la [page nommage]({{ site.baseurl }}/guides/naming)
+- **Signaler des oublis ou divergences spec/code** : skill `/spec-reality` ou commentaire d'issue
+- **Capturer des fixtures HFR réelles** via `hfr-mcp` (skill `/parse-fixture`)
+- **Proposer un nom** d'app : voir la [page nommage]({{ site.baseurl }}/guides/naming)
 
 ---
 
-## Quand le dev commencera
+## Environnement de développement
 
 ### Prérequis
 
@@ -120,7 +121,7 @@ Convention de nommage MVI retenue (Phase 1, validée sur `:feature:topic`) :
 
 - **`<Feature>UiState`** plutôt que `<Feature>State` — cohérent avec Compose et avec le wording « UI state » utilisé dans la spec MVI.
 - **`<Feature>Intent`** = actions utilisateur internes au ViewModel. Vit dans `<Feature>UiState.kt` tant que la liste est courte ; extraire en `<Feature>Intent.kt` quand le fichier dépasse ~80 lignes ou quand la sealed hierarchy a plus de 5-6 cas.
-- **`<Feature>Request`** = DTO d'entrée du screen, **dérivé** de la `NavKey` Navigation 3 (la clé Nav3 vit côté `app/` dans `RedfaceNavigation.kt` sous le nom `<Feature>Route : RedfaceNavKey` — cf. ADR-008). Le `Request` est ce que `MainActivity` extrait de la route et passe au `<Feature>Screen` ; toujours dans son propre fichier (contrat externe).
+- **`<Feature>Request`** = DTO d'entrée du screen, **dérivé** de la `NavKey` Navigation 3 (la clé Nav3 vit côté `app/` dans `RedfaceNavigation.kt` sous le nom `<Feature>Route : RedfaceNavKey` — cf. ADR-008). Le `Request` est construit par le `entryProvider` / `RedfaceNavHost` à partir de la route et passé au `<Feature>Screen` ; toujours dans son propre fichier (contrat externe).
 - **Effects** (one-shot side-effects vers la vue : snackbar, navigation programmatique, finish) : à introduire **uniquement quand le besoin émerge**. Ne pas les anticiper en Phase 1 si la feature n'en a pas besoin (cohérent avec `AGENTS.md` § « Charte anti-derive IA-first » → « Spike avant architecture » et « Le noyau avant l'écosystème »).
 
 ### Méthodologie
@@ -175,7 +176,7 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 - **MockK** — mocking Kotlin-first
 - **Robolectric** — tests Android sans émulateur
 - **Turbine** — test des `Flow` et `StateFlow`
-- **Compose Testing** — tests UI pour les écrans critiques (Phase 1+)
+- **Compose Testing** — câblage prévu pour les tests UI des écrans critiques ; pas encore consommé (aucun test Compose dans le repo aujourd'hui — arrive avec le premier écran qui sort du slice topic fixe)
 
 **Enforcement au build (Phase 0) :**
 - **Konsist** — règles d'architecture (imports inter-modules, `:core:extension` limité à `topic/editor`, tokens M3 centralisés dans `:core:ui`). Voir [architecture.md]({{ site.baseurl }}/specs/architecture) pour les règles. La règle `@AnonymousClient` sur prefetch sera activée dès que le code réseau/prefetch existera réellement.

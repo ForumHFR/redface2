@@ -8,12 +8,15 @@ permalink: /specs/extensions
 # Extensions communautaires
 {: .fs-8 }
 
-Catalogue des extensions communautaires et optionnelles prévues à partir de la Phase 4.
+Catalogue des comportements de lecture inspirés des userscripts HFR. Les **modules d'extension Gradle** (`:feature:bookmarks`, `:feature:blacklist`, …) arrivent en **Phase 4** ; certains comportements de cette page sont en réalité du polish Phase 1-2 livré nativement avec le `PostRenderer` (lus/non-lus, ego quote, spoilers).
 {: .fs-5 .fw-300 }
 
 ---
 
-> Cette page liste uniquement les **extensions communautaires** et les fonctionnalités optionnelles inspirées des userscripts HFR.
+> Cette page mélange deux catégories — chaque section précise sa phase :
+>
+> - **Comportements natifs Phase 1-2** : indicateurs lu/non-lu, ego quote, spoilers, drapeaux compacts. Implémentés directement dans `:core:ui` / `:feature:topic` quand le `PostRenderer` ou la liste des drapeaux les rendent triviaux. Listés ici parce que la communauté HFR les a popularisés via userscripts, pas parce qu'ils nécessitent un module séparé.
+> - **Modules d'extension Phase 4** : Bookmarks, Blacklist, Qualitay, Redflag, Color Tag, Imagehost, Gifpicker, Stats. Modules Gradle isolés enregistrés via Hilt `@IntoSet`, conformes à l'architecture `:core:extension` formalisée dans [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1).
 >
 > Pour l'inventaire complet des capabilities de base de l'app, voir le [scope fonctionnel]({{ site.baseurl }}/specs/scope).
 
@@ -29,7 +32,7 @@ Redface 2 intègre les plus populaires et les plus utiles **nativement dans l'ap
 
 ### Indicateurs lu/non-lu
 
-*Inspiré de : Last Post Highlight (pop. 22), New Page Number (pop. 33)*
+*Inspiré de : Last Post Highlight (pop. 22), New Page Number (pop. 33). **Phase 1 — comportement natif** (pas un module d'extension).*
 
 - Distinction visuelle claire entre posts lus et non lus dans un topic
 - Nombre de pages non lues affiché sur chaque drapeau

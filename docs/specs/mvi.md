@@ -1,7 +1,7 @@
 ---
 title: Pattern MVI
 parent: Spécifications
-nav_order: 5
+nav_order: 6
 permalink: /specs/mvi
 mermaid: true
 ---
@@ -213,6 +213,8 @@ La mise en page concrète (`Column` vs `Scaffold`, composants `FlagsToolbar`, `F
 
 ## Écran Topic (lecture)
 
+> **Statut Phase 1 — slice topic fixe** : le `TopicUiState` réellement exposé par `feature/topic/.../TopicUiState.kt` est aujourd'hui `(request: TopicRequest, mode: Mode, availablePages: List<Int>)` avec `Mode = Loading | Loaded(topic) | Error(message) | Placeholder`, et l'unique intent est `Retry`. Le contrat ci-dessous est la **cible Phase 1 fin / Phase 2** quand pagination, edit FP, flag et image viewer arriveront. La forme actuelle vient du fait que le slice fixe charge une fixture HFR via `TopicFixtureRepository` et n'a pas encore de pagination réseau ni d'actions sur posts. Cohérent avec la méthodologie hybride (squelette illustratif, pas figé).
+
 ```kotlin
 data class TopicUiState(
     val title: String = "",
@@ -240,7 +242,7 @@ sealed interface TopicIntent {
 sealed interface TopicEffect {
     data class NavigateToReply(val cat: Int, val post: Int, val quote: String?) : TopicEffect
     data class NavigateToEdit(val cat: Int, val post: Int, val numreponse: Int) : TopicEffect
-    data class NavigateToEditFP(val cat: Int, val post: Int) : TopicEffect
+    data class NavigateToEditFirstPost(val cat: Int, val post: Int) : TopicEffect
     data class NavigateToImage(val url: String) : TopicEffect
     data class Error(val message: String) : TopicEffect
 }
@@ -256,18 +258,17 @@ L'éditeur est partagé entre reply, edit et edit FP. Le mode détermine les cha
 data class EditorState(
     val mode: EditorMode = EditorMode.Reply,
     val content: String = "",
-    val subject: String = "",           // visible en mode EditFP
-    val poll: PollData? = null,         // visible en mode EditFP
+    val subject: String = "",           // visible en mode EditFirstPost
+    val poll: PollData? = null,         // visible en mode EditFirstPost
     val isSending: Boolean = false,
     val preview: PostContent? = null,   // AST de preview issue du BBCode courant, rendu par PostRenderer
     val error: String? = null,
 )
 
 enum class EditorMode {
-    Reply,      // nouveau message
-    Edit,       // éditer un post existant
-    EditFP,     // éditer le first post (sujet + sondage)
-    NewTopic,   // créer un topic
+    Reply,           // nouveau message dans un topic existant
+    Edit,            // éditer un post existant
+    EditFirstPost,   // éditer le first post (sujet + sondage + cat + subcat)
 }
 
 sealed interface EditorIntent {
@@ -278,6 +279,22 @@ sealed interface EditorIntent {
     data object Send : EditorIntent
 }
 ```
+
+> **Statut Phase 1 — placeholder, pas une décision figée** : l'enum `EditorMode` actuelle (3 valeurs, pas de `NewTopic`) vient du bootstrap navigation Phase 0 (commit `66e242c`, par GPT-5 Codex). C'était un état de code minimal pour faire compiler le graphe de routes et naviguer entre placeholders, **pas un arbitrage produit**. Aucune action de création de topic, d'édition, de reply ou d'édition FP n'est encore implémentée — l'`EditorScreen` reste un placeholder.
+>
+> **Décision Phase 2 — découpage en deux écrans** ([#86](https://github.com/ForumHFR/redface2/issues/86)) : quand l'éditeur réel arrivera, il sera découpé par **famille métier** plutôt que par mode unique :
+>
+> ```kotlin
+> // Post-level editor — édition de niveau post (contenu BBCode seulement)
+> enum class PostEditorMode { Reply, Edit }
+>
+> // Topic-level editor — édition de niveau topic (sujet + cat/subcat + contenu + sondage)
+> enum class TopicFormMode { New, EditFirstPost }
+> ```
+>
+> Les deux écrans partagent leurs **capacités** via composables `:core:ui` (`BBCodeToolbar`, `BBCodePreview`, `PollEditor`, `CatSubcatPicker`) et use cases `:core:domain` (`validateBbcode`). `BBCodePreview` reçoit un `PostContent` déjà parsé (ou une lambda `() -> PostContent`) — il **ne parse pas lui-même**, ce qui garde `:core:ui` libre de toute logique métier. Le parsing BBCode reste une responsabilité `:core:parser` (`parsePostContentFromBbcode`) exposée aux features via une interface/use case injectée, afin de préserver la frontière `:feature:*` → `:core:domain` + `:core:ui` (les ViewModels appellent le use case et passent le `PostContent` résultant à `BBCodePreview`). Pas de duplication, juste deux contrats de formulaire distincts. Rationale : l'endpoint HFR n'est pas une bonne frontière UI (`Reply` et `NewTopic` passent tous deux par `bddpost.php` mais leurs formulaires diffèrent ; `EditFirstPost` et `NewTopic` partagent presque toute la structure malgré des endpoints différents). La frontière utile est **post-level** vs **topic-level**.
+>
+> Cette section sera révisée quand l'éditeur Phase 2 sera prototypé — c'est cohérent avec la méthodologie hybride (prototype-first sur l'UI). Voir [#86](https://github.com/ForumHFR/redface2/issues/86) pour le suivi.
 
 ---
 
@@ -315,8 +332,13 @@ feature/topic/src/main/kotlin/fr/forumhfr/redface2/feature/topic/
   ├── TopicContent.kt       // @Composable stateless, previewable (si extrait)
   ├── TopicViewModel.kt     // MVI ViewModel (Hilt-injected via @HiltViewModel)
   ├── TopicUiState.kt       // État UI + Intents (consolidés tant que court)
-  └── TopicRequest.kt       // Paramètre d'entrée du screen (DTO dérivé de la NavKey)
+  └── TopicRequest.kt       // Paramètre d'entrée du screen (DTO dérivé de TopicRoute)
+
+feature/topic/src/test/kotlin/fr/forumhfr/redface2/feature/topic/
+  └── TopicViewModelTest.kt // JUnit 4 + Turbine, fixture-driven
 ```
+
+La `NavKey` (`TopicRoute`) ne vit **pas** dans le module feature : elle est déclarée côté `:app` dans `app/src/main/kotlin/.../navigation/RedfaceNavigation.kt` sous le sealed interface `RedfaceNavKey`. C'est la convention canonique pour Redface 2 — les routes `@Serializable` sont centralisées dans `:app` pour éviter les dépendances circulaires entre features. Détails dans [`contributing.md`]({{ site.baseurl }}/guides/contributing#convention-par-feature).
 
 Cette convention garantit la cohérence et facilite l'onboarding des contributeurs.
 

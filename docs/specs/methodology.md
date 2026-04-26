@@ -1,7 +1,7 @@
 ---
 title: Méthodologie
 parent: Spécifications
-nav_order: 8
+nav_order: 0
 permalink: /specs/methodology
 ---
 
