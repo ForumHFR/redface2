@@ -271,11 +271,6 @@ enum class EditorMode {
     EditFirstPost,   // éditer le first post (sujet + sondage + cat + subcat)
 }
 
-// Le mode "création de topic" (NewTopic) n'est pas un EditorMode : c'est un écran distinct
-// (`NewTopicScreen`) avec son propre formulaire (sélecteur cat/subcat hiérarchique, sujet
-// obligatoire) et son propre ViewModel. Il partage seulement le rendu de preview Compose
-// (`PostRenderer` + parser BBCode) avec l'éditeur.
-
 sealed interface EditorIntent {
     data class UpdateContent(val text: String) : EditorIntent
     data class UpdateSubject(val text: String) : EditorIntent
@@ -284,6 +279,22 @@ sealed interface EditorIntent {
     data object Send : EditorIntent
 }
 ```
+
+> **Statut Phase 1 — placeholder, pas une décision figée** : l'enum `EditorMode` actuelle (3 valeurs, pas de `NewTopic`) vient du bootstrap navigation Phase 0 (commit `66e242c`, par GPT-5 Codex). C'était un état de code minimal pour faire compiler le graphe de routes et naviguer entre placeholders, **pas un arbitrage produit**. Aucune action de création de topic, d'édition, de reply ou d'édition FP n'est encore implémentée — l'`EditorScreen` reste un placeholder.
+>
+> **Décision Phase 2 — découpage en deux écrans** ([#86](https://github.com/ForumHFR/redface2/issues/86)) : quand l'éditeur réel arrivera, il sera découpé par **famille métier** plutôt que par mode unique :
+>
+> ```kotlin
+> // Post-level editor — édition de niveau post (contenu BBCode seulement)
+> enum class PostEditorMode { Reply, Edit }
+>
+> // Topic-level editor — édition de niveau topic (sujet + cat/subcat + contenu + sondage)
+> enum class TopicFormMode { New, EditFirstPost }
+> ```
+>
+> Les deux écrans partagent leurs **capacités** via composables `:core:ui` (`BBCodeToolbar`, `BBCodePreview`, `PollEditor`, `CatSubcatPicker`) et use cases `:core:domain` (`parsePostContentFromBbcode`, `validateBbcode`) — pas de duplication, juste deux contrats de formulaire distincts. Rationale : l'endpoint HFR n'est pas une bonne frontière UI (`Reply` et `NewTopic` passent tous deux par `bddpost.php` mais leurs formulaires diffèrent ; `EditFirstPost` et `NewTopic` partagent presque toute la structure malgré des endpoints différents). La frontière utile est **post-level** vs **topic-level**.
+>
+> Cette section sera révisée quand l'éditeur Phase 2 sera prototypé — c'est cohérent avec la méthodologie hybride (prototype-first sur l'UI). Voir [#86](https://github.com/ForumHFR/redface2/issues/86) pour le suivi.
 
 ---
 
