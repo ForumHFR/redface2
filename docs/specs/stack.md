@@ -21,7 +21,7 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 | UI | **Jetpack Compose** (via compose-bom) | XML layouts | Direction officielle Google, déclaratif, plus maintenable |
 | Design system | **Material 3** + **Material 3 Adaptive 1.2+** | Material 2 | Standard 2026, dynamic color, canonical layouts (list-detail, supporting pane). Décisions design détaillées ci-dessous. |
 | Architecture | **MVI** (MVVM+UDF) | MVVM classique | Flux unidirectionnel, état prévisible, idéal pour un forum reader |
-| Navigation | **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026) | Circuit, Decompose, Navigation 2.x | Compose-first : back stack en state (`NavBackStack<NavKey>`), scenes calculées via `rememberSceneState`, Shared Elements entre scenes, intégration M3 Adaptive directe (list-detail, supporting pane). Cf. [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3). |
+| Navigation | **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026) | Circuit, Decompose, Navigation 2.x | Compose-first : back stack en state (`NavBackStack<NavKey>`), rendu single-pane via `NavDisplay(backStack, onBack, entryDecorators, entryProvider { entry<…> })`, multi-pane via `ListDetailPaneScaffold` (M3 Adaptive). Cf. [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3). |
 | DI | **Hilt (KSP)** | Koin | Erreurs à la compilation, intégration Jetpack, standard contributeurs |
 | HTTP | **OkHttp 5** (5.3+) | Retrofit, Ktor | Pas d'API REST à mapper, scraping HTML direct + cookies. Stable depuis 07/2025 (`callTimeout` via `kotlin.time.Duration`, `mockwebserver3`). |
 | Parsing HTML | **Jsoup** | Regex, custom parser | Standard JVM, CSS selectors, battle-tested |

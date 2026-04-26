@@ -31,10 +31,12 @@ Les options étudiées étaient principalement :
 Le projet retient **Compose Navigation 3** comme stack de navigation.
 
 Les choix d'API associés sont :
-- routes typées implémentant `NavKey`
-- back stack explicite via `NavBackStack<NavKey>`
-- scènes calculées via `rememberSceneState`
-- gestion du back via `NavigationBackHandler`
+- routes typées (`@Serializable`) implémentant un sealed interface `RedfaceNavKey : NavKey`
+- back stack explicite via `NavBackStack<NavKey>` (un par onglet de bottom nav, conservé entre commutations)
+- rendu via `NavDisplay(backStack, onBack, entryDecorators, entryProvider { entry<Route> { … } })` — l'API stable single-pane, qui couvre déjà predictive back, lifecycle et state restoration
+- décorateurs `rememberSaveableStateHolderNavEntryDecorator()` + `rememberViewModelStoreNavEntryDecorator()` pour la persistance d'état et des ViewModels par entrée
+- multi-pane (tablette / foldables) via `ListDetailPaneScaffold` (Material 3 Adaptive 1.2+) au-dessus du même back stack
+- gestion du back par défaut via le paramètre `onBack` de `NavDisplay` ; `PredictiveBackHandler` ajouté seulement sur les écrans à interaction custom (ex. éditeur avec draft non sauvegardé)
 
 Les fragments HFR de type `#t{numreponse}` sont parsés manuellement à l'entrée de l'app, puis transformés en routes typées.
 
