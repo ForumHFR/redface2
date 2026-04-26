@@ -60,30 +60,46 @@ class PostRendererInlineTest {
     }
 
     @Test
-    fun `smiley with imageUrl nested inside Strong is reachable from both walks`() {
-        // The MediaCounter KDoc warns: appendInline and walkInlinesForMedia must advance the
-        // counter under the EXACT same conditions, including when descending into containers
-        // like Strong / Emphasis / Color / Link. Without this test, the recursion branch in
-        // walkInlinesForMedia (PostRenderer.kt — `is PostInline.Strong -> walkInlinesForMedia(
-        // inline.children, ...)` and friends) could be deleted silently and only the JVM Strong
-        // case here would catch it before Compose runtime divergence at scroll time.
-        val inlines = listOf(
-            PostInline.Strong(
-                children = listOf(
-                    PostInline.Text("hi "),
-                    PostInline.Smiley(
-                        kind = SmileyKind.Builtin(":o"),
-                        imageUrl = "https://forum.hardware.fr/images/perso/o.gif",
-                    ),
-                ),
+    fun `MediaCounter recursion is symmetric across every PostInline container`() {
+        // The MediaCounter KDoc warns that appendInline and walkInlinesForMedia must advance
+        // the counter under the EXACT same conditions, including when descending into the six
+        // PostInline containers (Strong, Emphasis, Underline, Strike, Color, Link). If any
+        // recursion branch in walkInlinesForMedia (PostRenderer.kt, `is PostInline.<C> ->
+        // walkInlinesForMedia(inline.children, ...)`) is deleted, the AnnotatedString would
+        // still emit a post-smiley-N placeholder but the inline-content map would not register
+        // it — leading to silent divergence at Compose runtime. This test exercises every
+        // container type in turn so a deletion of any branch fails loudly with a JVM unit test.
+        fun smileyChild(): List<PostInline> = listOf(
+            PostInline.Smiley(
+                kind = SmileyKind.Builtin(":o"),
+                imageUrl = "https://forum.hardware.fr/images/perso/o.gif",
             ),
         )
+        val containers: List<Pair<String, PostInline>> = listOf(
+            "Strong" to PostInline.Strong(smileyChild()),
+            "Emphasis" to PostInline.Emphasis(smileyChild()),
+            "Underline" to PostInline.Underline(smileyChild()),
+            "Strike" to PostInline.Strike(smileyChild()),
+            "Color" to PostInline.Color(colorHex = "#FF0000", children = smileyChild()),
+            "Link" to PostInline.Link(url = "https://example.com", children = smileyChild()),
+        )
 
-        val annotated = buildInlineText(inlines, emptyLinkStyles, imageAlt = "img")
-        val media = collectInlineMedia(inlines)
+        containers.forEach { (name, container) ->
+            val inlines = listOf(container)
+            val annotated = buildInlineText(inlines, emptyLinkStyles, imageAlt = "img")
+            val media = collectInlineMedia(inlines)
 
-        assertEquals(setOf("post-smiley-0"), media.keys)
-        assertEquals(media.keys, annotated.inlineContentIds())
+            assertEquals(
+                "$name: collectInlineMedia must register the nested smiley as map key",
+                setOf("post-smiley-0"),
+                media.keys,
+            )
+            assertEquals(
+                "$name: AnnotatedString placeholder IDs must match the inline-content map keys",
+                media.keys,
+                annotated.inlineContentIds(),
+            )
+        }
     }
 
     @Test
