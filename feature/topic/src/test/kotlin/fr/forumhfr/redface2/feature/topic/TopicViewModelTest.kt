@@ -7,6 +7,7 @@ import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -52,25 +53,33 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `flow emitting cache then fresh exposes both Loaded states`() = runTest {
+    fun `cache emission lands before fresh emission in observable state sequence`() = runTest {
         val cached = fakeTopic(page = 1, totalPages = 3, title = "cached")
         val fresh = fakeTopic(page = 1, totalPages = 3, title = "fresh")
-        val repository = FakeTopicRepository(
-            flowsToReturn = listOf(
-                flow {
-                    emit(cached)
-                    emit(fresh)
-                },
-            ),
-        )
+        // SharedFlow with no replay so we control exactly when each emission lands and can
+        // observe the sequence Loading → Loaded(cached) → Loaded(fresh) with Turbine instead
+        // of asserting only the final state (which would pass even if cache-first was broken).
+        val controlled = MutableSharedFlow<Topic>(replay = 0)
+        val repository = FakeStreamingTopicRepository(controlled)
 
         val viewModel = TopicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
         )
 
-        val finalLoaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
-        assertEquals(fresh, finalLoaded.topic)
+        viewModel.state.test {
+            assertMode<TopicUiState.Mode.Loading>(awaitItem())
+
+            controlled.emit(cached)
+            val cachedState = awaitItem()
+            assertEquals(cached, assertMode<TopicUiState.Mode.Loaded>(cachedState).topic)
+
+            controlled.emit(fresh)
+            val freshState = awaitItem()
+            assertEquals(fresh, assertMode<TopicUiState.Mode.Loaded>(freshState).topic)
+
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test
@@ -180,6 +189,16 @@ private class FakeTopicRepository(
         calls += Triple(cat, post, page)
         return queue.removeFirstOrNull() ?: error("No more flows queued")
     }
+
+    override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
+        error("refreshTopicPage not used by ViewModel under test")
+    }
+}
+
+private class FakeStreamingTopicRepository(
+    private val source: Flow<Topic>,
+) : TopicRepository {
+    override fun observeTopicPage(cat: Int, post: Int, page: Int): Flow<Topic> = source
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
         error("refreshTopicPage not used by ViewModel under test")
