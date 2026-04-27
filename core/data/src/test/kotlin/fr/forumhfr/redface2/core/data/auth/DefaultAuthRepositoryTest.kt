@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.domain.auth.LoginError
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.network.auth.AuthRemoteDataSource
 import fr.forumhfr.redface2.core.network.cookie.CookieStore
+import fr.forumhfr.redface2.core.network.cookie.PersistentCookieJar
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import okhttp3.Cookie
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -22,14 +24,11 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class DefaultAuthRepositoryTest {
 
+    private val sampleUrl = "https://forum.hardware.fr/login_validation.php".toHttpUrl()
+
     @Test
     fun `observeAuthState emits Anonymous when no cookies are persisted`() = runTest {
-        val store = FakeCookieStore(initial = emptyList())
-        val repo = DefaultAuthRepository(
-            remote = mockk(),
-            cookieStore = store,
-            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+        val (repo, _) = buildRepository(initialCookies = emptyList())
 
         repo.observeAuthState().test {
             assertEquals(AuthState.Anonymous, awaitItem())
@@ -39,12 +38,7 @@ class DefaultAuthRepositoryTest {
 
     @Test
     fun `observeAuthState emits Authenticated when md_user cookie is present`() = runTest {
-        val store = FakeCookieStore(initial = listOf(cookie("md_user", "xaat")))
-        val repo = DefaultAuthRepository(
-            remote = mockk(),
-            cookieStore = store,
-            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+        val (repo, _) = buildRepository(initialCookies = listOf(cookie("md_user", "xaat")))
 
         repo.observeAuthState().test {
             assertEquals(AuthState.Authenticated("xaat"), awaitItem())
@@ -56,12 +50,7 @@ class DefaultAuthRepositoryTest {
     fun `observeAuthState emits Anonymous when md_user value is blank`() = runTest {
         // Defensive: an md_user cookie with empty value can show up during a deletion-marker
         // Set-Cookie before the jar's merge runs. We don't want to flap to a phantom session.
-        val store = FakeCookieStore(initial = listOf(cookie("md_user", "")))
-        val repo = DefaultAuthRepository(
-            remote = mockk(),
-            cookieStore = store,
-            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+        val (repo, _) = buildRepository(initialCookies = listOf(cookie("md_user", "")))
 
         repo.observeAuthState().test {
             assertEquals(AuthState.Anonymous, awaitItem())
@@ -70,20 +59,15 @@ class DefaultAuthRepositoryTest {
     }
 
     @Test
-    fun `observeAuthState transitions Anonymous to Authenticated when cookies are saved`() = runTest {
-        val store = FakeCookieStore(initial = emptyList())
-        val repo = DefaultAuthRepository(
-            remote = mockk(),
-            cookieStore = store,
-            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+    fun `observeAuthState transitions Anonymous to Authenticated when cookies arrive at the jar`() = runTest {
+        val (repo, jar) = buildRepository(initialCookies = emptyList())
 
         repo.observeAuthState().test {
             assertEquals(AuthState.Anonymous, awaitItem())
 
-            store.save(listOf(cookie("md_user", "xaat")))
-            assertEquals(AuthState.Authenticated("xaat"), awaitItem())
+            jar.saveFromResponse(sampleUrl, listOf(cookie("md_user", "xaat")))
 
+            assertEquals(AuthState.Authenticated("xaat"), awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -92,11 +76,7 @@ class DefaultAuthRepositoryTest {
     fun `login delegates to remote and returns its Result`() = runTest {
         val remote = mockk<AuthRemoteDataSource>()
         coEvery { remote.login("xaat", "secret") } returns Result.success(AuthState.Authenticated("xaat"))
-        val repo = DefaultAuthRepository(
-            remote = remote,
-            cookieStore = FakeCookieStore(initial = emptyList()),
-            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+        val (repo, _) = buildRepository(initialCookies = emptyList(), remote = remote)
 
         val result = repo.login("xaat", "secret")
 
@@ -108,11 +88,7 @@ class DefaultAuthRepositoryTest {
     fun `login propagates LoginError from remote`() = runTest {
         val remote = mockk<AuthRemoteDataSource>()
         coEvery { remote.login(any(), any()) } returns Result.failure(LoginError.InvalidCredentials)
-        val repo = DefaultAuthRepository(
-            remote = remote,
-            cookieStore = FakeCookieStore(initial = emptyList()),
-            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+        val (repo, _) = buildRepository(initialCookies = emptyList(), remote = remote)
 
         val result = repo.login("xaat", "wrong")
 
@@ -120,20 +96,32 @@ class DefaultAuthRepositoryTest {
     }
 
     @Test
-    fun `logout clears the cookie store`() = runTest {
-        val store = FakeCookieStore(initial = listOf(cookie("md_user", "xaat")))
-        val repo = DefaultAuthRepository(
-            remote = mockk(),
-            cookieStore = store,
-            ioDispatcher = UnconfinedTestDispatcher(testScheduler),
-        )
+    fun `logout clears the cookie jar synchronously`() = runTest {
+        val (repo, jar) = buildRepository(initialCookies = listOf(cookie("md_user", "xaat")))
 
         repo.logout()
 
-        store.observe().test {
-            assertEquals(emptyList<Cookie>(), awaitItem())
+        assertEquals(emptyList<Cookie>(), jar.state.value)
+        repo.observeAuthState().test {
+            assertEquals(AuthState.Anonymous, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    private fun buildRepository(
+        initialCookies: List<Cookie>,
+        remote: AuthRemoteDataSource = mockk(),
+    ): Pair<DefaultAuthRepository, PersistentCookieJar> {
+        val store = FakeCookieStore(initial = initialCookies)
+        // UnconfinedTestDispatcher drains the init-block collector synchronously so the
+        // jar's StateFlow already reflects the persisted cookies by the time we return.
+        val jar = PersistentCookieJar(store, UnconfinedTestDispatcher())
+        val repo = DefaultAuthRepository(
+            remote = remote,
+            cookieJar = jar,
+            ioDispatcher = UnconfinedTestDispatcher(),
+        )
+        return repo to jar
     }
 
     private fun cookie(
