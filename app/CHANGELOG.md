@@ -15,6 +15,42 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v14 — `0.1.0-phase1b.0` — 2026-04-27
+
+**Statut** : `local`
+**Commit** : à venir (PR feature/1b-1-auth)
+**Fichier** : `redface2-v14-20260427-<sha>.aab`
+
+Phase 1B.1 livrée : login HFR utilisable de bout en bout.
+
+### Added
+- **Login HFR fonctionnel** — `LoginScreen` (`:feature:auth`) appelle `AuthRepository.login()`, qui POSTe `login_validation.php?config=hfr.inc` via le `@AuthenticatedClient`. Le cookie `md_user` retourné est persisté par `PersistentCookieJar` ↔ `DataStoreCookieStore`, donc la session survit kill/restart de l'app.
+- **`AuthState` global** — `FlagsScreen` affiche maintenant `Connecté en tant que <pseudo> · Se déconnecter` ou un CTA `Se connecter à HFR`, alimenté par `FlagsHomeViewModel.observeAuthState()`.
+- **Erreurs typées** — `LoginError.{InvalidCredentials, RateLimited, Network, Unknown}` mappées en bandeaux français localisés dans `LoginScreen`.
+- **`:core:auth` non créé** — l'architecture spec place le backbone auth dans `:core:network` (login + cookies) et `:core:data` (repository impl). Le module `:feature:auth` (déjà bootstrap Phase 0) ajoute juste l'UI.
+- **Sécurité au repos** — `android:allowBackup="false"` + `fullBackupContent="false"` dans `AndroidManifest.xml` pour exclure les cookies des backups Google Drive (cf. ADR-002 amendé).
+- **Konsist @AnonymousClient** (closes #42) — règle architecturale qui interdit aux fichiers sous `/auth/` d'importer le qualifier `@AnonymousClient`. Catch le mismatch silencieux (cookies pas envoyés → session vue comme déconnectée) au build.
+- **DataStore Preferences 1.2.1** — ajouté au version catalog. Persiste les cookies non chiffrés (cf. ADR-002 amendé : password en plaintext POST → chiffrement local redondant face à un attaquant runtime).
+
+### Changed
+- **ADR-002 amendé** — alignement avec la décision originale issue [#24 thème 13](https://github.com/ForumHFR/redface2/issues/24#issuecomment-3526003625) : DataStore non chiffré + FBE plateforme, sans clé Keystore custom (la rédaction initiale avait dérivé en réintroduisant AES/GCM Keystore).
+- `InMemoryCookieJar` n'est plus dans le graph Hilt production — gardé comme utilitaire de test.
+
+### Tests
+- 5 tests `:core:data.auth.DataStoreCookieStore` (Robolectric, persist + filter expired)
+- 6 tests `:core:network.cookie.PersistentCookieJar` (cache snapshot + merge + deletion-marker)
+- 6 tests `:core:network.auth.AuthRemoteDataSource` (MockWebServer, success + 4 erreurs typées + identity mismatch)
+- 7 tests `:core:data.auth.DefaultAuthRepository` (MockK + fake CookieStore)
+- 11 tests `:feature:auth.LoginViewModel` (Idle → Submitting → Authenticated/Error, debounce, error mapping)
+- 1 test Konsist nouveau (anti-leak `@AnonymousClient` sur les paquets `/auth/`)
+
+### Notes
+- Drapeaux réels (parseFlags + `:feature:flags`) attendus en 1B.2 + 1B.3
+- Détection session expirée (Interceptor sur 302 → `/login.php`) reportée — Phase 1B.3 ou plus tard
+- Pas de biométrie / pas de relogin transparent (Option A actée dans ADR-002)
+
+---
+
 ## v13 — `0.1.0-phase1a.1` — 2026-04-27
 
 **Statut** : `local`
