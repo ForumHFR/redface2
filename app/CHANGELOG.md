@@ -15,6 +15,22 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v15 — `0.1.0-phase1b.1` — 2026-04-27
+
+**Statut** : `local`
+**Commit** : à venir (rebuild Phase 1B.1)
+**Fichier** : `redface2-v15-20260427-<sha>.aab`
+
+Rebuild administratif de Phase 1B.1 — `versionCode` 14 déjà uploadé sur Play Console, nouveau code `15` requis pour pouvoir réuploader. Aucun changement fonctionnel vs v14 ; le seul écart code est un polish post-review superpowers.
+
+### Changed
+- `AuthRemoteDataSource.classify()` — `LoginError.Unknown` distingue maintenant `"expected md_user cookie not set"` (cookie absent) de `"md_user cookie value mismatched the submitted pseudo"` (cookie présent mais valeur ≠ pseudo soumis). Auparavant les deux cas retournaient le même message « not set » menteur. Diagnostic logs côté dev plus précis ; comportement utilisateur identique (bandeau `LoginError.Unknown` localisé).
+
+### Notes
+- Voir entrée v14 ci-dessous pour le contenu Phase 1B.1 complet (login HFR + cookies persistants + AuthState global + Konsist anti-leak).
+
+---
+
 ## v14 — `0.1.0-phase1b.0` — 2026-04-27
 
 **Statut** : `local`
