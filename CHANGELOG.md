@@ -8,10 +8,17 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
+Phase 1B.1 livrée : login HFR utilisable de bout en bout avec cookies persistants (DataStore + `PersistentCookieJar`). AAB `0.1.0-phase1b.0` (build 14) sortira avec la PR `feature/1b-1-auth`.
+
+### Added
+- `docs/specs/models.md` : nouvelle section **Authentification** documentant `AuthState` (sealed `Anonymous` / `Authenticated(pseudo)`) et `LoginError` (sealed `InvalidCredentials` / `RateLimited` / `Network` / `Unknown`). Le `classDiagram` Mermaid expose la hiérarchie sealed.
+- `docs/specs/roadmap.md` Phase 1 : entrée "Login HFR" cochée.
+
 ### Changed
 - **ADR-002 amendé** : alignement avec la décision originale du cycle [#24 thème 13](https://github.com/ForumHFR/redface2/issues/24#issuecomment-3526003625). La décision actée était **DataStore non chiffré + FBE plateforme + `allowBackup="false"`**, sans clé Keystore custom. La rédaction initiale de l'ADR avait réintroduit une couche AES/GCM Keystore qui n'était pas dans la décision. Rationale : le password transite en clair côté HFR, donc tout chiffrement local du cookie est redondant face à un attaquant runtime.
 - `docs/specs/architecture.md` § Stockage sécurisé des credentials : section réécrite (suppression du snippet `Cipher`/`KeyGenParameterSpec`).
 - `docs/specs/stack.md` ligne "Stockage sécurisé" : "DataStore + Keystore" → "DataStore non chiffré + FBE plateforme".
+- `AGENTS.md` règle Deprecations : alignement sur la nouvelle formulation Option A.
 
 ---
 

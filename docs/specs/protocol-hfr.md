@@ -89,12 +89,24 @@ Le fait qu'une édition concerne le **premier post** (FP) vs un post normal est 
 
 ### POST `login_validation.php`
 
+URL complète : `POST https://forum.hardware.fr/login_validation.php?config=hfr.inc`
+
+Form-encoded body (`application/x-www-form-urlencoded`) :
+
 | Field | Valeur | Description |
 |---|---|---|
 | `pseudo` | username | |
-| `password` | password (plaintext) | **Attention** : HFR attend le password en clair dans le form POST (over HTTPS). Ne pas hasher côté client. |
+| `password` | password (plaintext) | **Attention** : HFR attend le password en clair dans le form POST (over HTTPS). Ne pas hasher côté client. Pas de `hash_check` ni de GET préalable pour le login lui-même. |
 
-Détection du succès : cookie `md_user` présent dans la réponse. Détection de l'échec : pattern `Votre mot de passe ou nom d'utilisateur n'est pas valide` dans le body HTML.
+Détection de la réponse (mirror de l'impl `:core:network/auth/AuthRemoteDataSource` Phase 1B.1) :
+
+| Cas | Marqueur | Action client |
+|---|---|---|
+| Succès | cookie `Set-Cookie: md_user=<pseudo>` présent | `AuthState.Authenticated(pseudo)`, cookie persisté par `PersistentCookieJar` |
+| Mauvais identifiants | body contient `Votre mot de passe ou nom d'utilisateur n'est pas valide` | `LoginError.InvalidCredentials` |
+| Anti-flood | body contient `Afin de prévenir les tentatives de flood` | `LoginError.RateLimited` (l'utilisateur attend quelques minutes et retente) |
+| Cookie `md_user` avec valeur ≠ pseudo soumis | défensif : `AuthRemoteDataSource` refuse de revendiquer une autre identité | `LoginError.Unknown("expected md_user cookie not set")` |
+| Tout autre format | aucun marqueur reconnu | `LoginError.Unknown(detail)` |
 
 ---
 
