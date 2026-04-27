@@ -38,11 +38,16 @@ fun FlagsScreen(
             Text(text = stringResource(R.string.flags_open_category))
         }
 
-        AuthFooter(
-            state = authState,
-            onLoginRequested = onLoginRequested,
-            onLogoutRequested = viewModel::logout,
-        )
+        // Render nothing while authState is null (cookie jar still warming up the cache from
+        // DataStore). Defaulting to "Se connecter à HFR" here would reintroduce the cold-start
+        // flicker the upstream layers are explicitly designed to avoid.
+        authState?.let { state ->
+            AuthFooter(
+                state = state,
+                onLoginRequested = onLoginRequested,
+                onLogoutRequested = viewModel::logout,
+            )
+        }
 
         // Phase 1A — version surfaced on the home placeholder so dogfood builds advertise
         // their lineage. Will move to :feature:settings (About screen) once that module
