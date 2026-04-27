@@ -80,4 +80,33 @@ class ArchitectureKonsistTest {
             }
         }
     }
+
+    @Test
+    fun `auth code does not depend on AnonymousClient`() {
+        // Anything under an /auth/ directory speaks to HFR with cookies attached. Wiring
+        // @AnonymousClient (CookieJar.NO_COOKIES) into auth code would silently break the
+        // session since OkHttp would never replay md_user / md_pass — this rule catches the
+        // mistake at build time instead of runtime.
+        val authProductionFiles = Konsist
+            .scopeFromProject()
+            .slice { file ->
+                file.path.contains("/auth/") &&
+                    !file.path.contains("/src/test/") &&
+                    !file.path.contains("/build/")
+            }
+            .files
+
+        assertTrue("Konsist must scan auth production files", authProductionFiles.isNotEmpty())
+
+        authProductionFiles.assertFalse { file ->
+            file.imports.any { imported ->
+                imported.name.orEmpty() == ANONYMOUS_CLIENT_QUALIFIER
+            }
+        }
+    }
+
+    private companion object {
+        const val ANONYMOUS_CLIENT_QUALIFIER =
+            "fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient"
+    }
 }
