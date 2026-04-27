@@ -67,7 +67,9 @@ class AuthRemoteDataSource @Inject constructor(
         RATE_LIMIT_MARKER in html -> Result.failure(LoginError.RateLimited)
         cookies.any { it.name == COOKIE_MD_USER && it.value == pseudo } ->
             Result.success(AuthState.Authenticated(pseudo))
-        else -> Result.failure(LoginError.Unknown("expected $COOKIE_MD_USER cookie not set"))
+        cookies.none { it.name == COOKIE_MD_USER } ->
+            Result.failure(LoginError.Unknown("expected $COOKIE_MD_USER cookie not set"))
+        else -> Result.failure(LoginError.Unknown("$COOKIE_MD_USER cookie does not match requested pseudo"))
     }
 
     private companion object {

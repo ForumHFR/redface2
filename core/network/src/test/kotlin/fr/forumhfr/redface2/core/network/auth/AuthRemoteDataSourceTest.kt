@@ -91,6 +91,7 @@ class AuthRemoteDataSourceTest {
 
         val error = result.exceptionOrNull()
         assertTrue("expected Unknown but was ${error?.javaClass?.simpleName}", error is LoginError.Unknown)
+        assertEquals("expected md_user cookie not set", (error as LoginError.Unknown).detail)
     }
 
     @Test
@@ -106,7 +107,12 @@ class AuthRemoteDataSourceTest {
 
         val result = dataSource.login("xaat", "secret")
 
-        assertTrue(result.exceptionOrNull() is LoginError.Unknown)
+        val error = result.exceptionOrNull()
+        assertTrue("expected Unknown but was ${error?.javaClass?.simpleName}", error is LoginError.Unknown)
+        assertEquals(
+            "md_user cookie does not match requested pseudo",
+            (error as LoginError.Unknown).detail,
+        )
     }
 
     @Test
