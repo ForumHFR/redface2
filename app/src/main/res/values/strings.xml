@@ -8,5 +8,8 @@
     <string name="flags_body">Accueil logue de l application. Ce placeholder valide le premier onglet et l ouverture vers un topic ou une categorie.</string>
     <string name="flags_open_unread_topic">Ouvrir un topic non lu</string>
     <string name="flags_open_category">Ouvrir la catégorie suivie</string>
+    <string name="flags_login_cta">Se connecter à HFR</string>
+    <string name="flags_logged_in_as">Connecté en tant que %1$s</string>
+    <string name="flags_logout_cta">Se déconnecter</string>
     <string name="app_version_footer">Redface 2 — v%1$s (build %2$d)</string>
 </resources>

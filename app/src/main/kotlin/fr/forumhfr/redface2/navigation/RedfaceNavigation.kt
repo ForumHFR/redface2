@@ -26,6 +26,7 @@ import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.FlagsScreen
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.feature.auth.LoginScreen
 import fr.forumhfr.redface2.feature.editor.EditorScreen
 import fr.forumhfr.redface2.feature.forum.CategoryScreen
 import fr.forumhfr.redface2.feature.forum.ForumScreen
@@ -88,6 +89,9 @@ enum class EditorMode {
     Edit,
     EditFirstPost,
 }
+
+@Serializable
+data object LoginRoute : RedfaceNavKey
 
 private enum class TopLevelDestination(
     val labelRes: Int,
@@ -180,6 +184,25 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     },
                     onOpenTrackedCategory = {
                         backStack.add(CategoryRoute(cat = 23, subcat = 0))
+                    },
+                    onLoginRequested = {
+                        backStack.add(LoginRoute)
+                    },
+                )
+            }
+            entry<LoginRoute> {
+                LoginScreen(
+                    onAuthenticated = {
+                        // Pop the login screen — the FlagsScreen footer reactively re-renders
+                        // to "Connecté en tant que <pseudo>" through observeAuthState().
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    onCancel = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
                     },
                 )
             }
