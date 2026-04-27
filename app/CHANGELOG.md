@@ -34,7 +34,7 @@ Phase 1B.1 livrée : login HFR utilisable de bout en bout.
 
 ### Changed
 - **ADR-002 amendé** — alignement avec la décision originale issue [#24 thème 13](https://github.com/ForumHFR/redface2/issues/24#issuecomment-3526003625) : DataStore non chiffré + FBE plateforme, sans clé Keystore custom (la rédaction initiale avait dérivé en réintroduisant AES/GCM Keystore).
-- `InMemoryCookieJar` n'est plus dans le graph Hilt production — gardé comme utilitaire de test.
+- `InMemoryCookieJar` supprimé (aucun consumer prod ni test). Si un futur test a besoin d'un CookieJar isolé en mémoire, il sera réintroduit sous `src/test/`.
 
 ### Tests
 - 5 tests `:core:data.auth.DataStoreCookieStore` (Robolectric, persist + filter expired)
