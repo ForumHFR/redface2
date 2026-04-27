@@ -83,10 +83,10 @@ Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances e
 
 - [ ] Login HFR (cookies persistants)
 - [ ] Écran Drapeaux (accueil) — tri par date/catégorie, filtres (mock courant, repository réel à venir)
-- [x] **Slice topic fixe** — `TopicScreen` rend une fixture HFR réelle (fixture `topic_khakha_page_146.html`) via le pipeline complet parser → AST → renderer
+- [x] **Slice topic fixe** — historique : `TopicScreen` a rendu une fixture HFR via parser → AST → renderer le temps que le pipeline réseau soit posé
 - [x] **Parser HTML topic** — `:core:parser` produit `PostContent` depuis le HTML HFR (cf. [PR #78](https://github.com/ForumHFR/redface2/pull/78))
 - [x] **PostRenderer Compose** — rendu natif `PostContent` dans `:core:ui` (paragraphes, citations imbriquées avec collapse, spoilers, smileys builtin/perso, images, couleurs ; cf. [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast) et [PR #80](https://github.com/ForumHFR/redface2/pull/80))
-- [ ] Écran Topic réel — `TopicRepository` au-dessus d'OkHttp + cache Room (remplace `TopicFixtureRepository`)
+- [x] **Écran Topic réel** — `TopicRepository` cache-aside (OkHttp + parser + Room) livré ([PR #88](https://github.com/ForumHFR/redface2/pull/88)) puis branché sur `TopicScreen` (1A-bind), `TopicFixtureRepository` supprimé
 - [ ] Écran Topic — pagination, scroll vers `numreponse` cible, navigation entre pages
 - [ ] Écran Forum — catégories, sous-catégories, liste de topics
 - [ ] Cache Room — topics et drapeaux

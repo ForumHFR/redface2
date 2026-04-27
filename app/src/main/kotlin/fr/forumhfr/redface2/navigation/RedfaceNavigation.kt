@@ -23,7 +23,6 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
-import fr.forumhfr.redface2.core.domain.fixtures.FixedTopicFixtures
 import fr.forumhfr.redface2.FlagsScreen
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -35,6 +34,17 @@ import fr.forumhfr.redface2.feature.search.SearchScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import kotlinx.serialization.Serializable
+
+// Stubs used by placeholder screens (Forum/Search/Messages/Category/Flags) whose models are
+// not yet wired. Each "open topic" button currently navigates to a hard-coded HFR thread so
+// the navigation graph itself can be exercised end-to-end. They disappear feature by feature
+// as Phase 1B/1C land the real FlaggedTopic, ForumTopic, SearchResult, MpThread models.
+//
+// The target is the community topic dedicated to Redface 2 itself
+// (https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35395) — recent, short,
+// and the most natural place to dogfood the app on the topic that discusses the app.
+private const val DEMO_TOPIC_CAT: Int = 23
+private const val DEMO_TOPIC_POST: Int = 35_395
 
 @Serializable
 sealed interface RedfaceNavKey : NavKey
@@ -162,8 +172,8 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     onOpenUnreadTopic = {
                         backStack.add(
                             TopicRoute(
-                                cat = FixedTopicFixtures.cat,
-                                post = FixedTopicFixtures.post,
+                                cat = DEMO_TOPIC_CAT,
+                                post = DEMO_TOPIC_POST,
                                 page = 1,
                             ),
                         )
@@ -181,8 +191,8 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     onOpenTopic = {
                         backStack.add(
                             TopicRoute(
-                                cat = FixedTopicFixtures.cat,
-                                post = FixedTopicFixtures.post,
+                                cat = DEMO_TOPIC_CAT,
+                                post = DEMO_TOPIC_POST,
                                 page = 1,
                             ),
                         )
@@ -194,10 +204,9 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     onOpenResult = {
                         backStack.add(
                             TopicRoute(
-                                cat = FixedTopicFixtures.cat,
-                                post = FixedTopicFixtures.post,
-                                page = 146,
-                                scrollTo = 18085119,
+                                cat = DEMO_TOPIC_CAT,
+                                post = DEMO_TOPIC_POST,
+                                page = 1,
                             ),
                         )
                     },
@@ -208,9 +217,9 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     onOpenTopic = {
                         backStack.add(
                             TopicRoute(
-                                cat = FixedTopicFixtures.cat,
-                                post = FixedTopicFixtures.post,
-                                page = 2,
+                                cat = DEMO_TOPIC_CAT,
+                                post = DEMO_TOPIC_POST,
+                                page = 1,
                             ),
                         )
                     },
@@ -223,8 +232,8 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     onOpenTopic = {
                         backStack.add(
                             TopicRoute(
-                                cat = FixedTopicFixtures.cat,
-                                post = FixedTopicFixtures.post,
+                                cat = DEMO_TOPIC_CAT,
+                                post = DEMO_TOPIC_POST,
                                 page = 1,
                             ),
                         )

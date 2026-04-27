@@ -172,13 +172,20 @@ Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le
 
 Les interfaces de repositories vivent dans le module domaine. Aucune dépendance framework.
 
-> **Note Phase 1** : ces interfaces sont le **contrat cible**. Le slice topic fixe utilise pour l'instant `TopicFixtureRepository` (fixtures HTML capturées), pas encore `TopicRepository` au-dessus de réseau + cache. Les interfaces ci-dessous arrivent feature par feature, avec leur implémentation `:core:data`.
+> **Note Phase 1** : ces interfaces sont le **contrat cible**. `TopicRepository` est livré (cf. [#88](https://github.com/ForumHFR/redface2/pull/88)) — `TopicScreen` lit du vrai HFR via cache-aside Room. Les autres interfaces (`FlagRepository`, `AuthRepository`, etc.) arrivent feature par feature avec leur implémentation `:core:data`.
 
 ```kotlin
 // Dans :core:domain — le contrat
 interface TopicRepository {
-    suspend fun getTopic(cat: Int, post: Int, page: Int): Result<Topic>
-    suspend fun prefetchNextPage(cat: Int, post: Int, page: Int)
+    /**
+     * Émet d'abord la page en cache si elle existe, puis la version réseau fraîchement
+     * fetchée et persistée. Cache-aside : la deuxième émission peut être identique à la
+     * première si le réseau confirme le cache.
+     */
+    fun observeTopicPage(cat: Int, post: Int, page: Int): Flow<Topic>
+
+    /** Force un fetch réseau ignorant le cache, et persiste le résultat. */
+    suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic
 }
 
 interface FlagRepository {
@@ -191,6 +198,8 @@ interface AuthRepository {
     suspend fun isLoggedIn(): Boolean
 }
 ```
+
+`TopicRepository` est livré en Phase 1A (cf. [#88](https://github.com/ForumHFR/redface2/pull/88), [#89](https://github.com/ForumHFR/redface2/pull/89)). `prefetchNextPage` documenté dans la roadmap arrivera en Phase 1B sur `HfrClient` directement (avec `useAuth = false`), puis sera relayé par `TopicRepository.prefetchTopicPage(...)`.
 
 ### `:core:network` — HfrClient
 

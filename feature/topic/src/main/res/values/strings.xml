@@ -1,12 +1,10 @@
 <resources>
-    <string name="topic_title">Topic %1$d</string>
-    <string name="topic_body_placeholder">Lecture du topic en catégorie %1$d, page %2$d.</string>
     <string name="topic_scroll_to">Scroll ciblé demandé vers le post %1$d.</string>
     <string name="topic_reply">Répondre depuis ce topic</string>
-    <string name="topic_fixed_title">Topic khakha embarqué</string>
-    <string name="topic_loading">Chargement de la fixture topic embarquée…</string>
-    <string name="topic_error_body">Impossible d’ouvrir la page %1$d du topic embarqué.\n\n%2$s</string>
-    <string name="topic_fixture_caption">Topic fixe embarqué pour validation parser/rendu.\npost=%1$d • page %2$d/%3$d</string>
+    <string name="topic_loading">Chargement…</string>
+    <string name="topic_error_title">Erreur de chargement</string>
+    <string name="topic_error_body">Impossible d’ouvrir la page %1$d.\n\n%2$s</string>
+    <string name="topic_caption">post %1$d • page %2$d / %3$d</string>
     <string name="topic_post_header_with_index">#%1$d • %2$s • n°%3$d</string>
     <string name="topic_post_header_without_index">%1$s • n°%2$d</string>
     <string name="topic_poll_option">%1$s — %2$.1f%% (%3$d votes)</string>

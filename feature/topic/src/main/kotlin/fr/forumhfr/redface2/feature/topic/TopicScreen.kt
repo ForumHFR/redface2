@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -87,20 +89,6 @@ internal fun TopicContent(
         color = MaterialTheme.colorScheme.surface,
     ) {
         when (val mode = state.mode) {
-            TopicUiState.Mode.Placeholder -> {
-                RedfacePlaceholderScreen(
-                    title = stringResource(R.string.topic_title, request.post),
-                    body = stringResource(R.string.topic_body_placeholder, request.cat, request.page),
-                ) {
-                    request.scrollTo?.let { target ->
-                        Text(text = stringResource(R.string.topic_scroll_to, target))
-                    }
-                    Button(onClick = onReply) {
-                        Text(text = stringResource(R.string.topic_reply))
-                    }
-                }
-            }
-
             TopicUiState.Mode.Loading -> {
                 Column(
                     modifier = Modifier
@@ -120,7 +108,7 @@ internal fun TopicContent(
 
             is TopicUiState.Mode.Error -> {
                 RedfacePlaceholderScreen(
-                    title = stringResource(R.string.topic_fixed_title),
+                    title = stringResource(R.string.topic_error_title),
                     body = stringResource(R.string.topic_error_body, request.page, mode.message),
                 ) {
                     TopicPageButtons(
@@ -208,7 +196,7 @@ private fun TopicHeaderCard(
             )
             Text(
                 text = stringResource(
-                    R.string.topic_fixture_caption,
+                    R.string.topic_caption,
                     topic.post,
                     topic.page,
                     topic.totalPages,
@@ -244,7 +232,14 @@ private fun TopicPageButtons(
     currentPage: Int,
     onOpenPage: (Int) -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // HFR topics regularly run past 100 pages — a non-scrollable Row would let the page
+    // buttons spill outside the viewport and become unreachable. The richer "page picker"
+    // (1..N input + ranges, à la HFR web) is a Phase 1D Polish concern; horizontalScroll
+    // is the minimum that keeps the long-topic case usable until then.
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         availablePages.forEach { page ->
             if (page == currentPage) {
                 Button(onClick = {}) {

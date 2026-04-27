@@ -17,4 +17,6 @@ dependencies {
     // placeholder. The dependency must reach :app's runtime classpath, so it lives here next to
     // the Compose entry points that use AsyncImage.
     implementation(libs.coil.network.okhttp)
+
+    testImplementation(libs.junit4)
 }
