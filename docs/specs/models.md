@@ -104,6 +104,16 @@ classDiagram
         +Boolean isEditable
     }
 
+    class AuthState {
+        <<sealed>>
+    }
+
+    class Authenticated {
+        +String pseudo
+    }
+
+    class Anonymous
+
     Topic --> Post : contient
     Post --> PostContent : rend
     PrivateMessage --> PMMessage : contient
@@ -111,7 +121,35 @@ classDiagram
     Topic --> Poll : optionnel
     Category --> SubCategory : contient
     FlaggedTopic --> FlagType : type
+    AuthState <|-- Anonymous
+    AuthState <|-- Authenticated
 ```
+
+---
+
+## Authentification
+
+État global de la session HFR exposé par `AuthRepository` (`:core:domain`). Phase 1B : alimenté par les cookies persistés (Option A — DataStore non chiffré + FBE plateforme, cf. [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a)).
+
+```kotlin
+sealed interface AuthState {
+    data object Anonymous : AuthState
+    data class Authenticated(val pseudo: String) : AuthState
+}
+```
+
+Erreurs typées remontées par `AuthRepository.login()` (Phase 1B) :
+
+```kotlin
+sealed class LoginError : Exception() {
+    data object InvalidCredentials : LoginError()   // mauvais pseudo/password
+    data object RateLimited : LoginError()          // anti-flood HFR
+    data class Network(val cause: Throwable) : LoginError()  // I/O, DNS, TLS, timeout
+    data class Unknown(val detail: String) : LoginError()    // HTML inattendu, cookie manquant
+}
+```
+
+L'UI (`:feature:auth`) traduit chaque variante en `stringResource` localisée — les messages techniques côté domain ne sont **pas** affichés tels quels.
 
 ---
 
