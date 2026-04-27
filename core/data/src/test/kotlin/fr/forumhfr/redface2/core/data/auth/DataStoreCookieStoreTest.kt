@@ -97,8 +97,26 @@ class DataStoreCookieStoreTest {
 
     @Test
     fun `multiple cookies are persisted with their metadata`() = runTest(UnconfinedTestDispatcher()) {
-        val mdUser = makeCookie(name = "md_user", value = "xaat", httpOnly = true)
-        val mdPass = makeCookie(name = "md_pass", value = "deadbeef", httpOnly = true)
+        // Build cookies inline to keep the httpOnly assertion explicit — the makeCookie helper
+        // is intentionally narrow (5 params) so adding a flag here doesn't bloat its signature.
+        val mdUser = Cookie.Builder()
+            .name("md_user")
+            .value("xaat")
+            .domain("forum.hardware.fr")
+            .path("/")
+            .expiresAt(System.currentTimeMillis() + 365L * 24 * 3600 * 1000)
+            .secure()
+            .httpOnly()
+            .build()
+        val mdPass = Cookie.Builder()
+            .name("md_pass")
+            .value("deadbeef")
+            .domain("forum.hardware.fr")
+            .path("/")
+            .expiresAt(System.currentTimeMillis() + 365L * 24 * 3600 * 1000)
+            .secure()
+            .httpOnly()
+            .build()
         store.save(listOf(mdUser, mdPass))
 
         store.observe().test {
@@ -117,15 +135,12 @@ class DataStoreCookieStoreTest {
         domain: String = "forum.hardware.fr",
         path: String = "/",
         expiresAt: Long = System.currentTimeMillis() + 365L * 24 * 3600 * 1000,
-        secure: Boolean = true,
-        httpOnly: Boolean = false,
     ): Cookie = Cookie.Builder()
         .name(name)
         .value(value)
         .domain(domain)
         .path(path)
         .expiresAt(expiresAt)
-        .also { if (secure) it.secure() }
-        .also { if (httpOnly) it.httpOnly() }
+        .secure()
         .build()
 }

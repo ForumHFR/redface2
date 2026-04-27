@@ -2,14 +2,10 @@ package fr.forumhfr.redface2.core.domain.auth
 
 sealed class LoginError : Exception() {
     /** HFR returned the "Votre mot de passe ou nom d'utilisateur n'est pas valide" page. */
-    data object InvalidCredentials : LoginError() {
-        private fun readResolve(): Any = InvalidCredentials
-    }
+    data object InvalidCredentials : LoginError()
 
     /** HFR returned the "Afin de prévenir les tentatives de flood" anti-bot page. */
-    data object RateLimited : LoginError() {
-        private fun readResolve(): Any = RateLimited
-    }
+    data object RateLimited : LoginError()
 
     /** I/O failure: no network, DNS, TLS handshake, timeout, etc. */
     data class Network(override val cause: Throwable) : LoginError()
