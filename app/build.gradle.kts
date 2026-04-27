@@ -15,8 +15,8 @@ android {
         // upload signing config).
         // versionName is also surfaced in the app footer via BuildConfig.VERSION_NAME so
         // dogfood builds advertise their phase / commit lineage to the user.
-        versionCode = 15
-        versionName = "0.1.0-phase1b.1"
+        versionCode = 16
+        versionName = "0.1.0-phase1b.2"
     }
 
     buildFeatures {

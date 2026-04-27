@@ -15,6 +15,19 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v16 — `0.1.0-phase1b.2` — 2026-04-28
+
+**Statut** : `local`
+**Commit** : à venir (rebuild Phase 1B.1)
+**Fichier** : `redface2-v16-20260428-<sha>.aab`
+
+Rebuild administratif de Phase 1B.1 — `versionCode` 15 brûlé côté Play Console, nouveau code `16` requis. Aucun changement code vs v15.
+
+### Notes
+- Voir entrées v15 et v14 ci-dessous pour le contenu Phase 1B.1.
+
+---
+
 ## v15 — `0.1.0-phase1b.1` — 2026-04-27
 
 **Statut** : `local`
