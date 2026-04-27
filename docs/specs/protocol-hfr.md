@@ -243,7 +243,7 @@ Deux sources distinctes :
 
 | Cookie | Rôle | Durée |
 |---|---|---|
-| `md_user` | ID utilisateur — **indicateur de session active** | 1 an |
+| `md_user` | Pseudo utilisateur — **indicateur de session active** | 1 an |
 | `md_pass` | Token de session | 1 an |
 | `md_forum` | Identifiant de forum | session |
 | Cookies divers (tracking interne HFR) | — | variable |
@@ -256,7 +256,7 @@ Un `Interceptor` OkHttp :
 
 1. Détecte HTTP 302 vers `/login.php` ou absence du pseudo dans la réponse.
 2. Émet un événement `SessionExpired`.
-3. Quand `:feature:auth` sera implémenté, `RedfaceApp` (`NavDisplay`) réinitialisera le back stack courant sur une route d'authentification dédiée et effacera le cache Room. Aucune `AuthRoute` n'existe encore dans le code Phase 1.
+3. Quand ce détecteur sera implémenté, `RedfaceApp` (`NavDisplay`) réinitialisera le back stack courant vers la route de login livrée par `:feature:auth` et effacera le cache Room concerné.
 
 L'utilisateur ré-entre son mot de passe (Option A : pas de re-login transparent, le password n'est pas stocké — voir [architecture.md#stockage-sécurisé-des-credentials](architecture.md#stockage-sécurisé-des-credentials)).
 

@@ -3,6 +3,8 @@ package fr.forumhfr.redface2.core.data.auth
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
 import java.io.File
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -125,6 +127,18 @@ class DataStoreCookieStoreTest {
             assertEquals("md_pass", cookies[0].name)
             assertEquals("md_user", cookies[1].name)
             assertTrue(cookies.all { it.httpOnly })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt persisted payload fails closed to empty cookies`() = runTest(UnconfinedTestDispatcher()) {
+        dataStore.edit { prefs ->
+            prefs[stringPreferencesKey(DataStoreCookieStore.KEY_SESSION_COOKIES)] = "not-json"
+        }
+
+        store.observe().test {
+            assertEquals(emptyList<Cookie>(), awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

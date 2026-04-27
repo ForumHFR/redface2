@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.network.cookie.CookieStore
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -26,6 +27,10 @@ class DataStoreCookieStore @Inject constructor(
         json.decodeFromString<List<CookieDto>>(raw)
             .mapNotNull { it.toCookie() }
             .filter { it.expiresAt > System.currentTimeMillis() }
+    }.catch {
+        // Fail closed: a corrupt DataStore payload must not leave PersistentCookieJar stuck
+        // waiting forever for its first non-null cache value.
+        emit(emptyList())
     }
 
     override suspend fun save(cookies: List<Cookie>) {

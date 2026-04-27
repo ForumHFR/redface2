@@ -144,7 +144,7 @@ Erreurs typées remontées par `AuthRepository.login()` (Phase 1B) :
 sealed class LoginError : Exception() {
     data object InvalidCredentials : LoginError()   // mauvais pseudo/password
     data object RateLimited : LoginError()          // anti-flood HFR
-    data class Network(val cause: Throwable) : LoginError()  // I/O, DNS, TLS, timeout
+    data class Network(override val cause: Throwable) : LoginError()  // I/O, DNS, TLS, timeout
     data class Unknown(val detail: String) : LoginError()    // HTML inattendu, cookie manquant
 }
 ```

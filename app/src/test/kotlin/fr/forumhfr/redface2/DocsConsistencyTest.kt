@@ -85,21 +85,23 @@ class DocsConsistencyTest {
     }
 
     @Test
-    fun `future auth route is not documented as an existing route`() {
+    fun `login route is documented as delivered once feature auth exists`() {
         val productionNavigation = doc("app/src/main/kotlin/fr/forumhfr/redface2/navigation/RedfaceNavigation.kt")
         val docsText = docsText()
         val docsLower = docsText.lowercase()
 
-        if (!productionNavigation.contains("AuthRoute")) {
-            assertFalse(
-                "Docs must not imply a current AuthRoute exists before :feature:auth is implemented.",
-                docsText.contains("route `Auth`"),
-            )
-            assertTrue(
-                "Docs must explicitly state that no AuthRoute exists yet (case-insensitive match across all docs).",
-                docsLower.contains("aucune `authroute` n'existe encore"),
-            )
-        }
+        assertTrue(
+            "Production navigation must expose the delivered login route.",
+            productionNavigation.contains("LoginRoute"),
+        )
+        assertTrue(
+            "Docs must document that the login route is now delivered by :feature:auth.",
+            docsText.contains("route de login livrée par `:feature:auth`"),
+        )
+        assertFalse(
+            "Docs must not keep the obsolete pre-1B.1 claim that no auth route exists.",
+            docsLower.contains("aucune `authroute` n'existe encore"),
+        )
     }
 
     @Test

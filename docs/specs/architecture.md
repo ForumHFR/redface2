@@ -141,7 +141,7 @@ Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (com
 
 Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le projet compte 15 modules (8 core + 7 features base). Les extensions sont des modules Gradle isolés qui s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant. La décision de découpage v1 est formalisée dans [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1).
 
-> **État réel des modules en Phase 1 (cycle topic réel en cours)** : tous les modules core et feature de base sont déclarés dans `settings.gradle.kts`, mais certains ne contiennent encore que le squelette Gradle (`build.gradle.kts`) sans code Kotlin — `:core:extension`, `:feature:auth` et `:feature:settings` notamment. `:core:network` et `:core:database` ont reçu leur backbone Phase 1A (`HfrClient`, `TopicRepositoryImpl` cache-aside, schema Room v1). C'est volontaire : le découpage est fixé dès le bootstrap (ADR-001) pour figer les frontières, mais le code arrive feature par feature. La prose ci-dessus décrit le **contrat cible** ; la réalité courante est trackée par la roadmap.
+> **État réel des modules en Phase 1** : tous les modules core et feature de base sont déclarés dans `settings.gradle.kts`, mais certains ne contiennent encore que le squelette Gradle (`build.gradle.kts`) sans code Kotlin — `:core:extension` et `:feature:settings` notamment. `:core:network` et `:core:database` ont reçu leur backbone Phase 1A (`HfrClient`, `TopicRepositoryImpl` cache-aside, schema Room v1). `:feature:auth` contient le login HFR Phase 1B.1 (`LoginScreen` / `LoginViewModel`). C'est volontaire : le découpage est fixé dès le bootstrap (ADR-001) pour figer les frontières, mais le code arrive feature par feature. La prose ci-dessus décrit le **contrat cible** ; la réalité courante est trackée par la roadmap.
 
 | Module | Fonction | Dépend de |
 |--------|----------|-----------|
@@ -172,7 +172,7 @@ Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le
 
 Les interfaces de repositories vivent dans le module domaine. Aucune dépendance framework.
 
-> **Note Phase 1** : ces interfaces sont le **contrat cible**. `TopicRepository` est livré (cf. [#88](https://github.com/ForumHFR/redface2/pull/88)) — `TopicScreen` lit du vrai HFR via cache-aside Room. Les autres interfaces (`FlagRepository`, `AuthRepository`, etc.) arrivent feature par feature avec leur implémentation `:core:data`.
+> **Note Phase 1** : ces interfaces sont le **contrat cible**. `TopicRepository` est livré (cf. [#88](https://github.com/ForumHFR/redface2/pull/88)) — `TopicScreen` lit du vrai HFR via cache-aside Room. `AuthRepository` est livré en Phase 1B.1 pour le login HFR et l'observation de session. Les autres interfaces (`FlagRepository`, etc.) arrivent feature par feature avec leur implémentation `:core:data`.
 
 ```kotlin
 // Dans :core:domain — le contrat
@@ -194,8 +194,9 @@ interface FlagRepository {
 }
 
 interface AuthRepository {
-    suspend fun login(username: String, password: String): Result<Unit>
-    suspend fun isLoggedIn(): Boolean
+    fun observeAuthState(): Flow<AuthState>
+    suspend fun login(pseudo: String, password: String): Result<AuthState.Authenticated>
+    suspend fun logout()
 }
 ```
 
@@ -219,10 +220,11 @@ class HfrClient @Inject constructor(
     suspend fun getFlags(): String
     suspend fun postReply(cat: Int, post: Int, content: String): Result<Unit>
     suspend fun editPost(cat: Int, post: Int, numreponse: Int, content: String): Result<Unit>
-    suspend fun login(username: String, password: String): Result<Unit>
     // ...
 }
 ```
+
+Le login HFR est isolé dans `:core:network.auth.AuthRemoteDataSource`, pas dans `HfrClient` : il POSTe `login_validation.php`, classe la réponse, puis laisse le `@AuthenticatedClient` persister les cookies via `PersistentCookieJar`.
 
 `@AnonymousClient` (cookie jar = `CookieJar.NO_COOKIES`) permet à un caller — typiquement le prefetch de la page suivante — d'aller chercher du HTML sans que HFR ne marque les drapeaux comme lus côté serveur. Les écrans qui doivent honorer la lecture (lecture utilisateur) appellent avec `useAuth = true` (default).
 
@@ -394,7 +396,7 @@ Les cookies sont persistés via un `PersistentCookieJar` adossé à un DataStore
 
 ### Session expirée
 
-Un `Interceptor` OkHttp détecte la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Il émet un événement `SessionExpired`. Quand le module `:feature:auth` sera implémenté, `RedfaceApp` réinitialisera le back stack courant sur une route d'authentification dédiée — aujourd'hui aucune `AuthRoute` n'existe encore. L'utilisateur ré-entre son mot de passe (Option A, pas de re-login transparent : le password n'est pas stocké).
+Un futur `Interceptor` OkHttp détectera la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Il émettra un événement `SessionExpired` que `RedfaceApp` traduira en navigation vers la route de login livrée par `:feature:auth`. L'utilisateur ré-entre son mot de passe (Option A, pas de re-login transparent : le password n'est pas stocké).
 
 ### HFR indisponible
 
