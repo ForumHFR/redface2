@@ -9,7 +9,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -59,10 +62,20 @@ class PersistentCookieJar @Inject constructor(
         }
     }
 
+    /**
+     * OkHttp's CookieJar contract is synchronous, so a request that fires before the cache
+     * has been primed from the persisted store would otherwise leak unauthenticated. We
+     * block here until the first store emission lands. The block runs on OkHttp's dispatcher
+     * thread (where `Call.execute` ultimately resolves), never on the main thread — Hilt
+     * builds the @Singleton jar lazily but the actual call sites are coroutines on
+     * @IoDispatcher or OkHttp's worker threads, so blocking here is safe even with
+     * StrictMode. The window is sub-ms in practice (DataStore<Preferences> file is tiny) and
+     * only triggers on the very first authenticated request after cold start.
+     */
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
         val now = System.currentTimeMillis()
-        return (cache.value ?: emptyList())
-            .filter { it.matches(url) && it.expiresAt > now }
+        val cookies = cache.value ?: runBlocking { state.filterNotNull().first() }
+        return cookies.filter { it.matches(url) && it.expiresAt > now }
     }
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {

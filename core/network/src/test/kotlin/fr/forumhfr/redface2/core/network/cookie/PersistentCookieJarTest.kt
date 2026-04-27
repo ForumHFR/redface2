@@ -1,10 +1,16 @@
 package fr.forumhfr.redface2.core.network.cookie
 
 import app.cash.turbine.test
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import okhttp3.Cookie
@@ -12,6 +18,7 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -147,6 +154,52 @@ class PersistentCookieJarTest {
         )
     }
 
+    @Test
+    fun `loadForRequest before first store emission blocks until cookies arrive`() {
+        // Simulate the dangerous cold-start path: an authenticated OkHttp call fires after
+        // app start but before the DataStore collector has fed the persisted cookies into
+        // the jar. Returning emptyList() here would leak the request unauthenticated; the
+        // jar must instead suspend until the first emission lands.
+        //
+        // We drive this with a real coroutine dispatcher (Dispatchers.IO) — UnconfinedTestDispatcher
+        // would short-circuit the runBlocking inside loadForRequest because the test scheduler
+        // would never advance past the inner suspend. Real threads are the simplest model here
+        // and match the production call site (OkHttp's worker threads).
+        val store = ManuallyControlledCookieStore()
+        val jar = PersistentCookieJar(store, Dispatchers.IO)
+
+        assertNull(
+            "precondition: state must be null while the controlled store has not emitted yet",
+            jar.state.value,
+        )
+
+        val executor = Executors.newSingleThreadExecutor()
+        val cookieFuture: CompletableFuture<List<Cookie>> = CompletableFuture.supplyAsync(
+            { jar.loadForRequest(baseUrl) },
+            executor,
+        )
+
+        // Give the supplier a moment to enter loadForRequest and start blocking on the flow.
+        Thread.sleep(LOAD_BLOCKING_GRACE_MS)
+        assertFalse(
+            "loadForRequest should still be blocking while the cookie cache is uninitialized",
+            cookieFuture.isDone,
+        )
+
+        // Releasing the cookie store unblocks the jar's collector, which sets cache.value
+        // and resumes the runBlocking inside loadForRequest.
+        runBlocking {
+            store.emit(listOf(cookie("md_user", "xaat")))
+        }
+
+        val loaded = cookieFuture.get(LOAD_BLOCKING_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        assertNotNull(loaded)
+        assertEquals(1, loaded.size)
+        assertEquals("md_user", loaded[0].name)
+
+        executor.shutdownNow()
+    }
+
     private fun cookie(
         name: String,
         value: String,
@@ -194,5 +247,26 @@ class PersistentCookieJarTest {
 
         override suspend fun save(cookies: List<Cookie>) = Unit
         override suspend fun clear() = Unit
+    }
+
+    private class ManuallyControlledCookieStore : CookieStore {
+        private val flow = MutableSharedFlow<List<Cookie>>(replay = 0)
+
+        suspend fun emit(cookies: List<Cookie>) = flow.emit(cookies)
+
+        override fun observe(): Flow<List<Cookie>> = flow
+
+        override suspend fun save(cookies: List<Cookie>) {
+            flow.emit(cookies)
+        }
+
+        override suspend fun clear() {
+            flow.emit(emptyList())
+        }
+    }
+
+    private companion object {
+        const val LOAD_BLOCKING_GRACE_MS = 100L
+        const val LOAD_BLOCKING_TIMEOUT_MS = 2_000L
     }
 }
