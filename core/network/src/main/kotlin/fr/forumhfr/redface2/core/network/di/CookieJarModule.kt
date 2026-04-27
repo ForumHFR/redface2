@@ -4,7 +4,7 @@ import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
-import fr.forumhfr.redface2.core.network.cookie.InMemoryCookieJar
+import fr.forumhfr.redface2.core.network.cookie.PersistentCookieJar
 import javax.inject.Singleton
 import okhttp3.CookieJar
 
@@ -13,5 +13,5 @@ import okhttp3.CookieJar
 abstract class CookieJarModule {
     @Binds
     @Singleton
-    abstract fun bindCookieJar(impl: InMemoryCookieJar): CookieJar
+    abstract fun bindCookieJar(impl: PersistentCookieJar): CookieJar
 }

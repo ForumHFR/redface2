@@ -1,20 +1,17 @@
 package fr.forumhfr.redface2.core.network.cookie
 
 import java.util.concurrent.ConcurrentHashMap
-import javax.inject.Inject
-import javax.inject.Singleton
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
 
 /**
- * In-memory cookie jar used during Phase 1A. A persistent Keystore-backed jar will replace
- * this implementation in Phase 1B (cf. ADR-002 — DataStore + Android Keystore, no plaintext
- * password). Cookies are keyed by host so that requests to forum.hardware.fr always replay
- * the same session, regardless of the URL path.
+ * In-memory cookie jar kept for tests after Phase 1B replaced the production binding with
+ * [PersistentCookieJar]. No longer part of the Hilt graph — instantiate directly when an
+ * isolated CookieJar is needed. Cookies are keyed by host so that requests to
+ * forum.hardware.fr always replay the same session, regardless of the URL path.
  */
-@Singleton
-class InMemoryCookieJar @Inject constructor() : CookieJar {
+class InMemoryCookieJar : CookieJar {
     private val store: MutableMap<String, MutableList<Cookie>> = ConcurrentHashMap()
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
