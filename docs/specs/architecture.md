@@ -363,55 +363,30 @@ sequenceDiagram
     OkHttp-->>App: HTML brut
 ```
 
-Les cookies sont persistés via un `PersistentCookieJar` adossé au DataStore chiffré (voir § Stockage sécurisé ci-dessous) pour éviter de se re-logguer à chaque lancement.
+Les cookies sont persistés via un `PersistentCookieJar` adossé à un DataStore non chiffré (voir § Stockage sécurisé ci-dessous) pour éviter de se re-logguer à chaque lancement.
 
 ### Stockage sécurisé des credentials
 
-**Option A retenue** (cycle [#24](https://github.com/ForumHFR/redface2/issues/24) thème 13, formalisée dans [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a)) : stack minimaliste **DataStore + Android Keystore**, **pas de Tink**, **pas de password stocké**.
+**Option A retenue** (cycle [#24](https://github.com/ForumHFR/redface2/issues/24) thème 13, formalisée dans [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a)) : stack minimaliste **DataStore non chiffré**, protection au repos déléguée à **File-Based Encryption (FBE)** d'Android, **pas de password stocké**.
 
 **Ce qui est stocké** : uniquement les **cookies de session HFR** (`md_user`, `md_pass`) — nécessaires pour rester connecté entre deux lancements de l'app.
 
 **Ce qui n'est pas stocké** : le mot de passe en clair de l'utilisateur. À l'expiration de session (cookies invalidés côté HFR), l'app redirige vers l'écran de login — l'utilisateur ré-entre son mot de passe. Pas de re-login transparent silencieux.
 
-> **Note** : `EncryptedSharedPreferences` (AndroidX Security) est déprécié à partir de `security-crypto 1.1.0-beta01` (04/06/2025), puis marqué deprecated en `1.1.0`. La release note officielle demande de préférer les APIs plateforme et l'usage direct d'Android Keystore ; les problèmes de StrictMode et de corruption de keyset observés sur le terrain restent des signaux supplémentaires, pas la formulation officielle canonique.
+**Protection au repos** :
 
-**Implémentation** :
+- minSdk 29 garantit FBE active : `/data/data/<pkg>` est chiffré tant que le device est locké, avec une clé dérivée du PIN/pattern utilisateur.
+- `android:allowBackup="false"` exclut les cookies du backup Google Drive.
+- la sandbox d'app empêche les autres apps non-root d'y accéder.
 
-```kotlin
-// 1. Clé AES/GCM dans Android Keystore (non extractible, TEE/StrongBox si dispo)
-private fun getOrCreateSessionKey(): SecretKey {
-    val spec = KeyGenParameterSpec.Builder(
-        KEY_ALIAS,
-        KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-    )
-        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-        .build()
-    return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-        .apply { init(spec) }
-        .generateKey()
-}
+> **Note** : `EncryptedSharedPreferences` (AndroidX Security) est déprécié à partir de `security-crypto 1.1.0-beta01` (04/06/2025), puis marqué deprecated en `1.1.0`. La release note officielle demande de préférer les APIs plateforme — la décision Option A va plus loin en supprimant la couche crypto custom redondante avec FBE.
 
-// 2. Chiffrement direct Cipher (pas de lib wrapper)
-fun encrypt(plaintext: ByteArray): Ciphertext {
-    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-    cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSessionKey())
-    return Ciphertext(iv = cipher.iv, data = cipher.doFinal(plaintext))
-}
-
-// 3. DataStore pour la persistance (IV + ciphertext stockés ensemble)
-@Serializable
-data class SessionCookies(
-    val mdUser: EncryptedBlob,
-    val mdPass: EncryptedBlob,
-)
-```
-
-**Rationale Option A (vs DataStore + Tink + Keystore envisagé initialement)** :
-- Tink est **overkill pour un seul secret** (session cookie). Sa valeur est dans le keyset management, AEAD streaming, multi-secret rotation — aucun n'est utile ici.
-- Moins de dépendances = moins de surface d'attaque et moins de maintenance.
-- Pas de password stocké = pas de question "que faire si la clé Keystore est invalidée" (re-login = user input = zéro magie).
-- Pas de biométrie : la clé Keystore est protégée par le TEE/StrongBox du device, suffisant pour un forum.
+**Rationale Option A (vs chiffrement custom envisagé initialement)** :
+- Le **password transite en clair** dans le POST `login_validation.php` (HFR ne supporte pas le hash côté client). Tout chiffrement local du cookie reste **redondant face à un attaquant runtime** : il verrait le password lors du prochain login.
+- FBE + sandbox + `allowBackup="false"` couvrent les menaces réalistes (app tierce, adb sur device locké, backup, forensic device locké).
+- Tink est overkill pour un seul secret (rotation, AEAD streaming, multi-keyset — aucun n'est utile ici).
+- Pas de clé Keystore custom = pas de gestion "clé invalidée par rotation système / restauration backup / perte StrongBox".
+- Pas de biométrie : forum ≠ banque, complexité UX disproportionnée pour le scope v1.
 
 ---
 

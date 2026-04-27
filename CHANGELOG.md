@@ -8,7 +8,10 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-(rien pour le moment)
+### Changed
+- **ADR-002 amendé** : alignement avec la décision originale du cycle [#24 thème 13](https://github.com/ForumHFR/redface2/issues/24#issuecomment-3526003625). La décision actée était **DataStore non chiffré + FBE plateforme + `allowBackup="false"`**, sans clé Keystore custom. La rédaction initiale de l'ADR avait réintroduit une couche AES/GCM Keystore qui n'était pas dans la décision. Rationale : le password transite en clair côté HFR, donc tout chiffrement local du cookie est redondant face à un attaquant runtime.
+- `docs/specs/architecture.md` § Stockage sécurisé des credentials : section réécrite (suppression du snippet `Cipher`/`KeyGenParameterSpec`).
+- `docs/specs/stack.md` ligne "Stockage sécurisé" : "DataStore + Keystore" → "DataStore non chiffré + FBE plateforme".
 
 ---
 

@@ -26,7 +26,7 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 | HTTP | **OkHttp 5** (5.3+) | Retrofit, Ktor | Pas d'API REST à mapper, scraping HTML direct + cookies. Stable depuis 07/2025 (`callTimeout` via `kotlin.time.Duration`, `mockwebserver3`). |
 | Parsing HTML | **Jsoup** | Regex, custom parser | Standard JVM, CSS selectors, battle-tested |
 | Cache locale | **Room** | DataStore, SQLDelight | Standard Android, intégration Flow, migrations |
-| Stockage sécurisé | **DataStore + Keystore** (cookies HFR, pas de password stocké) | EncryptedSharedPreferences (**déprécié**), Tink (overkill 1 secret) | Décision Option A : re-login manuel à l'expiration session. Cf. [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a). |
+| Stockage cookies HFR | **DataStore non chiffré** + FBE plateforme + `allowBackup="false"` | EncryptedSharedPreferences (**déprécié**), Tink ou clé Keystore custom (overkill, redondant avec FBE puisque le password transite en clair côté HFR) | Décision Option A : re-login manuel à l'expiration session, pas de password stocké. Cf. [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a). |
 | Images | **Coil 3+** | Glide | Natif Compose, coroutines, plus idiomatique Kotlin |
 | Async | **Coroutines + Flow** | RxJava | Standard Kotlin, plus léger, meilleure intégration Compose |
 | Enforcement archi | **Konsist** | ArchUnit | Kotlin-first, voit les sealed/data/internal ; ArchUnit = bytecode-only, perd la finesse Kotlin |
