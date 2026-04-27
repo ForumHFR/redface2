@@ -9,8 +9,21 @@ android {
 
     defaultConfig {
         applicationId = "fr.forumhfr.redface2"
-        versionCode = 1
-        versionName = "0.1.0-bootstrap"
+        // Bump versionCode + versionName at every release. Play Console rejects any AAB
+        // whose versionCode is already uploaded, so this is the canonical source of truth
+        // (the local signing init-script no longer overrides these — it only injects the
+        // upload signing config).
+        // versionName is also surfaced in the app footer via BuildConfig.VERSION_NAME so
+        // dogfood builds advertise their phase / commit lineage to the user.
+        versionCode = 12
+        versionName = "0.1.0-phase1a"
+    }
+
+    buildFeatures {
+        // Expose BuildConfig.VERSION_NAME / VERSION_CODE to Kotlin code so the
+        // placeholder screens can show them while :feature:settings (the future
+        // home of an About screen) is empty.
+        buildConfig = true
     }
 }
 
