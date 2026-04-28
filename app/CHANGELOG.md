@@ -15,6 +15,24 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v19 — `0.1.0-phase1b.5` — 2026-04-28
+
+**Statut** : `local`
+**Commit** : à venir
+**Fichier** : `redface2-v19-<date>-<sha>.aab`
+
+In-app reporting channel pour la conformité Google Play CSAE.
+
+### Added
+- **Bouton "Signaler un contenu"** sur `FlagsScreen` — `Intent.ACTION_SENDTO` avec `mailto:xat@azora.fr` + sujet pré-rempli `Redface 2 — Signalement`. Catch `ActivityNotFoundException` → Toast français quand aucun client mail n'est dispo.
+- 3 strings : `report_content_cta`, `report_email_subject`, `report_no_email_client`.
+
+### Notes
+- La page CSAE (`docs/legal/csae/index.html`, déployée Phase 1B.1 sur GitHub Pages) **claim** explicitement ce mécanisme de signalement in-app — sans cette livraison, la déclaration au Play Console serait factuellement incohérente avec l'app.
+- Reste sur `FlagsScreen` (point d'entrée toujours visible) en attendant un écran `:feature:settings` réel.
+
+---
+
 ## v18 — `0.1.0-phase1b.4` — 2026-04-28
 
 **Statut** : `local`
