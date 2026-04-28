@@ -275,7 +275,7 @@ core/parser/src/test/resources/fixtures/
 
 | Fixture | Page HFR | Auth ? | Pourquoi | Source HFR (à capturer) |
 |---------|----------|--------|----------|-------------------------|
-| `flags_page.html` | `/forum1f.php` (drapeaux) | logué uniquement | Écran d'accueil, pas dans v1 | `forum1f.php?owntopic=1` |
+| `flags_page_owntopic-{1,2,3}.html` | `/forum1f.php` (drapeaux) | logué uniquement | Écran d'accueil, pas dans v1 | `forum1f.php?owntopic={1,2,3}` |
 | `flags_page_empty.html` | Drapeaux vides | logué uniquement | Cas edge : aucun drapeau | compte neuf ou nettoyé |
 | `search_results.html` | `/search.php` | logué + non-logué | Recherche | `search.php?search=redface` |
 | `login_success.html` | Réponse login OK | — | Détection succès auth | Après POST login OK |

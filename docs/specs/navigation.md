@@ -431,7 +431,7 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
 }
 ```
 
-Phase 1B.4 a livré `FlagsRoute` (dans `:feature:flags`) avec le vrai modèle `Flag` : la lambda `onOpenFlag` reçoit le topic concerné et `backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.firstUnreadPostId.toInt()))` devient trivial. Les constantes privées `DEMO_TOPIC_CAT` / `DEMO_TOPIC_POST` restent uniquement pour `ForumScreen`, `SearchScreen`, `MessagesScreen` et `CategoryScreen` qui sont encore des placeholders Phase 1A — chaque call-site disparaîtra au fur et à mesure que les Phase 1C/2 livrent les modèles `ForumTopic`, `SearchResult`, `MpThread`.
+Phase 1B.4 a livré `FlagsRoute` (dans `:feature:flags`) avec le vrai modèle `Flag` : la lambda `onOpenFlag` reçoit le topic concerné et `backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.firstUnreadPostId.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()))` devient trivial. Les constantes privées `DEMO_TOPIC_CAT` / `DEMO_TOPIC_POST` restent uniquement pour `ForumScreen`, `SearchScreen`, `MessagesScreen` et `CategoryScreen` qui sont encore des placeholders Phase 1A — chaque call-site disparaîtra au fur et à mesure que les Phase 1C/2 livrent les modèles `ForumTopic`, `SearchResult`, `MpThread`.
 
 ---
 

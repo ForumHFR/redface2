@@ -2,11 +2,13 @@ package fr.forumhfr.redface2.core.network.cookie
 
 import android.os.Looper
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import java.io.Closeable
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,7 +48,7 @@ import okhttp3.HttpUrl
 class PersistentCookieJar @Inject constructor(
     private val store: CookieStore,
     @param:IoDispatcher private val dispatcher: CoroutineDispatcher,
-) : CookieJar {
+) : CookieJar, Closeable {
 
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
 
@@ -116,6 +118,10 @@ class PersistentCookieJar @Inject constructor(
     fun clear() {
         cache.value = emptyList()
         scope.launch { storeMutex.withLock { store.clear() } }
+    }
+
+    override fun close() {
+        scope.cancel()
     }
 
     private fun merge(existing: List<Cookie>, incoming: List<Cookie>): List<Cookie> {

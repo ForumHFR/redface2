@@ -63,7 +63,8 @@ class FlagsListParser {
         val type = flagIcon?.let(::iconToType) ?: defaultType
 
         val flagHref = flagAnchor?.attr("href").orEmpty()
-        val lastReadPage = flagHref.queryParam("page")?.toIntOrNull() ?: 1
+        val lastReadPage = flagHref.queryParam("page")?.toIntOrNull()
+            ?: if (hasUnread) 1 else totalPages.coerceAtLeast(1)
         val firstUnreadPostId = flagHref.fragment("t")?.toLongOrNull() ?: 0L
 
         val firstPostAuthor = row.selectFirst("td.sujetCase6 a.Tableau")?.text().orEmpty()

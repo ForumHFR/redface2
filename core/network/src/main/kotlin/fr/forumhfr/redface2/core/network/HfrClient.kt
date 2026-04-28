@@ -43,8 +43,8 @@ class HfrClient @Inject constructor(
     /**
      * Fetches the authenticated drapeaux page filtered by [owntopic] :
      *
-     * - `owntopic=1` → drapeaux rouges (lecture suivie)
-     * - `owntopic=2` → drapeaux cyan (sujets participés)
+     * - `owntopic=1` → drapeaux rouges (sujets participés)
+     * - `owntopic=2` → drapeaux cyan (lecture suivie uniquement)
      * - `owntopic=3` → étoiles jaunes (favoris)
      *
      * Always uses the authenticated client — HFR redirects this endpoint to /login.php

@@ -95,6 +95,8 @@ class FlagsListParserTest {
         val readFavorite = flags.first { !it.hasUnread }
 
         assertEquals(FlagType.FAVORITE, readFavorite.type)
+        assertTrue("precondition: fixture row must be multipage", readFavorite.totalPages > 1)
+        assertEquals(readFavorite.totalPages, readFavorite.lastReadPage)
         assertEquals(0L, readFavorite.firstUnreadPostId)
     }
 
