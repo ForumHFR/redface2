@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.flags.FlagsListParser
+import java.util.EnumMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
@@ -19,9 +20,11 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 
 /**
- * Phase 1B.4 network-only implementation of [FlagRepository]. Each call to [observe]
- * triggers an initial fetch; subsequent [refresh] calls broadcast a fresh result through
- * a per-type [MutableSharedFlow] so concurrent observers see the same payload.
+ * Phase 1B.4 network-only implementation of [FlagRepository]. The first [observe] call
+ * per [FlagType] fetches HFR; later observers reuse the last successful payload so tab
+ * switches do not implicitly refetch and change read/unread state behind the user's back.
+ * Explicit [refresh] calls still fetch and broadcast a fresh result through a per-type
+ * [MutableSharedFlow] so concurrent observers see the same payload.
  *
  * Caching to Room is intentionally deferred: at this stage, the user's drapeaux page is
  * always small (~150 rows in the heaviest filter) and HFR latency is acceptable for the
@@ -34,6 +37,8 @@ class DefaultFlagRepository @Inject constructor(
     private val parser: FlagsListParser,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : FlagRepository {
+
+    private val cachedSuccesses: MutableMap<FlagType, FlagsResult.Success> = EnumMap(FlagType::class.java)
 
     /**
      * One refresh-trigger per [FlagType] so a refresh on one tab doesn't re-fetch the
@@ -50,8 +55,13 @@ class DefaultFlagRepository @Inject constructor(
         }
 
     override fun observe(type: FlagType): Flow<FlagsResult> = flow {
-        emit(FlagsResult.Loading)
-        emit(fetch(type))
+        val cached = synchronized(cachedSuccesses) { cachedSuccesses[type] }
+        if (cached != null) {
+            emit(cached)
+        } else {
+            emit(FlagsResult.Loading)
+            emit(fetch(type))
+        }
         emitAll(refreshes.getValue(type).asSharedFlow())
     }
 
@@ -65,7 +75,11 @@ class DefaultFlagRepository @Inject constructor(
             val html = hfrClient.getFlagsPage(owntopic = type.owntopic())
             parser.parse(html, defaultType = type)
         }.fold(
-            onSuccess = { flags -> FlagsResult.Success(flags) },
+            onSuccess = { flags ->
+                FlagsResult.Success(flags).also { result ->
+                    synchronized(cachedSuccesses) { cachedSuccesses[type] = result }
+                }
+            },
             onFailure = { throwable ->
                 Log.w(LOG_TAG, "Flags fetch failed for $type", throwable)
                 FlagsResult.Failure(throwable)

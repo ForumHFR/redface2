@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.flags.FlagsListParser
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import java.io.IOException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -71,6 +72,29 @@ class DefaultFlagRepositoryTest {
 
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `observe reuses cached success instead of refetching the same tab`() = runTest {
+        val flags = listOf(stubFlag(topicId = 5, type = FlagType.FAVORITE))
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getFlagsPage(owntopic = 3) } returns "<favorites/>"
+        val parser = mockk<FlagsListParser>()
+        coEvery { parser.parse("<favorites/>", FlagType.FAVORITE) } returns flags
+        val (repo, _, _) = buildRepository(hfrClient = hfrClient, parser = parser)
+
+        repo.observe(FlagType.FAVORITE).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            assertEquals(FlagsResult.Success(flags), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repo.observe(FlagType.FAVORITE).test {
+            assertEquals(FlagsResult.Success(flags), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 1) { hfrClient.getFlagsPage(owntopic = 3) }
     }
 
     @Test
