@@ -1,0 +1,5 @@
+Source: forum.hardware.fr (capture personnelle XaT, 2026-04-28)
+Captured page: forum1f.php?config=hfr.inc&owntopic=3&new=0&nojs=0
+Type: étoile jaune (favoris)
+Marqueur ligne (sujetCase5): favoris.gif (avec posts non-lus) / favorisn.gif (sans nouveaux)
+Notes: hash_check, codehex et id_user sanitized. La vue favoris affiche aussi les topics sans nouveaux posts (cf. closed.gif).

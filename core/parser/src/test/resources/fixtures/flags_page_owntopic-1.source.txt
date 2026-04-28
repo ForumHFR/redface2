@@ -1,0 +1,5 @@
+Source: forum.hardware.fr (capture personnelle XaT, 2026-04-28)
+Captured page: forum1f.php?config=hfr.inc&owntopic=1&new=0&nojs=0
+Type: drapeau rouge (lecture suivie)
+Marqueur ligne (sujetCase5): flag1.gif (avec posts non-lus) / flagn1.gif (sans nouveaux)
+Notes: hash_check, codehex et id_user sanitized. La fixture inclut aussi 3 favoris.gif intercalés (mix accidentel ou drapeau historique).

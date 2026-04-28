@@ -1,0 +1,5 @@
+Source: forum.hardware.fr (capture personnelle XaT, 2026-04-28)
+Captured page: forum1f.php?config=hfr.inc&owntopic=2&new=0&nojs=0
+Type: drapeau cyan (sujets participés / "Mes sujets")
+Marqueur ligne (sujetCase5): flag0.gif (avec posts non-lus) / flagn0.gif (sans nouveaux)
+Notes: hash_check, codehex et id_user sanitized. 128 topics cyan dans la fixture (pas de favoris ni rouge mélangés).
