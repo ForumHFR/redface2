@@ -30,18 +30,20 @@ Ces modèles émergeront du premier prototype de chaque écran. Pas de spec pré
 
 ```mermaid
 classDiagram
-    class FlaggedTopic {
+    class Flag {
         +Int cat
-        +Int subcat
-        +Int postId
+        +Int? subcat
+        +Int topicId
         +String title
-        +String lastAuthor
-        +Instant lastDate
-        +FlagType flagType
-        +Int unreadCount
-        +String categoryName
+        +Int totalReplies
+        +Int views
+        +FlagType type
+        +Boolean hasUnread
         +Int lastReadPage
-        +Int totalPages
+        +Long firstUnreadPostId
+        +String firstPostAuthor
+        +String lastReplyAuthor
+        +String lastReplyAt
     }
 
     class Topic {
@@ -120,7 +122,7 @@ classDiagram
     PMMessage --> PostContent : rend
     Topic --> Poll : optionnel
     Category --> SubCategory : contient
-    FlaggedTopic --> FlagType : type
+    Flag --> FlagType : type
     AuthState <|-- Anonymous
     AuthState <|-- Authenticated
 ```
@@ -156,26 +158,30 @@ L'UI (`:feature:auth`) traduit chaque variante en `stringResource` localisée �
 ## Drapeaux
 
 ```kotlin
-data class FlaggedTopic(
+data class Flag(
     val cat: Int,
-    val subcat: Int,
-    val postId: Int,
+    val subcat: Int?,
+    val topicId: Int,
     val title: String,
-    val lastAuthor: String,
-    val lastDate: Instant,
-    val flagType: FlagType,
-    val unreadCount: Int,
-    val categoryName: String,
-    val lastReadPage: Int,      // page de la dernière lecture
-    val totalPages: Int,        // nombre total de pages
+    val totalReplies: Int,
+    val views: Int,
+    val type: FlagType,
+    val hasUnread: Boolean,
+    val lastReadPage: Int,        // page où l'utilisateur a son marqueur de lecture
+    val firstUnreadPostId: Long,  // numreponse cible pour scroller à la reprise (0 = inconnu)
+    val firstPostAuthor: String,
+    val lastReplyAuthor: String,
+    val lastReplyAt: String,      // timestamp brut HFR ("DD-MM-YYYY HH:mm"), parsing reporté
 )
 
 enum class FlagType {
-    CYAN,       // l'utilisateur a participé au topic
-    FAVORITE,   // marque d'une étoile jaune
-    READ,       // drapeau rouge, marque de lecture
+    CYAN,       // drapeau cyan = sujet où l'utilisateur a participé (`owntopic=2`)
+    RED,        // drapeau rouge = lecture suivie (`owntopic=1`)
+    FAVORITE,   // étoile jaune = favori (`owntopic=3`)
 }
 ```
+
+> **Phase 1B.4 → 1D drift** : `lastReplyAt` est gardé en `String` brut tel qu'il sort de HFR (`DD-MM-YYYY HH:mm`). La promotion en `Instant` viendra avec `HfrDateParser` quand un cas d'usage l'exige côté UI (tri par date, "il y a N minutes"). `views` est exposé tel quel pour parité avec la liste des topics et tracking dette technique HFR ; pas d'usage UI courant.
 
 ---
 

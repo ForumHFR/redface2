@@ -1,0 +1,23 @@
+<resources>
+    <string name="flags_title">Drapeaux</string>
+    <string name="flags_login_intro">Connecte-toi à HFR pour voir tes drapeaux, ton activité et tes MPs.</string>
+    <string name="flags_login_cta">Se connecter à HFR</string>
+    <string name="flags_logged_in_as">Connecté en tant que %1$s</string>
+    <string name="flags_logout_cta">Se déconnecter</string>
+    <string name="flags_unread_mps">MPs non lus : %1$d</string>
+
+    <string name="flags_tab_red">Drapeaux rouges</string>
+    <string name="flags_tab_cyan">Mes sujets</string>
+    <string name="flags_tab_favorite">Favoris</string>
+
+    <string name="flags_loading">Chargement…</string>
+    <string name="flags_empty">Aucun drapeau dans cette vue.</string>
+    <string name="flags_error">Impossible de récupérer les drapeaux. Vérifie ta connexion ou réessaie.</string>
+    <string name="flags_retry">Réessayer</string>
+
+    <string name="flags_report_content_cta">Signaler un contenu</string>
+    <string name="flags_report_email_subject">Redface 2 — Signalement</string>
+    <string name="flags_report_no_email_client">Aucune application e-mail trouvée. Écrivez à xat@azora.fr.</string>
+
+    <string name="flags_app_version_footer">Redface 2 — v%1$s (build %2$d)</string>
+</resources>

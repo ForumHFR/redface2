@@ -236,7 +236,7 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
             rememberViewModelStoreNavEntryDecorator(),
         ),
         entryProvider = entryProvider {
-            entry<FlagsListRoute> { FlagsScreen(onOpenUnreadTopic = { /* ... */ }) }
+            entry<FlagsListRoute> { FlagsRoute(versionName, versionCode, onOpenFlag = { flag -> /* ... */ }, onLoginRequested = { /* ... */ }) }
             entry<ForumRoute> { ForumScreen(onOpenCategory = { /* ... */ }) }
             entry<SearchRoute> { SearchScreen(onOpenResult = { /* ... */ }) }
             entry<MessagesRoute> { MessagesScreen(onOpenTopic = { /* ... */ }) }
@@ -368,9 +368,9 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 > **Statut Phase 5+** — multi-pane n'est pas livré en Phase 1. Dans le snippet ci-dessous :
 >
 > - le **pattern de composition** (`NavDisplay` + `ListDetailPaneScaffold` sur le même back stack, switch `WindowSizeClass`) est **illustratif** — c'est ce qui sera implémenté Phase 5+ ;
-> - les **signatures de screens** appelées (`FlagsScreen(onOpenUnreadTopic, onOpenTrackedCategory)`, `TopicScreen(request: TopicRequest, onReply, onOpenPage)`, `EditorScreen(mode: String, cat, post)`) sont les signatures **réelles Phase 1** livrées dans le repo aujourd'hui (cf. `feature/topic/.../TopicScreen.kt`, `app/.../FlagsScreen.kt`, `feature/editor/.../EditorScreen.kt`).
+> - les **signatures de screens** appelées (`FlagsRoute(versionName, versionCode, onOpenFlag, onLoginRequested)`, `TopicScreen(request: TopicRequest, onReply, onOpenPage)`, `EditorScreen(mode: String, cat, post)`) sont les signatures **réelles Phase 1** livrées dans le repo aujourd'hui (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/editor/.../EditorScreen.kt`).
 >
-> Le hardcoding `cat = DEMO_TOPIC_CAT, post = DEMO_TOPIC_POST` dans la lambda `onOpenUnreadTopic` reflète la **réalité Phase 1A** : `FlagsScreen` est encore un placeholder mock sans modèle `FlaggedTopic`, donc le call-site pointe sur un topic démo le temps que la liste réelle des drapeaux arrive (Phase 1B). Quand `FlagsScreen` exposera `(topic: FlaggedTopic) -> Unit`, la lambda recevra le topic concerné — voir la note sous le snippet.
+> Le call-site `onOpenFlag = { flag -> backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = ...)) }` passe désormais le topic concerné — Phase 1B.4 a remplacé le placeholder mock par la liste réelle des drapeaux.
 
 ```kotlin
 @Composable
@@ -381,19 +381,22 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
     if (isExpanded) {
         ListDetailPaneScaffold(
             listPane = {
-                FlagsScreen(
-                    onOpenUnreadTopic = {
+                FlagsRoute(
+                    versionName = BuildConfig.VERSION_NAME,
+                    versionCode = BuildConfig.VERSION_CODE,
+                    onOpenFlag = { flag ->
                         backStack.add(
                             TopicRoute(
-                                cat = DEMO_TOPIC_CAT,
-                                post = DEMO_TOPIC_POST,
-                                page = 1,
+                                cat = flag.cat,
+                                post = flag.topicId,
+                                page = flag.lastReadPage,
+                                scrollTo = flag.firstUnreadPostId
+                                    .takeIf { it in 1L..Int.MAX_VALUE.toLong() }
+                                    ?.toInt(),
                             ),
                         )
                     },
-                    onOpenTrackedCategory = {
-                        backStack.add(CategoryRoute(cat = 23, subcat = 0))
-                    },
+                    onLoginRequested = { backStack.add(LoginRoute) },
                 )
             },
             detailPane = {
@@ -428,7 +431,7 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
 }
 ```
 
-Quand `FlagsScreen` quittera le placeholder mock (Phase 1B) pour exposer un vrai modèle `FlaggedTopic` (cf. [models.md § À définir avec les écrans]({{ site.baseurl }}/specs/models#à-définir-avec-les-écrans)), la lambda passée à `onOpenUnreadTopic` recevra le topic concerné et `backStack.add(TopicRoute(topic.cat, topic.postId, topic.lastReadPage))` deviendra trivial. Pour l'instant, les constantes privées `DEMO_TOPIC_CAT` / `DEMO_TOPIC_POST` (définies en haut de `RedfaceNavigation.kt`) servent de cible — chaque call-site disparaît au fur et à mesure que les Phase 1B/1C livrent les modèles `FlaggedTopic`, `ForumTopic`, `SearchResult`, `MpThread`.
+Phase 1B.4 a livré `FlagsRoute` (dans `:feature:flags`) avec le vrai modèle `Flag` : la lambda `onOpenFlag` reçoit le topic concerné et `backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.firstUnreadPostId.toInt()))` devient trivial. Les constantes privées `DEMO_TOPIC_CAT` / `DEMO_TOPIC_POST` restent uniquement pour `ForumScreen`, `SearchScreen`, `MessagesScreen` et `CategoryScreen` qui sont encore des placeholders Phase 1A — chaque call-site disparaîtra au fur et à mesure que les Phase 1C/2 livrent les modèles `ForumTopic`, `SearchResult`, `MpThread`.
 
 ---
 

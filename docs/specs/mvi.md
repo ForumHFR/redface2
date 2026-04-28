@@ -57,8 +57,8 @@ Les exemples ViewModel ci-dessous sont **des squelettes illustratifs** — certa
 ```kotlin
 // ── State ──────────────────────────────────────────
 data class FlagsState(
-    val flags: List<FlaggedTopic> = emptyList(),
-    val filteredFlags: List<FlaggedTopic> = emptyList(),
+    val flags: List<Flag> = emptyList(),
+    val filteredFlags: List<Flag> = emptyList(),
     val sortMode: SortMode = SortMode.BY_DATE,
     val filter: FlagFilter = FlagFilter.ALL,
     val isLoading: Boolean = false,
@@ -74,15 +74,15 @@ sealed interface FlagsIntent {
     data object Refresh : FlagsIntent
     data class SetSort(val mode: SortMode) : FlagsIntent
     data class SetFilter(val filter: FlagFilter) : FlagsIntent
-    data class OpenTopic(val topic: FlaggedTopic) : FlagsIntent
-    data class RemoveFlag(val topic: FlaggedTopic) : FlagsIntent
-    data class UndoRemoveFlag(val topic: FlaggedTopic) : FlagsIntent
+    data class OpenTopic(val topic: Flag) : FlagsIntent
+    data class RemoveFlag(val topic: Flag) : FlagsIntent
+    data class UndoRemoveFlag(val topic: Flag) : FlagsIntent
 }
 
 // ── Effects ────────────────────────────────────────
 sealed interface FlagsEffect {
     data class NavigateToTopic(val cat: Int, val post: Int, val page: Int) : FlagsEffect
-    data class ShowUndo(val topic: FlaggedTopic) : FlagsEffect
+    data class ShowUndo(val topic: Flag) : FlagsEffect
     data class Error(val message: String) : FlagsEffect
 }
 ```
@@ -134,7 +134,7 @@ class FlagsViewModel @Inject constructor(
         }
     }
 
-    private fun openTopic(topic: FlaggedTopic) {
+    private fun openTopic(topic: Flag) {
         viewModelScope.launch {
             _effects.send(FlagsEffect.NavigateToTopic(topic.cat, topic.postId, topic.lastReadPage))
         }
@@ -145,7 +145,7 @@ class FlagsViewModel @Inject constructor(
     // Équivalent d'une map de transactions en cours (pattern mutex/debounce).
     private val pendingRemovals = mutableMapOf<Int, Job>()
 
-    private fun removeFlag(topic: FlaggedTopic) {
+    private fun removeFlag(topic: Flag) {
         // 1. Retirer de l'UI immédiatement
         _state.update { it.copy(flags = it.flags - topic) }
         updateFilteredFlags()
@@ -167,7 +167,7 @@ class FlagsViewModel @Inject constructor(
         pendingRemovals[topic.postId] = job
     }
 
-    private fun undoRemoveFlag(topic: FlaggedTopic) {
+    private fun undoRemoveFlag(topic: Flag) {
         pendingRemovals.remove(topic.postId)?.cancel()
         _state.update { it.copy(flags = it.flags + topic) }
         updateFilteredFlags()
@@ -183,16 +183,16 @@ class FlagsViewModel @Inject constructor(
     }
 
     // Helpers pure — testables isolément.
-    private fun matchesFilter(topic: FlaggedTopic, filter: FlagFilter): Boolean = when (filter) {
+    private fun matchesFilter(topic: Flag, filter: FlagFilter): Boolean = when (filter) {
         FlagFilter.ALL       -> true
         FlagFilter.CYAN      -> topic.flagType == FlagType.CYAN
         FlagFilter.FAVORITE  -> topic.flagType == FlagType.FAVORITE
-        FlagFilter.READ      -> topic.flagType == FlagType.READ
+        FlagFilter.READ      -> topic.flagType == FlagType.RED
     }
 
-    private fun comparatorFor(mode: SortMode): Comparator<FlaggedTopic> = when (mode) {
+    private fun comparatorFor(mode: SortMode): Comparator<Flag> = when (mode) {
         SortMode.BY_DATE     -> compareByDescending { it.lastDate }
-        SortMode.BY_CATEGORY -> compareBy<FlaggedTopic> { it.categoryName }
+        SortMode.BY_CATEGORY -> compareBy<Flag> { it.categoryName }
             .thenByDescending { it.lastDate }
     }
 }

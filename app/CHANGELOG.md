@@ -15,6 +15,45 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v20 — `0.1.0-phase1b.6` — 2026-04-28
+
+**Statut** : `local`
+**Commit** : à venir
+**Fichier** : `redface2-v20-<date>-<sha>.aab`
+
+Phase 1B.2-1B.5 livrée d'un trait : liste réelle des drapeaux HFR (parser + repository + UI + module feature).
+
+### Added
+- **`FlagsListParser`** dans `:core:parser` — parse `forum1f.php?owntopic={1,2,3}` (drapeaux rouges, cyan, favoris). Détection unread canonique sur `td.sujetCase1` (`closedb*` vs `closed`), classification via icône `td.sujetCase5` (présente uniquement sur unread) avec fallback sur le `defaultType` du listing. 6 tests, 3 fixtures HTML capturées sur HFR réel (172 lignes au total) avec données sensibles nettoyées.
+- **`Flag` data class** dans `:core:model` (remplace `FlaggedTopic` placeholder) + `FlagType { CYAN, RED, FAVORITE }`.
+- **`FlagRepository`** dans `:core:domain` (`observe(type)` / `refresh(type)`) + `DefaultFlagRepository` dans `:core:data` (network-only, broadcast refresh via `MutableSharedFlow` par `FlagType`). 4 tests Robolectric+MockK.
+- **`HfrClient.getFlagsPage(owntopic: Int)`** sur `@AuthenticatedClient` (les drapeaux sont une vue par utilisateur, owntopic ∈ 1..3 enforced par `require`).
+- **`FlagItem` composable** dans `:core:ui` — pastille couleur (cyan/rouge/jaune, dimmed à 35% si lu), titre semi-bold si unread, footer auteur · réponses · dernière page lue.
+- **Module `:feature:flags`** avec `FlagsRoute` + `FlagsViewModel` :
+  - `flatMapLatest(authState)` pour ne montrer la liste que quand authentifié, retour anti-flicker en attendant `authState ≠ null`.
+  - 3 onglets `PrimaryTabRow` (rouge / cyan / favoris), source flow change avec `selectTab`.
+  - Footer auth (pseudo, MP unread, version, bouton CSAE, bouton logout).
+  - 5 tests Turbine couvrant `flatMapLatest` + `selectTab` + `refresh` + `logout`.
+- Navigation `:app` migre `entry<FlagsListRoute>` du placeholder `FlagsScreen` (supprimé) vers `FlagsRoute`. Lambda `onOpenFlag` pousse la vraie `TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.firstUnreadPostId.toInt())` au lieu du `DEMO_TOPIC` hardcodé.
+
+### Changed
+- `docs/specs/architecture.md` documente `:feature:flags` (mermaid + tableau des modules).
+- `docs/specs/models.md` remplace le placeholder `FlaggedTopic` par le vrai `Flag` + drift `lastReplyAt: String` justifiée (HFR renvoie une chaîne FR pré-formatée).
+- `docs/specs/navigation.md` réécrit le snippet `entry<FlagsListRoute>` autour de `FlagsRoute(...)`.
+- `docs/specs/roadmap.md` coche l'item « Écran Drapeaux ».
+
+### Removed
+- `app/src/main/kotlin/.../FlagsScreen.kt` (placeholder Phase 0).
+- `app/src/main/kotlin/.../FlagsHomeViewModel.kt` (placeholder ViewModel à 1 string).
+- Strings du placeholder dans `app/src/main/res/values/strings.xml` (déplacées dans `:feature:flags`).
+
+### Notes
+- L'API HFR `forum1f.php?owntopic=N` est **par utilisateur** : chaque rafraîchissement marque les topics vus côté HFR. Pas d'`@AnonymousClient` ici, c'est intentionnel — le prefetch non-authentifié est réservé à la pagination des topics.
+- `Flag.firstUnreadPostId` est un `Long` côté domain mais `TopicRoute.scrollTo` un `Int` (limite Compose Navigation 3) ; le narrowing `takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()` est sûr en pratique (HFR `numreponse` plafonne ~10M).
+- Konsist : architecture rules toujours vertes après ajout de `:feature:flags`.
+
+---
+
 ## v19 — `0.1.0-phase1b.5` — 2026-04-28
 
 **Statut** : `local`

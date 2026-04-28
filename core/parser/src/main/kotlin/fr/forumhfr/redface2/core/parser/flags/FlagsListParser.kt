@@ -37,6 +37,7 @@ class FlagsListParser {
         }
     }
 
+    @Suppress("ReturnCount")
     private fun parseRow(row: Element, defaultType: FlagType): Flag? {
         val titleAnchor = row.selectFirst("td.sujetCase3 a.cCatTopic") ?: return null
         val title = titleAnchor.text().trim().ifEmpty { return null }
