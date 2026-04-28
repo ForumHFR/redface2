@@ -8,6 +8,8 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:domain"))
+
     implementation(platform(libs.okhttp.bom))
     api(libs.okhttp)
     implementation(libs.okhttp.logging)
@@ -16,4 +18,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit4)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.turbine)
+    testImplementation(libs.okhttp.mockwebserver)
 }

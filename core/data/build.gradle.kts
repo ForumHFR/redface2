@@ -16,11 +16,15 @@ android {
 
 dependencies {
     implementation(project(":core:domain"))
+    implementation(project(":core:model"))
     implementation(project(":core:network"))
     implementation(project(":core:parser"))
     implementation(project(":core:database"))
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(platform(libs.okhttp.bom))
+    implementation(libs.okhttp)
 
     testImplementation(libs.junit4)
     testImplementation(libs.mockk)

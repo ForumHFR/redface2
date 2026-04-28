@@ -15,8 +15,13 @@ android {
         // upload signing config).
         // versionName is also surfaced in the app footer via BuildConfig.VERSION_NAME so
         // dogfood builds advertise their phase / commit lineage to the user.
-        versionCode = 13
-        versionName = "0.1.0-phase1a.1"
+        versionCode = 18
+        versionName = "0.1.0-phase1b.4"
+
+        // Manifest placeholder so a side-by-side install (dogfood/preview overlay)
+        // can override the launcher label without touching tracked manifest/strings.
+        // Defaults to the in-app string resource for production builds.
+        manifestPlaceholders["appLabel"] = "@string/app_name"
     }
 
     buildFeatures {
@@ -48,6 +53,10 @@ dependencies {
     implementation(libs.androidx.navigation3.runtime)
     implementation(libs.androidx.navigation3.ui)
     implementation(libs.androidx.lifecycle.viewmodel.navigation3)
+    implementation(libs.androidx.hilt.navigation.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.core)
 
     testImplementation(libs.junit4)

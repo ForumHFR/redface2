@@ -141,7 +141,7 @@ Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (com
 
 Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le projet compte 15 modules (8 core + 7 features base). Les extensions sont des modules Gradle isolés qui s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant. La décision de découpage v1 est formalisée dans [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1).
 
-> **État réel des modules en Phase 1 (cycle topic réel en cours)** : tous les modules core et feature de base sont déclarés dans `settings.gradle.kts`, mais certains ne contiennent encore que le squelette Gradle (`build.gradle.kts`) sans code Kotlin — `:core:extension`, `:feature:auth` et `:feature:settings` notamment. `:core:network` et `:core:database` ont reçu leur backbone Phase 1A (`HfrClient`, `TopicRepositoryImpl` cache-aside, schema Room v1). C'est volontaire : le découpage est fixé dès le bootstrap (ADR-001) pour figer les frontières, mais le code arrive feature par feature. La prose ci-dessus décrit le **contrat cible** ; la réalité courante est trackée par la roadmap.
+> **État réel des modules en Phase 1** : tous les modules core et feature de base sont déclarés dans `settings.gradle.kts`, mais certains ne contiennent encore que le squelette Gradle (`build.gradle.kts`) sans code Kotlin — `:core:extension` et `:feature:settings` notamment. `:core:network` et `:core:database` ont reçu leur backbone Phase 1A (`HfrClient`, `TopicRepositoryImpl` cache-aside, schema Room v1). `:feature:auth` contient le login HFR Phase 1B.1 (`LoginScreen` / `LoginViewModel`). C'est volontaire : le découpage est fixé dès le bootstrap (ADR-001) pour figer les frontières, mais le code arrive feature par feature. La prose ci-dessus décrit le **contrat cible** ; la réalité courante est trackée par la roadmap.
 
 | Module | Fonction | Dépend de |
 |--------|----------|-----------|
@@ -172,7 +172,7 @@ Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le
 
 Les interfaces de repositories vivent dans le module domaine. Aucune dépendance framework.
 
-> **Note Phase 1** : ces interfaces sont le **contrat cible**. `TopicRepository` est livré (cf. [#88](https://github.com/ForumHFR/redface2/pull/88)) — `TopicScreen` lit du vrai HFR via cache-aside Room. Les autres interfaces (`FlagRepository`, `AuthRepository`, etc.) arrivent feature par feature avec leur implémentation `:core:data`.
+> **Note Phase 1** : ces interfaces sont le **contrat cible**. `TopicRepository` est livré (cf. [#88](https://github.com/ForumHFR/redface2/pull/88)) — `TopicScreen` lit du vrai HFR via cache-aside Room. `AuthRepository` est livré en Phase 1B.1 pour le login HFR et l'observation de session. Les autres interfaces (`FlagRepository`, etc.) arrivent feature par feature avec leur implémentation `:core:data`.
 
 ```kotlin
 // Dans :core:domain — le contrat
@@ -194,12 +194,22 @@ interface FlagRepository {
 }
 
 interface AuthRepository {
-    suspend fun login(username: String, password: String): Result<Unit>
-    suspend fun isLoggedIn(): Boolean
+    fun observeAuthState(): Flow<AuthState>
+    suspend fun login(pseudo: String, password: String): Result<AuthState.Authenticated>
+    suspend fun logout()
+}
+
+interface MessagesRepository {
+    /**
+     * Compteur de MPs non lus : `null` quand anonyme ou avant la première résolution,
+     * Int sinon. Phase 1B.1 livre uniquement ce compteur (preuve d'auth sur l'écran d'accueil) ;
+     * la liste complète des MPs et la lecture de threads MP arrivent en Phase 1C.
+     */
+    fun observeUnreadMpCount(): Flow<Int?>
 }
 ```
 
-`TopicRepository` est livré en Phase 1A (cf. [#88](https://github.com/ForumHFR/redface2/pull/88), [#89](https://github.com/ForumHFR/redface2/pull/89)). `prefetchNextPage` documenté dans la roadmap arrivera en Phase 1B sur `HfrClient` directement (avec `useAuth = false`), puis sera relayé par `TopicRepository.prefetchTopicPage(...)`.
+`TopicRepository` est livré en Phase 1A (cf. [#88](https://github.com/ForumHFR/redface2/pull/88), [#89](https://github.com/ForumHFR/redface2/pull/89)). `prefetchNextPage` documenté dans la roadmap arrivera en Phase 1B sur `HfrClient` directement (avec `useAuth = false`), puis sera relayé par `TopicRepository.prefetchTopicPage(...)`. `MessagesRepository` est livré en Phase 1B.1 en bonus du login : `:core:data DefaultMessagesRepository` combine l'observation de `AuthState` avec un fetch de `forum1.php?cat=prive` (parser dédié `:core:parser/messages/PrivateMessageListParser`) déclenché à chaque transition vers `Authenticated`. Le full pipeline messagerie (liste + threads) viendra en Phase 1C.
 
 ### `:core:network` — HfrClient
 
@@ -219,10 +229,11 @@ class HfrClient @Inject constructor(
     suspend fun getFlags(): String
     suspend fun postReply(cat: Int, post: Int, content: String): Result<Unit>
     suspend fun editPost(cat: Int, post: Int, numreponse: Int, content: String): Result<Unit>
-    suspend fun login(username: String, password: String): Result<Unit>
     // ...
 }
 ```
+
+Le login HFR est isolé dans `:core:network.auth.AuthRemoteDataSource`, pas dans `HfrClient` : il POSTe `login_validation.php`, classe la réponse, puis laisse le `@AuthenticatedClient` persister les cookies via `PersistentCookieJar`.
 
 `@AnonymousClient` (cookie jar = `CookieJar.NO_COOKIES`) permet à un caller — typiquement le prefetch de la page suivante — d'aller chercher du HTML sans que HFR ne marque les drapeaux comme lus côté serveur. Les écrans qui doivent honorer la lecture (lecture utilisateur) appellent avec `useAuth = true` (default).
 
@@ -363,55 +374,30 @@ sequenceDiagram
     OkHttp-->>App: HTML brut
 ```
 
-Les cookies sont persistés via un `PersistentCookieJar` adossé au DataStore chiffré (voir § Stockage sécurisé ci-dessous) pour éviter de se re-logguer à chaque lancement.
+Les cookies sont persistés via un `PersistentCookieJar` adossé à un DataStore non chiffré (voir § Stockage sécurisé ci-dessous) pour éviter de se re-logguer à chaque lancement.
 
 ### Stockage sécurisé des credentials
 
-**Option A retenue** (cycle [#24](https://github.com/ForumHFR/redface2/issues/24) thème 13, formalisée dans [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a)) : stack minimaliste **DataStore + Android Keystore**, **pas de Tink**, **pas de password stocké**.
+**Option A retenue** (cycle [#24](https://github.com/ForumHFR/redface2/issues/24) thème 13, formalisée dans [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a)) : stack minimaliste **DataStore non chiffré**, protection au repos déléguée à **File-Based Encryption (FBE)** d'Android, **pas de password stocké**.
 
 **Ce qui est stocké** : uniquement les **cookies de session HFR** (`md_user`, `md_pass`) — nécessaires pour rester connecté entre deux lancements de l'app.
 
 **Ce qui n'est pas stocké** : le mot de passe en clair de l'utilisateur. À l'expiration de session (cookies invalidés côté HFR), l'app redirige vers l'écran de login — l'utilisateur ré-entre son mot de passe. Pas de re-login transparent silencieux.
 
-> **Note** : `EncryptedSharedPreferences` (AndroidX Security) est déprécié à partir de `security-crypto 1.1.0-beta01` (04/06/2025), puis marqué deprecated en `1.1.0`. La release note officielle demande de préférer les APIs plateforme et l'usage direct d'Android Keystore ; les problèmes de StrictMode et de corruption de keyset observés sur le terrain restent des signaux supplémentaires, pas la formulation officielle canonique.
+**Protection au repos** :
 
-**Implémentation** :
+- minSdk 29 garantit FBE active : `/data/data/<pkg>` est chiffré tant que le device est locké, avec une clé dérivée du PIN/pattern utilisateur.
+- `android:allowBackup="false"` exclut les cookies du backup Google Drive.
+- la sandbox d'app empêche les autres apps non-root d'y accéder.
 
-```kotlin
-// 1. Clé AES/GCM dans Android Keystore (non extractible, TEE/StrongBox si dispo)
-private fun getOrCreateSessionKey(): SecretKey {
-    val spec = KeyGenParameterSpec.Builder(
-        KEY_ALIAS,
-        KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-    )
-        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-        .build()
-    return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-        .apply { init(spec) }
-        .generateKey()
-}
+> **Note** : `EncryptedSharedPreferences` (AndroidX Security) est déprécié à partir de `security-crypto 1.1.0-beta01` (04/06/2025), puis marqué deprecated en `1.1.0`. La release note officielle demande de préférer les APIs plateforme — la décision Option A va plus loin en supprimant la couche crypto custom redondante avec FBE.
 
-// 2. Chiffrement direct Cipher (pas de lib wrapper)
-fun encrypt(plaintext: ByteArray): Ciphertext {
-    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-    cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSessionKey())
-    return Ciphertext(iv = cipher.iv, data = cipher.doFinal(plaintext))
-}
-
-// 3. DataStore pour la persistance (IV + ciphertext stockés ensemble)
-@Serializable
-data class SessionCookies(
-    val mdUser: EncryptedBlob,
-    val mdPass: EncryptedBlob,
-)
-```
-
-**Rationale Option A (vs DataStore + Tink + Keystore envisagé initialement)** :
-- Tink est **overkill pour un seul secret** (session cookie). Sa valeur est dans le keyset management, AEAD streaming, multi-secret rotation — aucun n'est utile ici.
-- Moins de dépendances = moins de surface d'attaque et moins de maintenance.
-- Pas de password stocké = pas de question "que faire si la clé Keystore est invalidée" (re-login = user input = zéro magie).
-- Pas de biométrie : la clé Keystore est protégée par le TEE/StrongBox du device, suffisant pour un forum.
+**Rationale Option A (vs chiffrement custom envisagé initialement)** :
+- Le **password transite en clair** dans le POST `login_validation.php` (HFR ne supporte pas le hash côté client). Tout chiffrement local du cookie reste **redondant face à un attaquant runtime** : il verrait le password lors du prochain login.
+- FBE + sandbox + `allowBackup="false"` couvrent les menaces réalistes (app tierce, adb sur device locké, backup, forensic device locké).
+- Tink est overkill pour un seul secret (rotation, AEAD streaming, multi-keyset — aucun n'est utile ici).
+- Pas de clé Keystore custom = pas de gestion "clé invalidée par rotation système / restauration backup / perte StrongBox".
+- Pas de biométrie : forum ≠ banque, complexité UX disproportionnée pour le scope v1.
 
 ---
 
@@ -419,7 +405,7 @@ data class SessionCookies(
 
 ### Session expirée
 
-Un `Interceptor` OkHttp détecte la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Il émet un événement `SessionExpired`. Quand le module `:feature:auth` sera implémenté, `RedfaceApp` réinitialisera le back stack courant sur une route d'authentification dédiée — aujourd'hui aucune `AuthRoute` n'existe encore. L'utilisateur ré-entre son mot de passe (Option A, pas de re-login transparent : le password n'est pas stocké).
+Un futur `Interceptor` OkHttp détectera la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Il émettra un événement `SessionExpired` que `RedfaceApp` traduira en navigation vers la route de login livrée par `:feature:auth`. L'utilisateur ré-entre son mot de passe (Option A, pas de re-login transparent : le password n'est pas stocké).
 
 ### HFR indisponible
 

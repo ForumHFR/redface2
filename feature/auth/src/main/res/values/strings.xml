@@ -1,0 +1,13 @@
+<resources>
+    <string name="login_title">Connexion HFR</string>
+    <string name="login_intro">Saisis tes identifiants HFR pour accéder à tes drapeaux et tes MPs.</string>
+    <string name="login_pseudo">Pseudo</string>
+    <string name="login_password">Mot de passe</string>
+    <string name="login_submit">Se connecter</string>
+    <string name="login_cancel">Annuler</string>
+    <string name="login_error_invalid">Pseudo ou mot de passe incorrect.</string>
+    <string name="login_error_rate_limited">HFR a temporairement bloqué les tentatives. Réessaie dans quelques minutes.</string>
+    <string name="login_error_network">Connexion impossible. Vérifie ta connexion réseau.</string>
+    <string name="login_error_unknown">Erreur inattendue. Réessaie ou re-vérifie tes identifiants.</string>
+    <string name="login_error_dismiss">Masquer</string>
+</resources>

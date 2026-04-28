@@ -37,7 +37,7 @@ Cette documentation est issue de la rétro-ingénierie du code de [Redface v1](h
 | Nouveau topic | POST | `/bddpost.php?config=hfr.inc&cat={cat}&subcat={subcat}&new=1` | **oui** |
 | MP (envoi) | POST | `/bddpost.php?config=hfr.inc&cat=prive&pseudo={dest}` | **oui** |
 | Conversation MP | GET | `/message.php?config=hfr.inc&cat=prive&post={mp_id}&page={page}` | **oui** |
-| Liste des MPs | GET | `/message.php?config=hfr.inc` | **oui** |
+| Liste des MPs | GET | `/forum1.php?config=hfr.inc&cat=prive&page={page}&subcat=&sondage=0&owntopic=0&trash=0&trash_post=0&moderation=0&new=0&nojs=0&subcatgroup=0` | **oui** |
 | Page d'édition d'un post | GET | `/message.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Ajouter aux drapeaux | GET | `/user/addflag.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Retirer des drapeaux | GET | `/user/delflag.php?config=hfr.inc&cat={cat}&post={post}&p=1&sondage=0&owntopic={0,1}&new=0` | **oui** |
@@ -47,6 +47,8 @@ Cette documentation est issue de la rétro-ingénierie du code de [Redface v1](h
 | Recherche | GET | `/search.php?config=hfr.inc&search={query}&cat={cat}&...` | non |
 
 > **Note sur `PRIVATE_MESSAGE_CAT_ID`** : la catégorie des MPs est la **chaîne** `"prive"` et non un entier. Attention lors du typage côté Kotlin — `cat: String` pour les endpoints MP ou sentinel dédié.
+
+> **Note sur l'URL "Liste des MPs"** : l'endpoint canonique est `forum1.php?config=hfr.inc&cat=prive&...`, **pas** `message.php?config=hfr.inc` (qui ouvre le composer d'un MP isolé). Vérifié dans le legacy v1 (`HFREndpoints.PRIVATE_MESSAGES_URL`, prouvé en prod ~10 ans) et reproduit dans `:core:network HfrClient.getPrivateMessageListPage()` de Phase 1B.1. Toute la chaîne de query params (`subcat=`, `sondage=0`, `owntopic=0`, etc.) est conservée à l'identique du legacy par défensif — HFR pourrait accepter une URL plus courte mais ce n'est pas testé.
 
 ---
 
@@ -89,12 +91,24 @@ Le fait qu'une édition concerne le **premier post** (FP) vs un post normal est 
 
 ### POST `login_validation.php`
 
+URL complète : `POST https://forum.hardware.fr/login_validation.php?config=hfr.inc`
+
+Form-encoded body (`application/x-www-form-urlencoded`) :
+
 | Field | Valeur | Description |
 |---|---|---|
 | `pseudo` | username | |
-| `password` | password (plaintext) | **Attention** : HFR attend le password en clair dans le form POST (over HTTPS). Ne pas hasher côté client. |
+| `password` | password (plaintext) | **Attention** : HFR attend le password en clair dans le form POST (over HTTPS). Ne pas hasher côté client. Pas de `hash_check` ni de GET préalable pour le login lui-même. |
 
-Détection du succès : cookie `md_user` présent dans la réponse. Détection de l'échec : pattern `Votre mot de passe ou nom d'utilisateur n'est pas valide` dans le body HTML.
+Détection de la réponse (mirror de l'impl `:core:network/auth/AuthRemoteDataSource` Phase 1B.1) :
+
+| Cas | Marqueur | Action client |
+|---|---|---|
+| Succès | cookie `Set-Cookie: md_user=<pseudo>` présent | `AuthState.Authenticated(pseudo)`, cookie persisté par `PersistentCookieJar` |
+| Mauvais identifiants | body contient `Votre mot de passe ou nom d'utilisateur n'est pas valide` | `LoginError.InvalidCredentials` |
+| Anti-flood | body contient `Afin de prévenir les tentatives de flood` | `LoginError.RateLimited` (l'utilisateur attend quelques minutes et retente) |
+| Cookie `md_user` avec valeur ≠ pseudo soumis | défensif : `AuthRemoteDataSource` refuse de revendiquer une autre identité | `LoginError.Unknown("expected md_user cookie not set")` |
+| Tout autre format | aucun marqueur reconnu | `LoginError.Unknown(detail)` |
 
 ---
 
@@ -231,7 +245,7 @@ Deux sources distinctes :
 
 | Cookie | Rôle | Durée |
 |---|---|---|
-| `md_user` | ID utilisateur — **indicateur de session active** | 1 an |
+| `md_user` | Pseudo utilisateur — **indicateur de session active** | 1 an |
 | `md_pass` | Token de session | 1 an |
 | `md_forum` | Identifiant de forum | session |
 | Cookies divers (tracking interne HFR) | — | variable |
@@ -244,7 +258,7 @@ Un `Interceptor` OkHttp :
 
 1. Détecte HTTP 302 vers `/login.php` ou absence du pseudo dans la réponse.
 2. Émet un événement `SessionExpired`.
-3. Quand `:feature:auth` sera implémenté, `RedfaceApp` (`NavDisplay`) réinitialisera le back stack courant sur une route d'authentification dédiée et effacera le cache Room. Aucune `AuthRoute` n'existe encore dans le code Phase 1.
+3. Quand ce détecteur sera implémenté, `RedfaceApp` (`NavDisplay`) réinitialisera le back stack courant vers la route de login livrée par `:feature:auth` et effacera le cache Room concerné.
 
 L'utilisateur ré-entre son mot de passe (Option A : pas de re-login transparent, le password n'est pas stocké — voir [architecture.md#stockage-sécurisé-des-credentials](architecture.md#stockage-sécurisé-des-credentials)).
 
