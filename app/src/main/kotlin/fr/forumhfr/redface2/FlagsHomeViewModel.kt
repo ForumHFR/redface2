@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,9 +25,22 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class FlagsHomeViewModel @Inject constructor(
     private val authRepository: AuthRepository,
+    messagesRepository: MessagesRepository,
 ) : ViewModel() {
 
     val authState: StateFlow<AuthState?> = authRepository.observeAuthState()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = null,
+        )
+
+    /**
+     * Phase 1B.1 bonus: unread MP count surfaced as a "really logged in to HFR" signal.
+     * `null` covers both anonymous and "not yet fetched / fetch failed" — the home screen
+     * renders nothing in either case (same convention as `authState`).
+     */
+    val unreadMpCount: StateFlow<Int?> = messagesRepository.observeUnreadMpCount()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,

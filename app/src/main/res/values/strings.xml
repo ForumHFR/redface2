@@ -11,5 +11,6 @@
     <string name="flags_login_cta">Se connecter à HFR</string>
     <string name="flags_logged_in_as">Connecté en tant que %1$s</string>
     <string name="flags_logout_cta">Se déconnecter</string>
+    <string name="flags_unread_mps">MPs non lus : %1$d</string>
     <string name="app_version_footer">Redface 2 — v%1$s (build %2$d)</string>
 </resources>

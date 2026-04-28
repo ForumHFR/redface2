@@ -26,6 +26,7 @@ fun FlagsScreen(
 ) {
     val viewModel = hiltViewModel<FlagsHomeViewModel>()
     val authState by viewModel.authState.collectAsStateWithLifecycle()
+    val unreadMpCount by viewModel.unreadMpCount.collectAsStateWithLifecycle()
 
     RedfacePlaceholderScreen(
         title = stringResource(R.string.flags_title),
@@ -44,6 +45,7 @@ fun FlagsScreen(
         authState?.let { state ->
             AuthFooter(
                 state = state,
+                unreadMpCount = unreadMpCount,
                 onLoginRequested = onLoginRequested,
                 onLogoutRequested = viewModel::logout,
             )
@@ -67,6 +69,7 @@ fun FlagsScreen(
 @Composable
 private fun AuthFooter(
     state: AuthState,
+    unreadMpCount: Int?,
     onLoginRequested: () -> Unit,
     onLogoutRequested: () -> Unit,
 ) {
@@ -87,6 +90,17 @@ private fun AuthFooter(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // The unread MP count is fetched from forum1.php?cat=prive — only resolves
+            // when the session is actually valid HFR-side (HFR redirects to login
+            // otherwise), so showing it doubles as a "really logged in" proof beyond
+            // what the cookie alone tells us.
+            unreadMpCount?.let { count ->
+                Text(
+                    text = stringResource(R.string.flags_unread_mps, count),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             TextButton(
                 onClick = onLogoutRequested,
                 modifier = Modifier.fillMaxWidth(),
