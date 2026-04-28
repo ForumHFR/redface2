@@ -98,7 +98,7 @@ L'écran le plus important de l'app. Affiche les topics suivis par l'utilisateur
 - **Tous** : tous les drapeaux confondus
 - **Cyan** : topics où l'utilisateur a participé
 - **Favori** : topics marqués d'une étoile jaune
-- **Rouge** : marque de lecture (dernière position lue)
+- **Rouge** : topics lus uniquement (drapeau de lecture sans participation)
 
 **Actions sur un topic :**
 - Tap → ouvrir le topic à la dernière position non lue

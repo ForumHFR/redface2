@@ -6,8 +6,8 @@ package fr.forumhfr.redface2.core.model
  * HFR exposes three drapeau categories (selected via the `owntopic` query param,
  * confirmed by the onglet titles in the captured fixtures):
  *
- * - `owntopic=1` → [FlagType.RED] — « Tous les sujets auxquels j'ai participé »
- * - `owntopic=2` → [FlagType.CYAN] — « Tous les sujets que j'ai commencé à lire uniquement »
+ * - `owntopic=1` → [FlagType.CYAN] — « Tous les sujets auxquels j'ai participé »
+ * - `owntopic=2` → [FlagType.RED] — « Tous les sujets que j'ai commencé à lire uniquement »
  * - `owntopic=3` → [FlagType.FAVORITE] — « Tous mes favoris »
  *
  * The icon filename in the listing's `td.sujetCase5 img[src]` carries both the
@@ -53,9 +53,9 @@ data class Flag(
 )
 
 enum class FlagType {
-    /** Cyan drapeau — lus uniquement (`owntopic=2`, `flag0.gif` / `flagn0.gif`). */
+    /** Cyan drapeau — sujets participés (`owntopic=1`, `flag1.gif` / `flagn1.gif`). */
     CYAN,
-    /** Red drapeau — sujets participés (`owntopic=1`, `flag1.gif` / `flagn1.gif`). */
+    /** Red drapeau — lus uniquement (`owntopic=2`, `flag0.gif` / `flagn0.gif`). */
     RED,
     /** Yellow star — favoris (`owntopic=3`, `favoris.gif` / `favorisn.gif`). */
     FAVORITE,

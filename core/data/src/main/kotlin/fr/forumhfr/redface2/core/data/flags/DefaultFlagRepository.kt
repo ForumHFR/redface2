@@ -74,8 +74,8 @@ class DefaultFlagRepository @Inject constructor(
     }
 
     private fun FlagType.owntopic(): Int = when (this) {
-        FlagType.RED -> 1
-        FlagType.CYAN -> 2
+        FlagType.CYAN -> 1
+        FlagType.RED -> 2
         FlagType.FAVORITE -> 3
     }
 

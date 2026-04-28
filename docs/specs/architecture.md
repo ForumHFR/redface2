@@ -167,7 +167,7 @@ Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le
 - Contient `MainActivity`
 - Dépend de tous les modules feature (base + extensions)
 
-> **Note Phase 1B.4 — `:feature:flags` livré** : l'écran d'accueil (Drapeaux) vit désormais dans `:feature:flags` avec `FlagsViewModel` (Hilt) + `FlagRepository` + 3 onglets (`FlagType.RED` / `CYAN` / `FAVORITE`). `:app` ne fait plus que la navigation (`FlagsRoute(versionName, versionCode, onOpenFlag, onLoginRequested)`) et passe `BuildConfig.VERSION_NAME/VERSION_CODE` en paramètres pour que l'écran puisse afficher le footer "Redface 2 — vX.Y (build N)" sans dépendre de la BuildConfig de `:app`.
+> **Note Phase 1B.4 — `:feature:flags` livré** : l'écran d'accueil (Drapeaux) vit désormais dans `:feature:flags` avec `FlagsViewModel` (Hilt) + `FlagRepository` + 3 onglets (`FlagType.CYAN` = mes sujets, `RED` = lus uniquement, `FAVORITE`). `:app` ne fait plus que la navigation (`FlagsRoute(versionName, versionCode, onOpenFlag, onLoginRequested)`) et passe `BuildConfig.VERSION_NAME/VERSION_CODE` en paramètres pour que l'écran puisse afficher le footer "Redface 2 — vX.Y (build N)" sans dépendre de la BuildConfig de `:app`.
 
 ---
 

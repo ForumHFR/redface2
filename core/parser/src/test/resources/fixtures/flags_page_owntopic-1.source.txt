@@ -1,5 +1,5 @@
 Source: forum.hardware.fr (capture personnelle XaT, 2026-04-28)
 Captured page: forum1f.php?config=hfr.inc&owntopic=1&new=0&nojs=0
-Type: drapeau rouge — onglet HFR « Tous les sujets auxquels j'ai participé » (= Mes sujets côté UI Redface 2)
+Type: drapeau cyan — onglet HFR « Tous les sujets auxquels j'ai participé » (= Mes sujets côté UI Redface 2)
 Marqueur ligne (sujetCase5): flag1.gif (avec posts non-lus) / flagn1.gif (sans nouveaux)
-Notes: hash_check, codehex et id_user sanitized. La fixture inclut aussi 2 favoris.gif intercalés (legacy mix : un topic peut être classifié favori côté HFR alors qu'on l'a participé). 39 lignes, dont 37 RED + 2 FAVORITE — toutes hasUnread=true.
+Notes: hash_check, codehex et id_user sanitized. La fixture inclut aussi 2 favoris.gif intercalés (legacy mix : un topic peut être classifié favori côté HFR alors qu'on l'a participé). 39 lignes, dont 37 CYAN + 2 FAVORITE — toutes hasUnread=true.

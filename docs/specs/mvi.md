@@ -66,7 +66,7 @@ class FlagsViewModel @Inject constructor(
     messagesRepository: MessagesRepository,
 ) : ViewModel() {
 
-    private val _selectedTab = MutableStateFlow(FlagType.RED)
+    private val _selectedTab = MutableStateFlow(FlagType.CYAN)
     val selectedTab: StateFlow<FlagType> = _selectedTab.asStateFlow()
 
     val authState: StateFlow<AuthState?> =

@@ -97,8 +97,8 @@ class FlagsListParser {
     }
 
     private fun iconToType(name: String): FlagType? = when (name) {
-        "flag0", "flagn0" -> FlagType.CYAN
-        "flag1", "flagn1" -> FlagType.RED
+        "flag0", "flagn0" -> FlagType.RED
+        "flag1", "flagn1" -> FlagType.CYAN
         "favoris", "favorisn" -> FlagType.FAVORITE
         else -> null
     }

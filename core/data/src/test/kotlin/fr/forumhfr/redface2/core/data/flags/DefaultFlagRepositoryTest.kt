@@ -29,7 +29,7 @@ class DefaultFlagRepositoryTest {
         val flags = listOf(stubFlag(topicId = 5))
         val (repo, _, _) = buildRepository(html = "<html/>", parsedFlags = flags)
 
-        repo.observe(FlagType.RED).test {
+        repo.observe(FlagType.CYAN).test {
             assertEquals(FlagsResult.Loading, awaitItem())
             assertEquals(FlagsResult.Success(flags), awaitItem())
             cancelAndIgnoreRemainingEvents()
@@ -42,7 +42,7 @@ class DefaultFlagRepositoryTest {
         coEvery { hfrClient.getFlagsPage(owntopic = 1) } throws IOException("offline")
         val (repo, _, _) = buildRepository(hfrClient = hfrClient)
 
-        repo.observe(FlagType.RED).test {
+        repo.observe(FlagType.CYAN).test {
             assertEquals(FlagsResult.Loading, awaitItem())
             val result = awaitItem()
             assertTrue("expected Failure, got $result", result is FlagsResult.Failure)
@@ -57,16 +57,16 @@ class DefaultFlagRepositoryTest {
         val hfrClient = mockk<HfrClient>()
         coEvery { hfrClient.getFlagsPage(owntopic = 1) } returnsMany listOf("<html v=1/>", "<html v=2/>")
         val parser = mockk<FlagsListParser>()
-        coEvery { parser.parse("<html v=1/>", FlagType.RED) } returns initialFlags
-        coEvery { parser.parse("<html v=2/>", FlagType.RED) } returns refreshedFlags
+        coEvery { parser.parse("<html v=1/>", FlagType.CYAN) } returns initialFlags
+        coEvery { parser.parse("<html v=2/>", FlagType.CYAN) } returns refreshedFlags
 
         val (repo, _, _) = buildRepository(hfrClient = hfrClient, parser = parser)
 
-        repo.observe(FlagType.RED).test {
+        repo.observe(FlagType.CYAN).test {
             assertEquals(FlagsResult.Loading, awaitItem())
             assertEquals(FlagsResult.Success(initialFlags), awaitItem())
 
-            repo.refresh(FlagType.RED)
+            repo.refresh(FlagType.CYAN)
             assertEquals(FlagsResult.Success(refreshedFlags), awaitItem())
 
             cancelAndIgnoreRemainingEvents()
@@ -80,16 +80,16 @@ class DefaultFlagRepositoryTest {
         coEvery { hfrClient.getFlagsPage(owntopic = 2) } returns "<c/>"
         coEvery { hfrClient.getFlagsPage(owntopic = 3) } returns "<f/>"
         val parser = mockk<FlagsListParser>()
-        coEvery { parser.parse("<r/>", FlagType.RED) } returns
-            listOf(stubFlag(topicId = 1, type = FlagType.RED))
-        coEvery { parser.parse("<c/>", FlagType.CYAN) } returns
-            listOf(stubFlag(topicId = 2, type = FlagType.CYAN))
+        coEvery { parser.parse("<r/>", FlagType.CYAN) } returns
+            listOf(stubFlag(topicId = 1, type = FlagType.CYAN))
+        coEvery { parser.parse("<c/>", FlagType.RED) } returns
+            listOf(stubFlag(topicId = 2, type = FlagType.RED))
         coEvery { parser.parse("<f/>", FlagType.FAVORITE) } returns
             listOf(stubFlag(topicId = 3, type = FlagType.FAVORITE))
 
         val (repo, _, _) = buildRepository(hfrClient = hfrClient, parser = parser)
 
-        listOf(FlagType.RED to 1, FlagType.CYAN to 2, FlagType.FAVORITE to 3).forEach { (type, topicId) ->
+        listOf(FlagType.CYAN to 1, FlagType.RED to 2, FlagType.FAVORITE to 3).forEach { (type, topicId) ->
             repo.observe(type).test {
                 awaitItem() // Loading
                 val success = awaitItem() as FlagsResult.Success
@@ -99,7 +99,7 @@ class DefaultFlagRepositoryTest {
         }
     }
 
-    private fun stubFlag(topicId: Int, type: FlagType = FlagType.RED): Flag = Flag(
+    private fun stubFlag(topicId: Int, type: FlagType = FlagType.CYAN): Flag = Flag(
         cat = 1,
         subcat = 1,
         topicId = topicId,

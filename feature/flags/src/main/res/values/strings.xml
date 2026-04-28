@@ -6,8 +6,8 @@
     <string name="flags_logout_cta">Se déconnecter</string>
     <string name="flags_unread_mps">MPs non lus : %1$d</string>
 
-    <string name="flags_tab_red">Mes sujets</string>
-    <string name="flags_tab_cyan">Lus uniquement</string>
+    <string name="flags_tab_my_topics">Mes sujets</string>
+    <string name="flags_tab_read_only">Lus uniquement</string>
     <string name="flags_tab_favorite">Favoris</string>
 
     <string name="flags_loading">Chargement…</string>

@@ -62,9 +62,9 @@ class FlagsViewModelTest {
             // Initial value (null) before stateIn fires.
             awaitItem()
             // FakeFlagRepository emits Loading then Success(emptyList) on subscribe.
-            flags.emit(FlagType.RED, FlagsResult.Loading)
+            flags.emit(FlagType.CYAN, FlagsResult.Loading)
             assertEquals(FlagsResult.Loading, awaitItem())
-            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(1, FlagType.RED))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN))))
             val success = awaitItem() as FlagsResult.Success
             assertEquals(1, success.flags.single().topicId)
             cancelAndIgnoreRemainingEvents()
@@ -80,14 +80,14 @@ class FlagsViewModelTest {
         vm.flagsState.test {
             awaitItem() // initial null
 
-            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(1, FlagType.RED))))
-            val red = awaitItem() as FlagsResult.Success
-            assertEquals(FlagType.RED, red.flags.single().type)
-
-            vm.selectTab(FlagType.CYAN)
-            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(2, FlagType.CYAN))))
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN))))
             val cyan = awaitItem() as FlagsResult.Success
             assertEquals(FlagType.CYAN, cyan.flags.single().type)
+
+            vm.selectTab(FlagType.RED)
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED))))
+            val red = awaitItem() as FlagsResult.Success
+            assertEquals(FlagType.RED, red.flags.single().type)
 
             cancelAndIgnoreRemainingEvents()
         }

@@ -157,8 +157,8 @@ private fun ColumnScope.AuthenticatedBody(
     onRetry: () -> Unit,
 ) {
     val tabs = listOf(
-        FlagType.RED to stringResource(R.string.flags_tab_red),
-        FlagType.CYAN to stringResource(R.string.flags_tab_cyan),
+        FlagType.CYAN to stringResource(R.string.flags_tab_my_topics),
+        FlagType.RED to stringResource(R.string.flags_tab_read_only),
         FlagType.FAVORITE to stringResource(R.string.flags_tab_favorite),
     )
     val selectedIndex = tabs.indexOfFirst { it.first == selectedTab }.coerceAtLeast(0)

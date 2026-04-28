@@ -178,8 +178,8 @@ data class Flag(
 
 enum class FlagType {
     // Mapping confirmé par les onglets HFR capturés dans les fixtures :
-    CYAN,       // « Tous les sujets que j'ai commencé à lire uniquement » (`owntopic=2`, `flag0.gif`)
-    RED,        // « Tous les sujets auxquels j'ai participé » (`owntopic=1`, `flag1.gif`)
+    CYAN,       // « Tous les sujets auxquels j'ai participé » (`owntopic=1`, `flag1.gif`)
+    RED,        // « Tous les sujets que j'ai commencé à lire uniquement » (`owntopic=2`, `flag0.gif`)
     FAVORITE,   // « Tous mes favoris » (`owntopic=3`, `favoris.gif`)
 }
 ```
