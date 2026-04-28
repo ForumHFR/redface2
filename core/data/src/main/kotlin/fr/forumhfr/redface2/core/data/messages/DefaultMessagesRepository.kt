@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.data.messages
 
+import android.util.Log
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
@@ -51,6 +52,16 @@ class DefaultMessagesRepository @Inject constructor(
         runCatching {
             val html = hfrClient.getPrivateMessageListPage(page = 1)
             parser.countUnread(html)
+        }.onFailure { throwable ->
+            // Surface fetch failures in logcat so a missing "MPs non lus" line on FlagsScreen
+            // can be debugged. Silent swallow would make a regression invisible (e.g. HFR DOM
+            // change → parser returns 0 vs network failure → null). Logging on failure only
+            // keeps the happy path quiet.
+            Log.w(LOG_TAG, "Unread MP count fetch failed", throwable)
         }.getOrNull()
+    }
+
+    private companion object {
+        const val LOG_TAG = "MessagesRepository"
     }
 }

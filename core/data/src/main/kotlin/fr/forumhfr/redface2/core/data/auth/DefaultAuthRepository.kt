@@ -9,6 +9,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -39,6 +40,7 @@ class DefaultAuthRepository @Inject constructor(
             val mdUser = cookies.firstOrNull { it.name == COOKIE_MD_USER && it.value.isNotBlank() }
             if (mdUser != null) AuthState.Authenticated(mdUser.value) else AuthState.Anonymous
         }
+        .distinctUntilChanged()
 
     /**
      * The persistence side-effect happens implicitly: AuthRemoteDataSource POSTs through the

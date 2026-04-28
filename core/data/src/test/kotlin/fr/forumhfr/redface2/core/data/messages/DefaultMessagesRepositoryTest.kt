@@ -1,0 +1,143 @@
+package fr.forumhfr.redface2.core.data.messages
+
+import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.auth.LoginError
+import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.network.HfrClient
+import fr.forumhfr.redface2.core.parser.messages.PrivateMessageListParser
+import io.mockk.coEvery
+import io.mockk.mockk
+import java.io.IOException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(manifest = Config.NONE, sdk = [33])
+class DefaultMessagesRepositoryTest {
+
+    @Test
+    fun `observeUnreadMpCount emits null when auth state is Anonymous`() = runTest {
+        val (repo, authStates) = buildRepository()
+
+        repo.observeUnreadMpCount().test {
+            authStates.emit(AuthState.Anonymous)
+            assertNull(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeUnreadMpCount emits parsed count when authenticated`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageListPage(page = 1) } returns FAKE_HTML
+        val parser = mockk<PrivateMessageListParser>()
+        coEvery { parser.countUnread(FAKE_HTML) } returns 7
+
+        val (repo, authStates) = buildRepository(hfrClient = hfrClient, parser = parser)
+
+        repo.observeUnreadMpCount().test {
+            authStates.emit(AuthState.Authenticated("xaat"))
+            assertEquals(7, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeUnreadMpCount emits null when fetch throws (network error)`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageListPage(page = 1) } throws IOException("offline")
+
+        val (repo, authStates) = buildRepository(hfrClient = hfrClient)
+
+        repo.observeUnreadMpCount().test {
+            authStates.emit(AuthState.Authenticated("xaat"))
+            assertNull(
+                "A failed fetch must surface as null rather than a stale or zero count",
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeUnreadMpCount flips back to null when user logs out`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageListPage(page = 1) } returns FAKE_HTML
+        val parser = mockk<PrivateMessageListParser>()
+        coEvery { parser.countUnread(FAKE_HTML) } returns 3
+
+        val (repo, authStates) = buildRepository(hfrClient = hfrClient, parser = parser)
+
+        repo.observeUnreadMpCount().test {
+            authStates.emit(AuthState.Authenticated("xaat"))
+            assertEquals(3, awaitItem())
+
+            authStates.emit(AuthState.Anonymous)
+            assertNull(awaitItem())
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeUnreadMpCount refetches when auth state flips to Authenticated again`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageListPage(page = 1) } returnsMany listOf(FAKE_HTML, FAKE_HTML_2)
+        val parser = mockk<PrivateMessageListParser>()
+        coEvery { parser.countUnread(FAKE_HTML) } returns 1
+        coEvery { parser.countUnread(FAKE_HTML_2) } returns 5
+
+        val (repo, authStates) = buildRepository(hfrClient = hfrClient, parser = parser)
+
+        repo.observeUnreadMpCount().test {
+            authStates.emit(AuthState.Authenticated("xaat"))
+            assertEquals(1, awaitItem())
+
+            authStates.emit(AuthState.Anonymous)
+            assertNull(awaitItem())
+
+            authStates.emit(AuthState.Authenticated("xaat"))
+            assertEquals(5, awaitItem())
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    private fun buildRepository(
+        hfrClient: HfrClient = mockk(relaxed = true),
+        parser: PrivateMessageListParser = mockk(relaxed = true),
+    ): Pair<DefaultMessagesRepository, MutableSharedFlow<AuthState>> {
+        val authStates = MutableSharedFlow<AuthState>(replay = 0)
+        val authRepository = object : AuthRepository {
+            override fun observeAuthState(): Flow<AuthState> = authStates
+
+            override suspend fun login(pseudo: String, password: String) =
+                Result.failure<AuthState.Authenticated>(LoginError.Unknown("not used in this test"))
+
+            override suspend fun logout() = Unit
+        }
+        val repo = DefaultMessagesRepository(
+            authRepository = authRepository,
+            hfrClient = hfrClient,
+            parser = parser,
+            ioDispatcher = UnconfinedTestDispatcher(),
+        )
+        return repo to authStates
+    }
+
+    private companion object {
+        const val FAKE_HTML = "<html><body><table></table></body></html>"
+        const val FAKE_HTML_2 = "<html><body><table>v2</table></body></html>"
+    }
+}

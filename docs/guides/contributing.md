@@ -55,6 +55,34 @@ Exemples :
 
 Le script monte le repo dans `/workspace`, persiste les caches Gradle / Android dans `.gradle-user/` et exécute le container avec l'UID/GID de l'utilisateur hôte pour éviter les fichiers root-owned sur Linux. En rootless Podman, `--userns keep-id` est ajouté automatiquement pour garder le mapping d'identité.
 
+#### Dogfood : installer en parallèle d'une release Play
+
+Pour installer un build local **à côté** d'une version Redface 2 déjà publiée (alpha / closed testing) sans clobber l'existant, créer un init-script Gradle **gitignored** sous `.gradle-user/dogfood.init.gradle` :
+
+```groovy
+allprojects {
+  afterEvaluate { project ->
+    if (project.plugins.hasPlugin('com.android.application')) {
+      project.android.defaultConfig.applicationIdSuffix = '.dogfood'
+      project.android.defaultConfig.versionNameSuffix = '-dogfood'
+      project.android.defaultConfig.manifestPlaceholders.put('appLabel', 'Redface 2 dog')
+    }
+  }
+}
+```
+
+Puis builder :
+
+```bash
+./scripts/docker-dev.sh ./gradlew :app:assembleRelease \
+  --init-script .gradle-user/signing/signing.init.gradle \
+  --init-script .gradle-user/dogfood.init.gradle
+```
+
+L'APK résultant a `applicationId fr.forumhfr.redface2.dogfood`, un launcher label distinct, et coexiste avec la release prod sur le même appareil. **Ne jamais utiliser cet overlay pour un AAB destiné à Play Console** — Play attend l'`applicationId` bare `fr.forumhfr.redface2` déclaré dans la console.
+
+Le placeholder `${appLabel}` est tracké dans `app/src/main/AndroidManifest.xml` + `app/build.gradle.kts` (défault `@string/app_name`), donc les builds standard sans overlay ne sont pas affectés.
+
 ### Structure du projet
 
 ```

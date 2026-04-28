@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.network.cookie
 
+import android.os.Looper
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -13,6 +14,8 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -50,6 +53,14 @@ class PersistentCookieJar @Inject constructor(
     private val cache = MutableStateFlow<List<Cookie>?>(null)
 
     /**
+     * Serializes writes to the persisted [CookieStore] so a `saveFromResponse` can never be
+     * reordered with a concurrent `clear` (logout) on the way to disk. The runtime cache is
+     * already a `StateFlow` with atomic value writes; the mutex covers only the disk path
+     * where order matters for crash-survivability of the auth state.
+     */
+    private val storeMutex = Mutex()
+
+    /**
      * Runtime cookie state. Emits `null` until the persisted store has been read for the
      * first time, then a non-null list updated synchronously on every saveFromResponse /
      * clear and re-emitted whenever the store flow fires.
@@ -74,7 +85,18 @@ class PersistentCookieJar @Inject constructor(
      */
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
         val now = System.currentTimeMillis()
-        val cookies = cache.value ?: runBlocking { state.filterNotNull().first() }
+        val cookies = cache.value ?: run {
+            // Defensive: blocking on Main is the headline ANR scenario for this code path.
+            // The Looper API throws in JVM-only unit tests (`android.jar` is compile-only),
+            // so we guard the read and skip the check when there is no Looper subsystem.
+            val mainLooper = runCatching { Looper.getMainLooper() }.getOrNull()
+            check(mainLooper == null || Looper.myLooper() != mainLooper) {
+                "PersistentCookieJar.loadForRequest must not block the Main thread. The cookie " +
+                    "cache is uninitialized; this call site is wrong (an OkHttp Call should " +
+                    "execute off-main, on @IoDispatcher or an OkHttp worker thread)."
+            }
+            runBlocking { state.filterNotNull().first() }
+        }
         return cookies.filter { it.matches(url) && it.expiresAt > now }
     }
 
@@ -82,17 +104,18 @@ class PersistentCookieJar @Inject constructor(
         if (cookies.isEmpty()) return
         val merged = merge(cache.value ?: emptyList(), cookies)
         cache.value = merged
-        scope.launch { store.save(merged) }
+        scope.launch { storeMutex.withLock { store.save(merged) } }
     }
 
     /**
      * Clears the runtime cache synchronously and the persisted store asynchronously. Used by
      * `AuthRepository.logout()` so the auth state flips to `Anonymous` immediately, without
-     * waiting for the DataStore commit.
+     * waiting for the DataStore commit. Disk writes are serialized via `storeMutex` so a
+     * logout can never be reordered behind a stale `saveFromResponse` on the way to disk.
      */
     fun clear() {
         cache.value = emptyList()
-        scope.launch { store.clear() }
+        scope.launch { storeMutex.withLock { store.clear() } }
     }
 
     private fun merge(existing: List<Cookie>, incoming: List<Cookie>): List<Cookie> {

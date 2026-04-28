@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.network.cookie
 
 import app.cash.turbine.test
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +93,24 @@ class PersistentCookieJarTest {
     }
 
     @Test
+    fun `saveFromResponse with an expired cookie removes the matching cache entry even when value is non-empty`() {
+        // Defensive complement to the deletion-marker test (which used value=""). HFR also
+        // sends "burn this cookie" via expiresAt < now while keeping a non-empty placeholder
+        // value. The merge logic must treat both shapes the same way: drop the entry.
+        val store = FakeCookieStore(initial = listOf(cookie("md_user", "xaat")))
+        val jar = PersistentCookieJar(store, UnconfinedTestDispatcher())
+
+        jar.saveFromResponse(
+            baseUrl,
+            listOf(cookie("md_user", "stale", expiresAt = System.currentTimeMillis() - 1_000)),
+        )
+
+        val loaded = jar.loadForRequest(baseUrl)
+        assertTrue(loaded.none { it.name == "md_user" })
+        assertTrue(store.lastSaved.none { it.name == "md_user" })
+    }
+
+    @Test
     fun `saveFromResponse with empty list is a no-op and does not touch the store`() {
         val store = FakeCookieStore(initial = listOf(cookie("md_user", "xaat")))
         val jar = PersistentCookieJar(store, UnconfinedTestDispatcher())
@@ -173,18 +192,35 @@ class PersistentCookieJarTest {
             jar.state.value,
         )
 
+        val supplierStarted = CountDownLatch(1)
         val executor = Executors.newSingleThreadExecutor()
         val cookieFuture: CompletableFuture<List<Cookie>> = CompletableFuture.supplyAsync(
-            { jar.loadForRequest(baseUrl) },
+            {
+                supplierStarted.countDown()
+                jar.loadForRequest(baseUrl)
+            },
             executor,
         )
 
-        // Give the supplier a moment to enter loadForRequest and start blocking on the flow.
-        Thread.sleep(LOAD_BLOCKING_GRACE_MS)
-        assertFalse(
-            "loadForRequest should still be blocking while the cookie cache is uninitialized",
-            cookieFuture.isDone,
+        // Wait for the supplier thread to have actually entered our lambda before asserting
+        // anything about it. Without this latch, a slow runner could schedule the supplier
+        // after our assertion and we'd see isDone=false for the wrong reason (not blocking,
+        // not even started yet).
+        assertTrue(
+            "supplier did not start within $SUPPLIER_START_TIMEOUT_MS ms — runner is too slow",
+            supplierStarted.await(SUPPLIER_START_TIMEOUT_MS, TimeUnit.MILLISECONDS),
         )
+
+        // Verify isDone stays false across a poll window. We bail early if it ever flips
+        // (which would mean the contract is broken, not that the runner is slow).
+        val deadline = System.currentTimeMillis() + LOAD_BLOCKING_GRACE_MS
+        while (System.currentTimeMillis() < deadline) {
+            assertFalse(
+                "loadForRequest must keep blocking while the cookie cache is uninitialized",
+                cookieFuture.isDone,
+            )
+            Thread.sleep(LOAD_BLOCKING_POLL_MS)
+        }
 
         // Releasing the cookie store unblocks the jar's collector, which sets cache.value
         // and resumes the runBlocking inside loadForRequest.
@@ -267,6 +303,8 @@ class PersistentCookieJarTest {
 
     private companion object {
         const val LOAD_BLOCKING_GRACE_MS = 100L
+        const val LOAD_BLOCKING_POLL_MS = 10L
         const val LOAD_BLOCKING_TIMEOUT_MS = 2_000L
+        const val SUPPLIER_START_TIMEOUT_MS = 2_000L
     }
 }

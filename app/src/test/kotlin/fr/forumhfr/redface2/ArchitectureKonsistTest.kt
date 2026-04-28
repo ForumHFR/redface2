@@ -82,31 +82,44 @@ class ArchitectureKonsistTest {
     }
 
     @Test
-    fun `auth code does not depend on AnonymousClient`() {
-        // Anything under an /auth/ directory speaks to HFR with cookies attached. Wiring
-        // @AnonymousClient (CookieJar.NO_COOKIES) into auth code would silently break the
-        // session since OkHttp would never replay md_user / md_pass — this rule catches the
-        // mistake at build time instead of runtime.
-        val authProductionFiles = Konsist
+    fun `authenticated-only code does not depend on AnonymousClient`() {
+        // Any code under /auth/ or /messages/ speaks to HFR with cookies attached. Wiring
+        // @AnonymousClient (CookieJar.NO_COOKIES) here would silently break the session
+        // since OkHttp would never replay md_user / md_pass — this rule catches the
+        // mistake at build time instead of runtime. The check is layered so a contributor
+        // can't bypass it with a star-import (`import …qualifiers.*`) or a fully-qualified
+        // annotation usage (`@…qualifiers.AnonymousClient`).
+        val authenticatedOnlyFiles = Konsist
             .scopeFromProject()
             .slice { file ->
-                file.path.contains("/auth/") &&
+                AUTH_DIR_TOKENS.any { file.path.contains(it) } &&
                     !file.path.contains("/src/test/") &&
                     !file.path.contains("/build/")
             }
             .files
 
-        assertTrue("Konsist must scan auth production files", authProductionFiles.isNotEmpty())
+        assertTrue(
+            "Konsist must scan authenticated-only production files",
+            authenticatedOnlyFiles.isNotEmpty(),
+        )
 
-        authProductionFiles.assertFalse { file ->
+        authenticatedOnlyFiles.assertFalse { file ->
             file.imports.any { imported ->
-                imported.name.orEmpty() == ANONYMOUS_CLIENT_QUALIFIER
-            }
+                val name = imported.name.orEmpty()
+                name == ANONYMOUS_CLIENT_QUALIFIER ||
+                    // Star-import of the qualifiers package would silently allow @AnonymousClient.
+                    name == "$ANONYMOUS_CLIENT_PACKAGE.*"
+            } ||
+                // Catches @fully.qualified.AnonymousClient usage that bypasses the imports list.
+                file.text.contains(ANONYMOUS_CLIENT_QUALIFIER)
         }
     }
 
     private companion object {
+        const val ANONYMOUS_CLIENT_PACKAGE =
+            "fr.forumhfr.redface2.core.network.qualifiers"
         const val ANONYMOUS_CLIENT_QUALIFIER =
-            "fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient"
+            "$ANONYMOUS_CLIENT_PACKAGE.AnonymousClient"
+        val AUTH_DIR_TOKENS = listOf("/auth/", "/messages/")
     }
 }
