@@ -82,8 +82,12 @@ class FlagsViewModel @Inject constructor(
         .flatMapLatest { state ->
             when (state) {
                 null, AuthState.Anonymous -> flowOf(null)
-                is AuthState.Authenticated ->
-                    selectedTab.flatMapLatest { type -> flagRepository.observe(type) }
+                is AuthState.Authenticated -> selectedTab.flatMapLatest { type ->
+                    // The .map { it as FlagsResult? } upcast is required so the `when`
+                    // branches share a common type — `flowOf(null)` is `Flow<Nothing?>`,
+                    // and stateIn needs the upstream `Flow<FlagsResult?>`.
+                    flagRepository.observe(type).map { it as FlagsResult? }
+                }
             }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, initialValue = null)

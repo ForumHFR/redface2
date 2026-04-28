@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -148,7 +149,7 @@ private fun AnonymousBody(onLoginRequested: () -> Unit) {
 }
 
 @Composable
-private fun AuthenticatedBody(
+private fun ColumnScope.AuthenticatedBody(
     selectedTab: FlagType,
     flagsState: FlagsResult?,
     onSelectTab: (FlagType) -> Unit,
@@ -210,10 +211,20 @@ private fun AuthenticatedBody(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
+                        // Without weight(1f), this LazyColumn would consume all remaining
+                        // vertical space inside the parent Column (FlagsRoute) and push
+                        // FooterSlot off-screen — invariably reproducible on the cyan tab
+                        // (127 rows in the captured fixture). Weight is the canonical
+                        // Compose pattern for "header + scrollable list + footer".
+                        .weight(1f)
                         .clip(RoundedCornerShape(0.dp))
                         .background(MaterialTheme.colorScheme.surface),
                 ) {
-                    items(items = current.flags, key = { flag -> flag.topicId }) { flag ->
+                    // Compose `key` rejects duplicates with IllegalArgumentException, but
+                    // HFR's `post=` topic id is only guaranteed unique within a category
+                    // (cf. AGENTS.md), not globally. Using "cat-topicId" eliminates the
+                    // latent crash if the listing ever returns the same topicId in two cats.
+                    items(items = current.flags, key = { "${it.cat}-${it.topicId}" }) { flag ->
                         FlagItem(
                             flag = flag,
                             metadata = flagMetadata(flag),

@@ -50,7 +50,10 @@ class FlagsListParser {
         // td.sujetCase4 is the "Dern. page" column — its anchor text is the topic's last
         // page number, NOT the reply count. The actual reply count lives on td.sujetCase7
         // ("Rép." header) and the view count on td.sujetCase8 ("Lues" header).
-        val totalPages = row.selectFirst("td.sujetCase4 a")?.text()?.toIntOrNull() ?: 0
+        // coerceAtLeast(1) so a brand-new topic (no reply page resolved yet) doesn't
+        // surface "p.X/0" in the UI footer.
+        val totalPages = (row.selectFirst("td.sujetCase4 a")?.text()?.toIntOrNull() ?: 0)
+            .coerceAtLeast(1)
 
         // Canonical unread signal: line marker on sujetCase1.
         val lineMarker = row.selectFirst("td.sujetCase1 img[src]")?.iconName()
@@ -64,12 +67,14 @@ class FlagsListParser {
 
         val flagHref = flagAnchor?.attr("href").orEmpty()
         val lastReadPage = flagHref.queryParam("page")?.toIntOrNull()
-            ?: if (hasUnread) 1 else totalPages.coerceAtLeast(1)
+            ?: if (hasUnread) 1 else totalPages
         val firstUnreadPostId = flagHref.fragment("t")?.toLongOrNull() ?: 0L
 
         val firstPostAuthor = row.selectFirst("td.sujetCase6 a.Tableau")?.text().orEmpty()
-        val replyCount = row.selectFirst("td.sujetCase7")?.text()?.replace(" ", "")?.toIntOrNull() ?: 0
-        val views = row.selectFirst("td.sujetCase8")?.text()?.replace(" ", "")?.toIntOrNull() ?: 0
+        // HFR groups thousands with U+00A0 (NBSP) in some renderings — strip both
+        // ASCII space (defensive) and any non-digit char so the parsed Int is robust.
+        val replyCount = row.selectFirst("td.sujetCase7")?.text()?.digitsOnly() ?: 0
+        val views = row.selectFirst("td.sujetCase8")?.text()?.digitsOnly() ?: 0
         val lastReplyAt = row.selectFirst("td.sujetCase9 a")?.ownText()?.trim().orEmpty()
         val lastReplyAuthor = row.selectFirst("td.sujetCase9 a b")?.text().orEmpty()
 
@@ -113,4 +118,6 @@ class FlagsListParser {
         val fragment = substring(hashIndex + 1)
         return fragment.removePrefix(name).takeIf { it.length < fragment.length }
     }
+
+    private fun String.digitsOnly(): Int? = filter(Char::isDigit).toIntOrNull()
 }
