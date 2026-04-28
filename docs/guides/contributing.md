@@ -98,6 +98,7 @@ redface2/
     ui/                   # Thème, composants partagés, PostRenderer
     extension/            # Points d'extension (Phase 4)
   feature/
+    flags/                # Écran d'accueil (drapeaux)
     forum/                # Catégories, topics
     topic/                # Lecture de topic
     editor/               # Reply, edit, FP, création topic
@@ -151,6 +152,7 @@ Convention de nommage MVI retenue (Phase 1, validée sur `:feature:topic`) :
 - **`<Feature>Intent`** = actions utilisateur internes au ViewModel. Vit dans `<Feature>UiState.kt` tant que la liste est courte ; extraire en `<Feature>Intent.kt` quand le fichier dépasse ~80 lignes ou quand la sealed hierarchy a plus de 5-6 cas.
 - **`<Feature>Request`** = DTO d'entrée du screen, **dérivé** de la `NavKey` Navigation 3 (la clé Nav3 vit côté `app/` dans `RedfaceNavigation.kt` sous le nom `<Feature>Route : RedfaceNavKey` — cf. ADR-008). Le `Request` est construit par le `entryProvider` / `RedfaceNavHost` à partir de la route et passé au `<Feature>Screen` ; toujours dans son propre fichier (contrat externe).
 - **Effects** (one-shot side-effects vers la vue : snackbar, navigation programmatique, finish) : à introduire **uniquement quand le besoin émerge**. Ne pas les anticiper en Phase 1 si la feature n'en a pas besoin (cohérent avec `AGENTS.md` § « Charte anti-derive IA-first » → « Spike avant architecture » et « Le noyau avant l'écosystème »).
+- **`<Feature>Screen` vs `<Feature>Route`** : le call-site stateful (qui résout `hiltViewModel()` et collecte les flows) s'appelle généralement `<Feature>Screen`. Une variante `<Feature>Route` est acceptable quand le composable doit aussi recevoir des données runtime depuis `:app` (ex. `BuildConfig.VERSION_NAME` dans `:feature:flags.FlagsRoute`) : le suffixe « Route » signale alors qu'il s'agit du call-site directement attaché à l'`entry<…Route>` de Compose Navigation 3.
 
 ### Méthodologie
 

@@ -37,10 +37,12 @@ import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import kotlinx.serialization.Serializable
 
-// Stubs used by placeholder screens (Forum/Search/Messages/Category/Flags) whose models are
-// not yet wired. Each "open topic" button currently navigates to a hard-coded HFR thread so
-// the navigation graph itself can be exercised end-to-end. They disappear feature by feature
-// as Phase 1B/1C land the real FlaggedTopic, ForumTopic, SearchResult, MpThread models.
+// Stubs used by placeholder screens (Forum/Search/Messages/Category) whose models are not
+// yet wired. Each "open topic" button currently navigates to a hard-coded HFR thread so the
+// navigation graph itself can be exercised end-to-end. The Flags entry no longer needs this
+// crutch since Phase 1B.4 (it now opens the real Flag's TopicRoute). The remaining call-sites
+// disappear feature by feature as Phase 1C/2 land the real ForumTopic, SearchResult,
+// MpThread models.
 //
 // The target is the community topic dedicated to Redface 2 itself
 // (https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35395) — recent, short,

@@ -17,7 +17,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.withContext
 
 /**
- * Phase 1B.1 bonus: surfaces the authenticated user's unread MP count on FlagsScreen as
+ * Phase 1B.1 bonus: surfaces the authenticated user's unread MP count on FlagsRoute as
  * a "really logged in" signal. Flow semantics:
  *
  * - When `AuthState` is `Anonymous` → emit `null` (no count to show).
@@ -53,10 +53,10 @@ class DefaultMessagesRepository @Inject constructor(
             val html = hfrClient.getPrivateMessageListPage(page = 1)
             parser.countUnread(html)
         }.onFailure { throwable ->
-            // Surface fetch failures in logcat so a missing "MPs non lus" line on FlagsScreen
-            // can be debugged. Silent swallow would make a regression invisible (e.g. HFR DOM
-            // change → parser returns 0 vs network failure → null). Logging on failure only
-            // keeps the happy path quiet.
+            // Surface fetch failures in logcat so a missing "MPs non lus" line in FlagsRoute's
+            // footer can be debugged. Silent swallow would make a regression invisible (e.g.
+            // HFR DOM change → parser returns 0 vs network failure → null). Logging on failure
+            // only keeps the happy path quiet.
             Log.w(LOG_TAG, "Unread MP count fetch failed", throwable)
         }.getOrNull()
     }

@@ -26,15 +26,20 @@ import fr.forumhfr.redface2.core.model.FlagType
 /**
  * Renders one row of the user's drapeaux list.
  *
- * Visual hierarchy chosen to mirror what HFR users have spent ~20 years training their
- * eyes on: a colored dot on the left for the flag type (cyan / red / yellow), the topic
- * title in the dominant slot, and a footer line with the last reply author + total
- * replies + last read page. When the topic has unread posts, the title is rendered in
- * `Bold` so the row visibly pops vs read entries (which the favoris view exposes too).
+ * Visual hierarchy mirrors what HFR users have spent ~20 years training their eyes on:
+ * a colored dot on the left for the flag type (cyan / red / yellow), the topic title
+ * in the dominant slot, and a [metadata] footer line. When [Flag.hasUnread] is true,
+ * the title is rendered in [FontWeight.SemiBold] so the row visibly pops vs read
+ * entries (which the favoris view exposes too).
+ *
+ * The footer string is passed in pre-formatted from the caller (`:feature:flags`)
+ * because `:core:ui` has no localized resources of its own — keeping the i18n boundary
+ * clean per the convention recorded in `docs/guides/contributing.md`.
  */
 @Composable
 fun FlagItem(
     flag: Flag,
+    metadata: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -58,18 +63,14 @@ fun FlagItem(
                 fontWeight = if (flag.hasUnread) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 2,
             )
-            Text(
-                text = buildString {
-                    append(flag.lastReplyAuthor)
-                    append(" · ")
-                    append(flag.totalReplies)
-                    append(" réponses · p.")
-                    append(flag.lastReadPage)
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
+            if (metadata.isNotEmpty()) {
+                Text(
+                    text = metadata,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
         }
     }
 }

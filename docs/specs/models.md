@@ -35,7 +35,8 @@ classDiagram
         +Int? subcat
         +Int topicId
         +String title
-        +Int totalReplies
+        +Int totalPages
+        +Int replyCount
         +Int views
         +FlagType type
         +Boolean hasUnread
@@ -163,25 +164,27 @@ data class Flag(
     val subcat: Int?,
     val topicId: Int,
     val title: String,
-    val totalReplies: Int,
-    val views: Int,
+    val totalPages: Int,           // td.sujetCase4 — colonne "Dern. page" (numéro dernière page)
+    val replyCount: Int,           // td.sujetCase7 — colonne "Rép." (nombre de réponses)
+    val views: Int,                // td.sujetCase8 — colonne "Lues" (nombre de vues)
     val type: FlagType,
     val hasUnread: Boolean,
-    val lastReadPage: Int,        // page où l'utilisateur a son marqueur de lecture
-    val firstUnreadPostId: Long,  // numreponse cible pour scroller à la reprise (0 = inconnu)
+    val lastReadPage: Int,         // page où l'utilisateur a son marqueur de lecture
+    val firstUnreadPostId: Long,   // numreponse cible pour scroller à la reprise (0 = inconnu)
     val firstPostAuthor: String,
     val lastReplyAuthor: String,
-    val lastReplyAt: String,      // timestamp brut HFR ("DD-MM-YYYY HH:mm"), parsing reporté
+    val lastReplyAt: String,       // timestamp brut HFR ("DD-MM-YYYY HH:mm"), parsing reporté
 )
 
 enum class FlagType {
-    CYAN,       // drapeau cyan = sujet où l'utilisateur a participé (`owntopic=2`)
-    RED,        // drapeau rouge = lecture suivie (`owntopic=1`)
-    FAVORITE,   // étoile jaune = favori (`owntopic=3`)
+    // Mapping confirmé par les onglets HFR capturés dans les fixtures :
+    CYAN,       // « Tous les sujets que j'ai commencé à lire uniquement » (`owntopic=2`, `flag0.gif`)
+    RED,        // « Tous les sujets auxquels j'ai participé » (`owntopic=1`, `flag1.gif`)
+    FAVORITE,   // « Tous mes favoris » (`owntopic=3`, `favoris.gif`)
 }
 ```
 
-> **Phase 1B.4 → 1D drift** : `lastReplyAt` est gardé en `String` brut tel qu'il sort de HFR (`DD-MM-YYYY HH:mm`). La promotion en `Instant` viendra avec `HfrDateParser` quand un cas d'usage l'exige côté UI (tri par date, "il y a N minutes"). `views` est exposé tel quel pour parité avec la liste des topics et tracking dette technique HFR ; pas d'usage UI courant.
+> **Phase 1B.4 → 1D drift** : `lastReplyAt` est gardé en `String` brut tel qu'il sort de HFR (`DD-MM-YYYY HH:mm`). La promotion en `Instant` viendra avec `HfrDateParser` quand un cas d'usage l'exige côté UI (tri par date, "il y a N minutes"). `views` est exposé tel quel pour parité avec la liste des topics et tracking dette technique HFR ; pas d'usage UI courant. `totalPages` est utilisé pour afficher la position relative `p.X/Y` dans le footer du `FlagItem`.
 
 ---
 

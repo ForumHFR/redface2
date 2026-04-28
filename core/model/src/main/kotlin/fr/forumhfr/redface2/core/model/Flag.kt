@@ -3,11 +3,12 @@ package fr.forumhfr.redface2.core.model
 /**
  * One row of the user's HFR drapeaux page (`forum1f.php?config=hfr.inc&owntopic=N`).
  *
- * HFR exposes three drapeau categories (selected via the `owntopic` query param):
+ * HFR exposes three drapeau categories (selected via the `owntopic` query param,
+ * confirmed by the onglet titles in the captured fixtures):
  *
- * - `owntopic=1` → [FlagType.RED] — drapeau rouge (lecture suivie)
- * - `owntopic=2` → [FlagType.CYAN] — drapeau cyan (sujets participés)
- * - `owntopic=3` → [FlagType.FAVORITE] — étoile jaune (favoris)
+ * - `owntopic=1` → [FlagType.RED] — « Tous les sujets auxquels j'ai participé »
+ * - `owntopic=2` → [FlagType.CYAN] — « Tous les sujets que j'ai commencé à lire uniquement »
+ * - `owntopic=3` → [FlagType.FAVORITE] — « Tous mes favoris »
  *
  * The icon filename in the listing's `td.sujetCase5 img[src]` carries both the
  * type and a `hasUnread` axis — `flag0/flag1/favoris` mean unread, `flagn0/flagn1/favorisn`
@@ -19,7 +20,14 @@ data class Flag(
     val subcat: Int?,
     val topicId: Int,
     val title: String,
-    val totalReplies: Int,
+    /**
+     * Total number of pages in the topic — read from `td.sujetCase4` ("Dern. page" column,
+     * which links to the topic's last page).
+     */
+    val totalPages: Int,
+    /** Number of replies — read from `td.sujetCase7` (the "Rép." column header). */
+    val replyCount: Int,
+    /** Number of views — read from `td.sujetCase8` (the "Lues" column header). */
     val views: Int,
     val type: FlagType,
     val hasUnread: Boolean,
@@ -45,9 +53,9 @@ data class Flag(
 )
 
 enum class FlagType {
-    /** Cyan drapeau — sujets participés (`owntopic=2`, `flag0.gif` / `flagn0.gif`). */
+    /** Cyan drapeau — lus uniquement (`owntopic=2`, `flag0.gif` / `flagn0.gif`). */
     CYAN,
-    /** Red drapeau — lecture suivie (`owntopic=1`, `flag1.gif` / `flagn1.gif`). */
+    /** Red drapeau — sujets participés (`owntopic=1`, `flag1.gif` / `flagn1.gif`). */
     RED,
     /** Yellow star — favoris (`owntopic=3`, `favoris.gif` / `favorisn.gif`). */
     FAVORITE,

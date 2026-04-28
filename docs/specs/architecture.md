@@ -220,7 +220,7 @@ interface MessagesRepository {
 
 `TopicRepository` est livré en Phase 1A (cf. [#88](https://github.com/ForumHFR/redface2/pull/88), [#89](https://github.com/ForumHFR/redface2/pull/89)). `prefetchNextPage` documenté dans la roadmap arrivera en Phase 1B sur `HfrClient` directement (avec `useAuth = false`), puis sera relayé par `TopicRepository.prefetchTopicPage(...)`. `MessagesRepository` est livré en Phase 1B.1 en bonus du login : `:core:data DefaultMessagesRepository` combine l'observation de `AuthState` avec un fetch de `forum1.php?cat=prive` (parser dédié `:core:parser/messages/PrivateMessageListParser`) déclenché à chaque transition vers `Authenticated`. Le full pipeline messagerie (liste + threads) viendra en Phase 1C.
 
-`FlagRepository` + parser + UI sont livrés en Phase 1B.2 → 1B.5 : `FlagsListParser` extrait `List<Flag>` depuis `forum1f.php?owntopic=N` (cf. [`models.md`]({{ site.baseurl }}/specs/models)), `:core:data DefaultFlagRepository` orchestre fetch + parse via `transformLatest`, `FlagItem` rend une ligne dans `:core:ui`, et `:feature:flags FlagsRoute` compose les 3 onglets HFR (drapeaux rouges / cyan / favoris) plus le footer auth + MP count + version + signalement CSAE. Pas de cache Room en 1B — la liste est rechargée à chaque transition `Authenticated` ou refresh utilisateur ; persistance reportée en Phase 1D (cf. roadmap `1D.2`).
+`FlagRepository` + parser + UI sont livrés en Phase 1B.2 → 1B.5 : `FlagsListParser` (classe dédiée dans `:core:parser`, distincte de la façade `HfrParser`) extrait `List<Flag>` depuis `forum1f.php?config=hfr.inc&owntopic=N` (cf. [`models.md`]({{ site.baseurl }}/specs/models)). `:core:data DefaultFlagRepository` orchestre fetch + parse via un `flow { emit(Loading); emit(fetch); emitAll(refreshes) }` cold-collected — un `MutableSharedFlow<FlagsResult>` par `FlagType` rebroadcast les résultats des `refresh()` explicites. `FlagItem` rend une ligne dans `:core:ui`, et `:feature:flags FlagsRoute` compose les 3 onglets HFR (« Mes sujets » / « Lus uniquement » / « Favoris ») plus le footer auth + MP count + version + signalement CSAE. Pas de cache Room en 1B — la liste est rechargée à chaque transition `Authenticated` ou refresh utilisateur ; persistance reportée en Phase 1D (cf. roadmap `1D.2`). Pas de `PullToRefreshBox` non plus en 1B : un bouton « Réessayer » s'affiche uniquement sur état d'erreur ; pull-to-refresh complet est laissé pour quand le besoin justifie le coût (Phase 1D / Phase 2).
 
 ### `:core:network` — HfrClient
 
@@ -236,8 +236,10 @@ class HfrClient @Inject constructor(
     // Phase 1A — livrée
     suspend fun getTopicPage(cat: Int, post: Int, page: Int, useAuth: Boolean = true): String
 
-    // Phase 1B+ — à implémenter
-    suspend fun getFlags(): String
+    // Phase 1B.2-1B.5 — livrée
+    suspend fun getFlagsPage(owntopic: Int): String  // owntopic ∈ 1..3, cf. FlagType
+
+    // Phase 2+ — à implémenter
     suspend fun postReply(cat: Int, post: Int, content: String): Result<Unit>
     suspend fun editPost(cat: Int, post: Int, numreponse: Int, content: String): Result<Unit>
     // ...
@@ -252,18 +254,22 @@ Le login HFR est isolé dans `:core:network.auth.AuthRemoteDataSource`, pas dans
 
 Le parser transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine. Isolé de toute logique réseau et UI.
 
-> **Statut Phase 1** : seule `parseTopicPage` est livrée (cf. `core/parser/.../HfrParser.kt`). `PostContentParser` et `TopicPageParser` existent comme classes internes du module. Les autres méthodes ci-dessous arrivent feature par feature : `parseFlags` quand `FlagsViewModel` réel arrive (Phase 1 fin), `parseEditPage` Phase 2, `parseMessageList` Phase 3, `parsePostContentFromBbcode` Phase 2 (parser BBCode pour preview éditeur).
+> **Statut Phase 1B** : `parseTopicPage` (Phase 1A) et le parser drapeaux (Phase 1B.2) sont livrés. Le parser drapeaux n'est PAS exposé via la façade `HfrParser` — c'est une classe dédiée `FlagsListParser` dans `:core:parser/flags/`, injectée directement dans `DefaultFlagRepository`. `PostContentParser` et `TopicPageParser` existent comme classes internes du module derrière `HfrParser`. Les autres méthodes ci-dessous arrivent feature par feature : `parseEditPage` Phase 2, `parseMessageList` Phase 3, `parsePostContentFromBbcode` Phase 2 (parser BBCode pour preview éditeur), `parseCategories` Phase 1 fin.
 
 ```kotlin
 class HfrParser @Inject constructor() {
     fun parseTopicPage(html: String): Topic                 // Phase 1 — livrée
     fun parsePostContentFromHtml(html: String): PostContent // Phase 1 — livrée (interne au module)
     fun parsePostContentFromBbcode(bbcode: String): PostContent // Phase 2 éditeur
-    fun parseFlags(html: String): List<Flag>        // Phase 1 fin
     fun parseCategories(html: String): List<Category>       // Phase 1 fin
     fun parseEditPage(html: String): EditInfo               // Phase 2
     fun parseMessageList(html: String): List<PrivateMessage> // Phase 3
     // ...
+}
+
+// Parser drapeaux livré comme classe dédiée Phase 1B.2 — pas via HfrParser :
+class FlagsListParser @Inject constructor() {
+    fun parse(html: String, defaultType: FlagType): List<Flag>
 }
 ```
 

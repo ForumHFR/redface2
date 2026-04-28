@@ -216,6 +216,7 @@ private fun AuthenticatedBody(
                     items(items = current.flags, key = { flag -> flag.topicId }) { flag ->
                         FlagItem(
                             flag = flag,
+                            metadata = flagMetadata(flag),
                             onClick = { onOpenFlag(flag) },
                         )
                         FlagItemDivider()
@@ -272,3 +273,22 @@ private fun FooterSlot(
 }
 
 private const val REPORT_EMAIL = "xat@azora.fr"
+
+@Composable
+private fun flagMetadata(flag: Flag): String =
+    if (flag.lastReplyAuthor.isNotBlank()) {
+        stringResource(
+            R.string.flags_item_metadata_with_author,
+            flag.lastReplyAuthor,
+            flag.replyCount,
+            flag.lastReadPage,
+            flag.totalPages,
+        )
+    } else {
+        stringResource(
+            R.string.flags_item_metadata_no_author,
+            flag.replyCount,
+            flag.lastReadPage,
+            flag.totalPages,
+        )
+    }

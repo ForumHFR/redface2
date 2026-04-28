@@ -24,15 +24,17 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 Phase 1B.2-1B.5 livrée d'un trait : liste réelle des drapeaux HFR (parser + repository + UI + module feature).
 
 ### Added
-- **`FlagsListParser`** dans `:core:parser` — parse `forum1f.php?owntopic={1,2,3}` (drapeaux rouges, cyan, favoris). Détection unread canonique sur `td.sujetCase1` (`closedb*` vs `closed`), classification via icône `td.sujetCase5` (présente uniquement sur unread) avec fallback sur le `defaultType` du listing. 6 tests, 3 fixtures HTML capturées sur HFR réel (172 lignes au total) avec données sensibles nettoyées.
-- **`Flag` data class** dans `:core:model` (remplace `FlaggedTopic` placeholder) + `FlagType { CYAN, RED, FAVORITE }`.
+- **`FlagsListParser`** dans `:core:parser` — parse `forum1f.php?owntopic={1,2,3}` (sujets participés / lus uniquement / favoris). Détection unread canonique sur `td.sujetCase1` (`closedb*` vs `closed`), classification via icône `td.sujetCase5` (présente uniquement sur unread) avec fallback sur le `defaultType` du listing. 6 tests, 3 fixtures HTML capturées sur HFR réel (172 lignes au total) avec données sensibles nettoyées.
+- **`Flag` data class** dans `:core:model` (remplace l'ancien placeholder `FlaggedTopic`) + `FlagType { CYAN, RED, FAVORITE }`. Champs `totalPages` (`td.sujetCase4`), `replyCount` (`td.sujetCase7`), `views` (`td.sujetCase8`) — colonnes alignées sur les headers HFR « Dern. page » / « Rép. » / « Lues ».
 - **`FlagRepository`** dans `:core:domain` (`observe(type)` / `refresh(type)`) + `DefaultFlagRepository` dans `:core:data` (network-only, broadcast refresh via `MutableSharedFlow` par `FlagType`). 4 tests Robolectric+MockK.
 - **`HfrClient.getFlagsPage(owntopic: Int)`** sur `@AuthenticatedClient` (les drapeaux sont une vue par utilisateur, owntopic ∈ 1..3 enforced par `require`).
-- **`FlagItem` composable** dans `:core:ui` — pastille couleur (cyan/rouge/jaune, dimmed à 35% si lu), titre semi-bold si unread, footer auteur · réponses · dernière page lue.
+- **`FlagItem` composable** dans `:core:ui` — pastille couleur (cyan/rouge/jaune, dimmed à 35% si lu), titre semi-bold si unread, footer `metadata: String` reçu pré-formaté par le caller (i18n boundary clean : `:core:ui` n'a pas de `strings.xml`).
 - **Module `:feature:flags`** avec `FlagsRoute` + `FlagsViewModel` :
   - `flatMapLatest(authState)` pour ne montrer la liste que quand authentifié, retour anti-flicker en attendant `authState ≠ null`.
-  - 3 onglets `PrimaryTabRow` (rouge / cyan / favoris), source flow change avec `selectTab`.
+  - 3 onglets `PrimaryTabRow` (« Mes sujets » / « Lus uniquement » / « Favoris ») alignés sur les onglets HFR (`owntopic=1/2/3`), source flow change avec `selectTab`.
   - Footer auth (pseudo, MP unread, version, bouton CSAE, bouton logout).
+  - Bouton « Réessayer » sur état d'erreur (pas de `PullToRefreshBox` en 1B — viendra en 1D quand un cas d'usage le justifie).
+  - Footer `FlagItem` formaté côté `:feature:flags` via `stringResource` (`flags_item_metadata_with_author` / `_no_author`).
   - 5 tests Turbine couvrant `flatMapLatest` + `selectTab` + `refresh` + `logout`.
 - Navigation `:app` migre `entry<FlagsListRoute>` du placeholder `FlagsScreen` (supprimé) vers `FlagsRoute`. Lambda `onOpenFlag` pousse la vraie `TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.firstUnreadPostId.toInt())` au lieu du `DEMO_TOPIC` hardcodé.
 

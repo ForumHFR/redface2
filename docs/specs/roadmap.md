@@ -82,7 +82,7 @@ Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances e
 **Objectif :** lire le forum. C'est 80% du use case.
 
 - [x] **Login HFR (cookies persistants)** — `:feature:auth.LoginScreen` + `AuthRepository` cache-aside (DataStore + `PersistentCookieJar`), session persistée via `md_user`/`md_pass` (cf. [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a) — DataStore non chiffré + FBE, AAB v14 / `0.1.0-phase1b.0`)
-- [x] **Écran Drapeaux (accueil)** — `:feature:flags.FlagsRoute` + `FlagRepository` (HFR `forum1f.php?owntopic={1,2,3}`, parser `FlagsListParser`), 3 onglets (rouge/cyan/favoris), pull-to-refresh, footer auth + MP unread (Phase 1B.2-1B.5)
+- [x] **Écran Drapeaux (accueil)** — `:feature:flags.FlagsRoute` + `FlagRepository` (HFR `forum1f.php?owntopic={1,2,3}`, parser `FlagsListParser`), 3 onglets (« Mes sujets » / « Lus uniquement » / « Favoris »), bouton « Réessayer » sur erreur (pas de pull-to-refresh complet en 1B), footer auth + MP unread (Phase 1B.2-1B.5)
 - [x] **Slice topic fixe** — historique : `TopicScreen` a rendu une fixture HFR via parser → AST → renderer le temps que le pipeline réseau soit posé
 - [x] **Parser HTML topic** — `:core:parser` produit `PostContent` depuis le HTML HFR (cf. [PR #78](https://github.com/ForumHFR/redface2/pull/78))
 - [x] **PostRenderer Compose** — rendu natif `PostContent` dans `:core:ui` (paragraphes, citations imbriquées avec collapse, spoilers, smileys builtin/perso, images, couleurs ; cf. [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast) et [PR #80](https://github.com/ForumHFR/redface2/pull/80))

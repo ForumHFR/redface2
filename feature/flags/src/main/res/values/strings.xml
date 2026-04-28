@@ -6,14 +6,19 @@
     <string name="flags_logout_cta">Se déconnecter</string>
     <string name="flags_unread_mps">MPs non lus : %1$d</string>
 
-    <string name="flags_tab_red">Drapeaux rouges</string>
-    <string name="flags_tab_cyan">Mes sujets</string>
+    <string name="flags_tab_red">Mes sujets</string>
+    <string name="flags_tab_cyan">Lus uniquement</string>
     <string name="flags_tab_favorite">Favoris</string>
 
     <string name="flags_loading">Chargement…</string>
     <string name="flags_empty">Aucun drapeau dans cette vue.</string>
     <string name="flags_error">Impossible de récupérer les drapeaux. Vérifie ta connexion ou réessaie.</string>
     <string name="flags_retry">Réessayer</string>
+
+    <!-- Footer metadata formats. With author: "Shaad · 69017 rép. · p.1725/1726". Without
+         author (HFR returns no last replier on brand new topics): "69017 rép. · p.1/1". -->
+    <string name="flags_item_metadata_with_author">%1$s · %2$d rép. · p.%3$d/%4$d</string>
+    <string name="flags_item_metadata_no_author">%1$d rép. · p.%2$d/%3$d</string>
 
     <string name="flags_report_content_cta">Signaler un contenu</string>
     <string name="flags_report_email_subject">Redface 2 — Signalement</string>

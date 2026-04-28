@@ -47,7 +47,10 @@ class FlagsListParser {
             .toIntOrNull() ?: return null
         val cat = topicHref.queryParam("cat")?.toIntOrNull() ?: return null
         val subcat = topicHref.queryParam("subcat")?.toIntOrNull()
-        val totalReplies = row.selectFirst("td.sujetCase4 a")?.text()?.toIntOrNull() ?: 0
+        // td.sujetCase4 is the "Dern. page" column — its anchor text is the topic's last
+        // page number, NOT the reply count. The actual reply count lives on td.sujetCase7
+        // ("Rép." header) and the view count on td.sujetCase8 ("Lues" header).
+        val totalPages = row.selectFirst("td.sujetCase4 a")?.text()?.toIntOrNull() ?: 0
 
         // Canonical unread signal: line marker on sujetCase1.
         val lineMarker = row.selectFirst("td.sujetCase1 img[src]")?.iconName()
@@ -64,7 +67,8 @@ class FlagsListParser {
         val firstUnreadPostId = flagHref.fragment("t")?.toLongOrNull() ?: 0L
 
         val firstPostAuthor = row.selectFirst("td.sujetCase6 a.Tableau")?.text().orEmpty()
-        val views = row.selectFirst("td.sujetCase7")?.text()?.replace(" ", "")?.toIntOrNull() ?: 0
+        val replyCount = row.selectFirst("td.sujetCase7")?.text()?.replace(" ", "")?.toIntOrNull() ?: 0
+        val views = row.selectFirst("td.sujetCase8")?.text()?.replace(" ", "")?.toIntOrNull() ?: 0
         val lastReplyAt = row.selectFirst("td.sujetCase9 a")?.ownText()?.trim().orEmpty()
         val lastReplyAuthor = row.selectFirst("td.sujetCase9 a b")?.text().orEmpty()
 
@@ -73,7 +77,8 @@ class FlagsListParser {
             subcat = subcat,
             topicId = topicId,
             title = title,
-            totalReplies = totalReplies,
+            totalPages = totalPages,
+            replyCount = replyCount,
             views = views,
             type = type,
             hasUnread = hasUnread,
