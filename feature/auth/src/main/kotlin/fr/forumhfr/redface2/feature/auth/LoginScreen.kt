@@ -120,6 +120,7 @@ internal fun LoginContent(
             if (errorMode != null) {
                 ErrorBanner(
                     type = errorMode.type,
+                    detail = errorMode.detail,
                     onDismiss = { onIntent(LoginIntent.DismissError) },
                 )
             }
@@ -154,6 +155,7 @@ internal fun LoginContent(
 @Composable
 private fun ErrorBanner(
     type: LoginUiState.ErrorType,
+    detail: String?,
     onDismiss: () -> Unit,
 ) {
     val message = stringResource(
@@ -172,6 +174,16 @@ private fun ErrorBanner(
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(text = message, style = MaterialTheme.typography.bodyMedium)
+            // Alpha affordance: surface the technical detail under the localized message so
+            // testers can self-diagnose without `adb logcat`. Hidden when null (e.g.
+            // InvalidCredentials / RateLimited where there's nothing useful to show).
+            if (!detail.isNullOrBlank()) {
+                Text(
+                    text = detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                )
+            }
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.login_error_dismiss))
             }

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.network.auth
 
+import android.util.Log
 import fr.forumhfr.redface2.core.domain.auth.LoginError
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.network.HfrConstants
@@ -46,16 +47,41 @@ class AuthRemoteDataSource @Inject constructor(
 
         val request = Request.Builder().url(url).post(body).build()
 
-        val (cookies, html) = try {
+        // Alpha-friendly logcat trail. Pseudo is what the user typed and is already
+        // surfaced everywhere (cookie, footer) — fine to log. Password is NEVER logged.
+        val codePoints = pseudo.codePointCount(0, pseudo.length)
+        Log.i(LOG_TAG, "login attempt: pseudo='$pseudo' len=${pseudo.length} codepoints=$codePoints")
+
+        val (status, cookies, html) = try {
             client.newCall(request).execute().use { response ->
                 val parsed = response.headers("Set-Cookie").mapNotNull { Cookie.parse(url, it) }
-                parsed to response.body.string()
+                Triple(response.code, parsed, response.body.string())
             }
         } catch (e: IOException) {
+            Log.w(LOG_TAG, "login network failure for pseudo='$pseudo'", e)
             return Result.failure(LoginError.Network(e))
         }
 
-        return classify(cookies, html, pseudo)
+        // Cookie names only — values may contain session secrets. We tag md_user
+        // separately because its presence/absence drives the classification.
+        val cookieNames = cookies.joinToString(",") { it.name }
+        val mdUserCookie = cookies.firstOrNull { it.name == COOKIE_MD_USER }
+        Log.d(
+            LOG_TAG,
+            "login response: http=$status htmlLen=${html.length} cookies=[$cookieNames] " +
+                "md_user=${if (mdUserCookie == null) "absent" else "present(len=${mdUserCookie.value.length})"}",
+        )
+
+        return classify(cookies, html, pseudo).also { result ->
+            result.onFailure { error ->
+                val detail = (error as? LoginError.Unknown)?.detail ?: error::class.simpleName
+                Log.w(
+                    LOG_TAG,
+                    "login classified as failure for pseudo='$pseudo': $detail",
+                )
+            }
+            result.onSuccess { Log.i(LOG_TAG, "login classified as success for pseudo='$pseudo'") }
+        }
     }
 
     private fun classify(
@@ -69,10 +95,25 @@ class AuthRemoteDataSource @Inject constructor(
             Result.success(AuthState.Authenticated(pseudo))
         cookies.none { it.name == COOKIE_MD_USER } ->
             Result.failure(LoginError.Unknown("expected $COOKIE_MD_USER cookie not set"))
-        else -> Result.failure(LoginError.Unknown("$COOKIE_MD_USER cookie does not match requested pseudo"))
+        else -> {
+            // Build a diagnostic that compares submitted pseudo vs cookie value WITHOUT
+            // leaking the cookie verbatim — just enough for the alpha user to see if HFR
+            // normalized casing, trimmed whitespace, or returned a different account.
+            val cookieValue = cookies.first { it.name == COOKIE_MD_USER }.value
+            val sameLength = cookieValue.length == pseudo.length
+            val sameCaseInsensitive = cookieValue.equals(pseudo, ignoreCase = true)
+            Result.failure(
+                LoginError.Unknown(
+                    "$COOKIE_MD_USER cookie does not match requested pseudo " +
+                        "(submitted len=${pseudo.length} vs cookie len=${cookieValue.length}, " +
+                        "sameLength=$sameLength, caseInsensitiveMatch=$sameCaseInsensitive)",
+                ),
+            )
+        }
     }
 
     private companion object {
+        const val LOG_TAG = "AuthRemoteDataSource"
         const val LOGIN_PATH = "login_validation.php"
         const val COOKIE_MD_USER = "md_user"
         const val INVALID_CREDS_MARKER = "Votre mot de passe ou nom d'utilisateur n'est pas valide"

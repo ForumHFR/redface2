@@ -138,17 +138,19 @@ class LoginViewModelTest {
     }
 
     @Test
-    fun `Submit maps LoginError Unknown to ErrorType Unknown`() = runTest {
-        val repo = FakeAuthRepository(loginResult = Result.failure(LoginError.Unknown("???")))
+    fun `Submit maps LoginError Unknown to ErrorType Unknown and propagates the detail`() = runTest {
+        val repo = FakeAuthRepository(
+            loginResult = Result.failure(LoginError.Unknown("md_user mismatch (sameLength=true)")),
+        )
         val viewModel = LoginViewModel(authRepository = repo)
 
         viewModel.send(LoginIntent.UpdatePseudo("xaat"))
         viewModel.send(LoginIntent.UpdatePassword("secret"))
         viewModel.send(LoginIntent.Submit)
 
-        val mode = viewModel.state.value.mode
-        assertTrue(mode is LoginUiState.Mode.Error)
-        assertEquals(LoginUiState.ErrorType.Unknown, (mode as LoginUiState.Mode.Error).type)
+        val mode = viewModel.state.value.mode as LoginUiState.Mode.Error
+        assertEquals(LoginUiState.ErrorType.Unknown, mode.type)
+        assertEquals("md_user mismatch (sameLength=true)", mode.detail)
     }
 
     @Test

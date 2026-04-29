@@ -109,9 +109,16 @@ class AuthRemoteDataSourceTest {
 
         val error = result.exceptionOrNull()
         assertTrue("expected Unknown but was ${error?.javaClass?.simpleName}", error is LoginError.Unknown)
-        assertEquals(
-            "md_user cookie does not match requested pseudo",
-            (error as LoginError.Unknown).detail,
+        // The detail now embeds a fact-only diagnostic so contributors can see in the alpha
+        // UI whether HFR normalized casing/length. The exact format is allowed to evolve.
+        val detail = (error as LoginError.Unknown).detail
+        assertTrue(
+            "expected detail to mention md_user mismatch, was: $detail",
+            detail.contains("md_user cookie does not match requested pseudo"),
+        )
+        assertTrue(
+            "expected detail to mention sameLength, was: $detail",
+            detail.contains("sameLength="),
         )
     }
 
