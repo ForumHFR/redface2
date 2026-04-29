@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.network.auth
 
 import android.util.Log
 import fr.forumhfr.redface2.core.domain.auth.LoginError
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.network.HfrConstants
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
@@ -19,7 +20,27 @@ import okhttp3.Request
 class AuthRemoteDataSource @Inject constructor(
     @param:AuthenticatedClient private val client: OkHttpClient,
     @param:HfrBaseUrl private val baseUrl: HttpUrl,
+    private val diagnostics: DiagnosticsLog,
 ) {
+
+    /** Tee an event to both logcat AND the in-app diagnostics buffer. */
+    private fun logI(message: String) {
+        Log.i(LOG_TAG, message)
+        diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, message)
+    }
+    private fun logD(message: String) {
+        Log.d(LOG_TAG, message)
+        diagnostics.record(DiagnosticsLog.Level.DEBUG, LOG_TAG, message)
+    }
+    private fun logW(message: String, throwable: Throwable? = null) {
+        if (throwable != null) Log.w(LOG_TAG, message, throwable) else Log.w(LOG_TAG, message)
+        val full = if (throwable != null) {
+            "$message — ${throwable.javaClass.simpleName}: ${throwable.message}"
+        } else {
+            message
+        }
+        diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, full)
+    }
 
     /**
      * POSTs the login form to HFR. The CookieJar attached to the @AuthenticatedClient is what
@@ -47,10 +68,11 @@ class AuthRemoteDataSource @Inject constructor(
 
         val request = Request.Builder().url(url).post(body).build()
 
-        // Alpha-friendly logcat trail. Pseudo is what the user typed and is already
-        // surfaced everywhere (cookie, footer) — fine to log. Password is NEVER logged.
+        // Alpha-friendly logcat + in-app trail. Pseudo is what the user typed and is
+        // already surfaced everywhere (cookie, footer) — fine to log. Password is
+        // NEVER logged.
         val codePoints = pseudo.codePointCount(0, pseudo.length)
-        Log.i(LOG_TAG, "login attempt: pseudo='$pseudo' len=${pseudo.length} codepoints=$codePoints")
+        logI("login attempt: pseudo='$pseudo' len=${pseudo.length} codepoints=$codePoints")
 
         val (status, cookies, html) = try {
             client.newCall(request).execute().use { response ->
@@ -58,7 +80,7 @@ class AuthRemoteDataSource @Inject constructor(
                 Triple(response.code, parsed, response.body.string())
             }
         } catch (e: IOException) {
-            Log.w(LOG_TAG, "login network failure for pseudo='$pseudo'", e)
+            logW("login network failure for pseudo='$pseudo'", e)
             return Result.failure(LoginError.Network(e))
         }
 
@@ -66,21 +88,17 @@ class AuthRemoteDataSource @Inject constructor(
         // separately because its presence/absence drives the classification.
         val cookieNames = cookies.joinToString(",") { it.name }
         val mdUserCookie = cookies.firstOrNull { it.name == COOKIE_MD_USER }
-        Log.d(
-            LOG_TAG,
-            "login response: http=$status htmlLen=${html.length} cookies=[$cookieNames] " +
-                "md_user=${if (mdUserCookie == null) "absent" else "present(len=${mdUserCookie.value.length})"}",
+        val mdUserPresence = if (mdUserCookie == null) "absent" else "present(len=${mdUserCookie.value.length})"
+        logD(
+            "login response: http=$status htmlLen=${html.length} cookies=[$cookieNames] md_user=$mdUserPresence",
         )
 
         return classify(cookies, html, pseudo).also { result ->
             result.onFailure { error ->
                 val detail = (error as? LoginError.Unknown)?.detail ?: error::class.simpleName
-                Log.w(
-                    LOG_TAG,
-                    "login classified as failure for pseudo='$pseudo': $detail",
-                )
+                logW("login classified as failure for pseudo='$pseudo': $detail")
             }
-            result.onSuccess { Log.i(LOG_TAG, "login classified as success for pseudo='$pseudo'") }
+            result.onSuccess { logI("login classified as success for pseudo='$pseudo'") }
         }
     }
 

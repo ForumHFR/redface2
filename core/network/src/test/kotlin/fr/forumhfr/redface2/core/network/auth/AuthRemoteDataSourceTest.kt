@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.network.auth
 
 import fr.forumhfr.redface2.core.domain.auth.LoginError
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.AuthState
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
@@ -17,12 +18,18 @@ class AuthRemoteDataSourceTest {
 
     private lateinit var server: MockWebServer
     private lateinit var dataSource: AuthRemoteDataSource
+    private lateinit var diagnostics: DiagnosticsLog
 
     @Before
     fun setUp() {
         server = MockWebServer().apply { start() }
         val client = OkHttpClient.Builder().build()
-        dataSource = AuthRemoteDataSource(client = client, baseUrl = server.url("/"))
+        diagnostics = DiagnosticsLog()
+        dataSource = AuthRemoteDataSource(
+            client = client,
+            baseUrl = server.url("/"),
+            diagnostics = diagnostics,
+        )
     }
 
     @After

@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.network.auth.AuthRemoteDataSource
 import fr.forumhfr.redface2.core.network.cookie.PersistentCookieJar
 import java.io.File
@@ -86,7 +87,11 @@ class AuthChainIntegrationTest {
         // persisted store contents (or null if the file is empty).
         cookieJar = newCookieJar()
         okHttp = OkHttpClient.Builder().cookieJar(cookieJar).build()
-        dataSource = AuthRemoteDataSource(client = okHttp, baseUrl = baseUrl)
+        dataSource = AuthRemoteDataSource(
+            client = okHttp,
+            baseUrl = baseUrl,
+            diagnostics = DiagnosticsLog(),
+        )
         repository = DefaultAuthRepository(
             remote = dataSource,
             cookieJar = cookieJar,

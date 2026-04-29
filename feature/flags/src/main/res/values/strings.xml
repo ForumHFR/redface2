@@ -21,6 +21,7 @@
     <string name="flags_item_metadata_no_author">%1$d rép. · p.%2$d/%3$d</string>
 
     <string name="flags_report_content_cta">Signaler un contenu</string>
+    <string name="flags_diagnostics_cta">Diagnostics (alpha)</string>
     <string name="flags_report_email_subject">Redface 2 — Signalement</string>
     <string name="flags_report_no_email_client">Aucune application e-mail trouvée. Écrivez à xat@azora.fr.</string>
 

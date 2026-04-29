@@ -96,6 +96,9 @@ enum class EditorMode {
 @Serializable
 data object LoginRoute : RedfaceNavKey
 
+@Serializable
+data object DiagnosticsRoute : RedfaceNavKey
+
 private enum class TopLevelDestination(
     val labelRes: Int,
     val rootRoute: RedfaceNavKey,
@@ -195,6 +198,18 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     },
                     onLoginRequested = {
                         backStack.add(LoginRoute)
+                    },
+                    onOpenDiagnostics = {
+                        backStack.add(DiagnosticsRoute)
+                    },
+                )
+            }
+            entry<DiagnosticsRoute> {
+                fr.forumhfr.redface2.feature.flags.DiagnosticsScreen(
+                    onClose = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
                     },
                 )
             }

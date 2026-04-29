@@ -57,6 +57,7 @@ fun FlagsRoute(
     versionCode: Int,
     onOpenFlag: (Flag) -> Unit,
     onLoginRequested: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
 ) {
     val viewModel: FlagsViewModel = hiltViewModel()
     val authState by viewModel.authState.collectAsStateWithLifecycle()
@@ -107,19 +108,22 @@ fun FlagsRoute(
                         versionName,
                         versionCode,
                     ),
-                    onLogout = viewModel::logout,
-                    onReportContent = {
-                        val intent = Intent(Intent.ACTION_SENDTO).apply {
-                            data = "mailto:$REPORT_EMAIL".toUri()
-                            putExtra(Intent.EXTRA_EMAIL, arrayOf(REPORT_EMAIL))
-                            putExtra(Intent.EXTRA_SUBJECT, reportEmailSubject)
-                        }
-                        try {
-                            context.startActivity(intent)
-                        } catch (_: ActivityNotFoundException) {
-                            Toast.makeText(context, reportNoEmailClient, Toast.LENGTH_LONG).show()
-                        }
-                    },
+                    actions = FooterActions(
+                        onLogout = viewModel::logout,
+                        onReportContent = {
+                            val intent = Intent(Intent.ACTION_SENDTO).apply {
+                                data = "mailto:$REPORT_EMAIL".toUri()
+                                putExtra(Intent.EXTRA_EMAIL, arrayOf(REPORT_EMAIL))
+                                putExtra(Intent.EXTRA_SUBJECT, reportEmailSubject)
+                            }
+                            try {
+                                context.startActivity(intent)
+                            } catch (_: ActivityNotFoundException) {
+                                Toast.makeText(context, reportNoEmailClient, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        onOpenDiagnostics = onOpenDiagnostics,
+                    ),
                 )
             }
         }
@@ -238,13 +242,18 @@ private fun ColumnScope.AuthenticatedBody(
     }
 }
 
+private data class FooterActions(
+    val onLogout: () -> Unit,
+    val onReportContent: () -> Unit,
+    val onOpenDiagnostics: () -> Unit,
+)
+
 @Composable
 private fun FooterSlot(
     state: AuthState,
     unreadMpCount: Int?,
     versionLabel: String,
-    onLogout: () -> Unit,
-    onReportContent: () -> Unit,
+    actions: FooterActions,
 ) {
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     Column(
@@ -266,7 +275,7 @@ private fun FooterSlot(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            TextButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {
+            TextButton(onClick = actions.onLogout, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.flags_logout_cta))
             }
         }
@@ -276,8 +285,11 @@ private fun FooterSlot(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        TextButton(onClick = onReportContent, modifier = Modifier.fillMaxWidth()) {
+        TextButton(onClick = actions.onReportContent, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.flags_report_content_cta))
+        }
+        TextButton(onClick = actions.onOpenDiagnostics, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.flags_diagnostics_cta))
         }
         Spacer(modifier = Modifier.height(4.dp))
     }
