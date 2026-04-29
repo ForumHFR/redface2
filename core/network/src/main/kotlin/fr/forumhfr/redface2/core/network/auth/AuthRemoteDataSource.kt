@@ -15,6 +15,7 @@ import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okio.Buffer
 
 @Singleton
 class AuthRemoteDataSource @Inject constructor(
@@ -74,6 +75,13 @@ class AuthRemoteDataSource @Inject constructor(
         val codePoints = pseudo.codePointCount(0, pseudo.length)
         logI("login attempt: pseudo='$pseudo' len=${pseudo.length} codepoints=$codePoints")
 
+        // Dump the wire-form body with password redacted so the alpha tester can see
+        // exactly how their pseudo is URL-encoded before HFR sees it. Spaces become +,
+        // @ becomes %40, accents become %XX%XX, etc. — useful when a "special" pseudo
+        // gets rejected and we suspect HFR's PHP decode disagrees with our encode.
+        val redactedBody = redactPassword(dumpFormBody(body))
+        logD("login request: POST $url body=$redactedBody")
+
         val (status, cookies, html) = try {
             client.newCall(request).execute().use { response ->
                 val parsed = response.headers("Set-Cookie").mapNotNull { Cookie.parse(url, it) }
@@ -130,11 +138,23 @@ class AuthRemoteDataSource @Inject constructor(
         }
     }
 
+    /** Read the FormBody back into a UTF-8 string — same bytes HFR's PHP receives. */
+    private fun dumpFormBody(body: FormBody): String {
+        val buffer = Buffer()
+        body.writeTo(buffer)
+        return buffer.readUtf8()
+    }
+
+    /** Replace `password=...` (up to next `&` or end of string) with `password=<redacted>`. */
+    private fun redactPassword(rawBody: String): String =
+        rawBody.replace(PASSWORD_FIELD_REGEX, "password=<redacted>")
+
     private companion object {
         const val LOG_TAG = "AuthRemoteDataSource"
         const val LOGIN_PATH = "login_validation.php"
         const val COOKIE_MD_USER = "md_user"
         const val INVALID_CREDS_MARKER = "Votre mot de passe ou nom d'utilisateur n'est pas valide"
         const val RATE_LIMIT_MARKER = "Afin de prévenir les tentatives de flood"
+        val PASSWORD_FIELD_REGEX = Regex("password=[^&]*")
     }
 }
