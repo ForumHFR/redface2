@@ -15,6 +15,23 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v22 — `0.1.0-phase1b.8` — 2026-04-29
+
+**Statut** : `local`
+**Commit** : à venir
+**Fichier** : `redface2-v22-<date>-<sha>.aab`
+
+Diagnostics login plus utiles : trace de la requête HTTP envoyée + bouton « Copier ».
+
+### Added
+- **`AuthRemoteDataSource`** logue maintenant le wire-form body envoyé à HFR (`Log.d login request: POST <url> body=pseudo=...&password=<redacted>`). Permet au testeur alpha de voir comment son pseudo est URL-encodé (espace → `+`, `@` → `%40`, accents → `%XX%XX`) avant qu'il n'arrive au PHP HFR — utile quand un pseudo « spécial » est rejeté et qu'on suspecte un désaccord d'encoding entre `FormBody` et le décodeur côté serveur. Le password est masqué via regex sur le buffer dumpé avant tout `Log.d` ou `diagnostics.record`.
+- **Bouton « Copier »** dans `DiagnosticsScreen` : copie tout le ring buffer dans le presse-papiers en plain text (`HH:mm:ss.SSS  L  TAG  message` par ligne). Désactivé buffer vide. Toast de confirmation sur Android < 13 (Android 13+ affiche déjà l'overlay système « copié dans le presse-papiers »).
+
+### Notes
+- v21 buildée localement mais non distribuée — bumpée à v22 directement.
+
+---
+
 ## v21 — `0.1.0-phase1b.7` — 2026-04-29
 
 **Statut** : `local`
