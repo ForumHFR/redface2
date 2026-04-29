@@ -42,8 +42,8 @@ class DefaultFlagRepository @Inject constructor(
 
     /**
      * One refresh-trigger per [FlagType] so a refresh on one tab doesn't re-fetch the
-     * other two. Replay = 0 because [observe] flushes its own initial fetch via
-     * [Flow.onStart] — the shared flow only carries explicit refresh acks.
+     * other two. Replay = 0 because [observe] emits its own cached-or-initial result;
+     * the shared flow only carries explicit refresh acks.
      */
     private val refreshes: Map<FlagType, MutableSharedFlow<FlagsResult>> = FlagType.entries
         .associateWith {
@@ -66,8 +66,13 @@ class DefaultFlagRepository @Inject constructor(
     }
 
     override suspend fun refresh(type: FlagType) {
-        val result = fetch(type)
-        refreshes.getValue(type).emit(result)
+        val refreshesForType = refreshes.getValue(type)
+        refreshesForType.emit(FlagsResult.Loading)
+        refreshesForType.emit(fetch(type))
+    }
+
+    override fun clearSessionCache() {
+        synchronized(cachedSuccesses) { cachedSuccesses.clear() }
     }
 
     private suspend fun fetch(type: FlagType): FlagsResult = withContext(ioDispatcher) {

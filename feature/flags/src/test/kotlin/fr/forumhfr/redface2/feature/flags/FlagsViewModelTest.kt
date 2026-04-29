@@ -114,6 +114,25 @@ class FlagsViewModelTest {
         vm.logout()
 
         assertTrue(auth.logoutCalled)
+        assertTrue("expected logout to clear private flags cache", flags.clearSessionCacheCallCount >= 1)
+    }
+
+    @Test
+    fun `switching authenticated pseudo clears the private flags cache`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val flags = FakeFlagRepository()
+        val vm = FlagsViewModel(auth, flags, FakeMessagesRepository())
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN))))
+            awaitItem()
+
+            auth.emit(AuthState.Authenticated("other"))
+
+            assertEquals(2, flags.clearSessionCacheCallCount)
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     private fun stubFlag(topicId: Int, type: FlagType): Flag = Flag(
@@ -146,6 +165,10 @@ class FlagsViewModelTest {
             logoutCalled = true
             state.value = AuthState.Anonymous
         }
+
+        fun emit(next: AuthState) {
+            state.value = next
+        }
     }
 
     private class FakeFlagRepository : FlagRepository {
@@ -153,12 +176,18 @@ class FlagsViewModelTest {
             .associateWith { MutableSharedFlow(replay = 1, extraBufferCapacity = 4) }
         var refreshCalls: List<FlagType> = emptyList()
             private set
+        var clearSessionCacheCallCount: Int = 0
+            private set
 
         override fun observe(type: FlagType): Flow<FlagsResult> =
             perType.getValue(type).asSharedFlow()
 
         override suspend fun refresh(type: FlagType) {
             refreshCalls = refreshCalls + type
+        }
+
+        override fun clearSessionCache() {
+            clearSessionCacheCallCount += 1
         }
 
         suspend fun emit(type: FlagType, result: FlagsResult) {

@@ -14,6 +14,7 @@
     <string name="flags_empty">Aucun drapeau dans cette vue.</string>
     <string name="flags_error">Impossible de récupérer les drapeaux. Vérifie ta connexion ou réessaie.</string>
     <string name="flags_retry">Réessayer</string>
+    <string name="flags_refresh">Actualiser</string>
 
     <!-- Footer metadata formats. With author: "Shaad · 69017 rép. · p.1725/1726". Without
          author (HFR returns no last replier on brand new topics): "69017 rép. · p.1/1". -->

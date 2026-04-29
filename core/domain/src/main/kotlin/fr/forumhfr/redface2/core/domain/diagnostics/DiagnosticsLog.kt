@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.domain.diagnostics
 
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,15 +19,20 @@ import kotlinx.coroutines.flow.update
  * Volume: capped at [CAPACITY]. Older entries are dropped when full. Process death
  * resets the buffer — there is no persistence, by design (we don't want a tester's
  * device shipping a long-lived auth trace to disk).
+ *
+ * Identity: each entry carries a monotonic [Entry.id] so Compose lists can use stable
+ * keys even when two identical messages land in the same millisecond.
  */
 @Singleton
 class DiagnosticsLog @Inject constructor() {
 
     private val _entries = MutableStateFlow<List<Entry>>(emptyList())
+    private val sequence = AtomicLong()
     val entries: StateFlow<List<Entry>> = _entries.asStateFlow()
 
     fun record(level: Level, tag: String, message: String) {
         val entry = Entry(
+            id = sequence.incrementAndGet(),
             level = level,
             tag = tag,
             message = message,
@@ -42,6 +48,7 @@ class DiagnosticsLog @Inject constructor() {
     }
 
     data class Entry(
+        val id: Long,
         val level: Level,
         val tag: String,
         val message: String,

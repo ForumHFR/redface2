@@ -54,7 +54,7 @@ Les exemples ViewModel ci-dessous sont **des squelettes illustratifs** — certa
 
 ## Écran Drapeaux (accueil)
 
-> **Statut Phase 1B.4 → 1B.5 livré** : le `FlagsViewModel` réel expose plusieurs `StateFlow` séparés (auth, MP, onglet courant, liste de drapeaux du tab) plutôt qu'un seul `FlagsState` agrégé, et un nombre limité d'actions (`selectTab`, `refresh`, `logout`). Pas de tri, pas de filtre, pas de `RemoveFlag`/`UndoRemoveFlag`, pas de pull-to-refresh : ces capacités sont **hors scope Phase 1B** et arriveront au plus tôt en Phase 1D / Phase 2 quand un cas d'usage le justifie. Le squelette illustratif Phase 1+ ci-dessous a été remplacé par la forme actuellement shippée.
+> **Statut Phase 1B.4 → 1B.5 livré** : le `FlagsViewModel` réel expose plusieurs `StateFlow` séparés (auth, MP, onglet courant, liste de drapeaux du tab) plutôt qu'un seul `FlagsState` agrégé, et un nombre limité d'actions (`selectTab`, `refresh`, `logout`). Pas de tri, pas de filtre, pas de `RemoveFlag`/`UndoRemoveFlag`, pas de pull-to-refresh : ces capacités sont **hors scope Phase 1B** et arriveront au plus tôt en Phase 1D / Phase 2 quand un cas d'usage le justifie. Un bouton « Actualiser » force néanmoins un fetch réseau explicite sur l'onglet courant, pour éviter que le cache mémoire de session ne bloque le dogfood. Le squelette illustratif Phase 1+ ci-dessous a été remplacé par la forme actuellement shippée.
 
 ### ViewModel — forme livrée
 
@@ -65,6 +65,8 @@ class FlagsViewModel @Inject constructor(
     private val flagRepository: FlagRepository,
     messagesRepository: MessagesRepository,
 ) : ViewModel() {
+
+    private var observedPseudo: String? = null
 
     private val _selectedTab = MutableStateFlow(FlagType.CYAN)
     val selectedTab: StateFlow<FlagType> = _selectedTab.asStateFlow()
@@ -79,6 +81,7 @@ class FlagsViewModel @Inject constructor(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val flagsState: StateFlow<FlagsResult?> = authState
+        .onEach(::clearFlagsCacheIfSessionChanged)
         .flatMapLatest { state ->
             when (state) {
                 null, AuthState.Anonymous -> flowOf(null)
@@ -99,7 +102,26 @@ class FlagsViewModel @Inject constructor(
     }
 
     fun logout() {
-        viewModelScope.launch { authRepository.logout() }
+        viewModelScope.launch {
+            flagRepository.clearSessionCache()
+            authRepository.logout()
+        }
+    }
+
+    private fun clearFlagsCacheIfSessionChanged(state: AuthState?) {
+        when (state) {
+            null -> Unit
+            AuthState.Anonymous -> {
+                observedPseudo = null
+                flagRepository.clearSessionCache()
+            }
+            is AuthState.Authenticated -> {
+                if (observedPseudo != state.pseudo) {
+                    flagRepository.clearSessionCache()
+                }
+                observedPseudo = state.pseudo
+            }
+        }
     }
 }
 ```
@@ -110,6 +132,7 @@ class FlagsViewModel @Inject constructor(
 interface FlagRepository {
     fun observe(type: FlagType): Flow<FlagsResult>
     suspend fun refresh(type: FlagType)
+    fun clearSessionCache()
 }
 
 sealed class FlagsResult {

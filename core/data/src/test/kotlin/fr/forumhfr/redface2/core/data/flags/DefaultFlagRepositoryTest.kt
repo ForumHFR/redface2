@@ -68,6 +68,7 @@ class DefaultFlagRepositoryTest {
             assertEquals(FlagsResult.Success(initialFlags), awaitItem())
 
             repo.refresh(FlagType.CYAN)
+            assertEquals(FlagsResult.Loading, awaitItem())
             assertEquals(FlagsResult.Success(refreshedFlags), awaitItem())
 
             cancelAndIgnoreRemainingEvents()
@@ -95,6 +96,34 @@ class DefaultFlagRepositoryTest {
         }
 
         coVerify(exactly = 1) { hfrClient.getFlagsPage(owntopic = 3) }
+    }
+
+    @Test
+    fun `clearSessionCache drops cached flags so the next observe fetches again`() = runTest {
+        val initialFlags = listOf(stubFlag(topicId = 5, type = FlagType.FAVORITE))
+        val nextFlags = listOf(stubFlag(topicId = 9, type = FlagType.FAVORITE))
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getFlagsPage(owntopic = 3) } returnsMany listOf("<favorites v=1/>", "<favorites v=2/>")
+        val parser = mockk<FlagsListParser>()
+        coEvery { parser.parse("<favorites v=1/>", FlagType.FAVORITE) } returns initialFlags
+        coEvery { parser.parse("<favorites v=2/>", FlagType.FAVORITE) } returns nextFlags
+        val (repo, _, _) = buildRepository(hfrClient = hfrClient, parser = parser)
+
+        repo.observe(FlagType.FAVORITE).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            assertEquals(FlagsResult.Success(initialFlags), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repo.clearSessionCache()
+
+        repo.observe(FlagType.FAVORITE).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            assertEquals(FlagsResult.Success(nextFlags), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 2) { hfrClient.getFlagsPage(owntopic = 3) }
     }
 
     @Test

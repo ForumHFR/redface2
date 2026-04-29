@@ -107,7 +107,7 @@ fun DiagnosticsScreen(onClose: () -> Unit) {
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.surface),
                 ) {
-                    items(items = entries, key = { it.timestampMillis.toString() + it.message.hashCode() }) { entry ->
+                    items(items = entries, key = { it.id }) { entry ->
                         DiagnosticsRow(entry = entry, timestampLabel = timeFormat.format(Date(entry.timestampMillis)))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     }

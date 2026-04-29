@@ -10,27 +10,33 @@ import kotlinx.coroutines.flow.Flow
  * once the user-facing remove/swipe interactions are designed.
  *
  * Flow semantics:
- * - Emits the freshly-fetched list on each [refresh] / [observe] subscription.
- * - Re-emits when the auth state flips to authenticated (a logged-out user has no
- *   drapeaux to show; the [observe] flow is expected to be combined with `AuthState`
- *   upstream by the ViewModel layer).
+ * - [observe] fetches on the first subscription for a tab, then reuses the last success
+ *   from the current auth session so tab switches do not implicitly mutate HFR read state.
+ * - [refresh] always fetches the network, updates the in-memory success cache, and
+ *   broadcasts the result to active observers.
+ * - [clearSessionCache] must run when the auth session ends or changes user; cached
+ *   drapeaux are user-private.
  * - On a fetch error, the [Result] in [FlagsResult.Failure] carries the cause; the flow
  *   does not retry on its own.
  */
 interface FlagRepository {
 
     /**
-     * Observe the user's drapeaux for the given [type]. The first emission is the result
-     * of an initial fetch (success or failure); subsequent emissions are produced by
-     * explicit [refresh] calls.
+     * Observe the user's drapeaux for the given [type]. Emits a cached success when
+     * available for the current auth session; otherwise emits [FlagsResult.Loading] then
+     * the initial fetch result. Subsequent emissions are produced by explicit [refresh]
+     * calls.
      */
     fun observe(type: FlagType): Flow<FlagsResult>
 
     /**
-     * Force a fresh network fetch and broadcast it to current observers. No-op when no
-     * one is observing — the caller wouldn't see the result anyway.
+     * Force a fresh network fetch, update the session cache, and broadcast it to current
+     * observers. Active observers receive [FlagsResult.Loading] before the fresh result.
      */
     suspend fun refresh(type: FlagType)
+
+    /** Drop all per-tab in-memory results tied to the current auth session. */
+    fun clearSessionCache()
 }
 
 /**

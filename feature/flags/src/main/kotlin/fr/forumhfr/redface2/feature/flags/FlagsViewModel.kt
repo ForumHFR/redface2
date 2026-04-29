@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -36,6 +37,8 @@ class FlagsViewModel @Inject constructor(
     private val flagRepository: FlagRepository,
     messagesRepository: MessagesRepository,
 ) : ViewModel() {
+
+    private var observedPseudo: String? = null
 
     private val _selectedTab = MutableStateFlow(FlagType.CYAN)
     val selectedTab: StateFlow<FlagType> = _selectedTab.asStateFlow()
@@ -61,6 +64,7 @@ class FlagsViewModel @Inject constructor(
      * any in-flight observation via [flatMapLatest].
      */
     val flagsState: StateFlow<FlagsResult?> = authState
+        .onEach(::clearFlagsCacheIfSessionChanged)
         .flatMapLatest { state ->
             when (state) {
                 null -> flowOf(null)
@@ -85,6 +89,28 @@ class FlagsViewModel @Inject constructor(
     }
 
     fun logout() {
-        viewModelScope.launch { authRepository.logout() }
+        viewModelScope.launch {
+            flagRepository.clearSessionCache()
+            authRepository.logout()
+        }
+    }
+
+    private fun clearFlagsCacheIfSessionChanged(state: AuthState?) {
+        when (state) {
+            null -> Unit
+            AuthState.Anonymous -> {
+                observedPseudo = null
+                flagRepository.clearSessionCache()
+            }
+            is AuthState.Authenticated -> {
+                // Clear on the first authenticated emission too: the repository is a
+                // singleton and may outlive this ViewModel, so a recreated Flags screen
+                // must not trust whatever per-user cache was left in memory.
+                if (observedPseudo != state.pseudo) {
+                    flagRepository.clearSessionCache()
+                }
+                observedPseudo = state.pseudo
+            }
+        }
     }
 }

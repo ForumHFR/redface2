@@ -236,7 +236,15 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
             rememberViewModelStoreNavEntryDecorator(),
         ),
         entryProvider = entryProvider {
-            entry<FlagsListRoute> { FlagsRoute(versionName, versionCode, onOpenFlag = { flag -> /* ... */ }, onLoginRequested = { /* ... */ }) }
+            entry<FlagsListRoute> {
+                FlagsRoute(
+                    versionName,
+                    versionCode,
+                    onOpenFlag = { flag -> /* ... */ },
+                    onLoginRequested = { /* ... */ },
+                    onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
+                )
+            }
             entry<ForumRoute> { ForumScreen(onOpenCategory = { /* ... */ }) }
             entry<SearchRoute> { SearchScreen(onOpenResult = { /* ... */ }) }
             entry<MessagesRoute> { MessagesScreen(onOpenTopic = { /* ... */ }) }
@@ -368,7 +376,7 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 > **Statut Phase 5+** — multi-pane n'est pas livré en Phase 1. Dans le snippet ci-dessous :
 >
 > - le **pattern de composition** (`NavDisplay` + `ListDetailPaneScaffold` sur le même back stack, switch `WindowSizeClass`) est **illustratif** — c'est ce qui sera implémenté Phase 5+ ;
-> - les **signatures de screens** appelées (`FlagsRoute(versionName, versionCode, onOpenFlag, onLoginRequested)`, `TopicScreen(request: TopicRequest, onReply, onOpenPage)`, `EditorScreen(mode: String, cat, post)`) sont les signatures **réelles Phase 1** livrées dans le repo aujourd'hui (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/editor/.../EditorScreen.kt`).
+> - les **signatures de screens** appelées (`FlagsRoute(versionName, versionCode, onOpenFlag, onLoginRequested, onOpenDiagnostics)`, `TopicScreen(request: TopicRequest, onReply, onOpenPage)`, `EditorScreen(mode: String, cat, post)`) sont les signatures **réelles Phase 1** livrées dans le repo aujourd'hui (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/editor/.../EditorScreen.kt`).
 >
 > Le call-site `onOpenFlag = { flag -> backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = ...)) }` passe désormais le topic concerné — Phase 1B.4 a remplacé le placeholder mock par la liste réelle des drapeaux.
 
@@ -397,6 +405,7 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
                         )
                     },
                     onLoginRequested = { backStack.add(LoginRoute) },
+                    onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
                 )
             },
             detailPane = {

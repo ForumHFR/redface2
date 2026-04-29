@@ -96,7 +96,7 @@ fun FlagsRoute(
                         flagsState = flagsState,
                         onSelectTab = viewModel::selectTab,
                         onOpenFlag = onOpenFlag,
-                        onRetry = viewModel::refresh,
+                        onRefresh = viewModel::refresh,
                     )
                 }
 
@@ -158,7 +158,7 @@ private fun ColumnScope.AuthenticatedBody(
     flagsState: FlagsResult?,
     onSelectTab: (FlagType) -> Unit,
     onOpenFlag: (Flag) -> Unit,
-    onRetry: () -> Unit,
+    onRefresh: () -> Unit,
 ) {
     val tabs = listOf(
         FlagType.CYAN to stringResource(R.string.flags_tab_my_topics),
@@ -198,12 +198,18 @@ private fun ColumnScope.AuthenticatedBody(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
             )
-            TextButton(onClick = onRetry) {
+            TextButton(onClick = onRefresh) {
                 Text(stringResource(R.string.flags_retry))
             }
         }
 
         is FlagsResult.Success -> {
+            TextButton(
+                onClick = onRefresh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.flags_refresh))
+            }
             if (current.flags.isEmpty()) {
                 Text(
                     text = stringResource(R.string.flags_empty),

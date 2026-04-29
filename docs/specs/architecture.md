@@ -167,7 +167,7 @@ Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le
 - Contient `MainActivity`
 - Dépend de tous les modules feature (base + extensions)
 
-> **Note Phase 1B.4 — `:feature:flags` livré** : l'écran d'accueil (Drapeaux) vit désormais dans `:feature:flags` avec `FlagsViewModel` (Hilt) + `FlagRepository` + 3 onglets (`FlagType.CYAN` = mes sujets, `RED` = lus uniquement, `FAVORITE`). `:app` ne fait plus que la navigation (`FlagsRoute(versionName, versionCode, onOpenFlag, onLoginRequested)`) et passe `BuildConfig.VERSION_NAME/VERSION_CODE` en paramètres pour que l'écran puisse afficher le footer "Redface 2 — vX.Y (build N)" sans dépendre de la BuildConfig de `:app`.
+> **Note Phase 1B.4 — `:feature:flags` livré** : l'écran d'accueil (Drapeaux) vit désormais dans `:feature:flags` avec `FlagsViewModel` (Hilt) + `FlagRepository` + 3 onglets (`FlagType.CYAN` = mes sujets, `RED` = lus uniquement, `FAVORITE`). `:app` ne fait plus que la navigation (`FlagsRoute(versionName, versionCode, onOpenFlag, onLoginRequested, onOpenDiagnostics)`) et passe `BuildConfig.VERSION_NAME/VERSION_CODE` en paramètres pour que l'écran puisse afficher le footer "Redface 2 — vX.Y (build N)" sans dépendre de la BuildConfig de `:app`.
 
 ---
 
@@ -195,11 +195,13 @@ interface TopicRepository {
 
 interface FlagRepository {
     /**
-     * Émet `Loading`, puis le résultat d'un fetch network (`Success(flags)` ou `Failure`).
-     * Les abonnés reçoivent ensuite chaque [refresh] explicite via le SharedFlow par type.
+     * Émet le succès en cache pour la session courante si disponible ; sinon `Loading`,
+     * puis le résultat d'un fetch network (`Success(flags)` ou `Failure`). Les abonnés
+     * reçoivent ensuite chaque [refresh] explicite via le SharedFlow par type.
      */
     fun observe(type: FlagType): Flow<FlagsResult>
     suspend fun refresh(type: FlagType)
+    fun clearSessionCache()
 }
 
 interface AuthRepository {
@@ -220,7 +222,7 @@ interface MessagesRepository {
 
 `TopicRepository` est livré en Phase 1A (cf. [#88](https://github.com/ForumHFR/redface2/pull/88), [#89](https://github.com/ForumHFR/redface2/pull/89)). `prefetchNextPage` documenté dans la roadmap arrivera en Phase 1B sur `HfrClient` directement (avec `useAuth = false`), puis sera relayé par `TopicRepository.prefetchTopicPage(...)`. `MessagesRepository` est livré en Phase 1B.1 en bonus du login : `:core:data DefaultMessagesRepository` combine l'observation de `AuthState` avec un fetch de `forum1.php?cat=prive` (parser dédié `:core:parser/messages/PrivateMessageListParser`) déclenché à chaque transition vers `Authenticated`. Le full pipeline messagerie (liste + threads) viendra en Phase 1C.
 
-`FlagRepository` + parser + UI sont livrés en Phase 1B.2 → 1B.5 : `FlagsListParser` (classe dédiée dans `:core:parser`, distincte de la façade `HfrParser`) extrait `List<Flag>` depuis `forum1f.php?config=hfr.inc&owntopic=N` (cf. [`models.md`]({{ site.baseurl }}/specs/models)). `:core:data DefaultFlagRepository` orchestre fetch + parse via un `flow { emit(Loading); emit(fetch); emitAll(refreshes) }` cold-collected — un `MutableSharedFlow<FlagsResult>` par `FlagType` rebroadcast les résultats des `refresh()` explicites. `FlagItem` rend une ligne dans `:core:ui`, et `:feature:flags FlagsRoute` compose les 3 onglets HFR (« Mes sujets » / « Lus uniquement » / « Favoris ») plus le footer auth + MP count + version + signalement CSAE. Pas de cache Room en 1B — la liste est rechargée à chaque transition `Authenticated` ou refresh utilisateur ; persistance reportée en Phase 1D (cf. roadmap `1D.2`). Pas de `PullToRefreshBox` non plus en 1B : un bouton « Réessayer » s'affiche uniquement sur état d'erreur ; pull-to-refresh complet est laissé pour quand le besoin justifie le coût (Phase 1D / Phase 2).
+`FlagRepository` + parser + UI sont livrés en Phase 1B.2 → 1B.5 : `FlagsListParser` (classe dédiée dans `:core:parser`, distincte de la façade `HfrParser`) extrait `List<Flag>` depuis `forum1f.php?config=hfr.inc&owntopic=N` (cf. [`models.md`]({{ site.baseurl }}/specs/models)). `:core:data DefaultFlagRepository` orchestre fetch + parse via un `flow { emit(Loading); emit(fetch); emitAll(refreshes) }` cold-collected — un `MutableSharedFlow<FlagsResult>` par `FlagType` rebroadcast les résultats des `refresh()` explicites. Il garde uniquement un cache mémoire par onglet pour la session HFR courante : revenir sur un onglet déjà chargé ne refetch pas implicitement, mais `refresh(type)` force toujours le réseau et `clearSessionCache()` vide tout au logout / changement de session. `FlagItem` rend une ligne dans `:core:ui`, et `:feature:flags FlagsRoute` compose les 3 onglets HFR (« Mes sujets » / « Lus uniquement » / « Favoris ») plus le footer auth + MP count + version + signalement CSAE. Pas de cache Room en 1B — la persistance est reportée en Phase 1D (cf. roadmap `1D.2`). Pas de `PullToRefreshBox` non plus en 1B : des boutons « Réessayer » / « Actualiser » couvrent le besoin minimal ; pull-to-refresh complet est laissé pour quand le besoin justifie le coût (Phase 1D / Phase 2).
 
 ### `:core:network` — HfrClient
 
@@ -340,7 +342,7 @@ class TopicViewModel @Inject constructor(
 | Donnée | Stratégie | Durée |
 |--------|-----------|-------|
 | Topics lus | Cache Room, invalidation au refresh | Jusqu'au refresh |
-| Drapeaux | Cache Room, refresh au lancement + pull-to-refresh | 5 min TTL |
+| Drapeaux | Phase 1B : cache mémoire par session + refresh explicite ; Phase 1D : cache Room à réévaluer | Session courante |
 | Catégories | Cache Room, rarement change | 24h TTL |
 | Smileys | Cache Coil, ne changent jamais | Infini |
 | Avatars | Cache Coil, ETag | 1h TTL |
