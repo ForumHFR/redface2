@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.network.HfrConstants
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
 import java.io.IOException
+import java.net.URLDecoder
 import javax.inject.Inject
 import javax.inject.Singleton
 import okhttp3.Cookie
@@ -110,33 +111,42 @@ class AuthRemoteDataSource @Inject constructor(
         }
     }
 
+    @Suppress("ReturnCount")
     private fun classify(
         cookies: List<Cookie>,
         html: String,
         pseudo: String,
-    ): Result<AuthState.Authenticated> = when {
-        INVALID_CREDS_MARKER in html -> Result.failure(LoginError.InvalidCredentials)
-        RATE_LIMIT_MARKER in html -> Result.failure(LoginError.RateLimited)
-        cookies.any { it.name == COOKIE_MD_USER && it.value == pseudo } ->
-            Result.success(AuthState.Authenticated(pseudo))
-        cookies.none { it.name == COOKIE_MD_USER } ->
-            Result.failure(LoginError.Unknown("expected $COOKIE_MD_USER cookie not set"))
-        else -> {
-            // Build a diagnostic that compares submitted pseudo vs cookie value WITHOUT
-            // leaking the cookie verbatim — just enough for the alpha user to see if HFR
-            // normalized casing, trimmed whitespace, or returned a different account.
-            val cookieValue = cookies.first { it.name == COOKIE_MD_USER }.value
-            val sameLength = cookieValue.length == pseudo.length
-            val sameCaseInsensitive = cookieValue.equals(pseudo, ignoreCase = true)
-            Result.failure(
-                LoginError.Unknown(
-                    "$COOKIE_MD_USER cookie does not match requested pseudo " +
-                        "(submitted len=${pseudo.length} vs cookie len=${cookieValue.length}, " +
-                        "sameLength=$sameLength, caseInsensitiveMatch=$sameCaseInsensitive)",
-                ),
-            )
-        }
+    ): Result<AuthState.Authenticated> {
+        if (INVALID_CREDS_MARKER in html) return Result.failure(LoginError.InvalidCredentials)
+        if (RATE_LIMIT_MARKER in html) return Result.failure(LoginError.RateLimited)
+
+        val mdUserCookie = cookies.firstOrNull { it.name == COOKIE_MD_USER }
+            ?: return Result.failure(LoginError.Unknown("expected $COOKIE_MD_USER cookie not set"))
+
+        // HFR sets md_user with the pseudo URL-form-encoded — spaces become '+', accents
+        // become %XX. A pseudo like "Colonel MythO" lands in the cookie as "Colonel+MythO".
+        // Decode before comparing so the equality check matches the user's plain-text input.
+        // URLDecoder may throw on a malformed escape — fall back to the raw value so the
+        // diagnostic below still has something meaningful to compare.
+        val decodedValue = decodeCookieValue(mdUserCookie.value)
+        if (decodedValue == pseudo) return Result.success(AuthState.Authenticated(pseudo))
+
+        // Build a diagnostic that compares submitted pseudo vs cookie value WITHOUT
+        // leaking the cookie verbatim — just enough for the alpha user to see if HFR
+        // normalized casing, trimmed whitespace, or returned a different account.
+        val sameLength = decodedValue.length == pseudo.length
+        val sameCaseInsensitive = decodedValue.equals(pseudo, ignoreCase = true)
+        return Result.failure(
+            LoginError.Unknown(
+                "$COOKIE_MD_USER cookie does not match requested pseudo " +
+                    "(submitted len=${pseudo.length} vs decoded cookie len=${decodedValue.length}, " +
+                    "sameLength=$sameLength, caseInsensitiveMatch=$sameCaseInsensitive)",
+            ),
+        )
     }
+
+    private fun decodeCookieValue(raw: String): String =
+        runCatching { URLDecoder.decode(raw, Charsets.UTF_8) }.getOrDefault(raw)
 
     /** Read the FormBody back into a UTF-8 string — same bytes HFR's PHP receives. */
     private fun dumpFormBody(body: FormBody): String {

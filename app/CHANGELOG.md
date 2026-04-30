@@ -15,6 +15,22 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v23 — `0.1.0-phase1b.9` — 2026-04-29
+
+**Statut** : `local`
+**Commit** : à venir
+**Fichier** : `redface2-v23-<date>-<sha>.aab`
+
+Hotfix login pour les pseudos avec espace ou caractères spéciaux.
+
+### Fixed
+- **`AuthRemoteDataSource.classify`** décode maintenant la valeur du cookie `md_user` via `URLDecoder` avant comparaison avec le pseudo soumis. HFR pose le pseudo URL-form-encodé dans le cookie (espace → `+`, accents → `%XX`), donc un pseudo comme `Colonel MythO` matchait `Colonel+MythO` octet-à-octet → `LoginError.Unknown` alors que la session était en réalité valide. Confirmé sur l'alpha grâce au trail diagnostics. URLDecoder est wrappé dans `runCatching` pour fall-back sur la valeur brute si l'encodage est malformé. Test ajouté : `pseudo with space matches md_user cookie URL-form-encoded`.
+
+### Notes
+- v22 est restée locale (jamais distribuée) — bumpée à v23 directement pour livrer ce hotfix avec les diagnostics login + bouton « Copier ».
+
+---
+
 ## v22 — `0.1.0-phase1b.8` — 2026-04-29
 
 **Statut** : `local`

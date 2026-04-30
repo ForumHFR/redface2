@@ -61,6 +61,24 @@ class AuthRemoteDataSourceTest {
     }
 
     @Test
+    fun `pseudo with space matches md_user cookie URL-form-encoded`() = runTest {
+        // Real-world case observed on alpha: HFR sets md_user with the pseudo URL-form-
+        // encoded (space → '+'), so a naive equality check between submitted pseudo and
+        // raw cookie value rejected the session even though the login succeeded.
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Set-Cookie", "md_user=Colonel+MythO; Path=/")
+                .addHeader("Set-Cookie", "md_pass=deadbeef; Path=/; HttpOnly")
+                .setBody("<html><body>Bienvenue Colonel MythO</body></html>"),
+        )
+
+        val result = dataSource.login("Colonel MythO", "secret")
+
+        assertEquals(AuthState.Authenticated("Colonel MythO"), result.getOrNull())
+    }
+
+    @Test
     fun `invalid credentials returns LoginError InvalidCredentials`() = runTest {
         server.enqueue(
             MockResponse()
