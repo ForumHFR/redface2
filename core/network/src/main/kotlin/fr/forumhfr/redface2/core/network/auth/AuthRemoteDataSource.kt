@@ -146,7 +146,7 @@ class AuthRemoteDataSource @Inject constructor(
     }
 
     private fun decodeCookieValue(raw: String): String =
-        runCatching { URLDecoder.decode(raw, Charsets.UTF_8) }.getOrDefault(raw)
+        runCatching { URLDecoder.decode(raw, Charsets.UTF_8.name()) }.getOrDefault(raw)
 
     /** Read the FormBody back into a UTF-8 string — same bytes HFR's PHP receives. */
     private fun dumpFormBody(body: FormBody): String {
