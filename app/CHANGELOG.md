@@ -26,11 +26,11 @@ Durcissement final Phase 1B avant 1C : login failure, cookies, session expirée 
 ### Changed
 - **Login HFR** : le POST `login_validation.php` utilise maintenant un cookie jar de staging avec redirects désactivés. Les `Set-Cookie` reçus sur une réponse 200 ou une redirection 302 ne sont commités dans le `PersistentCookieJar` qu'après classification `Authenticated`, donc `InvalidCredentials`, `RateLimited` ou `Unknown` ne peuvent plus installer une session par effet de bord.
 - **Cookies persistants** : `PersistentCookieJar` sérialise les écritures avec une version de mutation ; un `clear()` plus récent gagne contre un `saveFromResponse()` plus ancien qui n'aurait pas encore atteint le store. `DataStoreCookieStore.observe()` fail-close sur payload corrompu sans terminer le flow, afin qu'une future écriture valide soit observée.
-- **Session expirée** : `HfrClient.getFlagsPage()` et `getPrivateMessageListPage()` lèvent maintenant `SessionExpiredException` si HFR redirige vers `/login.php` ou renvoie un formulaire login en HTTP 200. L'écran Drapeaux affiche un message dédié avec action de reconnexion au lieu d'une liste vide trompeuse.
+- **Session expirée** : `HfrClient.getFlagsPage()`, `getPrivateMessageListPage()` et `getTopicPage(useAuth = true)` lèvent maintenant `SessionExpiredException` si HFR redirige vers `/login.php` ou renvoie un formulaire login en HTTP 200. `getTopicPage(useAuth = false)` garde le passthrough anonyme pour le prefetch. L'écran Drapeaux affiche un message dédié avec action de reconnexion au lieu d'une liste vide trompeuse.
 - **`protocol-hfr.md`** : documente le cookie `md_user` form-url-encoded (`Colonel MythO` -> `Colonel+MythO`), distingue absence de cookie et mismatch après décodage, et acte le staging cookie du login.
 
 ### Tests
-- Tests MockWebServer sur login failure + `Set-Cookie` non persisté, login success + commit explicite, session expirée flags/MP, vraie page vide non confondue avec login.
+- Tests MockWebServer sur login failure + `Set-Cookie` non persisté, login success + commit explicite, session expirée flags/MP/topic authentifié, passthrough topic anonyme, vraie page vide non confondue avec login.
 - Tests cookie store sur `clear()` vs save stale et recovery après payload DataStore corrompu.
 
 ---

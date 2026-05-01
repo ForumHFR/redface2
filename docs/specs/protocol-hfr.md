@@ -264,7 +264,7 @@ Les fetchers authentifiés doivent distinguer une vraie liste vide d'une page lo
 1. l'URL finale après redirection pointe vers `/login.php` ou `/login_validation.php` ;
 2. le HTML contient un formulaire login HFR (`login_validation.php`, champ `pseudo`, champ `password`).
 
-Ce signal est branché sur les endpoints authentifiés `getFlagsPage()` et `getPrivateMessageListPage()`. L'UI drapeaux affiche alors un état “session expirée” avec action de reconnexion, au lieu de parser la page login comme une liste vide.
+Ce signal est branché sur les endpoints authentifiés `getFlagsPage()`, `getPrivateMessageListPage()` et `getTopicPage(useAuth = true)`. Le chemin `getTopicPage(useAuth = false)` garde son passthrough anonyme pour le prefetch : il ne peut pas avoir de session expirée et le caller veut le HTML brut retourné par HFR. L'UI drapeaux affiche alors un état “session expirée” avec action de reconnexion, au lieu de parser la page login comme une liste vide.
 
 L'utilisateur ré-entre son mot de passe (Option A : pas de re-login transparent, le password n'est pas stocké — voir [architecture.md#stockage-sécurisé-des-credentials](architecture.md#stockage-sécurisé-des-credentials)).
 
