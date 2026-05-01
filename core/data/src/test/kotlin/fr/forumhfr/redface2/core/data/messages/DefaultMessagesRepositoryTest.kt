@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.data.messages
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.LoginError
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageListParser
@@ -64,6 +65,29 @@ class DefaultMessagesRepositoryTest {
             authStates.emit(AuthState.Authenticated("xaat"))
             assertNull(
                 "A failed fetch must surface as null rather than a stale or zero count",
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeUnreadMpCount emits null when fetch throws SessionExpiredException`() = runTest {
+        // The footer line is intentionally silenced on session expiry — the body of FlagsRoute
+        // already surfaces a reconnect CTA via FlagsResult.Failure(SessionExpiredException),
+        // so doubling that signal in the footer would be noisy. This test pins that contract:
+        // the MP repository must NOT propagate SessionExpiredException to its caller, it must
+        // swallow it silently like any other fetch failure.
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageListPage(page = 1) } throws
+            SessionExpiredException("https://forum.hardware.fr/login.php")
+
+        val (repo, authStates) = buildRepository(hfrClient = hfrClient)
+
+        repo.observeUnreadMpCount().test {
+            authStates.emit(AuthState.Authenticated("xaat"))
+            assertNull(
+                "SessionExpiredException must surface as null in the footer (FlagsRoute body owns the CTA)",
                 awaitItem(),
             )
             cancelAndIgnoreRemainingEvents()

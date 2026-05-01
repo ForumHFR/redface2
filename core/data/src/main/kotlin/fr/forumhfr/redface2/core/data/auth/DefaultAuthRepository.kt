@@ -43,10 +43,17 @@ class DefaultAuthRepository @Inject constructor(
         .distinctUntilChanged()
 
     /**
-     * The persistence side-effect happens implicitly: AuthRemoteDataSource POSTs through the
-     * @AuthenticatedClient OkHttp instance, whose CookieJar (PersistentCookieJar) writes the
-     * Set-Cookie headers to its in-memory cache *and* through to CookieStore. The Result we
-     * return here is the immediate classification — useful for LoginViewModel's UX path.
+     * Cookie persistence is *explicit*, not implicit: AuthRemoteDataSource POSTs through a
+     * derived OkHttp instance with `cookieJar(NO_COOKIES).followRedirects(false)` so HFR's
+     * Set-Cookie headers are staged on the response only — never written to disk by the
+     * CookieJar machinery. The remote then commits them to the @AuthenticatedClient's
+     * PersistentCookieJar (in-memory cache + DataStore) **iff** classify() returns
+     * Authenticated. Failed logins (InvalidCredentials, RateLimited, Unknown, Network) leave
+     * no cookie behind, fixing the "rejected login installs a half-valid session" risk.
+     *
+     * The Result returned here is the same classification — useful for LoginViewModel's UX
+     * path. observeAuthState() flips to Authenticated on the next CookieJar emission, which
+     * happens synchronously inside that explicit commit.
      */
     override suspend fun login(pseudo: String, password: String): Result<AuthState.Authenticated> =
         withContext(ioDispatcher) { remote.login(pseudo, password) }

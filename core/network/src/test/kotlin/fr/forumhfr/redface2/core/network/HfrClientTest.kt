@@ -77,4 +77,38 @@ class HfrClientTest {
 
         assertEquals("<html><body>Aucun sujet</body></html>", html)
     }
+
+    @Test
+    fun `getTopicPage throws SessionExpired when authenticated and final URL is login`() = runTest {
+        // Without this hardening, an expired session would be parsed silently as an empty
+        // topic — wrong empty screen, no reconnect CTA. Mirrors the getFlagsPage / getMP
+        // protection.
+        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "/login.php"))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html>login</html>"))
+
+        val error = runCatching {
+            client.getTopicPage(cat = 23, post = 35395, page = 1, useAuth = true)
+        }.exceptionOrNull()
+
+        assertTrue("expected SessionExpiredException, got $error", error is SessionExpiredException)
+    }
+
+    @Test
+    fun `getTopicPage with useAuth=false skips session expiry detection`() = runTest {
+        // The anonymous prefetch path must NOT raise SessionExpired even on a login-like body:
+        // there is no session to expire, the caller wants whatever HTML the server returned.
+        val loginLikeBody = """
+            <html><body>
+              <form action="/login_validation.php?config=hfr.inc">
+                <input name="pseudo">
+                <input name="password" type="password">
+              </form>
+            </body></html>
+        """.trimIndent()
+        server.enqueue(MockResponse().setResponseCode(200).setBody(loginLikeBody))
+
+        val html = client.getTopicPage(cat = 23, post = 35395, page = 1, useAuth = false)
+
+        assertEquals(loginLikeBody, html)
+    }
 }

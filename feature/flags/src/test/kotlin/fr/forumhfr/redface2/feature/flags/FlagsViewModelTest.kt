@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.flags
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.LoginError
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
@@ -115,6 +116,30 @@ class FlagsViewModelTest {
 
         assertTrue(auth.logoutCalled)
         assertTrue("expected logout to clear private flags cache", flags.clearSessionCacheCallCount >= 1)
+    }
+
+    @Test
+    fun `flagsState propagates SessionExpiredException cause to drive the reconnect CTA`() = runTest {
+        // FlagsRoute renders the reconnect CTA branch when `current.cause is SessionExpiredException`.
+        // A future refactor that drops the `cause` field on FlagsResult.Failure (e.g. flattening
+        // it to a `String message`) would silently break that detection. This test pins the
+        // contract: the SessionExpiredException must traverse the repository → ViewModel →
+        // exposed state without being unwrapped.
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val flags = FakeFlagRepository()
+        val vm = FlagsViewModel(auth, flags, FakeMessagesRepository())
+        val expired = SessionExpiredException("https://forum.hardware.fr/login.php")
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            flags.emit(FlagType.CYAN, FlagsResult.Failure(expired))
+            val failure = awaitItem() as FlagsResult.Failure
+            assertTrue(
+                "expected SessionExpiredException to traverse the stack — got ${failure.cause::class.simpleName}",
+                failure.cause is SessionExpiredException,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test

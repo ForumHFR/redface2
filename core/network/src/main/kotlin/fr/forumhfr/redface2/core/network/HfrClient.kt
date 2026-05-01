@@ -32,13 +32,19 @@ class HfrClient @Inject constructor(
             .addQueryParameter("page", page.toString())
             .build()
 
-        val client = if (useAuth) authenticated else anonymous
         val request = Request.Builder().url(url).get().build()
-        return client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IOException("HFR returned ${response.code} for $url")
+        return if (useAuth) {
+            // Authenticated read: an expired session would otherwise be parsed silently as an
+            // empty topic. executeAuthenticatedHtml() raises SessionExpiredException so the
+            // caller can surface a reconnect CTA instead of a misleading empty screen.
+            authenticated.newCall(request).executeAuthenticatedHtml()
+        } else {
+            anonymous.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("HFR returned ${response.code} for $url")
+                }
+                response.body.string()
             }
-            response.body.string()
         }
     }
 
