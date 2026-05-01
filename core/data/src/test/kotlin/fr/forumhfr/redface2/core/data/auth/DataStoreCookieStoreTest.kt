@@ -143,6 +143,25 @@ class DataStoreCookieStoreTest {
         }
     }
 
+    @Test
+    fun `corrupt persisted payload fails closed but observe recovers after valid save`() =
+        runTest(UnconfinedTestDispatcher()) {
+            dataStore.edit { prefs ->
+                prefs[stringPreferencesKey(DataStoreCookieStore.KEY_SESSION_COOKIES)] = "not-json"
+            }
+
+            store.observe().test {
+                assertEquals(emptyList<Cookie>(), awaitItem())
+
+                store.save(listOf(makeCookie(name = "md_user", value = "xaat")))
+
+                val cookies = awaitItem()
+                assertEquals(1, cookies.size)
+                assertEquals("md_user", cookies.single().name)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
     private fun makeCookie(
         name: String,
         value: String,

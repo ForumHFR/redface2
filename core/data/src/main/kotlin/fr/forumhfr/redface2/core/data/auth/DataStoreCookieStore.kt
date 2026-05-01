@@ -24,11 +24,17 @@ class DataStoreCookieStore @Inject constructor(
 
     override fun observe(): Flow<List<Cookie>> = dataStore.data.map { prefs ->
         val raw = prefs[cookiesKey] ?: return@map emptyList()
-        json.decodeFromString<List<CookieDto>>(raw)
-            .mapNotNull { it.toCookie() }
-            .filter { it.expiresAt > System.currentTimeMillis() }
+        runCatching {
+            json.decodeFromString<List<CookieDto>>(raw)
+                .mapNotNull { it.toCookie() }
+                .filter { it.expiresAt > System.currentTimeMillis() }
+        }.getOrElse {
+            // Fail closed but keep the DataStore flow alive: the next valid write must be
+            // observed normally instead of being swallowed by a terminal catch block.
+            emptyList()
+        }
     }.catch {
-        // Fail closed: a corrupt DataStore payload must not leave PersistentCookieJar stuck
+        // DataStore-level failure: fail closed so PersistentCookieJar is never stuck
         // waiting forever for its first non-null cache value.
         emit(emptyList())
     }

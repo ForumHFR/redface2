@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Flag
@@ -94,9 +95,12 @@ fun FlagsRoute(
                     is AuthState.Authenticated -> AuthenticatedBody(
                         selectedTab = selectedTab,
                         flagsState = flagsState,
-                        onSelectTab = viewModel::selectTab,
-                        onOpenFlag = onOpenFlag,
-                        onRefresh = viewModel::refresh,
+                        actions = AuthenticatedActions(
+                            onSelectTab = viewModel::selectTab,
+                            onOpenFlag = onOpenFlag,
+                            onRefresh = viewModel::refresh,
+                            onLoginRequested = onLoginRequested,
+                        ),
                     )
                 }
 
@@ -156,9 +160,7 @@ private fun AnonymousBody(onLoginRequested: () -> Unit) {
 private fun ColumnScope.AuthenticatedBody(
     selectedTab: FlagType,
     flagsState: FlagsResult?,
-    onSelectTab: (FlagType) -> Unit,
-    onOpenFlag: (Flag) -> Unit,
-    onRefresh: () -> Unit,
+    actions: AuthenticatedActions,
 ) {
     val tabs = listOf(
         FlagType.CYAN to stringResource(R.string.flags_tab_my_topics),
@@ -171,7 +173,7 @@ private fun ColumnScope.AuthenticatedBody(
         tabs.forEachIndexed { index, (type, label) ->
             Tab(
                 selected = index == selectedIndex,
-                onClick = { onSelectTab(type) },
+                onClick = { actions.onSelectTab(type) },
                 text = { Text(label, style = MaterialTheme.typography.labelLarge) },
             )
         }
@@ -193,19 +195,28 @@ private fun ColumnScope.AuthenticatedBody(
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            val sessionExpired = current.cause is SessionExpiredException
             Text(
-                text = stringResource(R.string.flags_error),
+                text = stringResource(
+                    if (sessionExpired) R.string.flags_session_expired else R.string.flags_error,
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
             )
-            TextButton(onClick = onRefresh) {
-                Text(stringResource(R.string.flags_retry))
+            if (sessionExpired) {
+                TextButton(onClick = actions.onLoginRequested) {
+                    Text(stringResource(R.string.flags_login_cta))
+                }
+            } else {
+                TextButton(onClick = actions.onRefresh) {
+                    Text(stringResource(R.string.flags_retry))
+                }
             }
         }
 
         is FlagsResult.Success -> {
             TextButton(
-                onClick = onRefresh,
+                onClick = actions.onRefresh,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.flags_refresh))
@@ -238,7 +249,7 @@ private fun ColumnScope.AuthenticatedBody(
                         FlagItem(
                             flag = flag,
                             metadata = flagMetadata(flag),
-                            onClick = { onOpenFlag(flag) },
+                            onClick = { actions.onOpenFlag(flag) },
                         )
                         FlagItemDivider()
                     }
@@ -247,6 +258,13 @@ private fun ColumnScope.AuthenticatedBody(
         }
     }
 }
+
+private data class AuthenticatedActions(
+    val onSelectTab: (FlagType) -> Unit,
+    val onOpenFlag: (Flag) -> Unit,
+    val onRefresh: () -> Unit,
+    val onLoginRequested: () -> Unit,
+)
 
 private data class FooterActions(
     val onLogout: () -> Unit,

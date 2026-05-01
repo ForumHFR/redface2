@@ -248,7 +248,7 @@ class HfrClient @Inject constructor(
 }
 ```
 
-Le login HFR est isolé dans `:core:network.auth.AuthRemoteDataSource`, pas dans `HfrClient` : il POSTe `login_validation.php`, classe la réponse, puis laisse le `@AuthenticatedClient` persister les cookies via `PersistentCookieJar`.
+Le login HFR est isolé dans `:core:network.auth.AuthRemoteDataSource`, pas dans `HfrClient` : il POSTe `login_validation.php` avec un cookie jar de staging, classe la réponse, puis commite explicitement les cookies dans le `@AuthenticatedClient` seulement si la réponse est `Authenticated`.
 
 `@AnonymousClient` (cookie jar = `CookieJar.NO_COOKIES`) permet à un caller — typiquement le prefetch de la page suivante — d'aller chercher du HTML sans que HFR ne marque les drapeaux comme lus côté serveur. Les écrans qui doivent honorer la lecture (lecture utilisateur) appellent avec `useAuth = true` (default).
 
@@ -381,9 +381,10 @@ sequenceDiagram
     participant HFR
 
     App->>OkHttp: login(user, pass)
-    OkHttp->>HFR: POST /login_validation.php
+    OkHttp->>HFR: POST /login_validation.php (cookie jar staging, no redirect)
     HFR-->>OkHttp: Set-Cookie md_user, md_pass
-    OkHttp->>OkHttp: CookieJar stocke les cookies
+    OkHttp->>OkHttp: classify Authenticated
+    OkHttp->>OkHttp: commit cookies dans PersistentCookieJar
 
     Note over App,HFR: Toutes les requêtes suivantes incluent les cookies
 
@@ -424,7 +425,7 @@ Les cookies sont persistés via un `PersistentCookieJar` adossé à un DataStore
 
 ### Session expirée
 
-Un futur `Interceptor` OkHttp détectera la redirection vers la page de login (HTTP 302 ou absence du cookie `md_user` dans la réponse). Il émettra un événement `SessionExpired` que `RedfaceApp` traduira en navigation vers la route de login livrée par `:feature:auth`. L'utilisateur ré-entre son mot de passe (Option A, pas de re-login transparent : le password n'est pas stocké).
+Les fetchers authentifiés lèvent `SessionExpiredException` quand HFR renvoie la page de login à la place du payload demandé (URL finale `/login.php` / `/login_validation.php`, ou formulaire login en HTTP 200). L'écran concerné affiche un état session expirée et propose la reconnexion via la route de login livrée par `:feature:auth`. L'utilisateur ré-entre son mot de passe (Option A, pas de re-login transparent : le password n'est pas stocké).
 
 ### HFR indisponible
 

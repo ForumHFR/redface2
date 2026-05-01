@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.network.cookie
 import android.os.Looper
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import java.io.Closeable
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
@@ -41,8 +42,9 @@ import okhttp3.HttpUrl
  * - `saveFromResponse` updates the StateFlow synchronously and launches a coroutine to
  *   persist via [CookieStore.save]. The fire-and-forget is intentional — OkHttp shouldn't
  *   wait for disk I/O.
- * - The collector launched in `init` mirrors store updates back into the cache (e.g. a
- *   logout that clears the store from another component is observed here too).
+ * - The collector launched in `init` primes the runtime cache from the persisted store.
+ *   After the first local mutation, the runtime cache is the source of truth; store
+ *   emissions are ignored so a stale async save can never resurrect cookies after logout.
  */
 @Singleton
 class PersistentCookieJar @Inject constructor(
@@ -61,6 +63,7 @@ class PersistentCookieJar @Inject constructor(
      * where order matters for crash-survivability of the auth state.
      */
     private val storeMutex = Mutex()
+    private val mutationVersion = AtomicLong(0L)
 
     /**
      * Runtime cookie state. Emits `null` until the persisted store has been read for the
@@ -71,7 +74,11 @@ class PersistentCookieJar @Inject constructor(
 
     init {
         scope.launch {
-            store.observe().collect { cookies -> cache.value = cookies }
+            store.observe().collect { cookies ->
+                if (mutationVersion.get() == 0L) {
+                    cache.value = cookies
+                }
+            }
         }
     }
 
@@ -104,9 +111,16 @@ class PersistentCookieJar @Inject constructor(
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
         if (cookies.isEmpty()) return
+        val version = mutationVersion.incrementAndGet()
         val merged = merge(cache.value ?: emptyList(), cookies)
         cache.value = merged
-        scope.launch { storeMutex.withLock { store.save(merged) } }
+        scope.launch {
+            storeMutex.withLock {
+                if (version == mutationVersion.get()) {
+                    store.save(merged)
+                }
+            }
+        }
     }
 
     /**
@@ -116,8 +130,15 @@ class PersistentCookieJar @Inject constructor(
      * logout can never be reordered behind a stale `saveFromResponse` on the way to disk.
      */
     fun clear() {
+        val version = mutationVersion.incrementAndGet()
         cache.value = emptyList()
-        scope.launch { storeMutex.withLock { store.clear() } }
+        scope.launch {
+            storeMutex.withLock {
+                if (version == mutationVersion.get()) {
+                    store.clear()
+                }
+            }
+        }
     }
 
     override fun close() {

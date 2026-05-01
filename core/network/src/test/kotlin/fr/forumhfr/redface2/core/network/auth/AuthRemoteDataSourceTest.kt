@@ -4,6 +4,9 @@ import fr.forumhfr.redface2.core.domain.auth.LoginError
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.AuthState
 import kotlinx.coroutines.test.runTest
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -23,13 +26,8 @@ class AuthRemoteDataSourceTest {
     @Before
     fun setUp() {
         server = MockWebServer().apply { start() }
-        val client = OkHttpClient.Builder().build()
         diagnostics = DiagnosticsLog()
-        dataSource = AuthRemoteDataSource(
-            client = client,
-            baseUrl = server.url("/"),
-            diagnostics = diagnostics,
-        )
+        dataSource = buildDataSource()
     }
 
     @After
@@ -79,6 +77,26 @@ class AuthRemoteDataSourceTest {
     }
 
     @Test
+    fun `successful login keeps Set-Cookie from login redirect`() = runTest {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(302)
+                .addHeader("Location", "/forum1.php")
+                .addHeader("Set-Cookie", "md_user=xaat; Path=/")
+                .addHeader("Set-Cookie", "md_pass=deadbeef; Path=/; HttpOnly"),
+        )
+
+        val result = dataSource.login("xaat", "secret")
+
+        assertEquals(AuthState.Authenticated("xaat"), result.getOrNull())
+        assertEquals(
+            "staging login client must not follow redirects before parsing Set-Cookie",
+            1,
+            server.requestCount,
+        )
+    }
+
+    @Test
     fun `invalid credentials returns LoginError InvalidCredentials`() = runTest {
         server.enqueue(
             MockResponse()
@@ -89,6 +107,23 @@ class AuthRemoteDataSourceTest {
         val result = dataSource.login("xaat", "wrong")
 
         assertEquals(LoginError.InvalidCredentials, result.exceptionOrNull())
+    }
+
+    @Test
+    fun `invalid credentials with Set-Cookie does not persist cookies`() = runTest {
+        val cookieJar = RecordingCookieJar()
+        dataSource = buildDataSource(cookieJar)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Set-Cookie", "md_user=xaat; Path=/")
+                .setBody("<html><body>Votre mot de passe ou nom d'utilisateur n'est pas valide</body></html>"),
+        )
+
+        val result = dataSource.login("xaat", "wrong")
+
+        assertEquals(LoginError.InvalidCredentials, result.exceptionOrNull())
+        assertTrue("login failure must not persist Set-Cookie", cookieJar.savedCookies.isEmpty())
     }
 
     @Test
@@ -105,6 +140,23 @@ class AuthRemoteDataSourceTest {
     }
 
     @Test
+    fun `rate-limited response with Set-Cookie does not persist cookies`() = runTest {
+        val cookieJar = RecordingCookieJar()
+        dataSource = buildDataSource(cookieJar)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Set-Cookie", "md_user=xaat; Path=/")
+                .setBody("<html><body>Afin de prévenir les tentatives de flood, veuillez patienter</body></html>"),
+        )
+
+        val result = dataSource.login("xaat", "secret")
+
+        assertEquals(LoginError.RateLimited, result.exceptionOrNull())
+        assertTrue("login failure must not persist Set-Cookie", cookieJar.savedCookies.isEmpty())
+    }
+
+    @Test
     fun `success page without md_user cookie returns LoginError Unknown`() = runTest {
         server.enqueue(
             MockResponse()
@@ -117,6 +169,24 @@ class AuthRemoteDataSourceTest {
         val error = result.exceptionOrNull()
         assertTrue("expected Unknown but was ${error?.javaClass?.simpleName}", error is LoginError.Unknown)
         assertEquals("expected md_user cookie not set", (error as LoginError.Unknown).detail)
+    }
+
+    @Test
+    fun `unknown response with partial Set-Cookie but no md_user does not persist cookies`() = runTest {
+        val cookieJar = RecordingCookieJar()
+        dataSource = buildDataSource(cookieJar)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Set-Cookie", "md_pass=deadbeef; Path=/; HttpOnly")
+                .addHeader("Set-Cookie", "md_id=42; Path=/")
+                .setBody("<html><body>Bienvenue</body></html>"),
+        )
+
+        val result = dataSource.login("xaat", "secret")
+
+        assertEquals("expected md_user cookie not set", (result.exceptionOrNull() as LoginError.Unknown).detail)
+        assertTrue("partial login cookies must not be persisted without md_user", cookieJar.savedCookies.isEmpty())
     }
 
     @Test
@@ -148,6 +218,42 @@ class AuthRemoteDataSourceTest {
     }
 
     @Test
+    fun `unknown response with mismatching Set-Cookie does not persist cookies`() = runTest {
+        val cookieJar = RecordingCookieJar()
+        dataSource = buildDataSource(cookieJar)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Set-Cookie", "md_user=someone_else; Path=/")
+                .addHeader("Set-Cookie", "md_pass=deadbeef; Path=/; HttpOnly")
+                .setBody("<html><body>OK</body></html>"),
+        )
+
+        val result = dataSource.login("xaat", "secret")
+
+        assertTrue(result.exceptionOrNull() is LoginError.Unknown)
+        assertTrue("login failure must not persist Set-Cookie", cookieJar.savedCookies.isEmpty())
+    }
+
+    @Test
+    fun `successful login commits staged cookies to the original cookie jar`() = runTest {
+        val cookieJar = RecordingCookieJar()
+        dataSource = buildDataSource(cookieJar)
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Set-Cookie", "md_user=xaat; Path=/")
+                .addHeader("Set-Cookie", "md_pass=deadbeef; Path=/; HttpOnly")
+                .setBody("<html><body>Bienvenue xaat</body></html>"),
+        )
+
+        val result = dataSource.login("xaat", "secret")
+
+        assertEquals(AuthState.Authenticated("xaat"), result.getOrNull())
+        assertEquals(listOf("md_user", "md_pass"), cookieJar.savedCookies.map { it.name })
+    }
+
+    @Test
     fun `network failure returns LoginError Network with the IOException attached`() = runTest {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
 
@@ -155,5 +261,27 @@ class AuthRemoteDataSourceTest {
 
         val error = result.exceptionOrNull()
         assertTrue("expected Network but was ${error?.javaClass?.simpleName}", error is LoginError.Network)
+    }
+
+    private fun buildDataSource(cookieJar: CookieJar = CookieJar.NO_COOKIES): AuthRemoteDataSource {
+        val client = OkHttpClient.Builder()
+            .cookieJar(cookieJar)
+            .build()
+        return AuthRemoteDataSource(
+            client = client,
+            baseUrl = server.url("/"),
+            diagnostics = diagnostics,
+        )
+    }
+
+    private class RecordingCookieJar : CookieJar {
+        var savedCookies: List<Cookie> = emptyList()
+            private set
+
+        override fun loadForRequest(url: HttpUrl): List<Cookie> = emptyList()
+
+        override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+            savedCookies = cookies
+        }
     }
 }

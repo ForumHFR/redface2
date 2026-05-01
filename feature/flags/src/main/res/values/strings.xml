@@ -13,6 +13,7 @@
     <string name="flags_loading">Chargement…</string>
     <string name="flags_empty">Aucun drapeau dans cette vue.</string>
     <string name="flags_error">Impossible de récupérer les drapeaux. Vérifie ta connexion ou réessaie.</string>
+    <string name="flags_session_expired">Session HFR expirée. Reconnecte-toi pour recharger tes drapeaux.</string>
     <string name="flags_retry">Réessayer</string>
     <string name="flags_refresh">Actualiser</string>
 

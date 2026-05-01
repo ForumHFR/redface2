@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.Cookie
 import okhttp3.HttpUrl
@@ -132,6 +134,22 @@ class PersistentCookieJarTest {
 
         assertEquals(emptyList<Cookie>(), jar.state.value)
         assertEquals(emptyList<Cookie>(), store.lastSaved)
+        assertTrue(store.cleared)
+    }
+
+    @Test
+    fun `clear wins over a stale save coroutine that has not reached the store yet`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val store = FakeCookieStore(initial = emptyList())
+        val jar = PersistentCookieJar(store, dispatcher)
+
+        jar.saveFromResponse(baseUrl, listOf(cookie("md_user", "xaat")))
+        jar.clear()
+        runCurrent()
+
+        assertEquals(emptyList<Cookie>(), jar.state.value)
+        assertEquals(emptyList<Cookie>(), store.lastSaved)
+        assertEquals("stale save should be skipped before reaching the store", 0, store.saveCount)
         assertTrue(store.cleared)
     }
 
