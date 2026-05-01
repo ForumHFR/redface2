@@ -1,11 +1,13 @@
 package fr.forumhfr.redface2.core.network
 
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
+import okhttp3.Call
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -62,12 +64,7 @@ class HfrClient @Inject constructor(
             .build()
 
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IOException("HFR returned ${response.code} for $url")
-            }
-            response.body.string()
-        }
+        return authenticated.newCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -94,11 +91,28 @@ class HfrClient @Inject constructor(
             .build()
 
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IOException("HFR returned ${response.code} for $url")
-            }
-            response.body.string()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    private fun Call.executeAuthenticatedHtml(): String = execute().use { response ->
+        if (!response.isSuccessful) {
+            throw IOException("HFR returned ${response.code} for ${response.request.url}")
         }
+        val html = response.body.string()
+        val finalUrl = response.request.url
+        if (finalUrl.isLoginUrl() || html.looksLikeLoginPage()) {
+            throw SessionExpiredException(finalUrl.toString())
+        }
+        html
+    }
+
+    private fun HttpUrl.isLoginUrl(): Boolean =
+        encodedPath.endsWith("/login.php") || encodedPath.endsWith("/login_validation.php")
+
+    private fun String.looksLikeLoginPage(): Boolean {
+        val lower = lowercase()
+        return "login_validation.php" in lower &&
+            "name=\"pseudo\"" in lower &&
+            "name=\"password\"" in lower
     }
 }

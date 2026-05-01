@@ -12,6 +12,7 @@ import java.net.URLDecoder
 import javax.inject.Inject
 import javax.inject.Singleton
 import okhttp3.Cookie
+import okhttp3.CookieJar
 import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
@@ -45,9 +46,9 @@ class AuthRemoteDataSource @Inject constructor(
     }
 
     /**
-     * POSTs the login form to HFR. The CookieJar attached to the @AuthenticatedClient is what
-     * actually persists the session — this method only classifies the response. Returns a
-     * typed [LoginError] inside Result.failure on every non-success path so the caller can
+     * POSTs the login form to HFR. Cookies are staged until the response is classified, then
+     * committed to the CookieJar attached to the @AuthenticatedClient only on success. Returns
+     * a typed [LoginError] inside Result.failure on every non-success path so the caller can
      * branch without parsing messages.
      *
      * Detection logic (mirrors hfr-mcp/internal/hfr/client.go::Login, kept as the single
@@ -84,10 +85,21 @@ class AuthRemoteDataSource @Inject constructor(
         logD("login request: POST $url body=$redactedBody")
 
         val (status, cookies, html) = try {
-            client.newCall(request).execute().use { response ->
-                val parsed = response.headers("Set-Cookie").mapNotNull { Cookie.parse(url, it) }
-                Triple(response.code, parsed, response.body.string())
-            }
+            // Use a no-cookie staging client for the POST itself: OkHttp normally persists
+            // Set-Cookie before this method can classify the response. Login failures must
+            // never install a session by side effect, so we manually commit cookies only
+            // after classify() returns Authenticated. Redirects are disabled so cookies set
+            // on HFR's login 302 are still visible on the response we classify.
+            client.newBuilder()
+                .cookieJar(CookieJar.NO_COOKIES)
+                .followRedirects(false)
+                .build()
+                .newCall(request)
+                .execute()
+                .use { response ->
+                    val parsed = response.headers("Set-Cookie").mapNotNull { Cookie.parse(url, it) }
+                    Triple(response.code, parsed, response.body.string())
+                }
         } catch (e: IOException) {
             logW("login network failure for pseudo='$pseudo'", e)
             return Result.failure(LoginError.Network(e))
@@ -103,6 +115,9 @@ class AuthRemoteDataSource @Inject constructor(
         )
 
         return classify(cookies, html, pseudo).also { result ->
+            result.onSuccess {
+                client.cookieJar.saveFromResponse(url, cookies)
+            }
             result.onFailure { error ->
                 val detail = (error as? LoginError.Unknown)?.detail ?: error::class.simpleName
                 logW("login classified as failure for pseudo='$pseudo': $detail")

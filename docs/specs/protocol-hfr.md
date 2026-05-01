@@ -104,11 +104,16 @@ Détection de la réponse (mirror de l'impl `:core:network/auth/AuthRemoteDataSo
 
 | Cas | Marqueur | Action client |
 |---|---|---|
-| Succès | cookie `Set-Cookie: md_user=<pseudo>` présent | `AuthState.Authenticated(pseudo)`, cookie persisté par `PersistentCookieJar` |
+| Succès | cookie `Set-Cookie: md_user=<pseudo form-url-encoded>` présent et décodable vers le pseudo soumis | `AuthState.Authenticated(pseudo)`, cookies commités dans `PersistentCookieJar` |
 | Mauvais identifiants | body contient `Votre mot de passe ou nom d'utilisateur n'est pas valide` | `LoginError.InvalidCredentials` |
 | Anti-flood | body contient `Afin de prévenir les tentatives de flood` | `LoginError.RateLimited` (l'utilisateur attend quelques minutes et retente) |
-| Cookie `md_user` avec valeur ≠ pseudo soumis | défensif : `AuthRemoteDataSource` refuse de revendiquer une autre identité | `LoginError.Unknown("expected md_user cookie not set")` |
+| Cookie `md_user` absent | aucun cookie d'identité exploitable | `LoginError.Unknown("expected md_user cookie not set")` |
+| Cookie `md_user` présent mais valeur décodée ≠ pseudo soumis | défensif : `AuthRemoteDataSource` refuse de revendiquer une autre identité | `LoginError.Unknown("md_user cookie does not match requested pseudo (...)")` |
 | Tout autre format | aucun marqueur reconnu | `LoginError.Unknown(detail)` |
+
+HFR encode la valeur du cookie `md_user` comme un form body (`application/x-www-form-urlencoded`) : espace `+`, accents `%XX`, etc. Le client doit donc décoder `md_user` avant comparaison (`Colonel MythO` ↔ `Colonel+MythO`). Ce contrat est couvert par le test `pseudo with space matches md_user cookie URL-form-encoded`.
+
+Le POST login utilise un cookie jar de staging avec redirects désactivés : les `Set-Cookie` posés par une réponse 200 ou par la redirection 302 de login restent visibles pour classification, puis ne sont commités dans le `PersistentCookieJar` qu'après classification `Authenticated`. Une réponse classée `InvalidCredentials`, `RateLimited` ou `Unknown` ne doit jamais installer une session par effet de bord.
 
 ---
 
@@ -250,15 +255,16 @@ Deux sources distinctes :
 | `md_forum` | Identifiant de forum | session |
 | Cookies divers (tracking interne HFR) | — | variable |
 
-**Indicateur de session active** : présence du cookie `md_user`. Si une réponse HTTP redirige vers la page de login ou si le DOM ne contient plus le pseudo de l'utilisateur connecté, la session a expiré.
+**Indicateur de session active** : présence du cookie `md_user`. Si une réponse HTTP redirige vers la page de login ou si le DOM contient le formulaire login à la place du payload demandé, la session a expiré.
 
 ### Détection et recovery de session expirée
 
-Un `Interceptor` OkHttp :
+Les fetchers authentifiés doivent distinguer une vraie liste vide d'une page login servie en HTTP 200. Phase 1B hardening : `HfrClient` lève `SessionExpiredException` au minimum quand :
 
-1. Détecte HTTP 302 vers `/login.php` ou absence du pseudo dans la réponse.
-2. Émet un événement `SessionExpired`.
-3. Quand ce détecteur sera implémenté, `RedfaceApp` (`NavDisplay`) réinitialisera le back stack courant vers la route de login livrée par `:feature:auth` et effacera le cache Room concerné.
+1. l'URL finale après redirection pointe vers `/login.php` ou `/login_validation.php` ;
+2. le HTML contient un formulaire login HFR (`login_validation.php`, champ `pseudo`, champ `password`).
+
+Ce signal est branché sur les endpoints authentifiés `getFlagsPage()` et `getPrivateMessageListPage()`. L'UI drapeaux affiche alors un état “session expirée” avec action de reconnexion, au lieu de parser la page login comme une liste vide.
 
 L'utilisateur ré-entre son mot de passe (Option A : pas de re-login transparent, le password n'est pas stocké — voir [architecture.md#stockage-sécurisé-des-credentials](architecture.md#stockage-sécurisé-des-credentials)).
 
