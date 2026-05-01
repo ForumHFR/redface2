@@ -94,6 +94,51 @@ class HfrClientTest {
     }
 
     @Test
+    fun `getForumHomePage with useAuth=true throws SessionExpired on login redirect`() = runTest {
+        // Without this hardening, an expired session would surface as an empty
+        // ForumIndex, which is indistinguishable in the UI from a forum that lost all
+        // its categories. The session-expiry CTA must fire instead.
+        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "/login.php"))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html>login</html>"))
+
+        val error = runCatching { client.getForumHomePage(useAuth = true) }.exceptionOrNull()
+
+        assertTrue("expected SessionExpiredException, got $error", error is SessionExpiredException)
+        assertTrue((error as SessionExpiredException).finalUrl.endsWith("/login.php"))
+    }
+
+    @Test
+    fun `getTopicListPage builds the legacy v1 query string`() = runTest {
+        // Pin the exact query string against a regression — HFR's v1 client kept this
+        // exhaustive list of params for ~10 years and we mirror it defensively. Order
+        // is fixed by OkHttp's HttpUrl builder (insertion order).
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>ok</body></html>"))
+
+        val html = client.getTopicListPage(cat = 13, subcat = 0, page = 1)
+
+        assertEquals("<html><body>ok</body></html>", html)
+        val recorded = server.takeRequest()
+        assertEquals("/forum1.php", recorded.requestUrl?.encodedPath)
+        val expectedQuery = listOf(
+            "config" to "hfr.inc",
+            "cat" to "13",
+            "subcat" to "0",
+            "page" to "1",
+            "sondage" to "0",
+            "owntopic" to "0",
+            "trash" to "0",
+            "trash_post" to "0",
+            "moderation" to "0",
+            "new" to "0",
+            "nojs" to "0",
+            "subcatgroup" to "0",
+        )
+        expectedQuery.forEach { (name, value) ->
+            assertEquals("query param $name", value, recorded.requestUrl?.queryParameter(name))
+        }
+    }
+
+    @Test
     fun `getTopicPage with useAuth=false skips session expiry detection`() = runTest {
         // The anonymous prefetch path must NOT raise SessionExpired even on a login-like body:
         // there is no session to expire, the caller wants whatever HTML the server returned.

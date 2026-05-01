@@ -1,0 +1,9 @@
+Source: forum.hardware.fr (capture anonymous XaT, 2026-05-01)
+Captured page: forum.php?config=hfr.inc
+Type: racine forum HFR — table de toutes les catégories et sous-catégories.
+Structure DOM observée:
+- 20 catégories `<a class="cCatTopic" href="/hfr/<CategorySlug>/liste_sujet-1.htm"> <CategoryName></a>`
+- N sous-catégories par catégorie `<a class="Tableau" href="/hfr/<CategorySlug>/<SubCategorySlug>/liste_sujet-1.htm">`
+- Cellules `<td class="catCase{0..4}">` portent le compteur de topics et les modérateurs (les `cat=prive&dest=<modo>` permettent d'identifier les modos au passage).
+- IMPORTANT: les IDs numériques `cat=N` ne sont PAS exposés dans cette page (URLs en mod_rewrite slug uniquement). Les IDs s'obtiennent via le `<select name="cat">` présent dans n'importe quelle page de liste topic.
+Notes: capture anonymous, donc `hash_check` vide. Aucun cookie ni id_user. Liens `md_cryptlink<HEX>` (S'identifier / S'inscrire / nb connectés) laissés tels quels — ils n'affectent pas notre parser.

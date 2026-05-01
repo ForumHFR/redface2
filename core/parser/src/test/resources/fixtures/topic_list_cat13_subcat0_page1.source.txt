@@ -1,0 +1,17 @@
+Source: forum.hardware.fr (capture anonymous XaT, 2026-05-01)
+Captured page: forum1.php?config=hfr.inc&cat=13&subcat=0&page=1
+Type: liste de topics de la catégorie « Discussions » (cat=13), toutes sous-catégories confondues (subcat=0), page 1.
+Structure DOM observée:
+- `<input type="hidden" name="cat" value="13" />` → source authoritative pour cat ID
+- `<select name="cat" onchange="…">` avec 20 `<option value="N">Name` → mapping ID↔nom complet
+- Lignes topics: `<tr class="sujet ligne_booleen cBackCouleurTab{1,3} [ligne_sticky]">`
+- Colonnes (similaires à FlagsListParser):
+  - `td.sujetCase2` icône statut (pastille drapeau / sticky / locked)
+  - `td.sujetCase3` titre + lien `<a class="cCatTopic" href="/hfr/<…>/sujet_<POST_ID>_<PAGE>.htm" title="Sujet n°<POST_ID>">…`
+  - `td.sujetCase4` auteur du premier message
+  - `td.sujetCase5` réponses (le user a une convention différente côté flags ; vérifier)
+  - `td.sujetCase7` vues
+  - `td.sujetCase8` dernier répondant + date
+- Pagination: liens `<a href="/hfr/Discussions/liste_sujet-{N}.htm">{N}</a>` en bas de page
+- 5 topics sticky observés (épinglés en haut), suivis des topics réguliers triés par dernière réponse
+Notes: capture anonymous → `hash_check` vide, aucun cookie. URLs topic en mod_rewrite slug — l'ID `post=N` est extractible via le pattern `sujet_(\d+)_(\d+)\.htm` sur le href.

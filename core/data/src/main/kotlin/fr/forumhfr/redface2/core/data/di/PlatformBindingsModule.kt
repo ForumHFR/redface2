@@ -9,6 +9,8 @@ import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.coroutines.MainDispatcher
 import fr.forumhfr.redface2.core.parser.HfrParser
 import fr.forumhfr.redface2.core.parser.flags.FlagsListParser
+import fr.forumhfr.redface2.core.parser.forum.ForumCategoriesParser
+import fr.forumhfr.redface2.core.parser.forum.TopicListParser
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageListParser
 import java.time.Clock
 import javax.inject.Singleton
@@ -48,4 +50,12 @@ object PlatformBindingsModule {
     @Provides
     @Singleton
     fun provideFlagsListParser(): FlagsListParser = FlagsListParser()
+
+    @Provides
+    @Singleton
+    fun provideForumCategoriesParser(): ForumCategoriesParser = ForumCategoriesParser()
+
+    @Provides
+    @Singleton
+    fun provideTopicListParser(): TopicListParser = TopicListParser()
 }

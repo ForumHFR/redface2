@@ -25,8 +25,8 @@ Cette documentation est issue de la rétro-ingénierie du code de [Redface v1](h
 
 | Fonctionnalité | Méthode | Endpoint | Auth requise |
 |---|---|---|---|
-| Page d'accueil (catégories) | GET | `/hfr/` ou `/` | non |
-| Liste de topics d'une sous-catégorie | GET | `/forum2.php?config=hfr.inc&cat={cat}&subcat={subcat}&page={page}` | non (logué ↔ lu/non-lu visible) |
+| Page d'accueil (catégories) | GET | `/forum.php?config=hfr.inc` | non (logué ↔ lu/non-lu visible) |
+| Liste de topics d'une (sous-)catégorie | GET | `/forum1.php?config=hfr.inc&cat={cat}&subcat={subcat}&page={page}&sondage=0&owntopic=0&trash=0&trash_post=0&moderation=0&new=0&nojs=0&subcatgroup=0` | non (logué ↔ lu/non-lu visible) |
 | Liste topics (rewrite SEO) | GET | `/hfr/{cat_slug}/{subcat_slug}/liste_sujet-{page}.htm` | non |
 | Lecture d'un topic | GET | `/forum2.php?config=hfr.inc&cat={cat}&post={post}&page={page}` | non |
 | Drapeaux (accueil Redface 2) | GET | `/forum1f.php?config=hfr.inc&owntopic={filter_id}` | **oui** |
@@ -49,6 +49,40 @@ Cette documentation est issue de la rétro-ingénierie du code de [Redface v1](h
 > **Note sur `PRIVATE_MESSAGE_CAT_ID`** : la catégorie des MPs est la **chaîne** `"prive"` et non un entier. Attention lors du typage côté Kotlin — `cat: String` pour les endpoints MP ou sentinel dédié.
 
 > **Note sur l'URL "Liste des MPs"** : l'endpoint canonique est `forum1.php?config=hfr.inc&cat=prive&...`, **pas** `message.php?config=hfr.inc` (qui ouvre le composer d'un MP isolé). Vérifié dans le legacy v1 (`HFREndpoints.PRIVATE_MESSAGES_URL`, prouvé en prod ~10 ans) et reproduit dans `:core:network HfrClient.getPrivateMessageListPage()` de Phase 1B.1. Toute la chaîne de query params (`subcat=`, `sondage=0`, `owntopic=0`, etc.) est conservée à l'identique du legacy par défensif — HFR pourrait accepter une URL plus courte mais ce n'est pas testé.
+
+---
+
+## Forum index et listes de topics
+
+### `GET /forum.php?config=hfr.inc` — page racine
+
+Renvoie la liste des catégories HFR. Le HTML expose **uniquement** :
+
+- le nom de la catégorie via `<a class="cCatTopic" href="/hfr/<slug>/liste_sujet-1.htm">`,
+- ses sous-catégories via les `<a class="Tableau">` voisins, dont le href suit le motif `/hfr/<categorySlug>/<subcategorySlug>/liste_sujet-1.htm`.
+
+**Aucun identifiant numérique n'est exposé à ce niveau.** Le mapping nom↔ID est récupéré sur n'importe quelle page de liste de topics (cf. ci-dessous). Cas particulier : la catégorie `Achats & Ventes` a un href `cCatTopic` à deux segments (`/hfr/AchatsVentes/Hardware/liste_sujet-1.htm`) — le slug de catégorie est le **premier** segment (`AchatsVentes`), le second (`Hardware`) est la première sous-catégorie listée.
+
+Certains `<a class="Tableau">` du même `<tr class="cat">` pointent vers `/message.php?...&dest=<modo>` (colonne « Modérateur ») : il faut les filtrer du parsing des sous-catégories. Référence : `:core:parser/forum/ForumCategoriesParser.kt` (Phase 1C-A).
+
+### `GET /forum1.php?config=hfr.inc&cat=X&subcat=Y&page=Z&...` — liste de topics
+
+Renvoie la page Z des topics de la catégorie X (et sous-catégorie Y, ou `subcat=0` pour toutes les sous-catégories d'un coup). C'est cette page qui porte l'identifiant numérique de la catégorie courante :
+
+- `<input type="hidden" name="cat" value="X">` — source canonique de l'ID numérique.
+- `<select name="cat" onchange="…">` avec un `<option value="N">Name</option>` par catégorie — fournit le **mapping ID↔nom complet** pour les 19 catégories HFR (utile pour pré-remplir le cache local sans recapturer chaque sous-page).
+- Pas d'`<input name="subcat">` quand `subcat=0` — modèle correspondant : `subcat: Int? = null` côté Kotlin.
+
+Toute la chaîne de query params (`sondage=0&owntopic=0&trash=0&trash_post=0&moderation=0&new=0&nojs=0&subcatgroup=0`) est conservée à l'identique du legacy v1 par défensif — HFR accepte probablement une URL plus courte, mais le combo legacy a ~10 ans de production. Référence : `:core:network HfrClient.getTopicListPage()` (Phase 1C-A).
+
+### Authentification : anonyme accepté, mais authentifié recommandé
+
+Les deux endpoints répondent en anonyme. Cependant :
+
+- En anonyme, HFR sert l'icône `closedb_new.gif` (« Nouveaux sujets ») pour **toutes les lignes**, sans distinction lu/non-lu — il n'y a pas de session à attribuer. Le champ `TopicSummary.hasUnread` est alors mécaniquement `true` partout et doit être ignoré côté UI.
+- En authentifié, HFR rend l'icône réelle (`closed.gif`, `closedb.gif`, `closedb_new.gif`, `closedm*.gif` pour locked). Le champ `hasUnread` devient significatif.
+
+Les deux helpers de `:core:network HfrClient` (`getForumHomePage`, `getTopicListPage`) acceptent un paramètre `useAuth: Boolean = true`. Le défaut authentifié donne le rendu correct au logué ; `useAuth = false` est réservé aux prefetchs futurs qui ne doivent pas mettre à jour les drapeaux serveur (cf. règle `feedback_prefetch_no_auth`).
 
 ---
 

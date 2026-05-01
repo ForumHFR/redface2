@@ -100,6 +100,76 @@ class HfrClient @Inject constructor(
         return authenticated.newCall(request).executeAuthenticatedHtml()
     }
 
+    /**
+     * Fetches the HFR forum index page (`forum.php?config=hfr.inc`). Defaults to the
+     * authenticated client so a logged-in user sees their unread/flag state — anonymous
+     * is exposed for future prefetch usage that must not mark anything as read.
+     */
+    suspend fun getForumHomePage(useAuth: Boolean = true): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("forum.php")
+            .addQueryParameter("config", "hfr.inc")
+            .build()
+
+        val request = Request.Builder().url(url).get().build()
+        return if (useAuth) {
+            authenticated.newCall(request).executeAuthenticatedHtml()
+        } else {
+            anonymous.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("HFR returned ${response.code} for $url")
+                }
+                response.body.string()
+            }
+        }
+    }
+
+    /**
+     * Fetches a topic-list page (`forum1.php?config=hfr.inc&cat=X&subcat=Y&page=Z`). The
+     * full legacy v1 query string is reproduced (`sondage`, `owntopic`, `trash`, …) for
+     * defensiveness — HFR may accept a shorter URL but the legacy combination is the
+     * one with ~10 years of production proof. `subcat=0` lists every subcategory of the
+     * given `cat`; `subcat=N` scopes to subcategory N.
+     */
+    suspend fun getTopicListPage(
+        cat: Int,
+        subcat: Int = 0,
+        page: Int = 1,
+        useAuth: Boolean = true,
+    ): String {
+        require(cat > 0) { "cat must be > 0, got $cat" }
+        require(subcat >= 0) { "subcat must be >= 0, got $subcat" }
+        require(page >= 1) { "page must be >= 1, got $page" }
+
+        val url = baseUrl.newBuilder()
+            .addPathSegment("forum1.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", cat.toString())
+            .addQueryParameter("subcat", subcat.toString())
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("sondage", "0")
+            .addQueryParameter("owntopic", "0")
+            .addQueryParameter("trash", "0")
+            .addQueryParameter("trash_post", "0")
+            .addQueryParameter("moderation", "0")
+            .addQueryParameter("new", "0")
+            .addQueryParameter("nojs", "0")
+            .addQueryParameter("subcatgroup", "0")
+            .build()
+
+        val request = Request.Builder().url(url).get().build()
+        return if (useAuth) {
+            authenticated.newCall(request).executeAuthenticatedHtml()
+        } else {
+            anonymous.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("HFR returned ${response.code} for $url")
+                }
+                response.body.string()
+            }
+        }
+    }
+
     private fun Call.executeAuthenticatedHtml(): String = execute().use { response ->
         if (!response.isSuccessful) {
             throw IOException("HFR returned ${response.code} for ${response.request.url}")

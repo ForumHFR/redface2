@@ -18,9 +18,10 @@ Structures du domaine métier.
 
 Certains modèles référencés dans `navigation.md` et `extensions.md` sont volontairement laissés à définir au moment d'implémenter leurs écrans, pour éviter la dette de spec pré-code :
 
-- **`TopicSummary`** — une ligne dans une liste de topics (titre, auteur, dernière date, nombre non-lus). ≠ `Topic` qui contient tous les posts d'une page. Nécessaire Phase 1 pour le Forum et la liste des topics d'une sous-catégorie.
 - **`UserProfile`** — données du popup profil rapide (avatar, date inscription, nombre posts, localisation). Nécessaire Phase 2 pour la feature "Voir un profil utilisateur" (listée dans la section [Lecture du scope]({{ site.baseurl }}/specs/scope#lecture)) et son extension Phase 4 ["Infos profil rapides"]({{ site.baseurl }}/specs/extensions#infos-profil-rapides).
 - **`UserStats`** — statistiques détaillées utilisateur (posts par cat, activité, topics créés). Nécessaire Phase 4 pour la feature "Stats utilisateur".
+
+`TopicSummary` (une ligne dans une liste de topics) et `TopicListPage` (snapshot d'une page de liste) ont été promus en Phase 1C-A — voir la section [Catégories et listes de topics](#catégories-et-listes-de-topics).
 
 Ces modèles émergeront du premier prototype de chaque écran. Pas de spec préventive à faire maintenant.
 
@@ -75,15 +76,43 @@ classDiagram
     }
 
     class Category {
-        +Int id
         +String name
+        +String slug
         +List~SubCategory~ subcategories
     }
 
     class SubCategory {
-        +Int id
         +String name
-        +Int topicCount
+        +String slug
+        +String parentCategorySlug
+    }
+
+    class ForumIndex {
+        +List~Category~ categories
+    }
+
+    class TopicSummary {
+        +Int cat
+        +Int? subcat
+        +Int post
+        +String title
+        +String firstPostAuthor
+        +Int replyCount
+        +Int views
+        +Int totalPages
+        +String lastReplyAuthor
+        +String lastReplyAt
+        +Boolean isSticky
+        +Boolean isLocked
+        +Boolean hasUnread
+    }
+
+    class TopicListPage {
+        +Int cat
+        +Int? subcat
+        +Int currentPage
+        +Int totalPages
+        +List~TopicSummary~ topics
     }
 
     class PrivateMessage {
@@ -123,6 +152,8 @@ classDiagram
     PMMessage --> PostContent : rend
     Topic --> Poll : optionnel
     Category --> SubCategory : contient
+    ForumIndex --> Category : contient
+    TopicListPage --> TopicSummary : contient
     Flag --> FlagType : type
     AuthState <|-- Anonymous
     AuthState <|-- Authenticated
@@ -310,21 +341,57 @@ data class EditInfo(
 
 ---
 
-## Catégories
+## Catégories et listes de topics
+
+Phase 1C-A introduit le parsing de la racine HFR et des pages de liste de topics. La racine (`forum.php?config=hfr.inc`) **n'expose pas** d'identifiant numérique : seuls le nom et le slug mod_rewrite y figurent. L'ID numérique (`cat: Int`) apparaît sur n'importe quelle page de liste via `<input type="hidden" name="cat">` et la mapping complète ID↔nom via `<select name="cat">` (cf. [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#forum-index-et-listes-de-topics)).
 
 ```kotlin
 data class Category(
-    val id: Int,
     val name: String,
+    val slug: String,                // ex: "Discussions", "Hardware", "AchatsVentes"
     val subcategories: List<SubCategory>,
 )
 
 data class SubCategory(
-    val id: Int,
     val name: String,
-    val topicCount: Int,
+    val slug: String,                // ex: "Viepratique"
+    val parentCategorySlug: String,  // ex: "Discussions"
+)
+
+data class ForumIndex(
+    val categories: List<Category>,
 )
 ```
+
+Les listes de topics par (sous-)catégorie utilisent les modèles suivants. Le mapping des colonnes `td.sujetCase{1..9}` est identique à celui de `Flag` (même rendu HFR sous-jacent), à l'exception de `td.sujetCase5` qui porte l'icône de drapeau (vide pour une requête anonyme — non lu côté liste de topics).
+
+```kotlin
+data class TopicSummary(
+    val cat: Int,
+    val subcat: Int?,                // null quand l'URL appelée avait subcat=0
+    val post: Int,
+    val title: String,
+    val firstPostAuthor: String,     // td.sujetCase6
+    val replyCount: Int,             // td.sujetCase7 ("Rép.")
+    val views: Int,                  // td.sujetCase8 ("Lues")
+    val totalPages: Int,             // td.sujetCase4 ("Dern. page")
+    val lastReplyAuthor: String,
+    val lastReplyAt: String,         // timestamp brut HFR ("DD-MM-YYYY HH:mm")
+    val isSticky: Boolean,           // tr.ligne_sticky
+    val isLocked: Boolean,           // td.sujetCase1 img = closedm*.gif
+    val hasUnread: Boolean,          // significatif uniquement en requête authentifiée
+)
+
+data class TopicListPage(
+    val cat: Int,
+    val subcat: Int?,
+    val currentPage: Int,
+    val totalPages: Int,
+    val topics: List<TopicSummary>,
+)
+```
+
+`firstUnreadPostId` n'apparaît PAS sur `TopicSummary` : la liste de topics ne porte pas l'ancre `#t<numreponse>` que la page des drapeaux ajoute. `topicCount` n'apparaît PAS sur `SubCategory` : la cellule `td.catCase2` qui porte ce compteur sur la racine est attachée à la **catégorie parente**, pas à la sous-catégorie — l'exposer ici serait au mieux trompeur.
 
 ---
 

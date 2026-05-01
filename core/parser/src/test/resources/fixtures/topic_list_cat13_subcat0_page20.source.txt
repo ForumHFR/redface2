@@ -1,0 +1,5 @@
+Source: forum.hardware.fr (capture anonymous XaT, 2026-05-01)
+Captured page: forum1.php?config=hfr.inc&cat=13&subcat=0&page=20
+Type: liste de topics « Discussions » (cat=13) page 20 — utilisée pour valider le parser de pagination (page courante au milieu, pas en bord).
+Structure: identique à `topic_list_cat13_subcat0_page1.html`.
+Notes: HFR n'expose pas le `total pages` directement ; le parser doit déduire le max à partir des liens de pagination affichés (« 1, 2, …, 19, 20, 21, …, N »). Les topics sticky n'apparaissent qu'en page 1, donc cette fixture les exclut — utile pour vérifier que le parser ne crash pas en absence de `ligne_sticky`.
