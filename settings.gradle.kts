@@ -30,6 +30,7 @@ include(":core:database")
 include(":core:ui")
 include(":core:extension")
 
+include(":feature:flags")
 include(":feature:forum")
 include(":feature:topic")
 include(":feature:editor")

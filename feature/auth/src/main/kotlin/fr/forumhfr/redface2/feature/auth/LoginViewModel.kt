@@ -51,7 +51,7 @@ class LoginViewModel @Inject constructor(
                             LoginUiState.Mode.Authenticated(authenticated.pseudo)
                         },
                         onFailure = { error ->
-                            LoginUiState.Mode.Error(error.toErrorType())
+                            LoginUiState.Mode.Error(error.toErrorType(), error.toErrorDetail())
                         },
                     ),
                 )
@@ -65,5 +65,19 @@ class LoginViewModel @Inject constructor(
         is LoginError.Network -> LoginUiState.ErrorType.Network
         is LoginError.Unknown -> LoginUiState.ErrorType.Unknown
         else -> LoginUiState.ErrorType.Unknown
+    }
+
+    /**
+     * Surface the technical error message in the alpha so contributors can read it
+     * directly on screen instead of digging through logcat. We expose:
+     * - LoginError.Unknown.detail as-is (carries the classify() diagnostic)
+     * - LoginError.Network root cause class+message (e.g. "UnknownHostException: ...")
+     * - other classes: just the simple class name as a hint
+     */
+    private fun Throwable.toErrorDetail(): String? = when (this) {
+        is LoginError.Unknown -> detail
+        is LoginError.Network -> "${cause.javaClass.simpleName}: ${cause.message ?: "I/O failure"}"
+        is LoginError.InvalidCredentials, is LoginError.RateLimited -> null
+        else -> "${this::class.simpleName}: ${message ?: "(no message)"}"
     }
 }

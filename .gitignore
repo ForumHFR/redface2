@@ -7,3 +7,9 @@ scripts/phase-minus-1-dashboard.sh
 local.properties
 **/build/
 core/parser/src/test/resources/fixtures/*_files/
+
+# Stamped binaries produced by ./gradlew :app:bundleRelease + signing init-script,
+# or by the dogfood debug build — never tracked in git, always uploaded to Play
+# Console / shared out-of-band.
+*.apk
+*.aab

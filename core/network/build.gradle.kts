@@ -5,6 +5,16 @@ plugins {
 
 android {
     namespace = "fr.forumhfr.redface2.core.network"
+
+    testOptions {
+        unitTests {
+            // android.util.Log is invoked from AuthRemoteDataSource (alpha-friendly logcat
+            // trail). Without this flag, every Log.* call throws "not mocked" in JVM unit
+            // tests. Default-values stubs Log.* to no-ops returning 0, which is what we
+            // want — we don't assert on logcat in tests.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {

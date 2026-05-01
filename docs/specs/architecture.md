@@ -55,7 +55,8 @@ graph TB
 
 ```mermaid
 graph TB
-    APP[":app"] --> FF[":feature:forum"]
+    APP[":app"] --> FFL[":feature:flags"]
+    APP --> FF[":feature:forum"]
     APP --> FT[":feature:topic"]
     APP --> FE[":feature:editor"]
     APP --> FM[":feature:messages"]
@@ -64,8 +65,11 @@ graph TB
     APP --> FSR[":feature:search"]
     APP --> CDATA[":core:data"]
 
-    FF --> CDOM[":core:domain"]
-    FF --> CU[":core:ui"]
+    FFL --> CDOM[":core:domain"]
+    FFL --> CU[":core:ui"]
+
+    FF --> CDOM
+    FF --> CU
 
     FT --> CDOM
     FT --> CU
@@ -129,6 +133,7 @@ Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (com
 
 | Module | Écrans | Dépend de |
 |--------|--------|-----------|
+| `:feature:flags` | Drapeaux (accueil) — onglets rouge/cyan/favoris, footer auth + MP | `:core:domain`, `:core:ui` |
 | `:feature:forum` | Catégories, sous-catégories, liste de topics | `:core:domain`, `:core:ui` |
 | `:feature:topic` | Lecture de topic, pagination | `:core:domain`, `:core:ui`, `:core:extension` |
 | `:feature:editor` | Reply, edit, edit FP, preview BBCode, création topic | `:core:domain`, `:core:ui`, `:core:extension` |
@@ -162,7 +167,7 @@ Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le
 - Contient `MainActivity`
 - Dépend de tous les modules feature (base + extensions)
 
-> **Note Phase 1 — `FlagsScreen` héberge dans `:app`** : l'écran d'accueil (Drapeaux) vit aujourd'hui dans `app/src/main/kotlin/.../FlagsScreen.kt` et **non** dans un module `:feature:flags`. C'est délibéré tant qu'il reste un placeholder mock (pas de ViewModel, pas de repository, pas d'état non-trivial). Quand le `FlagsViewModel` documenté dans [`mvi.md`]({{ site.baseurl }}/specs/mvi#écran-drapeaux-accueil) sera réellement implémenté (avec `FlagRepository` + intents `Refresh` / `RemoveFlag` / `Undo` + effects de navigation), un module `:feature:flags` sera créé en miroir des autres features (`:feature:forum`, `:feature:topic`, …) pour respecter la frontière "features → `:core:domain` + `:core:ui` only" formalisée plus haut. Cette exception est la même que celle qui s'appliquera transitoirement à tout écran tant que sa logique propre tient en quelques composables stateless.
+> **Note Phase 1B.4 — `:feature:flags` livré** : l'écran d'accueil (Drapeaux) vit désormais dans `:feature:flags` avec `FlagsViewModel` (Hilt) + `FlagRepository` + 3 onglets (`FlagType.CYAN` = mes sujets, `RED` = lus uniquement, `FAVORITE`). `:app` ne fait plus que la navigation (`FlagsRoute(versionName, versionCode, onOpenFlag, onLoginRequested, onOpenDiagnostics)`) et passe `BuildConfig.VERSION_NAME/VERSION_CODE` en paramètres pour que l'écran puisse afficher le footer "Redface 2 — vX.Y (build N)" sans dépendre de la BuildConfig de `:app`.
 
 ---
 
@@ -189,8 +194,14 @@ interface TopicRepository {
 }
 
 interface FlagRepository {
-    suspend fun getFlags(): Result<List<FlaggedTopic>>
-    suspend fun removeFlag(topic: FlaggedTopic): Result<Unit>
+    /**
+     * Émet le succès en cache pour la session courante si disponible ; sinon `Loading`,
+     * puis le résultat d'un fetch network (`Success(flags)` ou `Failure`). Les abonnés
+     * reçoivent ensuite chaque [refresh] explicite via le SharedFlow par type.
+     */
+    fun observe(type: FlagType): Flow<FlagsResult>
+    suspend fun refresh(type: FlagType)
+    fun clearSessionCache()
 }
 
 interface AuthRepository {
@@ -211,6 +222,8 @@ interface MessagesRepository {
 
 `TopicRepository` est livré en Phase 1A (cf. [#88](https://github.com/ForumHFR/redface2/pull/88), [#89](https://github.com/ForumHFR/redface2/pull/89)). `prefetchNextPage` documenté dans la roadmap arrivera en Phase 1B sur `HfrClient` directement (avec `useAuth = false`), puis sera relayé par `TopicRepository.prefetchTopicPage(...)`. `MessagesRepository` est livré en Phase 1B.1 en bonus du login : `:core:data DefaultMessagesRepository` combine l'observation de `AuthState` avec un fetch de `forum1.php?cat=prive` (parser dédié `:core:parser/messages/PrivateMessageListParser`) déclenché à chaque transition vers `Authenticated`. Le full pipeline messagerie (liste + threads) viendra en Phase 1C.
 
+`FlagRepository` + parser + UI sont livrés en Phase 1B.2 → 1B.5 : `FlagsListParser` (classe dédiée dans `:core:parser`, distincte de la façade `HfrParser`) extrait `List<Flag>` depuis `forum1f.php?config=hfr.inc&owntopic=N` (cf. [`models.md`]({{ site.baseurl }}/specs/models)). `:core:data DefaultFlagRepository` orchestre fetch + parse via un `flow { emit(Loading); emit(fetch); emitAll(refreshes) }` cold-collected — un `MutableSharedFlow<FlagsResult>` par `FlagType` rebroadcast les résultats des `refresh()` explicites. Il garde uniquement un cache mémoire par onglet pour la session HFR courante : revenir sur un onglet déjà chargé ne refetch pas implicitement, mais `refresh(type)` force toujours le réseau et `clearSessionCache()` vide tout au logout / changement de session. `FlagItem` rend une ligne dans `:core:ui`, et `:feature:flags FlagsRoute` compose les 3 onglets HFR (« Mes sujets » / « Lus uniquement » / « Favoris ») plus le footer auth + MP count + version + signalement CSAE. Pas de cache Room en 1B — la persistance est reportée en Phase 1D (cf. roadmap `1D.2`). Pas de `PullToRefreshBox` non plus en 1B : des boutons « Réessayer » / « Actualiser » couvrent le besoin minimal ; pull-to-refresh complet est laissé pour quand le besoin justifie le coût (Phase 1D / Phase 2).
+
 ### `:core:network` — HfrClient
 
 Le client HTTP ne parse rien. Il retourne du HTML brut ou des confirmations d'action.
@@ -225,8 +238,10 @@ class HfrClient @Inject constructor(
     // Phase 1A — livrée
     suspend fun getTopicPage(cat: Int, post: Int, page: Int, useAuth: Boolean = true): String
 
-    // Phase 1B+ — à implémenter
-    suspend fun getFlags(): String
+    // Phase 1B.2-1B.5 — livrée
+    suspend fun getFlagsPage(owntopic: Int): String  // owntopic ∈ 1..3, cf. FlagType
+
+    // Phase 2+ — à implémenter
     suspend fun postReply(cat: Int, post: Int, content: String): Result<Unit>
     suspend fun editPost(cat: Int, post: Int, numreponse: Int, content: String): Result<Unit>
     // ...
@@ -241,18 +256,22 @@ Le login HFR est isolé dans `:core:network.auth.AuthRemoteDataSource`, pas dans
 
 Le parser transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine. Isolé de toute logique réseau et UI.
 
-> **Statut Phase 1** : seule `parseTopicPage` est livrée (cf. `core/parser/.../HfrParser.kt`). `PostContentParser` et `TopicPageParser` existent comme classes internes du module. Les autres méthodes ci-dessous arrivent feature par feature : `parseFlags` quand `FlagsViewModel` réel arrive (Phase 1 fin), `parseEditPage` Phase 2, `parseMessageList` Phase 3, `parsePostContentFromBbcode` Phase 2 (parser BBCode pour preview éditeur).
+> **Statut Phase 1B** : `parseTopicPage` (Phase 1A) et le parser drapeaux (Phase 1B.2) sont livrés. Le parser drapeaux n'est PAS exposé via la façade `HfrParser` — c'est une classe dédiée `FlagsListParser` dans `:core:parser/flags/`, injectée directement dans `DefaultFlagRepository`. `PostContentParser` et `TopicPageParser` existent comme classes internes du module derrière `HfrParser`. Les autres méthodes ci-dessous arrivent feature par feature : `parseEditPage` Phase 2, `parseMessageList` Phase 3, `parsePostContentFromBbcode` Phase 2 (parser BBCode pour preview éditeur), `parseCategories` Phase 1 fin.
 
 ```kotlin
 class HfrParser @Inject constructor() {
     fun parseTopicPage(html: String): Topic                 // Phase 1 — livrée
     fun parsePostContentFromHtml(html: String): PostContent // Phase 1 — livrée (interne au module)
     fun parsePostContentFromBbcode(bbcode: String): PostContent // Phase 2 éditeur
-    fun parseFlags(html: String): List<FlaggedTopic>        // Phase 1 fin
     fun parseCategories(html: String): List<Category>       // Phase 1 fin
     fun parseEditPage(html: String): EditInfo               // Phase 2
     fun parseMessageList(html: String): List<PrivateMessage> // Phase 3
     // ...
+}
+
+// Parser drapeaux livré comme classe dédiée Phase 1B.2 — pas via HfrParser :
+class FlagsListParser @Inject constructor() {
+    fun parse(html: String, defaultType: FlagType): List<Flag>
 }
 ```
 
@@ -302,7 +321,7 @@ abstract class RepositoryModule {
     abstract fun bindTopicRepository(impl: TopicRepositoryImpl): TopicRepository
 
     @Binds
-    abstract fun bindFlagRepository(impl: FlagRepositoryImpl): FlagRepository
+    abstract fun bindFlagRepository(impl: DefaultFlagRepository): FlagRepository
 }
 ```
 
@@ -323,7 +342,7 @@ class TopicViewModel @Inject constructor(
 | Donnée | Stratégie | Durée |
 |--------|-----------|-------|
 | Topics lus | Cache Room, invalidation au refresh | Jusqu'au refresh |
-| Drapeaux | Cache Room, refresh au lancement + pull-to-refresh | 5 min TTL |
+| Drapeaux | Phase 1B : cache mémoire par session + refresh explicite ; Phase 1D : cache Room à réévaluer | Session courante |
 | Catégories | Cache Room, rarement change | 24h TTL |
 | Smileys | Cache Coil, ne changent jamais | Infini |
 | Avatars | Cache Coil, ETag | 1h TTL |

@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.network.auth.AuthRemoteDataSource
 import fr.forumhfr.redface2.core.network.cookie.PersistentCookieJar
 import java.io.File
@@ -60,6 +61,7 @@ class AuthChainIntegrationTest {
     private lateinit var repository: DefaultAuthRepository
 
     private lateinit var baseUrl: HttpUrl
+    private val cookieJars = mutableListOf<PersistentCookieJar>()
 
     @Before
     fun setUp() {
@@ -70,6 +72,8 @@ class AuthChainIntegrationTest {
 
     @After
     fun tearDown() {
+        cookieJars.forEach { it.close() }
+        cookieJars.clear()
         server.shutdown()
     }
 
@@ -81,15 +85,22 @@ class AuthChainIntegrationTest {
         // UnconfinedTestDispatcher drains the cookie jar's init-block collector synchronously,
         // so by the time wireChain() returns, the jar's StateFlow already mirrors the
         // persisted store contents (or null if the file is empty).
-        cookieJar = PersistentCookieJar(cookieStore, UnconfinedTestDispatcher())
+        cookieJar = newCookieJar()
         okHttp = OkHttpClient.Builder().cookieJar(cookieJar).build()
-        dataSource = AuthRemoteDataSource(client = okHttp, baseUrl = baseUrl)
+        dataSource = AuthRemoteDataSource(
+            client = okHttp,
+            baseUrl = baseUrl,
+            diagnostics = DiagnosticsLog(),
+        )
         repository = DefaultAuthRepository(
             remote = dataSource,
             cookieJar = cookieJar,
             ioDispatcher = UnconfinedTestDispatcher(),
         )
     }
+
+    private fun newCookieJar(): PersistentCookieJar =
+        PersistentCookieJar(cookieStore, UnconfinedTestDispatcher()).also(cookieJars::add)
 
     @Test
     fun `successful login propagates through the chain to AuthState Authenticated`() = runTest {
@@ -129,7 +140,7 @@ class AuthChainIntegrationTest {
 
         // Step 2 — rebuild PersistentCookieJar + DefaultAuthRepository against the same
         // DataStore file (the "fresh boot" of a returning user).
-        val coldStartJar = PersistentCookieJar(cookieStore, UnconfinedTestDispatcher())
+        val coldStartJar = newCookieJar()
         val coldStartRepo = DefaultAuthRepository(
             remote = dataSource,
             cookieJar = coldStartJar,
@@ -166,7 +177,7 @@ class AuthChainIntegrationTest {
                 makeCookie("md_user", "xaat", baseUrl.host),
             ),
         )
-        val warmJar = PersistentCookieJar(cookieStore, UnconfinedTestDispatcher())
+        val warmJar = newCookieJar()
         val warmRepo = DefaultAuthRepository(
             remote = dataSource,
             cookieJar = warmJar,

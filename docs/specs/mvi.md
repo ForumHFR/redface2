@@ -54,160 +54,109 @@ Les exemples ViewModel ci-dessous sont **des squelettes illustratifs** — certa
 
 ## Écran Drapeaux (accueil)
 
-```kotlin
-// ── State ──────────────────────────────────────────
-data class FlagsState(
-    val flags: List<FlaggedTopic> = emptyList(),
-    val filteredFlags: List<FlaggedTopic> = emptyList(),
-    val sortMode: SortMode = SortMode.BY_DATE,
-    val filter: FlagFilter = FlagFilter.ALL,
-    val isLoading: Boolean = false,
-    val isRefreshing: Boolean = false,
-    val error: String? = null,
-)
+> **Statut Phase 1B.4 → 1B.5 livré** : le `FlagsViewModel` réel expose plusieurs `StateFlow` séparés (auth, MP, onglet courant, liste de drapeaux du tab) plutôt qu'un seul `FlagsState` agrégé, et un nombre limité d'actions (`selectTab`, `refresh`, `logout`). Pas de tri, pas de filtre, pas de `RemoveFlag`/`UndoRemoveFlag`, pas de pull-to-refresh : ces capacités sont **hors scope Phase 1B** et arriveront au plus tôt en Phase 1D / Phase 2 quand un cas d'usage le justifie. Un bouton « Actualiser » force néanmoins un fetch réseau explicite sur l'onglet courant, pour éviter que le cache mémoire de session ne bloque le dogfood. Le squelette illustratif Phase 1+ ci-dessous a été remplacé par la forme actuellement shippée.
 
-enum class SortMode { BY_DATE, BY_CATEGORY }
-enum class FlagFilter { ALL, CYAN, FAVORITE, READ }
-
-// ── Intents ────────────────────────────────────────
-sealed interface FlagsIntent {
-    data object Refresh : FlagsIntent
-    data class SetSort(val mode: SortMode) : FlagsIntent
-    data class SetFilter(val filter: FlagFilter) : FlagsIntent
-    data class OpenTopic(val topic: FlaggedTopic) : FlagsIntent
-    data class RemoveFlag(val topic: FlaggedTopic) : FlagsIntent
-    data class UndoRemoveFlag(val topic: FlaggedTopic) : FlagsIntent
-}
-
-// ── Effects ────────────────────────────────────────
-sealed interface FlagsEffect {
-    data class NavigateToTopic(val cat: Int, val post: Int, val page: Int) : FlagsEffect
-    data class ShowUndo(val topic: FlaggedTopic) : FlagsEffect
-    data class Error(val message: String) : FlagsEffect
-}
-```
-
-### ViewModel
+### ViewModel — forme livrée
 
 ```kotlin
 @HiltViewModel
 class FlagsViewModel @Inject constructor(
+    authRepository: AuthRepository,
     private val flagRepository: FlagRepository,
+    messagesRepository: MessagesRepository,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(FlagsState())
-    val state = _state.asStateFlow()
+    private var observedPseudo: String? = null
 
-    private val _effects = Channel<FlagsEffect>()
-    val effects = _effects.receiveAsFlow()
+    private val _selectedTab = MutableStateFlow(FlagType.CYAN)
+    val selectedTab: StateFlow<FlagType> = _selectedTab.asStateFlow()
 
-    init { send(FlagsIntent.Refresh) }
+    val authState: StateFlow<AuthState?> =
+        authRepository.observeAuthState()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, initialValue = null)
 
-    fun send(intent: FlagsIntent) {
-        when (intent) {
-            is FlagsIntent.Refresh -> refresh()
-            is FlagsIntent.SetSort -> {
-                _state.update { it.copy(sortMode = intent.mode) }
-                updateFilteredFlags()
+    val unreadMpCount: StateFlow<Int?> =
+        messagesRepository.observeUnreadMpCount()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, initialValue = null)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val flagsState: StateFlow<FlagsResult?> = authState
+        .onEach(::clearFlagsCacheIfSessionChanged)
+        .flatMapLatest { state ->
+            when (state) {
+                null, AuthState.Anonymous -> flowOf(null)
+                is AuthState.Authenticated -> selectedTab.flatMapLatest { type ->
+                    // The .map { it as FlagsResult? } upcast is required so the `when`
+                    // branches share a common type — `flowOf(null)` is `Flow<Nothing?>`,
+                    // and stateIn needs the upstream `Flow<FlagsResult?>`.
+                    flagRepository.observe(type).map { it as FlagsResult? }
+                }
             }
-            is FlagsIntent.SetFilter -> {
-                _state.update { it.copy(filter = intent.filter) }
-                updateFilteredFlags()
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, initialValue = null)
+
+    fun selectTab(type: FlagType) { _selectedTab.value = type }
+
+    fun refresh() {
+        viewModelScope.launch { flagRepository.refresh(_selectedTab.value) }
+    }
+
+    fun logout() {
+        viewModelScope.launch {
+            flagRepository.clearSessionCache()
+            authRepository.logout()
+        }
+    }
+
+    private fun clearFlagsCacheIfSessionChanged(state: AuthState?) {
+        when (state) {
+            null -> Unit
+            AuthState.Anonymous -> {
+                observedPseudo = null
+                flagRepository.clearSessionCache()
             }
-            is FlagsIntent.OpenTopic -> openTopic(intent.topic)
-            is FlagsIntent.RemoveFlag -> removeFlag(intent.topic)
-            is FlagsIntent.UndoRemoveFlag -> undoRemoveFlag(intent.topic)
-        }
-    }
-
-    private fun refresh() {
-        viewModelScope.launch {
-            _state.update { it.copy(isRefreshing = true) }
-            flagRepository.getFlags()
-                .onSuccess { flags ->
-                    _state.update { it.copy(flags = flags, isRefreshing = false, error = null) }
-                    updateFilteredFlags()
+            is AuthState.Authenticated -> {
+                if (observedPseudo != state.pseudo) {
+                    flagRepository.clearSessionCache()
                 }
-                .onFailure { e ->
-                    _state.update { it.copy(isRefreshing = false, error = e.message) }
-                }
+                observedPseudo = state.pseudo
+            }
         }
-    }
-
-    private fun openTopic(topic: FlaggedTopic) {
-        viewModelScope.launch {
-            _effects.send(FlagsEffect.NavigateToTopic(topic.cat, topic.postId, topic.lastReadPage))
-        }
-    }
-
-    // Les Jobs de cancellation du timer "undo" vivent hors StateFlow car ils ne font pas
-    // partie de l'état UI observable — seule leur existence est pertinente pour annuler.
-    // Équivalent d'une map de transactions en cours (pattern mutex/debounce).
-    private val pendingRemovals = mutableMapOf<Int, Job>()
-
-    private fun removeFlag(topic: FlaggedTopic) {
-        // 1. Retirer de l'UI immédiatement
-        _state.update { it.copy(flags = it.flags - topic) }
-        updateFilteredFlags()
-
-        // 2. Lancer un timer avec undo
-        val job = viewModelScope.launch {
-            _effects.send(FlagsEffect.ShowUndo(topic))
-            delay(5_000)
-
-            // 3. Timeout expiré → exécuter côté serveur
-            flagRepository.removeFlag(topic)
-                .onFailure {
-                    // Rollback si le réseau échoue
-                    _state.update { it.copy(flags = it.flags + topic) }
-                    updateFilteredFlags()
-                    _effects.send(FlagsEffect.Error("Impossible de retirer le drapeau"))
-                }
-        }
-        pendingRemovals[topic.postId] = job
-    }
-
-    private fun undoRemoveFlag(topic: FlaggedTopic) {
-        pendingRemovals.remove(topic.postId)?.cancel()
-        _state.update { it.copy(flags = it.flags + topic) }
-        updateFilteredFlags()
-    }
-
-    private fun updateFilteredFlags() {
-        _state.update { state ->
-            val filtered = state.flags
-                .filter { matchesFilter(it, state.filter) }
-                .sortedWith(comparatorFor(state.sortMode))
-            state.copy(filteredFlags = filtered)
-        }
-    }
-
-    // Helpers pure — testables isolément.
-    private fun matchesFilter(topic: FlaggedTopic, filter: FlagFilter): Boolean = when (filter) {
-        FlagFilter.ALL       -> true
-        FlagFilter.CYAN      -> topic.flagType == FlagType.CYAN
-        FlagFilter.FAVORITE  -> topic.flagType == FlagType.FAVORITE
-        FlagFilter.READ      -> topic.flagType == FlagType.READ
-    }
-
-    private fun comparatorFor(mode: SortMode): Comparator<FlaggedTopic> = when (mode) {
-        SortMode.BY_DATE     -> compareByDescending { it.lastDate }
-        SortMode.BY_CATEGORY -> compareBy<FlaggedTopic> { it.categoryName }
-            .thenByDescending { it.lastDate }
     }
 }
 ```
 
-### Screen (Compose)
+`FlagRepository` est livrée comme un contrat à deux verbes (cf. `core/domain/.../FlagRepository.kt`) :
 
-Le Screen Compose émerge en **Phase 1+ (prototype-first)**, conformément à la [méthodologie hybride](#méthodologie-mvi-hybride). Les patterns invariants qu'il doit respecter :
+```kotlin
+interface FlagRepository {
+    fun observe(type: FlagType): Flow<FlagsResult>
+    suspend fun refresh(type: FlagType)
+    fun clearSessionCache()
+}
 
-- Collecter le state via `collectAsStateWithLifecycle()` (pas `collectAsState()` seul)
-- Observer les effects via [`ObserveAsEvents`](#utilitaire--observeasevents) (pas `LaunchedEffect` nu — évite la navigation fantôme en arrière-plan)
-- Splitter en `<Name>Screen` (stateful, `hiltViewModel()`) et `<Name>Content` (stateless, `@Preview`-able) — voir [Convention](#convention)
-- Utiliser les APIs Material 3 actuelles (`PullToRefreshBox`, pas Accompanist `SwipeRefresh` déprécié)
+sealed class FlagsResult {
+    data object Loading : FlagsResult()
+    data class Success(val flags: List<Flag>) : FlagsResult()
+    data class Failure(val cause: Throwable) : FlagsResult()
+}
+```
 
-La mise en page concrète (`Column` vs `Scaffold`, composants `FlagsToolbar`, `FlagItem`, etc.) est itérée à partir du code dès Phase 1, pas figée ici.
+Les noms de champs (`Flag.cat`, `Flag.topicId`, `Flag.type`, `Flag.replyCount`, `Flag.totalPages`, `Flag.lastReadPage`, …) suivent strictement [`models.md`]({{ site.baseurl }}/specs/models#drapeaux). Pas de `topic.postId` ni `topic.flagType` ni `topic.lastDate` — ces noms n'existent pas dans le modèle.
+
+### Cible future (Phase 1D / Phase 2)
+
+Quand le besoin arrive, on pourra élargir le contrat :
+
+- ajout d'intents `RemoveFlag` / `UndoRemoveFlag` (avec timer `delay(5_000)` + rollback réseau, pattern documenté dans `:feature:topic`),
+- pré-calcul UI `filteredFlags` derived avec un `SortMode` / `FlagFilter`,
+- `PullToRefreshBox` Material 3 sur le `LazyColumn` (l'API Phase 1B se contente d'un bouton « Réessayer » sur état d'erreur).
+
+Quand cette extension arrive, `FlagsState` agrégé peut redevenir préférable au triplet de `StateFlow` actuel ; ce sera un changement scope au moment du chantier, documenté ici à ce moment-là — pas avant.
+
+### Screen (Compose) — forme livrée
+
+`feature/flags/src/main/kotlin/.../FlagsRoute.kt` est l'entrée stateful (récupère `FlagsViewModel` via `hiltViewModel()`, collecte ses `StateFlow` via `collectAsStateWithLifecycle()`). Le footer (auth, MP unread, version, bouton signalement, logout) et l'écran lui-même (3 onglets, liste, retry) cohabitent dans le même composable parce que la surface utile reste petite Phase 1B. Le découpage `<Name>Screen` / `<Name>Content` reste l'objectif quand la complexité justifie le coût (filtre, tri, undo) — cf. cible Phase 1D.
 
 ---
 

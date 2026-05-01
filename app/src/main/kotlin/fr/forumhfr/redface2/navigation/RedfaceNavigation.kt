@@ -23,11 +23,12 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
-import fr.forumhfr.redface2.FlagsScreen
+import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.feature.auth.LoginScreen
 import fr.forumhfr.redface2.feature.editor.EditorScreen
+import fr.forumhfr.redface2.feature.flags.FlagsRoute
 import fr.forumhfr.redface2.feature.forum.CategoryScreen
 import fr.forumhfr.redface2.feature.forum.ForumScreen
 import fr.forumhfr.redface2.feature.messages.MessagesScreen
@@ -36,10 +37,12 @@ import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import kotlinx.serialization.Serializable
 
-// Stubs used by placeholder screens (Forum/Search/Messages/Category/Flags) whose models are
-// not yet wired. Each "open topic" button currently navigates to a hard-coded HFR thread so
-// the navigation graph itself can be exercised end-to-end. They disappear feature by feature
-// as Phase 1B/1C land the real FlaggedTopic, ForumTopic, SearchResult, MpThread models.
+// Stubs used by placeholder screens (Forum/Search/Messages/Category) whose models are not
+// yet wired. Each "open topic" button currently navigates to a hard-coded HFR thread so the
+// navigation graph itself can be exercised end-to-end. The Flags entry no longer needs this
+// crutch since Phase 1B.4 (it now opens the real Flag's TopicRoute). The remaining call-sites
+// disappear feature by feature as Phase 1C/2 land the real ForumTopic, SearchResult,
+// MpThread models.
 //
 // The target is the community topic dedicated to Redface 2 itself
 // (https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35395) — recent, short,
@@ -92,6 +95,9 @@ enum class EditorMode {
 
 @Serializable
 data object LoginRoute : RedfaceNavKey
+
+@Serializable
+data object DiagnosticsRoute : RedfaceNavKey
 
 private enum class TopLevelDestination(
     val labelRes: Int,
@@ -172,28 +178,45 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
         ),
         entryProvider = entryProvider {
             entry<FlagsListRoute> {
-                FlagsScreen(
-                    onOpenUnreadTopic = {
+                FlagsRoute(
+                    versionName = BuildConfig.VERSION_NAME,
+                    versionCode = BuildConfig.VERSION_CODE,
+                    onOpenFlag = { flag ->
                         backStack.add(
                             TopicRoute(
-                                cat = DEMO_TOPIC_CAT,
-                                post = DEMO_TOPIC_POST,
-                                page = 1,
+                                cat = flag.cat,
+                                post = flag.topicId,
+                                page = flag.lastReadPage,
+                                // HFR numreponse fits in Int (largest observed ~10M),
+                                // so the toInt() narrowing is safe in practice. 0 means
+                                // "no first-unread known" → don't deep-link anywhere.
+                                scrollTo = flag.firstUnreadPostId
+                                    .takeIf { it in 1L..Int.MAX_VALUE.toLong() }
+                                    ?.toInt(),
                             ),
                         )
                     },
-                    onOpenTrackedCategory = {
-                        backStack.add(CategoryRoute(cat = 23, subcat = 0))
-                    },
                     onLoginRequested = {
                         backStack.add(LoginRoute)
+                    },
+                    onOpenDiagnostics = {
+                        backStack.add(DiagnosticsRoute)
+                    },
+                )
+            }
+            entry<DiagnosticsRoute> {
+                fr.forumhfr.redface2.feature.flags.DiagnosticsScreen(
+                    onClose = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
                     },
                 )
             }
             entry<LoginRoute> {
                 LoginScreen(
                     onAuthenticated = {
-                        // Pop the login screen — the FlagsScreen footer reactively re-renders
+                        // Pop the login screen — FlagsRoute reactively re-renders
                         // to "Connecté en tant que <pseudo>" through observeAuthState().
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)

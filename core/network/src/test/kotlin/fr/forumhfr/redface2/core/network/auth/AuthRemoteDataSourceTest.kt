@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.network.auth
 
 import fr.forumhfr.redface2.core.domain.auth.LoginError
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.AuthState
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
@@ -17,12 +18,18 @@ class AuthRemoteDataSourceTest {
 
     private lateinit var server: MockWebServer
     private lateinit var dataSource: AuthRemoteDataSource
+    private lateinit var diagnostics: DiagnosticsLog
 
     @Before
     fun setUp() {
         server = MockWebServer().apply { start() }
         val client = OkHttpClient.Builder().build()
-        dataSource = AuthRemoteDataSource(client = client, baseUrl = server.url("/"))
+        diagnostics = DiagnosticsLog()
+        dataSource = AuthRemoteDataSource(
+            client = client,
+            baseUrl = server.url("/"),
+            diagnostics = diagnostics,
+        )
     }
 
     @After
@@ -51,6 +58,24 @@ class AuthRemoteDataSourceTest {
         val body = recorded.body.readUtf8()
         assertTrue("body should carry pseudo", body.contains("pseudo=xaat"))
         assertTrue("body should carry password", body.contains("password=secret"))
+    }
+
+    @Test
+    fun `pseudo with space matches md_user cookie URL-form-encoded`() = runTest {
+        // Real-world case observed on alpha: HFR sets md_user with the pseudo URL-form-
+        // encoded (space → '+'), so a naive equality check between submitted pseudo and
+        // raw cookie value rejected the session even though the login succeeded.
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Set-Cookie", "md_user=Colonel+MythO; Path=/")
+                .addHeader("Set-Cookie", "md_pass=deadbeef; Path=/; HttpOnly")
+                .setBody("<html><body>Bienvenue Colonel MythO</body></html>"),
+        )
+
+        val result = dataSource.login("Colonel MythO", "secret")
+
+        assertEquals(AuthState.Authenticated("Colonel MythO"), result.getOrNull())
     }
 
     @Test
@@ -109,9 +134,16 @@ class AuthRemoteDataSourceTest {
 
         val error = result.exceptionOrNull()
         assertTrue("expected Unknown but was ${error?.javaClass?.simpleName}", error is LoginError.Unknown)
-        assertEquals(
-            "md_user cookie does not match requested pseudo",
-            (error as LoginError.Unknown).detail,
+        // The detail now embeds a fact-only diagnostic so contributors can see in the alpha
+        // UI whether HFR normalized casing/length. The exact format is allowed to evolve.
+        val detail = (error as LoginError.Unknown).detail
+        assertTrue(
+            "expected detail to mention md_user mismatch, was: $detail",
+            detail.contains("md_user cookie does not match requested pseudo"),
+        )
+        assertTrue(
+            "expected detail to mention sameLength, was: $detail",
+            detail.contains("sameLength="),
         )
     }
 

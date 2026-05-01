@@ -1,11 +1,14 @@
 package fr.forumhfr.redface2.core.network.auth
 
+import android.util.Log
 import fr.forumhfr.redface2.core.domain.auth.LoginError
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.network.HfrConstants
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
 import java.io.IOException
+import java.net.URLDecoder
 import javax.inject.Inject
 import javax.inject.Singleton
 import okhttp3.Cookie
@@ -13,12 +16,33 @@ import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okio.Buffer
 
 @Singleton
 class AuthRemoteDataSource @Inject constructor(
     @param:AuthenticatedClient private val client: OkHttpClient,
     @param:HfrBaseUrl private val baseUrl: HttpUrl,
+    private val diagnostics: DiagnosticsLog,
 ) {
+
+    /** Tee an event to both logcat AND the in-app diagnostics buffer. */
+    private fun logI(message: String) {
+        Log.i(LOG_TAG, message)
+        diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, message)
+    }
+    private fun logD(message: String) {
+        Log.d(LOG_TAG, message)
+        diagnostics.record(DiagnosticsLog.Level.DEBUG, LOG_TAG, message)
+    }
+    private fun logW(message: String, throwable: Throwable? = null) {
+        if (throwable != null) Log.w(LOG_TAG, message, throwable) else Log.w(LOG_TAG, message)
+        val full = if (throwable != null) {
+            "$message — ${throwable.javaClass.simpleName}: ${throwable.message}"
+        } else {
+            message
+        }
+        diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, full)
+    }
 
     /**
      * POSTs the login form to HFR. The CookieJar attached to the @AuthenticatedClient is what
@@ -46,36 +70,101 @@ class AuthRemoteDataSource @Inject constructor(
 
         val request = Request.Builder().url(url).post(body).build()
 
-        val (cookies, html) = try {
+        // Alpha-friendly logcat + in-app trail. Pseudo is what the user typed and is
+        // already surfaced everywhere (cookie, footer) — fine to log. Password is
+        // NEVER logged.
+        val codePoints = pseudo.codePointCount(0, pseudo.length)
+        logI("login attempt: pseudo='$pseudo' len=${pseudo.length} codepoints=$codePoints")
+
+        // Dump the wire-form body with password redacted so the alpha tester can see
+        // exactly how their pseudo is URL-encoded before HFR sees it. Spaces become +,
+        // @ becomes %40, accents become %XX%XX, etc. — useful when a "special" pseudo
+        // gets rejected and we suspect HFR's PHP decode disagrees with our encode.
+        val redactedBody = redactPassword(dumpFormBody(body))
+        logD("login request: POST $url body=$redactedBody")
+
+        val (status, cookies, html) = try {
             client.newCall(request).execute().use { response ->
                 val parsed = response.headers("Set-Cookie").mapNotNull { Cookie.parse(url, it) }
-                parsed to response.body.string()
+                Triple(response.code, parsed, response.body.string())
             }
         } catch (e: IOException) {
+            logW("login network failure for pseudo='$pseudo'", e)
             return Result.failure(LoginError.Network(e))
         }
 
-        return classify(cookies, html, pseudo)
+        // Cookie names only — values may contain session secrets. We tag md_user
+        // separately because its presence/absence drives the classification.
+        val cookieNames = cookies.joinToString(",") { it.name }
+        val mdUserCookie = cookies.firstOrNull { it.name == COOKIE_MD_USER }
+        val mdUserPresence = if (mdUserCookie == null) "absent" else "present(len=${mdUserCookie.value.length})"
+        logD(
+            "login response: http=$status htmlLen=${html.length} cookies=[$cookieNames] md_user=$mdUserPresence",
+        )
+
+        return classify(cookies, html, pseudo).also { result ->
+            result.onFailure { error ->
+                val detail = (error as? LoginError.Unknown)?.detail ?: error::class.simpleName
+                logW("login classified as failure for pseudo='$pseudo': $detail")
+            }
+            result.onSuccess { logI("login classified as success for pseudo='$pseudo'") }
+        }
     }
 
+    @Suppress("ReturnCount")
     private fun classify(
         cookies: List<Cookie>,
         html: String,
         pseudo: String,
-    ): Result<AuthState.Authenticated> = when {
-        INVALID_CREDS_MARKER in html -> Result.failure(LoginError.InvalidCredentials)
-        RATE_LIMIT_MARKER in html -> Result.failure(LoginError.RateLimited)
-        cookies.any { it.name == COOKIE_MD_USER && it.value == pseudo } ->
-            Result.success(AuthState.Authenticated(pseudo))
-        cookies.none { it.name == COOKIE_MD_USER } ->
-            Result.failure(LoginError.Unknown("expected $COOKIE_MD_USER cookie not set"))
-        else -> Result.failure(LoginError.Unknown("$COOKIE_MD_USER cookie does not match requested pseudo"))
+    ): Result<AuthState.Authenticated> {
+        if (INVALID_CREDS_MARKER in html) return Result.failure(LoginError.InvalidCredentials)
+        if (RATE_LIMIT_MARKER in html) return Result.failure(LoginError.RateLimited)
+
+        val mdUserCookie = cookies.firstOrNull { it.name == COOKIE_MD_USER }
+            ?: return Result.failure(LoginError.Unknown("expected $COOKIE_MD_USER cookie not set"))
+
+        // HFR sets md_user with the pseudo URL-form-encoded — spaces become '+', accents
+        // become %XX. A pseudo like "Colonel MythO" lands in the cookie as "Colonel+MythO".
+        // Decode before comparing so the equality check matches the user's plain-text input.
+        // URLDecoder may throw on a malformed escape — fall back to the raw value so the
+        // diagnostic below still has something meaningful to compare.
+        val decodedValue = decodeCookieValue(mdUserCookie.value)
+        if (decodedValue == pseudo) return Result.success(AuthState.Authenticated(pseudo))
+
+        // Build a diagnostic that compares submitted pseudo vs cookie value WITHOUT
+        // leaking the cookie verbatim — just enough for the alpha user to see if HFR
+        // normalized casing, trimmed whitespace, or returned a different account.
+        val sameLength = decodedValue.length == pseudo.length
+        val sameCaseInsensitive = decodedValue.equals(pseudo, ignoreCase = true)
+        return Result.failure(
+            LoginError.Unknown(
+                "$COOKIE_MD_USER cookie does not match requested pseudo " +
+                    "(submitted len=${pseudo.length} vs decoded cookie len=${decodedValue.length}, " +
+                    "sameLength=$sameLength, caseInsensitiveMatch=$sameCaseInsensitive)",
+            ),
+        )
     }
 
+    private fun decodeCookieValue(raw: String): String =
+        runCatching { URLDecoder.decode(raw, Charsets.UTF_8.name()) }.getOrDefault(raw)
+
+    /** Read the FormBody back into a UTF-8 string — same bytes HFR's PHP receives. */
+    private fun dumpFormBody(body: FormBody): String {
+        val buffer = Buffer()
+        body.writeTo(buffer)
+        return buffer.readUtf8()
+    }
+
+    /** Replace `password=...` (up to next `&` or end of string) with `password=<redacted>`. */
+    private fun redactPassword(rawBody: String): String =
+        rawBody.replace(PASSWORD_FIELD_REGEX, "password=<redacted>")
+
     private companion object {
+        const val LOG_TAG = "AuthRemoteDataSource"
         const val LOGIN_PATH = "login_validation.php"
         const val COOKIE_MD_USER = "md_user"
         const val INVALID_CREDS_MARKER = "Votre mot de passe ou nom d'utilisateur n'est pas valide"
         const val RATE_LIMIT_MARKER = "Afin de prévenir les tentatives de flood"
+        val PASSWORD_FIELD_REGEX = Regex("password=[^&]*")
     }
 }

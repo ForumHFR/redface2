@@ -246,7 +246,7 @@ Room s'intègre nativement avec **Flow** pour des données réactives :
 
 ```kotlin
 @Query("SELECT * FROM flagged_topics ORDER BY last_date DESC")
-fun observeFlags(): Flow<List<FlaggedTopicEntity>>
+fun observeFlags(): Flow<List<FlagEntity>>
 ```
 
 ### Coil

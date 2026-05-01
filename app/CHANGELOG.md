@@ -15,6 +15,119 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v23 — `0.1.0-phase1b.9` — 2026-04-29
+
+**Statut** : `local`
+**Commit** : à venir
+**Fichier** : `redface2-v23-<date>-<sha>.aab`
+
+Hotfix login pour les pseudos avec espace ou caractères spéciaux.
+
+### Fixed
+- **`AuthRemoteDataSource.classify`** décode maintenant la valeur du cookie `md_user` via `URLDecoder` avant comparaison avec le pseudo soumis. HFR pose le pseudo URL-form-encodé dans le cookie (espace → `+`, accents → `%XX`), donc un pseudo comme `Colonel MythO` matchait `Colonel+MythO` octet-à-octet → `LoginError.Unknown` alors que la session était en réalité valide. Confirmé sur l'alpha grâce au trail diagnostics. URLDecoder est wrappé dans `runCatching` pour fall-back sur la valeur brute si l'encodage est malformé. Test ajouté : `pseudo with space matches md_user cookie URL-form-encoded`.
+
+### Notes
+- v22 est restée locale (jamais distribuée) — bumpée à v23 directement pour livrer ce hotfix avec les diagnostics login + bouton « Copier ».
+
+---
+
+## v22 — `0.1.0-phase1b.8` — 2026-04-29
+
+**Statut** : `local`
+**Commit** : à venir
+**Fichier** : `redface2-v22-<date>-<sha>.aab`
+
+Diagnostics login plus utiles : trace de la requête HTTP envoyée + bouton « Copier ».
+
+### Added
+- **`AuthRemoteDataSource`** logue maintenant le wire-form body envoyé à HFR (`Log.d login request: POST <url> body=pseudo=...&password=<redacted>`). Permet au testeur alpha de voir comment son pseudo est URL-encodé (espace → `+`, `@` → `%40`, accents → `%XX%XX`) avant qu'il n'arrive au PHP HFR — utile quand un pseudo « spécial » est rejeté et qu'on suspecte un désaccord d'encoding entre `FormBody` et le décodeur côté serveur. Le password est masqué via regex sur le buffer dumpé avant tout `Log.d` ou `diagnostics.record`.
+- **Bouton « Copier »** dans `DiagnosticsScreen` : copie tout le ring buffer dans le presse-papiers en plain text (`HH:mm:ss.SSS  L  TAG  message` par ligne). Désactivé buffer vide. Toast de confirmation sur Android < 13 (Android 13+ affiche déjà l'overlay système « copié dans le presse-papiers »).
+
+### Notes
+- v21 buildée localement mais non distribuée — bumpée à v22 directement.
+
+---
+
+## v21 — `0.1.0-phase1b.7` — 2026-04-29
+
+**Statut** : `local`
+**Commit** : à venir
+**Fichier** : `redface2-v21-<date>-<sha>.aab`
+
+Diagnostics in-app + corrections post-review round 2.
+
+### Added
+- **`DiagnosticsLog`** dans `:core:domain` — ring buffer 200 entrées en mémoire, exposé via `StateFlow<List<Entry>>`. In-memory only par design, pas de persistance disque.
+- **`DiagnosticsScreen`** dans `:feature:flags` — viewer in-app accessible via le bouton « Diagnostics (alpha) » dans le footer. Auto-scroll vers la dernière entrée, code couleur par niveau (I vert, D bleu, W orange), boutons « Vider » / « Fermer ».
+- **`DiagnosticsRoute`** dans la navigation `:app`.
+- **Trail logcat + in-app** sur `AuthRemoteDataSource` : `Log.i` à chaque tentative (pseudo + length + codepoints, jamais le password), `Log.d` après réponse (HTTP code, body length, cookie names, présence de md_user en length seulement), `Log.w` sur chaque échec classifié.
+
+### Changed
+- **`LoginError.Unknown` mismatch cookie/pseudo** : embed maintenant un diagnostic factuel (`submitted len=X vs cookie len=Y, sameLength=true/false, caseInsensitiveMatch=true/false`) sans jamais embed la valeur du cookie.
+- **`LoginUiState.Mode.Error`** gagne un champ `detail: String?` propagé depuis `LoginError.Unknown.detail` et `LoginError.Network.cause`.
+- **`LoginScreen.ErrorBanner`** rend le détail en monospace sous le message localisé — un testeur diagnostique sans `adb logcat`.
+- **`FlagsListParser`** : `replyCount` et `views` strippent maintenant tout char non-numérique via `digitsOnly()` au lieu de juste l'espace ASCII (robust contre NBSP `U+00A0` que HFR utilise pour grouper les milliers).
+- **`FlagsListParser.totalPages`** : `coerceAtLeast(1)` au niveau parser, élimine "p.X/0" sur topic neuf.
+- **`FlagsListParser.lastReadPage`** : fallback `totalPages` quand le row est lu et n'a pas d'anchor (drapeau lu sur favorisn).
+- **`FlagRepository` cache mémoire** : le cache par onglet est maintenant explicitement borné à la session HFR courante (`clearSessionCache()` au logout / retour anonyme). Un nouvel accès avec un autre compte ne peut plus réémettre les drapeaux du compte précédent.
+- **`FlagRepository.refresh()`** : émet `Loading` puis le résultat réseau frais, met à jour le cache session, et alimente le bouton « Actualiser » affiché sur les listes en succès.
+- **`FlagItem`** dans `:core:ui` reçoit maintenant `metadata: String` pré-formaté par le caller — i18n boundary clean (plus de littéral français hardcodé dans le module partagé).
+- **`FlagsRoute` `LazyColumn`** ajoute `Modifier.weight(1f)` pour que `FooterSlot` reste visible même avec 127 drapeaux (cyan tab) — `AuthenticatedBody` devient extension `ColumnScope`.
+- **`FlagsRoute` `LazyColumn` `key`** passe de `flag.topicId` à `"${cat}-${topicId}"` — élimine le crash latent `IllegalArgumentException` si HFR retourne le même topicId dans deux cats.
+- **Onglets HFR mapping** corrigé via fixtures réelles : `FlagType.CYAN` = `owntopic=1` = sujets participés (« Mes sujets »), `FlagType.RED` = `owntopic=2` = lus uniquement, `FlagType.FAVORITE` = `owntopic=3`.
+- **`DefaultFlagRepository`** : cache mémoire par onglet après le premier succès — changer d'onglet puis revenir ne refetch pas et ne fait pas bouger l'état lu/non-lu.
+
+### Fixed
+- Tests `:core:network` activent `testOptions.unitTests.isReturnDefaultValues = true` pour mocker `android.util.Log` en JVM unit tests.
+- **`DiagnosticsScreen`** : clés `LazyColumn` basées sur un `Entry.id` monotone au lieu de `timestampMillis + hash(message)`, supprimant le crash théorique sur deux logs identiques dans la même milliseconde.
+
+### Notes
+- v20 a été uploadée Play Console — versionCode 21 obligatoire pour cette release. CHANGELOG v20 existant conservé pour historique.
+
+---
+
+## v20 — `0.1.0-phase1b.6` — 2026-04-28
+
+**Statut** : `internal`
+**Commit** : à venir
+**Fichier** : `redface2-v20-<date>-<sha>.aab`
+
+Phase 1B.2-1B.5 livrée d'un trait : liste réelle des drapeaux HFR (parser + repository + UI + module feature).
+
+### Added
+- **`FlagsListParser`** dans `:core:parser` — parse `forum1f.php?owntopic={1,2,3}` (mes sujets cyan / lus uniquement rouges / favoris). Détection unread canonique sur `td.sujetCase1` (`closedb*` vs `closed`), classification via icône `td.sujetCase5` (`flag1` → cyan, `flag0` → rouge, `favoris` → favori) avec fallback sur le `defaultType` du listing. 6 tests, 3 fixtures HTML capturées sur HFR réel avec données sensibles nettoyées.
+- **`Flag` data class** dans `:core:model` (remplace l'ancien placeholder `FlaggedTopic`) + `FlagType { CYAN, RED, FAVORITE }`. Champs `totalPages` (`td.sujetCase4`), `replyCount` (`td.sujetCase7`), `views` (`td.sujetCase8`) — colonnes alignées sur les headers HFR « Dern. page » / « Rép. » / « Lues ».
+- **`FlagRepository`** dans `:core:domain` (`observe(type)` / `refresh(type)`) + `DefaultFlagRepository` dans `:core:data` (network-only, broadcast refresh via `MutableSharedFlow` par `FlagType`). 4 tests Robolectric+MockK.
+- `DefaultFlagRepository` garde un cache mémoire par onglet après le premier succès : changer d'onglet puis revenir sur Favoris ne refetch pas implicitement et ne fait pas bouger l'état lu/non-lu sans action utilisateur.
+- **`HfrClient.getFlagsPage(owntopic: Int)`** sur `@AuthenticatedClient` (les drapeaux sont une vue par utilisateur, owntopic ∈ 1..3 enforced par `require`).
+- **`FlagItem` composable** dans `:core:ui` — pastille couleur (cyan/rouge/jaune, dimmed à 35% si lu), titre semi-bold si unread, footer `metadata: String` reçu pré-formaté par le caller (i18n boundary clean : `:core:ui` n'a pas de `strings.xml`).
+- **Module `:feature:flags`** avec `FlagsRoute` + `FlagsViewModel` :
+  - `flatMapLatest(authState)` pour ne montrer la liste que quand authentifié, retour anti-flicker en attendant `authState ≠ null`.
+  - 3 onglets `PrimaryTabRow` (« Mes sujets » = `owntopic=1` cyan / « Lus uniquement » = `owntopic=2` rouge / « Favoris » = `owntopic=3`), source flow change avec `selectTab`.
+  - Footer auth (pseudo, MP unread, version, bouton CSAE, bouton logout).
+  - Bouton « Réessayer » sur état d'erreur (pas de `PullToRefreshBox` en 1B — viendra en 1D quand un cas d'usage le justifie).
+  - Footer `FlagItem` formaté côté `:feature:flags` via `stringResource` (`flags_item_metadata_with_author` / `_no_author`).
+  - 5 tests Turbine couvrant `flatMapLatest` + `selectTab` + `refresh` + `logout`.
+- Navigation `:app` migre `entry<FlagsListRoute>` du placeholder `FlagsScreen` (supprimé) vers `FlagsRoute`. Lambda `onOpenFlag` pousse la vraie `TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.firstUnreadPostId.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt())` au lieu du `DEMO_TOPIC` hardcodé.
+
+### Changed
+- `docs/specs/architecture.md` documente `:feature:flags` (mermaid + tableau des modules).
+- `docs/specs/models.md` remplace le placeholder `FlaggedTopic` par le vrai `Flag` + drift `lastReplyAt: String` justifiée (HFR renvoie une chaîne FR pré-formatée).
+- `docs/specs/navigation.md` réécrit le snippet `entry<FlagsListRoute>` autour de `FlagsRoute(...)`.
+- `docs/specs/roadmap.md` coche l'item « Écran Drapeaux ».
+
+### Removed
+- `app/src/main/kotlin/.../FlagsScreen.kt` (placeholder Phase 0).
+- `app/src/main/kotlin/.../FlagsHomeViewModel.kt` (placeholder ViewModel à 1 string).
+- Strings du placeholder dans `app/src/main/res/values/strings.xml` (déplacées dans `:feature:flags`).
+
+### Notes
+- L'API HFR `forum1f.php?owntopic=N` est **par utilisateur** : chaque rafraîchissement marque les topics vus côté HFR. Pas d'`@AnonymousClient` ici, c'est intentionnel — le prefetch non-authentifié est réservé à la pagination des topics.
+- `Flag.firstUnreadPostId` est un `Long` côté domain mais `TopicRoute.scrollTo` un `Int` (limite Compose Navigation 3) ; le narrowing `takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()` est sûr en pratique (HFR `numreponse` plafonne ~10M).
+- Konsist : architecture rules toujours vertes après ajout de `:feature:flags`.
+
+---
+
 ## v19 — `0.1.0-phase1b.5` — 2026-04-28
 
 **Statut** : `local`
