@@ -1,7 +1,5 @@
 package fr.forumhfr.redface2.core.ui.theme
 
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 import fr.forumhfr.redface2.core.model.FlagType
 
@@ -27,11 +25,12 @@ object FlagPalette {
     val Favorite: Color = Color(0xFFF9A825)
 
     /**
-     * Resolves the bucket color for a non-null [FlagType]. Composable + read-only so
-     * it can sit inside `remember`/`derivedStateOf` blocks without recomposition cost.
+     * Resolves the bucket color for a non-null [FlagType]. Plain Kotlin function — not
+     * `@Composable` — so it can be called from `remember { ... }` / `derivedStateOf { ... }`
+     * blocks (whose lambdas reject composable calls) as well as from a regular
+     * `@Composable` body. The returned [Color] is a constant; theme branching, if ever
+     * needed, would introduce a parallel `@Composable` accessor.
      */
-    @Composable
-    @ReadOnlyComposable
     fun colorFor(type: FlagType): Color = when (type) {
         FlagType.CYAN -> Cyan
         FlagType.RED -> Red
