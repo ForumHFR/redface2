@@ -15,9 +15,14 @@ Endpoints, form fields, constantes et edge cases du protocole HFR utilisés par 
 
 ## Préambule
 
-HFR n'expose **aucune API publique**. Le client Redface 2 fait du **scraping HTML** sur les pages du forum, avec gestion de session par cookies. Cette page documente les invariants du protocole — constantes, form fields, anti-CSRF, anti-bot, optimisations JS inline — que **le LLM qui écrit le parser ou le client réseau doit respecter**.
+HFR expose deux surfaces consommables côté client :
 
-Cette documentation est issue de la rétro-ingénierie du code de [Redface v1](https://github.com/ForumHFR/Redface) (Java + Retrofit 1.9) et de fixtures HTML réelles capturées depuis [forum.hardware.fr](https://forum.hardware.fr).
+1. **HTML sur les endpoints `forum*.php`** — le scraping historique, toujours en place pour la lecture des posts, les MPs, le login et toutes les mutations en v1 (`bddpost.php`, `addflag.php`, `delflag.php`).
+2. **JSON sur `/webservices/rest_api.php`** — une API REST partielle exposée par MesDiscussions (le moteur du forum), retrouvée et instrumentée fin avril 2026, qui couvre la portion **browsing** : catégories, sous-catégories, listings de topics, drapeaux personnels, metadata d'un topic. Décision de stratégie hybride : [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride).
+
+Cette page documente les invariants des deux surfaces — constantes, form fields, anti-CSRF, anti-bot, optimisations JS inline, contrat REST — que **le LLM qui écrit le parser, le client réseau ou les mappers REST doit respecter**.
+
+La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1](https://github.com/ForumHFR/Redface) (Java + Retrofit 1.9) et de fixtures HTML réelles capturées depuis [forum.hardware.fr](https://forum.hardware.fr). La documentation REST est issue de tests live 2026-05-01 sur le contrat MesDiscussions V1 (doc Confluence retrouvée sur [Wayback Machine](https://web.archive.org/web/2018/help.mesdiscussions.net/pages/viewpage.action?pageId=5013586)) et des 6 fixtures JSON capturées au même moment.
 
 ---
 
@@ -347,6 +352,61 @@ Le nombre de posts par page est un **réglage utilisateur HFR** (`editprofil.php
 
 ---
 
+## API REST HFR — endpoints et contrat (Phase 1C-A, ADR-003)
+
+Toutes les URLs REST passent par le même point d'entrée :
+
+```
+GET https://forum.hardware.fr/webservices/rest_api.php?uri=<URI>[&page=N&results_per_page=M]
+```
+
+### Endpoints retenus en v1
+
+| Domaine | URI | Auth | Notes |
+|---|---|---|---|
+| Liste des catégories publiques | `forums/hardwarefr/categories/` | non (auth ajoute des liens drapeaux) | 19 catégories ; `cat=24` Blabla est conditionnelle, exclue de la nav publique |
+| Sous-catégories d'une catégorie | `forums/hardwarefr/categories/{cat}/subcategories/` | non | Ordre éditorial préservé |
+| Liste des topics — catégorie entière | `forums/hardwarefr/categories/{cat}/topics/last/` | non / oui | Auth ajoute `is_read`, `flag_owntopic`, `last_position`, `last_post_read_id` |
+| Liste des topics — sous-catégorie | `forums/hardwarefr/categories/{cat}/subcategories/{sub}/topics/last/` | non / oui | idem, plus `links.subcategory.href` |
+| Metadata d'un topic | `forums/hardwarefr/categories/{cat}/topics/{topic}/` | non / oui | 1 KB vs 220 KB pour la même page HTML |
+| Drapeaux par catégorie | `forums/hardwarefr/categories/{cat}/topics/{participated,read,favorites}/` | **oui** | Format plat (resources = topics) |
+| Drapeaux globaux | `forums/hardwarefr/topics/{participated,read,favorites}/` | **oui** | Format groupé par catégorie (resources = list of category groups) |
+
+### Endpoints HTML-only (pas de REST disponible côté HFR)
+
+- `…/posts/` (lecture posts d'un topic) → HTTP 500 inconditionnel côté serveur, vérifié exhaustivement le 2026-05-02 (18+ variantes CSRF testées). Reste HTML : `forum2.php?cat=N&post=M&page=P`.
+- MPs (liste, lecture, envoi) → aucun endpoint REST exposé (300+ variantes scannées). Reste HTML : `forum1.php?cat=prive`, `forum2.php?cat=prive&post=N`, `bddpost.php`.
+- Mutations drapeaux (`PUT topics/{id}/`) → routé mais sémantique métier opaque (downgrade refusé, no-op refusé, hors-bornes silently ignored). Reste HTML : `addflag.php` / `delflag.php`.
+- Création topic / réponse (`POST topics/last/`, `POST topics/{id}/posts/`) → routé et fonctionnel (testé live), mais **reporté à v2** : `DELETE` REST = 501, donc rollback de test impossible côté CI sans cycle sandbox.
+
+### Helper de réécriture HATEOAS — obligatoire
+
+Tout `href` retourné dans un payload REST pointe sur `https://forum.hardware.fr/api/<…>`. Apache n'a jamais activé le rewrite `/api/` côté HFR, ces URLs renvoient 404 telles quelles. Le client doit réécrire :
+
+```text
+https://forum.hardware.fr/api/<path>          (HATEOAS, non callable)
+        →
+https://forum.hardware.fr/webservices/rest_api.php?uri=<path>   (callable)
+```
+
+Implémenté de façon validante (host + scheme + préfixe `/api/` enforcés) dans `:core:network HfrApiClient.rewriteHateoasHref(href)`. Les query params HATEOAS (`page`, `results_per_page`) sont copiés comme params top-level — ils ne sont jamais bakés dans la valeur `uri`.
+
+### Contraintes serveur
+
+- Verbes : GET / POST / PUT supportés. PATCH renvoie 501 ; DELETE renvoie 501 sur les ressources existantes.
+- `hash_check` (CSRF) requis pour les POST / PUT, à extraire d'une page HTML auth.
+- Pagination : `?page=N&results_per_page=M`. Défaut HATEOAS = 25 ; cible Redface 2 = 50 (limite les requêtes sur les sous-cats actives).
+- Limite parallélisme : ≤ 10 connexions TCP simultanées vers HFR (saturation Apache mesurée à 20). OkHttp `maxRequestsPerHost = 5` par défaut reste sous le seuil.
+- `name` / `title` peuvent contenir des entités HTML non décodées (`&amp;`) — décoder côté mapper.
+
+### Champs présents en JSON / absents en HTML
+
+- `views` (compteur de vues) : absent du JSON. Si on a besoin du chiffre, c'est HTML uniquement.
+- `total_pages` (topic) : déductible via `ceil(links.posts.count / 40)`.
+- `tns3` filename avatar : nom du fichier, le préfixe d'URL est à reconstituer côté UI.
+
+---
+
 ## Fixtures HTML
 
 Les fixtures de test du parser vivent dans `core/parser/src/test/resources/fixtures/` (à créer en Phase 0). Chaque fixture doit être :
@@ -358,6 +418,17 @@ Les fixtures de test du parser vivent dans `core/parser/src/test/resources/fixtu
 Catalogue complet : voir [`contributing.md#fixtures-html-pour-le-parser`](contributing.md#fixtures-html-pour-le-parser).
 
 Pour capturer une fixture : utiliser le MCP `hfr-mcp` avec `hfr_read output=path/to/fixture.html` (écrit le HTML brut), puis appliquer le skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/parse-fixture/SKILL.md) pour générer l'analyse structurée.
+
+## Fixtures REST
+
+Les fixtures JSON de test des mappers REST vivent dans `core/data/src/test/resources/fixtures/` (Phase 1C-A — capturées 2026-05-01). Mêmes règles que les fixtures HTML : capturées live, nettoyées des données sensibles avant commit, accompagnées d'un `.source.txt` qui documente la commande curl d'origine et les caveats.
+
+Catalogue initial :
+- `rest_categories.json` / `rest_categories_auth.json` — 19 catégories anonymes / authentifiées (avec liens drapeaux).
+- `rest_subcategories_cat13.json` — 15 sous-catégories de Discussions (cat=13).
+- `rest_topics_cat23_subcat550_p1.json` — page 1 des 25 derniers topics Tech Mobiles / Android.
+- `rest_topic_meta_35395.json` — metadata du topic communauté Redface 2.
+- `rest_cat23_participated.json` — un topic en mode authentifié (drapeau « participé »).
 
 ---
 

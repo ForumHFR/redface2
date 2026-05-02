@@ -23,7 +23,8 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 | Architecture | **MVI** (MVVM+UDF) | MVVM classique | Flux unidirectionnel, état prévisible, idéal pour un forum reader |
 | Navigation | **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026) | Circuit, Decompose, Navigation 2.x | Compose-first : back stack en state (`NavBackStack<NavKey>`), rendu single-pane via `NavDisplay(backStack, onBack, entryDecorators, entryProvider { entry<…> })`, multi-pane via `ListDetailPaneScaffold` (M3 Adaptive). Cf. [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3). |
 | DI | **Hilt (KSP)** | Koin | Erreurs à la compilation, intégration Jetpack, standard contributeurs |
-| HTTP | **OkHttp 5** (5.3+) | Retrofit, Ktor | Pas d'API REST à mapper, scraping HTML direct + cookies. Stable depuis 07/2025 (`callTimeout` via `kotlin.time.Duration`, `mockwebserver3`). |
+| HTTP | **OkHttp 5** (5.3+) | Retrofit, Ktor | Stratégie hybride HTML + REST JSON ([ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride)) : 6 endpoints REST côté browsing, scraping HTML pour le reste. OkHttp brut suffit, pas de Retrofit. Stable depuis 07/2025 (`callTimeout` via `kotlin.time.Duration`, `mockwebserver3`). |
+| Sérialisation JSON | **kotlinx.serialization** (`kotlinx-serialization-json`) | Moshi, Gson | Côté `:core:data` pour les DTO REST `@Serializable` (Phase 1C-A). Aucune dépendance KSP / annotation processor — Kotlin compiler plugin natif déjà câblé dans `gradle/libs.versions.toml`. |
 | Parsing HTML | **Jsoup** | Regex, custom parser | Standard JVM, CSS selectors, battle-tested |
 | Cache locale | **Room** | DataStore, SQLDelight | Standard Android, intégration Flow, migrations |
 | Stockage cookies HFR | **DataStore non chiffré** + FBE plateforme + `allowBackup="false"` | EncryptedSharedPreferences (**déprécié**), Tink ou clé Keystore custom (overkill, redondant avec FBE puisque le password transite en clair côté HFR) | Décision Option A : re-login manuel à l'expiration session, pas de password stocké. Cf. [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a). |
@@ -184,9 +185,11 @@ La décision KMP est reportée post-v1, confirmée par les retours communautaire
 
 ### OkHttp 5 direct (sans Retrofit)
 
-Choix contre-intuitif. Retrofit est le standard Android pour le réseau. Mais Retrofit ajoute de la valeur quand on consomme une **API REST structurée** avec des endpoints types.
+Choix contre-intuitif. Retrofit est le standard Android pour le réseau. Mais Retrofit ajoute de la valeur quand on consomme une **API REST structurée** avec des endpoints types **et nombreux**.
 
-HFR n'a pas d'API. Redface fait du **scraping HTML** :
+HFR expose une API REST JSON partielle (`/webservices/rest_api.php`) découverte 2026-05-01 et formalisée par [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride). Avec **6 endpoints** REST consommés en v1 + le scraping HTML pour le reste, Retrofit reste injustifié : générer 6 interfaces qui retournent `JsonElement` ou `ResponseBody` n'apporte rien face à OkHttp + `kotlinx.serialization` direct.
+
+Le code Redface 2 fait donc du **scraping HTML** sur les domaines HTML-only **et** du **REST JSON minimal** sur les domaines browsing :
 - `GET /forum1.php?cat=13&post=12345&page=3` → HTML brut à parser
 - `POST /bddpost.php` → formulaire avec champs cachés
 

@@ -18,11 +18,12 @@ Structures du domaine métier.
 
 Certains modèles référencés dans `navigation.md` et `extensions.md` sont volontairement laissés à définir au moment d'implémenter leurs écrans, pour éviter la dette de spec pré-code :
 
-- **`TopicSummary`** — une ligne dans une liste de topics (titre, auteur, dernière date, nombre non-lus). ≠ `Topic` qui contient tous les posts d'une page. Nécessaire Phase 1 pour le Forum et la liste des topics d'une sous-catégorie.
 - **`UserProfile`** — données du popup profil rapide (avatar, date inscription, nombre posts, localisation). Nécessaire Phase 2 pour la feature "Voir un profil utilisateur" (listée dans la section [Lecture du scope]({{ site.baseurl }}/specs/scope#lecture)) et son extension Phase 4 ["Infos profil rapides"]({{ site.baseurl }}/specs/extensions#infos-profil-rapides).
 - **`UserStats`** — statistiques détaillées utilisateur (posts par cat, activité, topics créés). Nécessaire Phase 4 pour la feature "Stats utilisateur".
 
-Ces modèles émergeront du premier prototype de chaque écran. Pas de spec préventive à faire maintenant.
+`TopicSummary` est livré en Phase 1C-A pour le Forum et la liste des topics — voir la section [Catégories et browsing](#catégories-et-browsing) ci-dessous.
+
+Ces autres modèles émergeront du premier prototype de chaque écran. Pas de spec préventive à faire maintenant.
 
 ---
 
@@ -77,13 +78,40 @@ classDiagram
     class Category {
         +Int id
         +String name
-        +List~SubCategory~ subcategories
+        +Boolean forceSubcat
+        +Int subcategoryCount
     }
 
     class SubCategory {
         +Int id
         +String name
-        +Int topicCount
+        +Int parentCategoryId
+    }
+
+    class TopicSummary {
+        +Int cat
+        +Int? subcat
+        +Int topicId
+        +String title
+        +String author
+        +String lastReplyAuthor
+        +String lastReplyAt
+        +Int replyCount
+        +Int totalPages
+        +Boolean isSticky
+        +Boolean isLocked
+        +Boolean? hasUnread
+        +Int? lastReadPage
+        +Int? lastPostReadId
+    }
+
+    class TopicListPage {
+        +Int cat
+        +Int? subcat
+        +Int page
+        +Int resultsPerPage
+        +Int totalTopics
+        +List~TopicSummary~ topics
     }
 
     class PrivateMessage {
@@ -122,7 +150,8 @@ classDiagram
     PrivateMessage --> PMMessage : contient
     PMMessage --> PostContent : rend
     Topic --> Poll : optionnel
-    Category --> SubCategory : contient
+    SubCategory --> Category : enfant de
+    TopicListPage --> TopicSummary : contient
     Flag --> FlagType : type
     AuthState <|-- Anonymous
     AuthState <|-- Authenticated
@@ -310,21 +339,52 @@ data class EditInfo(
 
 ---
 
-## Catégories
+## Catégories et browsing
+
+Modèles consommés par `:feature:forum` (Phase 1C-A). Les sources sont REST JSON via `HfrApiClient` (`:core:network`) puis mappés depuis les DTO `:core:data forum/RestForumDtos.kt` (cf. [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride)).
 
 ```kotlin
 data class Category(
     val id: Int,
     val name: String,
-    val subcategories: List<SubCategory>,
+    val forceSubcat: Boolean,        // mirrors REST `force_subcat`
+    val subcategoryCount: Int,        // mirrors REST `links.subcategories.count`
 )
 
 data class SubCategory(
     val id: Int,
     val name: String,
-    val topicCount: Int,
+    val parentCategoryId: Int,        // injecté côté mapper (pas dans le JSON brut)
+)
+
+data class TopicSummary(
+    val cat: Int,
+    val subcat: Int?,                 // déduit du endpoint ou de `links.subcategory.href`
+    val topicId: Int,
+    val title: String,
+    val author: String,
+    val lastReplyAuthor: String,
+    val lastReplyAt: String,          // raw `YYYY-MM-DD HH:mm`, parsing reporté
+    val replyCount: Int,              // max(links.posts.count - 1, 0)
+    val totalPages: Int,              // ceil(links.posts.count / 40)
+    val isSticky: Boolean,            // mirrors `is_sticky`
+    val isLocked: Boolean,            // mirrors `is_closed`
+    val hasUnread: Boolean?,          // !is_read si présent en auth, null sinon
+    val lastReadPage: Int?,           // mirrors `last_position` si présent
+    val lastPostReadId: Int?,         // mirrors `last_post_read_id` si présent
+)
+
+data class TopicListPage(
+    val cat: Int,
+    val subcat: Int?,
+    val page: Int,
+    val resultsPerPage: Int,
+    val totalTopics: Int,             // mirrors `results_count`
+    val topics: List<TopicSummary>,
 )
 ```
+
+**Champs absents en REST** : `views` n'est pas exposé en JSON — ne pas inventer `0`, ne pas l'afficher. Le calcul de pages côté topic utilise `40` posts/page (constante HFR pour la pagination du contenu d'un topic), indépendant du `results_per_page` REST qui paginera la liste des topics.
 
 ---
 
