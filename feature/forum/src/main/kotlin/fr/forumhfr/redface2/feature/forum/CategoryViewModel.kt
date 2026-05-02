@@ -11,12 +11,15 @@ import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
+import fr.forumhfr.redface2.core.model.TopicSummary
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -37,6 +40,12 @@ import kotlinx.coroutines.launch
  * Switching subcategories is a local UI state change — it does not push a new nav entry,
  * so the deep link `(cat, initialSubcat)` survives across switches and the back button
  * still brings the user up to the parent stack.
+ *
+ * `refresh()` toggles [isRefreshing] for the duration of the network round-trip so a
+ * PullToRefresh indicator stays anchored over the existing content. While a refresh is
+ * in flight the [TopicsUiState] / [SubcategoriesUiState] sub-states keep showing the
+ * previous `Content` (via [keepContentDuringRefresh]) instead of bouncing through
+ * `Loading` and wiping the list.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel(assistedFactory = CategoryViewModel.Factory::class)
@@ -47,6 +56,8 @@ class CategoryViewModel @AssistedInject constructor(
 
     private val selectedSubcat: MutableStateFlow<Int?> = MutableStateFlow(request.initialSubcat)
     private val page: MutableStateFlow<Int> = MutableStateFlow(request.initialPage.coerceAtLeast(1))
+    private val searchQuery: MutableStateFlow<String> = MutableStateFlow("")
+    private val isRefreshing: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
     private val categoryNameState: StateFlow<String?> =
         forumRepository.observeCategories()
@@ -60,6 +71,10 @@ class CategoryViewModel @AssistedInject constructor(
     private val subcategoriesState: StateFlow<SubcategoriesUiState> =
         forumRepository.observeSubcategories(request.cat)
             .map { it.toSubcategoriesUiState() }
+            .keepContentDuringRefresh(
+                isLoading = { it is SubcategoriesUiState.Loading },
+                isContent = { it is SubcategoriesUiState.Content },
+            )
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
@@ -70,9 +85,18 @@ class CategoryViewModel @AssistedInject constructor(
         selectedSubcat,
         page,
     ) { subcat, currentPage -> subcat to currentPage }
+        // flatMapLatest gives us a fresh upstream every time (cat, subcat, page) shifts —
+        // the new flow restarts at Loading, which is the right semantics: the topics
+        // we were showing are for a different (subcat, page) tuple. The refresh-keeps-
+        // content trick (keepContentDuringRefresh) is applied *inside* the new upstream
+        // so that a refresh of the same key keeps showing the prior topics.
         .flatMapLatest { (subcat, currentPage) ->
             forumRepository.observeTopicList(cat = request.cat, subcat = subcat, page = currentPage)
                 .map { it.toTopicsUiState() }
+                .keepContentDuringRefresh(
+                    isLoading = { it is TopicsUiState.Loading },
+                    isContent = { it is TopicsUiState.Content },
+                )
         }
         .stateIn(
             scope = viewModelScope,
@@ -80,22 +104,37 @@ class CategoryViewModel @AssistedInject constructor(
             initialValue = TopicsUiState.Loading,
         )
 
-    val uiState: StateFlow<CategoryUiState> = combine(
+    // 7 source flows total (5 core + searchQuery + isRefreshing). Kotlin's typed
+    // `combine` overloads cap at 5, so we layer a second `combine` on top of the core
+    // one to fold in the search query and refresh indicator. Keeps the lambda typed
+    // and avoids `Array<*>` casts at the use site.
+    private val coreState: Flow<CoreCategoryState> = combine(
         selectedSubcat,
         page,
         categoryNameState,
         subcategoriesState,
         topicsState,
     ) { subcat, currentPage, categoryName, subcategories, topics ->
+        CoreCategoryState(subcat, currentPage, categoryName, subcategories, topics)
+    }
+
+    val uiState: StateFlow<CategoryUiState> = combine(
+        coreState,
+        searchQuery,
+        isRefreshing,
+    ) { core, query, refreshing ->
         CategoryUiState(
             cat = request.cat,
-            categoryName = categoryName,
+            categoryName = core.categoryName,
             initialSubcat = request.initialSubcat,
-            selectedSubcat = subcat,
-            page = currentPage,
-            pageCount = topics.pageCount(),
-            subcategories = subcategories,
-            topics = topics,
+            selectedSubcat = core.subcat,
+            page = core.page,
+            pageCount = core.topics.pageCount(),
+            subcategories = core.subcategories,
+            topics = core.topics,
+            searchQuery = query,
+            filteredTopics = core.topics.filterTopics(query),
+            isRefreshing = refreshing,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -109,6 +148,9 @@ class CategoryViewModel @AssistedInject constructor(
             pageCount = 1,
             subcategories = SubcategoriesUiState.Loading,
             topics = TopicsUiState.Loading,
+            searchQuery = "",
+            filteredTopics = emptyList(),
+            isRefreshing = false,
         ),
     )
 
@@ -116,6 +158,7 @@ class CategoryViewModel @AssistedInject constructor(
         if (selectedSubcat.value == subcat) return
         selectedSubcat.value = subcat
         page.value = 1
+        // searchQuery preserved deliberately — see CategoryUiState.searchQuery KDoc.
     }
 
     fun selectPage(newPage: Int) {
@@ -123,14 +166,30 @@ class CategoryViewModel @AssistedInject constructor(
         page.value = newPage
     }
 
+    fun updateSearchQuery(query: String) {
+        searchQuery.value = query
+    }
+
+    /**
+     * Triggers a network refresh of the subcategories AND the current topic list.
+     * Toggles [isRefreshing] for the duration so the PullToRefresh indicator stays
+     * anchored. The repository's refresh* methods broadcast `Loading` then the
+     * fresh result through their respective shared flows; [keepContentDuringRefresh]
+     * collapses the transient `Loading` so the list does not blank.
+     */
     fun refresh() {
         viewModelScope.launch {
-            forumRepository.refreshSubcategories(request.cat)
-            forumRepository.refreshTopicList(
-                cat = request.cat,
-                subcat = selectedSubcat.value,
-                page = page.value,
-            )
+            isRefreshing.value = true
+            try {
+                forumRepository.refreshSubcategories(request.cat)
+                forumRepository.refreshTopicList(
+                    cat = request.cat,
+                    subcat = selectedSubcat.value,
+                    page = page.value,
+                )
+            } finally {
+                isRefreshing.value = false
+            }
         }
     }
 
@@ -161,13 +220,52 @@ class CategoryViewModel @AssistedInject constructor(
         else -> 1
     }
 
+    private fun TopicsUiState.filterTopics(query: String): List<TopicSummary> = when (this) {
+        is TopicsUiState.Content -> page.topics.filter { matchesTopicQuery(it, query) }
+        else -> emptyList()
+    }
+
     @AssistedFactory
     interface Factory {
         fun create(request: CategoryRequest): CategoryViewModel
     }
 
+    private data class CoreCategoryState(
+        val subcat: Int?,
+        val page: Int,
+        val categoryName: String?,
+        val subcategories: SubcategoriesUiState,
+        val topics: TopicsUiState,
+    )
+
     private companion object {
         const val STOP_TIMEOUT_MS: Long = 5_000L
+    }
+}
+
+/**
+ * Hides a transient `Loading` re-emitted by a repository's `refresh*()` broadcast
+ * when there is already a prior `Content` to keep showing. The first cold-start
+ * `Loading` passes through (so the screen still renders its initial spinner) and
+ * `Error` always passes through (so a failed refresh surfaces the "Réessayer"
+ * button instead of silently keeping stale data).
+ */
+private fun <T : Any> Flow<T>.keepContentDuringRefresh(
+    isLoading: (T) -> Boolean,
+    isContent: (T) -> Boolean,
+): Flow<T> = flow {
+    var lastContent: T? = null
+    collect { value ->
+        when {
+            isContent(value) -> {
+                lastContent = value
+                emit(value)
+            }
+            isLoading(value) && lastContent != null -> {
+                // Suppress: keep showing the previous Content under a refresh spinner.
+            }
+            else -> emit(value)
+        }
     }
 }
 

@@ -46,6 +46,18 @@ data class TopicSummary(
      * deep link). Distinct from "first unread", which is one post further.
      */
     val lastPostReadId: Int?,
+    /**
+     * Authenticated-only flag bucket inferred from REST `flag_owntopic` :
+     * - `1 → FlagType.CYAN`     (« Mes sujets » — sujets participés)
+     * - `2 → FlagType.RED`      (« Lus uniquement »)
+     * - `3 → FlagType.FAVORITE` (favoris)
+     *
+     * `null` quand le payload est anonyme (champ absent) ou que la valeur est
+     * inconnue (HFR ajoutera peut-être 4 demain — on dégrade silencieusement
+     * plutôt que de planter). Distinct de [hasUnread] qui est l'axe lu/non-lu :
+     * un sujet drapeau cyan peut être lu ou non lu.
+     */
+    val flagType: FlagType?,
 )
 
 /**
