@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
 import fr.forumhfr.redface2.core.model.TopicSummary
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -229,14 +230,65 @@ class CategoryViewModelTest {
             forumRepository = repo,
         )
 
-        // Repository's refresh* methods are simple stubs (Unit) — they suspend zero
-        // work, so isRefreshing flips on then off in a single dispatch cycle. We
-        // still assert the false state at rest, plus the on-the-fly tracking exposed
-        // by `repo.refreshTopicListCalls`.
-        assertEquals(false, vm.uiState.value.isRefreshing)
-        vm.refresh()
-        assertEquals(false, vm.uiState.value.isRefreshing)
-        assertTrue(repo.refreshTopicListCalls.isNotEmpty())
+        // Force at least one collector on uiState so the underlying combine starts
+        // observing isRefreshing — without this, vm.uiState.value would stay frozen
+        // on the StateFlow's initialValue and we couldn't observe the transient flip.
+        vm.uiState.test {
+            awaitItem() // initial Loading
+            assertEquals(false, vm.uiState.value.isRefreshing)
+
+            // Gate refreshSubcategories so the launched refresh() coroutine suspends
+            // mid-way. We can then assert isRefreshing == true while the gate holds.
+            val gate = CompletableDeferred<Unit>()
+            repo.suspendRefreshSubcategoriesUntil = gate
+
+            vm.refresh()
+
+            // While the repository is suspended the flag has flipped on. Drain
+            // intermediate emissions until the indicator reaches true.
+            val whileRefreshing = awaitContent { it.isRefreshing }
+            assertEquals(true, whileRefreshing.isRefreshing)
+
+            // Release the gate — refresh() resumes, runs refreshTopicList, returns,
+            // and isRefreshing flips back off.
+            gate.complete(Unit)
+            val afterRefresh = awaitContent { !it.isRefreshing }
+            assertEquals(false, afterRefresh.isRefreshing)
+            assertTrue(repo.refreshTopicListCalls.isNotEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `categoryName is preserved across Loading and Failure broadcasts`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = null),
+            forumRepository = repo,
+        )
+
+        vm.uiState.test {
+            awaitItem() // initial — categoryName == null
+            repo.emitCategories(
+                ForumResult.Success(
+                    listOf(
+                        Category(id = 23, name = "Technologies Mobiles", forceSubcat = false, subcategoryCount = 5),
+                    ),
+                ),
+            )
+            val withName = awaitContent { it.categoryName == "Technologies Mobiles" }
+            assertEquals("Technologies Mobiles", withName.categoryName)
+
+            // A subsequent Loading (e.g. user pulled-to-refresh on Forum tab) must NOT
+            // wipe the title back to "Catégorie 23". Same for a transient Failure.
+            repo.emitCategories(ForumResult.Loading)
+            assertEquals("Technologies Mobiles", vm.uiState.value.categoryName)
+
+            repo.emitCategories(ForumResult.Failure(IllegalStateException("transient")))
+            assertEquals("Technologies Mobiles", vm.uiState.value.categoryName)
+
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test
@@ -420,6 +472,13 @@ class CategoryViewModelTest {
         var refreshTopicListCalls: List<Triple<Int, Int?, Int>> = emptyList()
             private set
 
+        /**
+         * Optional gate consumed by [refreshSubcategories] — when set, the suspending
+         * stub awaits the gate before recording the call and returning. Lets a test
+         * pin the in-flight state of [CategoryViewModel.isRefreshing].
+         */
+        var suspendRefreshSubcategoriesUntil: CompletableDeferred<Unit>? = null
+
         override fun observeCategories(): Flow<ForumResult<List<Category>>> =
             categories.asSharedFlow()
 
@@ -429,6 +488,7 @@ class CategoryViewModelTest {
             subcategories.asSharedFlow()
 
         override suspend fun refreshSubcategories(cat: Int) {
+            suspendRefreshSubcategoriesUntil?.await()
             refreshSubcategoriesCalls = refreshSubcategoriesCalls + cat
         }
 

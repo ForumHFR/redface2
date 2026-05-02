@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -59,9 +60,15 @@ class CategoryViewModel @AssistedInject constructor(
     private val searchQuery: MutableStateFlow<String> = MutableStateFlow("")
     private val isRefreshing: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
+    // scan keeps the last non-null name across `Loading` / `Failure` re-emissions so a
+    // global refreshCategories() round-trip does not reflash the screen title back to
+    // "Catégorie <id>". The seed `null` lets the screen render its fallback before the
+    // first successful fetch.
     private val categoryNameState: StateFlow<String?> =
         forumRepository.observeCategories()
-            .map { result -> result.toCategoryName(request.cat) }
+            .scan(null as String?) { previous, result ->
+                result.toCategoryName(request.cat) ?: previous
+            }
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),

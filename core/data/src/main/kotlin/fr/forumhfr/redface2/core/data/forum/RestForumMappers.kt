@@ -96,7 +96,10 @@ internal object RestForumMappers {
             ceil(postsCount.toDouble() / postsResultsPerPage).toInt().coerceAtLeast(1)
         }
         val subcatFromHref = dto.links.subcategory?.href?.let(::extractSubcatId)
-        val isAuthenticatedRow = dto.isRead != null || dto.lastPosition != null || dto.lastPostReadId != null
+        val isAuthenticatedRow = dto.isRead != null ||
+            dto.lastPosition != null ||
+            dto.lastPostReadId != null ||
+            dto.flagOwntopic != null
         val lastReadPage = if (isAuthenticatedRow) {
             postsHref
                 ?.let { extractQueryParam(it, "page") }

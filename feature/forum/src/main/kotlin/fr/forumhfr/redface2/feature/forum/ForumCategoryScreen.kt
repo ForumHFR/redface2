@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -35,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -333,10 +336,16 @@ private fun TopicRow(
 
 @Composable
 private fun FlagIndicator(flagType: FlagType?) {
+    // Reserve the same gutter width on every row, flagged or not, so titles stay
+    // left-aligned across rows in mixed (auth) listings. When flagType is null the
+    // gutter is an empty Spacer; when it is non-null we paint the colored dot inside
+    // the same gutter and attach a contentDescription so screen readers and color-
+    // blind users get the bucket name (color is otherwise the only signal).
+    val gutter = Modifier
+        .padding(end = 12.dp)
+        .size(10.dp)
     if (flagType == null) {
-        // No badge for anonymous payloads or unknown buckets — keeps the row aligned
-        // with the no-flag visual but doesn't reserve space (we want the title to flow
-        // left-aligned in the common public case).
+        Spacer(modifier = gutter)
         return
     }
     val color = when (flagType) {
@@ -344,12 +353,18 @@ private fun FlagIndicator(flagType: FlagType?) {
         FlagType.RED -> Color(0xFFD32F2F)
         FlagType.FAVORITE -> Color(0xFFF9A825)
     }
+    val description = stringResource(
+        when (flagType) {
+            FlagType.CYAN -> R.string.category_flag_cyan
+            FlagType.RED -> R.string.category_flag_red
+            FlagType.FAVORITE -> R.string.category_flag_favorite
+        },
+    )
     Box(
-        modifier = Modifier
-            .padding(end = 12.dp)
-            .size(10.dp)
+        modifier = gutter
             .clip(CircleShape)
-            .background(color),
+            .background(color)
+            .semantics { contentDescription = description },
     )
 }
 
