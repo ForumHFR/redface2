@@ -91,7 +91,7 @@ internal object RestFlagMappers {
             type = toFlagType(dto.flagOwntopic) ?: defaultType,
             hasUnread = dto.isRead?.let { !it } ?: true,
             lastReadPage = lastReadPage,
-            lastPostReadId = dto.lastPostReadId?.toLong(),
+            lastPostReadId = dto.lastPostReadId,
             firstPostAuthor = dto.links.author?.title.orEmpty(),
             lastReplyAuthor = dto.links.lastAuthor?.title.orEmpty(),
             lastReplyAt = dto.lastPostDate,

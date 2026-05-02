@@ -280,7 +280,14 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                                 cat = topic.cat,
                                 post = topic.topicId,
                                 page = topic.lastReadPage ?: 1,
-                                scrollTo = topic.lastPostReadId,
+                                // Compose Navigation 3 caps `scrollTo` at Int while
+                                // `numreponse` is stored Long? to absorb a future
+                                // overflow without breaking deserialisation.
+                                // Production HFR values fit in Int (~10M); narrow
+                                // defensively and drop the anchor when out of range.
+                                scrollTo = topic.lastPostReadId
+                                    ?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }
+                                    ?.toInt(),
                             ),
                         )
                     },

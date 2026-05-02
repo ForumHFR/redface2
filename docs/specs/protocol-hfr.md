@@ -370,8 +370,8 @@ GET https://forum.hardware.fr/webservices/rest_api.php?uri=<URI>[&page=N&results
 | Liste des topics — catégorie entière | `forums/hardwarefr/categories/{cat}/topics/last/` | non / oui | Auth ajoute `is_read`, `flag_owntopic`, `last_position`, `last_post_read_id` |
 | Liste des topics — sous-catégorie | `forums/hardwarefr/categories/{cat}/subcategories/{sub}/topics/last/` | non / oui | idem, plus `links.subcategory.href` |
 | Metadata d'un topic | `forums/hardwarefr/categories/{cat}/topics/{topic}/` | non / oui | 1 KB vs 220 KB pour la même page HTML |
-| Drapeaux par catégorie | `forums/hardwarefr/categories/{cat}/topics/{participated,read,favorites}/` | **oui** | Format plat (resources = topics) |
-| Drapeaux globaux | `forums/hardwarefr/topics/{participated,read,favorites}/` | **oui** | Format groupé par catégorie (resources = list of category groups) |
+| Drapeaux par catégorie | `forums/hardwarefr/categories/{cat}/topics/{participated,read,favorites}/` | **oui** | Format plat (resources = topics). **Voie consommée en Phase 1D-1 (#110)** : `DefaultFlagRepository` itère sur les catégories publiques pour reconstituer la liste complète des drapeaux. |
+| Drapeaux globaux | `forums/hardwarefr/topics/{participated,read,favorites}/` | **oui** | Format groupé par catégorie (resources = list of category groups). **Non consommé en Phase 1D-1** : forme groupée non capturée, à valider via fixture live + DTO dédié dans une PR de suivi (perf : remplacerait N requêtes par-cat par 1 requête globale). |
 
 ### Endpoints HTML-only (pas de REST disponible côté HFR)
 

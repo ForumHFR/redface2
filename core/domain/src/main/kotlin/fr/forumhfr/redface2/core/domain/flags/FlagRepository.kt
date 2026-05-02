@@ -5,9 +5,12 @@ import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Read access to the user's drapeaux. Phase 1B.4 ships a network-only implementation
- * (no Room persistence yet); a `lastReadPage` ack endpoint will be added in Phase 1B.5+
- * once the user-facing remove/swipe interactions are designed.
+ * Read access to the user's drapeaux. Phase 1D-1 (#110) ships a REST per-category
+ * implementation that walks `forums/hardwarefr/categories/{cat}/topics/{bucket}/`
+ * and concatenates the results — no Room persistence yet (deferred to #26). A
+ * `lastReadPage` ack mutation endpoint will be added once the user-facing
+ * remove/swipe interactions are designed; for now, drapeau mutations stay HTML
+ * (`addflag.php` / `delflag.php`) per ADR-003.
  *
  * Flow semantics:
  * - [observe] fetches on the first subscription for a tab, then reuses the last success

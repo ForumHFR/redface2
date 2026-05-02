@@ -44,8 +44,12 @@ data class TopicSummary(
      * Authenticated-only field, mirrors REST `last_post_read_id` — the id of
      * the last post the user actually read (anchor for a "scroll to last read"
      * deep link). Distinct from "first unread", which is one post further.
+     * Stored as `Long?` so the DTO/mapper chain handles HFR `numreponse` values
+     * past `Int.MAX_VALUE` (~2.1 G) without a deserialisation crash. The
+     * navigation layer narrows back to `Int` for [TopicRoute.scrollTo] when the
+     * value fits.
      */
-    val lastPostReadId: Int?,
+    val lastPostReadId: Long?,
     /**
      * Authenticated-only flag bucket inferred from REST `flag_owntopic` :
      * - `1 → FlagType.CYAN`     (« Mes sujets » — sujets participés)
