@@ -14,7 +14,12 @@ data class Category(
      * before listing topics. Mirrors the REST `force_subcat` boolean.
      */
     val forceSubcat: Boolean,
-    /** Number of subcategories under this category. From REST `links.subcategories.count`. */
+    /**
+     * Number of subcategories under this category. Mapped from REST
+     * `number_of_subcategories` on the category list payload — we do not consume
+     * `links.subcategories.count` because the public list omits the `links` block
+     * for the categories themselves (see `RestCategory`'s field-by-field comment).
+     */
     val subcategoryCount: Int,
 )
 

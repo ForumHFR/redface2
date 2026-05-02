@@ -402,7 +402,8 @@ Implémenté de façon validante (host + scheme + préfixe `/api/` enforcés) da
 ### Champs présents en JSON / absents en HTML
 
 - `views` (compteur de vues) : absent du JSON. Si on a besoin du chiffre, c'est HTML uniquement.
-- `total_pages` (topic) : déductible via `ceil(links.posts.count / 40)`.
+- `total_pages` (topic) : déductible via `ceil(links.posts.count / N)`, où `N` est la valeur du query param `results_per_page` exposé par `links.posts.href` du payload (typiquement 40 dans les fixtures actuelles, mais ne **jamais** le hardcoder — c'est l'API qui décide). C'est différent du réglage HTML utilisateur `postsPerPage` (cf. § *postsPerPage configurable*) qui s'applique au rendu de `forum2.php`, pas à la liste de topics REST.
+- `last_position` ≠ page : `last_position` est l'**index/offset du dernier post lu dans le topic global** (et non un numéro de page). La page de reprise est exposée séparément, encodée dans `links.posts.href?page=N` du même topic auth ; c'est cette valeur qu'il faut consommer pour `TopicSummary.lastReadPage`.
 - `tns3` filename avatar : nom du fichier, le préfixe d'URL est à reconstituer côté UI.
 
 ---

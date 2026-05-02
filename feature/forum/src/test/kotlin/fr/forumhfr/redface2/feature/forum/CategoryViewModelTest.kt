@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -55,10 +56,7 @@ class CategoryViewModelTest {
             repo.emitTopicList(cat = 23, subcat = null, page = 1, result = ForumResult.Success(EMPTY_PAGE))
 
             // Drain warm-up emissions until both subcategories and topics are Content.
-            do {
-                val s = awaitItem()
-                if (s.subcategories is SubcategoriesUiState.Content && s.topics is TopicsUiState.Content) break
-            } while (true)
+            awaitContent { it.subcategories is SubcategoriesUiState.Content && it.topics is TopicsUiState.Content }
 
             vm.selectSubcategory(550)
 
@@ -70,6 +68,19 @@ class CategoryViewModelTest {
             repo.emitTopicList(cat = 23, subcat = 550, page = 1, result = ForumResult.Success(EMPTY_PAGE))
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `initialPage from CategoryRequest seeds the page state`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 4),
+            forumRepository = repo,
+        )
+
+        // Initial uiState carries the initialPage straight through (no warm-up needed —
+        // the StateFlow's initialValue is built off the request).
+        assertEquals(4, vm.uiState.value.page)
     }
 
     @Test
@@ -85,19 +96,95 @@ class CategoryViewModelTest {
             repo.emitSubcategories(ForumResult.Success(emptyList()))
             repo.emitTopicList(cat = 13, subcat = 422, page = 1, result = ForumResult.Success(EMPTY_PAGE))
 
-            var current = awaitItem()
-            while (current.topics !is TopicsUiState.Content) current = awaitItem()
+            var current = awaitContent { it.topics is TopicsUiState.Content }
             assertEquals(1, current.page)
 
             vm.selectPage(2)
             // Page advance triggers a new flow subscription — emit content for page 2.
             repo.emitTopicList(cat = 13, subcat = 422, page = 2, result = ForumResult.Success(EMPTY_PAGE))
 
-            // Drain until we see the page=2 payload back through uiState
-            do {
-                current = awaitItem()
-            } while (current.page != 2 || current.topics !is TopicsUiState.Content)
+            current = awaitContent { it.page == 2 && it.topics is TopicsUiState.Content }
             assertEquals(2, current.page)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `pageCount reflects topics totalTopics divided by resultsPerPage`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = 550),
+            forumRepository = repo,
+        )
+
+        vm.uiState.test {
+            repo.emitSubcategories(ForumResult.Success(emptyList()))
+            // 130 topics / 50-per-page → 3 pages.
+            repo.emitTopicList(
+                cat = 23,
+                subcat = 550,
+                page = 1,
+                result = ForumResult.Success(
+                    EMPTY_PAGE.copy(totalTopics = 130, resultsPerPage = 50),
+                ),
+            )
+
+            val current = awaitContent { it.topics is TopicsUiState.Content }
+            assertEquals(3, current.pageCount)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `categoryName is derived from observeCategories matching cat`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = null),
+            forumRepository = repo,
+        )
+
+        vm.uiState.test {
+            // Initial Loading uiState — no categoryName yet.
+            assertNull(awaitItem().categoryName)
+
+            repo.emitCategories(
+                ForumResult.Success(
+                    listOf(
+                        Category(id = 23, name = "Technologies Mobiles", forceSubcat = false, subcategoryCount = 5),
+                        Category(id = 30, name = "Electronique", forceSubcat = false, subcategoryCount = 3),
+                    ),
+                ),
+            )
+
+            val current = awaitContent { it.categoryName == "Technologies Mobiles" }
+            assertEquals("Technologies Mobiles", current.categoryName)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `categoryName stays null when categories list does not contain cat`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 999, initialSubcat = null),
+            forumRepository = repo,
+        )
+
+        vm.uiState.test {
+            awaitItem() // initial Loading
+            repo.emitCategories(
+                ForumResult.Success(
+                    listOf(
+                        Category(id = 23, name = "Technologies Mobiles", forceSubcat = false, subcategoryCount = 5),
+                    ),
+                ),
+            )
+            // No emission with categoryName != null is expected — we just ensure the
+            // state remains coherent (cat=999, name=null) when topics emit too.
+            repo.emitTopicList(cat = 999, subcat = null, page = 1, result = ForumResult.Success(EMPTY_PAGE))
+            val current = awaitContent { it.topics is TopicsUiState.Content }
+            assertNull(current.categoryName)
+            assertEquals(999, current.cat)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -125,14 +212,11 @@ class CategoryViewModelTest {
         )
 
         vm.uiState.test {
-            // Throw away initial Loading
-            awaitItem()
+            awaitItem() // initial Loading
             repo.emitSubcategories(ForumResult.Failure(IllegalStateException("subcats fail")))
             repo.emitTopicList(cat = 23, subcat = null, page = 1, result = ForumResult.Success(EMPTY_PAGE))
 
-            // Drain until subcategories is Error
-            var current = awaitItem()
-            while (current.subcategories !is SubcategoriesUiState.Error) current = awaitItem()
+            val current = awaitContent { it.subcategories is SubcategoriesUiState.Error }
             assertEquals(
                 "subcats fail",
                 (current.subcategories as SubcategoriesUiState.Error).message,
@@ -151,12 +235,27 @@ class CategoryViewModelTest {
             totalTopics = 0,
             topics = emptyList<TopicSummary>(),
         )
+        const val AWAIT_CONTENT_TIMEOUT_MS = 2_000L
+    }
 
-        @Suppress("unused") // used to silence Category warning (not referenced directly)
-        val UNUSED_CATEGORY: Category? = null
+    /**
+     * Bounded helper around `awaitItem()` to drain warm-up emissions until the predicate
+     * holds. Replaces the unbounded `do { ... } while (true)` loops that risked hanging
+     * the test runner if the predicate was never satisfied.
+     */
+    private suspend fun app.cash.turbine.ReceiveTurbine<CategoryUiState>.awaitContent(
+        predicate: (CategoryUiState) -> Boolean,
+    ): CategoryUiState = withTimeout(AWAIT_CONTENT_TIMEOUT_MS) {
+        var current = awaitItem()
+        while (!predicate(current)) {
+            current = awaitItem()
+        }
+        current
     }
 
     private class FakeForumRepository : ForumRepository {
+        private val categories: MutableSharedFlow<ForumResult<List<Category>>> =
+            MutableSharedFlow(replay = 1, extraBufferCapacity = 4)
         private val subcategories: MutableSharedFlow<ForumResult<List<SubCategory>>> =
             MutableSharedFlow(replay = 1, extraBufferCapacity = 4)
         private val topicLists: MutableMap<
@@ -170,7 +269,7 @@ class CategoryViewModelTest {
             private set
 
         override fun observeCategories(): Flow<ForumResult<List<Category>>> =
-            MutableSharedFlow<ForumResult<List<Category>>>(replay = 1).asSharedFlow()
+            categories.asSharedFlow()
 
         override suspend fun refreshCategories() = Unit
 
@@ -190,6 +289,10 @@ class CategoryViewModelTest {
 
         override suspend fun refreshTopicList(cat: Int, subcat: Int?, page: Int) {
             refreshTopicListCalls = refreshTopicListCalls + Triple(cat, subcat, page)
+        }
+
+        suspend fun emitCategories(result: ForumResult<List<Category>>) {
+            categories.emit(result)
         }
 
         suspend fun emitSubcategories(result: ForumResult<List<SubCategory>>) {

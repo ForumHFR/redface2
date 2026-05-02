@@ -45,12 +45,21 @@ class HfrApiClient @Inject constructor(
     suspend fun getSubcategories(cat: Int): String =
         get(uri = "${CATEGORIES_URI}$cat/subcategories/", useAuth = false)
 
+    /**
+     * Fetches a page of topics for `cat` (and optionally `subcat`).
+     *
+     * `useAuth` has no default — callers must pick explicitly. Authenticated calls
+     * surface per-user fields the topic listing UI relies on (`is_read`,
+     * `last_post_read_id`, `links.posts.href?page=N` for the last read page),
+     * while a future prefetch path that hits `/topics/last/` to warm a cache must
+     * stay unauthenticated to avoid mutating the user's drapeaux state.
+     */
     suspend fun getTopicList(
         cat: Int,
         subcat: Int?,
         page: Int = 1,
         resultsPerPage: Int = DEFAULT_RESULTS_PER_PAGE,
-        useAuth: Boolean = false,
+        useAuth: Boolean,
     ): String {
         require(page >= 1) { "page must be >= 1, got $page" }
         require(resultsPerPage in 1..MAX_RESULTS_PER_PAGE) {
@@ -83,6 +92,13 @@ class HfrApiClient @Inject constructor(
      * forum.hardware.fr never had the `/api/` rewrite enabled, so any href consumed without
      * this transformation 404s. The rewrite is intentionally strict: only the canonical
      * host + scheme + `/api/` path prefix are accepted, anything else throws.
+     *
+     * Phase 1C-A keeps this helper around but largely **unused** in production — the
+     * mappers are happy to read query params off the raw href string (e.g.
+     * `?page=N&results_per_page=M` for the topic listing) and the four high-level
+     * `getXxx(...)` methods build URIs deterministically from `cat`/`subcat`. The
+     * helper exists for the next slice that follows a HATEOAS link verbatim
+     * (e.g. derefing `links.posts.href` to load the actual posts page in REST).
      *
      * @throws IllegalArgumentException if [href] is not a valid HFR HATEOAS link.
      */

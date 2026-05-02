@@ -11,8 +11,17 @@ import kotlin.math.max
  * Maps REST DTOs to domain models per ADR-003 mapping rules:
  * - HTML entities in `name` / `title` are decoded so the UI gets plain text.
  * - `replyCount = max(posts.count - 1, 0)` — `posts.count` is the total post count.
- * - `totalPages = ceil(posts.count / 40)` — HFR topic pages are 40 posts/page,
- *   independent of the REST listing's `results_per_page`.
+ * - `totalPages = ceil(posts.count / postsResultsPerPage)` — the HATEOAS
+ *   `links.posts.href?results_per_page=N` query param drives the divisor. We
+ *   intentionally do **not** assume HFR's HTML 40-posts-per-page convention
+ *   globally: it is a per-user setting on the legacy HTML reader. The REST
+ *   contract advertises the pagination bucket on every topic, so we trust it.
+ *   `POSTS_PER_PAGE_FALLBACK` is only used as a defensive last resort when the
+ *   href is missing / malformed, never as the canonical truth.
+ * - `lastReadPage` is parsed from `links.posts.href?page=N` (the auth payload
+ *   already points to the page of the last read post). `last_position` is the
+ *   per-post index inside that page, **not** a page number — see ADR-003 and
+ *   the `rest_cat23_participated.source.txt` capture notes.
  * - Authenticated-only fields stay nullable so anonymous responses round-trip cleanly.
  *
  * Functions are pure; tests live in `core/data/src/test/.../RestForumMappersTest.kt`
@@ -20,7 +29,12 @@ import kotlin.math.max
  */
 internal object RestForumMappers {
 
-    private const val POSTS_PER_HFR_PAGE = 40
+    /**
+     * Defensive fallback when `links.posts.href` does not advertise its
+     * `results_per_page`. Matches the historical HFR HTML default but is **not**
+     * a global truth — REST's `links.posts.href?results_per_page=N` is.
+     */
+    private const val POSTS_PER_PAGE_FALLBACK = 40
 
     /** `categories/{cat}/subcategories/{sub}/` extracted from a HATEOAS subcategory link. */
     private val SUBCAT_FROM_HREF = Regex("/categories/\\d+/subcategories/(\\d+)/")
@@ -67,14 +81,29 @@ internal object RestForumMappers {
         cat: Int,
         fallbackSubcat: Int?,
     ): TopicSummary {
+        val postsHref = dto.links.posts?.href
         val postsCount = dto.links.posts?.count ?: 0
+        val postsResultsPerPage = postsHref
+            ?.let { extractQueryParam(it, "results_per_page") }
+            ?.toIntOrNull()
+            ?.takeIf { it > 0 }
+            ?: POSTS_PER_PAGE_FALLBACK
         val replyCount = max(postsCount - 1, 0)
         val totalPages = if (postsCount <= 0) {
             1
         } else {
-            ceil(postsCount.toDouble() / POSTS_PER_HFR_PAGE).toInt().coerceAtLeast(1)
+            ceil(postsCount.toDouble() / postsResultsPerPage).toInt().coerceAtLeast(1)
         }
-        val subcatFromHref = dto.links.subcategory?.href?.let { extractSubcatId(it) }
+        val subcatFromHref = dto.links.subcategory?.href?.let(::extractSubcatId)
+        val isAuthenticatedRow = dto.isRead != null || dto.lastPosition != null || dto.lastPostReadId != null
+        val lastReadPage = if (isAuthenticatedRow) {
+            postsHref
+                ?.let { extractQueryParam(it, "page") }
+                ?.toIntOrNull()
+                ?.takeIf { it >= 1 }
+        } else {
+            null
+        }
         return TopicSummary(
             cat = cat,
             subcat = subcatFromHref ?: fallbackSubcat,
@@ -87,14 +116,31 @@ internal object RestForumMappers {
             totalPages = totalPages,
             isSticky = dto.isSticky,
             isLocked = dto.isClosed,
+            // hasUnread = !is_read — anonymous payloads omit `is_read` so we expose `null`.
             hasUnread = dto.isRead?.let { !it },
-            lastReadPage = dto.lastPosition,
+            lastReadPage = lastReadPage,
             lastPostReadId = dto.lastPostReadId,
         )
     }
 
     private fun extractSubcatId(href: String): Int? =
         SUBCAT_FROM_HREF.find(href)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+    /**
+     * Extracts a query parameter value from a raw href string. We avoid pulling
+     * `okhttp3.HttpUrl` here because `:core:data` doesn't depend on `:core:network`.
+     * Returns `null` if the param is absent or the href has no query part.
+     */
+    private fun extractQueryParam(href: String, name: String): String? {
+        val queryStart = href.indexOf('?').takeIf { it >= 0 } ?: return null
+        val query = href.substring(queryStart + 1)
+        return query.split('&').firstNotNullOfOrNull { pair ->
+            val eq = pair.indexOf('=')
+            if (eq < 0) return@firstNotNullOfOrNull null
+            val key = pair.substring(0, eq)
+            if (key == name) pair.substring(eq + 1) else null
+        }
+    }
 }
 
 /**
@@ -133,7 +179,7 @@ private val NAMED_ENTITIES: Map<String, String> = mapOf(
     "quot" to "\"",
     "apos" to "'",
     "#39" to "'",
-    "nbsp" to " ",
+    "nbsp" to " ",
 )
 
 private fun decodeEntity(entity: String): String? = when {

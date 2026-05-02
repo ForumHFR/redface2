@@ -69,6 +69,7 @@ data object MessagesRoute : RedfaceNavKey
 data class CategoryRoute(
     val cat: Int,
     val subcat: Int? = null,
+    val page: Int = 1,
 ) : RedfaceNavKey
 
 @Serializable
@@ -232,7 +233,7 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
             entry<ForumRoute> {
                 ForumScreen(
                     onOpenCategory = { category ->
-                        backStack.add(CategoryRoute(cat = category.id, subcat = null))
+                        backStack.add(CategoryRoute(cat = category.id, subcat = null, page = 1))
                     },
                 )
             }
@@ -267,6 +268,7 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     request = CategoryRequest(
                         cat = route.cat,
                         initialSubcat = route.subcat,
+                        initialPage = route.page,
                     ),
                     onOpenTopic = { topic ->
                         backStack.add(
@@ -328,9 +330,13 @@ internal fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
     "/forum1.php" -> {
         val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
         val subcat = uri.getQueryParameter("subcat")?.toIntOrNull()
+        // Preserve `page` from the deep link so a shared link to e.g.
+        // forum1.php?cat=23&subcat=550&page=2 lands on page 2 instead of silently
+        // resetting to 1. Out-of-range / malformed values fall back to 1.
+        val page = uri.getQueryParameter("page")?.toIntOrNull()?.coerceAtLeast(1) ?: 1
         ParsedDeepLink(
             destination = TopLevelDestination.Forum,
-            route = CategoryRoute(cat = cat, subcat = subcat),
+            route = CategoryRoute(cat = cat, subcat = subcat, page = page),
         )
     }
 

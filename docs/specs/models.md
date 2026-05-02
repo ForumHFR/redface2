@@ -348,7 +348,7 @@ data class Category(
     val id: Int,
     val name: String,
     val forceSubcat: Boolean,        // mirrors REST `force_subcat`
-    val subcategoryCount: Int,        // mirrors REST `links.subcategories.count`
+    val subcategoryCount: Int,        // mirrors REST `number_of_subcategories` (le payload public n'a pas de bloc `links` côté catégorie)
 )
 
 data class SubCategory(
@@ -366,12 +366,12 @@ data class TopicSummary(
     val lastReplyAuthor: String,
     val lastReplyAt: String,          // raw `YYYY-MM-DD HH:mm`, parsing reporté
     val replyCount: Int,              // max(links.posts.count - 1, 0)
-    val totalPages: Int,              // ceil(links.posts.count / 40)
+    val totalPages: Int,              // ceil(links.posts.count / postsResultsPerPage), où postsResultsPerPage vient de `links.posts.href?results_per_page=N`. Pas de constante 40 globale (cf. § "postsPerPage configurable").
     val isSticky: Boolean,            // mirrors `is_sticky`
     val isLocked: Boolean,            // mirrors `is_closed`
     val hasUnread: Boolean?,          // !is_read si présent en auth, null sinon
-    val lastReadPage: Int?,           // mirrors `last_position` si présent
-    val lastPostReadId: Int?,         // mirrors `last_post_read_id` si présent
+    val lastReadPage: Int?,           // page extraite de `links.posts.href?page=N` (auth uniquement). PAS `last_position` qui est l'index intra-page.
+    val lastPostReadId: Int?,         // mirrors `last_post_read_id` si présent — id du dernier post lu, ancre pour le scroll.
 )
 
 data class TopicListPage(
@@ -384,7 +384,7 @@ data class TopicListPage(
 )
 ```
 
-**Champs absents en REST** : `views` n'est pas exposé en JSON — ne pas inventer `0`, ne pas l'afficher. Le calcul de pages côté topic utilise `40` posts/page (constante HFR pour la pagination du contenu d'un topic), indépendant du `results_per_page` REST qui paginera la liste des topics.
+**Champs absents en REST** : `views` n'est pas exposé en JSON — ne pas inventer `0`, ne pas l'afficher. Le calcul de pages côté topic (`TopicSummary.totalPages`) utilise le `results_per_page` exposé par `links.posts.href` (typiquement 40 dans les fixtures, mais c'est l'API qui décide — `40` n'est pas une constante globale, cf. [protocol-hfr.md § postsPerPage configurable]({{ site.baseurl }}/specs/protocol-hfr#postsperpage-configurable) pour la pagination HTML). Le `results_per_page` du wrapper REST englobe la **liste de topics**, distinct de celui imbriqué dans `links.posts.href` qui pagine les **posts** d'un topic.
 
 ---
 

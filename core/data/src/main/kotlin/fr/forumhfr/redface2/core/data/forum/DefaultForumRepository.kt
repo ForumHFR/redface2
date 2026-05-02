@@ -25,9 +25,13 @@ import kotlinx.serialization.json.Json
  *
  * Caching policy:
  * - Categories list is cached in memory after the first successful fetch — the public
- *   list is small (19 entries) and very rarely changes. [refreshCategories] clears the
- *   cache and refetches; the next observer gets the fresh value.
- * - Subcategory lists are cached per parent category id, same rationale.
+ *   list is small (19 entries) and very rarely changes. [refreshCategories] re-emits
+ *   `Loading` then a fresh result through the broadcast flow, and replaces the cache
+ *   on success; on failure the previous cached value stays in place so the next
+ *   observer can still render last-known-good data without bouncing through an Error
+ *   state.
+ * - Subcategory lists are cached per parent category id, same semantics:
+ *   [refreshSubcategories] replaces the cache on success, keeps it on failure.
  * - Topic lists are **not** cached: pagination + freshness expectations make a memory
  *   cache more confusing than helpful in 1C-A. Re-opening a category screen refetches.
  *
@@ -37,7 +41,7 @@ import kotlinx.serialization.json.Json
 @Singleton
 class DefaultForumRepository @Inject constructor(
     private val apiClient: HfrApiClient,
-    private val json: Json,
+    @param:ForumJson private val json: Json,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ForumRepository {
 
@@ -141,6 +145,11 @@ class DefaultForumRepository @Inject constructor(
         page: Int,
     ): ForumResult<TopicListPage> = withContext(ioDispatcher) {
         runCatching {
+            // `useAuth = true` is intentional: the topic-listing UI surfaces per-user
+            // fields (`is_read`, `last_post_read_id`, the page extracted from
+            // `links.posts.href`). A future prefetch path that warms a cache off
+            // `/topics/last/` must instead pass `useAuth = false` — see ADR-003 §
+            // "Prefetch" — otherwise it would silently mark drapeaux as read.
             val body = apiClient.getTopicList(
                 cat = cat,
                 subcat = subcat,

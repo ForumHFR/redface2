@@ -62,7 +62,7 @@ class HfrApiClientTest {
     fun `getTopicList with subcat sends top-level page and results_per_page`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
 
-        client.getTopicList(cat = 23, subcat = 550, page = 1, resultsPerPage = 50)
+        client.getTopicList(cat = 23, subcat = 550, page = 1, resultsPerPage = 50, useAuth = false)
 
         val recorded = server.takeRequest()
         val url = requireNotNull(recorded.requestUrl)
@@ -78,7 +78,7 @@ class HfrApiClientTest {
     fun `getTopicList without subcat hits the cat-level last topics endpoint`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
 
-        client.getTopicList(cat = 13, subcat = null, page = 2, resultsPerPage = 50)
+        client.getTopicList(cat = 13, subcat = null, page = 2, resultsPerPage = 50, useAuth = false)
 
         val recorded = server.takeRequest()
         val url = requireNotNull(recorded.requestUrl)
@@ -173,11 +173,56 @@ class HfrApiClientTest {
     }
 
     @Test
-    fun `getTopicList rejects an out-of-range resultsPerPage`() = runTest {
+    fun `getTopicList rejects resultsPerPage = 0`() = runTest {
         val error = runCatching {
-            client.getTopicList(cat = 13, subcat = null, page = 1, resultsPerPage = 0)
+            client.getTopicList(cat = 13, subcat = null, page = 1, resultsPerPage = 0, useAuth = false)
         }.exceptionOrNull()
 
         assertTrue("expected IllegalArgumentException, got $error", error is IllegalArgumentException)
+    }
+
+    @Test
+    fun `getTopicList rejects resultsPerPage above the cap`() = runTest {
+        val error = runCatching {
+            client.getTopicList(cat = 13, subcat = null, page = 1, resultsPerPage = 101, useAuth = false)
+        }.exceptionOrNull()
+
+        assertTrue("expected IllegalArgumentException, got $error", error is IllegalArgumentException)
+    }
+
+    @Test
+    fun `getTopicList rejects page = 0`() = runTest {
+        val error = runCatching {
+            client.getTopicList(cat = 13, subcat = null, page = 0, resultsPerPage = 50, useAuth = false)
+        }.exceptionOrNull()
+
+        assertTrue("expected IllegalArgumentException, got $error", error is IllegalArgumentException)
+    }
+
+    @Test
+    fun `rewriteHateoasHref strips an incoming uri query param so it does not pollute the rewritten URL`() {
+        // Defensive guard: if HFR ever returned a HATEOAS href that already had a `uri=`
+        // query (it doesn't today, but the rewrite is the boundary that protects us),
+        // the rewritten URL must use the path-derived `uri` value, not the inherited one.
+        val href = (
+            "https://forum.hardware.fr/api/forums/hardwarefr/categories/" +
+                "23/topics/35395/posts/?uri=should-not-leak&page=12&results_per_page=40"
+            ).toHttpUrl()
+
+        val rewritten = client.rewriteHateoasHref(href)
+
+        // Only the path-derived `uri` survives — the incoming one is not propagated.
+        assertEquals(
+            "forums/hardwarefr/categories/23/topics/35395/posts/",
+            rewritten.queryParameter("uri"),
+        )
+        // The other query params still ride along.
+        assertEquals("12", rewritten.queryParameter("page"))
+        assertEquals("40", rewritten.queryParameter("results_per_page"))
+        // And there is exactly one `uri` value, not two.
+        assertEquals(
+            listOf("forums/hardwarefr/categories/23/topics/35395/posts/"),
+            rewritten.queryParameterValues("uri"),
+        )
     }
 }

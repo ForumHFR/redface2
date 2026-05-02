@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.model.SubCategory
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -121,7 +122,7 @@ class RestForumMappersTest {
     }
 
     @Test
-    fun `authenticated topic surfaces is_read flag_owntopic last_position last_post_read_id`() {
+    fun `authenticated topic exposes lastReadPage from links posts href page param not last_position`() {
         val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(
             fixture("rest_cat23_participated.json"),
         )
@@ -132,11 +133,97 @@ class RestForumMappersTest {
         assertEquals(35395, topic.topicId)
         // is_read = false → hasUnread = true
         assertEquals(true, topic.hasUnread)
-        // last_position = 479 → exposed as lastReadPage in the model
-        assertEquals(479, topic.lastReadPage)
+        // links.posts.href = ".../posts/?page=12&results_per_page=40" → lastReadPage = 12.
+        // last_position is the per-post offset (479 / 541 posts), NOT a page index — we
+        // must not surface it as such. See ADR-003 + rest_cat23_participated.source.txt.
+        assertEquals(12, topic.lastReadPage)
         assertEquals(2_783_256, topic.lastPostReadId)
+        // Regression guard: never expose REST `last_position` as `lastReadPage`.
+        assertNotEquals(479, topic.lastReadPage)
         // subcat extracted from links.subcategory.href
         assertEquals(550, topic.subcat)
+    }
+
+    @Test
+    fun `totalPages divides posts count by links posts href results_per_page param`() {
+        // Synthetic case: 120 posts / 60-per-page bucket should yield 2 pages.
+        // If totalPages is hardcoded to 40, this test fails (120/40 = 3).
+        val syntheticPayload = """
+            {
+              "resource": {
+                "page": 1,
+                "results_count": 1,
+                "results_per_page": 1,
+                "resources": [
+                  {
+                    "id": 99,
+                    "title": "synthetic",
+                    "links": {
+                      "posts": {
+                        "href": "https://forum.hardware.fr/api/forums/x/categories/1/topics/99/posts/?page=1&results_per_page=60",
+                        "count": 120
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(syntheticPayload)
+
+        val page = RestForumMappers.toTopicListPage(envelope, cat = 1, subcat = null)
+
+        val topic = page.topics.single()
+        assertEquals(2, topic.totalPages)
+        assertEquals(119, topic.replyCount)
+    }
+
+    @Test
+    fun `totalPages falls back to 40 when links posts href is absent`() {
+        // Defensive fallback path. If the href is missing the mapper must not crash —
+        // and the captured anonymous fixture (results_per_page=40) is unaffected.
+        val syntheticPayload = """
+            {
+              "resource": {
+                "page": 1,
+                "results_count": 1,
+                "results_per_page": 1,
+                "resources": [
+                  {
+                    "id": 99,
+                    "title": "synthetic",
+                    "links": {
+                      "posts": { "count": 80 }
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(syntheticPayload)
+
+        val topic = RestForumMappers.toTopicListPage(envelope, cat = 1, subcat = null).topics.single()
+
+        // 80 / 40-fallback = 2 pages.
+        assertEquals(2, topic.totalPages)
+    }
+
+    @Test
+    fun `categories auth fixture maps to the same public projection as anonymous fixture`() {
+        val anonymous = json.decodeFromString<RestListEnvelope<RestCategory>>(
+            fixture("rest_categories.json"),
+        ).let(RestForumMappers::toCategories)
+        val authenticated = json.decodeFromString<RestListEnvelope<RestCategory>>(
+            fixture("rest_categories_auth.json"),
+        ).let(RestForumMappers::toCategories)
+
+        // The authenticated payload exposes the same public categories — id, decoded
+        // name, force_subcat and subcategoryCount must round-trip identically. The
+        // private cat=24 (Blabla) is not in either projection (REST does not expose it
+        // via the public list, even when authenticated).
+        assertEquals(anonymous.size, authenticated.size)
+        assertEquals(anonymous, authenticated)
+        assertNull(authenticated.firstOrNull { it.id == 24 })
     }
 
     @Test

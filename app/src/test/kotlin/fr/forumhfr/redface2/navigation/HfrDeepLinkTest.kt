@@ -18,23 +18,50 @@ import org.robolectric.RobolectricTestRunner
 class HfrDeepLinkTest {
 
     @Test
-    fun `forum1 php with cat lands on the Forum tab as a CategoryRoute`() {
+    fun `forum1 php with cat preserves subcat and page in the CategoryRoute`() {
         val uri = Uri.parse("https://forum.hardware.fr/forum1.php?cat=23&subcat=550&page=2")
 
         val parsed = parseHfrDeepLink(uri)
 
-        val expectedRoute = CategoryRoute(cat = 23, subcat = 550)
+        val expectedRoute = CategoryRoute(cat = 23, subcat = 550, page = 2)
         assertEquals(expectedRoute, parsed?.route)
         assertEquals(TopLevelDestination.Forum, parsed?.destination)
     }
 
     @Test
-    fun `forum1 php without subcat still resolves to a CategoryRoute`() {
+    fun `forum1 php without page defaults to page 1`() {
+        val uri = Uri.parse("https://forum.hardware.fr/forum1.php?cat=23&subcat=550")
+
+        val parsed = parseHfrDeepLink(uri)
+
+        assertEquals(CategoryRoute(cat = 23, subcat = 550, page = 1), parsed?.route)
+    }
+
+    @Test
+    fun `forum1 php without subcat still resolves to a CategoryRoute on page 1`() {
         val uri = Uri.parse("https://forum.hardware.fr/forum1.php?cat=13")
 
         val parsed = parseHfrDeepLink(uri)
 
-        assertEquals(CategoryRoute(cat = 13, subcat = null), parsed?.route)
+        assertEquals(CategoryRoute(cat = 13, subcat = null, page = 1), parsed?.route)
+    }
+
+    @Test
+    fun `forum1 php with malformed page falls back to page 1`() {
+        val uri = Uri.parse("https://forum.hardware.fr/forum1.php?cat=23&page=abc")
+
+        val parsed = parseHfrDeepLink(uri)
+
+        assertEquals(CategoryRoute(cat = 23, subcat = null, page = 1), parsed?.route)
+    }
+
+    @Test
+    fun `forum1 php with negative page falls back to page 1`() {
+        val uri = Uri.parse("https://forum.hardware.fr/forum1.php?cat=23&page=-5")
+
+        val parsed = parseHfrDeepLink(uri)
+
+        assertEquals(CategoryRoute(cat = 23, subcat = null, page = 1), parsed?.route)
     }
 
     @Test

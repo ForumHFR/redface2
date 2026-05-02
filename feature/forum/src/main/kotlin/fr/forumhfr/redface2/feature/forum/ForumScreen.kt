@@ -171,14 +171,17 @@ private fun CategoryRow(
     category: Category,
     onClick: () -> Unit,
 ) {
+    val accessibilityLabel = stringResource(
+        R.string.forum_category_accessibility,
+        category.name,
+        category.subcategoryCount,
+    )
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .padding(horizontal = 24.dp, vertical = 16.dp)
-            .semantics {
-                contentDescription = "${category.name}, ${category.subcategoryCount} sous-catégories"
-            },
+            .semantics { contentDescription = accessibilityLabel },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {

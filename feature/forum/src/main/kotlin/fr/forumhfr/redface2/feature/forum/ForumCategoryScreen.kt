@@ -62,7 +62,10 @@ fun ForumCategoryScreen(
                 .navigationBarsPadding(),
         ) {
             Text(
-                text = stringResource(R.string.category_title, state.cat),
+                // Real category name when known (e.g. "Technologies Mobiles"), fall back
+                // to "Catégorie <id>" while categories are still loading or unreachable.
+                text = state.categoryName
+                    ?: stringResource(R.string.category_title_fallback, state.cat),
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
@@ -82,6 +85,7 @@ fun ForumCategoryScreen(
                 onRetry = viewModel::refresh,
                 onSelectPage = viewModel::selectPage,
                 currentPage = state.page,
+                pageCount = state.pageCount,
             )
         }
     }
@@ -141,6 +145,13 @@ private fun SubcategoryChips(
     }
 }
 
+/**
+ * Compose composables idiomatically take many small focused params (state slice +
+ * callbacks + a pager position). 6 args here is below most Material 3 composable
+ * signatures' real-world threshold, but detekt's default `functionThreshold = 6`
+ * fires on equality. Suppressing locally rather than relaxing the project rule.
+ */
+@Suppress("LongParameterList")
 @Composable
 private fun TopicsBody(
     state: TopicsUiState,
@@ -148,6 +159,7 @@ private fun TopicsBody(
     onRetry: () -> Unit,
     onSelectPage: (Int) -> Unit,
     currentPage: Int,
+    pageCount: Int,
 ) {
     when (state) {
         TopicsUiState.Loading -> Box(
@@ -192,6 +204,7 @@ private fun TopicsBody(
                 item {
                     PagerRow(
                         currentPage = currentPage,
+                        pageCount = pageCount,
                         onSelectPage = onSelectPage,
                     )
                 }
@@ -258,6 +271,7 @@ private fun topicBadgeText(topic: TopicSummary): String {
 @Composable
 private fun PagerRow(
     currentPage: Int,
+    pageCount: Int,
     onSelectPage: (Int) -> Unit,
 ) {
     Row(
@@ -274,10 +288,13 @@ private fun PagerRow(
             Text(text = stringResource(R.string.category_pager_previous))
         }
         Text(
-            text = stringResource(R.string.category_pager_current, currentPage),
+            text = stringResource(R.string.category_pager_position, currentPage, pageCount),
             style = MaterialTheme.typography.bodyMedium,
         )
-        OutlinedButton(onClick = { onSelectPage(currentPage + 1) }) {
+        OutlinedButton(
+            enabled = currentPage < pageCount,
+            onClick = { onSelectPage(currentPage + 1) },
+        ) {
             Text(text = stringResource(R.string.category_pager_next))
         }
     }

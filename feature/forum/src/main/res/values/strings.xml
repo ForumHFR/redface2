@@ -5,8 +5,9 @@
     <string name="forum_error_title">HFR injoignable</string>
     <string name="forum_empty">Aucune catégorie à afficher.</string>
     <string name="forum_category_subcat_count">%1$d sous-catégories</string>
+    <string name="forum_category_accessibility">%1$s, %2$d sous-catégories</string>
 
-    <string name="category_title">Catégorie %1$d</string>
+    <string name="category_title_fallback">Catégorie %1$d</string>
     <string name="category_filter_all">Toutes</string>
     <string name="category_subcategories_error">Sous-catégories indisponibles</string>
     <string name="category_topics_error">Topics indisponibles</string>
@@ -15,5 +16,5 @@
     <string name="category_badge_locked">Fermé</string>
     <string name="category_pager_previous">Précédent</string>
     <string name="category_pager_next">Suivant</string>
-    <string name="category_pager_current">page %1$d</string>
+    <string name="category_pager_position">page %1$d / %2$d</string>
 </resources>

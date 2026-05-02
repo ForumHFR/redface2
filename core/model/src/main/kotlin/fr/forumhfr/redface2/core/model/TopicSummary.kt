@@ -19,7 +19,12 @@ data class TopicSummary(
     val lastReplyAt: String,
     /** Number of replies (= total posts − 1). Derived from `links.posts.count`. */
     val replyCount: Int,
-    /** ceil(posts.count / 40). HFR topic pages are paginated 40 posts per page. */
+    /**
+     * `ceil(posts.count / postsResultsPerPage)` where `postsResultsPerPage` is
+     * read from `links.posts.href?results_per_page=N` on the REST topic payload.
+     * 40 is **not** assumed globally — the HTML reader exposes a per-user
+     * setting; only the REST href advertises a stable bucket.
+     */
     val totalPages: Int,
     val isSticky: Boolean,
     val isLocked: Boolean,
@@ -28,9 +33,18 @@ data class TopicSummary(
      * `is_read = true`, `null` when the JSON omits the field (anonymous response).
      */
     val hasUnread: Boolean?,
-    /** Authenticated-only field, mirrors REST `last_position`. */
+    /**
+     * Authenticated-only field. Page index (1-based) of the last post the user
+     * read for this topic, parsed from `links.posts.href?page=N`. **Not** REST's
+     * `last_position`, which is the per-post offset inside that page, not a page
+     * number. `null` on anonymous payloads or when the auth href omits `page`.
+     */
     val lastReadPage: Int?,
-    /** Authenticated-only field, mirrors REST `last_post_read_id`. */
+    /**
+     * Authenticated-only field, mirrors REST `last_post_read_id` — the id of
+     * the last post the user actually read (anchor for a "scroll to last read"
+     * deep link). Distinct from "first unread", which is one post further.
+     */
     val lastPostReadId: Int?,
 )
 
