@@ -1,0 +1,791 @@
+{
+    "resource": {
+        "page": 1,
+        "results_count": 19,
+        "results_per_page": 19,
+        "resources": [
+            {
+                "id": 1,
+                "name": "Hardware",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/subcategories/",
+                        "count": 15
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/",
+                "number_of_subcategories": 15,
+                "force_subcat": true
+            },
+            {
+                "id": 16,
+                "name": "Hardware - P\u00e9riph\u00e9riques",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/16/subcategories/",
+                        "count": 8
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/16/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/16/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/16/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/16/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/16/",
+                "number_of_subcategories": 8,
+                "force_subcat": true
+            },
+            {
+                "id": 15,
+                "name": "Ordinateurs portables",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/15/subcategories/",
+                        "count": 8
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/15/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/15/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/15/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/15/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/15/",
+                "number_of_subcategories": 8,
+                "force_subcat": true
+            },
+            {
+                "id": 2,
+                "name": "Overclocking, Cooling &amp; Modding",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/2/subcategories/",
+                        "count": 7
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/2/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/2/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/2/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/2/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/2/",
+                "number_of_subcategories": 7,
+                "force_subcat": true
+            },
+            {
+                "id": 30,
+                "name": "Electronique, domotique, DIY",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/30/subcategories/",
+                        "count": 7
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/30/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/30/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/30/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/30/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/30/",
+                "number_of_subcategories": 7,
+                "force_subcat": false
+            },
+            {
+                "id": 23,
+                "name": "Technologies Mobiles",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/",
+                        "count": 10
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/",
+                "number_of_subcategories": 10,
+                "force_subcat": true
+            },
+            {
+                "id": 25,
+                "name": "Apple",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/25/subcategories/",
+                        "count": 7
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/25/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/25/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/25/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/25/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/25/",
+                "number_of_subcategories": 7,
+                "force_subcat": false
+            },
+            {
+                "id": 3,
+                "name": "Video &amp; Son",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/3/subcategories/",
+                        "count": 4
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/3/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/3/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/3/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/3/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/3/",
+                "number_of_subcategories": 4,
+                "force_subcat": true
+            },
+            {
+                "id": 14,
+                "name": "Photo num\u00e9rique",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/subcategories/",
+                        "count": 10
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/",
+                "number_of_subcategories": 10,
+                "force_subcat": true
+            },
+            {
+                "id": 5,
+                "name": "Jeux Video",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/5/subcategories/",
+                        "count": 7
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/5/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/5/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/5/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/5/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/5/",
+                "number_of_subcategories": 7,
+                "force_subcat": true
+            },
+            {
+                "id": 4,
+                "name": "Windows &amp; Software",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/4/subcategories/",
+                        "count": 12
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/4/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/4/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/4/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/4/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/4/",
+                "number_of_subcategories": 12,
+                "force_subcat": true
+            },
+            {
+                "id": 22,
+                "name": "R\u00e9seaux grand public / SoHo",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/22/subcategories/",
+                        "count": 8
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/22/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/22/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/22/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/22/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/22/",
+                "number_of_subcategories": 8,
+                "force_subcat": true
+            },
+            {
+                "id": 21,
+                "name": "Syst\u00e8mes &amp; R\u00e9seaux Pro",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/21/subcategories/",
+                        "count": 8
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/21/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/21/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/21/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/21/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/21/",
+                "number_of_subcategories": 8,
+                "force_subcat": true
+            },
+            {
+                "id": 11,
+                "name": "Linux et OS Alternatifs",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/11/subcategories/",
+                        "count": 8
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/11/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/11/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/11/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/11/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/11/",
+                "number_of_subcategories": 8,
+                "force_subcat": true
+            },
+            {
+                "id": 10,
+                "name": "Programmation",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/10/subcategories/",
+                        "count": 27
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/10/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/10/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/10/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/10/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/10/",
+                "number_of_subcategories": 27,
+                "force_subcat": true
+            },
+            {
+                "id": 12,
+                "name": "Graphisme",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/12/subcategories/",
+                        "count": 10
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/12/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/12/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/12/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/12/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/12/",
+                "number_of_subcategories": 10,
+                "force_subcat": true
+            },
+            {
+                "id": 6,
+                "name": "Achats &amp; Ventes",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/6/subcategories/",
+                        "count": 11
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/6/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/6/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/6/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/6/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/6/",
+                "number_of_subcategories": 11,
+                "force_subcat": true
+            },
+            {
+                "id": 8,
+                "name": "Emploi &amp; Etudes",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/8/subcategories/",
+                        "count": 5
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/8/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/8/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/8/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/8/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/8/",
+                "number_of_subcategories": 5,
+                "force_subcat": true
+            },
+            {
+                "id": 13,
+                "name": "Discussions",
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "subcategories": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/subcategories/",
+                        "count": 15
+                    },
+                    "last_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/last/?page=1&results_per_page=25"
+                    },
+                    "read_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/read/"
+                    },
+                    "participated_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/participated/"
+                    },
+                    "favorite_topics": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/favorites/"
+                    }
+                },
+                "type": "forum_category",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/",
+                "number_of_subcategories": 15,
+                "force_subcat": true
+            }
+        ],
+        "list_type": "forum_category",
+        "type": "list",
+        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/"
+    }
+}

@@ -1,0 +1,11 @@
+Source: forum.hardware.fr — REST API
+Captured endpoint: GET /webservices/rest_api.php?uri=forums/hardwarefr/categories/13/subcategories/
+Captured: 2026-05-01 (anonymous)
+Type: 15 sous-catégories de Discussions (cat=13)
+
+Notes:
+- 15 subcats : Actualité, Politique, Société, Cinéma, Musique, Arts & Lecture, TV/Radio, Sciences,
+  Santé, Sports, Auto/Moto, Cuisine, Loisirs, Voyages, Vie pratique
+- Chaque entrée: `id`, `name`, `links.{forum,category,last_topics}`, `type`, `href`
+- `id` subcat est globalement unique (422 = "Actualité" dans cat=13, 550 = "Android" dans cat=23)
+- Ordre HFR (pertinence éditoriale), pas lexicographique ni par ID

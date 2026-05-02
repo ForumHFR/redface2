@@ -1,0 +1,43 @@
+{
+    "resource": {
+        "id": 35395,
+        "title": "Redface 2 \u2014 PHASE 1 @ ALPHA",
+        "last_post_date": "2026-05-01 17:07",
+        "is_closed": false,
+        "is_sticky": true,
+        "links": {
+            "forum": {
+                "linked_type": "forum",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+            },
+            "category": {
+                "linked_type": "forum_category",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+            },
+            "posts": {
+                "linked_type": "list",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/35395/posts/?page=1&results_per_page=40",
+                "count": 541
+            },
+            "last_author": {
+                "linked_type": "user",
+                "type": "link",
+                "href": null,
+                "title": "qwazer",
+                "tns3": "mesdiscussions-959354.jpg"
+            },
+            "author": {
+                "linked_type": "user",
+                "type": "link",
+                "href": null,
+                "title": "XaTriX",
+                "tns3": "mesdiscussions-54596.png"
+            }
+        },
+        "type": "topic",
+        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/35395/"
+    }
+}

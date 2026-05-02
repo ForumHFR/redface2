@@ -25,7 +25,7 @@ Règles du repo :
 - statut simple : `Proposé`, `Accepté` ou `Superseded par ADR-XXX`
 - les pages canoniques de `docs/specs/` restent la source détaillée ; l'ADR capture le **pourquoi** et le **choix**
 
-Les numéros `003` à `007` sont volontairement laissés libres pour des décisions Phase 1 pressenties mais pas encore actées au moment où les ADR `008` à `010` ont été créées. Ils ne correspondent pas à des ADR supprimées.
+Les numéros `004` à `007` sont volontairement laissés libres pour des décisions Phase 1 pressenties mais pas encore actées au moment où les ADR `008` à `010` ont été créées. Ils ne correspondent pas à des ADR supprimées.
 
 ## Index initial
 
@@ -34,6 +34,7 @@ Les numéros `003` à `007` sont volontairement laissés libres pour des décisi
 | [ADR-000]({{ site.baseurl }}/adr/000-methodologie-triple-hybride) | Méthodologie triple-hybride SDD + Prototype + TDD |
 | [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1) | Découpage Gradle v1 : 15 modules avant les extensions |
 | [ADR-002]({{ site.baseurl }}/adr/002-credentials-option-a) | Credentials Option A : DataStore + Keystore, sans password stocké |
+| [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride) | Stratégie hybride REST + HTML pour la couche réseau HFR |
 | [ADR-008]({{ site.baseurl }}/adr/008-compose-navigation-3) | Compose Navigation 3 retenu pour la navigation |
 | [ADR-009]({{ site.baseurl }}/adr/009-okhttp-5-3-plus) | OkHttp 5.3+ retenu comme client HTTP principal |
 | [ADR-010]({{ site.baseurl }}/adr/010-licence-client-android) | GPL-3.0-only retenue pour le client Android |
