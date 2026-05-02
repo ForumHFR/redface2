@@ -1,0 +1,16 @@
+Source: forum.hardware.fr — REST API
+Captured endpoint: GET /webservices/rest_api.php?uri=forums/hardwarefr/categories/
+Captured: 2026-05-01 (anonymous, no cookies)
+Type: liste des 19 catégories publiques HFR exposées via l'API REST JSON
+
+Notes:
+- 19 catégories publiques, IDs non contigus (7, 9, 17-20, 26-29 non exposés ; 24 est conditionnelle, cf. ci-dessous)
+- Chaque entrée a `id`, `name`, `force_subcat`, `number_of_subcategories`, `links.{forum,subcategories,last_topics}`, `type`, `href`
+- `name` contient des entités HTML non décodées (ex. `&amp;` pour `&`) — à décoder côté parser
+- La cat=24 "Blabla - Divers" est une catégorie privée/conditionnelle : elle n'est pas
+  visible par défaut en anonymous ni pour tous les comptes authentifiés. Elle peut
+  apparaître seulement après réglage administrateur sur un profil. Elle ne fait donc
+  pas partie de la navigation publique REST canonique.
+- Pas de `is_*` flags (rien de personnalisé en anonymous)
+
+Voir aussi: rest_categories_auth.json (mêmes 19 cats + links.{read_topics,participated_topics,favorite_topics} en auth).

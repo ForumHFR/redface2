@@ -1,0 +1,1313 @@
+{
+    "resource": {
+        "page": 1,
+        "results_count": 1008,
+        "results_per_page": 25,
+        "resources": [
+            {
+                "id": 35367,
+                "title": "D\u00e9c\u00e8s de Marc, fondateur du forum",
+                "last_post_date": "2026-02-09 16:26",
+                "is_closed": true,
+                "is_sticky": true,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/35367/posts/?page=1&results_per_page=40",
+                        "count": 1
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Wolfman",
+                        "tns3": "mesdiscussions-54374.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Wolfman",
+                        "tns3": "mesdiscussions-54374.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/35367/"
+            },
+            {
+                "id": 13,
+                "title": "[T\u00e9l\u00e9phonie Mobile] - Liste des topics uniques",
+                "last_post_date": "2025-11-09 14:30",
+                "is_closed": false,
+                "is_sticky": true,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/510/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/510/topics/13/posts/?page=1&results_per_page=40",
+                        "count": 190
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "conforoa",
+                        "tns3": "mesdiscussions-10029.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Wolfman",
+                        "tns3": "mesdiscussions-54374.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/510/topics/13/"
+            },
+            {
+                "id": 26638,
+                "title": "[Tablettes] - Liste des topics uniques",
+                "last_post_date": "2024-04-30 09:07",
+                "is_closed": false,
+                "is_sticky": true,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/540/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/540/topics/26638/posts/?page=1&results_per_page=40",
+                        "count": 17
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "NAUSSAC"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Wolfman",
+                        "tns3": "mesdiscussions-54374.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/540/topics/26638/"
+            },
+            {
+                "id": 14227,
+                "title": "/!\\ R\u00e8gles - A lire avant de poster !",
+                "last_post_date": "2007-08-19 16:06",
+                "is_closed": true,
+                "is_sticky": true,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/14227/posts/?page=1&results_per_page=40",
+                        "count": 1
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "CharlesT",
+                        "tns3": "mesdiscussions-127415.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "CharlesT",
+                        "tns3": "mesdiscussions-127415.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/14227/"
+            },
+            {
+                "id": 28190,
+                "title": "[Topic Unique] Les Autoradio/GPS/Multimedia sous Android (new Soc7870)",
+                "last_post_date": "2026-05-01 19:34",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/28190/posts/?page=1&results_per_page=40",
+                        "count": 12693
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "EE8",
+                        "tns3": "mesdiscussions-816398.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "mum1989",
+                        "tns3": "mesdiscussions-781637.png"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/28190/"
+            },
+            {
+                "id": 35395,
+                "title": "Redface 2 \u2014 PHASE 1 @ ALPHA",
+                "last_post_date": "2026-05-01 17:07",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35395/posts/?page=1&results_per_page=40",
+                        "count": 541
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "qwazer",
+                        "tns3": "mesdiscussions-959354.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "XaTriX",
+                        "tns3": "mesdiscussions-54596.png"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35395/"
+            },
+            {
+                "id": 35077,
+                "title": "[topic unique] balises GFH: Google Find Hub",
+                "last_post_date": "2026-04-30 12:18",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35077/posts/?page=1&results_per_page=40",
+                        "count": 587
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Gui3gui"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Poly"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35077/"
+            },
+            {
+                "id": 21184,
+                "title": "[Topic Unik] Applications Android - read the FP noob !!!",
+                "last_post_date": "2026-04-29 09:21",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/21184/posts/?page=1&results_per_page=40",
+                        "count": 62803
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "bulldozer_fusion",
+                        "tns3": "mesdiscussions-802171.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "fafarex",
+                        "tns3": "mesdiscussions-780119.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/21184/"
+            },
+            {
+                "id": 21748,
+                "title": "[Projet] HFR4droid 0.8.7 - 15 ans d\u00e9j\u00e0 !",
+                "last_post_date": "2026-04-28 22:35",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/21748/posts/?page=1&results_per_page=40",
+                        "count": 18058
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "SenorPollo",
+                        "tns3": "mesdiscussions-1065212.png"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "ToYonos",
+                        "tns3": "mesdiscussions-51660.png"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/21748/"
+            },
+            {
+                "id": 27774,
+                "title": "[Android] S\u00e9curit\u00e9, vie priv\u00e9e",
+                "last_post_date": "2026-04-19 09:51",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/27774/posts/?page=1&results_per_page=40",
+                        "count": 63
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Rem82",
+                        "tns3": "mesdiscussions-646455.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Maratus",
+                        "tns3": "mesdiscussions-963009.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/27774/"
+            },
+            {
+                "id": 29332,
+                "title": "[TU] Redface, le client HFR pour Android [v5.0.1 dispo !]",
+                "last_post_date": "2026-04-16 19:55",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/29332/posts/?page=1&results_per_page=40",
+                        "count": 13888
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "XaTriX",
+                        "tns3": "mesdiscussions-54596.png"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Ayuget",
+                        "tns3": "mesdiscussions-65747.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/29332/"
+            },
+            {
+                "id": 35259,
+                "title": "Un lecteur IPTV gratuit sur Android Box ?",
+                "last_post_date": "2026-04-14 12:57",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35259/posts/?page=1&results_per_page=40",
+                        "count": 4
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Richard007x"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Miketvnexus"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35259/"
+            },
+            {
+                "id": 35394,
+                "title": "Droid2PC : continuit\u00e9 Android vers Mac sans workflow cloud impos\u00e9",
+                "last_post_date": "2026-04-11 01:29",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35394/posts/?page=1&results_per_page=40",
+                        "count": 1
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "droid2pc"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "droid2pc"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35394/"
+            },
+            {
+                "id": 35391,
+                "title": "La \"prison\" android.....",
+                "last_post_date": "2026-04-06 22:23",
+                "is_closed": true,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35391/posts/?page=1&results_per_page=40",
+                        "count": 2
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Mod\u00e9ration"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "merise2",
+                        "tns3": "mesdiscussions-1207239.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35391/"
+            },
+            {
+                "id": 17825,
+                "title": "[Topic Unique] Android NOUGAT 7.0",
+                "last_post_date": "2026-03-31 22:57",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/17825/posts/?page=1&results_per_page=40",
+                        "count": 18211
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "-JLL-",
+                        "tns3": "mesdiscussions-631390.png"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Olivie",
+                        "tns3": "mesdiscussions-563008.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/17825/"
+            },
+            {
+                "id": 35380,
+                "title": "Android va devenir une plateforme ferm\u00e9e au mois de septembre",
+                "last_post_date": "2026-03-26 12:42",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35380/posts/?page=1&results_per_page=40",
+                        "count": 11
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "merise2",
+                        "tns3": "mesdiscussions-1207239.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "muzah",
+                        "tns3": "mesdiscussions-34850.png"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35380/"
+            },
+            {
+                "id": 35295,
+                "title": "[Topic Unique] Migration d'iOs \u00e0 Android",
+                "last_post_date": "2026-03-04 09:37",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35295/posts/?page=1&results_per_page=40",
+                        "count": 83
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "myzt",
+                        "tns3": "mesdiscussions-834445.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Kerjou"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35295/"
+            },
+            {
+                "id": 34406,
+                "title": "[TU] [Feedback] NextGP : App Android d\u00e9di\u00e9 au racing (F1 x MotoGP)",
+                "last_post_date": "2026-02-06 16:12",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/34406/posts/?page=1&results_per_page=40",
+                        "count": 56
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "bixibu",
+                        "tns3": "mesdiscussions-114687.png"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "bixibu",
+                        "tns3": "mesdiscussions-114687.png"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/34406/"
+            },
+            {
+                "id": 35331,
+                "title": "autoradio android probl\u00e8me CANBUS",
+                "last_post_date": "2026-01-15 14:36",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35331/posts/?page=1&results_per_page=40",
+                        "count": 2
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "absolumentpasbultom",
+                        "tns3": "mesdiscussions-1056359.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "loweib"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35331/"
+            },
+            {
+                "id": 35357,
+                "title": "comment envoyer un ptit fichier .RAR par bluetooth avec FICHIERS ?",
+                "last_post_date": "2026-01-13 07:59",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35357/posts/?page=1&results_per_page=40",
+                        "count": 2
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "amiens2019"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "amiens2019"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35357/"
+            },
+            {
+                "id": 35355,
+                "title": "R\u00e9solu - Gmail android plus de synchro plus de notification",
+                "last_post_date": "2026-01-09 19:16",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35355/posts/?page=1&results_per_page=40",
+                        "count": 1
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "nicotat"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "nicotat"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35355/"
+            },
+            {
+                "id": 35354,
+                "title": "site pour t\u00e9l\u00e9charger .apk sans passer par une appli tierce?",
+                "last_post_date": "2026-01-08 14:37",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35354/posts/?page=1&results_per_page=40",
+                        "count": 1
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "serrye"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "serrye"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35354/"
+            },
+            {
+                "id": 35332,
+                "title": "probl\u00e8me connexion internet / android auto",
+                "last_post_date": "2025-12-23 10:39",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35332/posts/?page=1&results_per_page=40",
+                        "count": 19
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "polux42"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "polux42"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35332/"
+            },
+            {
+                "id": 35337,
+                "title": "YouTube sur Android Auto ou Android Automovie",
+                "last_post_date": "2025-11-28 16:44",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35337/posts/?page=1&results_per_page=40",
+                        "count": 1
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "DiB91",
+                        "tns3": "mesdiscussions-58199.png"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "DiB91",
+                        "tns3": "mesdiscussions-58199.png"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35337/"
+            },
+            {
+                "id": 35231,
+                "title": "blocage num\u00e9ros t\u00e9l",
+                "last_post_date": "2025-11-08 15:04",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35231/posts/?page=1&results_per_page=40",
+                        "count": 7
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "merise2",
+                        "tns3": "mesdiscussions-1207239.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "hspyck"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35231/"
+            },
+            {
+                "id": 35325,
+                "title": "Transfert via usb sur android impossible",
+                "last_post_date": "2025-11-02 10:50",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35325/posts/?page=1&results_per_page=40",
+                        "count": 2
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "scalpatif",
+                        "tns3": "mesdiscussions-501259.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "scalpatif",
+                        "tns3": "mesdiscussions-501259.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35325/"
+            },
+            {
+                "id": 35313,
+                "title": "Android auto",
+                "last_post_date": "2025-09-26 19:17",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35313/posts/?page=1&results_per_page=40",
+                        "count": 2
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "b4tm4n",
+                        "tns3": "mesdiscussions-1211322.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "ananas74"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35313/"
+            },
+            {
+                "id": 35315,
+                "title": "ouverture diaphragme sur redmenote 14",
+                "last_post_date": "2025-09-26 19:09",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35315/posts/?page=1&results_per_page=40",
+                        "count": 2
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "b4tm4n",
+                        "tns3": "mesdiscussions-1211322.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Sepamal"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35315/"
+            },
+            {
+                "id": 35312,
+                "title": "comment donner le droit autorisation miracast \u00e0 une appli ?",
+                "last_post_date": "2025-09-25 19:23",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                    },
+                    "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35312/posts/?page=1&results_per_page=40",
+                        "count": 3
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "amiens2019"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "amiens2019"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35312/"
+            }
+        ],
+        "list_type": "topic",
+        "type": "list",
+        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/last/?page=1&results_per_page=25"
+    }
+}

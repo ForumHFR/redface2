@@ -1,0 +1,8 @@
+Source: forum.hardware.fr — REST API
+Captured endpoint: GET /webservices/rest_api.php?uri=forums/hardwarefr/categories/23/topics/35395/
+Captured: 2026-05-01 (anonymous)
+Type: metadata standalone du topic 35395 (Redface 2 — PHASE 1 @ ALPHA)
+
+Mêmes champs que dans une ligne de la liste topics, sans wrapper de pagination.
+À utiliser pour le header de l'écran TopicReader (titre, sticky/locked, count posts, auteur, dernier auteur).
+La lecture du contenu (posts) reste obligatoirement HTML via forum2.php — endpoint REST /posts/ cassé HTTP 500.

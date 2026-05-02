@@ -1,0 +1,21 @@
+Source: forum.hardware.fr — REST API (authentifié)
+Captured endpoint: GET /webservices/rest_api.php?uri=forums/hardwarefr/categories/
+Captured: 2026-05-01 avec cookies md_user/md_passs/md_id (compte test)
+Type: liste catégories en mode authentifié
+
+Différences vs anonymous (rest_categories.json):
+Pour CHAQUE catégorie, `links` contient en plus :
+- `read_topics`     → href vers /categories/{cat}/topics/read/        (drapeaux rouges, lecture suivie scopée à la cat)
+- `participated_topics` → href vers /categories/{cat}/topics/participated/ (drapeaux cyan, sujets participés scopés cat)
+- `favorite_topics` → href vers /categories/{cat}/topics/favorites/   (étoiles jaunes, favoris scopés cat)
+
+Aux niveaux globaux, ces 3 endpoints existent aussi sans scope cat:
+- /webservices/rest_api.php?uri=forums/hardwarefr/topics/{read,participated,favorites}/
+  → format différent : resources[] est un tableau de groupements par cat (chaque groupe contient ses topics)
+
+Conséquence pour Redface 2 :
+- L'écran "Drapeaux" actuellement servi par forum1f.php?owntopic={1,2,3} peut entièrement passer par REST :
+    owntopic=1 (cyan)  → topics/participated/
+    owntopic=2 (rouge) → topics/read/
+    owntopic=3 (jaune) → topics/favorites/
+- Plus besoin de scraper le HTML pour cet écran.

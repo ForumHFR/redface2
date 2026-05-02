@@ -1,0 +1,25 @@
+Source: forum.hardware.fr — REST API
+Captured endpoint: GET /webservices/rest_api.php?uri=forums/hardwarefr/categories/23/subcategories/550/topics/last/&page=1&results_per_page=25
+Captured: 2026-05-01 (anonymous)
+Type: page 1 des 25 derniers topics de cat=23 (Tech Mobiles) / subcat=550 (Android)
+
+Champs par topic (anonymous):
+- id, title, last_post_date (format "YYYY-MM-DD HH:MM" — pas de secondes), is_closed, is_sticky
+- links.posts.count (= nb total posts du topic)
+- links.posts.href (URL pour lecture HTML — REST /posts/ est cassé HTTP 500)
+- links.author.{title, tns3} (pseudo + filename avatar)
+- links.last_author.{title, tns3}
+- href, type
+
+Champs MANQUANTS vs HTML forum1.php :
+- `views` (nombre de vues) — non exposé en JSON
+- `total_pages` du topic — déductible via links.posts.count / 40 (results_per_page par défaut HTML topic)
+- `is_unread` / drapeaux personnels — uniquement en mode authentifié
+
+Pagination wrapper:
+- results_count = total topics dans cette subcat (~1008 pour cat23/sub550)
+- page = page courante
+- results_per_page = 25 (peut être modifié via query param)
+- total_pages = ceil(results_count / results_per_page) — pas exposé directement
+
+Voir rest_cat23_participated.json pour le format authentifié (ajout de is_read, last_position, last_post_read_id, flag_owntopic, subcategory link).
