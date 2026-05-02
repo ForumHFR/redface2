@@ -7,11 +7,9 @@ import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.Category
 import javax.inject.Inject
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -35,10 +33,10 @@ class ForumViewModel @Inject constructor(
 
     val uiState: StateFlow<ForumUiState> = forumRepository.observeCategories()
         .map { it.toUiState() }
-        // Suppress transient `Loading` re-emitted by refreshCategories() once we have
-        // a Content to keep showing — see CategoryViewModel.keepContentDuringRefresh
-        // for the same pattern at the per-category screen level.
-        .keepContentDuringRefresh()
+        .keepContentDuringRefresh(
+            isLoading = { it is ForumUiState.Loading },
+            isContent = { it is ForumUiState.Content },
+        )
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
@@ -62,24 +60,6 @@ class ForumViewModel @Inject constructor(
             is ForumResult.Success -> ForumUiState.Content(value)
             is ForumResult.Failure -> ForumUiState.Error(cause.message)
         }
-
-    private fun Flow<ForumUiState>.keepContentDuringRefresh(): Flow<ForumUiState> = flow {
-        var lastContent: ForumUiState.Content? = null
-        collect { value ->
-            when (value) {
-                is ForumUiState.Content -> {
-                    lastContent = value
-                    emit(value)
-                }
-                ForumUiState.Loading -> if (lastContent != null) {
-                    // Skip — keep showing the previous content under a refresh spinner.
-                } else {
-                    emit(value)
-                }
-                is ForumUiState.Error -> emit(value)
-            }
-        }
-    }
 
     private companion object {
         const val STOP_TIMEOUT_MS: Long = 5_000L
