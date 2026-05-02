@@ -148,7 +148,7 @@ class TopicRepositoryImplTest {
     }
 
     @Test
-    fun `prefetchAnonymous does not overwrite an existing AUTHENTICATED row`() = runTest {
+    fun `prefetch does not overwrite an existing AUTHENTICATED row`() = runTest {
         // First request lands as authenticated and warms the cache with auth-derived
         // post fields (the fixture has isOwnPost=false but the row is tagged AUTH).
         server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
@@ -163,7 +163,7 @@ class TopicRepositoryImplTest {
         // call; the assertion is on the persisted row's authMode.
         server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
         val anonRepo = repository(now = Instant.parse("2026-04-26T18:00:30Z"))
-        anonRepo.prefetchAnonymous(1, 999_395, 1)
+        anonRepo.prefetch(1, 999_395, 1)
 
         val afterPrefetch = dao.getTopicPage(1, 999_395, 1)
         assertNotNull(afterPrefetch)
@@ -178,7 +178,7 @@ class TopicRepositoryImplTest {
     fun `observeTopicPage with a fresh ANONYMOUS cache still re-fetches authenticated`() = runTest {
         // Cold cache → anonymous prefetch lands an ANONYMOUS row at T0.
         server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
-        repository(now = Instant.parse("2026-04-26T18:00:00Z")).prefetchAnonymous(1, 999_395, 1)
+        repository(now = Instant.parse("2026-04-26T18:00:00Z")).prefetch(1, 999_395, 1)
         val anonRow = dao.getTopicPage(1, 999_395, 1)
         assertEquals(FetchMode.ANONYMOUS, anonRow!!.authMode)
         assertEquals("warm-up should have issued exactly one network request", 1, server.requestCount)
@@ -207,7 +207,7 @@ class TopicRepositoryImplTest {
         // Cold cache → an anonymous prefetch writes an ANONYMOUS row.
         server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
         val anonRepo = repository(now = Instant.parse("2026-04-26T18:00:00Z"))
-        anonRepo.prefetchAnonymous(1, 999_395, 1)
+        anonRepo.prefetch(1, 999_395, 1)
         val anonRow = dao.getTopicPage(1, 999_395, 1)
         assertNotNull(anonRow)
         assertEquals(FetchMode.ANONYMOUS, anonRow!!.authMode)
@@ -229,11 +229,11 @@ class TopicRepositoryImplTest {
     }
 
     @Test
-    fun `prefetchAnonymous on a cold cache writes an ANONYMOUS row`() = runTest {
+    fun `prefetch on a cold cache writes an ANONYMOUS row`() = runTest {
         server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
         val anonRepo = repository(now = Instant.parse("2026-04-26T18:00:00Z"))
 
-        anonRepo.prefetchAnonymous(1, 999_395, 1)
+        anonRepo.prefetch(1, 999_395, 1)
 
         val row = dao.getTopicPage(1, 999_395, 1)
         assertNotNull(row)

@@ -387,18 +387,22 @@ Pour donner l'impression que le forum est local :
 
 ```
 Utilisateur lit la page 3 d'un topic
-  → Prefetch page 4 en arrière-plan
+  → Prefetch page 4 en arrière-plan (anonyme, écrit en cache ANONYMOUS)
   → Quand il scroll vers le bas, la page 4 est déjà prête
-
-Utilisateur ouvre ses drapeaux
-  → Prefetch les 3 premiers topics (ceux qu'il ouvre le plus souvent)
 ```
 
-Le prefetch respecte les conditions réseau : désactivé en mode économie de données ou réseau lent.
+Implémentation Phase 1D PR 4 (#108) :
+
+- **Topic page** : `TopicViewModel` déclenche `topicRepository.prefetch(cat, post, page+1)` après chaque émission `Loaded`. Le job est rattaché à `viewModelScope` ; sortir de l'écran ou changer de page propage le `cancel()` jusqu'à OkHttp.
+- **Topic listing** : `CategoryViewModel` déclenche `forumRepository.prefetchTopicList(cat, subcat, page+1)` à chaque transition vers `Content`. Le job est annulé à chaque changement de `(subcat, page)` via le pattern `combine + onEach + cancel` standard.
+- **Une seule page d'avance** par déclencheur. Pas de chaîne `n+2, n+3` — le coût ne paie pas le bénéfice et grossirait la facture pour des comportements rares.
+- **Échecs swallowed** : un prefetch flaky ne doit jamais perturber l'affichage. Erreurs loguées en `Log.w`, puis avalées.
 
 #### Règle critique : prefetch non-authentifié
 
 Les requêtes de prefetch ne doivent **jamais** inclure les cookies de session — sinon HFR marque silencieusement les topics comme lus. Implémentation avec deux instances `OkHttpClient` (`@AuthenticatedClient` / `@AnonymousClient`) et test Konsist d'enforcement : voir [protocol-hfr.md § Règle critique prefetch non-authentifié]({{ site.baseurl }}/specs/protocol-hfr#règle-critique--prefetch-non-authentifié).
+
+Côté cache disque, l'entrée est tagguée `authMode = ANONYMOUS` et **ne remplace pas** une row existante taguée `AUTHENTICATED` (cf. § Stratégie de cache).
 
 ---
 

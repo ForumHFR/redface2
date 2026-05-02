@@ -52,7 +52,29 @@ class TopicViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), repository.calls)
+        assertEquals(
+            "anonymous prefetch should fire on page+1 once the topic is loaded",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 3)),
+            repository.prefetches,
+        )
     }
+
+    @Test
+    fun `last page does not trigger an out-of-range prefetch`() = runTest {
+        val topic = fakeTopic(page = 5, totalPages = 5)
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
+
+        TopicViewModel(
+            request = topicRequest(page = 5),
+            topicRepository = repository,
+        ).state.test {
+            awaitItem()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertTrue("no prefetch on the final page", repository.prefetches.isEmpty())
+    }
+
 
     @Test
     fun `cache emission lands before fresh emission in observable state sequence`() = runTest {
@@ -287,6 +309,7 @@ private class FakeTopicRepository(
 ) : TopicRepository {
     private val queue = ArrayDeque(flowsToReturn)
     val calls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
+    val prefetches: MutableList<Triple<Int, Int, Int>> = mutableListOf()
 
     override fun observeTopicPage(cat: Int, post: Int, page: Int): Flow<Topic> {
         calls += Triple(cat, post, page)
@@ -295,6 +318,10 @@ private class FakeTopicRepository(
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
         error("refreshTopicPage not used by ViewModel under test")
+    }
+
+    override suspend fun prefetch(cat: Int, post: Int, page: Int) {
+        prefetches += Triple(cat, post, page)
     }
 }
 
@@ -305,5 +332,9 @@ private class FakeStreamingTopicRepository(
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
         error("refreshTopicPage not used by ViewModel under test")
+    }
+
+    override suspend fun prefetch(cat: Int, post: Int, page: Int) {
+        // no-op for streaming tests
     }
 }

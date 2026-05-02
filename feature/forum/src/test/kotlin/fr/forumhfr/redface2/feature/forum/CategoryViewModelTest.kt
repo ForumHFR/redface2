@@ -406,6 +406,54 @@ class CategoryViewModelTest {
         }
     }
 
+    @Test
+    fun `Content emission triggers anonymous prefetch of the next page`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 1),
+            forumRepository = repo,
+        )
+        // Listings: 130 topics @ 50 per page → 3 pages total. Prefetch should fire for page 2.
+        val multiPage = EMPTY_PAGE.copy(totalTopics = 130, resultsPerPage = 50)
+
+        vm.uiState.test {
+            awaitItem() // initial state
+            repo.emitSubcategories(ForumResult.Success(listOf(SUBCAT_550)))
+            repo.emitTopicList(cat = 23, subcat = 550, page = 1, result = ForumResult.Success(multiPage))
+            awaitContent { it.topics is TopicsUiState.Content }
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(
+            "page 1 of a 3-page listing should fire one prefetch on page 2",
+            listOf(Triple(23, 550, 2)),
+            repo.prefetchTopicListCalls,
+        )
+    }
+
+    @Test
+    fun `last page does not trigger a prefetch`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 3),
+            forumRepository = repo,
+        )
+        val multiPage = EMPTY_PAGE.copy(totalTopics = 130, resultsPerPage = 50, page = 3)
+
+        vm.uiState.test {
+            awaitItem()
+            repo.emitSubcategories(ForumResult.Success(listOf(SUBCAT_550)))
+            repo.emitTopicList(cat = 23, subcat = 550, page = 3, result = ForumResult.Success(multiPage))
+            awaitContent { it.topics is TopicsUiState.Content }
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertTrue(
+            "no prefetch on the final page",
+            repo.prefetchTopicListCalls.isEmpty(),
+        )
+    }
+
     private companion object {
         val SUBCAT_550 = SubCategory(id = 550, name = "Android", parentCategoryId = 23)
         val EMPTY_PAGE = TopicListPage(
@@ -471,6 +519,8 @@ class CategoryViewModelTest {
             private set
         var refreshTopicListCalls: List<Triple<Int, Int?, Int>> = emptyList()
             private set
+        var prefetchTopicListCalls: List<Triple<Int, Int?, Int>> = emptyList()
+            private set
 
         /**
          * Optional gate consumed by [refreshSubcategories] — when set, the suspending
@@ -501,6 +551,10 @@ class CategoryViewModelTest {
 
         override suspend fun refreshTopicList(cat: Int, subcat: Int?, page: Int) {
             refreshTopicListCalls = refreshTopicListCalls + Triple(cat, subcat, page)
+        }
+
+        override suspend fun prefetchTopicList(cat: Int, subcat: Int?, page: Int) {
+            prefetchTopicListCalls = prefetchTopicListCalls + Triple(cat, subcat, page)
         }
 
         suspend fun emitCategories(result: ForumResult<List<Category>>) {

@@ -34,6 +34,20 @@ interface ForumRepository {
     ): Flow<ForumResult<TopicListPage>>
 
     suspend fun refreshTopicList(cat: Int, subcat: Int?, page: Int)
+
+    /**
+     * Anonymous prefetch — unauthenticated REST request (cf. ADR-003 §
+     * Prefetch) that warms an in-memory cache of [page] for `(cat, subcat)`.
+     * The cached entry is **not** broadcast through the auth flow consumed by
+     * the screen, since the anon payload misses the per-user fields
+     * (`is_read`, `last_post_read_id`); the next user-driven
+     * [observeTopicList] still re-fetches authenticated.
+     *
+     * The benefit is purely network: the prefetch uses the anonymous client,
+     * so no cookie is sent and HFR does not mark anything as read. Failures
+     * are swallowed.
+     */
+    suspend fun prefetchTopicList(cat: Int, subcat: Int?, page: Int)
 }
 
 /**

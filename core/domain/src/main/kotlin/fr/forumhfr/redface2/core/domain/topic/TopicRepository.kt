@@ -20,4 +20,17 @@ interface TopicRepository {
      * The persisted row is tagged as authenticated.
      */
     suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic
+
+    /**
+     * Background prefetch — anonymous fetch (no HFR cookies, no
+     * mark-as-read side effect, cf. ADR-003 § Prefetch) that warms the Room
+     * cache for [page] without overwriting an existing authenticated row. The
+     * caller's coroutine context controls cancellation: when the consumer
+     * leaves the screen or moves on to a new page, the structured-concurrency
+     * scope it lives in propagates the cancel and stops the in-flight fetch.
+     *
+     * Failures are swallowed: a prefetch is best-effort by design and must
+     * never bubble up to the user-facing flow.
+     */
+    suspend fun prefetch(cat: Int, post: Int, page: Int)
 }

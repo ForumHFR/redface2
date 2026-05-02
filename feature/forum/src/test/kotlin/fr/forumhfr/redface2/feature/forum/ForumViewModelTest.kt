@@ -145,6 +145,8 @@ class ForumViewModelTest {
 
         override suspend fun refreshTopicList(cat: Int, subcat: Int?, page: Int) = Unit
 
+        override suspend fun prefetchTopicList(cat: Int, subcat: Int?, page: Int) = Unit
+
         suspend fun emitCategories(result: ForumResult<List<Category>>) {
             categories.emit(result)
         }

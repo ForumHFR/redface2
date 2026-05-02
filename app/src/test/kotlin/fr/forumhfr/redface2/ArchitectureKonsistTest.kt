@@ -115,6 +115,48 @@ class ArchitectureKonsistTest {
         }
     }
 
+    @Test
+    fun `prefetch call sites use the prefetch entry points only`() {
+        // Phase 1D PR 4 — anonymous prefetch must funnel through the dedicated
+        // repository methods (`TopicRepository.prefetch`, `ForumRepository.prefetchTopicList`),
+        // which both go to the @AnonymousClient. A ViewModel that calls
+        // `refreshTopicPage()` or `refreshTopicList()` from a "prefetch" context
+        // would fire an authenticated request and silently mark drapeaux as read
+        // (cf. ADR-003 § Prefetch). This test catches the mistake by enforcing
+        // that the substring "prefetch" only appears next to the repository's
+        // prefetch methods, never the auth-paying refresh ones.
+        val viewModelFiles = Konsist
+            .scopeFromProject()
+            .slice { file ->
+                file.path.contains("/feature/") &&
+                    file.path.endsWith("ViewModel.kt") &&
+                    !file.path.contains("/src/test/") &&
+                    !file.path.contains("/build/")
+            }
+            .files
+
+        assertTrue("Konsist must scan feature ViewModels", viewModelFiles.isNotEmpty())
+
+        viewModelFiles.assertFalse { file ->
+            // Match patterns where a "prefetch"-named scope refers to refresh*().
+            // Naive but cheap: if a file mentions both "prefetch" and a refresh*()
+            // method invocation in any prefetch-tagged context, flag it.
+            val text = file.text.lowercase()
+            val prefetchContext = text.contains("prefetch")
+            val callsAuthenticatedRefresh = text.contains("refreshtopicpage") ||
+                text.contains("refreshtopiclist")
+            // Only flag if the file has BOTH and the refresh call lives near a
+            // prefetch label — same line or same block. We approximate "near"
+            // by looking at the lines that contain the refresh call.
+            prefetchContext && callsAuthenticatedRefresh && file.text.lineSequence().any { line ->
+                val lower = line.lowercase()
+                lower.contains("prefetch") && (
+                    lower.contains("refreshtopicpage") || lower.contains("refreshtopiclist")
+                    )
+            }
+        }
+    }
+
     private companion object {
         const val ANONYMOUS_CLIENT_PACKAGE =
             "fr.forumhfr.redface2.core.network.qualifiers"

@@ -13,13 +13,16 @@ import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
 import fr.forumhfr.redface2.core.model.TopicSummary
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -160,6 +163,49 @@ class CategoryViewModel @AssistedInject constructor(
         ),
     )
 
+    private var prefetchJob: Job? = null
+
+    init {
+        // Anonymous prefetch of `page + 1` whenever a content emission lands —
+        // see ADR-003 § Prefetch and the PR 4 prompt. The job is cancelled on
+        // every (subcat, page) change so we never have two prefetches in
+        // flight at once and never warm a page the user has already moved
+        // past. Using `is ContentTrigger` ignores Loading / Error transitions
+        // — only firm Content triggers a warm-up.
+        viewModelScope.launch {
+            combine(selectedSubcat, page, topicsState) { subcat, currentPage, topics ->
+                ContentTrigger(subcat, currentPage, topics.contentPageCount() ?: -1)
+            }
+                .distinctUntilChanged()
+                .onEach { trigger -> schedulePrefetch(trigger) }
+                .collect()
+        }
+    }
+
+    private suspend fun Flow<ContentTrigger>.collect() = collect { /* no-op, side-effect via onEach */ }
+
+    private fun schedulePrefetch(trigger: ContentTrigger) {
+        prefetchJob?.cancel()
+        val nextPage = trigger.currentPage + 1
+        // pageCount unknown (no Content yet) → -1 sentinel, skip.
+        if (trigger.pageCount <= 0 || nextPage > trigger.pageCount) return
+        prefetchJob = viewModelScope.launch {
+            forumRepository.prefetchTopicList(
+                cat = request.cat,
+                subcat = trigger.subcat,
+                page = nextPage,
+            )
+        }
+    }
+
+    private fun TopicsUiState.contentPageCount(): Int? = when (this) {
+        is TopicsUiState.Content -> listingPageCount(
+            totalTopics = page.totalTopics,
+            resultsPerPage = page.resultsPerPage,
+        )
+        else -> null
+    }
+
     fun selectSubcategory(subcat: Int?) {
         if (selectedSubcat.value == subcat) return
         selectedSubcat.value = subcat
@@ -242,6 +288,12 @@ class CategoryViewModel @AssistedInject constructor(
         val categoryName: String?,
         val subcategories: SubcategoriesUiState,
         val topics: TopicsUiState,
+    )
+
+    private data class ContentTrigger(
+        val subcat: Int?,
+        val currentPage: Int,
+        val pageCount: Int,
     )
 
     private companion object {
