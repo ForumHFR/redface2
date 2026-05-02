@@ -19,6 +19,8 @@ Champs ADDITIONNELS vs anonymous (cf. rest_topics_cat23_subcat550_p1.json) :
                                   HTML 40-posts-par-page est un défaut, pas une vérité globale.
 
 Conséquence pour Redface 2 :
-- Cet endpoint remplace HfrClient.getFlagsPage(owntopic=1) côté REST
-- Le payload JSON donne directement la cible "Aller au dernier message lu" (links.posts.href est ready)
-- Pas besoin de parser le tooltip HTML "Allez au dernier message lu dans un sujet auquel vous avez participé"
+- Cet endpoint (variante par-cat) est consommé par `HfrApiClient.getCategoryFlagTopics(cat, bucket=PARTICIPATED, useAuth=true)`.
+- La variante globale `forums/hardwarefr/topics/participated/` (consommée par `HfrApiClient.getFlagTopics(...)`) partage la même enveloppe `RestListEnvelope<RestTopic>` ; chaque topic porte son `links.category.href` que le mapper consomme pour reconstituer `Flag.cat`. Cette fixture par-cat sert de preuve de la forme côté tests, la forme globale est validée à la requête réelle.
+- Le payload JSON donne directement la cible "Aller au dernier message lu" via `last_post_read_id` + `links.posts.href?page=N`.
+- Pas besoin de parser le tooltip HTML "Allez au dernier message lu dans un sujet auquel vous avez participé".
+- Phase 1D-1 (#110) a retiré le scrape HTML `forum1f.php` au profit de cette voie REST.

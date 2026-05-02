@@ -1,12 +1,14 @@
 package fr.forumhfr.redface2.core.data.flags
 
 import android.util.Log
+import fr.forumhfr.redface2.core.data.forum.RestListEnvelope
+import fr.forumhfr.redface2.core.data.forum.RestTopic
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.model.FlagType
-import fr.forumhfr.redface2.core.network.HfrClient
-import fr.forumhfr.redface2.core.parser.flags.FlagsListParser
+import fr.forumhfr.redface2.core.network.HfrApiClient
+import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
 import java.util.EnumMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -18,30 +20,33 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 
 /**
- * Phase 1B.4 network-only implementation of [FlagRepository]. The first [observe] call
- * per [FlagType] fetches HFR; later observers reuse the last successful payload so tab
- * switches do not implicitly refetch and change read/unread state behind the user's back.
- * Explicit [refresh] calls still fetch and broadcast a fresh result through a per-type
- * [MutableSharedFlow] so concurrent observers see the same payload.
+ * Phase 1D-1 REST implementation of [FlagRepository] (cf. ADR-003, issue #110). Reads
+ * the user's drapeaux from `forums/hardwarefr/topics/{participated,read,favorites}/`
+ * via [HfrApiClient]. The legacy HTML scrape on `forum1f.php` has been retired with
+ * this slice — `getFlagsPage` and the matching `FlagsListParser` are gone.
  *
- * Caching to Room is intentionally deferred: at this stage, the user's drapeaux page is
- * always small (~150 rows in the heaviest filter) and HFR latency is acceptable for the
- * "open the home tab" cold path. Cache-aside arrives in Phase 1D when persistence policy
- * for the home tab is reviewed end-to-end (cf. roadmap `1D.2`).
+ * The first [observe] call per [FlagType] fetches the network and caches the success
+ * for the current auth session ; tab switches reuse the cache so the screen does not
+ * implicitly mark drapeaux as read by re-hitting the auth REST endpoint. Explicit
+ * [refresh] calls always fetch and broadcast through a per-type [MutableSharedFlow].
+ *
+ * Caching to Room is deferred to issue #26. The in-memory cache is purged on
+ * [clearSessionCache] (logout, account switch).
  */
 @Singleton
 class DefaultFlagRepository @Inject constructor(
-    private val hfrClient: HfrClient,
-    private val parser: FlagsListParser,
+    private val apiClient: HfrApiClient,
+    @param:FlagsJson private val json: Json,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : FlagRepository {
 
     private val cachedSuccesses: MutableMap<FlagType, FlagsResult.Success> = EnumMap(FlagType::class.java)
 
     /**
-     * One refresh-trigger per [FlagType] so a refresh on one tab doesn't re-fetch the
+     * One refresh-trigger per [FlagType] so a refresh on one tab does not re-fetch the
      * other two. Replay = 0 because [observe] emits its own cached-or-initial result;
      * the shared flow only carries explicit refresh acks.
      */
@@ -77,8 +82,12 @@ class DefaultFlagRepository @Inject constructor(
 
     private suspend fun fetch(type: FlagType): FlagsResult = withContext(ioDispatcher) {
         runCatching {
-            val html = hfrClient.getFlagsPage(owntopic = type.owntopic())
-            parser.parse(html, defaultType = type)
+            val body = apiClient.getFlagTopics(
+                bucket = type.toBucket(),
+                useAuth = true,
+            )
+            val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(body)
+            RestFlagMappers.toFlags(envelope = envelope, defaultType = type)
         }.fold(
             onSuccess = { flags ->
                 FlagsResult.Success(flags).also { result ->
@@ -86,16 +95,16 @@ class DefaultFlagRepository @Inject constructor(
                 }
             },
             onFailure = { throwable ->
-                Log.w(LOG_TAG, "Flags fetch failed for $type", throwable)
+                Log.w(LOG_TAG, "Flags REST fetch failed for $type", throwable)
                 FlagsResult.Failure(throwable)
             },
         )
     }
 
-    private fun FlagType.owntopic(): Int = when (this) {
-        FlagType.CYAN -> 1
-        FlagType.RED -> 2
-        FlagType.FAVORITE -> 3
+    private fun FlagType.toBucket(): HfrRestFlagBucket = when (this) {
+        FlagType.CYAN -> HfrRestFlagBucket.PARTICIPATED
+        FlagType.RED -> HfrRestFlagBucket.READ
+        FlagType.FAVORITE -> HfrRestFlagBucket.FAVORITES
     }
 
     private companion object {

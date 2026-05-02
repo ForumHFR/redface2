@@ -2,10 +2,9 @@ package fr.forumhfr.redface2.core.data.flags
 
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
-import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
-import fr.forumhfr.redface2.core.network.HfrClient
-import fr.forumhfr.redface2.core.parser.flags.FlagsListParser
+import fr.forumhfr.redface2.core.network.HfrApiClient
+import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -13,6 +12,7 @@ import java.io.IOException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -25,23 +25,36 @@ import org.robolectric.annotation.Config
 @Config(manifest = Config.NONE, sdk = [33])
 class DefaultFlagRepositoryTest {
 
+    private val json: Json = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+    }
+
     @Test
     fun `observe emits Loading then Success on a happy fetch`() = runTest {
-        val flags = listOf(stubFlag(topicId = 5))
-        val (repo, _, _) = buildRepository(html = "<html/>", parsedFlags = flags)
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getFlagTopics(bucket = HfrRestFlagBucket.PARTICIPATED, useAuth = true)
+        } returns FIXTURE_PARTICIPATED
+        val repo = buildRepository(apiClient)
 
         repo.observe(FlagType.CYAN).test {
             assertEquals(FlagsResult.Loading, awaitItem())
-            assertEquals(FlagsResult.Success(flags), awaitItem())
+            val success = awaitItem() as FlagsResult.Success
+            assertEquals(1, success.flags.size)
+            assertEquals(35395, success.flags.single().topicId)
+            assertEquals(FlagType.CYAN, success.flags.single().type)
             cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
     fun `observe emits Failure when the network throws`() = runTest {
-        val hfrClient = mockk<HfrClient>()
-        coEvery { hfrClient.getFlagsPage(owntopic = 1) } throws IOException("offline")
-        val (repo, _, _) = buildRepository(hfrClient = hfrClient)
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getFlagTopics(bucket = HfrRestFlagBucket.PARTICIPATED, useAuth = true)
+        } throws IOException("offline")
+        val repo = buildRepository(apiClient)
 
         repo.observe(FlagType.CYAN).test {
             assertEquals(FlagsResult.Loading, awaitItem())
@@ -53,23 +66,21 @@ class DefaultFlagRepositoryTest {
 
     @Test
     fun `refresh broadcasts a fresh result to active observers`() = runTest {
-        val initialFlags = listOf(stubFlag(topicId = 5))
-        val refreshedFlags = listOf(stubFlag(topicId = 5), stubFlag(topicId = 9))
-        val hfrClient = mockk<HfrClient>()
-        coEvery { hfrClient.getFlagsPage(owntopic = 1) } returnsMany listOf("<html v=1/>", "<html v=2/>")
-        val parser = mockk<FlagsListParser>()
-        coEvery { parser.parse("<html v=1/>", FlagType.CYAN) } returns initialFlags
-        coEvery { parser.parse("<html v=2/>", FlagType.CYAN) } returns refreshedFlags
-
-        val (repo, _, _) = buildRepository(hfrClient = hfrClient, parser = parser)
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getFlagTopics(bucket = HfrRestFlagBucket.PARTICIPATED, useAuth = true)
+        } returnsMany listOf(FIXTURE_PARTICIPATED, FIXTURE_PARTICIPATED_REFRESHED)
+        val repo = buildRepository(apiClient)
 
         repo.observe(FlagType.CYAN).test {
             assertEquals(FlagsResult.Loading, awaitItem())
-            assertEquals(FlagsResult.Success(initialFlags), awaitItem())
+            val initial = awaitItem() as FlagsResult.Success
+            assertEquals(35395, initial.flags.single().topicId)
 
             repo.refresh(FlagType.CYAN)
             assertEquals(FlagsResult.Loading, awaitItem())
-            assertEquals(FlagsResult.Success(refreshedFlags), awaitItem())
+            val refreshed = awaitItem() as FlagsResult.Success
+            assertEquals(2, refreshed.flags.size)
 
             cancelAndIgnoreRemainingEvents()
         }
@@ -77,41 +88,42 @@ class DefaultFlagRepositoryTest {
 
     @Test
     fun `observe reuses cached success instead of refetching the same tab`() = runTest {
-        val flags = listOf(stubFlag(topicId = 5, type = FlagType.FAVORITE))
-        val hfrClient = mockk<HfrClient>()
-        coEvery { hfrClient.getFlagsPage(owntopic = 3) } returns "<favorites/>"
-        val parser = mockk<FlagsListParser>()
-        coEvery { parser.parse("<favorites/>", FlagType.FAVORITE) } returns flags
-        val (repo, _, _) = buildRepository(hfrClient = hfrClient, parser = parser)
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getFlagTopics(bucket = HfrRestFlagBucket.FAVORITES, useAuth = true)
+        } returns FIXTURE_PARTICIPATED
+        val repo = buildRepository(apiClient)
 
         repo.observe(FlagType.FAVORITE).test {
             assertEquals(FlagsResult.Loading, awaitItem())
-            assertEquals(FlagsResult.Success(flags), awaitItem())
+            val first = awaitItem() as FlagsResult.Success
+            assertEquals(35395, first.flags.single().topicId)
             cancelAndIgnoreRemainingEvents()
         }
 
         repo.observe(FlagType.FAVORITE).test {
-            assertEquals(FlagsResult.Success(flags), awaitItem())
+            val cached = awaitItem() as FlagsResult.Success
+            assertEquals(35395, cached.flags.single().topicId)
             cancelAndIgnoreRemainingEvents()
         }
 
-        coVerify(exactly = 1) { hfrClient.getFlagsPage(owntopic = 3) }
+        coVerify(exactly = 1) {
+            apiClient.getFlagTopics(bucket = HfrRestFlagBucket.FAVORITES, useAuth = true)
+        }
     }
 
     @Test
     fun `clearSessionCache drops cached flags so the next observe fetches again`() = runTest {
-        val initialFlags = listOf(stubFlag(topicId = 5, type = FlagType.FAVORITE))
-        val nextFlags = listOf(stubFlag(topicId = 9, type = FlagType.FAVORITE))
-        val hfrClient = mockk<HfrClient>()
-        coEvery { hfrClient.getFlagsPage(owntopic = 3) } returnsMany listOf("<favorites v=1/>", "<favorites v=2/>")
-        val parser = mockk<FlagsListParser>()
-        coEvery { parser.parse("<favorites v=1/>", FlagType.FAVORITE) } returns initialFlags
-        coEvery { parser.parse("<favorites v=2/>", FlagType.FAVORITE) } returns nextFlags
-        val (repo, _, _) = buildRepository(hfrClient = hfrClient, parser = parser)
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getFlagTopics(bucket = HfrRestFlagBucket.FAVORITES, useAuth = true)
+        } returnsMany listOf(FIXTURE_PARTICIPATED, FIXTURE_PARTICIPATED_REFRESHED)
+        val repo = buildRepository(apiClient)
 
         repo.observe(FlagType.FAVORITE).test {
             assertEquals(FlagsResult.Loading, awaitItem())
-            assertEquals(FlagsResult.Success(initialFlags), awaitItem())
+            val first = awaitItem() as FlagsResult.Success
+            assertEquals(1, first.flags.size)
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -119,71 +131,154 @@ class DefaultFlagRepositoryTest {
 
         repo.observe(FlagType.FAVORITE).test {
             assertEquals(FlagsResult.Loading, awaitItem())
-            assertEquals(FlagsResult.Success(nextFlags), awaitItem())
+            val refetched = awaitItem() as FlagsResult.Success
+            assertEquals(2, refetched.flags.size)
             cancelAndIgnoreRemainingEvents()
         }
 
-        coVerify(exactly = 2) { hfrClient.getFlagsPage(owntopic = 3) }
-    }
-
-    @Test
-    fun `each FlagType maps to its own owntopic value`() = runTest {
-        val hfrClient = mockk<HfrClient>()
-        coEvery { hfrClient.getFlagsPage(owntopic = 1) } returns "<r/>"
-        coEvery { hfrClient.getFlagsPage(owntopic = 2) } returns "<c/>"
-        coEvery { hfrClient.getFlagsPage(owntopic = 3) } returns "<f/>"
-        val parser = mockk<FlagsListParser>()
-        coEvery { parser.parse("<r/>", FlagType.CYAN) } returns
-            listOf(stubFlag(topicId = 1, type = FlagType.CYAN))
-        coEvery { parser.parse("<c/>", FlagType.RED) } returns
-            listOf(stubFlag(topicId = 2, type = FlagType.RED))
-        coEvery { parser.parse("<f/>", FlagType.FAVORITE) } returns
-            listOf(stubFlag(topicId = 3, type = FlagType.FAVORITE))
-
-        val (repo, _, _) = buildRepository(hfrClient = hfrClient, parser = parser)
-
-        listOf(FlagType.CYAN to 1, FlagType.RED to 2, FlagType.FAVORITE to 3).forEach { (type, topicId) ->
-            repo.observe(type).test {
-                awaitItem() // Loading
-                val success = awaitItem() as FlagsResult.Success
-                assertEquals(topicId, success.flags.single().topicId)
-                cancelAndIgnoreRemainingEvents()
-            }
+        coVerify(exactly = 2) {
+            apiClient.getFlagTopics(bucket = HfrRestFlagBucket.FAVORITES, useAuth = true)
         }
     }
 
-    private fun stubFlag(topicId: Int, type: FlagType = FlagType.CYAN): Flag = Flag(
-        cat = 1,
-        subcat = 1,
-        topicId = topicId,
-        title = "Topic $topicId",
-        totalPages = 1,
-        replyCount = 0,
-        views = 0,
-        type = type,
-        hasUnread = true,
-        lastReadPage = 1,
-        firstUnreadPostId = 0L,
-        firstPostAuthor = "",
-        lastReplyAuthor = "",
-        lastReplyAt = "",
-    )
+    @Test
+    fun `each FlagType maps to its own REST bucket`() = runTest {
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getFlagTopics(bucket = HfrRestFlagBucket.PARTICIPATED, useAuth = true)
+        } returns FIXTURE_PARTICIPATED
+        coEvery {
+            apiClient.getFlagTopics(bucket = HfrRestFlagBucket.READ, useAuth = true)
+        } returns FIXTURE_PARTICIPATED
+        coEvery {
+            apiClient.getFlagTopics(bucket = HfrRestFlagBucket.FAVORITES, useAuth = true)
+        } returns FIXTURE_PARTICIPATED
+        val repo = buildRepository(apiClient)
 
-    private fun buildRepository(
-        html: String = "<html/>",
-        parsedFlags: List<Flag> = emptyList(),
-        hfrClient: HfrClient = mockk<HfrClient>().also {
-            coEvery { it.getFlagsPage(owntopic = any()) } returns html
-        },
-        parser: FlagsListParser = mockk<FlagsListParser>().also {
-            coEvery { it.parse(any(), any()) } returns parsedFlags
-        },
-    ): Triple<DefaultFlagRepository, HfrClient, FlagsListParser> {
-        val repo = DefaultFlagRepository(
-            hfrClient = hfrClient,
-            parser = parser,
+        listOf(
+            FlagType.CYAN to HfrRestFlagBucket.PARTICIPATED,
+            FlagType.RED to HfrRestFlagBucket.READ,
+            FlagType.FAVORITE to HfrRestFlagBucket.FAVORITES,
+        ).forEach { (type, _) ->
+            repo.observe(type).test {
+                awaitItem() // Loading
+                val success = awaitItem() as FlagsResult.Success
+                assertEquals(1, success.flags.size)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+        coVerify(exactly = 1) {
+            apiClient.getFlagTopics(bucket = HfrRestFlagBucket.PARTICIPATED, useAuth = true)
+        }
+        coVerify(exactly = 1) {
+            apiClient.getFlagTopics(bucket = HfrRestFlagBucket.READ, useAuth = true)
+        }
+        coVerify(exactly = 1) {
+            apiClient.getFlagTopics(bucket = HfrRestFlagBucket.FAVORITES, useAuth = true)
+        }
+    }
+
+    private fun buildRepository(apiClient: HfrApiClient): DefaultFlagRepository =
+        DefaultFlagRepository(
+            apiClient = apiClient,
+            json = json,
             ioDispatcher = UnconfinedTestDispatcher(),
         )
-        return Triple(repo, hfrClient, parser)
+
+    private companion object {
+        // Real REST shape (single-resource per-cat fixture promoted to a global-style
+        // body — same envelope, just with a category-link the mapper can read). The
+        // payload comes verbatim from `core/data/src/test/resources/fixtures/
+        // rest_cat23_participated.json` so a server-side change to the field set is
+        // caught by the mapper tests as well as this one.
+        const val FIXTURE_PARTICIPATED = """
+            {
+              "resource": {
+                "page": 1,
+                "results_count": 1,
+                "results_per_page": 1,
+                "resources": [
+                  {
+                    "id": 35395,
+                    "title": "Redface 2",
+                    "last_post_date": "2026-05-01 17:07",
+                    "is_closed": false,
+                    "is_sticky": false,
+                    "links": {
+                      "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"
+                      },
+                      "subcategory": {
+                        "linked_type": "forum_subcategory",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/"
+                      },
+                      "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/subcategories/550/topics/35395/posts/?page=12&results_per_page=40",
+                        "count": 541
+                      },
+                      "last_author": {"title": "qwazer"},
+                      "author": {"title": "XaTriX"}
+                    },
+                    "is_read": false,
+                    "flag_owntopic": 1,
+                    "last_position": 479,
+                    "last_post_read_id": 2783256
+                  }
+                ]
+              }
+            }
+        """
+
+        const val FIXTURE_PARTICIPATED_REFRESHED = """
+            {
+              "resource": {
+                "page": 1,
+                "results_count": 2,
+                "results_per_page": 50,
+                "resources": [
+                  {
+                    "id": 35395,
+                    "title": "Redface 2",
+                    "last_post_date": "2026-05-01 17:07",
+                    "is_closed": false,
+                    "is_sticky": false,
+                    "links": {
+                      "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"},
+                      "posts": {
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/35395/posts/?page=12&results_per_page=40",
+                        "count": 541
+                      }
+                    },
+                    "is_read": false,
+                    "flag_owntopic": 1,
+                    "last_post_read_id": 2783256
+                  },
+                  {
+                    "id": 9999,
+                    "title": "Other topic",
+                    "last_post_date": "2026-05-02 09:00",
+                    "is_closed": false,
+                    "is_sticky": false,
+                    "links": {
+                      "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
+                      "posts": {
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/9999/posts/?page=3&results_per_page=40",
+                        "count": 100
+                      }
+                    },
+                    "is_read": true,
+                    "flag_owntopic": 1,
+                    "last_post_read_id": 12345
+                  }
+                ]
+              }
+            }
+        """
     }
 }

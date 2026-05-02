@@ -10,6 +10,23 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 Phase 1B.1 livrée : login HFR utilisable de bout en bout avec cookies persistants (DataStore + `PersistentCookieJar`). AAB `0.1.0-phase1b.0` (build 14) sortira avec la PR `feature/1b-1-auth`.
 
+### Phase 1D-1 — Drapeaux REST (#110)
+
+#### Added
+- `core/network/HfrRestFlagBucket` (enum `PARTICIPATED`/`READ`/`FAVORITES`) + `HfrApiClient.getFlagTopics(bucket, …, useAuth=true)` et `getCategoryFlagTopics(cat, bucket, …, useAuth=true)` pour la lecture REST des drapeaux.
+- `core/data/flags/RestFlagMappers` : mapping `RestListEnvelope<RestTopic>` → `List<Flag>` partagé entre la forme globale (cat dérivé de `links.category.href`) et la forme par-cat (cat passé en `fallbackCat`).
+- `core/data/flags/RestFlagMappersTest` (fixtures + cas synthétiques) ; `core/data/flags/DefaultFlagRepositoryTest` réécrit pour mocker `HfrApiClient` au lieu du parser HTML.
+
+#### Changed
+- `core/data/flags/DefaultFlagRepository` consomme désormais `HfrApiClient.getFlagTopics(...)` + JSON lenient (`@FlagsJson`) au lieu de `HfrClient.getFlagsPage(...)` + `FlagsListParser`. Sémantique observe / refresh / clearSessionCache inchangée.
+- `core/model/Flag` : champ `views: Int` retiré (REST ne l'expose pas, aucun consumer UI). `firstUnreadPostId: Long` renommé `lastPostReadId: Long?` pour refléter la sémantique REST `last_post_read_id` (id du dernier post lu, pas du premier non lu). `app/RedfaceNavigation` adapte le narrowing `Long → Int` pour le scroll.
+- `docs/specs/protocol-hfr.md`, `architecture.md`, `models.md`, `navigation.md`, `roadmap.md` mis à jour pour acter la migration REST des drapeaux et la sémantique `lastPostReadId`.
+
+#### Removed
+- `core/parser/flags/FlagsListParser` + ses tests + ses fixtures HTML (`flags_page_owntopic-{1,2,3}.html`).
+- `core/network/HfrClient.getFlagsPage(owntopic)` (et son test associé).
+- Provider Hilt `provideFlagsListParser` dans `PlatformBindingsModule`.
+
 ### Added
 - `docs/specs/models.md` : nouvelle section **Authentification** documentant `AuthState` (sealed `Anonymous` / `Authenticated(pseudo)`) et `LoginError` (sealed `InvalidCredentials` / `RateLimited` / `Network` / `Unknown`). Le `classDiagram` Mermaid expose la hiérarchie sealed.
 - `docs/specs/roadmap.md` Phase 1 : entrée "Login HFR" cochée.

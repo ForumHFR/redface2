@@ -1,5 +1,0 @@
-Source: forum.hardware.fr (capture personnelle XaT, 2026-04-28)
-Captured page: forum1f.php?config=hfr.inc&owntopic=2&new=0&nojs=0
-Type: drapeau rouge — onglet HFR « Tous les sujets que j'ai commencé à lire uniquement » (= Lus uniquement côté UI Redface 2)
-Marqueur ligne (sujetCase5): flag0.gif (avec posts non-lus) / flagn0.gif (sans nouveaux)
-Notes: hash_check, codehex et id_user sanitized. 127 topics rouges dans la fixture (pas de favoris ni cyan mélangés), tous hasUnread=true.
