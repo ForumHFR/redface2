@@ -29,7 +29,8 @@ import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.feature.auth.LoginScreen
 import fr.forumhfr.redface2.feature.editor.EditorScreen
 import fr.forumhfr.redface2.feature.flags.FlagsRoute
-import fr.forumhfr.redface2.feature.forum.CategoryScreen
+import fr.forumhfr.redface2.feature.forum.CategoryRequest
+import fr.forumhfr.redface2.feature.forum.ForumCategoryScreen
 import fr.forumhfr.redface2.feature.forum.ForumScreen
 import fr.forumhfr.redface2.feature.messages.MessagesScreen
 import fr.forumhfr.redface2.feature.search.SearchScreen
@@ -37,12 +38,11 @@ import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import kotlinx.serialization.Serializable
 
-// Stubs used by placeholder screens (Forum/Search/Messages/Category) whose models are not
-// yet wired. Each "open topic" button currently navigates to a hard-coded HFR thread so the
-// navigation graph itself can be exercised end-to-end. The Flags entry no longer needs this
-// crutch since Phase 1B.4 (it now opens the real Flag's TopicRoute). The remaining call-sites
-// disappear feature by feature as Phase 1C/2 land the real ForumTopic, SearchResult,
-// MpThread models.
+// Stubs used by the remaining placeholder tabs (Search/Messages) whose models are not
+// yet wired. Each "open topic" button currently navigates to a hard-coded HFR thread so
+// the navigation graph itself can be exercised end-to-end. Forum/Category dropped this
+// crutch in Phase 1C-A (real REST-backed ForumScreen / ForumCategoryScreen). The
+// remaining call-sites disappear as Phase 1C+ lands the real SearchResult / MpThread.
 //
 // The target is the community topic dedicated to Redface 2 itself
 // (https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35395) — recent, short,
@@ -69,6 +69,7 @@ data object MessagesRoute : RedfaceNavKey
 data class CategoryRoute(
     val cat: Int,
     val subcat: Int? = null,
+    val page: Int = 1,
 ) : RedfaceNavKey
 
 @Serializable
@@ -99,7 +100,7 @@ data object LoginRoute : RedfaceNavKey
 @Serializable
 data object DiagnosticsRoute : RedfaceNavKey
 
-private enum class TopLevelDestination(
+internal enum class TopLevelDestination(
     val labelRes: Int,
     val rootRoute: RedfaceNavKey,
 ) {
@@ -109,7 +110,7 @@ private enum class TopLevelDestination(
     Messages(R.string.nav_messages, MessagesRoute),
 }
 
-private data class ParsedDeepLink(
+internal data class ParsedDeepLink(
     val destination: TopLevelDestination,
     val route: RedfaceNavKey,
 )
@@ -231,17 +232,8 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
             }
             entry<ForumRoute> {
                 ForumScreen(
-                    onOpenCategory = {
-                        backStack.add(CategoryRoute(cat = 23, subcat = 0))
-                    },
-                    onOpenTopic = {
-                        backStack.add(
-                            TopicRoute(
-                                cat = DEMO_TOPIC_CAT,
-                                post = DEMO_TOPIC_POST,
-                                page = 1,
-                            ),
-                        )
+                    onOpenCategory = { category ->
+                        backStack.add(CategoryRoute(cat = category.id, subcat = null, page = 1))
                     },
                 )
             }
@@ -272,15 +264,19 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                 )
             }
             entry<CategoryRoute> { route ->
-                CategoryScreen(
-                    cat = route.cat,
-                    subcat = route.subcat,
-                    onOpenTopic = {
+                ForumCategoryScreen(
+                    request = CategoryRequest(
+                        cat = route.cat,
+                        initialSubcat = route.subcat,
+                        initialPage = route.page,
+                    ),
+                    onOpenTopic = { topic ->
                         backStack.add(
                             TopicRoute(
-                                cat = DEMO_TOPIC_CAT,
-                                post = DEMO_TOPIC_POST,
-                                page = 1,
+                                cat = topic.cat,
+                                post = topic.topicId,
+                                page = topic.lastReadPage ?: 1,
+                                scrollTo = topic.lastPostReadId,
                             ),
                         )
                     },
@@ -327,8 +323,27 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
     )
 }
 
-private fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
+internal fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
+    // forum1.php is the topic-list page (per category / subcategory). Required:
+    // `cat`. Optional: `subcat`, `page`. Lands on the Forum tab so the back stack
+    // walks Forum -> Category -> (deeper) instead of Flags.
     "/forum1.php" -> {
+        val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
+        val subcat = uri.getQueryParameter("subcat")?.toIntOrNull()
+        // Preserve `page` from the deep link so a shared link to e.g.
+        // forum1.php?cat=23&subcat=550&page=2 lands on page 2 instead of silently
+        // resetting to 1. Out-of-range / malformed values fall back to 1.
+        val page = uri.getQueryParameter("page")?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+        ParsedDeepLink(
+            destination = TopLevelDestination.Forum,
+            route = CategoryRoute(cat = cat, subcat = subcat, page = page),
+        )
+    }
+
+    // forum2.php is the topic-content page (the actual posts). Required: `cat`,
+    // `post`. Optional: `page`, fragment `#t<numreponse>` for scroll-to-post.
+    // Lands on the Flags tab — the typical reading surface.
+    "/forum2.php" -> {
         val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
         val post = uri.getQueryParameter("post")?.toIntOrNull() ?: return null
         val page = uri.getQueryParameter("page")?.toIntOrNull() ?: 1
@@ -336,14 +351,6 @@ private fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
         ParsedDeepLink(
             destination = TopLevelDestination.Flags,
             route = TopicRoute(cat = cat, post = post, page = page, scrollTo = scrollTo),
-        )
-    }
-
-    "/forum2.php" -> {
-        val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
-        ParsedDeepLink(
-            destination = TopLevelDestination.Forum,
-            route = CategoryRoute(cat = cat, subcat = uri.getQueryParameter("subcat")?.toIntOrNull()),
         )
     }
 

@@ -120,9 +120,9 @@ graph TB
 |--------|---------------|-----------|
 | `:core:model` | Modèles domaine purs (`Topic`, `Post`, `PostContent`, `Category`, `Flag`, `MP`). Aucune dépendance Android. | rien |
 | `:core:domain` | Interfaces de repositories (`TopicRepository`, `FlagRepository`, `AuthRepository`...) et règles métier partagées. Aucune dépendance framework. | `:core:model` |
-| `:core:data` | Implémentations des repositories. Orchestre réseau, parser et cache. Fournit les bindings Hilt. | `:core:domain`, `:core:network`, `:core:parser`, `:core:database` |
-| `:core:network` | `HfrClient` : requêtes HTTP, cookies, session, login. Encapsule OkHttp. Renvoie du HTML brut ou `Result<Unit>` — n'expose aucun type domaine. | rien |
-| `:core:parser` | `HfrParser` : transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine, dont l'AST `PostContent`. | `:core:model` |
+| `:core:data` | Implémentations des repositories. Orchestre réseau (HTML + REST JSON), parser HTML et cache. Porte les DTO `@Serializable` REST et leurs mappers vers `:core:model`. Fournit les bindings Hilt. | `:core:domain`, `:core:network`, `:core:parser`, `:core:database` |
+| `:core:network` | Deux clients : `HfrClient` (HTML brut sur `forum*.php`, login, MPs, mutations) et `HfrApiClient` (JSON REST sur `/webservices/rest_api.php`, browsing). Encapsulent OkHttp. Aucun type domaine exposé — du `String` brut ou des erreurs typées. Le helper de rewrite HATEOAS `HfrApiClient.rewriteHateoasHref(href)` vit ici. Cf. [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride). | rien |
+| `:core:parser` | `HfrParser` : transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine, dont l'AST `PostContent`. Pas de parser JSON REST ici — les DTO REST vivent dans `:core:data`. | `:core:model` |
 | `:core:database` | Room DB, DAOs, entities, mappers entity↔model. Cache locale + cache MPStorage. | `:core:model` |
 | `:core:ui` | Thème Material 3 (`theme/`) et `PostRenderer` (`post/`, `PostContent` → Compose). D'autres sous-packages (`components/`, `adaptive/`, `semantics/`, `util/`, `extensions/`) sont prévus mais n'apparaîtront qu'au fur et à mesure de l'arrivée des features qui les justifient — pas de module vide en avance. Seul module autorisé à instancier `ColorScheme`, `Typography`, `Shapes`. | `:core:model` |
 | `:core:extension` | Interfaces d'extension : `PostDecorator`, `TopicToolbarContributor`, `EditorToolbarContributor`. | `:core:model` |
@@ -224,9 +224,12 @@ interface MessagesRepository {
 
 `FlagRepository` + parser + UI sont livrés en Phase 1B.2 → 1B.5 : `FlagsListParser` (classe dédiée dans `:core:parser`, distincte de la façade `HfrParser`) extrait `List<Flag>` depuis `forum1f.php?config=hfr.inc&owntopic=N` (cf. [`models.md`]({{ site.baseurl }}/specs/models)). `:core:data DefaultFlagRepository` orchestre fetch + parse via un `flow { emit(Loading); emit(fetch); emitAll(refreshes) }` cold-collected — un `MutableSharedFlow<FlagsResult>` par `FlagType` rebroadcast les résultats des `refresh()` explicites. Il garde uniquement un cache mémoire par onglet pour la session HFR courante : revenir sur un onglet déjà chargé ne refetch pas implicitement, mais `refresh(type)` force toujours le réseau et `clearSessionCache()` vide tout au logout / changement de session. `FlagItem` rend une ligne dans `:core:ui`, et `:feature:flags FlagsRoute` compose les 3 onglets HFR (« Mes sujets » / « Lus uniquement » / « Favoris ») plus le footer auth + MP count + version + signalement CSAE. Pas de cache Room en 1B — la persistance est reportée en Phase 1D (cf. roadmap `1D.2`). Pas de `PullToRefreshBox` non plus en 1B : des boutons « Réessayer » / « Actualiser » couvrent le besoin minimal ; pull-to-refresh complet est laissé pour quand le besoin justifie le coût (Phase 1D / Phase 2).
 
-### `:core:network` — HfrClient
+### `:core:network` — HfrClient + HfrApiClient
 
-Le client HTTP ne parse rien. Il retourne du HTML brut ou des confirmations d'action.
+La couche réseau ne parse rien. Elle retourne du `String` (HTML ou JSON) ou des confirmations d'action. Deux clients coexistent depuis Phase 1C-A (cf. [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride)) :
+
+- **`HfrClient`** — endpoints HTML `forum*.php` : login, lecture posts, drapeaux page, MPs, mutations.
+- **`HfrApiClient`** — endpoints REST JSON `/webservices/rest_api.php?uri=…` : browsing (catégories, sous-catégories, topic listings, metadata topic). Fournit aussi le helper validant `rewriteHateoasHref(href)` qui transforme une URL HATEOAS `/api/…` en URL callable côté HFR.
 
 ```kotlin
 @Singleton
@@ -322,8 +325,13 @@ abstract class RepositoryModule {
 
     @Binds
     abstract fun bindFlagRepository(impl: DefaultFlagRepository): FlagRepository
+
+    @Binds
+    abstract fun bindForumRepository(impl: DefaultForumRepository): ForumRepository
 }
 ```
+
+`ForumRepository` (Phase 1C-A) consomme `HfrApiClient` et expose `observeCategories()` / `observeSubcategories(cat)` / `observeTopicList(cat, subcat?, page)` (et leurs `refresh*` jumeaux) en `Flow<ForumResult<…>>`. Cache mémoire pour catégories et sous-catégories ; pas de Room en 1C-A (les listings de topics ne sont pas mis en cache disque). Cf. [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride) pour la décision REST-first sur ces trois domaines.
 
 Les ViewModels dans les features ne connaissent que l'interface :
 

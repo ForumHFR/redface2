@@ -1,0 +1,24 @@
+Source: forum.hardware.fr — REST API (authentifié)
+Captured endpoint: GET /webservices/rest_api.php?uri=forums/hardwarefr/categories/23/topics/participated/
+Captured: 2026-05-01 avec cookies md_user/md_passs/md_id (compte test)
+Type: topics participés (drapeau cyan owntopic=1 du legacy) scopés cat=23
+
+Champs ADDITIONNELS vs anonymous (cf. rest_topics_cat23_subcat550_p1.json) :
+- `is_read: bool`              → drapeau lu/non-lu (false = non-lu = drapeau coloré)
+- `flag_owntopic: int`         → 1 (cyan participé)
+- `last_position: int`         → **index/offset global du dernier post lu dans le topic**, pas un numéro de page.
+                                  Ici 479 est l'index dans le topic global (le topic a 541 posts au total),
+                                  qui mappe sur la page 12 via la pagination 40/page. Ne **pas** utiliser
+                                  comme page directement.
+- `last_post_read_id: int`     → ID du dernier post lu (ancre pour deep-link "aller au dernier message lu")
+- `links.subcategory`          → href vers la sous-catégorie d'origine du topic (le topic 35395 est en sub=550)
+- `links.posts.href` contient déjà `?page=N` où N = **page du dernier post lu** (ici page=12) — c'est CETTE
+                                  valeur que les mappers consomment pour `TopicSummary.lastReadPage`.
+- `links.posts.href` contient `?results_per_page=N` (ici 40) — c'est CETTE valeur que les mappers
+                                  consomment pour calculer `totalPages = ceil(count / N)`. La valeur
+                                  HTML 40-posts-par-page est un défaut, pas une vérité globale.
+
+Conséquence pour Redface 2 :
+- Cet endpoint remplace HfrClient.getFlagsPage(owntopic=1) côté REST
+- Le payload JSON donne directement la cible "Aller au dernier message lu" (links.posts.href est ready)
+- Pas besoin de parser le tooltip HTML "Allez au dernier message lu dans un sujet auquel vous avez participé"

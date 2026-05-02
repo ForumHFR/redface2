@@ -10,7 +10,7 @@ permalink: /adr/003-api-rest-hfr-hybride
 
 ## Statut
 
-Proposé — 2026-05-02
+Accepté — 2026-05-02
 
 ## Contexte
 
@@ -53,7 +53,7 @@ Choix de design pour la couche REST :
 2. **Helper de rewrite HATEOAS obligatoire.** Tout `href` retourné dans un payload pointe vers `/api/<…>` qui renvoie 404 sur HFR. Une fonction validante réécrit uniquement les URLs `https://forum.hardware.fr/api/<path>` vers `https://forum.hardware.fr/webservices/rest_api.php?uri=<path>` au moment du déréférencement. Le rewrite vit dans la couche réseau, jamais exposé aux ViewModels.
 3. **Limite de parallélisme.** OkHttp `maxRequestsPerHost = 5` (default) reste en place. Bench montre une saturation TCP côté Apache LDLC à 20 parallèles ; ≤ 10 connexions simultanées est le seuil sain. Pas de tuning custom requis.
 4. **Pas de fallback runtime global.** Si un endpoint REST utilisé en v1 commence à renvoyer 500/404 en prod, on réintroduit une source HTML pour le domaine touché via une PR dédiée. Pas de double-source automatique côté happy path : on ne paye pas le coût d'un fallback systématique sur des endpoints qui marchent.
-5. **Fixtures canoniques.** Les 6 fixtures `core/parser/src/test/resources/fixtures/rest_*.json` capturées le 2026-05-01 (avec leurs `.source.txt` documentant la commande curl d'origine) deviennent les fixtures de référence pour les parsers REST. Comme pour les fixtures HTML, les captures authentifiées doivent avoir leurs données sensibles nettoyées avant commit.
+5. **Fixtures canoniques.** Les 6 fixtures `core/data/src/test/resources/fixtures/rest_*.json` capturées le 2026-05-01 (avec leurs `.source.txt` documentant la commande curl d'origine) deviennent les fixtures de référence pour les mappers REST. Comme pour les fixtures HTML, les captures authentifiées doivent avoir leurs données sensibles nettoyées avant commit. Les fixtures vivent à côté de leurs consumers : les DTO + mappers REST sont dans `:core:data`, donc les fixtures aussi (initialement capturées dans `:core:parser`, déplacées en Phase 1C-A).
 6. **Pas de mutation REST en v1.** Même si création topic / réponse ont été validées live, l'écriture reste en HTML v1 (`bddpost.php`, `addflag.php`, `delflag.php`). Pour les drapeaux, la sémantique de `PUT topics/` est trop opaque et le risque de marquer involontairement des drapeaux en prod (testé : downgrade refusé, no-op refusé, hors-bornes silently ignored) interdit un usage v1. À réévaluer post-v1 avec un compte de test dédié.
 7. **Frontières de modules.** `:core:network` porte le transport REST, la construction d'URL et le rewrite HATEOAS. Les DTO `@Serializable` et les mappings vers `:core:model` vivent dans `:core:data`, au plus près des repositories qui consomment les endpoints. `:core:parser` reste dédié aux formats HFR historiques nécessitant une transformation structurante (HTML posts/MPs, AST).
 
@@ -100,6 +100,6 @@ Choix de design pour la couche REST :
 
 ## Sources
 
-- Sources versionnées : `core/parser/src/test/resources/fixtures/rest_*.json` (6 fixtures + `.source.txt`) et cette ADR, qui intègre la synthèse des mesures et des endpoints retenus.
+- Sources versionnées : `core/data/src/test/resources/fixtures/rest_*.json` (6 fixtures + `.source.txt`) et cette ADR, qui intègre la synthèse des mesures et des endpoints retenus.
 - Archives locales non normatives : `~/.claude/projects/-work-xaat/memory/reference_hfr_rest_api.md`, `tmp/redface2/drafts/hfr-rest-api_claude.md`, `tmp/redface2/drafts/hfr-rest-mp-doc-urls.md`, `tmp/redface2/bench-rest-vs-html-2026-05-01/results.md` (+ raw CSV + scripts rejouables).
 - Doc V1 MesDiscussions (Wayback Machine) : `https://web.archive.org/web/2018/help.mesdiscussions.net/pages/viewpage.action?pageId=5013586`.

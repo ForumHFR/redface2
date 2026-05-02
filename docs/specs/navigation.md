@@ -80,7 +80,7 @@ graph TB
     style TOPIC fill:#e74c3c,color:#fff
 ```
 
-> **Lecture du graphe** : ce diagramme décrit le **flow utilisateur**, pas le découpage en `NavKey`. Les sept routes typées réelles sont `FlagsListRoute`, `ForumRoute`, `CategoryRoute`, `TopicRoute`, `SearchRoute`, `MessagesRoute`, `EditorRoute` (cf. § Implémentation ci-dessous). Plusieurs nœuds du graphe sont des **states internes au screen** plutôt que des routes distinctes : `TABMP` / `TABMULTI` correspondent à `MessageTab.CLASSIC` / `MessageTab.MULTI` dans le `MessagesState` ; `CATS` / `SUBCATS` / `TOPICLIST` sont couverts par la même `CategoryRoute(cat, subcat?)`. Le mapping flow → routes typées est explicite dans le code de `entryProvider` plus bas.
+> **Lecture du graphe** : ce diagramme décrit le **flow utilisateur**, pas le découpage en `NavKey`. Les sept routes typées réelles sont `FlagsListRoute`, `ForumRoute`, `CategoryRoute`, `TopicRoute`, `SearchRoute`, `MessagesRoute`, `EditorRoute` (cf. § Implémentation ci-dessous). Plusieurs nœuds du graphe sont des **states internes au screen** plutôt que des routes distinctes : `TABMP` / `TABMULTI` correspondent à `MessageTab.CLASSIC` / `MessageTab.MULTI` dans le `MessagesState` ; `CATS` / `SUBCATS` / `TOPICLIST` sont couverts par la même `CategoryRoute(cat, subcat?, page)`. Le mapping flow → routes typées est explicite dans le code de `entryProvider` plus bas.
 
 ---
 
@@ -203,6 +203,7 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
 @Serializable data class CategoryRoute(
     val cat: Int,
     val subcat: Int? = null,
+    val page: Int = 1,
 ) : RedfaceNavKey
 @Serializable data class TopicRoute(
     val cat: Int,
@@ -248,7 +249,25 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
             entry<ForumRoute> { ForumScreen(onOpenCategory = { /* ... */ }) }
             entry<SearchRoute> { SearchScreen(onOpenResult = { /* ... */ }) }
             entry<MessagesRoute> { MessagesScreen(onOpenTopic = { /* ... */ }) }
-            entry<CategoryRoute> { route -> CategoryScreen(cat = route.cat, subcat = route.subcat, onOpenTopic = { /* ... */ }) }
+            entry<CategoryRoute> { route ->
+                ForumCategoryScreen(
+                    request = CategoryRequest(
+                        cat = route.cat,
+                        initialSubcat = route.subcat,
+                        initialPage = route.page,
+                    ),
+                    onOpenTopic = { topic ->
+                        backStack.add(
+                            TopicRoute(
+                                cat = topic.cat,
+                                post = topic.topicId,
+                                page = topic.lastReadPage ?: 1,
+                                scrollTo = topic.lastPostReadId,
+                            ),
+                        )
+                    },
+                )
+            }
             entry<TopicRoute> { route ->
                 TopicScreen(
                     request = TopicRequest(route.cat, route.post, route.page, route.scrollTo),
@@ -317,19 +336,21 @@ private data class ParsedDeepLink(val destination: TopLevelDestination, val rout
 private fun parseHfrDeepLink(uri: Uri): ParsedDeepLink? = when (uri.path) {
     "/forum1.php" -> {
         val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
+        val subcat = uri.getQueryParameter("subcat")?.toIntOrNull()
+        val page = uri.getQueryParameter("page")?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+        ParsedDeepLink(
+            destination = TopLevelDestination.Forum,
+            route = CategoryRoute(cat = cat, subcat = subcat, page = page),
+        )
+    }
+    "/forum2.php" -> {
+        val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
         val post = uri.getQueryParameter("post")?.toIntOrNull() ?: return null
         val page = uri.getQueryParameter("page")?.toIntOrNull() ?: 1
         val scrollTo = uri.fragment?.removePrefix("t")?.toIntOrNull()
         ParsedDeepLink(
             destination = TopLevelDestination.Flags,
             route = TopicRoute(cat = cat, post = post, page = page, scrollTo = scrollTo),
-        )
-    }
-    "/forum2.php" -> {
-        val cat = uri.getQueryParameter("cat")?.toIntOrNull() ?: return null
-        ParsedDeepLink(
-            destination = TopLevelDestination.Forum,
-            route = CategoryRoute(cat = cat, subcat = uri.getQueryParameter("subcat")?.toIntOrNull()),
         )
     }
     "/forum1f.php" -> ParsedDeepLink(TopLevelDestination.Flags, FlagsListRoute)
@@ -440,7 +461,7 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
 }
 ```
 
-Phase 1B.4 a livré `FlagsRoute` (dans `:feature:flags`) avec le vrai modèle `Flag` : la lambda `onOpenFlag` reçoit le topic concerné et `backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.firstUnreadPostId.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()))` devient trivial. Les constantes privées `DEMO_TOPIC_CAT` / `DEMO_TOPIC_POST` restent uniquement pour `ForumScreen`, `SearchScreen`, `MessagesScreen` et `CategoryScreen` qui sont encore des placeholders Phase 1A — chaque call-site disparaîtra au fur et à mesure que les Phase 1C/2 livrent les modèles `ForumTopic`, `SearchResult`, `MpThread`.
+Phase 1B.4 a livré `FlagsRoute` (dans `:feature:flags`) avec le vrai modèle `Flag` : la lambda `onOpenFlag` reçoit le topic concerné et `backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.firstUnreadPostId.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()))` devient trivial. Phase 1C-A a ensuite remplacé les placeholders Forum/Category par `ForumScreen` + `ForumCategoryScreen` alimentés par `ForumRepository` REST. Les constantes privées `DEMO_TOPIC_CAT` / `DEMO_TOPIC_POST` restent uniquement pour `SearchScreen` et `MessagesScreen`, qui sont encore des placeholders ; chaque call-site disparaîtra au fur et à mesure que les phases Search/Messages livreront les modèles `SearchResult` et `MpThread`.
 
 ---
 

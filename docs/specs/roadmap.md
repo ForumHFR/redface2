@@ -88,9 +88,10 @@ Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances e
 - [x] **PostRenderer Compose** — rendu natif `PostContent` dans `:core:ui` (paragraphes, citations imbriquées avec collapse, spoilers, smileys builtin/perso, images, couleurs ; cf. [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast) et [PR #80](https://github.com/ForumHFR/redface2/pull/80))
 - [x] **Écran Topic réel** — `TopicRepository` cache-aside (OkHttp + parser + Room) livré ([PR #88](https://github.com/ForumHFR/redface2/pull/88)) puis branché sur `TopicScreen` (1A-bind), `TopicFixtureRepository` supprimé
 - [ ] Écran Topic — pagination, scroll vers `numreponse` cible, navigation entre pages
-- [ ] Écran Forum — catégories, sous-catégories, liste de topics
+- [x] **Écran Forum 1C-A REST-first** — `:feature:forum.ForumScreen` (19 catégories) + `ForumCategoryScreen` (subcats + topics paginés). Source REST `/webservices/rest_api.php` via `HfrApiClient` (`:core:network`) et `ForumRepository` (`:core:data`), cf. [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride)
+- [ ] Écran Forum 1C-B — pull-to-refresh, drapeaux REST, recherche locale dans la liste
 - [ ] Cache Room — topics et drapeaux
-- [ ] Deep linking (URLs HFR → app) — squelette `parseHfrDeepLink` posé dans `RedfaceNavigation.kt`, à brancher sur les écrans réels
+- [x] Deep linking (URLs HFR → app) — `parseHfrDeepLink` corrigé (mapping `forum1.php` ↔ `forum2.php` inversé, fixé en 1C-A) et branché sur les écrans réels Forum/Category/Topic
 - [ ] Prefetch pages suivantes (avec `@AnonymousClient`, cf. [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#règle-critique--prefetch-non-authentifié))
 - [ ] Images + smileys (Coil 3 — split fetcher déjà câblé via `coil-network-okhttp`)
 - [ ] Blocs monospace `[fixed]` / `[code]` — restent suivis par [#79](https://github.com/ForumHFR/redface2/issues/79) et arriveront avec une fixture réelle

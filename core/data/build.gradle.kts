@@ -10,6 +10,12 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            // android.util.Log.* gets called from production code paths reached by JVM
+            // unit tests (DefaultForumRepository's onFailure logger, future mappers).
+            // Without this flag, every Log.* call throws "not mocked"; default-values
+            // stubs them to no-ops returning 0, which is what we want — we don't assert
+            // on logcat in tests. Same convention as :core:network.
+            isReturnDefaultValues = true
         }
     }
 }

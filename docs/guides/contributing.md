@@ -306,6 +306,22 @@ core/parser/src/test/resources/fixtures/
 
 **Total : ~36 fixtures** (13 reprises testées de v1 + 14 nouvelles + 9 profil/paramètres).
 
+### Fixtures REST JSON (Phase 1C-A)
+
+À côté des fixtures HTML, le browsing REST (cf. [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride)) consomme des fixtures JSON capturées live le 2026-05-01. Elles vivent à côté de leurs consumers (DTO + mappers) dans `:core:data` :
+
+```
+core/data/src/test/resources/fixtures/
+├── rest_categories.json              # 19 catégories anonymes
+├── rest_categories_auth.json         # 19 catégories + liens drapeaux (auth)
+├── rest_subcategories_cat13.json     # 15 sous-catégories de Discussions
+├── rest_topics_cat23_subcat550_p1.json  # page 1 — Tech Mobiles / Android
+├── rest_topic_meta_35395.json        # metadata d'un topic isolé
+└── rest_cat23_participated.json      # un topic en mode authentifié
+```
+
+Mêmes règles que les fixtures HTML : capturées live, **jamais inventées**, nettoyées des données sensibles avant commit, accompagnées d'un `.source.txt` qui documente la commande curl d'origine + caveats. Capture via `curl` direct contre `/webservices/rest_api.php?uri=…`, avec ou sans cookies selon le mode visé.
+
 **Règles :**
 - Les fixtures sont capturées depuis le vrai site HFR, **jamais** fabriquées par une IA ou à la main.
 - Capture via MCP `hfr-mcp` : `hfr_read cat=X post=Y page=Z output=path/to/fixture.html` écrit le HTML brut.
