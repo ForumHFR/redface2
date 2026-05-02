@@ -10,6 +10,18 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 Phase 1B.1 livrée : login HFR utilisable de bout en bout avec cookies persistants (DataStore + `PersistentCookieJar`). AAB `0.1.0-phase1b.0` (build 14) sortira avec la PR `feature/1b-1-auth`.
 
+### Phase 1D-2 — Lecture longue topic (#107)
+
+#### Added
+- `TopicEffect.ScrollToPost(numreponse)` : nouveau side-effect one-shot consommé par `LaunchedEffect(Unit)` côté `TopicScreen`. Le ViewModel garde un flag `scrollEffectEmitted` pour empêcher un re-emit après refresh ; nouvelle TopicRoute (page différente) crée un nouveau ViewModel, le flag se réinitialise naturellement.
+- Pagination UX : Précédent / Suivant désactivés aux bornes, indicateur `page X/Y`, champ "Aller à la page" qui n'accepte que `1..totalPages`. Rangée 1..N conservée en complément ≤ 40 pages.
+- `TopicUiState.canGoPrevious` / `canGoNext` exposés pour piloter l'UI sans dupliquer la logique côté Compose.
+- Tests : scroll effect émis pile une fois, ignoré quand le post cible n'est pas dans la page chargée, jamais re-émis sur refresh ; bornes Précédent/Suivant.
+
+#### Changed
+- `TopicScreen` : suppression du `LaunchedEffect(state.mode, request.scrollTo)` qui re-scrollait à chaque transition state, remplacé par la consommation de `viewModel.effects` via `LaunchedEffect(Unit)`.
+- Strings drapeaux `topic_page_previous` / `topic_page_next` / `topic_page_indicator` / `topic_page_jump_label` / `topic_page_jump_action` ajoutés.
+
 ### Added
 - `docs/specs/models.md` : nouvelle section **Authentification** documentant `AuthState` (sealed `Anonymous` / `Authenticated(pseudo)`) et `LoginError` (sealed `InvalidCredentials` / `RateLimited` / `Network` / `Unknown`). Le `classDiagram` Mermaid expose la hiérarchie sealed.
 - `docs/specs/roadmap.md` Phase 1 : entrée "Login HFR" cochée.

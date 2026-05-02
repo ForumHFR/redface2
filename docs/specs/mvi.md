@@ -189,6 +189,8 @@ sealed interface TopicIntent {
 }
 
 sealed interface TopicEffect {
+    /** Phase 1D-2 (#107) — one-shot scroll demand consumed by `LaunchedEffect(Unit)`. */
+    data class ScrollToPost(val numreponse: Int) : TopicEffect
     data class NavigateToReply(val cat: Int, val post: Int, val quote: String?) : TopicEffect
     data class NavigateToEdit(val cat: Int, val post: Int, val numreponse: Int) : TopicEffect
     data class NavigateToEditFirstPost(val cat: Int, val post: Int) : TopicEffect

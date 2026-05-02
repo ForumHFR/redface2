@@ -14,4 +14,9 @@
     <string name="topic_poll_show">(afficher)</string>
     <string name="topic_poll_hide">(masquer)</string>
     <string name="topic_retry">Réessayer</string>
+    <string name="topic_page_previous">Précédent</string>
+    <string name="topic_page_next">Suivant</string>
+    <string name="topic_page_indicator">page %1$d / %2$d</string>
+    <string name="topic_page_jump_label">Aller à la page</string>
+    <string name="topic_page_jump_action">Y aller</string>
 </resources>

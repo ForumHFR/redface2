@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.feature.topic
 
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.Topic
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
@@ -119,6 +121,94 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `scrollTo emits a single ScrollToPost effect when the target post is in the loaded page`() = runTest {
+        val target = 12_345
+        val topic = fakeTopic(
+            page = 3,
+            totalPages = 5,
+            posts = listOf(fakePost(numreponse = target)),
+        )
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
+
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 3, scrollTo = target),
+            topicRepository = repository,
+        )
+
+        viewModel.effects.test {
+            val effect = awaitItem() as TopicEffect.ScrollToPost
+            assertEquals(target, effect.numreponse)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `scrollTo does not emit an effect when the target post is missing from the page`() = runTest {
+        val topic = fakeTopic(page = 1, totalPages = 1, posts = listOf(fakePost(numreponse = 555)))
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
+
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 1, scrollTo = 999),
+            topicRepository = repository,
+        )
+
+        viewModel.effects.test {
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `scrollTo emits at most once even when the page reloads`() = runTest {
+        val target = 7_777
+        val topic = fakeTopic(page = 2, totalPages = 5, posts = listOf(fakePost(numreponse = target)))
+        // Two emissions in a row simulate cache + fresh ; the effect must fire only on the
+        // first one so the user does not get re-snapped after they have scrolled away.
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow {
+                emit(topic)
+                emit(topic.copy(title = "fresh"))
+            }),
+        )
+
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 2, scrollTo = target),
+            topicRepository = repository,
+        )
+
+        viewModel.effects.test {
+            val first = awaitItem() as TopicEffect.ScrollToPost
+            assertEquals(target, first.numreponse)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `canGoPrevious is false on page 1 and true otherwise`() = runTest {
+        val topic = fakeTopic(page = 1, totalPages = 3)
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+        )
+        assertEquals(false, viewModel.state.value.canGoPrevious)
+        assertEquals(true, viewModel.state.value.canGoNext)
+    }
+
+    @Test
+    fun `canGoNext is false on the last page`() = runTest {
+        val topic = fakeTopic(page = 5, totalPages = 5)
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 5),
+            topicRepository = repository,
+        )
+        assertEquals(true, viewModel.state.value.canGoPrevious)
+        assertEquals(false, viewModel.state.value.canGoNext)
+    }
+
+    @Test
     fun `retry after error replays the current page and succeeds`() = runTest {
         val topic = fakeTopic(page = 2, totalPages = 4)
         val repository = FakeTopicRepository(
@@ -145,26 +235,39 @@ class TopicViewModelTest {
         )
     }
 
-    private fun topicRequest(page: Int): TopicRequest = TopicRequest(
+    private fun topicRequest(page: Int, scrollTo: Int? = null): TopicRequest = TopicRequest(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
         page = page,
-        scrollTo = null,
+        scrollTo = scrollTo,
     )
 
     private fun fakeTopic(
         page: Int,
         totalPages: Int,
         title: String = "fake",
+        posts: List<Post> = emptyList(),
     ): Topic = Topic(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
         title = title,
-        posts = emptyList(),
+        posts = posts,
         page = page,
         totalPages = totalPages,
         isFirstPostOwner = false,
         poll = null,
+    )
+
+    private fun fakePost(numreponse: Int): Post = Post(
+        numreponse = numreponse,
+        author = "tester",
+        date = java.time.Instant.parse("2026-05-04T12:00:00Z"),
+        content = PostContent(blocks = emptyList()),
+        avatarUrl = null,
+        isEditable = false,
+        isOwnPost = false,
+        quotedAuthors = emptyList(),
+        postIndex = null,
     )
 
     private inline fun <reified T : TopicUiState.Mode> assertMode(state: TopicUiState): T {

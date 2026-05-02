@@ -11,29 +11,35 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,6 +51,8 @@ import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 @Composable
 fun TopicScreen(
@@ -59,6 +67,7 @@ fun TopicScreen(
 
     TopicContent(
         state = state,
+        effects = viewModel.effects,
         onIntent = viewModel::send,
         onReply = { onReply(request.post) },
         onOpenPage = onOpenPage,
@@ -68,19 +77,28 @@ fun TopicScreen(
 @Composable
 internal fun TopicContent(
     state: TopicUiState,
+    effects: Flow<TopicEffect>,
     onIntent: (TopicIntent) -> Unit,
     onReply: () -> Unit,
     onOpenPage: (Int) -> Unit,
 ) {
-    val request = state.request
     val lazyListState = rememberLazyListState()
 
-    LaunchedEffect(state.mode, request.scrollTo) {
-        val topic = (state.mode as? TopicUiState.Mode.Loaded)?.topic ?: return@LaunchedEffect
-        val target = request.scrollTo ?: return@LaunchedEffect
-        val index = topic.posts.indexOfFirst { it.numreponse == target }
-        if (index >= 0) {
-            lazyListState.scrollToItem(index + 1)
+    // Single-shot scroll : `effects` emits `ScrollToPost` exactly once per request,
+    // when the ViewModel has loaded a page that contains the requested numreponse.
+    // Once consumed, the user can scroll freely without the deep link snapping back.
+    LaunchedEffect(Unit) {
+        effects.collect { effect ->
+            when (effect) {
+                is TopicEffect.ScrollToPost -> {
+                    val mode = state.mode as? TopicUiState.Mode.Loaded ?: return@collect
+                    val index = mode.topic.posts.indexOfFirst { it.numreponse == effect.numreponse }
+                    if (index >= 0) {
+                        // +1 because the LazyColumn header card occupies item 0.
+                        lazyListState.scrollToItem(index + 1)
+                    }
+                }
+            }
         }
     }
 
@@ -109,11 +127,13 @@ internal fun TopicContent(
             is TopicUiState.Mode.Error -> {
                 RedfacePlaceholderScreen(
                     title = stringResource(R.string.topic_error_title),
-                    body = stringResource(R.string.topic_error_body, request.page, mode.message),
+                    body = stringResource(R.string.topic_error_body, state.request.page, mode.message),
                 ) {
-                    TopicPageButtons(
+                    TopicPageNavigation(
+                        currentPage = state.request.page,
                         availablePages = state.availablePages,
-                        currentPage = request.page,
+                        canGoPrevious = state.canGoPrevious,
+                        canGoNext = state.canGoNext,
                         onOpenPage = onOpenPage,
                     )
                     OutlinedButton(onClick = { onIntent(TopicIntent.Retry) }) {
@@ -143,7 +163,7 @@ private fun TopicLoadedContent(
     onOpenPage: (Int) -> Unit,
     listState: LazyListState,
 ) {
-    val scrollTo = state.request.scrollTo
+    val highlight = state.request.scrollTo
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -156,8 +176,7 @@ private fun TopicLoadedContent(
         item {
             TopicHeaderCard(
                 topic = topic,
-                availablePages = state.availablePages,
-                scrollTo = scrollTo,
+                state = state,
                 onReply = onReply,
                 onOpenPage = onOpenPage,
             )
@@ -168,7 +187,7 @@ private fun TopicLoadedContent(
         ) { post ->
             TopicPostCard(
                 post = post,
-                highlighted = scrollTo == post.numreponse,
+                highlighted = highlight == post.numreponse,
             )
         }
     }
@@ -177,8 +196,7 @@ private fun TopicLoadedContent(
 @Composable
 private fun TopicHeaderCard(
     topic: Topic,
-    availablePages: List<Int>,
-    scrollTo: Int?,
+    state: TopicUiState,
     onReply: () -> Unit,
     onOpenPage: (Int) -> Unit,
 ) {
@@ -204,16 +222,18 @@ private fun TopicHeaderCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            scrollTo?.let { target ->
+            state.request.scrollTo?.let { target ->
                 Text(
                     text = stringResource(R.string.topic_scroll_to, target),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            TopicPageButtons(
-                availablePages = availablePages,
+            TopicPageNavigation(
                 currentPage = topic.page,
+                availablePages = state.availablePages,
+                canGoPrevious = topic.page > 1,
+                canGoNext = topic.page < topic.totalPages,
                 onOpenPage = onOpenPage,
             )
             topic.poll?.let { poll ->
@@ -226,30 +246,102 @@ private fun TopicHeaderCard(
     }
 }
 
+/**
+ * Primary page navigation : Previous / page X/Y indicator / Next + a jump-to-page
+ * input for long topics. The Previous button is disabled on page 1, Next on the
+ * last page — both intents are no-ops outside their valid range. The legacy
+ * exhaustive 1..N row stays below as a complement (kept usable on small topics
+ * where a finger-tap on the right page is faster than typing).
+ */
 @Composable
-private fun TopicPageButtons(
-    availablePages: List<Int>,
+private fun TopicPageNavigation(
     currentPage: Int,
+    availablePages: List<Int>,
+    canGoPrevious: Boolean,
+    canGoNext: Boolean,
     onOpenPage: (Int) -> Unit,
 ) {
-    // HFR topics regularly run past 100 pages — a non-scrollable Row would let the page
-    // buttons spill outside the viewport and become unreachable. The richer "page picker"
-    // (1..N input + ranges, à la HFR web) is a Phase 1D Polish concern; horizontalScroll
-    // is the minimum that keeps the long-topic case usable until then.
-    Row(
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        availablePages.forEach { page ->
-            if (page == currentPage) {
-                Button(onClick = {}) {
-                    Text(text = page.toString())
-                }
-            } else {
-                OutlinedButton(onClick = { onOpenPage(page) }) {
-                    Text(text = page.toString())
+    val totalPages = availablePages.lastOrNull() ?: 1
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(
+                onClick = { if (canGoPrevious) onOpenPage(currentPage - 1) },
+                enabled = canGoPrevious,
+            ) {
+                Text(stringResource(R.string.topic_page_previous))
+            }
+            Text(
+                text = stringResource(R.string.topic_page_indicator, currentPage, totalPages),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedButton(
+                onClick = { if (canGoNext) onOpenPage(currentPage + 1) },
+                enabled = canGoNext,
+            ) {
+                Text(stringResource(R.string.topic_page_next))
+            }
+        }
+        TopicPageJumpField(
+            currentPage = currentPage,
+            totalPages = totalPages,
+            onOpenPage = onOpenPage,
+        )
+        if (availablePages.size in 2..PAGE_GRID_LIMIT) {
+            // Compact range row : keeps the historical UX for small topics. Not
+            // surfaced for long topics (>40 pages) — Previous/Next + jump cover them.
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                availablePages.forEach { page ->
+                    if (page == currentPage) {
+                        Button(onClick = {}) {
+                            Text(text = page.toString())
+                        }
+                    } else {
+                        OutlinedButton(onClick = { onOpenPage(page) }) {
+                            Text(text = page.toString())
+                        }
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun TopicPageJumpField(
+    currentPage: Int,
+    totalPages: Int,
+    onOpenPage: (Int) -> Unit,
+) {
+    var input by remember(currentPage) { mutableStateOf("") }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedTextField(
+            value = input,
+            onValueChange = { raw -> input = raw.filter(Char::isDigit).take(JUMP_MAX_DIGITS) },
+            singleLine = true,
+            label = { Text(stringResource(R.string.topic_page_jump_label)) },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.width(160.dp),
+        )
+        TextButton(
+            onClick = {
+                val target = input.toIntOrNull() ?: return@TextButton
+                if (target in 1..totalPages && target != currentPage) {
+                    input = ""
+                    onOpenPage(target)
+                }
+            },
+        ) {
+            Text(stringResource(R.string.topic_page_jump_action))
         }
     }
 }
@@ -371,3 +463,12 @@ private val topicDateFormatter = DateTimeFormatter
     .withZone(ZoneId.of("Europe/Paris"))
 
 private fun java.time.Instant.asTopicDate(): String = topicDateFormatter.format(this)
+
+private const val PAGE_GRID_LIMIT = 40
+private const val JUMP_MAX_DIGITS = 4
+
+/**
+ * Helper for tests / previews that need a [TopicContent] without a ViewModel — falls
+ * back to an empty effects flow so no scroll is dispatched.
+ */
+internal fun emptyEffectsFlow(): Flow<TopicEffect> = flowOf()
