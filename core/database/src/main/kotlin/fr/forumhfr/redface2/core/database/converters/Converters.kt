@@ -1,7 +1,9 @@
 package fr.forumhfr.redface2.core.database.converters
 
 import androidx.room.TypeConverter
+import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.database.serialization.PostContentSerializer
+import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.PostContent
 import java.time.Instant
 import kotlinx.serialization.builtins.ListSerializer
@@ -51,4 +53,20 @@ internal object Converters {
     @JvmStatic
     fun postContentFromJson(value: String): PostContent =
         PostContentSerializer.decode(value)
+
+    @TypeConverter
+    @JvmStatic
+    fun fetchModeToString(value: FetchMode): String = value.name
+
+    @TypeConverter
+    @JvmStatic
+    fun fetchModeFromString(value: String): FetchMode = FetchMode.valueOf(value)
+
+    @TypeConverter
+    @JvmStatic
+    fun flagTypeToString(value: FlagType): String = value.name
+
+    @TypeConverter
+    @JvmStatic
+    fun flagTypeFromString(value: String): FlagType = FlagType.valueOf(value)
 }

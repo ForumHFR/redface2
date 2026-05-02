@@ -1,0 +1,139 @@
+package fr.forumhfr.redface2.core.database.dao
+
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import fr.forumhfr.redface2.core.database.RedfaceDatabase
+import fr.forumhfr.redface2.core.database.entities.FetchMode
+import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
+import fr.forumhfr.redface2.core.model.FlagType
+import java.time.Instant
+import kotlinx.coroutines.test.runTest
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@RunWith(RobolectricTestRunner::class)
+@Config(manifest = Config.NONE, sdk = [33])
+class FlagDaoTest {
+
+    private lateinit var database: RedfaceDatabase
+    private lateinit var dao: FlagDao
+
+    @Before
+    fun setUp() {
+        database = Room.inMemoryDatabaseBuilder(
+            ApplicationProvider.getApplicationContext<android.content.Context>(),
+            RedfaceDatabase::class.java,
+        )
+            .allowMainThreadQueries()
+            .build()
+        dao = database.flagDao()
+    }
+
+    @After
+    fun tearDown() {
+        database.close()
+    }
+
+    @Test
+    fun `replaceForType wipes previous rows for the same userId and type`() = runTest {
+        dao.upsertAll(listOf(row(userId = "alice", topicId = 100, type = FlagType.CYAN)))
+
+        val replacement = listOf(
+            row(userId = "alice", topicId = 200, type = FlagType.CYAN),
+            row(userId = "alice", topicId = 300, type = FlagType.CYAN),
+        )
+        dao.replaceForType("alice", FlagType.CYAN, replacement)
+
+        val cyan = dao.getFlags("alice", FlagType.CYAN)
+        assertEquals(setOf(200, 300), cyan.map { it.topicId }.toSet())
+    }
+
+    @Test
+    fun `replaceForType does not touch other users or other types`() = runTest {
+        dao.upsertAll(
+            listOf(
+                row(userId = "alice", topicId = 1, type = FlagType.CYAN),
+                row(userId = "alice", topicId = 2, type = FlagType.RED),
+                row(userId = "bob", topicId = 3, type = FlagType.CYAN),
+            ),
+        )
+
+        dao.replaceForType("alice", FlagType.CYAN, emptyList())
+
+        // Alice's CYAN tab is empty …
+        assertTrue(dao.getFlags("alice", FlagType.CYAN).isEmpty())
+        // … but her RED tab survives, and Bob's CYAN tab is untouched. This is the
+        // isolation guarantee.
+        assertEquals(listOf(2), dao.getFlags("alice", FlagType.RED).map { it.topicId })
+        assertEquals(listOf(3), dao.getFlags("bob", FlagType.CYAN).map { it.topicId })
+    }
+
+    @Test
+    fun `deleteAllForUser purges every type for that user only`() = runTest {
+        dao.upsertAll(
+            listOf(
+                row(userId = "alice", topicId = 1, type = FlagType.CYAN),
+                row(userId = "alice", topicId = 2, type = FlagType.RED),
+                row(userId = "alice", topicId = 3, type = FlagType.FAVORITE),
+                row(userId = "bob", topicId = 4, type = FlagType.CYAN),
+            ),
+        )
+
+        dao.deleteAllForUser("alice")
+
+        assertTrue(dao.getFlags("alice", FlagType.CYAN).isEmpty())
+        assertTrue(dao.getFlags("alice", FlagType.RED).isEmpty())
+        assertTrue(dao.getFlags("alice", FlagType.FAVORITE).isEmpty())
+        assertEquals(1, dao.getFlags("bob", FlagType.CYAN).size)
+    }
+
+    @Test
+    fun `getLastFetchedAt returns null when no rows exist`() = runTest {
+        assertNull(dao.getLastFetchedAt("alice", FlagType.CYAN))
+    }
+
+    @Test
+    fun `getLastFetchedAt returns the most recent fetchedAt across rows of the same type`() = runTest {
+        val older = Instant.parse("2026-04-26T17:00:00Z")
+        val newer = Instant.parse("2026-04-26T18:00:00Z")
+        dao.upsertAll(
+            listOf(
+                row(userId = "alice", topicId = 1, type = FlagType.CYAN, fetchedAt = older),
+                row(userId = "alice", topicId = 2, type = FlagType.CYAN, fetchedAt = newer),
+            ),
+        )
+        assertEquals(newer, dao.getLastFetchedAt("alice", FlagType.CYAN))
+    }
+
+    private fun row(
+        userId: String,
+        topicId: Int,
+        type: FlagType,
+        fetchedAt: Instant = Instant.parse("2026-04-26T18:00:00Z"),
+    ): FlagTopicEntity = FlagTopicEntity(
+        userId = userId,
+        type = type,
+        cat = 23,
+        subcat = 550,
+        topicId = topicId,
+        title = "fixture topic $topicId",
+        totalPages = 12,
+        replyCount = 480,
+        views = 9_999,
+        hasUnread = true,
+        lastReadPage = 11,
+        firstUnreadPostId = 555_000_000L + topicId,
+        firstPostAuthor = "alice",
+        lastReplyAuthor = "bob",
+        lastReplyAt = "26-04-2026 18:00",
+        fetchedAt = fetchedAt,
+        authMode = FetchMode.AUTHENTICATED,
+    )
+}

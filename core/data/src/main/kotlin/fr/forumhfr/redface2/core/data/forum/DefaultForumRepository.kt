@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.forum
 
 import android.util.Log
+import fr.forumhfr.redface2.core.data.cache.CachePolicy
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
@@ -8,6 +9,8 @@ import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
 import fr.forumhfr.redface2.core.network.HfrApiClient
+import java.time.Clock
+import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
@@ -43,11 +46,12 @@ class DefaultForumRepository @Inject constructor(
     private val apiClient: HfrApiClient,
     @param:ForumJson private val json: Json,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val clock: Clock,
 ) : ForumRepository {
 
     @Volatile
-    private var cachedCategories: List<Category>? = null
-    private val cachedSubcategories: MutableMap<Int, List<SubCategory>> = HashMap()
+    private var cachedCategories: CachedEntry<List<Category>>? = null
+    private val cachedSubcategories: MutableMap<Int, CachedEntry<List<SubCategory>>> = HashMap()
     private val subcategoriesLock = Any()
 
     private val categoriesRefresh: MutableSharedFlow<ForumResult<List<Category>>> =
@@ -58,9 +62,11 @@ class DefaultForumRepository @Inject constructor(
 
     override fun observeCategories(): Flow<ForumResult<List<Category>>> = flow {
         val cached = cachedCategories
-        if (cached != null) {
-            emit(ForumResult.Success(cached))
+        val now = clock.instant()
+        if (cached != null && CachePolicy.isFresh(cached.fetchedAt, CachePolicy.categories, now)) {
+            emit(ForumResult.Success(cached.value))
         } else {
+            if (cached != null) emit(ForumResult.Success(cached.value))
             emit(ForumResult.Loading)
             emit(fetchCategories())
         }
@@ -74,9 +80,11 @@ class DefaultForumRepository @Inject constructor(
 
     override fun observeSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>> = flow {
         val cached = synchronized(subcategoriesLock) { cachedSubcategories[cat] }
-        if (cached != null) {
-            emit(ForumResult.Success(cached))
+        val now = clock.instant()
+        if (cached != null && CachePolicy.isFresh(cached.fetchedAt, CachePolicy.subcategories, now)) {
+            emit(ForumResult.Success(cached.value))
         } else {
+            if (cached != null) emit(ForumResult.Success(cached.value))
             emit(ForumResult.Loading)
             emit(fetchSubcategories(cat))
         }
@@ -112,7 +120,7 @@ class DefaultForumRepository @Inject constructor(
             RestForumMappers.toCategories(envelope)
         }.fold(
             onSuccess = { list ->
-                cachedCategories = list
+                cachedCategories = CachedEntry(list, clock.instant())
                 ForumResult.Success(list)
             },
             onFailure = { throwable ->
@@ -129,7 +137,7 @@ class DefaultForumRepository @Inject constructor(
             RestForumMappers.toSubcategories(envelope, parentCategoryId = cat)
         }.fold(
             onSuccess = { list ->
-                synchronized(subcategoriesLock) { cachedSubcategories[cat] = list }
+                synchronized(subcategoriesLock) { cachedSubcategories[cat] = CachedEntry(list, clock.instant()) }
                 ForumResult.Success(list)
             },
             onFailure = { throwable ->
@@ -194,6 +202,8 @@ class DefaultForumRepository @Inject constructor(
     }
 
     private data class TopicListKey(val cat: Int, val subcat: Int?, val page: Int)
+
+    private data class CachedEntry<T>(val value: T, val fetchedAt: Instant)
 
     private companion object {
         const val LOG_TAG = "ForumRepository"

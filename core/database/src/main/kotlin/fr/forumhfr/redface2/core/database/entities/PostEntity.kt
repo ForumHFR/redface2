@@ -23,4 +23,10 @@ data class PostEntity(
     val quotedAuthors: List<String>,
     val postIndex: Int?,
     val fetchedAt: Instant,
+    /**
+     * Same anti-overwrite guard as [TopicEntity.authMode]. An anonymous prefetch
+     * row must not blindly clobber an authenticated row with stale `isOwnPost` /
+     * `isEditable` flags.
+     */
+    val authMode: FetchMode,
 )

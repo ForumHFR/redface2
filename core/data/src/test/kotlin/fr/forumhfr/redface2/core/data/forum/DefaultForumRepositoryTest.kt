@@ -6,6 +6,9 @@ import fr.forumhfr.redface2.core.network.HfrApiClient
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -92,6 +95,33 @@ class DefaultForumRepositoryTest {
     }
 
     @Test
+    fun `categories cache replays past CachePolicy categories TTL when stale`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery { getCategories(any()) } returns fixture("rest_categories.json")
+        }
+        val mutableClock = MutableClock(Instant.parse("2026-04-26T18:00:00Z"))
+        val repo = repository(apiClient, clock = mutableClock)
+
+        // Warm the cache.
+        repo.observeCategories().test {
+            awaitItem() // Loading
+            awaitItem() // Success
+            cancelAndIgnoreRemainingEvents()
+        }
+        // Advance past the 24h categories TTL — the next observer should re-fetch.
+        mutableClock.advance(java.time.Duration.ofHours(25))
+        repo.observeCategories().test {
+            // First emission is the still-cached (stale) Success — UX-preserving so
+            // the screen does not flash through Loading. Then Loading + a fresh Success.
+            awaitItem() as ForumResult.Success
+            assertEquals(ForumResult.Loading, awaitItem())
+            assertTrue(awaitItem() is ForumResult.Success)
+            cancelAndIgnoreRemainingEvents()
+        }
+        coVerify(exactly = 2) { apiClient.getCategories(any()) }
+    }
+
+    @Test
     fun `observeTopicList wires the page to the apiClient call`() = runTest {
         val apiClient = mockk<HfrApiClient> {
             coEvery {
@@ -111,12 +141,30 @@ class DefaultForumRepositoryTest {
         }
     }
 
-    private fun repository(apiClient: HfrApiClient): DefaultForumRepository =
+    private fun repository(
+        apiClient: HfrApiClient,
+        clock: Clock = Clock.fixed(Instant.parse("2026-04-26T18:00:00Z"), ZoneOffset.UTC),
+    ): DefaultForumRepository =
         DefaultForumRepository(
             apiClient = apiClient,
             json = json,
             ioDispatcher = UnconfinedTestDispatcher(),
+            clock = clock,
         )
+
+    /**
+     * A minimal mutable [Clock] whose [Clock.instant] result can be advanced at
+     * test time. Avoids depending on the deprecated `Clock.offset` chain or
+     * MockK shadowing for a one-off helper.
+     */
+    private class MutableClock(private var current: Instant) : Clock() {
+        override fun getZone(): java.time.ZoneId = ZoneOffset.UTC
+        override fun withZone(zone: java.time.ZoneId): Clock = this
+        override fun instant(): Instant = current
+        fun advance(duration: java.time.Duration) {
+            current = current.plus(duration)
+        }
+    }
 
     private fun fixture(name: String): String {
         val resource = requireNotNull(javaClass.classLoader?.getResourceAsStream("fixtures/$name")) {

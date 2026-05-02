@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.data.topic
 
+import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.database.entities.PostEntity
 import fr.forumhfr.redface2.core.database.entities.TopicEntity
 import fr.forumhfr.redface2.core.model.Poll
@@ -16,7 +17,11 @@ internal object TopicMappers {
         encodeDefaults = true
     }
 
-    fun toEntities(topic: Topic, fetchedAt: Instant): Pair<TopicEntity, List<PostEntity>> {
+    fun toEntities(
+        topic: Topic,
+        fetchedAt: Instant,
+        authMode: FetchMode,
+    ): Pair<TopicEntity, List<PostEntity>> {
         val topicEntity = TopicEntity(
             cat = topic.cat,
             post = topic.post,
@@ -27,8 +32,11 @@ internal object TopicMappers {
             pollJson = topic.poll?.let { json.encodeToString(PollDto.serializer(), it.toDto()) },
             numreponses = topic.posts.map { it.numreponse },
             fetchedAt = fetchedAt,
+            authMode = authMode,
         )
-        val postEntities = topic.posts.map { post -> post.toEntity(topic.cat, topic.post, fetchedAt) }
+        val postEntities = topic.posts.map { post ->
+            post.toEntity(topic.cat, topic.post, fetchedAt, authMode)
+        }
         return topicEntity to postEntities
     }
 
@@ -47,7 +55,12 @@ internal object TopicMappers {
         )
     }
 
-    private fun Post.toEntity(cat: Int, postId: Int, fetchedAt: Instant): PostEntity = PostEntity(
+    private fun Post.toEntity(
+        cat: Int,
+        postId: Int,
+        fetchedAt: Instant,
+        authMode: FetchMode,
+    ): PostEntity = PostEntity(
         cat = cat,
         post = postId,
         numreponse = numreponse,
@@ -60,6 +73,7 @@ internal object TopicMappers {
         quotedAuthors = quotedAuthors,
         postIndex = postIndex,
         fetchedAt = fetchedAt,
+        authMode = authMode,
     )
 
     private fun PostEntity.toDomain(): Post = Post(
