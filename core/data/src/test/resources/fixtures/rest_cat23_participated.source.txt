@@ -6,7 +6,7 @@ Type: topics participés (drapeau cyan owntopic=1 du legacy) scopés cat=23
 Champs ADDITIONNELS vs anonymous (cf. rest_topics_cat23_subcat550_p1.json) :
 - `is_read: bool`              → drapeau lu/non-lu (false = non-lu = drapeau coloré)
 - `flag_owntopic: int`         → 1 (cyan participé)
-- `last_position: int`         → **index/offset du dernier post lu DANS sa page**, pas un numéro de page.
+- `last_position: int`         → **index/offset global du dernier post lu dans le topic**, pas un numéro de page.
                                   Ici 479 est l'index dans le topic global (le topic a 541 posts au total),
                                   qui mappe sur la page 12 via la pagination 40/page. Ne **pas** utiliser
                                   comme page directement.
