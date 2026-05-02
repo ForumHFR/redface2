@@ -1,36 +1,48 @@
 package fr.forumhfr.redface2.feature.forum
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicSummary
 
@@ -40,7 +52,13 @@ import fr.forumhfr.redface2.core.model.TopicSummary
  * fires [onOpenTopic] with the right `(cat, post, page, scrollTo)` triple — when the
  * authenticated payload exposes `lastPostReadId`, the user lands directly on their last
  * read position; otherwise [onOpenTopic] is called with `page = 1` and no scroll target.
+ *
+ * Phase 1C-B additions:
+ * - Material 3 [PullToRefreshBox] anchored over the topic body.
+ * - Local in-page search field, filtering on title / author / last reply author.
+ * - Per-row flag badge driven by the auth-only `flag_owntopic` REST field.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ForumCategoryScreen(
     request: CategoryRequest,
@@ -79,16 +97,46 @@ fun ForumCategoryScreen(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            TopicsBody(
-                state = state.topics,
-                onOpenTopic = onOpenTopic,
-                onRetry = viewModel::refresh,
-                onSelectPage = viewModel::selectPage,
-                currentPage = state.page,
-                pageCount = state.pageCount,
+            SearchField(
+                query = state.searchQuery,
+                onQueryChange = viewModel::updateSearchQuery,
             )
+
+            PullToRefreshBox(
+                isRefreshing = state.isRefreshing,
+                onRefresh = viewModel::refresh,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                TopicsBody(
+                    state = state.topics,
+                    filteredTopics = state.filteredTopics,
+                    searchQuery = state.searchQuery,
+                    onOpenTopic = onOpenTopic,
+                    onRetry = viewModel::refresh,
+                    onSelectPage = viewModel::selectPage,
+                    currentPage = state.page,
+                    pageCount = state.pageCount,
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun SearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        label = { Text(stringResource(R.string.category_search_label)) },
+        placeholder = { Text(stringResource(R.string.category_search_placeholder)) },
+    )
 }
 
 @Composable
@@ -147,7 +195,7 @@ private fun SubcategoryChips(
 
 /**
  * Compose composables idiomatically take many small focused params (state slice +
- * callbacks + a pager position). 6 args here is below most Material 3 composable
+ * callbacks + a pager position). 8 args here is below most Material 3 composable
  * signatures' real-world threshold, but detekt's default `functionThreshold = 6`
  * fires on equality. Suppressing locally rather than relaxing the project rule.
  */
@@ -155,6 +203,8 @@ private fun SubcategoryChips(
 @Composable
 private fun TopicsBody(
     state: TopicsUiState,
+    filteredTopics: List<TopicSummary>,
+    searchQuery: String,
     onOpenTopic: (TopicSummary) -> Unit,
     onRetry: () -> Unit,
     onSelectPage: (Int) -> Unit,
@@ -195,11 +245,17 @@ private fun TopicsBody(
         }
 
         is TopicsUiState.Content -> {
-            val topics = state.page.topics
+            // The PagerRow always shows the underlying `state.page` total — a search
+            // filter only narrows the visible rows in the current page; switching
+            // page or subcat is what actually re-fetches.
             LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                items(topics, key = TopicSummary::topicId) { topic ->
-                    TopicRow(topic = topic, onClick = { onOpenTopic(topic) })
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                if (filteredTopics.isEmpty()) {
+                    item { TopicsEmpty(searchQuery = searchQuery) }
+                } else {
+                    items(filteredTopics, key = TopicSummary::topicId) { topic ->
+                        TopicRow(topic = topic, onClick = { onOpenTopic(topic) })
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
                 }
                 item {
                     PagerRow(
@@ -210,6 +266,26 @@ private fun TopicsBody(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TopicsEmpty(searchQuery: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = if (searchQuery.isBlank()) {
+                stringResource(R.string.category_topics_empty)
+            } else {
+                stringResource(R.string.category_topics_empty_search, searchQuery)
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -225,6 +301,7 @@ private fun TopicRow(
             .padding(horizontal = 24.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        FlagIndicator(flagType = topic.flagType)
         Column(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = topic.title,
@@ -255,6 +332,40 @@ private fun TopicRow(
             }
         }
     }
+}
+
+@Composable
+private fun FlagIndicator(flagType: FlagType?) {
+    // Reserve the same gutter width on every row, flagged or not, so titles stay
+    // left-aligned across rows in mixed (auth) listings. When flagType is null the
+    // gutter is an empty Spacer; when it is non-null we paint the colored dot inside
+    // the same gutter and attach a contentDescription so screen readers and color-
+    // blind users get the bucket name (color is otherwise the only signal).
+    val gutter = Modifier
+        .padding(end = 12.dp)
+        .size(10.dp)
+    if (flagType == null) {
+        Spacer(modifier = gutter)
+        return
+    }
+    val color = when (flagType) {
+        FlagType.CYAN -> Color(0xFF00BCD4)
+        FlagType.RED -> Color(0xFFD32F2F)
+        FlagType.FAVORITE -> Color(0xFFF9A825)
+    }
+    val description = stringResource(
+        when (flagType) {
+            FlagType.CYAN -> R.string.category_flag_cyan
+            FlagType.RED -> R.string.category_flag_red
+            FlagType.FAVORITE -> R.string.category_flag_favorite
+        },
+    )
+    Box(
+        modifier = gutter
+            .clip(CircleShape)
+            .background(color)
+            .semantics { contentDescription = description },
+    )
 }
 
 @Composable

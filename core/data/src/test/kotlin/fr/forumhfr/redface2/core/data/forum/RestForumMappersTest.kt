@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.forum
 
 import fr.forumhfr.redface2.core.model.Category
+import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.SubCategory
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -90,10 +91,11 @@ class RestForumMappersTest {
         assertEquals(189, tmListTopic.replyCount)
         assertEquals(5, tmListTopic.totalPages)
         assertFalse(tmListTopic.isLocked)
-        // Anonymous response → hasUnread / lastReadPage / lastPostReadId stay null
+        // Anonymous response → hasUnread / lastReadPage / lastPostReadId / flagType stay null
         assertNull(tmListTopic.hasUnread)
         assertNull(tmListTopic.lastReadPage)
         assertNull(tmListTopic.lastPostReadId)
+        assertNull(tmListTopic.flagType)
         // Authors are mapped from links.author / links.last_author
         assertEquals("Wolfman", marcTopic.author)
         assertEquals("Wolfman", marcTopic.lastReplyAuthor)
@@ -142,6 +144,113 @@ class RestForumMappersTest {
         assertNotEquals(479, topic.lastReadPage)
         // subcat extracted from links.subcategory.href
         assertEquals(550, topic.subcat)
+        // flag_owntopic = 1 → CYAN (sujet participé). Captured fixture is the participated bucket.
+        assertEquals(FlagType.CYAN, topic.flagType)
+    }
+
+    @Test
+    fun `flag_owntopic 1, 2, 3 map to CYAN, RED, FAVORITE — anything else maps to null`() {
+        // Synthetic payloads — one resource per flag_owntopic value we care to assert.
+        // The tuple lists the expected mapping; null covers anonymous (absent), 0/4/-1
+        // (unknown buckets HFR may add or rename without warning).
+        val cases: List<Pair<Int?, FlagType?>> = listOf(
+            1 to FlagType.CYAN,
+            2 to FlagType.RED,
+            3 to FlagType.FAVORITE,
+            null to null,
+            0 to null,
+            4 to null,
+            -1 to null,
+        )
+
+        cases.forEach { (raw, expected) ->
+            val payload = """
+                {
+                  "resource": {
+                    "page": 1,
+                    "results_count": 1,
+                    "results_per_page": 1,
+                    "resources": [
+                      {
+                        "id": 99,
+                        "title": "synthetic",
+                        ${if (raw != null) "\"flag_owntopic\": $raw," else ""}
+                        "links": { "posts": { "count": 1 } }
+                      }
+                    ]
+                  }
+                }
+            """.trimIndent()
+            val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(payload)
+            val topic = RestForumMappers.toTopicListPage(envelope, cat = 1, subcat = null).topics.single()
+            assertEquals("flag_owntopic=$raw expected $expected", expected, topic.flagType)
+        }
+    }
+
+    @Test
+    fun `flag_owntopic alone counts as an authenticated row — lastReadPage parsed from posts href`() {
+        // Synthetic: only flag_owntopic + links.posts.href?page=2. No is_read, no
+        // last_position, no last_post_read_id. Before the fix, isAuthenticatedRow
+        // looked only at is_read / last_position / last_post_read_id, so lastReadPage
+        // would have been null even though the auth-only flag_owntopic field was
+        // populated. Pin the relaxed predicate.
+        val payload = """
+            {
+              "resource": {
+                "page": 1,
+                "results_count": 1,
+                "results_per_page": 1,
+                "resources": [
+                  {
+                    "id": 77,
+                    "title": "auth via flag only",
+                    "flag_owntopic": 1,
+                    "links": {
+                      "posts": {
+                        "href": "https://forum.hardware.fr/api/forums/x/categories/1/topics/77/posts/?page=2&results_per_page=40",
+                        "count": 60
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(payload)
+
+        val topic = RestForumMappers.toTopicListPage(envelope, cat = 1, subcat = null).topics.single()
+
+        assertEquals(2, topic.lastReadPage)
+        assertEquals(FlagType.CYAN, topic.flagType)
+        // hasUnread is still null — `is_read` was not in the payload.
+        assertNull(topic.hasUnread)
+    }
+
+    @Test
+    fun `flagType is independent from hasUnread — read CYAN topic still surfaces both`() {
+        // is_read = true (drapeau lu), flag_owntopic = 1 (cyan participé).
+        val payload = """
+            {
+              "resource": {
+                "page": 1,
+                "results_count": 1,
+                "results_per_page": 1,
+                "resources": [
+                  {
+                    "id": 42,
+                    "title": "read but cyan",
+                    "is_read": true,
+                    "flag_owntopic": 1,
+                    "links": { "posts": { "count": 1 } }
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(payload)
+        val topic = RestForumMappers.toTopicListPage(envelope, cat = 1, subcat = null).topics.single()
+        assertEquals(FlagType.CYAN, topic.flagType)
+        assertEquals(false, topic.hasUnread)
     }
 
     @Test

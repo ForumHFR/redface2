@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
 import fr.forumhfr.redface2.core.model.TopicSummary
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -204,6 +205,186 @@ class CategoryViewModelTest {
     }
 
     @Test
+    fun `refresh forwards the current page and selectedSubcat after the user moved`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = null, initialPage = 1),
+            forumRepository = repo,
+        )
+
+        // Move state to (subcat=550, page=2) before the user pulls to refresh.
+        vm.selectSubcategory(550)
+        vm.selectPage(2)
+
+        vm.refresh()
+
+        assertTrue(repo.refreshSubcategoriesCalls.contains(23))
+        assertEquals(listOf(Triple(23, 550, 2)), repo.refreshTopicListCalls)
+    }
+
+    @Test
+    fun `isRefreshing flips true during refresh and false after`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = 550),
+            forumRepository = repo,
+        )
+
+        // Force at least one collector on uiState so the underlying combine starts
+        // observing isRefreshing — without this, vm.uiState.value would stay frozen
+        // on the StateFlow's initialValue and we couldn't observe the transient flip.
+        vm.uiState.test {
+            awaitItem() // initial Loading
+            assertEquals(false, vm.uiState.value.isRefreshing)
+
+            // Gate refreshSubcategories so the launched refresh() coroutine suspends
+            // mid-way. We can then assert isRefreshing == true while the gate holds.
+            val gate = CompletableDeferred<Unit>()
+            repo.suspendRefreshSubcategoriesUntil = gate
+
+            vm.refresh()
+
+            // While the repository is suspended the flag has flipped on. Drain
+            // intermediate emissions until the indicator reaches true.
+            val whileRefreshing = awaitContent { it.isRefreshing }
+            assertEquals(true, whileRefreshing.isRefreshing)
+
+            // Release the gate — refresh() resumes, runs refreshTopicList, returns,
+            // and isRefreshing flips back off.
+            gate.complete(Unit)
+            val afterRefresh = awaitContent { !it.isRefreshing }
+            assertEquals(false, afterRefresh.isRefreshing)
+            assertTrue(repo.refreshTopicListCalls.isNotEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `categoryName is preserved across Loading and Failure broadcasts`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = null),
+            forumRepository = repo,
+        )
+
+        vm.uiState.test {
+            awaitItem() // initial — categoryName == null
+            repo.emitCategories(
+                ForumResult.Success(
+                    listOf(
+                        Category(id = 23, name = "Technologies Mobiles", forceSubcat = false, subcategoryCount = 5),
+                    ),
+                ),
+            )
+            val withName = awaitContent { it.categoryName == "Technologies Mobiles" }
+            assertEquals("Technologies Mobiles", withName.categoryName)
+
+            // A subsequent Loading (e.g. user pulled-to-refresh on Forum tab) must NOT
+            // wipe the title back to "Catégorie 23". Same for a transient Failure.
+            repo.emitCategories(ForumResult.Loading)
+            assertEquals("Technologies Mobiles", vm.uiState.value.categoryName)
+
+            repo.emitCategories(ForumResult.Failure(IllegalStateException("transient")))
+            assertEquals("Technologies Mobiles", vm.uiState.value.categoryName)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `searchQuery filters by title author and lastReplyAuthor case- and accent-insensitively`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = 550),
+            forumRepository = repo,
+        )
+
+        val topics = listOf(
+            topicSummary(id = 1, title = "Android et iOS", author = "alice", lastAuthor = "bob"),
+            topicSummary(id = 2, title = "Réflexion sur la batterie", author = "Charlie", lastAuthor = "dave"),
+            topicSummary(id = 3, title = "Câble USB-C", author = "Eve", lastAuthor = "Frédéric"),
+        )
+
+        vm.uiState.test {
+            awaitItem() // initial Loading
+            repo.emitSubcategories(ForumResult.Success(emptyList()))
+            repo.emitTopicList(
+                cat = 23,
+                subcat = 550,
+                page = 1,
+                result = ForumResult.Success(EMPTY_PAGE.copy(topics = topics, totalTopics = topics.size)),
+            )
+
+            val withAll = awaitContent { it.topics is TopicsUiState.Content && it.filteredTopics.size == 3 }
+            assertEquals(3, withAll.filteredTopics.size)
+
+            // Title match — case-insensitive
+            vm.updateSearchQuery("ANDROID")
+            val byTitle = awaitContent { it.searchQuery == "ANDROID" && it.filteredTopics.size == 1 }
+            assertEquals(setOf(1), byTitle.filteredTopics.map(TopicSummary::topicId).toSet())
+
+            // Title match — accent-insensitive
+            vm.updateSearchQuery("reflexion")
+            val byAccent = awaitContent { it.searchQuery == "reflexion" && it.filteredTopics.size == 1 }
+            assertEquals(setOf(2), byAccent.filteredTopics.map(TopicSummary::topicId).toSet())
+
+            // Last reply author — accent-insensitive
+            vm.updateSearchQuery("frederic")
+            val byLastAuthor = awaitContent { it.searchQuery == "frederic" && it.filteredTopics.size == 1 }
+            assertEquals(setOf(3), byLastAuthor.filteredTopics.map(TopicSummary::topicId).toSet())
+
+            // Author match — case-insensitive substring
+            vm.updateSearchQuery("CHAR")
+            val byAuthor = awaitContent { it.searchQuery == "CHAR" && it.filteredTopics.size == 1 }
+            assertEquals(setOf(2), byAuthor.filteredTopics.map(TopicSummary::topicId).toSet())
+
+            // No match — empty list
+            vm.updateSearchQuery("zzz")
+            val noMatch = awaitContent { it.searchQuery == "zzz" }
+            assertTrue(noMatch.filteredTopics.isEmpty())
+
+            // Empty query — full list back
+            vm.updateSearchQuery("")
+            val cleared = awaitContent { it.searchQuery == "" && it.filteredTopics.size == 3 }
+            assertEquals(3, cleared.filteredTopics.size)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `searchQuery is preserved across subcategory switches`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = null),
+            forumRepository = repo,
+        )
+
+        vm.uiState.test {
+            awaitItem() // initial Loading
+            repo.emitSubcategories(ForumResult.Success(listOf(SUBCAT_550)))
+            repo.emitTopicList(
+                cat = 23,
+                subcat = null,
+                page = 1,
+                result = ForumResult.Success(EMPTY_PAGE.copy(subcat = null, totalTopics = 0)),
+            )
+            awaitContent { it.subcategories is SubcategoriesUiState.Content }
+
+            vm.updateSearchQuery("hello")
+            awaitContent { it.searchQuery == "hello" }
+
+            vm.selectSubcategory(550)
+            // After subcat switch the page resets to 1 — but the searchQuery stays.
+            val afterSwitch = awaitContent { it.selectedSubcat == 550 }
+            assertEquals("hello", afterSwitch.searchQuery)
+            assertEquals(1, afterSwitch.page)
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `failure from observeSubcategories surfaces as SubcategoriesUiState Error`() = runTest {
         val repo = FakeForumRepository()
         val vm = CategoryViewModel(
@@ -236,6 +417,29 @@ class CategoryViewModelTest {
             topics = emptyList<TopicSummary>(),
         )
         const val AWAIT_CONTENT_TIMEOUT_MS = 2_000L
+
+        fun topicSummary(
+            id: Int,
+            title: String,
+            author: String = "anon",
+            lastAuthor: String = author,
+        ): TopicSummary = TopicSummary(
+            cat = 23,
+            subcat = 550,
+            topicId = id,
+            title = title,
+            author = author,
+            lastReplyAuthor = lastAuthor,
+            lastReplyAt = "2026-05-02 10:00",
+            replyCount = 0,
+            totalPages = 1,
+            isSticky = false,
+            isLocked = false,
+            hasUnread = null,
+            lastReadPage = null,
+            lastPostReadId = null,
+            flagType = null,
+        )
     }
 
     /**
@@ -268,6 +472,13 @@ class CategoryViewModelTest {
         var refreshTopicListCalls: List<Triple<Int, Int?, Int>> = emptyList()
             private set
 
+        /**
+         * Optional gate consumed by [refreshSubcategories] — when set, the suspending
+         * stub awaits the gate before recording the call and returning. Lets a test
+         * pin the in-flight state of [CategoryViewModel.isRefreshing].
+         */
+        var suspendRefreshSubcategoriesUntil: CompletableDeferred<Unit>? = null
+
         override fun observeCategories(): Flow<ForumResult<List<Category>>> =
             categories.asSharedFlow()
 
@@ -277,6 +488,7 @@ class CategoryViewModelTest {
             subcategories.asSharedFlow()
 
         override suspend fun refreshSubcategories(cat: Int) {
+            suspendRefreshSubcategoriesUntil?.await()
             refreshSubcategoriesCalls = refreshSubcategoriesCalls + cat
         }
 

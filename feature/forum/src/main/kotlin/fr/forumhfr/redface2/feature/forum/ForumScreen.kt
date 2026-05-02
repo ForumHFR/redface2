@@ -14,11 +14,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -36,15 +38,21 @@ import fr.forumhfr.redface2.core.model.Category
  * Forum home tab. Lists the 19 public HFR categories from the REST API. Tapping a row
  * delegates to [onOpenCategory] which lifts the user into the per-category screen.
  *
- * No SwipeRefresh / Accompanist — Phase 1C-A keeps the same minimal "Réessayer" /
- * "Actualiser" affordance the Drapeaux screen ships with, per ADR-003 § "UI" guidance.
+ * Refresh UX is `PullToRefreshBox` (Material 3 stable). Accompanist `SwipeRefresh` is
+ * forbidden in this codebase; the legacy "Actualiser" inline button is kept as a
+ * secondary affordance for accessibility / non-touch input. While a refresh is in
+ * flight the categories list is **not** wiped — `ForumViewModel.uiState` collapses
+ * the transient `Loading` re-emitted by `refreshCategories()` (cf. ADR-003 §
+ * "UI guidance" + the keepContentDuringRefresh helper there).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ForumScreen(
     onOpenCategory: (Category) -> Unit,
 ) {
     val viewModel: ForumViewModel = hiltViewModel()
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -63,18 +71,24 @@ fun ForumScreen(
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
             )
 
-            when (val current = state) {
-                ForumUiState.Loading -> ForumLoading()
-                is ForumUiState.Error -> ForumError(
-                    message = current.message,
-                    onRetry = viewModel::refresh,
-                )
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = viewModel::refresh,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                when (val current = state) {
+                    ForumUiState.Loading -> ForumLoading()
+                    is ForumUiState.Error -> ForumError(
+                        message = current.message,
+                        onRetry = viewModel::refresh,
+                    )
 
-                is ForumUiState.Content -> ForumContent(
-                    categories = current.categories,
-                    onOpenCategory = onOpenCategory,
-                    onRefresh = viewModel::refresh,
-                )
+                    is ForumUiState.Content -> ForumContent(
+                        categories = current.categories,
+                        onOpenCategory = onOpenCategory,
+                        onRefresh = viewModel::refresh,
+                    )
+                }
             }
         }
     }

@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.forum
 
 import fr.forumhfr.redface2.core.model.Category
+import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
 import fr.forumhfr.redface2.core.model.TopicSummary
@@ -95,7 +96,10 @@ internal object RestForumMappers {
             ceil(postsCount.toDouble() / postsResultsPerPage).toInt().coerceAtLeast(1)
         }
         val subcatFromHref = dto.links.subcategory?.href?.let(::extractSubcatId)
-        val isAuthenticatedRow = dto.isRead != null || dto.lastPosition != null || dto.lastPostReadId != null
+        val isAuthenticatedRow = dto.isRead != null ||
+            dto.lastPosition != null ||
+            dto.lastPostReadId != null ||
+            dto.flagOwntopic != null
         val lastReadPage = if (isAuthenticatedRow) {
             postsHref
                 ?.let { extractQueryParam(it, "page") }
@@ -120,7 +124,23 @@ internal object RestForumMappers {
             hasUnread = dto.isRead?.let { !it },
             lastReadPage = lastReadPage,
             lastPostReadId = dto.lastPostReadId,
+            flagType = toFlagType(dto.flagOwntopic),
         )
+    }
+
+    /**
+     * REST `flag_owntopic` mirrors the legacy HTML `owntopic` query param :
+     * `1 → CYAN` (sujets participés), `2 → RED` (lus uniquement),
+     * `3 → FAVORITE` (favoris). Anything else (null, 0, future bucket numbers,
+     * negative values) maps to `null` instead of throwing — the UI degrades
+     * to "no badge" for unknown buckets so an HFR-side rollout that adds a
+     * 4th flag type doesn't crash the app.
+     */
+    private fun toFlagType(rawFlagOwntopic: Int?): FlagType? = when (rawFlagOwntopic) {
+        1 -> FlagType.CYAN
+        2 -> FlagType.RED
+        3 -> FlagType.FAVORITE
+        else -> null
     }
 
     private fun extractSubcatId(href: String): Int? =

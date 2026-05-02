@@ -17,4 +17,13 @@
     <string name="category_pager_previous">Précédent</string>
     <string name="category_pager_next">Suivant</string>
     <string name="category_pager_position">page %1$d / %2$d</string>
+
+    <string name="category_search_label">Rechercher dans cette page</string>
+    <string name="category_search_placeholder">Titre, auteur, dernier réponseur</string>
+    <string name="category_topics_empty">Aucun topic à afficher.</string>
+    <string name="category_topics_empty_search">Aucun topic ne contient « %1$s » dans cette page.</string>
+
+    <string name="category_flag_cyan">Drapeau mes sujets</string>
+    <string name="category_flag_red">Drapeau lu uniquement</string>
+    <string name="category_flag_favorite">Favori</string>
 </resources>
