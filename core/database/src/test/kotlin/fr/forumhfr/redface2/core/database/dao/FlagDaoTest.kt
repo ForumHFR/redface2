@@ -113,6 +113,27 @@ class FlagDaoTest {
     }
 
     @Test
+    fun `getFlags orders by lastReplyAt descending, lexicographic = chronological`() = runTest {
+        // Pins the SQL `ORDER BY lastReplyAt DESC` invariant. The REST format
+        // `YYYY-MM-DD HH:mm` makes lexicographic descending equal to chronological
+        // descending — including across year boundaries, which the legacy HFR HTML
+        // format `DD-MM-YYYY HH:mm` would have got wrong (`31-12-2025` < `01-01-2026`
+        // in lex but `>` in time). Regression guard if anyone migrates the column to
+        // the legacy format without realising.
+        dao.upsertAll(
+            listOf(
+                row(userId = "alice", topicId = 10, type = FlagType.CYAN, lastReplyAt = "2025-12-31 23:59"),
+                row(userId = "alice", topicId = 11, type = FlagType.CYAN, lastReplyAt = "2026-01-01 00:01"),
+                row(userId = "alice", topicId = 12, type = FlagType.CYAN, lastReplyAt = "2025-06-15 12:00"),
+            ),
+        )
+        assertEquals(
+            listOf(11, 10, 12),
+            dao.getFlags("alice", FlagType.CYAN).map { it.topicId },
+        )
+    }
+
+    @Test
     fun `getLastFetchedAt returns null when no rows exist`() = runTest {
         assertNull(dao.getLastFetchedAt("alice", FlagType.CYAN))
     }
@@ -135,6 +156,7 @@ class FlagDaoTest {
         topicId: Int,
         type: FlagType,
         fetchedAt: Instant = Instant.parse("2026-04-26T18:00:00Z"),
+        lastReplyAt: String = "2026-04-26 18:00",
     ): FlagTopicEntity = FlagTopicEntity(
         userId = userId,
         type = type,
@@ -144,13 +166,12 @@ class FlagDaoTest {
         title = "fixture topic $topicId",
         totalPages = 12,
         replyCount = 480,
-        views = 9_999,
         hasUnread = true,
         lastReadPage = 11,
-        firstUnreadPostId = 555_000_000L + topicId,
+        lastPostReadId = 555_000_000L + topicId,
         firstPostAuthor = "alice",
         lastReplyAuthor = "bob",
-        lastReplyAt = "26-04-2026 18:00",
+        lastReplyAt = lastReplyAt,
         fetchedAt = fetchedAt,
         authMode = FetchMode.AUTHENTICATED,
     )

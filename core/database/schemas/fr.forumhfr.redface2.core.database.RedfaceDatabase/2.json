@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 2,
-    "identityHash": "67aea25334d4a019699c0dadc3a3a798",
+    "identityHash": "21d61d3eb43568f3d9aaa651b39644d1",
     "entities": [
       {
         "tableName": "topic_pages",
@@ -180,7 +180,7 @@
       },
       {
         "tableName": "flag_topics",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`userId` TEXT NOT NULL, `type` TEXT NOT NULL, `cat` INTEGER NOT NULL, `subcat` INTEGER, `topicId` INTEGER NOT NULL, `title` TEXT NOT NULL, `totalPages` INTEGER NOT NULL, `replyCount` INTEGER NOT NULL, `views` INTEGER NOT NULL, `hasUnread` INTEGER NOT NULL, `lastReadPage` INTEGER NOT NULL, `firstUnreadPostId` INTEGER NOT NULL, `firstPostAuthor` TEXT NOT NULL, `lastReplyAuthor` TEXT NOT NULL, `lastReplyAt` TEXT NOT NULL, `fetchedAt` INTEGER NOT NULL, `authMode` TEXT NOT NULL, PRIMARY KEY(`userId`, `type`, `cat`, `topicId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`userId` TEXT NOT NULL, `type` TEXT NOT NULL, `cat` INTEGER NOT NULL, `subcat` INTEGER, `topicId` INTEGER NOT NULL, `title` TEXT NOT NULL, `totalPages` INTEGER NOT NULL, `replyCount` INTEGER NOT NULL, `hasUnread` INTEGER NOT NULL, `lastReadPage` INTEGER NOT NULL, `lastPostReadId` INTEGER, `firstPostAuthor` TEXT NOT NULL, `lastReplyAuthor` TEXT NOT NULL, `lastReplyAt` TEXT NOT NULL, `fetchedAt` INTEGER NOT NULL, `authMode` TEXT NOT NULL, PRIMARY KEY(`userId`, `type`, `cat`, `topicId`))",
         "fields": [
           {
             "fieldPath": "userId",
@@ -230,12 +230,6 @@
             "notNull": true
           },
           {
-            "fieldPath": "views",
-            "columnName": "views",
-            "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
             "fieldPath": "hasUnread",
             "columnName": "hasUnread",
             "affinity": "INTEGER",
@@ -248,10 +242,9 @@
             "notNull": true
           },
           {
-            "fieldPath": "firstUnreadPostId",
-            "columnName": "firstUnreadPostId",
-            "affinity": "INTEGER",
-            "notNull": true
+            "fieldPath": "lastPostReadId",
+            "columnName": "lastPostReadId",
+            "affinity": "INTEGER"
           },
           {
             "fieldPath": "firstPostAuthor",

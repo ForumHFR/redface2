@@ -361,9 +361,10 @@ class TopicViewModel @Inject constructor(
 
 `observeTopicPage(cat, post, page)` :
 
-1. Cache présent + fresh → émet une seule fois, pas de réseau.
-2. Cache présent + stale → émet le cache puis tente un refresh ; si le refresh échoue (offline, 502), l'erreur est swallowed et le stale reste à l'écran.
-3. Cache absent → fetch direct ; les erreurs propagent au flow.
+1. Cache `AUTHENTICATED` + fresh → émet une seule fois, pas de réseau. C'est le cas snappy back-nav d'un utilisateur connecté.
+2. Cache `ANONYMOUS` (fresh ou stale) → émet le cache pour un affichage immédiat puis lance un fetch authentifié pour upgrader la row vers `AUTHENTICATED` (champs per-user `isOwnPost`, `isEditable`, drapeau de lecture). Le `@Transaction` anti-écrasement décrit ci-dessous garantit que ce remplacement ne perd jamais une row `AUTHENTICATED` plus riche entre-temps.
+3. Cache `AUTHENTICATED` + stale → émet le cache puis tente un refresh ; si le refresh échoue (offline, 502), l'erreur est swallowed et le stale reste à l'écran.
+4. Cache absent → fetch direct ; les erreurs propagent au flow.
 
 Le `refreshTopicPage` explicite **bypasse** le TTL et renvoie systématiquement du frais. Même règle pour `refreshCategories` / `refreshSubcategories` / `refreshTopicList`.
 

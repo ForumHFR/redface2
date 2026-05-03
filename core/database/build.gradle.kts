@@ -14,6 +14,15 @@ android {
             isIncludeAndroidResources = true
         }
     }
+
+    sourceSets {
+        // MigrationTestHelper resolves schemas from the test assets folder. Pin the
+        // exported `schemas/` directory there so the v1 fixture is visible without
+        // copying — keeps a single source of truth in `$projectDir/schemas/`.
+        named("test") {
+            assets.srcDir("$projectDir/schemas")
+        }
+    }
 }
 
 ksp {
@@ -34,4 +43,5 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.androidx.test.core)
+    testImplementation(libs.room.testing)
 }

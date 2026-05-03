@@ -35,18 +35,23 @@ data class FlagTopicEntity(
     val title: String,
     val totalPages: Int,
     val replyCount: Int,
-    val views: Int,
     val hasUnread: Boolean,
     val lastReadPage: Int,
     /**
-     * Stored as Long because `numreponse` values on long-running topics already
-     * exceed `Int.MAX_VALUE`. Narrowing to Int happens at the navigation
-     * boundary, not at persistence.
+     * `numreponse` of the **last post the user read** (REST `last_post_read_id`).
+     * Stored as `Long` for forward-compat with the legacy `numreponse` size; current
+     * production values fit in `Int`. May be null when REST omits the field on a
+     * given row. Narrowing to `Int` happens at the navigation boundary, not at
+     * persistence.
      */
-    val firstUnreadPostId: Long,
+    val lastPostReadId: Long?,
     val firstPostAuthor: String,
     val lastReplyAuthor: String,
-    /** Raw HFR-printed timestamp (`DD-MM-YYYY HH:mm`) — see [fr.forumhfr.redface2.core.model.Flag.lastReplyAt]. */
+    /**
+     * Raw HFR-printed timestamp (`YYYY-MM-DD HH:mm`, REST format) — see
+     * [fr.forumhfr.redface2.core.model.Flag.lastReplyAt]. Lexicographic order matches
+     * chronological order, so [FlagDao.getFlags] sorts on this column directly.
+     */
     val lastReplyAt: String,
     val fetchedAt: Instant,
     val authMode: FetchMode,
