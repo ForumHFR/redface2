@@ -163,6 +163,8 @@ Quand cette extension arrive, `FlagsState` agrégé peut redevenir préférable 
 ## Écran Topic (lecture)
 
 > **Statut Phase 1A** : le `TopicUiState` réellement exposé par `feature/topic/.../TopicUiState.kt` est aujourd'hui `(request: TopicRequest, mode: Mode, availablePages: List<Int>)` avec `Mode = Loading | Loaded(topic) | Error(message)`, et l'unique intent est `Retry`. Le ViewModel collecte `TopicRepository.observeTopicPage(...)` (cache-aside : émet le cache puis le fresh) et calcule `availablePages = (1..topic.totalPages).toList()` à chaque émission. Le contrat ci-dessous est la **cible Phase 1 fin / Phase 2** quand pull-to-refresh, edit FP, flag et image viewer arriveront. La forme actuelle reflète qu'il n'y a pas encore d'actions sur posts ni de pagination explicite — cohérent avec la méthodologie hybride (squelette illustratif, pas figé).
+>
+> **Statut Phase 1D-2 (#107)** : seul `TopicEffect.ScrollToPost` est livré ; il pilote le scroll one-shot vers un `numreponse` quand un deep link arrive avec `?scrollTo=N`. Les autres effets listés ci-dessous (`NavigateToReply`, `NavigateToEdit`, `NavigateToEditFirstPost`, `NavigateToImage`, `Error`) restent du **contrat cible Phase 2** — ils ne sont ni émis ni câblés tant que les actions correspondantes (réponse, édition, viewer image, surface d'erreur) n'arrivent pas.
 
 ```kotlin
 data class TopicUiState(
@@ -189,6 +191,8 @@ sealed interface TopicIntent {
 }
 
 sealed interface TopicEffect {
+    /** Phase 1D-2 (#107) — one-shot scroll demand consumed by `LaunchedEffect(Unit)`. */
+    data class ScrollToPost(val numreponse: Int) : TopicEffect
     data class NavigateToReply(val cat: Int, val post: Int, val quote: String?) : TopicEffect
     data class NavigateToEdit(val cat: Int, val post: Int, val numreponse: Int) : TopicEffect
     data class NavigateToEditFirstPost(val cat: Int, val post: Int) : TopicEffect
