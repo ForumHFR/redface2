@@ -13,7 +13,7 @@ Phase 1B.1 livrée : login HFR utilisable de bout en bout avec cookies persistan
 ### Phase 1D-1 — Drapeaux REST (#110)
 
 #### Added
-- `core/network/HfrRestFlagBucket` (enum `PARTICIPATED`/`READ`/`FAVORITES`) + `HfrApiClient.getFlagTopics(bucket, …, useAuth=true)` (global, plumbing pour PR ultérieure) et `getCategoryFlagTopics(cat, bucket, …, useAuth=true)` (per-cat, voie consommée par la prod).
+- `core/network/HfrRestFlagBucket` (enum `PARTICIPATED`/`READ`/`FAVORITES`) + `HfrApiClient.getCategoryFlagTopics(cat, bucket, …, useAuth=true)` (per-cat, seule voie consommée par la prod). La voie globale REST `forums/hardwarefr/topics/{bucket}/` n'est pas exposée — son format groupé par catégorie n'a pas été capturé live (cf. `protocol-hfr.md`).
 - `core/data/flags/RestFlagMappers` : mapping `RestListEnvelope<RestTopic>` → `List<Flag>`, `cat` dérivé soit de `fallbackCat` (per-cat REST) soit de `links.category.href` (synthétique pour la forme globale future).
 - `core/data/flags/RestFlagMappersTest` : assertion contractuelle sur la fixture capturée `rest_cat23_participated.json` + cas défensifs synthétiques (champs absents, bucket inconnu, href malformé).
 - `core/data/flags/DefaultFlagRepositoryTest` : tests sur la fixture capturée + mock `ForumRepository` pour la liste des catégories ; couvre fan-out per-cat, pagination multi-page (synthétique), `Failure` propagé depuis le réseau ou la liste de catégories.

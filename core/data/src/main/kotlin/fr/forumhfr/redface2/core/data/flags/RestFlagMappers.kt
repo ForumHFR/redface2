@@ -47,6 +47,12 @@ import kotlin.math.max
  */
 internal object RestFlagMappers {
 
+    /**
+     * Defensive fallback when `links.posts.href` does not advertise its
+     * `results_per_page`. Matches the historical HFR HTML default but is **not**
+     * a global truth — REST's `links.posts.href?results_per_page=N` is. Mirrors
+     * `RestForumMappers.POSTS_PER_PAGE_FALLBACK` (same value, same intent).
+     */
     private const val POSTS_PER_PAGE_FALLBACK = 40
 
     private val CAT_FROM_HREF = Regex("/categories/(\\d+)/")

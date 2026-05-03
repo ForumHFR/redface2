@@ -181,6 +181,7 @@ class DefaultFlagRepository @Inject constructor(
     ): List<Flag> {
         val accumulated = mutableListOf<Flag>()
         var page = 1
+        var lastResultsCount = 0
         while (page <= MAX_PAGES) {
             val body = apiClient.getCategoryFlagTopics(
                 cat = cat,
@@ -196,9 +197,20 @@ class DefaultFlagRepository @Inject constructor(
                 fallbackCat = cat,
             )
             accumulated += mapped
-            val list = envelope.resource
-            if (mapped.isEmpty() || accumulated.size >= list.resultsCount) break
+            lastResultsCount = envelope.resource.resultsCount
+            if (mapped.isEmpty() || accumulated.size >= lastResultsCount) return accumulated
             page += 1
+        }
+        // Loop exited via the MAX_PAGES cap. Surface the silent truncation in adb logs
+        // so it can be diagnosed before the user complains — defensive cap, but if it
+        // ever fires the listing is incomplete and the symptom would otherwise be
+        // invisible.
+        if (accumulated.size < lastResultsCount) {
+            Log.w(
+                LOG_TAG,
+                "REST flags pagination hit MAX_PAGES=$MAX_PAGES for cat=$cat bucket=$bucket " +
+                    "with ${accumulated.size}/$lastResultsCount rows; list may be truncated",
+            )
         }
         return accumulated
     }

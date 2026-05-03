@@ -20,7 +20,7 @@ Champs ADDITIONNELS vs anonymous (cf. rest_topics_cat23_subcat550_p1.json) :
 
 Conséquence pour Redface 2 :
 - Cet endpoint (variante par-cat) est consommé par `HfrApiClient.getCategoryFlagTopics(cat, bucket=PARTICIPATED, useAuth=true)`.
-- La variante globale `forums/hardwarefr/topics/participated/` est routée par `HfrApiClient.getFlagTopics(...)` mais **n'est pas consommée par la prod en Phase 1D-1** : `protocol-hfr.md` documente que le payload global est groupé par catégorie (resources = list of category groups), forme distincte de l'enveloppe plate `RestListEnvelope<RestTopic>`. Sans capture live de cette forme groupée, Phase 1D-1 utilise exclusivement la voie par-cat (cf. `DefaultFlagRepository.fetch()` qui itère sur les catégories). Une PR de suivi pourra capturer le global et adapter le DTO si la perf le justifie.
+- La variante globale `forums/hardwarefr/topics/participated/` n'est pas exposée par le client : `protocol-hfr.md` documente que le payload global est groupé par catégorie (resources = list of category groups), forme distincte de l'enveloppe plate `RestListEnvelope<RestTopic>`. Sans capture live de cette forme groupée, Phase 1D-1 utilise exclusivement la voie par-cat (cf. `DefaultFlagRepository.fetch()` qui itère sur les catégories publiques). Une PR de suivi pourra capturer le global, ajouter un helper dédié (`getFlagTopics(bucket, …)`) et adapter le DTO si la perf le justifie.
 - Le payload JSON donne directement la cible "Aller au dernier message lu" via `last_post_read_id` + `links.posts.href?page=N`.
 - Pas besoin de parser le tooltip HTML "Allez au dernier message lu dans un sujet auquel vous avez participé".
 - Phase 1D-1 (#110) a retiré le scrape HTML `forum1f.php` au profit de cette voie REST.
