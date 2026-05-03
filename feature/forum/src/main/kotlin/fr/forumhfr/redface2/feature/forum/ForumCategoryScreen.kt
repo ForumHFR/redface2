@@ -34,7 +34,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -45,6 +44,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicSummary
+import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 
 /**
  * Per-category screen: chip row of subcategories ("Toutes" + each subcat) on top, list
@@ -348,11 +348,7 @@ private fun FlagIndicator(flagType: FlagType?) {
         Spacer(modifier = gutter)
         return
     }
-    val color = when (flagType) {
-        FlagType.CYAN -> Color(0xFF00BCD4)
-        FlagType.RED -> Color(0xFFD32F2F)
-        FlagType.FAVORITE -> Color(0xFFF9A825)
-    }
+    val color = FlagPalette.colorFor(flagType)
     val description = stringResource(
         when (flagType) {
             FlagType.CYAN -> R.string.category_flag_cyan

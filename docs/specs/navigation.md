@@ -419,8 +419,8 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
                                 cat = flag.cat,
                                 post = flag.topicId,
                                 page = flag.lastReadPage,
-                                scrollTo = flag.firstUnreadPostId
-                                    .takeIf { it in 1L..Int.MAX_VALUE.toLong() }
+                                scrollTo = flag.lastPostReadId
+                                    ?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }
                                     ?.toInt(),
                             ),
                         )
@@ -461,7 +461,7 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
 }
 ```
 
-Phase 1B.4 a livré `FlagsRoute` (dans `:feature:flags`) avec le vrai modèle `Flag` : la lambda `onOpenFlag` reçoit le topic concerné et `backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.firstUnreadPostId.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()))` devient trivial. Phase 1C-A a ensuite remplacé les placeholders Forum/Category par `ForumScreen` + `ForumCategoryScreen` alimentés par `ForumRepository` REST. Les constantes privées `DEMO_TOPIC_CAT` / `DEMO_TOPIC_POST` restent uniquement pour `SearchScreen` et `MessagesScreen`, qui sont encore des placeholders ; chaque call-site disparaîtra au fur et à mesure que les phases Search/Messages livreront les modèles `SearchResult` et `MpThread`.
+Phase 1B.4 a livré `FlagsRoute` (dans `:feature:flags`) avec le vrai modèle `Flag` ; en Phase 1D-1 le scroll anchor est passé de `firstUnreadPostId` à `lastPostReadId` (REST `last_post_read_id`) : `backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.lastPostReadId?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()))`. Phase 1C-A a ensuite remplacé les placeholders Forum/Category par `ForumScreen` + `ForumCategoryScreen` alimentés par `ForumRepository` REST. Les constantes privées `DEMO_TOPIC_CAT` / `DEMO_TOPIC_POST` restent uniquement pour `SearchScreen` et `MessagesScreen`, qui sont encore des placeholders ; chaque call-site disparaîtra au fur et à mesure que les phases Search/Messages livreront les modèles `SearchResult` et `MpThread`.
 
 ---
 

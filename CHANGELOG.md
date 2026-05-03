@@ -22,6 +22,29 @@ Phase 1B.1 livrée : login HFR utilisable de bout en bout avec cookies persistan
 - `TopicScreen` : suppression du `LaunchedEffect(state.mode, request.scrollTo)` qui re-scrollait à chaque transition state, remplacé par la consommation de `viewModel.effects` via `LaunchedEffect(Unit)`.
 - Strings drapeaux `topic_page_previous` / `topic_page_next` / `topic_page_indicator` / `topic_page_jump_label` / `topic_page_jump_action` ajoutés.
 
+### Phase 1D-1 — Drapeaux REST (#110)
+
+#### Added
+- `core/network/HfrRestFlagBucket` (enum `PARTICIPATED`/`READ`/`FAVORITES`) + `HfrApiClient.getCategoryFlagTopics(cat, bucket, …, useAuth=true)` (per-cat, seule voie consommée par la prod). La voie globale REST `forums/hardwarefr/topics/{bucket}/` n'est pas exposée — son format groupé par catégorie n'a pas été capturé live (cf. `protocol-hfr.md`).
+- `core/data/flags/RestFlagMappers` : mapping `RestListEnvelope<RestTopic>` → `List<Flag>`, `cat` dérivé soit de `fallbackCat` (per-cat REST) soit de `links.category.href` (synthétique pour la forme globale future).
+- `core/data/flags/RestFlagMappersTest` : assertion contractuelle sur la fixture capturée `rest_cat23_participated.json` + cas défensifs synthétiques (champs absents, bucket inconnu, href malformé).
+- `core/data/flags/DefaultFlagRepositoryTest` : tests sur la fixture capturée + mock `ForumRepository` pour la liste des catégories ; couvre fan-out per-cat, pagination multi-page (synthétique), `Failure` propagé depuis le réseau ou la liste de catégories.
+
+#### Changed
+- `core/data/flags/DefaultFlagRepository` consomme désormais `HfrApiClient.getCategoryFlagTopics(...)` + JSON lenient (`@FlagsJson`) au lieu de `HfrClient.getFlagsPage(...)` + `FlagsListParser`. Le repository injecte aussi `ForumRepository` pour récupérer la liste des catégories publiques ; la voie globale REST `forums/hardwarefr/topics/{bucket}/` n'est pas consommée car son format groupé n'a pas été capturé live (cf. `protocol-hfr.md`). Pagination multi-page implémentée par catégorie. Sémantique observe / refresh / clearSessionCache inchangée.
+- `core/data/forum/RestForumDtos.RestTopic.lastPostReadId` : `Int?` → `Long?` pour absorber sans crash un `numreponse` HFR au-delà de `Int.MAX_VALUE`. `core/model/TopicSummary.lastPostReadId` aligné en `Long?` ; `app/RedfaceNavigation` ajoute le narrowing `Long → Int` borné côté category route, déjà présent côté flag.
+- `core/model/Flag` : champ `views: Int` retiré (REST ne l'expose pas, aucun consumer UI). `firstUnreadPostId: Long` renommé `lastPostReadId: Long?` pour refléter la sémantique REST `last_post_read_id` (id du dernier post lu, pas du premier non lu).
+- `core/domain/flags/FlagRepository` : KDoc rafraîchie Phase 1B.4 → Phase 1D-1.
+- `docs/specs/protocol-hfr.md`, `architecture.md`, `models.md`, `navigation.md`, `roadmap.md` + `rest_cat23_participated.source.txt` mis à jour pour acter la voie per-cat consommée et le statut "non capturé" du global.
+
+#### Removed
+- `core/parser/flags/FlagsListParser` + ses tests + ses fixtures HTML (`flags_page_owntopic-{1,2,3}.html`).
+- `core/network/HfrClient.getFlagsPage(owntopic)` (et son test associé).
+- Provider Hilt `provideFlagsListParser` dans `PlatformBindingsModule`.
+
+#### Limites connues
+- Le format global REST des drapeaux (`forums/hardwarefr/topics/{bucket}/`, groupé par catégorie) n'a pas été capturé live ; la prod itère donc sur les ~19 catégories publiques en parallèle (OkHttp cap = 5 connexions concurrentes par host). Une PR de suivi pourra capturer le global et basculer la voie de consommation pour économiser N-1 round-trips.
+
 ### Added
 - `docs/specs/models.md` : nouvelle section **Authentification** documentant `AuthState` (sealed `Anonymous` / `Authenticated(pseudo)`) et `LoginError` (sealed `InvalidCredentials` / `RateLimited` / `Network` / `Unknown`). Le `classDiagram` Mermaid expose la hiérarchie sealed.
 - `docs/specs/roadmap.md` Phase 1 : entrée "Login HFR" cochée.

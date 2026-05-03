@@ -68,7 +68,7 @@ internal data class RestTopic(
     @SerialName("is_read") val isRead: Boolean? = null,
     @SerialName("flag_owntopic") val flagOwntopic: Int? = null,
     @SerialName("last_position") val lastPosition: Int? = null,
-    @SerialName("last_post_read_id") val lastPostReadId: Int? = null,
+    @SerialName("last_post_read_id") val lastPostReadId: Long? = null,
 )
 
 @Serializable

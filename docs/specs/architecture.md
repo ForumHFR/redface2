@@ -222,13 +222,13 @@ interface MessagesRepository {
 
 `TopicRepository` est livré en Phase 1A (cf. [#88](https://github.com/ForumHFR/redface2/pull/88), [#89](https://github.com/ForumHFR/redface2/pull/89)). `prefetchNextPage` documenté dans la roadmap arrivera en Phase 1B sur `HfrClient` directement (avec `useAuth = false`), puis sera relayé par `TopicRepository.prefetchTopicPage(...)`. `MessagesRepository` est livré en Phase 1B.1 en bonus du login : `:core:data DefaultMessagesRepository` combine l'observation de `AuthState` avec un fetch de `forum1.php?cat=prive` (parser dédié `:core:parser/messages/PrivateMessageListParser`) déclenché à chaque transition vers `Authenticated`. Le full pipeline messagerie (liste + threads) viendra en Phase 1C.
 
-`FlagRepository` + parser + UI sont livrés en Phase 1B.2 → 1B.5 : `FlagsListParser` (classe dédiée dans `:core:parser`, distincte de la façade `HfrParser`) extrait `List<Flag>` depuis `forum1f.php?config=hfr.inc&owntopic=N` (cf. [`models.md`]({{ site.baseurl }}/specs/models)). `:core:data DefaultFlagRepository` orchestre fetch + parse via un `flow { emit(Loading); emit(fetch); emitAll(refreshes) }` cold-collected — un `MutableSharedFlow<FlagsResult>` par `FlagType` rebroadcast les résultats des `refresh()` explicites. Il garde uniquement un cache mémoire par onglet pour la session HFR courante : revenir sur un onglet déjà chargé ne refetch pas implicitement, mais `refresh(type)` force toujours le réseau et `clearSessionCache()` vide tout au logout / changement de session. `FlagItem` rend une ligne dans `:core:ui`, et `:feature:flags FlagsRoute` compose les 3 onglets HFR (« Mes sujets » / « Lus uniquement » / « Favoris ») plus le footer auth + MP count + version + signalement CSAE. Pas de cache Room en 1B — la persistance est reportée en Phase 1D (cf. roadmap `1D.2`). Pas de `PullToRefreshBox` non plus en 1B : des boutons « Réessayer » / « Actualiser » couvrent le besoin minimal ; pull-to-refresh complet est laissé pour quand le besoin justifie le coût (Phase 1D / Phase 2).
+`FlagRepository` + UI sont livrés en Phase 1B.2 → 1B.5, **migrés en REST en Phase 1D-1** (cf. ADR-003 et issue #110). `:core:data DefaultFlagRepository` itère sur les catégories publiques fournies par `ForumRepository.observeCategories()` (filtrant `id > 0` pour éviter le 403 sur d'éventuels `cat=0` modos) et appelle pour chacune `HfrApiClient.getCategoryFlagTopics(cat, bucket = HfrRestFlagBucket.{PARTICIPATED,READ,FAVORITES}, page, resultsPerPage, useAuth = true)`. Chaque page est désérialisée en `RestListEnvelope<RestTopic>` (forme plate, contrat prouvé par la fixture `rest_cat23_participated.json`) puis mappée via `RestFlagMappers.toFlags(envelope, defaultType, fallbackCat)` pour produire `List<Flag>` (cf. [`models.md`]({{ site.baseurl }}/specs/models)). Les résultats des N catégories sont concaténés puis triés globalement par `lastReplyAt` (REST `YYYY-MM-DD HH:mm`, donc tri lexicographique = chronologique inverse) ; sans ce tri global la liste serait groupée par cat au lieu d'être triée par activité comme l'attend l'écran. La voie globale `forums/hardwarefr/topics/{bucket}/` n'est **pas** exposée par `HfrApiClient` en Phase 1D-1 : son enveloppe groupée par catégorie n'a pas de fixture capturée et garder une API morte est un anti-pattern (cf. § "Le noyau avant l'écosystème" de l'AGENTS.md). Une PR de suivi pourra rajouter le helper et basculer la consommation une fois le payload capturé. Le scrape HTML `forum1f.php?owntopic=N` + `FlagsListParser` ont été retirés ; `getFlagsPage()` n'existe plus côté `HfrClient`. La séquence de flux reste identique : `flow { emit(Loading); emit(fetch); emitAll(refreshes) }` cold-collected — un `MutableSharedFlow<FlagsResult>` par `FlagType` rebroadcast les résultats des `refresh()` explicites. Cache mémoire par onglet pour la session HFR courante : revenir sur un onglet déjà chargé ne refetch pas implicitement, mais `refresh(type)` force toujours le réseau et `clearSessionCache()` vide tout au logout / changement de session. `FlagItem` rend une ligne dans `:core:ui`, et `:feature:flags FlagsRoute` compose les 3 onglets plus le footer auth + MP count + version + signalement CSAE. Pas de cache Room en 1D-1 — la persistance des drapeaux arrive avec #26.
 
 ### `:core:network` — HfrClient + HfrApiClient
 
 La couche réseau ne parse rien. Elle retourne du `String` (HTML ou JSON) ou des confirmations d'action. Deux clients coexistent depuis Phase 1C-A (cf. [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride)) :
 
-- **`HfrClient`** — endpoints HTML `forum*.php` : login, lecture posts, drapeaux page, MPs, mutations.
+- **`HfrClient`** — endpoints HTML `forum*.php` : login, lecture posts, MPs, mutations drapeaux (`addflag.php` / `delflag.php`). La lecture des drapeaux est passée en REST en Phase 1D-1 — `getFlagsPage()` retiré.
 - **`HfrApiClient`** — endpoints REST JSON `/webservices/rest_api.php?uri=…` : browsing (catégories, sous-catégories, topic listings, metadata topic). Fournit aussi le helper validant `rewriteHateoasHref(href)` qui transforme une URL HATEOAS `/api/…` en URL callable côté HFR.
 
 ```kotlin
@@ -241,8 +241,8 @@ class HfrClient @Inject constructor(
     // Phase 1A — livrée
     suspend fun getTopicPage(cat: Int, post: Int, page: Int, useAuth: Boolean = true): String
 
-    // Phase 1B.2-1B.5 — livrée
-    suspend fun getFlagsPage(owntopic: Int): String  // owntopic ∈ 1..3, cf. FlagType
+    // Phase 1B.1 — livrée
+    suspend fun getPrivateMessageListPage(page: Int = 1): String
 
     // Phase 2+ — à implémenter
     suspend fun postReply(cat: Int, post: Int, content: String): Result<Unit>
@@ -259,7 +259,7 @@ Le login HFR est isolé dans `:core:network.auth.AuthRemoteDataSource`, pas dans
 
 Le parser transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine. Isolé de toute logique réseau et UI.
 
-> **Statut Phase 1B** : `parseTopicPage` (Phase 1A) et le parser drapeaux (Phase 1B.2) sont livrés. Le parser drapeaux n'est PAS exposé via la façade `HfrParser` — c'est une classe dédiée `FlagsListParser` dans `:core:parser/flags/`, injectée directement dans `DefaultFlagRepository`. `PostContentParser` et `TopicPageParser` existent comme classes internes du module derrière `HfrParser`. Les autres méthodes ci-dessous arrivent feature par feature : `parseEditPage` Phase 2, `parseMessageList` Phase 3, `parsePostContentFromBbcode` Phase 2 (parser BBCode pour preview éditeur), `parseCategories` Phase 1 fin.
+> **Statut Phase 1D-1** : `parseTopicPage` (Phase 1A) reste actif, `PrivateMessageListParser` (Phase 1B.1) reste actif. Le parser drapeaux HTML `FlagsListParser` (Phase 1B.2) a été retiré avec la migration REST des drapeaux (#110, ADR-003). `PostContentParser` et `TopicPageParser` existent comme classes internes derrière `HfrParser`. Les autres méthodes ci-dessous arrivent feature par feature : `parseEditPage` Phase 2, `parseMessageList` Phase 3, `parsePostContentFromBbcode` Phase 2 (parser BBCode pour preview éditeur).
 
 ```kotlin
 class HfrParser @Inject constructor() {
@@ -272,10 +272,8 @@ class HfrParser @Inject constructor() {
     // ...
 }
 
-// Parser drapeaux livré comme classe dédiée Phase 1B.2 — pas via HfrParser :
-class FlagsListParser @Inject constructor() {
-    fun parse(html: String, defaultType: FlagType): List<Flag>
-}
+// Le parser drapeaux HTML a été retiré en Phase 1D-1 (#110) au profit
+// de la lecture REST via `HfrApiClient.getCategoryFlagTopics(...)` + `RestFlagMappers`.
 ```
 
 ### `:core:data` — implémentations
@@ -397,9 +395,9 @@ sequenceDiagram
     Note over App,HFR: Toutes les requêtes suivantes incluent les cookies
 
     App->>OkHttp: fetchFlags()
-    OkHttp->>HFR: GET /forum1f.php + cookies
-    HFR-->>OkHttp: HTML drapeaux
-    OkHttp-->>App: HTML brut
+    OkHttp->>HFR: GET /webservices/rest_api.php?uri=forums/hardwarefr/categories/{cat}/topics/{bucket}/ + cookies
+    HFR-->>OkHttp: JSON drapeaux
+    OkHttp-->>App: JSON brut
 ```
 
 Les cookies sont persistés via un `PersistentCookieJar` adossé à un DataStore non chiffré (voir § Stockage sécurisé ci-dessous) pour éviter de se re-logguer à chaque lancement.

@@ -139,7 +139,7 @@ class RestForumMappersTest {
         // last_position is the per-post offset (479 / 541 posts), NOT a page index — we
         // must not surface it as such. See ADR-003 + rest_cat23_participated.source.txt.
         assertEquals(12, topic.lastReadPage)
-        assertEquals(2_783_256, topic.lastPostReadId)
+        assertEquals(2_783_256L, topic.lastPostReadId)
         // Regression guard: never expose REST `last_position` as `lastReadPage`.
         assertNotEquals(479, topic.lastReadPage)
         // subcat extracted from links.subcategory.href

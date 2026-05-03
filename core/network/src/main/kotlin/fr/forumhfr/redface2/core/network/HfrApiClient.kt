@@ -87,6 +87,41 @@ class HfrApiClient @Inject constructor(
     ): String = get(uri = "${CATEGORIES_URI}$cat/topics/$topicId/", useAuth = useAuth)
 
     /**
+     * Per-category drapeaux endpoint :
+     * `forums/hardwarefr/categories/{cat}/topics/{bucket}/`. Requires authentication —
+     * HFR redirects an anonymous request to login, surfaced as `SessionExpiredException`.
+     * The response is the same [RestListEnvelope]<RestTopic> shape used by the topic
+     * listing, contract proven by `rest_cat23_participated.json`.
+     *
+     * `useAuth` defaults to `true` because a flags listing is by definition per-user.
+     * The bucket is taken from the [HfrRestFlagBucket] enum — no free-form string variant.
+     *
+     * The matching global endpoint (`forums/hardwarefr/topics/{bucket}/`) is intentionally
+     * not exposed yet : its envelope is grouped-by-category and we have no captured
+     * fixture for it. It can be added in a follow-up PR once a fixture exists.
+     */
+    suspend fun getCategoryFlagTopics(
+        cat: Int,
+        bucket: HfrRestFlagBucket,
+        page: Int = 1,
+        resultsPerPage: Int = DEFAULT_RESULTS_PER_PAGE,
+        useAuth: Boolean = true,
+    ): String {
+        require(page >= 1) { "page must be >= 1, got $page" }
+        require(resultsPerPage in 1..MAX_RESULTS_PER_PAGE) {
+            "resultsPerPage must be in 1..$MAX_RESULTS_PER_PAGE, got $resultsPerPage"
+        }
+        return get(
+            uri = "${CATEGORIES_URI}$cat/topics/${bucket.uriSegment}/",
+            useAuth = useAuth,
+            extraParams = mapOf(
+                PARAM_PAGE to page.toString(),
+                PARAM_RESULTS_PER_PAGE to resultsPerPage.toString(),
+            ),
+        )
+    }
+
+    /**
      * Rewrites a HATEOAS `href` returned by the server (`https://forum.hardware.fr/api/...`)
      * into the actual callable URL on HFR (`/webservices/rest_api.php?uri=...`). Apache on
      * forum.hardware.fr never had the `/api/` rewrite enabled, so any href consumed without

@@ -38,11 +38,10 @@ classDiagram
         +String title
         +Int totalPages
         +Int replyCount
-        +Int views
         +FlagType type
         +Boolean hasUnread
         +Int lastReadPage
-        +Long firstUnreadPostId
+        +Long? lastPostReadId
         +String firstPostAuthor
         +String lastReplyAuthor
         +String lastReplyAt
@@ -193,27 +192,30 @@ data class Flag(
     val subcat: Int?,
     val topicId: Int,
     val title: String,
-    val totalPages: Int,           // td.sujetCase4 — colonne "Dern. page" (numéro dernière page)
-    val replyCount: Int,           // td.sujetCase7 — colonne "Rép." (nombre de réponses)
-    val views: Int,                // td.sujetCase8 — colonne "Lues" (nombre de vues)
+    val totalPages: Int,           // ceil(links.posts.count / posts_results_per_page) côté REST
+    val replyCount: Int,           // max(links.posts.count - 1, 0) côté REST
     val type: FlagType,
-    val hasUnread: Boolean,
-    val lastReadPage: Int,         // page où l'utilisateur a son marqueur de lecture
-    val firstUnreadPostId: Long,   // numreponse cible pour scroller à la reprise (0 = inconnu)
+    val hasUnread: Boolean,        // !is_read côté REST ; defensive true quand is_read absent
+    val lastReadPage: Int,         // links.posts.href?page=N côté REST
+    val lastPostReadId: Long?,     // last_post_read_id côté REST — id du DERNIER post lu (≠ premier non lu)
     val firstPostAuthor: String,
     val lastReplyAuthor: String,
-    val lastReplyAt: String,       // timestamp brut HFR ("DD-MM-YYYY HH:mm"), parsing reporté
+    val lastReplyAt: String,       // timestamp brut HFR REST ("YYYY-MM-DD HH:mm"), parsing reporté
 )
 
 enum class FlagType {
-    // Mapping confirmé par les onglets HFR capturés dans les fixtures :
-    CYAN,       // « Tous les sujets auxquels j'ai participé » (`owntopic=1`, `flag1.gif`)
-    RED,        // « Tous les sujets que j'ai commencé à lire uniquement » (`owntopic=2`, `flag0.gif`)
-    FAVORITE,   // « Tous mes favoris » (`owntopic=3`, `favoris.gif`)
+    // Mapping confirmé via REST flag_owntopic + onglets HFR capturés :
+    CYAN,       // sujets participés (`flag_owntopic=1`)
+    RED,        // lus uniquement (`flag_owntopic=2`)
+    FAVORITE,   // favoris (`flag_owntopic=3`)
 }
 ```
 
-> **Phase 1B.4 → 1D drift** : `lastReplyAt` est gardé en `String` brut tel qu'il sort de HFR (`DD-MM-YYYY HH:mm`). La promotion en `Instant` viendra avec `HfrDateParser` quand un cas d'usage l'exige côté UI (tri par date, "il y a N minutes"). `views` est exposé tel quel pour parité avec la liste des topics et tracking dette technique HFR ; pas d'usage UI courant. `totalPages` est utilisé pour afficher la position relative `p.X/Y` dans le footer du `FlagItem`.
+> **Phase 1D-1 — REST migration** : `Flag` n'est plus alimenté par `forum1f.php` mais par les endpoints REST `forums/hardwarefr/topics/{participated,read,favorites}/` (cf. ADR-003 et `protocol-hfr.md`). Conséquences sur le modèle :
+>
+> - `views` (colonne « Lues » du HTML) **est retiré** : la REST ne l'expose pas. Plutôt que `Int?`-everywhere, le champ disparaît du modèle ; aucun consommateur UI n'en dépendait.
+> - `firstUnreadPostId: Long` est remplacé par `lastPostReadId: Long?` : la REST expose `last_post_read_id` (id du **dernier post lu**, pas du premier non lu). Re-ancrer le scroll sur le dernier post lu reste un deep link utile sans inférer un premier-non-lu que la REST ne donne pas. `null` quand le payload omet le champ.
+> - `lastReplyAt` est gardé en `String` brut au format REST (`YYYY-MM-DD HH:mm`) ; promotion en `Instant` reportée à un cas d'usage UI réel (tri par date, "il y a N minutes").
 
 ---
 

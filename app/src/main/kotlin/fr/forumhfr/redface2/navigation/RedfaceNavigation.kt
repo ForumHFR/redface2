@@ -188,11 +188,15 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                                 cat = flag.cat,
                                 post = flag.topicId,
                                 page = flag.lastReadPage,
-                                // HFR numreponse fits in Int (largest observed ~10M),
-                                // so the toInt() narrowing is safe in practice. 0 means
-                                // "no first-unread known" → don't deep-link anywhere.
-                                scrollTo = flag.firstUnreadPostId
-                                    .takeIf { it in 1L..Int.MAX_VALUE.toLong() }
+                                // REST `last_post_read_id` is the LAST post the user
+                                // read (not the first unread). Re-anchoring the reader
+                                // there is close enough to the legacy "where I stopped"
+                                // UX without claiming a first-unread we cannot prove
+                                // from the REST flag payload. HFR numreponse fits in
+                                // Int (largest observed ~10M), so the toInt() narrowing
+                                // is safe in practice. null = no anchor available.
+                                scrollTo = flag.lastPostReadId
+                                    ?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }
                                     ?.toInt(),
                             ),
                         )
@@ -276,7 +280,14 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                                 cat = topic.cat,
                                 post = topic.topicId,
                                 page = topic.lastReadPage ?: 1,
-                                scrollTo = topic.lastPostReadId,
+                                // Compose Navigation 3 caps `scrollTo` at Int while
+                                // `numreponse` is stored Long? to absorb a future
+                                // overflow without breaking deserialisation.
+                                // Production HFR values fit in Int (~10M); narrow
+                                // defensively and drop the anchor when out of range.
+                                scrollTo = topic.lastPostReadId
+                                    ?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }
+                                    ?.toInt(),
                             ),
                         )
                     },
