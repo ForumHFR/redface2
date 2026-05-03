@@ -19,15 +19,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Robolectric-driven migration test for `MIGRATION_1_2`. Creates a v1 database with
- * the actual v1 schema (no `authMode`, no `flag_topics`), inserts a representative
- * row, runs the migration, then verifies the new shape on the same disk file by
- * opening it with the full Room database and reading back through the DAOs.
- *
- * Why this exists: the v1 → v2 migration is hand-written DDL. Without this test a
- * typo in `MIGRATION_1_2` (missing column, wrong index name, wrong default) would
- * only crash on a real upgrade-in-place install, where the diagnostic loop is days
- * long. The test takes seconds.
+ * Robolectric-driven migration tests for `MIGRATION_1_2` and `MIGRATION_2_3`. Both
+ * migrations are hand-written DDL ; without these tests a typo (missing column,
+ * wrong index name, wrong default) would only crash on a real upgrade-in-place
+ * install, where the diagnostic loop is days long. The tests take seconds.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [33])
@@ -51,8 +46,8 @@ class MigrationTest {
     }
 
     @Test
-    fun migrate_1_to_2_adds_authMode_with_AUTHENTICATED_default_and_creates_flag_topics() {
-        val dbName = "redface-test-migration.db"
+    fun migrate_1_to_3_chains_both_migrations_and_keeps_topic_pages_data() {
+        val dbName = "redface-test-migration-1-to-3.db"
 
         // 1. Build the v1 DB and insert a `topic_pages` + `posts` row that pre-dates
         //    `authMode`. We write through the raw SQLite helper because the v1
@@ -93,22 +88,23 @@ class MigrationTest {
             )
         }
 
-        // 2. Run the migration against the v1 fixture DB. `validateDroppedTables = true`
-        //    asserts every Room-known table matches the v2 schema exactly — so a typo
-        //    in MIGRATION_1_2 would surface here (column type, NOT NULL flag, index).
-        helper.runMigrationsAndValidate(dbName, 2, true, MIGRATION_1_2).close()
+        // 2. Run both migrations in chain against the v1 fixture DB. Target version 3
+        //    is the current @Database version. `validateDroppedTables = true` asserts
+        //    every Room-known table matches the v3 schema exactly — so a typo in
+        //    MIGRATION_1_2 or MIGRATION_2_3 would surface here.
+        helper.runMigrationsAndValidate(dbName, 3, true, MIGRATION_1_2, MIGRATION_2_3).close()
 
-        // 3. Open the upgraded DB via Room (forbidding any further migration, since
-        //    we already migrated to the latest). Read back through the DAOs and
-        //    confirm the shape. The migration backfilled `authMode = AUTHENTICATED`
-        //    on the pre-existing row, and the new `flag_topics` table is callable.
+        // 3. Open the upgraded DB via Room (already at the latest version). Read back
+        //    through the DAOs and confirm the shape: `authMode` was backfilled to
+        //    AUTHENTICATED on the pre-existing rows, `flag_topics` is queryable with
+        //    the v3 shape (no `views`, `lastPostReadId` nullable).
         val migrated = Room.databaseBuilder(
             ApplicationProvider.getApplicationContext(),
             RedfaceDatabase::class.java,
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
 
         try {
@@ -126,10 +122,10 @@ class MigrationTest {
                 assertEquals("AUTHENTICATED", cursor.getString(0))
             }
 
-            // The new flag_topics table is created with the v2 shape: queries on the
-            // REST-aligned columns (no `views`, `lastPostReadId` instead of
-            // `firstUnreadPostId`) compile against the migrated DB. If anyone
-            // re-introduced a legacy column, this query would throw.
+            // The flag_topics table reaches v3 shape after the chain: REST-aligned
+            // columns (no `views`, `lastPostReadId` nullable) compile against the
+            // migrated DB. If anyone re-introduced a legacy column, this query would
+            // throw.
             migrated.openHelper.readableDatabase.query(
                 "SELECT lastPostReadId FROM flag_topics LIMIT 1",
             ).use { cursor ->
@@ -144,6 +140,123 @@ class MigrationTest {
                 assertEquals(0, cursor.getInt(0))
             }
             assertNotNull(migrated.flagDao())
+        } finally {
+            migrated.close()
+        }
+    }
+
+    @Test
+    fun migrate_2_to_3_rebuilds_flag_topics_with_REST_shape_and_keeps_topic_pages_intact() {
+        val dbName = "redface-test-migration-2-to-3.db"
+
+        // 1. Build a v2 DB with the LEGACY flag_topics shape — what intermediate
+        //    Phase 1D AABs (v25-v28) actually wrote on real devices. Cooking the v2
+        //    fixture by hand instead of running MIGRATION_1_2 because the v2 schema
+        //    JSON exported by Room reflects the FIXED shape, not the legacy one.
+        helper.createDatabase(dbName, 2).use { v2 ->
+            v2.execSQL("DROP TABLE IF EXISTS `flag_topics`")
+            v2.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `flag_topics` (
+                    `userId` TEXT NOT NULL,
+                    `type` TEXT NOT NULL,
+                    `cat` INTEGER NOT NULL,
+                    `subcat` INTEGER,
+                    `topicId` INTEGER NOT NULL,
+                    `title` TEXT NOT NULL,
+                    `totalPages` INTEGER NOT NULL,
+                    `replyCount` INTEGER NOT NULL,
+                    `views` INTEGER NOT NULL,
+                    `hasUnread` INTEGER NOT NULL,
+                    `lastReadPage` INTEGER NOT NULL,
+                    `firstUnreadPostId` INTEGER NOT NULL,
+                    `firstPostAuthor` TEXT NOT NULL,
+                    `lastReplyAuthor` TEXT NOT NULL,
+                    `lastReplyAt` TEXT NOT NULL,
+                    `fetchedAt` INTEGER NOT NULL,
+                    `authMode` TEXT NOT NULL,
+                    PRIMARY KEY(`userId`, `type`, `cat`, `topicId`)
+                )
+                """.trimIndent(),
+            )
+            // Insert a row with the legacy NOT NULL columns to prove the migration
+            // doesn't choke on existing data — the destructive recreate is safe.
+            v2.insert(
+                "flag_topics",
+                android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE,
+                ContentValues().apply {
+                    put("userId", "alice")
+                    put("type", "CYAN")
+                    put("cat", 23)
+                    putNull("subcat")
+                    put("topicId", 35395)
+                    put("title", "legacy topic")
+                    put("totalPages", 1)
+                    put("replyCount", 0)
+                    put("views", 9_999)
+                    put("hasUnread", 0)
+                    put("lastReadPage", 1)
+                    put("firstUnreadPostId", 555_000_100L)
+                    put("firstPostAuthor", "alice")
+                    put("lastReplyAuthor", "bob")
+                    put("lastReplyAt", "2026-04-01 10:00")
+                    put("fetchedAt", 1_700_000_000_000L)
+                    put("authMode", "AUTHENTICATED")
+                },
+            )
+            // Touch topic_pages so we can prove MIGRATION_2_3 leaves it alone.
+            v2.insert(
+                "topic_pages",
+                android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE,
+                ContentValues().apply {
+                    put("cat", 23)
+                    put("post", 35395)
+                    put("page", 1)
+                    put("title", "kept across migration")
+                    put("totalPages", 1)
+                    put("isFirstPostOwner", 0)
+                    putNull("pollJson")
+                    put("numreponses", "[\"100\"]")
+                    put("fetchedAt", 1_700_000_000_000L)
+                    put("authMode", "AUTHENTICATED")
+                },
+            )
+        }
+
+        // 2. Run MIGRATION_2_3 and validate against the v3 schema.
+        helper.runMigrationsAndValidate(dbName, 3, true, MIGRATION_2_3).close()
+
+        // 3. flag_topics legacy row is gone (drapeaux are pure cache, refetched at
+        //    next observe), topic_pages survives.
+        val migrated = Room.databaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java,
+            dbName,
+        )
+            .allowMainThreadQueries()
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .build()
+
+        try {
+            migrated.openHelper.readableDatabase.query(
+                "SELECT COUNT(*) FROM flag_topics",
+            ).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("flag_topics must be empty after destructive rebuild", 0, cursor.getInt(0))
+            }
+            migrated.openHelper.readableDatabase.query(
+                "SELECT title FROM topic_pages WHERE cat = 23 AND post = 35395 AND page = 1",
+            ).use { cursor ->
+                assertTrue("topic_pages row must survive MIGRATION_2_3", cursor.moveToFirst())
+                assertEquals("kept across migration", cursor.getString(0))
+            }
+            // Querying the new column name compiles, querying the legacy ones throws —
+            // proving the rebuild took effect.
+            migrated.openHelper.readableDatabase.query(
+                "SELECT lastPostReadId FROM flag_topics LIMIT 1",
+            ).use { cursor ->
+                assertEquals(0, cursor.count)
+            }
         } finally {
             migrated.close()
         }
