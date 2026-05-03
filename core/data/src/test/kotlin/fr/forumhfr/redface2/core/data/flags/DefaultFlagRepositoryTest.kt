@@ -625,8 +625,11 @@ class DefaultFlagRepositoryTest {
         apiClient = apiClient,
         forumRepository = forumRepository,
         authRepository = authRepository,
-        flagDao = flagDao,
-        clock = clock,
+        flagCacheStore = FlagCacheStore(
+            flagDao = flagDao,
+            clock = clock,
+            ioDispatcher = UnconfinedTestDispatcher(),
+        ),
         json = json,
         ioDispatcher = UnconfinedTestDispatcher(),
     )

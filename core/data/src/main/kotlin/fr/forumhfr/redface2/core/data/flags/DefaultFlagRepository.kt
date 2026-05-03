@@ -1,12 +1,8 @@
 package fr.forumhfr.redface2.core.data.flags
 
 import android.util.Log
-import fr.forumhfr.redface2.core.data.cache.CachePolicy
 import fr.forumhfr.redface2.core.data.forum.RestListEnvelope
 import fr.forumhfr.redface2.core.data.forum.RestTopic
-import fr.forumhfr.redface2.core.database.dao.FlagDao
-import fr.forumhfr.redface2.core.database.entities.FetchMode
-import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
@@ -19,8 +15,6 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.network.HfrApiClient
 import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
-import java.time.Clock
-import java.time.Instant
 import java.util.EnumMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -71,8 +65,7 @@ class DefaultFlagRepository @Inject constructor(
     private val apiClient: HfrApiClient,
     private val forumRepository: ForumRepository,
     private val authRepository: AuthRepository,
-    private val flagDao: FlagDao,
-    private val clock: Clock,
+    private val flagCacheStore: FlagCacheStore,
     @param:FlagsJson private val json: Json,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : FlagRepository {
@@ -102,7 +95,7 @@ class DefaultFlagRepository @Inject constructor(
             if (userId == null) {
                 emit(notAuthenticatedFailure())
             } else {
-                val diskCached = loadCached(type = type, userId = userId)
+                val diskCached = flagCacheStore.load(type = type, userId = userId)
                 if (diskCached != null) {
                     synchronized(cachedSuccesses) { cachedSuccesses[type] = diskCached.result }
                     emit(diskCached.result)
@@ -178,26 +171,9 @@ class DefaultFlagRepository @Inject constructor(
         )
     }
 
-    private suspend fun loadCached(type: FlagType, userId: String): CachedFlags? = withContext(ioDispatcher) {
-        val rows = flagDao.getFlags(userId = userId, type = type)
-        if (rows.isEmpty()) return@withContext null
-
-        val fetchedAt = flagDao.getLastFetchedAt(userId = userId, type = type)
-            ?: return@withContext null
-        CachedFlags(
-            result = FlagsResult.Success(rows.map { it.toFlag() }),
-            isFresh = CachePolicy.isFresh(fetchedAt, CachePolicy.flags, clock),
-        )
-    }
-
     private suspend fun persistFlags(userId: String, type: FlagType, flags: List<Flag>) {
-        val fetchedAt = clock.instant()
         runCatching {
-            flagDao.replaceForType(
-                userId = userId,
-                type = type,
-                rows = flags.map { it.toEntity(userId = userId, fetchedAt = fetchedAt) },
-            )
+            flagCacheStore.replace(userId = userId, type = type, flags = flags)
         }.onFailure { throwable ->
             Log.w(LOG_TAG, "Could not persist flags cache for $type", throwable)
         }
@@ -296,46 +272,6 @@ class DefaultFlagRepository @Inject constructor(
         FlagType.RED -> HfrRestFlagBucket.READ
         FlagType.FAVORITE -> HfrRestFlagBucket.FAVORITES
     }
-
-    private fun FlagTopicEntity.toFlag(): Flag = Flag(
-        cat = cat,
-        subcat = subcat,
-        topicId = topicId,
-        title = title,
-        totalPages = totalPages,
-        replyCount = replyCount,
-        type = type,
-        hasUnread = hasUnread,
-        lastReadPage = lastReadPage,
-        lastPostReadId = lastPostReadId,
-        firstPostAuthor = firstPostAuthor,
-        lastReplyAuthor = lastReplyAuthor,
-        lastReplyAt = lastReplyAt,
-    )
-
-    private fun Flag.toEntity(userId: String, fetchedAt: Instant): FlagTopicEntity = FlagTopicEntity(
-        userId = userId,
-        type = type,
-        cat = cat,
-        subcat = subcat,
-        topicId = topicId,
-        title = title,
-        totalPages = totalPages,
-        replyCount = replyCount,
-        hasUnread = hasUnread,
-        lastReadPage = lastReadPage,
-        lastPostReadId = lastPostReadId,
-        firstPostAuthor = firstPostAuthor,
-        lastReplyAuthor = lastReplyAuthor,
-        lastReplyAt = lastReplyAt,
-        fetchedAt = fetchedAt,
-        authMode = FetchMode.AUTHENTICATED,
-    )
-
-    private data class CachedFlags(
-        val result: FlagsResult.Success,
-        val isFresh: Boolean,
-    )
 
     private companion object {
         const val LOG_TAG = "FlagRepository"
