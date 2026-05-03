@@ -51,10 +51,19 @@ class CacheInvalidator @Inject constructor(
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
 
-    private val supervisor = SupervisorJob()
-
+    /**
+     * The earlier shape of [start] was `CoroutineScope(ioDispatcher + supervisor + parent)`
+     * where `supervisor = SupervisorJob()` was a field. That field was dead code : in a
+     * `CoroutineContext`, both `Job` and `SupervisorJob` share the same `Job.Key`, so the
+     * second `Job` (parent) silently replaced `supervisor`. The field is now removed so
+     * the scope's parent is always the explicit one — either the caller's `parent` (lets
+     * the platform `Application.onCreate` cancel everything on app death) or a fresh
+     * `SupervisorJob()` when no parent is provided. Calling [start] twice still creates
+     * two independent scopes; if the future requires a long-lived stop button, expose it
+     * through a returned handle then.
+     */
     fun start(parent: Job? = null): Job {
-        val scope = CoroutineScope(ioDispatcher + supervisor + (parent ?: SupervisorJob()))
+        val scope = CoroutineScope(ioDispatcher + (parent ?: SupervisorJob()))
         return authRepository.observeAuthState()
             .distinctUntilChanged()
             .scan(InvalidatorState(previous = null)) { state, current -> state.transition(current) }

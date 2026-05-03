@@ -8,6 +8,21 @@ import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.model.FlagType
 import java.time.Instant
 
+/**
+ * Persistence boundary for the user's drapeaux. The schema keys rows by
+ * `(userId, type, cat, topicId)` — `userId` is the **lowercased pseudo** of
+ * the authenticated account.
+ *
+ * **Convention** : every caller MUST `.lowercase()` the pseudo before invoking
+ * any of these methods. The DAO does not normalise on its own — Room equality
+ * is byte-exact and `getFlags("Alice")` returns nothing if the row was upserted
+ * with `userId = "alice"`. The normalisation lives at the repository / mapper
+ * boundary so the DAO contract stays a thin SQL wrapper.
+ *
+ * `CacheInvalidator` already lowercases pseudos before calling [deleteAllForUser]
+ * (cf. `core.data.cache.CacheInvalidator`). When the repository write path lands
+ * (PR #112 → flag persistence), the same lowercase pass is mandatory at insert.
+ */
 @Dao
 interface FlagDao {
 

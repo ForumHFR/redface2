@@ -95,6 +95,24 @@ class FlagDaoTest {
     }
 
     @Test
+    fun `userId equality is byte-exact — callers must lowercase before insert`() = runTest {
+        // Pin the convention documented on FlagDao : the DAO does NOT normalise
+        // userId. Inserting "Alice" then querying "alice" returns nothing. This
+        // test fails loudly if Room ever switches to case-insensitive collation
+        // on this column (which would mask write bugs upstream).
+        dao.upsertAll(listOf(row(userId = "Alice", topicId = 1, type = FlagType.CYAN)))
+
+        assertTrue(
+            "case-mismatched userId must not return rows",
+            dao.getFlags("alice", FlagType.CYAN).isEmpty(),
+        )
+        assertEquals(
+            listOf(1),
+            dao.getFlags("Alice", FlagType.CYAN).map { it.topicId },
+        )
+    }
+
+    @Test
     fun `getLastFetchedAt returns null when no rows exist`() = runTest {
         assertNull(dao.getLastFetchedAt("alice", FlagType.CYAN))
     }

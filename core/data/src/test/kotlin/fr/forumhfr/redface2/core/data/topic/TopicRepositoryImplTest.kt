@@ -175,6 +175,32 @@ class TopicRepositoryImplTest {
     }
 
     @Test
+    fun `refreshTopicPage upgrades an existing ANONYMOUS row to AUTHENTICATED`() = runTest {
+        // Cold cache → an anonymous prefetch writes an ANONYMOUS row.
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
+        val anonRepo = repository(now = Instant.parse("2026-04-26T18:00:00Z"))
+        anonRepo.prefetchAnonymous(1, 999_395, 1)
+        val anonRow = dao.getTopicPage(1, 999_395, 1)
+        assertNotNull(anonRow)
+        assertEquals(FetchMode.ANONYMOUS, anonRow!!.authMode)
+
+        // The user opens the page : the authenticated path must overwrite the anon row,
+        // bringing back per-user fields. The "do not downgrade" guard is one-way —
+        // anon→auth is the upgrade path, not the other direction.
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
+        val authedRepo = repository(now = Instant.parse("2026-04-26T18:00:30Z"))
+        authedRepo.refreshTopicPage(1, 999_395, 1)
+
+        val upgraded = dao.getTopicPage(1, 999_395, 1)
+        assertNotNull(upgraded)
+        assertEquals(
+            "AUTHENTICATED fetch must overwrite a previously ANONYMOUS row",
+            FetchMode.AUTHENTICATED,
+            upgraded!!.authMode,
+        )
+    }
+
+    @Test
     fun `prefetchAnonymous on a cold cache writes an ANONYMOUS row`() = runTest {
         server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
         val anonRepo = repository(now = Instant.parse("2026-04-26T18:00:00Z"))

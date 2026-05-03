@@ -109,7 +109,11 @@ class TopicRepositoryImpl @Inject constructor(
      *
      * If [authMode] is `ANONYMOUS` and an `AUTHENTICATED` row already exists,
      * we drop the write entirely — better a slightly stale auth row than a
-     * fresh anon one without the per-user signal.
+     * fresh anon one without the per-user signal. The check runs inside a
+     * Room `@Transaction` (`TopicDao.upsertTopicPageWithPostsUnlessAuthenticated`)
+     * so a concurrent authenticated fetch cannot land between the read and the
+     * write — the previous read-then-write outside the transaction had a narrow
+     * TOCTOU window flagged by the multi-flavor reviews on PR #115.
      */
     private suspend fun persist(
         topicEntity: TopicEntity,
@@ -117,17 +121,17 @@ class TopicRepositoryImpl @Inject constructor(
         authMode: FetchMode,
     ) {
         if (authMode == FetchMode.ANONYMOUS) {
-            val existing = topicDao.getTopicPage(topicEntity.cat, topicEntity.post, topicEntity.page)
-            if (existing != null && existing.authMode == FetchMode.AUTHENTICATED) {
+            val written = topicDao.upsertTopicPageWithPostsUnlessAuthenticated(topicEntity, postEntities)
+            if (!written) {
                 Log.d(
                     LOG_TAG,
-                    "Skipping anonymous overwrite of AUTHENTICATED cache for " +
+                    "Skipped anonymous overwrite of AUTHENTICATED cache for " +
                         "cat=${topicEntity.cat} post=${topicEntity.post} page=${topicEntity.page}",
                 )
-                return
             }
+        } else {
+            topicDao.upsertTopicPageWithPosts(topicEntity, postEntities)
         }
-        topicDao.upsertTopicPageWithPosts(topicEntity, postEntities)
     }
 
     private suspend fun loadFromCache(cat: Int, post: Int, page: Int): CachedTopic? {
