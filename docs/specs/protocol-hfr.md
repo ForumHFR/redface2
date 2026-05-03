@@ -34,7 +34,8 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Liste de topics d'une sous-catégorie | GET | `/forum2.php?config=hfr.inc&cat={cat}&subcat={subcat}&page={page}` | non (logué ↔ lu/non-lu visible) |
 | Liste topics (rewrite SEO) | GET | `/hfr/{cat_slug}/{subcat_slug}/liste_sujet-{page}.htm` | non |
 | Lecture d'un topic | GET | `/forum2.php?config=hfr.inc&cat={cat}&post={post}&page={page}` | non |
-| Drapeaux (accueil Redface 2) | GET | `/forum1f.php?config=hfr.inc&owntopic={filter_id}` | **oui** |
+| Drapeaux (accueil Redface 2) — REST | GET | `/webservices/rest_api.php?uri=forums/hardwarefr/topics/{participated,read,favorites}/&page={page}&results_per_page={n}` | **oui** |
+| Drapeaux par catégorie — REST | GET | `/webservices/rest_api.php?uri=forums/hardwarefr/categories/{cat}/topics/{participated,read,favorites}/&page={page}&results_per_page={n}` | **oui** |
 | Login | POST | `/login_validation.php?config=hfr.inc&redirect=&url=` | — |
 | Reply (post) | POST | `/bddpost.php?config=hfr.inc&cat={cat}` | **oui** |
 | Edit (post) | POST | `/bdd.php?config=hfr.inc&cat={cat}` | **oui** |
@@ -269,7 +270,7 @@ Les fetchers authentifiés doivent distinguer une vraie liste vide d'une page lo
 1. l'URL finale après redirection pointe vers `/login.php` ou `/login_validation.php` ;
 2. le HTML contient un formulaire login HFR (`login_validation.php`, champ `pseudo`, champ `password`).
 
-Ce signal est branché sur les endpoints authentifiés `getFlagsPage()`, `getPrivateMessageListPage()` et `getTopicPage(useAuth = true)`. Le chemin `getTopicPage(useAuth = false)` garde son passthrough anonyme pour le prefetch : il ne peut pas avoir de session expirée et le caller veut le HTML brut retourné par HFR. L'UI drapeaux affiche alors un état “session expirée” avec action de reconnexion, au lieu de parser la page login comme une liste vide.
+Ce signal est branché sur les endpoints authentifiés `HfrApiClient.getCategoryFlagTopics()` (REST per-cat, fan-out 1 appel par catégorie publique), `HfrClient.getPrivateMessageListPage()` (HTML) et `HfrClient.getTopicPage(useAuth = true)` (HTML). Le chemin `getTopicPage(useAuth = false)` garde son passthrough anonyme pour le prefetch : il ne peut pas avoir de session expirée et le caller veut le HTML brut retourné par HFR. L'UI drapeaux affiche alors un état “session expirée” avec action de reconnexion, au lieu de parser la page login comme une liste vide.
 
 L'utilisateur ré-entre son mot de passe (Option A : pas de re-login transparent, le password n'est pas stocké — voir [architecture.md#stockage-sécurisé-des-credentials](architecture.md#stockage-sécurisé-des-credentials)).
 
@@ -369,8 +370,8 @@ GET https://forum.hardware.fr/webservices/rest_api.php?uri=<URI>[&page=N&results
 | Liste des topics — catégorie entière | `forums/hardwarefr/categories/{cat}/topics/last/` | non / oui | Auth ajoute `is_read`, `flag_owntopic`, `last_position`, `last_post_read_id` |
 | Liste des topics — sous-catégorie | `forums/hardwarefr/categories/{cat}/subcategories/{sub}/topics/last/` | non / oui | idem, plus `links.subcategory.href` |
 | Metadata d'un topic | `forums/hardwarefr/categories/{cat}/topics/{topic}/` | non / oui | 1 KB vs 220 KB pour la même page HTML |
-| Drapeaux par catégorie | `forums/hardwarefr/categories/{cat}/topics/{participated,read,favorites}/` | **oui** | Format plat (resources = topics) |
-| Drapeaux globaux | `forums/hardwarefr/topics/{participated,read,favorites}/` | **oui** | Format groupé par catégorie (resources = list of category groups) |
+| Drapeaux par catégorie | `forums/hardwarefr/categories/{cat}/topics/{participated,read,favorites}/` | **oui** | Format plat (resources = topics). **Voie consommée en Phase 1D-1 (#110)** : `DefaultFlagRepository` itère sur les catégories publiques pour reconstituer la liste complète des drapeaux. |
+| Drapeaux globaux | `forums/hardwarefr/topics/{participated,read,favorites}/` | **oui** | Format groupé par catégorie (resources = list of category groups). **Non consommé en Phase 1D-1** : forme groupée non capturée, à valider via fixture live + DTO dédié dans une PR de suivi (perf : remplacerait N requêtes par-cat par 1 requête globale). |
 
 ### Endpoints HTML-only (pas de REST disponible côté HFR)
 
@@ -415,6 +416,8 @@ Implémenté de façon validante (host + scheme + préfixe `/api/` enforcés) da
   | autre (`0`, `4`, négatif…) | `null` | bucket inconnu — l'UI dégrade silencieusement, pas de crash |
 
   Indépendant de `is_read` : un sujet drapeau cyan peut être lu (`is_read = true`, `hasUnread = false`) ou non lu — les deux axes coexistent dans `TopicSummary`.
+
+- `last_post_read_id` ≠ « premier non lu » : `last_post_read_id` est l'**id du dernier post lu** par l'utilisateur dans ce topic. Le legacy HTML `forum1f.php` exposait au contraire un `#t{numreponse}` pointant le **premier post non lu**. Redface 2 (Phase 1D-1) consomme `last_post_read_id` tel quel via `Flag.lastPostReadId` et l'utilise comme ancre de scroll en deep link — re-ancrer le lecteur sur le dernier post lu est suffisamment proche de l'UX « où je m'étais arrêté » sans inférer un premier-non-lu que le payload REST n'expose pas.
 - `tns3` filename avatar : nom du fichier, le préfixe d'URL est à reconstituer côté UI.
 
 ---

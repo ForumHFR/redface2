@@ -33,21 +33,6 @@ class HfrClientTest {
     }
 
     @Test
-    fun `getFlagsPage throws SessionExpired when final URL is login page`() = runTest {
-        server.enqueue(
-            MockResponse()
-                .setResponseCode(302)
-                .addHeader("Location", "/login.php"),
-        )
-        server.enqueue(MockResponse().setResponseCode(200).setBody("<html>login</html>"))
-
-        val error = runCatching { client.getFlagsPage(owntopic = 1) }.exceptionOrNull()
-
-        assertTrue("expected SessionExpiredException, got $error", error is SessionExpiredException)
-        assertTrue((error as SessionExpiredException).finalUrl.endsWith("/login.php"))
-    }
-
-    @Test
     fun `getPrivateMessageListPage throws SessionExpired on login form served as HTTP 200`() = runTest {
         server.enqueue(
             MockResponse()
@@ -70,19 +55,9 @@ class HfrClientTest {
     }
 
     @Test
-    fun `getFlagsPage keeps a real empty flags page distinct from session expired`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>Aucun sujet</body></html>"))
-
-        val html = client.getFlagsPage(owntopic = 3)
-
-        assertEquals("<html><body>Aucun sujet</body></html>", html)
-    }
-
-    @Test
     fun `getTopicPage throws SessionExpired when authenticated and final URL is login`() = runTest {
         // Without this hardening, an expired session would be parsed silently as an empty
-        // topic — wrong empty screen, no reconnect CTA. Mirrors the getFlagsPage / getMP
-        // protection.
+        // topic — wrong empty screen, no reconnect CTA. Mirrors the getMP protection.
         server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "/login.php"))
         server.enqueue(MockResponse().setResponseCode(200).setBody("<html>login</html>"))
 

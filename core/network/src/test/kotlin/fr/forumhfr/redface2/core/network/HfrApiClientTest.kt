@@ -88,6 +88,50 @@ class HfrApiClientTest {
     }
 
     @Test
+    fun `getCategoryFlagTopics scopes the URI to the cat plus bucket segment`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+
+        client.getCategoryFlagTopics(
+            cat = 23,
+            bucket = HfrRestFlagBucket.PARTICIPATED,
+            page = 2,
+            resultsPerPage = 30,
+            useAuth = true,
+        )
+
+        val recorded = server.takeRequest()
+        val url = requireNotNull(recorded.requestUrl)
+        assertEquals("forums/hardwarefr/categories/23/topics/participated/", url.queryParameter("uri"))
+        assertEquals("2", url.queryParameter("page"))
+        assertEquals("30", url.queryParameter("results_per_page"))
+    }
+
+    @Test
+    fun `getCategoryFlagTopics rejects page = 0 and out-of-range resultsPerPage`() = runTest {
+        val zeroPage = runCatching {
+            client.getCategoryFlagTopics(cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED, page = 0)
+        }.exceptionOrNull()
+        assertTrue("expected IAE for page=0, got $zeroPage", zeroPage is IllegalArgumentException)
+
+        val tooLarge = runCatching {
+            client.getCategoryFlagTopics(cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED, resultsPerPage = 101)
+        }.exceptionOrNull()
+        assertTrue("expected IAE for rpp=101, got $tooLarge", tooLarge is IllegalArgumentException)
+    }
+
+    @Test
+    fun `getCategoryFlagTopics surfaces SessionExpiredException on a login redirect`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "/login.php"))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("login form"))
+
+        val error = runCatching {
+            client.getCategoryFlagTopics(cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED)
+        }.exceptionOrNull()
+
+        assertTrue("expected SessionExpiredException, got $error", error is SessionExpiredException)
+    }
+
+    @Test
     fun `getTopicMetadata hits the topic-level URI without page params`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
 

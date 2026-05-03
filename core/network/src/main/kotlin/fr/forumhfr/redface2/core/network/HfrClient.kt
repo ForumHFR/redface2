@@ -49,31 +49,6 @@ class HfrClient @Inject constructor(
     }
 
     /**
-     * Fetches the authenticated drapeaux page filtered by [owntopic] :
-     *
-     * - `owntopic=1` → drapeaux cyan (sujets participés)
-     * - `owntopic=2` → drapeaux rouges (lecture suivie uniquement)
-     * - `owntopic=3` → étoiles jaunes (favoris)
-     *
-     * Always uses the authenticated client — HFR redirects this endpoint to /login.php
-     * for an anonymous request. Mirrors the legacy v1 `META_PAGE_URL` query string so any
-     * server-side filter HFR cares about stays in place.
-     */
-    suspend fun getFlagsPage(owntopic: Int): String {
-        require(owntopic in 1..3) { "owntopic must be in 1..3, got $owntopic" }
-        val url = baseUrl.newBuilder()
-            .addPathSegment("forum1f.php")
-            .addQueryParameter("config", "hfr.inc")
-            .addQueryParameter("owntopic", owntopic.toString())
-            .addQueryParameter("new", "0")
-            .addQueryParameter("nojs", "0")
-            .build()
-
-        val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
-    }
-
-    /**
      * Fetches the authenticated MP list page. The endpoint is the legacy v1 URL
      * (`forum1.php?config=hfr.inc&cat=prive&...`), which is structurally a topic listing
      * scoped to the user's private inbox. Always uses the authenticated client — there is
