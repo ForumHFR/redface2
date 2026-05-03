@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.scan
@@ -172,23 +173,23 @@ class CategoryViewModel @AssistedInject constructor(
         // flight at once and never warm a page the user has already moved
         // past. Using `is ContentTrigger` ignores Loading / Error transitions
         // — only firm Content triggers a warm-up.
-        viewModelScope.launch {
-            combine(selectedSubcat, page, topicsState) { subcat, currentPage, topics ->
-                ContentTrigger(subcat, currentPage, topics.contentPageCount() ?: -1)
-            }
-                .distinctUntilChanged()
-                .onEach { trigger -> schedulePrefetch(trigger) }
-                .collect()
+        combine(selectedSubcat, page, topicsState) { subcat, currentPage, topics ->
+            ContentTrigger(subcat, currentPage, topics.contentPageCount() ?: -1)
         }
+            .distinctUntilChanged()
+            .onEach { trigger -> schedulePrefetch(trigger) }
+            .launchIn(viewModelScope)
     }
 
-    private suspend fun Flow<ContentTrigger>.collect() = collect { /* no-op, side-effect via onEach */ }
-
     private fun schedulePrefetch(trigger: ContentTrigger) {
-        prefetchJob?.cancel()
         val nextPage = trigger.currentPage + 1
-        // pageCount unknown (no Content yet) → -1 sentinel, skip.
+        // pageCount unknown (no Content yet) → -1 sentinel, skip without touching
+        // the in-flight prefetch. The previous shape cancelled the job before this
+        // guard, which would lose an already-running prefetch when a Loading or
+        // intermediate emission landed during a pull-to-refresh — the prefetch was
+        // dropped and not relaunched, leaving the user with a cold next page.
         if (trigger.pageCount <= 0 || nextPage > trigger.pageCount) return
+        prefetchJob?.cancel()
         prefetchJob = viewModelScope.launch {
             forumRepository.prefetchTopicList(
                 cat = request.cat,

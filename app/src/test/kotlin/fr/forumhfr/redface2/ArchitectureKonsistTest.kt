@@ -122,9 +122,14 @@ class ArchitectureKonsistTest {
         // which both go to the @AnonymousClient. A ViewModel that calls
         // `refreshTopicPage()` or `refreshTopicList()` from a "prefetch" context
         // would fire an authenticated request and silently mark drapeaux as read
-        // (cf. ADR-003 § Prefetch). This test catches the mistake by enforcing
-        // that the substring "prefetch" only appears next to the repository's
-        // prefetch methods, never the auth-paying refresh ones.
+        // (cf. ADR-003 § Prefetch).
+        //
+        // We analyse at **function** granularity, not line-by-line. A naive
+        // line search misses the natural shape of the bug : a function named
+        // `maybeSchedulePrefetch(...)` calls `refreshTopicPage(...)` two lines
+        // below — the line search would not flag it because `prefetch` and
+        // `refreshTopicPage` live on different lines. Looking at the function
+        // text catches both same-line and multi-line forms.
         val viewModelFiles = Konsist
             .scopeFromProject()
             .slice { file ->
@@ -137,22 +142,19 @@ class ArchitectureKonsistTest {
 
         assertTrue("Konsist must scan feature ViewModels", viewModelFiles.isNotEmpty())
 
-        viewModelFiles.assertFalse { file ->
-            // Match patterns where a "prefetch"-named scope refers to refresh*().
-            // Naive but cheap: if a file mentions both "prefetch" and a refresh*()
-            // method invocation in any prefetch-tagged context, flag it.
-            val text = file.text.lowercase()
-            val prefetchContext = text.contains("prefetch")
-            val callsAuthenticatedRefresh = text.contains("refreshtopicpage") ||
-                text.contains("refreshtopiclist")
-            // Only flag if the file has BOTH and the refresh call lives near a
-            // prefetch label — same line or same block. We approximate "near"
-            // by looking at the lines that contain the refresh call.
-            prefetchContext && callsAuthenticatedRefresh && file.text.lineSequence().any { line ->
-                val lower = line.lowercase()
-                lower.contains("prefetch") && (
-                    lower.contains("refreshtopicpage") || lower.contains("refreshtopiclist")
-                    )
+        viewModelFiles.forEach { file ->
+            file.functions(includeNested = true, includeLocal = true).forEach { function ->
+                val nameSuggestsPrefetch = "prefetch" in function.name.lowercase()
+                val bodyMentionsPrefetch = "prefetch" in function.text.lowercase()
+                if (!nameSuggestsPrefetch && !bodyMentionsPrefetch) return@forEach
+                val body = function.text.lowercase()
+                val callsRefresh = "refreshtopicpage" in body || "refreshtopiclist" in body
+                org.junit.Assert.assertFalse(
+                    "Function ${file.path}:${function.name} mixes prefetch context " +
+                        "with an authenticated refresh* call. Anonymous prefetch must use " +
+                        "TopicRepository.prefetch / ForumRepository.prefetchTopicList only.",
+                    callsRefresh,
+                )
             }
         }
     }
