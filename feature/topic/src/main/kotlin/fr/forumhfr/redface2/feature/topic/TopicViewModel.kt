@@ -117,7 +117,11 @@ class TopicViewModel @AssistedInject constructor(
      * - Skip the call when already at the last page.
      * - Track [prefetchedPage] so we don't re-issue a request if the same
      *   page emits twice (cache + refresh emission of the stale path, or any
-     *   future intermediate emission).
+     *   future intermediate emission). The marker is set **before** the
+     *   coroutine runs, so a transient prefetch failure (network glitch) is
+     *   **not** retried for the same emission — prefetch is best-effort by
+     *   design and the next user-driven `observeTopicPage` on `page+1` will
+     *   re-fetch through the normal cache-miss path.
      * - Hang the job off [viewModelScope] so leaving the screen cancels the
      *   in-flight request — the structured-concurrency cancel propagates down
      *   to OkHttp.

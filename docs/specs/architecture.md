@@ -393,8 +393,8 @@ Utilisateur lit la page 3 d'un topic
 
 Implémentation Phase 1D PR 4 (#108) :
 
-- **Topic page** : `TopicViewModel` déclenche `topicRepository.prefetch(cat, post, page+1)` après chaque émission `Loaded`. Le job est rattaché à `viewModelScope` ; sortir de l'écran ou changer de page propage le `cancel()` jusqu'à OkHttp.
-- **Topic listing** : `CategoryViewModel` déclenche `forumRepository.prefetchTopicList(cat, subcat, page+1)` à chaque transition vers `Content`. Le job est annulé à chaque changement de `(subcat, page)` via le pattern `combine + onEach + cancel` standard.
+- **Topic page** : `TopicViewModel` déclenche `topicRepository.prefetch(cat, post, page+1)` après chaque émission `Loaded`. Le job est rattaché à `viewModelScope` ; sortir de l'écran ou changer de page propage le `cancel()` jusqu'à OkHttp. **Le payload est persisté** comme row `ANONYMOUS` en Room — la prochaine `observeTopicPage` la lit immédiatement (paint snappy) puis re-fetch authentifié pour upgrader vers `AUTHENTICATED` (champs per-user).
+- **Topic listing** : `CategoryViewModel` déclenche `forumRepository.prefetchTopicList(cat, subcat, page+1)` à chaque transition vers `Content`. Le job est annulé à chaque changement de `(subcat, page)` via le pattern `combine + onEach + cancel` standard. **Le payload est volontairement jeté** — pas de cache client peuplé. Un payload anonyme stripperait `is_read` et `last_post_read_id` qui sont nécessaires côté écran ; on ne fait que chauffer le CDN HFR pour la prochaine requête authentifiée.
 - **Une seule page d'avance** par déclencheur. Pas de chaîne `n+2, n+3` — le coût ne paie pas le bénéfice et grossirait la facture pour des comportements rares.
 - **Échecs swallowed** : un prefetch flaky ne doit jamais perturber l'affichage. Erreurs loguées en `Log.w`, puis avalées.
 

@@ -60,6 +60,57 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `prefetch is cancelled when the screen is left (issue #108)`() = runTest {
+        // Symmetric to CategoryViewModelTest's same-named case. Issue #108's
+        // acceptance criterion is "le prefetch est annulé quand l'utilisateur quitte
+        // la page". The topic-page prefetch is the more user-visible path of the two,
+        // so it deserves its own pin — without this test, only the listing path
+        // proves the cancellation chain. We suspend `prefetch` on awaitCancellation
+        // and verify the in-flight call observes [CancellationException] when the
+        // ViewModelStore is cleared (the public API the framework calls on screen
+        // leave).
+        val cancelObserved = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val topic = fakeTopic(page = 2, totalPages = 5)
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
+        repository.prefetchHook = { _, _, _ ->
+            try {
+                kotlinx.coroutines.awaitCancellation()
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                cancelObserved.complete(Unit)
+                throw cancellation
+            }
+        }
+        val vm = TopicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+        )
+
+        vm.state.test {
+            assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(
+            "prefetch should have been launched on Loaded(page=2)",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 3)),
+            repository.prefetches,
+        )
+
+        val store = androidx.lifecycle.ViewModelStore()
+        androidx.lifecycle.ViewModelProvider(
+            store,
+            object : androidx.lifecycle.ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = vm as T
+            },
+        ).get(TopicViewModel::class.java)
+        store.clear()
+
+        kotlinx.coroutines.withTimeout(CANCEL_TIMEOUT_MS) {
+            cancelObserved.await()
+        }
+    }
+
+    @Test
     fun `last page does not trigger an out-of-range prefetch`() = runTest {
         val topic = fakeTopic(page = 5, totalPages = 5)
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
@@ -301,6 +352,7 @@ class TopicViewModelTest {
     companion object {
         private const val SAMPLE_CAT = 13
         private const val SAMPLE_POST = 84_540
+        private const val CANCEL_TIMEOUT_MS = 2_000L
     }
 }
 
@@ -310,6 +362,14 @@ private class FakeTopicRepository(
     private val queue = ArrayDeque(flowsToReturn)
     val calls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
     val prefetches: MutableList<Triple<Int, Int, Int>> = mutableListOf()
+
+    /**
+     * Optional hook to suspend or fail inside `prefetch(...)`. Tests that need to
+     * observe the in-flight prefetch (cancellation, hung network) install this
+     * to gate the suspend until they're ready to assert. Default keeps the fake
+     * fast: `prefetch` returns immediately after recording the call.
+     */
+    var prefetchHook: (suspend (cat: Int, post: Int, page: Int) -> Unit)? = null
 
     override fun observeTopicPage(cat: Int, post: Int, page: Int): Flow<Topic> {
         calls += Triple(cat, post, page)
@@ -322,6 +382,7 @@ private class FakeTopicRepository(
 
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {
         prefetches += Triple(cat, post, page)
+        prefetchHook?.invoke(cat, post, page)
     }
 }
 

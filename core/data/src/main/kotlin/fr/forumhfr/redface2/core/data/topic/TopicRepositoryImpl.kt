@@ -35,7 +35,7 @@ class TopicRepositoryImpl @Inject constructor(
      * - Cache hit, **AUTHENTICATED** + fresh → emit and stop. No network. This is the
      *   snappy back-nav case: returning to a page within `CachePolicy.topicPage` does
      *   not refetch and does not silently mark drapeaux as read.
-     * - Cache hit, **ANONYMOUS** (warmed by [prefetchAnonymous]) → always emit cache
+     * - Cache hit, **ANONYMOUS** (warmed by [prefetch]) → always emit cache
      *   then re-fetch authenticated, regardless of TTL. The anon row is missing
      *   per-user fields (`isOwnPost`, `isEditable`, …) and reading without re-fetching
      *   would also skip the implicit "mark as read" the auth GET triggers server-side.
