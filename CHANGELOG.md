@@ -12,7 +12,35 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## v0.7.0 — 2026-05-03
 
-Phase 1D livrée : drapeaux REST, lecture longue topic, cache Room (TTL + persistance + isolation par compte), prefetch anonyme. AAB `0.1.0-phase1d.1` (build 29).
+Phase 1D livrée : drapeaux REST, lecture longue topic, cache Room (TTL + persistance + isolation par compte), prefetch anonyme. AAB final `0.1.0-phase1d.1` (versionCode 29, commit `af66363`) couvrant Phase 1D-1 → 1D-4, le hotfix Room v3 (PR [#119](https://github.com/ForumHFR/redface2/pull/119)) et l'audit de gel des `@SerialName` (PR [#120](https://github.com/ForumHFR/redface2/pull/120)).
+
+### Builds AAB Phase 1D
+
+Trajectoire des builds Phase 1D — Play Console n'accepte pas un `versionCode` déjà uploadé, donc chaque tentative consomme un slot ; les builds preview/dogfood listés ci-dessous explicitent ce qui a été émis localement même quand la PR associée n'a pas atteint `main`.
+
+| versionCode | versionName | Commit | Statut | Note |
+|---|---|---|---|---|
+| 25 | `0.1.0-phase1c.3` (preview) | `3d068e4` | preview dogfood | rebase Phase 1C-B avant pull-to-refresh, jamais sur `main` |
+| 26 | `0.1.0-phase1c.2` | `4fb376a` | livré | Phase 1C-B post review fixes (PR [#106](https://github.com/ForumHFR/redface2/pull/106) déjà mergée à `8be7a0d`) |
+| 27 | `0.1.0-phase1d.0` (preview) | `d44ccfd` puis `be8c712` | preview dogfood | Phase 1D-1 → 1D-3 en cours de stabilisation, jamais sur `main` |
+| 28 | `0.1.0-phase1d.0` | `c6c580c` | **burnt** | PR [#118](https://github.com/ForumHFR/redface2/pull/118) **fermée** : Room v2 retravaillé sans bump → `IllegalStateException: Room cannot verify the data integrity` au démarrage (cf. hotfix ci-dessous) |
+| 29 | `0.1.0-phase1d.1` | `be8c712` puis `af66363` | livré | AAB stamp `be8c712` = Room v3 only ; AAB stamp `af66363` = Room v3 + serialization hardening (PR [#120](https://github.com/ForumHFR/redface2/pull/120)) — c'est ce dernier qui est canonique |
+
+### Tooling — Gradle wrapper 9.5.0 ([#103](https://github.com/ForumHFR/redface2/pull/103))
+
+#### Changed
+- `gradle/wrapper/gradle-wrapper.properties` bump `9.4.1` → `9.5.0` ; aligne le wrapper repo sur le Gradle stable consommé par AGP 9 / Kotlin 2.3 build chain.
+
+### Hardening — Audit `@SerialName` post-Room ([#120](https://github.com/ForumHFR/redface2/pull/120))
+
+Audit déclenché après le crash identityHash : recherche systématique de bugs analogues sur tout objet sérialisé sur disque ou via DataStore, où un rename Kotlin sans `@SerialName` ferait silencieusement crasher la lecture du cache.
+
+#### Changed
+- `core/model/PostContent.kt` : tous les sealed cases (`PostBlock.*`, `PostInline.*`, `SmileyKind.*`) et toutes les data class properties figées avec `@SerialName` au FQN historique. Le discriminator polymorphique kotlinx.serialization ne dépend plus du package — déplacer une classe dans un autre fichier ou module ne casse plus les rows `posts.content` déjà persistées.
+- `core/data/topic/TopicMappers.PollDto` : `@SerialName` ajouté sur toutes les properties + defaults pour absorber un row legacy sans champ. Decode best-effort entouré de `runCatching` qui dégrade en `Poll = null` plutôt que crasher tout le topic.
+- `core/data/auth/DataStoreCookieStore.CookieDto` : `@SerialName` ajouté sur toutes les properties + defaults. Un rename Kotlin ne déclenche plus un logout silencieux (le `runCatching` upstream attrapait déjà le `MissingFieldException`, mais préférable de figer la forme on-disk).
+- Lectures défensives sur les colonnes `FetchMode` / `FlagType` dans `:core:database` : un row écrit avec une valeur enum inconnue (rare) est désormais rejeté de la liste plutôt que de crasher la query.
+- `PostContentSerializerTest` (nouveau, dans `:core:database`) bloque la régression : il décode des fixtures historiques byte-identiques produites avant l'audit, et échoue si le discriminator JSON ne match plus la valeur figée.
 
 ### Hotfix Phase 1D — Room schema v3
 
@@ -91,6 +119,22 @@ Pendant la séquence de PRs Phase 1D, les fixes superpowers sur `flag_topics` (d
 ## v0.6.0 — 2026-04-25
 
 Réalignement des specs sur la réalité du code après les PR [#78](https://github.com/ForumHFR/redface2/pull/78) (parser HTML topic + AST `PostContent`) et [#80](https://github.com/ForumHFR/redface2/pull/80) (`PostRenderer` Compose, retrait du fragment HTML brut de `Post.content`, sortie de Jsoup hors `:core:parser`). Phase courante : **Phase 1 — Core lecture**.
+
+### Builds AAB Phase 1B → 1C (rétrospectif)
+
+Cette section a été ajoutée a posteriori dans v0.7.0 pour combler le trou de tracking : entre le bootstrap Phase 0 et la livraison Phase 1D, plusieurs AABs ont été émis sans être notés ici. Chaque ligne ne correspond pas à un changement de spec, juste à un slot Play Console consommé.
+
+| versionCode | versionName | Commit | Note |
+|---|---|---|---|
+| 14 | `0.1.0-phase1b.0` | `99f08c6` | premier upload Play Console interne après livraison Phase 1A |
+| 15 | `0.1.0-phase1b.1` | `bcdbc09` | bump Play Console |
+| 16 | `0.1.0-phase1b.2` | `15c6c34` | bump Play Console |
+| 17 | `0.1.0-phase1b.3` | `940301c` | unread MP count sur `FlagsScreen` |
+| 18 | `0.1.0-phase1b.4` | `49eb713` | bump Play Console (prépare le lancement réel auth Phase 1B.1) |
+| 19 | `0.1.0-phase1b.5` | `57168e6` | bouton CSAE in-app sur `FlagsScreen` |
+| 23 | `0.1.0-phase1b.9` | `00ab443` | drapeaux HFR live + diagnostics login + URLDecoder hotfix (PR [#94](https://github.com/ForumHFR/redface2/pull/94)) — saut de versionCode dû aux builds dogfood intermédiaires consommés en local |
+| 24 | `0.1.0-phase1b.10` | `4cc60d3` | hardening session Phase 1B post review (`postRefreshFlags()` + `MaxAge`) |
+| 26 | `0.1.0-phase1c.2` | `4fb376a` | Phase 1C-B post review fixes (cf. v0.7.0 ci-dessus pour la suite) |
 
 ### Added
 - **Slice topic fixe** livré : `TopicScreen` rend une fixture HFR réelle (`topic_khakha_page_146.html`) via le pipeline complet `:core:parser` → AST `PostContent` → `:core:ui` `PostRenderer`, alimenté par `TopicFixtureRepository` en attendant le repository réseau (PR [#78](https://github.com/ForumHFR/redface2/pull/78) + [#80](https://github.com/ForumHFR/redface2/pull/80)).
