@@ -103,6 +103,11 @@ class DefaultFlagRepository @Inject constructor(
         runCatching {
             val cats = loadCategories()
             val bucket = type.toBucket()
+            // `coroutineScope` (fail-all) is intentional over `supervisorScope` (best-effort).
+            // A flags screen must surface a network failure with the "Réessayer" affordance
+            // — partial results would silently hide an outage and let the user think they
+            // are up to date. If one cat REST call throws, all siblings are cancelled and
+            // [FlagsResult.Failure] propagates with the original cause.
             coroutineScope {
                 cats.map { category ->
                     async { fetchAllPages(cat = category.id, bucket = bucket, defaultType = type) }
@@ -122,26 +127,43 @@ class DefaultFlagRepository @Inject constructor(
     }
 
     /**
-     * Resolves the public category list. Reuses [ForumRepository.observeCategories]
+     * Resolves the REST-callable category list. Reuses [ForumRepository.observeCategories]
      * which keeps an in-memory cache per session, so tabbing back to drapeaux after
-     * the Forum tab has loaded is one round-trip cheaper. Surfaces [ForumResult.Failure]
-     * as a thrown exception so the outer `runCatching` maps it to [FlagsResult.Failure]
-     * with the original cause.
+     * the Forum tab has loaded is one round-trip cheaper.
+     *
+     * Filters out categories whose [Category.id] is not strictly positive (defensive
+     * guard against a hypothetical `cat=0` modos space leaking through — the REST flag
+     * endpoint would 403 on it). Non-numeric pseudo-cats like `cat=prive` (MPs) cannot
+     * reach this method because `Category.id` is typed `Int`.
+     *
+     * The `first { !Loading }` waits for the first concrete result. A stalled `Loading`
+     * (network outage before the first fetch ever completes) is bounded by OkHttp's
+     * connect/read timeouts inside the underlying `getCategories` REST call — when that
+     * fails, `ForumRepository.observeCategories()` surfaces a `Failure` and `first` returns.
+     * We do not impose a separate `withTimeout` here because it would compete with
+     * coroutine test schedulers that don't share state with `Dispatchers.IO`.
      */
     private suspend fun loadCategories(): List<Category> {
         val first = forumRepository.observeCategories().first { it !is ForumResult.Loading }
-        return when (first) {
+        val all = when (first) {
             is ForumResult.Success -> first.value
             is ForumResult.Failure -> throw first.cause
             ForumResult.Loading -> error("filtered above")
         }
+        return all.filter { it.id > 0 }
     }
 
     /**
-     * Walks every page of `categories/{cat}/topics/{bucket}/` until either the response
-     * declares we have everything (`page * results_per_page >= results_count`) or the
-     * server returns an empty page (defensive — shouldn't happen but prevents an
-     * infinite loop on a malformed envelope).
+     * Walks every page of `categories/{cat}/topics/{bucket}/` until we have accumulated
+     * at least `results_count` rows, the server returns an empty page (defensive —
+     * shouldn't happen but prevents an infinite loop on a malformed envelope), or we
+     * hit [MAX_PAGES] (anti-runaway hard cap, would mean ~5000 flagged topics in a
+     * single category which is well beyond any realistic user).
+     *
+     * Pagination is driven by [accumulated.size] (not `page * results_per_page`) because
+     * the latter is fragile: the server can normalise `results_per_page` to a value
+     * different from the requested one, return a partial last page, or report a
+     * `results_count` that does not match an exact multiple of `results_per_page`.
      */
     private suspend fun fetchAllPages(
         cat: Int,
@@ -150,7 +172,7 @@ class DefaultFlagRepository @Inject constructor(
     ): List<Flag> {
         val accumulated = mutableListOf<Flag>()
         var page = 1
-        while (true) {
+        while (page <= MAX_PAGES) {
             val body = apiClient.getCategoryFlagTopics(
                 cat = cat,
                 bucket = bucket,
@@ -166,9 +188,7 @@ class DefaultFlagRepository @Inject constructor(
             )
             accumulated += mapped
             val list = envelope.resource
-            val pageSize = list.resultsPerPage.takeIf { it > 0 } ?: DEFAULT_RESULTS_PER_PAGE
-            val seen = list.page * pageSize
-            if (mapped.isEmpty() || seen >= list.resultsCount) break
+            if (mapped.isEmpty() || accumulated.size >= list.resultsCount) break
             page += 1
         }
         return accumulated
@@ -183,5 +203,6 @@ class DefaultFlagRepository @Inject constructor(
     private companion object {
         const val LOG_TAG = "FlagRepository"
         const val DEFAULT_RESULTS_PER_PAGE = 50
+        const val MAX_PAGES = 100
     }
 }

@@ -232,6 +232,114 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
+    fun `non-positive cat ids are filtered out before fan-out`() = runTest {
+        // ForumRepository may surface defensive non-public cats (cat=0 modos space) ; the
+        // REST drapeaux endpoint would 403 on them, so the repository must skip them.
+        val withModos = listOf(
+            Category(id = 0, name = "Espace modos", forceSubcat = false, subcategoryCount = 0),
+            Category(id = 23, name = "Technologies Mobiles", forceSubcat = true, subcategoryCount = 10),
+        )
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23,
+                bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(),
+                resultsPerPage = any(),
+                useAuth = true,
+            )
+        } returns capturedParticipatedFixture
+        val forumRepository = stubForumRepository(withModos)
+        val repo = buildRepository(apiClient, forumRepository)
+
+        repo.observe(FlagType.CYAN).test {
+            awaitItem() // Loading
+            val success = awaitItem() as FlagsResult.Success
+            assertEquals(1, success.flags.size)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) {
+            apiClient.getCategoryFlagTopics(
+                cat = 0,
+                bucket = any(),
+                page = any(),
+                resultsPerPage = any(),
+                useAuth = any(),
+            )
+        }
+    }
+
+    @Test
+    fun `pagination keeps walking when server inflates results_per_page on a partial page`() = runTest {
+        // Regression guard: the old `seen = page * pageSize` heuristic stopped after
+        // page 1 when the server advertised a results_per_page bigger than the actual
+        // payload (e.g. normalised to 10 while only 1 topic landed). The new contract
+        // pages on `accumulated.size >= results_count` so the second flag is fetched.
+        val page1 = """
+            {
+              "resource": {
+                "page": 1,
+                "results_count": 2,
+                "results_per_page": 10,
+                "resources": [
+                  {
+                    "id": 300,
+                    "title": "Topic A — partial page",
+                    "links": {
+                      "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
+                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/300/posts/?page=1&results_per_page=40", "count": 1}
+                    },
+                    "is_read": false,
+                    "flag_owntopic": 1
+                  }
+                ]
+              }
+            }
+        """
+        val page2 = """
+            {
+              "resource": {
+                "page": 2,
+                "results_count": 2,
+                "results_per_page": 10,
+                "resources": [
+                  {
+                    "id": 400,
+                    "title": "Topic B — second page",
+                    "links": {
+                      "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
+                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/400/posts/?page=1&results_per_page=40", "count": 1}
+                    },
+                    "is_read": false,
+                    "flag_owntopic": 1
+                  }
+                ]
+              }
+            }
+        """
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(cat = 13, bucket = HfrRestFlagBucket.PARTICIPATED, page = 1, resultsPerPage = 50, useAuth = true)
+        } returns page1
+        coEvery {
+            apiClient.getCategoryFlagTopics(cat = 13, bucket = HfrRestFlagBucket.PARTICIPATED, page = 2, resultsPerPage = 50, useAuth = true)
+        } returns page2
+        coEvery {
+            apiClient.getCategoryFlagTopics(cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED, page = any(), resultsPerPage = any(), useAuth = true)
+        } returns EMPTY_PAGE
+        val forumRepository = stubForumRepository(sampleCategories)
+        val repo = buildRepository(apiClient, forumRepository)
+
+        repo.observe(FlagType.CYAN).test {
+            awaitItem() // Loading
+            val success = awaitItem() as FlagsResult.Success
+            assertEquals(setOf(300, 400), success.flags.map { it.topicId }.toSet())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `pagination walks subsequent pages while results_count exceeds the current page`() = runTest {
         // Two pages on cat 13: results_count=2, results_per_page=1.
         // After page 1 the repository must walk page 2 and concatenate.

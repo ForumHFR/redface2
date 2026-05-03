@@ -87,43 +87,18 @@ class HfrApiClient @Inject constructor(
     ): String = get(uri = "${CATEGORIES_URI}$cat/topics/$topicId/", useAuth = useAuth)
 
     /**
-     * Fetches the user's drapeaux for [bucket] across **all** categories. The endpoint
-     * is `forums/hardwarefr/topics/{bucket}/` and requires authentication — HFR
-     * redirects an anonymous request to login, surfaced as `SessionExpiredException`.
+     * Per-category drapeaux endpoint :
+     * `forums/hardwarefr/categories/{cat}/topics/{bucket}/`. Requires authentication —
+     * HFR redirects an anonymous request to login, surfaced as `SessionExpiredException`.
+     * The response is the same [RestListEnvelope]<RestTopic> shape used by the topic
+     * listing, contract proven by `rest_cat23_participated.json`.
      *
-     * `useAuth` defaults to `true` because a flags listing is by definition per-user;
-     * the parameter is kept overridable so a future fixture-driven test can reuse the
-     * same shape under MockWebServer without minting cookies.
+     * `useAuth` defaults to `true` because a flags listing is by definition per-user.
+     * The bucket is taken from the [HfrRestFlagBucket] enum — no free-form string variant.
      *
-     * The bucket is taken from the [HfrRestFlagBucket] enum — there is no free-form
-     * string variant, so a caller cannot hit an unrelated REST URI.
-     */
-    suspend fun getFlagTopics(
-        bucket: HfrRestFlagBucket,
-        page: Int = 1,
-        resultsPerPage: Int = DEFAULT_RESULTS_PER_PAGE,
-        useAuth: Boolean = true,
-    ): String {
-        require(page >= 1) { "page must be >= 1, got $page" }
-        require(resultsPerPage in 1..MAX_RESULTS_PER_PAGE) {
-            "resultsPerPage must be in 1..$MAX_RESULTS_PER_PAGE, got $resultsPerPage"
-        }
-        return get(
-            uri = "${FORUM_TOPICS_URI}${bucket.uriSegment}/",
-            useAuth = useAuth,
-            extraParams = mapOf(
-                PARAM_PAGE to page.toString(),
-                PARAM_RESULTS_PER_PAGE to resultsPerPage.toString(),
-            ),
-        )
-    }
-
-    /**
-     * Per-category variant of [getFlagTopics] :
-     * `forums/hardwarefr/categories/{cat}/topics/{bucket}/`. Same auth contract — the
-     * REST API rejects an anonymous request the same way and the response is filtered
-     * to the given category. Useful as a smaller, deterministic payload for tests
-     * (cf. `rest_cat23_participated.json`).
+     * The matching global endpoint (`forums/hardwarefr/topics/{bucket}/`) is intentionally
+     * not exposed yet : its envelope is grouped-by-category and we have no captured
+     * fixture for it. It can be added in a follow-up PR once a fixture exists.
      */
     suspend fun getCategoryFlagTopics(
         cat: Int,
@@ -247,7 +222,6 @@ class HfrApiClient @Inject constructor(
         const val HFR_API_PREFIX = "/api/"
         const val REST_API_PATH = "/webservices/rest_api.php"
         const val CATEGORIES_URI = "forums/hardwarefr/categories/"
-        const val FORUM_TOPICS_URI = "forums/hardwarefr/topics/"
         const val PARAM_URI = "uri"
         const val PARAM_PAGE = "page"
         const val PARAM_RESULTS_PER_PAGE = "results_per_page"
