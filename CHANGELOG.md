@@ -8,7 +8,11 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-Phase 1B.1 livrée : login HFR utilisable de bout en bout avec cookies persistants (DataStore + `PersistentCookieJar`). AAB `0.1.0-phase1b.0` (build 14) sortira avec la PR `feature/1b-1-auth`.
+---
+
+## v0.7.0 — 2026-05-03
+
+Phase 1D livrée : drapeaux REST, lecture longue topic, cache Room (TTL + persistance + isolation par compte), prefetch anonyme. AAB `0.1.0-phase1d.0` (build 28). Le `versionCode 27` a déjà été produit pour un build préliminaire pré-merge (sur la tête de PR #116 d'avant superpowers fixes) ; ce bump à 28 livre la version stampée sur main post-merge.
 
 ### Phase 1D-4 — Prefetch anonyme (#108)
 
