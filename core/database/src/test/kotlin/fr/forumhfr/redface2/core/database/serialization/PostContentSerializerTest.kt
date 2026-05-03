@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -27,56 +28,7 @@ class PostContentSerializerTest {
 
     @Test
     fun `every block and inline kind round-trips through encode-decode`() {
-        val sample = PostContent(
-            blocks = listOf(
-                PostBlock.Paragraph(
-                    inlines = listOf(
-                        PostInline.Text("hello"),
-                        PostInline.LineBreak,
-                        PostInline.Strong(children = listOf(PostInline.Text("bold"))),
-                        PostInline.Emphasis(children = listOf(PostInline.Text("em"))),
-                        PostInline.Underline(children = listOf(PostInline.Text("under"))),
-                        PostInline.Strike(children = listOf(PostInline.Text("strike"))),
-                        PostInline.Color(
-                            colorHex = "#FF0000",
-                            children = listOf(PostInline.Text("red")),
-                        ),
-                        PostInline.Link(
-                            url = "https://example.invalid",
-                            children = listOf(PostInline.Text("link")),
-                        ),
-                        PostInline.InlineImage(url = "https://example.invalid/i.png", description = "alt"),
-                        PostInline.Smiley(
-                            kind = SmileyKind.Builtin(code = "jap"),
-                            imageUrl = "https://forum-images.hardware.fr/icones/smilies/jap.gif",
-                        ),
-                        PostInline.Smiley(
-                            kind = SmileyKind.Perso(name = "ouich"),
-                            imageUrl = "https://forum-images.hardware.fr/images/perso/ouich.gif",
-                        ),
-                    ),
-                ),
-                PostBlock.Quote(
-                    author = "alice",
-                    numreponse = 100,
-                    page = 2,
-                    content = PostContent(
-                        blocks = listOf(
-                            PostBlock.Paragraph(inlines = listOf(PostInline.Text("quoted"))),
-                        ),
-                    ),
-                ),
-                PostBlock.Spoiler(
-                    label = "secret",
-                    content = PostContent(
-                        blocks = listOf(
-                            PostBlock.Paragraph(inlines = listOf(PostInline.Text("hidden"))),
-                        ),
-                    ),
-                ),
-                PostBlock.Image(url = "https://example.invalid/i.png", description = "block alt"),
-            ),
-        )
+        val sample = samplePostContent()
 
         val encoded = PostContentSerializer.encode(sample)
         val decoded = PostContentSerializer.decode(encoded)
@@ -97,7 +49,8 @@ class PostContentSerializerTest {
      */
     @Test
     fun `frozen fixture decodes to the expected AST and re-encodes byte-identical`() {
-        val frozen = """
+        val frozen = minifiedJson(
+            """
             {
               "blocks": [
                 {
@@ -109,28 +62,136 @@ class PostContentSerializerTest {
                     },
                     {
                       "type": "fr.forumhfr.redface2.core.model.PostInline.LineBreak"
+                    },
+                    {
+                      "type": "fr.forumhfr.redface2.core.model.PostInline.Strong",
+                      "children": [
+                        {
+                          "type": "fr.forumhfr.redface2.core.model.PostInline.Text",
+                          "value": "bold"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "fr.forumhfr.redface2.core.model.PostInline.Emphasis",
+                      "children": [
+                        {
+                          "type": "fr.forumhfr.redface2.core.model.PostInline.Text",
+                          "value": "em"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "fr.forumhfr.redface2.core.model.PostInline.Underline",
+                      "children": [
+                        {
+                          "type": "fr.forumhfr.redface2.core.model.PostInline.Text",
+                          "value": "under"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "fr.forumhfr.redface2.core.model.PostInline.Strike",
+                      "children": [
+                        {
+                          "type": "fr.forumhfr.redface2.core.model.PostInline.Text",
+                          "value": "strike"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "fr.forumhfr.redface2.core.model.PostInline.Color",
+                      "colorHex": "#FF0000",
+                      "children": [
+                        {
+                          "type": "fr.forumhfr.redface2.core.model.PostInline.Text",
+                          "value": "red"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "fr.forumhfr.redface2.core.model.PostInline.Link",
+                      "url": "https://example.invalid",
+                      "children": [
+                        {
+                          "type": "fr.forumhfr.redface2.core.model.PostInline.Text",
+                          "value": "link"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "fr.forumhfr.redface2.core.model.PostInline.InlineImage",
+                      "url": "https://example.invalid/i.png",
+                      "description": "alt"
+                    },
+                    {
+                      "type": "fr.forumhfr.redface2.core.model.PostInline.Smiley",
+                      "kind": {
+                        "type": "fr.forumhfr.redface2.core.model.SmileyKind.Builtin",
+                        "code": ":jap:"
+                      },
+                      "imageUrl": "https://forum-images.hardware.fr/icones/smilies/jap.gif"
+                    },
+                    {
+                      "type": "fr.forumhfr.redface2.core.model.PostInline.Smiley",
+                      "kind": {
+                        "type": "fr.forumhfr.redface2.core.model.SmileyKind.Perso",
+                        "name": "ouich"
+                      },
+                      "imageUrl": "https://forum-images.hardware.fr/images/perso/ouich.gif"
                     }
                   ]
+                },
+                {
+                  "type": "fr.forumhfr.redface2.core.model.PostBlock.Quote",
+                  "author": "alice",
+                  "numreponse": 100,
+                  "page": 2,
+                  "content": {
+                    "blocks": [
+                      {
+                        "type": "fr.forumhfr.redface2.core.model.PostBlock.Paragraph",
+                        "inlines": [
+                          {
+                            "type": "fr.forumhfr.redface2.core.model.PostInline.Text",
+                            "value": "quoted"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "fr.forumhfr.redface2.core.model.PostBlock.Spoiler",
+                  "label": "secret",
+                  "content": {
+                    "blocks": [
+                      {
+                        "type": "fr.forumhfr.redface2.core.model.PostBlock.Paragraph",
+                        "inlines": [
+                          {
+                            "type": "fr.forumhfr.redface2.core.model.PostInline.Text",
+                            "value": "hidden"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "fr.forumhfr.redface2.core.model.PostBlock.Image",
+                  "url": "https://example.invalid/i.png",
+                  "description": "block alt"
                 }
               ]
             }
-        """.trimIndent()
+            """,
+        )
 
         val decoded = PostContentSerializer.decode(frozen)
 
-        assertEquals(
-            PostContent(
-                blocks = listOf(
-                    PostBlock.Paragraph(
-                        inlines = listOf(
-                            PostInline.Text("hello"),
-                            PostInline.LineBreak,
-                        ),
-                    ),
-                ),
-            ),
-            decoded,
-        )
+        assertEquals(samplePostContent(), decoded)
+        assertEquals(frozen, PostContentSerializer.encode(decoded))
     }
 
     @Test
@@ -165,4 +226,63 @@ class PostContentSerializerTest {
             decoded,
         )
     }
+
+    private fun samplePostContent(): PostContent = PostContent(
+        blocks = listOf(
+            PostBlock.Paragraph(
+                inlines = listOf(
+                    PostInline.Text("hello"),
+                    PostInline.LineBreak,
+                    PostInline.Strong(children = listOf(PostInline.Text("bold"))),
+                    PostInline.Emphasis(children = listOf(PostInline.Text("em"))),
+                    PostInline.Underline(children = listOf(PostInline.Text("under"))),
+                    PostInline.Strike(children = listOf(PostInline.Text("strike"))),
+                    PostInline.Color(
+                        colorHex = "#FF0000",
+                        children = listOf(PostInline.Text("red")),
+                    ),
+                    PostInline.Link(
+                        url = "https://example.invalid",
+                        children = listOf(PostInline.Text("link")),
+                    ),
+                    PostInline.InlineImage(
+                        url = "https://example.invalid/i.png",
+                        description = "alt",
+                    ),
+                    PostInline.Smiley(
+                        kind = SmileyKind.Builtin(code = ":jap:"),
+                        imageUrl = "https://forum-images.hardware.fr/icones/smilies/jap.gif",
+                    ),
+                    PostInline.Smiley(
+                        kind = SmileyKind.Perso(name = "ouich"),
+                        imageUrl = "https://forum-images.hardware.fr/images/perso/ouich.gif",
+                    ),
+                ),
+            ),
+            PostBlock.Quote(
+                author = "alice",
+                numreponse = 100,
+                page = 2,
+                content = PostContent(
+                    blocks = listOf(
+                        PostBlock.Paragraph(inlines = listOf(PostInline.Text("quoted"))),
+                    ),
+                ),
+            ),
+            PostBlock.Spoiler(
+                label = "secret",
+                content = PostContent(
+                    blocks = listOf(
+                        PostBlock.Paragraph(inlines = listOf(PostInline.Text("hidden"))),
+                    ),
+                ),
+            ),
+            PostBlock.Image(
+                url = "https://example.invalid/i.png",
+                description = "block alt",
+            ),
+        ),
+    )
+
+    private fun minifiedJson(value: String): String = Json.parseToJsonElement(value.trimIndent()).toString()
 }

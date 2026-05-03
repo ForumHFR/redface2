@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
 import java.io.File
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import okhttp3.Cookie
@@ -201,6 +202,24 @@ class DataStoreCookieStoreTest {
                 assertEquals("xaat", cookies.single().value)
                 cancelAndIgnoreRemainingEvents()
             }
+        }
+
+    @Test
+    fun `save writes the full historical key set even for default-valued fields`() =
+        runTest(UnconfinedTestDispatcher()) {
+            store.save(listOf(makeCookie(name = "md_user", value = "xaat")))
+
+            val raw = dataStore.data.first()[stringPreferencesKey(DataStoreCookieStore.KEY_SESSION_COOKIES)]
+                .orEmpty()
+
+            assertTrue(raw.contains("\"name\""))
+            assertTrue(raw.contains("\"value\""))
+            assertTrue(raw.contains("\"domain\""))
+            assertTrue(raw.contains("\"path\""))
+            assertTrue(raw.contains("\"expiresAt\""))
+            assertTrue(raw.contains("\"secure\""))
+            assertTrue(raw.contains("\"httpOnly\""))
+            assertTrue(raw.contains("\"hostOnly\""))
         }
 
     /**

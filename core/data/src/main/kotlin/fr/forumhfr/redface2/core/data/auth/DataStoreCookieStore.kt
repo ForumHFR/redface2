@@ -20,7 +20,10 @@ class DataStoreCookieStore @Inject constructor(
     @param:CookieDataStore private val dataStore: DataStore<Preferences>,
 ) : CookieStore {
 
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
     private val cookiesKey = stringPreferencesKey(KEY_SESSION_COOKIES)
 
     override fun observe(): Flow<List<Cookie>> = dataStore.data.map { prefs ->
