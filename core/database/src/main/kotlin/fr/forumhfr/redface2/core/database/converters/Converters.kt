@@ -58,15 +58,32 @@ internal object Converters {
     @JvmStatic
     fun fetchModeToString(value: FetchMode): String = value.name
 
+    /**
+     * Defensive read : if a future PR ever renames a [FetchMode] entry, every cached
+     * row written by an older build holding the old name would `IllegalArgumentException`
+     * here and crash the DAO. Falling back to `AUTHENTICATED` keeps the page openable
+     * — at worst the row is treated as authenticated and the next user-driven fetch
+     * overwrites it with the current canonical value. Renaming an enum value is a
+     * schema-affecting change ; if you need to do it, write a Room migration that
+     * rewrites every affected column instead of relying on this fallback.
+     */
     @TypeConverter
     @JvmStatic
-    fun fetchModeFromString(value: String): FetchMode = FetchMode.valueOf(value)
+    fun fetchModeFromString(value: String): FetchMode =
+        runCatching { FetchMode.valueOf(value) }.getOrDefault(FetchMode.AUTHENTICATED)
 
     @TypeConverter
     @JvmStatic
     fun flagTypeToString(value: FlagType): String = value.name
 
+    /**
+     * Defensive read for the same reason as [fetchModeFromString]. Falls back to
+     * [FlagType.CYAN] (sujets participés — the most common drapeau bucket). Still
+     * a destructive fallback : the row's true type is lost. Renaming a [FlagType]
+     * value should bump Room and rewrite `flag_topics.type`.
+     */
     @TypeConverter
     @JvmStatic
-    fun flagTypeFromString(value: String): FlagType = FlagType.valueOf(value)
+    fun flagTypeFromString(value: String): FlagType =
+        runCatching { FlagType.valueOf(value) }.getOrDefault(FlagType.CYAN)
 }
