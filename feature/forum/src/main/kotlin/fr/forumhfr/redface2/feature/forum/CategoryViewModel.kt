@@ -167,28 +167,38 @@ class CategoryViewModel @AssistedInject constructor(
     private var prefetchJob: Job? = null
 
     init {
-        // Anonymous prefetch of `page + 1` whenever a content emission lands —
-        // see ADR-003 § Prefetch and the PR 4 prompt. The job is cancelled on
-        // every (subcat, page) change so we never have two prefetches in
-        // flight at once and never warm a page the user has already moved
-        // past. Using `is ContentTrigger` ignores Loading / Error transitions
-        // — only firm Content triggers a warm-up.
-        combine(selectedSubcat, page, topicsState) { subcat, currentPage, topics ->
-            ContentTrigger(subcat, currentPage, topics.contentPageCount() ?: -1)
-        }
+        // Anonymous prefetch of `page + 1` whenever a Content lands. The trigger is
+        // derived **directly from the [TopicListPage] inside `Content`** — not from
+        // the separate `selectedSubcat` / `page` `MutableStateFlow`s. The earlier
+        // shape `combine(selectedSubcat, page, topicsState)` had a race : when the
+        // user switched subcat, the new `(subcat, page)` keys landed before the
+        // upstream `flatMapLatest` had time to emit the new `Content`, so the
+        // combine produced a trigger with **new keys + old Content payload** and
+        // tried to prefetch the wrong (subcat, page+1).
+        //
+        // Reading from the Content guarantees the trigger fields are coherent. On
+        // intermediate states (Loading / Error during a refresh or subcat switch)
+        // we cancel any in-flight prefetch so we never warm a page the user has
+        // moved past.
+        topicsState
+            .map { state -> state.toPrefetchTriggerOrNull() }
             .distinctUntilChanged()
-            .onEach { trigger -> schedulePrefetch(trigger) }
+            .onEach { trigger ->
+                if (trigger == null) {
+                    prefetchJob?.cancel()
+                } else {
+                    schedulePrefetch(trigger)
+                }
+            }
             .launchIn(viewModelScope)
     }
 
     private fun schedulePrefetch(trigger: ContentTrigger) {
         val nextPage = trigger.currentPage + 1
-        // pageCount unknown (no Content yet) → -1 sentinel, skip without touching
-        // the in-flight prefetch. The previous shape cancelled the job before this
-        // guard, which would lose an already-running prefetch when a Loading or
-        // intermediate emission landed during a pull-to-refresh — the prefetch was
-        // dropped and not relaunched, leaving the user with a cold next page.
-        if (trigger.pageCount <= 0 || nextPage > trigger.pageCount) return
+        // pageCount unknown is not possible here — the trigger is built from a
+        // Content payload that always carries a valid totalTopics / resultsPerPage.
+        // We still skip when the user is on the last page (or beyond, defensive).
+        if (nextPage > trigger.pageCount) return
         prefetchJob?.cancel()
         prefetchJob = viewModelScope.launch {
             forumRepository.prefetchTopicList(
@@ -199,10 +209,14 @@ class CategoryViewModel @AssistedInject constructor(
         }
     }
 
-    private fun TopicsUiState.contentPageCount(): Int? = when (this) {
-        is TopicsUiState.Content -> listingPageCount(
-            totalTopics = page.totalTopics,
-            resultsPerPage = page.resultsPerPage,
+    private fun TopicsUiState.toPrefetchTriggerOrNull(): ContentTrigger? = when (this) {
+        is TopicsUiState.Content -> ContentTrigger(
+            subcat = page.subcat,
+            currentPage = page.page,
+            pageCount = listingPageCount(
+                totalTopics = page.totalTopics,
+                resultsPerPage = page.resultsPerPage,
+            ),
         )
         else -> null
     }
