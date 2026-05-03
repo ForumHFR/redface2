@@ -43,6 +43,8 @@ class TopicViewModel @AssistedInject constructor(
     val effects: Flow<TopicEffect> = _effects.receiveAsFlow()
 
     private var loadJob: Job? = null
+    private var prefetchJob: Job? = null
+    private var prefetchedPage: Int? = null
 
     /**
      * Tracks whether the current value of [TopicRequest.scrollTo] has already been
@@ -65,6 +67,8 @@ class TopicViewModel @AssistedInject constructor(
 
     private fun loadCurrentPage() {
         loadJob?.cancel()
+        prefetchJob?.cancel()
+        prefetchedPage = null
         _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
         loadJob = viewModelScope.launch {
             topicRepository
@@ -88,6 +92,7 @@ class TopicViewModel @AssistedInject constructor(
                         )
                     }
                     maybeEmitScroll(topic.posts.map { it.numreponse })
+                    maybeSchedulePrefetch(totalPages = topic.totalPages)
                 }
         }
     }
@@ -98,6 +103,37 @@ class TopicViewModel @AssistedInject constructor(
         if (shouldEmit) {
             _effects.send(TopicEffect.ScrollToPost(checkNotNull(target)))
             scrollEffectEmitted = true
+        }
+    }
+
+    /**
+     * Fires off an anonymous prefetch of `currentPage + 1` once per loaded
+     * page. We deliberately:
+     *
+     * - Run **only one** page ahead — multi-page prefetching is explicitly out
+     *   of scope (§ "Ne pas prefetch plusieurs pages d'avance" in the PR 4
+     *   prompt). Two-page-ahead would scale costs without matching real
+     *   reading patterns.
+     * - Skip the call when already at the last page.
+     * - Track [prefetchedPage] so we don't re-issue a request if the same
+     *   page emits twice (cache + refresh emission of the stale path, or any
+     *   future intermediate emission). The marker is set **before** the
+     *   coroutine runs, so a transient prefetch failure (network glitch) is
+     *   **not** retried for the same emission — prefetch is best-effort by
+     *   design and the next user-driven `observeTopicPage` on `page+1` will
+     *   re-fetch through the normal cache-miss path.
+     * - Hang the job off [viewModelScope] so leaving the screen cancels the
+     *   in-flight request — the structured-concurrency cancel propagates down
+     *   to OkHttp.
+     */
+    private fun maybeSchedulePrefetch(totalPages: Int) {
+        val nextPage = request.page + 1
+        if (nextPage > totalPages) return
+        if (prefetchedPage == nextPage) return
+        prefetchedPage = nextPage
+        prefetchJob?.cancel()
+        prefetchJob = viewModelScope.launch {
+            topicRepository.prefetch(request.cat, request.post, nextPage)
         }
     }
 

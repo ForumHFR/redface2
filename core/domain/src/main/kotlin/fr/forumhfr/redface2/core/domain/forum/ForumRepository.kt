@@ -34,6 +34,30 @@ interface ForumRepository {
     ): Flow<ForumResult<TopicListPage>>
 
     suspend fun refreshTopicList(cat: Int, subcat: Int?, page: Int)
+
+    /**
+     * Anonymous prefetch — unauthenticated REST request (cf. ADR-003 §
+     * Prefetch) for `(cat, subcat, page)`. The response payload is
+     * **intentionally discarded** : there is no client-side cache populated
+     * by this method. Persisting an anonymous response would strip per-user
+     * fields (`is_read`, `last_post_read_id`) that the screen relies on, and
+     * `[observeTopicList]` will re-fetch authenticated on the next visit.
+     *
+     * The only benefit is **edge-cache warming on HFR / its CDN** : the next
+     * authenticated request for this `(cat, subcat, page)` lands warmer at
+     * the origin, shaving the connect/parse cost on HFR's side. The client
+     * does not see latency improvements unless HFR's CDN layer caches across
+     * authenticated and unauthenticated requests for the same URL — which
+     * is the documented behaviour of `forums/hardwarefr/categories/{cat}/
+     * topics/last/`.
+     *
+     * If a real client-side prefetch cache is needed in the future, it must
+     * be a **separate** persistence path that round-trips to authenticated
+     * before exposing the data — never feed this anonymous payload into the
+     * existing flow. Failures are swallowed (best-effort);
+     * [CancellationException] propagates.
+     */
+    suspend fun prefetchTopicList(cat: Int, subcat: Int?, page: Int)
 }
 
 /**

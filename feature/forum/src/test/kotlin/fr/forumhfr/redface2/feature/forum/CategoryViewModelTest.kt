@@ -406,6 +406,107 @@ class CategoryViewModelTest {
         }
     }
 
+    @Test
+    fun `Content emission triggers anonymous prefetch of the next page`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 1),
+            forumRepository = repo,
+        )
+        // Listings: 130 topics @ 50 per page → 3 pages total. Prefetch should fire for page 2.
+        val multiPage = EMPTY_PAGE.copy(totalTopics = 130, resultsPerPage = 50)
+
+        vm.uiState.test {
+            awaitItem() // initial state
+            repo.emitSubcategories(ForumResult.Success(listOf(SUBCAT_550)))
+            repo.emitTopicList(cat = 23, subcat = 550, page = 1, result = ForumResult.Success(multiPage))
+            awaitContent { it.topics is TopicsUiState.Content }
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(
+            "page 1 of a 3-page listing should fire one prefetch on page 2",
+            listOf(Triple(23, 550, 2)),
+            repo.prefetchTopicListCalls,
+        )
+    }
+
+    @Test
+    fun `prefetch is cancelled when the screen is left (issue #108)`() = runTest {
+        // The prefetch coroutine lives on `viewModelScope`. Issue #108's acceptance
+        // criterion is "le prefetch est annulé quand l'utilisateur quitte la page".
+        // We simulate that by calling `ViewModel.clear()` (the API the framework
+        // uses on screen leave) and verifying the in-flight prefetch sees a
+        // [CancellationException].
+        val cancelObserved = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val repo = FakeForumRepository().apply {
+            prefetchHook = { _, _, _ ->
+                try {
+                    kotlinx.coroutines.awaitCancellation()
+                } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                    cancelObserved.complete(Unit)
+                    throw cancellation
+                }
+            }
+        }
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 1),
+            forumRepository = repo,
+        )
+        val multiPage = EMPTY_PAGE.copy(totalTopics = 130, resultsPerPage = 50)
+
+        vm.uiState.test {
+            awaitItem()
+            repo.emitSubcategories(ForumResult.Success(listOf(SUBCAT_550)))
+            repo.emitTopicList(cat = 23, subcat = 550, page = 1, result = ForumResult.Success(multiPage))
+            awaitContent { it.topics is TopicsUiState.Content }
+            cancelAndIgnoreRemainingEvents()
+        }
+        // Prefetch must have launched and be suspended on awaitCancellation().
+        assertEquals(listOf(Triple(23, 550, 2)), repo.prefetchTopicListCalls)
+
+        // Simulate the screen leaving by routing the existing ViewModel through a
+        // ViewModelStore. `ViewModelStore.clear()` is the public API the framework
+        // uses on screen leave : it walks every stored ViewModel and triggers the
+        // internal clear path that cancels `viewModelScope` and calls `onCleared()`.
+        val store = androidx.lifecycle.ViewModelStore()
+        androidx.lifecycle.ViewModelProvider(
+            store,
+            object : androidx.lifecycle.ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = vm as T
+            },
+        ).get(CategoryViewModel::class.java)
+        store.clear()
+
+        kotlinx.coroutines.withTimeout(AWAIT_CONTENT_TIMEOUT_MS) {
+            cancelObserved.await()
+        }
+    }
+
+    @Test
+    fun `last page does not trigger a prefetch`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 3),
+            forumRepository = repo,
+        )
+        val multiPage = EMPTY_PAGE.copy(totalTopics = 130, resultsPerPage = 50, page = 3)
+
+        vm.uiState.test {
+            awaitItem()
+            repo.emitSubcategories(ForumResult.Success(listOf(SUBCAT_550)))
+            repo.emitTopicList(cat = 23, subcat = 550, page = 3, result = ForumResult.Success(multiPage))
+            awaitContent { it.topics is TopicsUiState.Content }
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertTrue(
+            "no prefetch on the final page",
+            repo.prefetchTopicListCalls.isEmpty(),
+        )
+    }
+
     private companion object {
         val SUBCAT_550 = SubCategory(id = 550, name = "Android", parentCategoryId = 23)
         val EMPTY_PAGE = TopicListPage(
@@ -471,6 +572,8 @@ class CategoryViewModelTest {
             private set
         var refreshTopicListCalls: List<Triple<Int, Int?, Int>> = emptyList()
             private set
+        var prefetchTopicListCalls: List<Triple<Int, Int?, Int>> = emptyList()
+            private set
 
         /**
          * Optional gate consumed by [refreshSubcategories] — when set, the suspending
@@ -501,6 +604,17 @@ class CategoryViewModelTest {
 
         override suspend fun refreshTopicList(cat: Int, subcat: Int?, page: Int) {
             refreshTopicListCalls = refreshTopicListCalls + Triple(cat, subcat, page)
+        }
+
+        /**
+         * Optional hook that lets a test gate the prefetch coroutine — e.g. suspend
+         * forever to verify cancellation propagates from a parent scope cancel.
+         */
+        var prefetchHook: (suspend (cat: Int, subcat: Int?, page: Int) -> Unit)? = null
+
+        override suspend fun prefetchTopicList(cat: Int, subcat: Int?, page: Int) {
+            prefetchTopicListCalls = prefetchTopicListCalls + Triple(cat, subcat, page)
+            prefetchHook?.invoke(cat, subcat, page)
         }
 
         suspend fun emitCategories(result: ForumResult<List<Category>>) {

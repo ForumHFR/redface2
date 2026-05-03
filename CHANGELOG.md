@@ -10,6 +10,17 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 Phase 1B.1 livrée : login HFR utilisable de bout en bout avec cookies persistants (DataStore + `PersistentCookieJar`). AAB `0.1.0-phase1b.0` (build 14) sortira avec la PR `feature/1b-1-auth`.
 
+### Phase 1D-4 — Prefetch anonyme (#108)
+
+#### Added
+- `TopicRepository.prefetch(cat, post, page)` : fetch topic en client anonyme, persistance `ANONYMOUS`, erreurs swallowed. Le cache auth plus riche reste protégé par l'anti-écrasement `authMode`.
+- `ForumRepository.prefetchTopicList(cat, subcat, page)` : warm-up anonyme du listing suivant, payload jeté volontairement pour ne pas exposer de données sans champs per-user.
+- `TopicViewModel` et `CategoryViewModel` lancent un prefetch `page + 1` best-effort après émission `Content`, avec un seul prefetch en vol et annulation à la sortie d'écran.
+- Tests ViewModel/repository + règle Konsist : les chemins prefetch doivent utiliser les APIs dédiées et ne pas appeler les méthodes `refresh*` authentifiées.
+
+#### Changed
+- `docs/specs/architecture.md` explicite l'asymétrie : topic prefetch persiste une row `ANONYMOUS`, listing forum prefetch réchauffe seulement HFR/CDN.
+
 ### Phase 1D-3 — Cache Room (#26)
 
 #### Added

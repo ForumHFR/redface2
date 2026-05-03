@@ -35,7 +35,7 @@ class TopicRepositoryImpl @Inject constructor(
      * - Cache hit, **AUTHENTICATED** + fresh → emit and stop. No network. This is the
      *   snappy back-nav case: returning to a page within `CachePolicy.topicPage` does
      *   not refetch and does not silently mark drapeaux as read.
-     * - Cache hit, **ANONYMOUS** (warmed by [prefetchAnonymous]) → always emit cache
+     * - Cache hit, **ANONYMOUS** (warmed by [prefetch]) → always emit cache
      *   then re-fetch authenticated, regardless of TTL. The anon row is missing
      *   per-user fields (`isOwnPost`, `isEditable`, …) and reading without re-fetching
      *   would also skip the implicit "mark as read" the auth GET triggers server-side.
@@ -75,18 +75,20 @@ class TopicRepositoryImpl @Inject constructor(
         fetchAndPersist(cat, post, page, FetchMode.AUTHENTICATED)
 
     /**
-     * Background prefetch path used by the prefetch service (Phase 1D PR 4).
-     * Issues an unauthenticated fetch — see ADR-003 § Prefetch — and persists
-     * the result *only if* it does not overwrite an existing authenticated
-     * cache row. Returns the parsed [Topic] for the caller's discretion (the
-     * service typically discards it).
-     *
-     * Not declared on [TopicRepository] because consumers in `:feature:*`
-     * never need the anonymous variant; only the data-layer prefetch service
-     * does.
+     * Phase 1D PR 4 — anonymous prefetch. Issues an unauthenticated fetch (cf.
+     * ADR-003 § Prefetch) and persists the result *only if* it does not
+     * overwrite an existing authenticated cache row. Failures are logged and
+     * swallowed so a flaky prefetch never disturbs the user-facing flow.
      */
-    suspend fun prefetchAnonymous(cat: Int, post: Int, page: Int): Topic =
-        fetchAndPersist(cat, post, page, FetchMode.ANONYMOUS)
+    override suspend fun prefetch(cat: Int, post: Int, page: Int) {
+        try {
+            fetchAndPersist(cat, post, page, FetchMode.ANONYMOUS)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            Log.w(LOG_TAG, "Prefetch failed for cat=$cat post=$post page=$page", error)
+        }
+    }
 
     private suspend fun fetchAndPersist(
         cat: Int,

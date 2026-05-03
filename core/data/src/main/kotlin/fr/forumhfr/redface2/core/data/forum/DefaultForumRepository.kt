@@ -113,6 +113,35 @@ class DefaultForumRepository @Inject constructor(
         flow.emit(fetchTopicList(cat, subcat, page))
     }
 
+    /**
+     * Fires an unauthenticated `getTopicList` request — no cookie sent — to
+     * warm HFR's edge cache for the next page the user is likely to visit.
+     * The response is intentionally **discarded**: writing it into the
+     * authenticated [topicListRefresh] flow would silently strip per-user
+     * fields like `is_read` and `last_post_read_id` that the screen relies on,
+     * which is exactly the failure mode ADR-003 § Prefetch warns against.
+     *
+     * Failures are swallowed (best-effort prefetch). [CancellationException]
+     * is rethrown so the caller's coroutine cancellation propagates.
+     */
+    override suspend fun prefetchTopicList(cat: Int, subcat: Int?, page: Int) {
+        withContext(ioDispatcher) {
+            try {
+                apiClient.getTopicList(
+                    cat = cat,
+                    subcat = subcat,
+                    page = page,
+                    resultsPerPage = DEFAULT_RESULTS_PER_PAGE,
+                    useAuth = false,
+                )
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                Log.w(LOG_TAG, "Prefetch failed for cat=$cat subcat=$subcat page=$page", error)
+            }
+        }
+    }
+
     private suspend fun fetchCategories(): ForumResult<List<Category>> = withContext(ioDispatcher) {
         runCatching {
             val body = apiClient.getCategories(useAuth = false)

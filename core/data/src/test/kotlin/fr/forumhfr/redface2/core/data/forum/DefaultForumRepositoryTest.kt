@@ -95,6 +95,42 @@ class DefaultForumRepositoryTest {
     }
 
     @Test
+    fun `prefetchTopicList issues an unauthenticated REST request`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery {
+                getTopicList(cat = 23, subcat = 550, page = 2, resultsPerPage = 50, useAuth = false)
+            } returns fixture("rest_topics_cat23_subcat550_p1.json")
+        }
+        val repo = repository(apiClient)
+
+        repo.prefetchTopicList(cat = 23, subcat = 550, page = 2)
+
+        // Cookie-bearing path must NOT be invoked. ADR-003 § Prefetch makes this
+        // the inviolable rule: a prefetch with `useAuth = true` would silently
+        // mark drapeaux as read on HFR.
+        coVerify(exactly = 1) {
+            apiClient.getTopicList(cat = 23, subcat = 550, page = 2, resultsPerPage = 50, useAuth = false)
+        }
+        coVerify(exactly = 0) {
+            apiClient.getTopicList(any(), any(), any(), any(), useAuth = true)
+        }
+    }
+
+    @Test
+    fun `prefetchTopicList swallows network failures`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery {
+                getTopicList(any(), any(), any(), any(), useAuth = false)
+            } throws IllegalStateException("HFR éteint")
+        }
+        val repo = repository(apiClient)
+
+        // Best-effort prefetch — must not bubble up. The screen's authenticated
+        // observeTopicList will fail visibly later if HFR is really down.
+        repo.prefetchTopicList(cat = 23, subcat = 550, page = 2)
+    }
+
+    @Test
     fun `categories cache replays past CachePolicy categories TTL when stale`() = runTest {
         val apiClient = mockk<HfrApiClient> {
             coEvery { getCategories(any()) } returns fixture("rest_categories.json")
