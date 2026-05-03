@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -70,6 +71,44 @@ class ForumViewModelTest {
         assertTrue(repo.refreshCategoriesCalled)
     }
 
+    @Test
+    fun `isRefreshing stays false on cold start before any user-triggered refresh`() = runTest {
+        // Pins the contract that `isRefreshing` is reserved for user-driven refreshes —
+        // initial cold-start fetch goes through `uiState.Loading`, not `isRefreshing=true`.
+        val repo = FakeForumRepository()
+        val vm = ForumViewModel(repo)
+
+        vm.isRefreshing.test {
+            assertEquals(false, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `isRefreshing flips true during refresh and false after`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = ForumViewModel(repo)
+
+        vm.isRefreshing.test {
+            assertEquals(false, awaitItem())
+
+            // Gate refreshCategories so the launched refresh coroutine suspends
+            // mid-way. The flag must be true while the gate holds.
+            val gate = CompletableDeferred<Unit>()
+            repo.suspendRefreshCategoriesUntil = gate
+
+            vm.refresh()
+
+            assertEquals(true, awaitItem())
+
+            // Release the gate → finally branch flips the flag back off.
+            gate.complete(Unit)
+            assertEquals(false, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+
     private companion object {
         val SAMPLE_CATEGORIES: List<Category> = listOf(
             Category(id = 13, name = "Discussions", forceSubcat = true, subcategoryCount = 15),
@@ -82,12 +121,14 @@ class ForumViewModelTest {
             MutableSharedFlow(replay = 1, extraBufferCapacity = 4)
         var refreshCategoriesCalled: Boolean = false
             private set
+        var suspendRefreshCategoriesUntil: CompletableDeferred<Unit>? = null
 
         override fun observeCategories(): Flow<ForumResult<List<Category>>> =
             categories.asSharedFlow()
 
         override suspend fun refreshCategories() {
             refreshCategoriesCalled = true
+            suspendRefreshCategoriesUntil?.await()
         }
 
         override fun observeSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>> =

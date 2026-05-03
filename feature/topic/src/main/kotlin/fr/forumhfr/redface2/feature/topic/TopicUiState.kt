@@ -7,6 +7,19 @@ data class TopicUiState(
     val mode: Mode,
     val availablePages: List<Int>,
 ) {
+    /**
+     * Helper used by the screen / ViewModel : `true` when the user has navigated to a
+     * page > 1, i.e. when "Previous" should be enabled. Mirrors the symmetric helper
+     * `canGoNext()` below.
+     */
+    val canGoPrevious: Boolean get() = request.page > 1
+
+    val canGoNext: Boolean
+        get() = when (mode) {
+            is Mode.Loaded -> request.page < mode.topic.totalPages
+            else -> request.page < (availablePages.lastOrNull() ?: 1)
+        }
+
     sealed interface Mode {
         data object Loading : Mode
 
@@ -31,4 +44,20 @@ data class TopicUiState(
 
 sealed interface TopicIntent {
     data object Retry : TopicIntent
+}
+
+/**
+ * One-shot side effects produced by [TopicViewModel]. The screen consumes these via
+ * `LaunchedEffect(Unit)` collecting from the effects channel — exactly once per
+ * effect, never replayed across recompositions or process death (intentional : if
+ * the user scrolled away, replaying a scroll on rotation would steal focus).
+ */
+sealed interface TopicEffect {
+    /**
+     * Ask the screen to scroll to a specific `numreponse` once the topic page is
+     * rendered. The ViewModel only emits this when the post is present in the loaded
+     * page, so the screen can blindly trust `numreponse` and resolve the index from
+     * the current `Topic.posts` list.
+     */
+    data class ScrollToPost(val numreponse: Int) : TopicEffect
 }
