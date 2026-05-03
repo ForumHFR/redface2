@@ -345,15 +345,41 @@ class TopicViewModel @Inject constructor(
 
 ## Stratégie de cache
 
-| Donnée | Stratégie | Durée |
-|--------|-----------|-------|
-| Topics lus | Cache Room, invalidation au refresh | Jusqu'au refresh |
-| Drapeaux | Phase 1B : cache mémoire par session + refresh explicite ; Phase 1D : cache Room à réévaluer | Session courante |
-| Catégories | Cache Room, rarement change | 24h TTL |
+| Donnée | Stratégie | TTL |
+|--------|-----------|-----|
+| Pages topic lues | Cache Room (`topic_pages` + `posts`), cache-affichable + refresh BG si stale, anti-écrasement par prefetch anonyme via `authMode` | 60 s (`CachePolicy.topicPage`) |
+| Listings topics REST | Mémoire processus, replay synchrone du dernier succès, refresh manuel = bypass TTL | 30 s (`CachePolicy.topicList`) |
+| Drapeaux REST (par compte) | Cache Room (`flag_topics`) avec `userId` dans la clé primaire ; purge au logout / changement de compte par `CacheInvalidator` | 30 s (`CachePolicy.flags`) |
+| Catégories | Cache mémoire HFR-public, replay sur stale puis refresh | 24 h (`CachePolicy.categories`) |
+| Sous-catégories | Cache mémoire par `cat`, même sémantique stale-replay | 6 h (`CachePolicy.subcategories`) |
 | Smileys | Cache Coil, ne changent jamais | Infini |
-| Avatars | Cache Coil, ETag | 1h TTL |
+| Avatars | Cache Coil, ETag | 1 h |
 | MultiMP flags | Room, jamais expire (donnée locale) | Permanent |
 | Préférences | DataStore | Permanent |
+
+### Sémantique fresh / stale
+
+`observeTopicPage(cat, post, page)` :
+
+1. Cache `AUTHENTICATED` + fresh → émet une seule fois, pas de réseau. C'est le cas snappy back-nav d'un utilisateur connecté.
+2. Cache `ANONYMOUS` (fresh ou stale) → émet le cache pour un affichage immédiat puis lance un fetch authentifié pour upgrader la row vers `AUTHENTICATED` (champs per-user `isOwnPost`, `isEditable`, drapeau de lecture). Le `@Transaction` anti-écrasement décrit ci-dessous garantit que ce remplacement ne perd jamais une row `AUTHENTICATED` plus riche entre-temps.
+3. Cache `AUTHENTICATED` + stale → émet le cache puis tente un refresh ; si le refresh échoue (offline, 502), l'erreur est swallowed et le stale reste à l'écran.
+4. Cache absent → fetch direct ; les erreurs propagent au flow.
+
+Le `refreshTopicPage` explicite **bypasse** le TTL et renvoie systématiquement du frais. Même règle pour `refreshCategories` / `refreshSubcategories` / `refreshTopicList`.
+
+### Isolation par compte
+
+Les drapeaux sont strictement scopés par pseudo (lowercase) dans `flag_topics.userId`. À la transition `Authenticated(A) → Anonymous` ou `Authenticated(A) → Authenticated(B)`, `CacheInvalidator` :
+
+- vide les rows `flag_topics` pour l'ancien `userId` ;
+- appelle `FlagRepository.clearSessionCache()` pour purger le cache mémoire.
+
+Les pages topic (`topic_pages` / `posts`) ne sont pas purgées : le HTML est partagé entre lecteurs, et la TTL courte de 60 s + le garde-fou `authMode` rendent la fuite de champs per-user (`isOwnPost`, `isEditable`) bornée.
+
+### Anti-écrasement auth ↔ anonyme
+
+Le prefetch anonyme (Phase 1D PR 4) ne doit **pas** remplacer un row authentifié plus riche. Chaque ligne persistée porte un `authMode` (`AUTHENTICATED` ou `ANONYMOUS`) ; un upsert anonyme sur une row authentifiée existante est silencieusement ignoré côté `TopicRepositoryImpl.persist`. À l'inverse, un fetch authentifié écrase toujours, pour garantir la fraîcheur des champs per-user.
 
 ### Prefetch intelligent
 

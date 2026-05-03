@@ -1,17 +1,26 @@
 package fr.forumhfr.redface2.core.data.flags
 
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.database.dao.FlagDao
+import fr.forumhfr.redface2.core.database.entities.FetchMode
+import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.network.HfrApiClient
 import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
+import io.mockk.every
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import java.io.IOException
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -53,7 +62,8 @@ class DefaultFlagRepositoryTest {
             stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
             stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
         }
-        val repo = buildRepository(apiClient, forumRepository)
+        val flagDao = stubFlagDao()
+        val repo = buildRepository(apiClient, forumRepository, flagDao = flagDao)
 
         repo.observe(FlagType.CYAN).test {
             assertEquals(FlagsResult.Loading, awaitItem())
@@ -64,6 +74,14 @@ class DefaultFlagRepositoryTest {
             assertEquals(23, flag.cat)
             assertEquals(FlagType.CYAN, flag.type)
             cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify {
+            flagDao.replaceForType(
+                userId = "xat",
+                type = FlagType.CYAN,
+                rows = match { rows -> rows.size == 1 && rows.single().topicId == 35395 },
+            )
         }
     }
 
@@ -158,6 +176,45 @@ class DefaultFlagRepositoryTest {
                 page = 1,
                 resultsPerPage = 50,
                 useAuth = true,
+            )
+        }
+    }
+
+    @Test
+    fun `observe emits fresh Room cache without REST fan-out`() = runTest {
+        val now = Instant.parse("2026-05-03T12:00:00Z")
+        val apiClient = mockk<HfrApiClient>(relaxed = true)
+        val flagDao = stubFlagDao()
+        coEvery { flagDao.getFlags("xat", FlagType.CYAN) } returns listOf(
+            flagEntity(
+                type = FlagType.CYAN,
+                topicId = 35395,
+                title = "Redface 2",
+                fetchedAt = now,
+            ),
+        )
+        coEvery { flagDao.getLastFetchedAt("xat", FlagType.CYAN) } returns now
+        val repo = buildRepository(
+            apiClient = apiClient,
+            forumRepository = stubForumRepository(sampleCategories),
+            flagDao = flagDao,
+            clock = Clock.fixed(now, ZoneOffset.UTC),
+        )
+
+        repo.observe(FlagType.CYAN).test {
+            val success = awaitItem() as FlagsResult.Success
+            assertEquals(1, success.flags.size)
+            assertEquals(35395, success.flags.single().topicId)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify(exactly = 0) {
+            apiClient.getCategoryFlagTopics(
+                cat = any(),
+                bucket = any(),
+                page = any(),
+                resultsPerPage = any(),
+                useAuth = any(),
             )
         }
     }
@@ -561,11 +618,57 @@ class DefaultFlagRepositoryTest {
     private fun buildRepository(
         apiClient: HfrApiClient,
         forumRepository: ForumRepository,
+        authRepository: AuthRepository = stubAuthRepository(),
+        flagDao: FlagDao = stubFlagDao(),
+        clock: Clock = Clock.fixed(Instant.parse("2026-05-03T12:00:00Z"), ZoneOffset.UTC),
     ): DefaultFlagRepository = DefaultFlagRepository(
         apiClient = apiClient,
         forumRepository = forumRepository,
+        authRepository = authRepository,
+        flagCacheStore = FlagCacheStore(
+            flagDao = flagDao,
+            clock = clock,
+            ioDispatcher = UnconfinedTestDispatcher(),
+        ),
         json = json,
         ioDispatcher = UnconfinedTestDispatcher(),
+    )
+
+    private fun stubAuthRepository(pseudo: String = "XaT"): AuthRepository {
+        val repo = mockk<AuthRepository>()
+        every { repo.observeAuthState() } returns flowOf(AuthState.Authenticated(pseudo))
+        return repo
+    }
+
+    private fun stubFlagDao(): FlagDao {
+        val dao = mockk<FlagDao>(relaxed = true)
+        coEvery { dao.getFlags(any(), any()) } returns emptyList()
+        coEvery { dao.getLastFetchedAt(any(), any()) } returns null
+        return dao
+    }
+
+    private fun flagEntity(
+        type: FlagType,
+        topicId: Int,
+        title: String,
+        fetchedAt: Instant,
+    ): FlagTopicEntity = FlagTopicEntity(
+        userId = "xat",
+        type = type,
+        cat = 23,
+        subcat = 550,
+        topicId = topicId,
+        title = title,
+        totalPages = 10,
+        replyCount = 42,
+        hasUnread = true,
+        lastReadPage = 9,
+        lastPostReadId = 1234L,
+        firstPostAuthor = "XaT",
+        lastReplyAuthor = "XaTelitte",
+        lastReplyAt = "2026-05-03 12:00",
+        fetchedAt = fetchedAt,
+        authMode = FetchMode.AUTHENTICATED,
     )
 
     private fun fixture(name: String): String {

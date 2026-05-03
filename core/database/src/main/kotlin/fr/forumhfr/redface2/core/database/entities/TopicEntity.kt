@@ -17,4 +17,11 @@ data class TopicEntity(
     val pollJson: String?,
     val numreponses: List<Int>,
     val fetchedAt: Instant,
+    /**
+     * Whether this row was written from an authenticated or anonymous request.
+     * Anonymous prefetch (Phase 1D PR 4) must not overwrite an authenticated
+     * row — see [FetchMode]. Defaulted to [FetchMode.AUTHENTICATED] so existing
+     * v1 rows keep their richer auth-derived fields after the v1→v2 migration.
+     */
+    val authMode: FetchMode,
 )

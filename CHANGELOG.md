@@ -10,6 +10,18 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 Phase 1B.1 livrée : login HFR utilisable de bout en bout avec cookies persistants (DataStore + `PersistentCookieJar`). AAB `0.1.0-phase1b.0` (build 14) sortira avec la PR `feature/1b-1-auth`.
 
+### Phase 1D-3 — Cache Room (#26)
+
+#### Added
+- `CachePolicy` centralise les TTL Phase 1D : pages topic 60 s, listings topics 30 s, drapeaux 30 s, catégories 24 h, sous-catégories 6 h.
+- Room schema v2 : `topic_pages.authMode`, `posts.authMode` et nouvelle table `flag_topics` scopée par `userId` + `FlagType`, avec migration `MIGRATION_1_2` et schema JSON exporté.
+- `CacheInvalidator` observe les transitions de session HFR et purge les drapeaux Room + cache mémoire au logout ou changement de compte.
+
+#### Changed
+- `TopicRepositoryImpl.observeTopicPage` applique la sémantique fresh/stale : cache fresh = pas de réseau, cache stale = cache affiché puis refresh, cache absent = fetch direct.
+- `DefaultFlagRepository` persiste les drapeaux REST dans `flag_topics`, relit un cache Room fresh sans re-fetch et remplace atomiquement le cache d'un onglet après chaque fetch réussi.
+- Le prefetch anonyme de topic ne peut pas écraser une row `AUTHENTICATED` plus riche.
+
 ### Phase 1D-2 — Lecture longue topic (#107)
 
 #### Added

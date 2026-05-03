@@ -3,11 +3,13 @@ package fr.forumhfr.redface2.core.data.flags
 import android.util.Log
 import fr.forumhfr.redface2.core.data.forum.RestListEnvelope
 import fr.forumhfr.redface2.core.data.forum.RestTopic
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
@@ -53,13 +55,17 @@ import kotlinx.serialization.json.Json
  * mark drapeaux as read by re-hitting the auth REST endpoint. Explicit [refresh]
  * calls always fetch and broadcast through a per-type [MutableSharedFlow].
  *
- * Caching to Room is deferred to issue #26. The in-memory cache is purged on
- * [clearSessionCache] (logout, account switch).
+ * Phase 1D-3 adds a Room cache (`flag_topics`) scoped by lowercased pseudo. A
+ * fresh disk cache avoids the REST fan-out ; a stale disk cache is displayed first
+ * while the repository attempts a background refresh. [clearSessionCache] still
+ * clears the process cache immediately on logout / account switch.
  */
 @Singleton
 class DefaultFlagRepository @Inject constructor(
     private val apiClient: HfrApiClient,
     private val forumRepository: ForumRepository,
+    private val authRepository: AuthRepository,
+    private val flagCacheStore: FlagCacheStore,
     @param:FlagsJson private val json: Json,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : FlagRepository {
@@ -85,8 +91,30 @@ class DefaultFlagRepository @Inject constructor(
         if (cached != null) {
             emit(cached)
         } else {
-            emit(FlagsResult.Loading)
-            emit(fetch(type))
+            val userId = currentUserId()
+            if (userId == null) {
+                emit(notAuthenticatedFailure())
+            } else {
+                val diskCached = flagCacheStore.load(type = type, userId = userId)
+                if (diskCached != null) {
+                    synchronized(cachedSuccesses) { cachedSuccesses[type] = diskCached.result }
+                    emit(diskCached.result)
+                    if (!diskCached.isFresh) {
+                        when (val refreshed = fetch(type = type, userId = userId)) {
+                            is FlagsResult.Success -> emit(refreshed)
+                            is FlagsResult.Failure -> Log.w(
+                                LOG_TAG,
+                                "Keeping stale flags cache for $type after refresh failure",
+                                refreshed.cause,
+                            )
+                            FlagsResult.Loading -> Unit
+                        }
+                    }
+                } else {
+                    emit(FlagsResult.Loading)
+                    emit(fetch(type = type, userId = userId))
+                }
+            }
         }
         emitAll(refreshes.getValue(type).asSharedFlow())
     }
@@ -94,14 +122,21 @@ class DefaultFlagRepository @Inject constructor(
     override suspend fun refresh(type: FlagType) {
         val refreshesForType = refreshes.getValue(type)
         refreshesForType.emit(FlagsResult.Loading)
-        refreshesForType.emit(fetch(type))
+        val userId = currentUserId()
+        refreshesForType.emit(
+            if (userId == null) {
+                notAuthenticatedFailure()
+            } else {
+                fetch(type = type, userId = userId)
+            },
+        )
     }
 
     override fun clearSessionCache() {
         synchronized(cachedSuccesses) { cachedSuccesses.clear() }
     }
 
-    private suspend fun fetch(type: FlagType): FlagsResult = withContext(ioDispatcher) {
+    private suspend fun fetch(type: FlagType, userId: String): FlagsResult = withContext(ioDispatcher) {
         runCatching {
             val cats = loadCategories()
             val bucket = type.toBucket()
@@ -124,6 +159,7 @@ class DefaultFlagRepository @Inject constructor(
             }
         }.fold(
             onSuccess = { flags ->
+                persistFlags(userId = userId, type = type, flags = flags)
                 FlagsResult.Success(flags).also { result ->
                     synchronized(cachedSuccesses) { cachedSuccesses[type] = result }
                 }
@@ -134,6 +170,22 @@ class DefaultFlagRepository @Inject constructor(
             },
         )
     }
+
+    private suspend fun persistFlags(userId: String, type: FlagType, flags: List<Flag>) {
+        runCatching {
+            flagCacheStore.replace(userId = userId, type = type, flags = flags)
+        }.onFailure { throwable ->
+            Log.w(LOG_TAG, "Could not persist flags cache for $type", throwable)
+        }
+    }
+
+    private suspend fun currentUserId(): String? = when (val state = authRepository.observeAuthState().first()) {
+        AuthState.Anonymous -> null
+        is AuthState.Authenticated -> state.pseudo.lowercase()
+    }
+
+    private fun notAuthenticatedFailure(): FlagsResult.Failure =
+        FlagsResult.Failure(IllegalStateException("Flags require an authenticated HFR session"))
 
     /**
      * Resolves the REST-callable category list. Reuses [ForumRepository.observeCategories]
