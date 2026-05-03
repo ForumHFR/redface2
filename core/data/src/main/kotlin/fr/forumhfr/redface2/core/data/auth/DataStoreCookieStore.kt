@@ -10,6 +10,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.Cookie
@@ -72,16 +73,25 @@ class DataStoreCookieStore @Inject constructor(
             .build()
     }.getOrNull()
 
+    /**
+     * On-disk shape of one persisted cookie. The `@SerialName` annotations freeze the
+     * JSON keys against any code-side rename : a Kotlin property rename without an
+     * explicit `@SerialName` would silently log out every existing user (the
+     * `runCatching` upstream catches the resulting `MissingFieldException` and emits
+     * an empty cookie list, which the UI reads as "session expired"). Defaults make
+     * a missing key tolerable for older payloads — preferable to wiping the whole
+     * cookie list because one new field landed.
+     */
     @Serializable
     private data class CookieDto(
-        val name: String,
-        val value: String,
-        val domain: String,
-        val path: String,
-        val expiresAt: Long,
-        val secure: Boolean,
-        val httpOnly: Boolean,
-        val hostOnly: Boolean,
+        @SerialName("name") val name: String = "",
+        @SerialName("value") val value: String = "",
+        @SerialName("domain") val domain: String = "",
+        @SerialName("path") val path: String = "/",
+        @SerialName("expiresAt") val expiresAt: Long = 0L,
+        @SerialName("secure") val secure: Boolean = false,
+        @SerialName("httpOnly") val httpOnly: Boolean = false,
+        @SerialName("hostOnly") val hostOnly: Boolean = false,
     )
 
     companion object {

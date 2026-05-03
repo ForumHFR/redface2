@@ -162,6 +162,87 @@ class DataStoreCookieStoreTest {
             }
         }
 
+    /**
+     * Pins the on-disk JSON shape of the cookie list. Every build that wrote cookies
+     * to DataStore produced this exact key set ; a future Kotlin-side rename of any
+     * `CookieDto` property would silently log out every existing user (the
+     * `runCatching` upstream catches the resulting `MissingFieldException` and emits
+     * an empty list, which the UI reads as "session expired"). The frozen
+     * `@SerialName` annotations on `CookieDto` keep the JSON keys stable ; this test
+     * proves a payload written by a hypothetical past build (or hand-crafted by a
+     * user manipulating the file) still decodes to a usable cookie.
+     */
+    @Test
+    fun `legacy persisted payload with the historical key set still decodes`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val farFuture = System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000
+            val historicalJson = """
+                [
+                  {
+                    "name": "md_user",
+                    "value": "xaat",
+                    "domain": "forum.hardware.fr",
+                    "path": "/",
+                    "expiresAt": $farFuture,
+                    "secure": true,
+                    "httpOnly": true,
+                    "hostOnly": true
+                  }
+                ]
+            """.trimIndent()
+            dataStore.edit { prefs ->
+                prefs[stringPreferencesKey(DataStoreCookieStore.KEY_SESSION_COOKIES)] = historicalJson
+            }
+
+            store.observe().test {
+                val cookies = awaitItem()
+                assertEquals(1, cookies.size)
+                assertEquals("md_user", cookies.single().name)
+                assertEquals("xaat", cookies.single().value)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    /**
+     * If a future schema adds a new field to `CookieDto`, an older payload missing
+     * that field must still decode (defaults take over). Without defaults, kotlinx
+     * throws `MissingFieldException` and the whole list is wiped — silent logout.
+     */
+    @Test
+    fun `payload missing a future-only optional field still decodes via defaults`() =
+        runTest(UnconfinedTestDispatcher()) {
+            // Simulate an older build that wrote 6 fields out of the 8 the current
+            // schema knows. The two missing ones (httpOnly, hostOnly) must default
+            // to false rather than blowing up the list.
+            val farFuture = System.currentTimeMillis() + 7L * 24 * 60 * 60 * 1000
+            val truncatedJson = """
+                [
+                  {
+                    "name": "md_user",
+                    "value": "xaat",
+                    "domain": "forum.hardware.fr",
+                    "path": "/",
+                    "expiresAt": $farFuture,
+                    "secure": true
+                  }
+                ]
+            """.trimIndent()
+            dataStore.edit { prefs ->
+                prefs[stringPreferencesKey(DataStoreCookieStore.KEY_SESSION_COOKIES)] = truncatedJson
+            }
+
+            store.observe().test {
+                val cookies = awaitItem()
+                assertEquals(
+                    "missing fields must not wipe the cookie list",
+                    1,
+                    cookies.size,
+                )
+                assertEquals("md_user", cookies.single().name)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
     private fun makeCookie(
         name: String,
         value: String,
