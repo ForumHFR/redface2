@@ -8,7 +8,15 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-Phase 1B.1 livrée : login HFR utilisable de bout en bout avec cookies persistants (DataStore + `PersistentCookieJar`). AAB `0.1.0-phase1b.0` (build 14) sortira avec la PR `feature/1b-1-auth`.
+---
+
+## v0.7.0 — 2026-05-03
+
+Phase 1D livrée : drapeaux REST, lecture longue topic, cache Room (TTL + persistance + isolation par compte), prefetch anonyme. AAB `0.1.0-phase1d.1` (build 29).
+
+### Hotfix Phase 1D — Room schema v3
+
+Pendant la séquence de PRs Phase 1D, les fixes superpowers sur `flag_topics` (drop `views`, `firstUnreadPostId NOT NULL` → `lastPostReadId INTEGER nullable`) ont été appliqués sans bumper la version Room. Les builds intermédiaires (versionCode 25-28) ont donc écrit la table avec la forme legacy, et au passage à un build avec l'entité corrigée, Room throw `IllegalStateException: Room cannot verify the data integrity` (identityHash mismatch). Fix : bump @Database à v3 + `MIGRATION_2_3` qui drop-recrée `flag_topics` à la forme REST. Sûr car drapeaux = cache pur (re-fetch à l'observe suivant). `topic_pages` / `posts` non touchés.
 
 ### Phase 1D-4 — Prefetch anonyme (#108)
 

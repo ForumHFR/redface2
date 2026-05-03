@@ -60,3 +60,60 @@ val MIGRATION_1_2: Migration = object : Migration(1, 2) {
         )
     }
 }
+
+/**
+ * v2 → v3 (Phase 1D hotfix):
+ *
+ * Rebuilds `flag_topics` to match the REST-aligned shape of [FlagTopicEntity] :
+ * - drops `views NOT NULL` (the REST API does not expose a view count),
+ * - replaces `firstUnreadPostId INTEGER NOT NULL` with `lastPostReadId INTEGER`
+ *   (REST exposes `last_post_read_id`, the **last** post the user has read,
+ *   nullable when omitted on a row).
+ *
+ * Devices that ran an intermediate Phase 1D AAB (v25-v28) wrote `flag_topics`
+ * with the legacy shape, then upgraded to a build whose entity expects the new
+ * shape — Room then fails with `IllegalStateException: Room cannot verify the
+ * data integrity` because the identity hash changed without a version bump.
+ * This migration drops the table and recreates it: `flag_topics` is pure cache
+ * (drapeaux are refetched at next observe), so destructive recreation is safe
+ * and avoids a column-by-column rewrite that would gain nothing for empty rows.
+ *
+ * `topic_pages` and `posts` are untouched : their schema didn't change between
+ * v2 and v3, only `flag_topics` did.
+ */
+val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS `flag_topics`")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `flag_topics` (
+                `userId` TEXT NOT NULL,
+                `type` TEXT NOT NULL,
+                `cat` INTEGER NOT NULL,
+                `subcat` INTEGER,
+                `topicId` INTEGER NOT NULL,
+                `title` TEXT NOT NULL,
+                `totalPages` INTEGER NOT NULL,
+                `replyCount` INTEGER NOT NULL,
+                `hasUnread` INTEGER NOT NULL,
+                `lastReadPage` INTEGER NOT NULL,
+                `lastPostReadId` INTEGER,
+                `firstPostAuthor` TEXT NOT NULL,
+                `lastReplyAuthor` TEXT NOT NULL,
+                `lastReplyAt` TEXT NOT NULL,
+                `fetchedAt` INTEGER NOT NULL,
+                `authMode` TEXT NOT NULL,
+                PRIMARY KEY(`userId`, `type`, `cat`, `topicId`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_flag_topics_userId_type` " +
+                "ON `flag_topics` (`userId`, `type`)",
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_flag_topics_userId_fetchedAt` " +
+                "ON `flag_topics` (`userId`, `fetchedAt`)",
+        )
+    }
+}
