@@ -51,8 +51,7 @@ import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.first
 
 @Composable
 fun TopicScreen(
@@ -64,35 +63,27 @@ fun TopicScreen(
         creationCallback = { factory -> factory.create(request) },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
-
-    TopicContent(
-        state = state,
-        effects = viewModel.effects,
-        onIntent = viewModel::send,
-        onReply = { onReply(request.post) },
-        onOpenPage = onOpenPage,
-    )
-}
-
-@Composable
-internal fun TopicContent(
-    state: TopicUiState,
-    effects: Flow<TopicEffect>,
-    onIntent: (TopicIntent) -> Unit,
-    onReply: () -> Unit,
-    onOpenPage: (Int) -> Unit,
-) {
     val lazyListState = rememberLazyListState()
 
     // Single-shot scroll : `effects` emits `ScrollToPost` exactly once per request,
     // when the ViewModel has loaded a page that contains the requested numreponse.
     // Once consumed, the user can scroll freely without the deep link snapping back.
+    //
+    // The `LaunchedEffect` lives here (next to `viewModel`) instead of inside
+    // `TopicContent` because it must read the latest [TopicUiState] from the
+    // [StateFlow], not the recomposition-captured `state` parameter. Reading the
+    // captured `state` would race : the ViewModel always updates the state before
+    // it sends the effect, but `collectAsStateWithLifecycle` may not have surfaced
+    // the new value to the composition by the time the effect lands. Pulling
+    // straight from `viewModel.state` and waiting for `Loaded` makes the invariant
+    // impossible to break.
     LaunchedEffect(Unit) {
-        effects.collect { effect ->
+        viewModel.effects.collect { effect ->
             when (effect) {
                 is TopicEffect.ScrollToPost -> {
-                    val mode = state.mode as? TopicUiState.Mode.Loaded ?: return@collect
-                    val index = mode.topic.posts.indexOfFirst { it.numreponse == effect.numreponse }
+                    val loadedMode = viewModel.state.first { it.mode is TopicUiState.Mode.Loaded }.mode
+                            as TopicUiState.Mode.Loaded
+                    val index = loadedMode.topic.posts.indexOfFirst { it.numreponse == effect.numreponse }
                     if (index >= 0) {
                         // +1 because the LazyColumn header card occupies item 0.
                         lazyListState.scrollToItem(index + 1)
@@ -102,6 +93,23 @@ internal fun TopicContent(
         }
     }
 
+    TopicContent(
+        state = state,
+        listState = lazyListState,
+        onIntent = viewModel::send,
+        onReply = { onReply(request.post) },
+        onOpenPage = onOpenPage,
+    )
+}
+
+@Composable
+internal fun TopicContent(
+    state: TopicUiState,
+    listState: LazyListState,
+    onIntent: (TopicIntent) -> Unit,
+    onReply: () -> Unit,
+    onOpenPage: (Int) -> Unit,
+) {
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
@@ -148,7 +156,7 @@ internal fun TopicContent(
                     topic = mode.topic,
                     onReply = onReply,
                     onOpenPage = onOpenPage,
-                    listState = lazyListState,
+                    listState = listState,
                 )
             }
         }
@@ -232,8 +240,8 @@ private fun TopicHeaderCard(
             TopicPageNavigation(
                 currentPage = topic.page,
                 availablePages = state.availablePages,
-                canGoPrevious = topic.page > 1,
-                canGoNext = topic.page < topic.totalPages,
+                canGoPrevious = state.canGoPrevious,
+                canGoNext = state.canGoNext,
                 onOpenPage = onOpenPage,
             )
             topic.poll?.let { poll ->
@@ -466,9 +474,3 @@ private fun java.time.Instant.asTopicDate(): String = topicDateFormatter.format(
 
 private const val PAGE_GRID_LIMIT = 40
 private const val JUMP_MAX_DIGITS = 4
-
-/**
- * Helper for tests / previews that need a [TopicContent] without a ViewModel — falls
- * back to an empty effects flow so no scroll is dispatched.
- */
-internal fun emptyEffectsFlow(): Flow<TopicEffect> = flowOf()
