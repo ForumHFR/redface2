@@ -36,20 +36,22 @@ import kotlinx.serialization.json.Json
  * favorites}/` via [HfrApiClient]. The legacy HTML scrape on `forum1f.php` has been
  * retired with this slice — `getFlagsPage` and the matching `FlagsListParser` are gone.
  *
- * **Why per-category and not the global endpoint** : `protocol-hfr.md` documents that
- * the global REST drapeau endpoint (`forums/hardwarefr/topics/{bucket}/`) returns a
- * *grouped-by-category* envelope, distinct from the flat `RestListEnvelope<RestTopic>`
- * shape we have a captured fixture for. Without a captured global fixture (live
- * capture not available in the migration session), we route through the per-cat REST
- * endpoint whose contract is proven by `rest_cat23_participated.json`. Cost : one
- * REST GET per HFR public category (~19 cats), parallelised through the IO dispatcher.
- * The global endpoint can be wired in a follow-up PR once a fixture is captured.
+ * **Why per-category and not the global endpoint** : the global drapeau endpoint
+ * `forums/hardwarefr/topics/{bucket}/` advertises a grouped-by-category envelope
+ * distinct from the flat [RestListEnvelope]<[RestTopic]> shape we have a captured
+ * fixture for. Without that fixture we cannot prove the parser, so the global helper
+ * is **not** exposed by `HfrApiClient` (cf. AGENTS.md § "noyau avant écosystème" —
+ * pas d'API morte). We route through the per-cat REST endpoint whose contract is
+ * proven by `rest_cat23_participated.json`. Cost : one REST GET per HFR public
+ * category (~19 cats), parallelised through the IO dispatcher. A follow-up PR can
+ * add the global helper and switch consumption once the payload is captured.
  *
- * The first [observe] call per [FlagType] fans out across categories, concatenates the
- * results and caches the success for the current auth session ; tab switches reuse the
- * cache so the screen does not implicitly mark drapeaux as read by re-hitting the auth
- * REST endpoint. Explicit [refresh] calls always fetch and broadcast through a per-type
- * [MutableSharedFlow].
+ * The first [observe] call per [FlagType] fans out across categories, concatenates
+ * the results, **sorts globally by `lastReplyAt` desc** so the screen shows topics
+ * by activity instead of grouping by cat, and caches the success for the current
+ * auth session ; tab switches reuse the cache so the screen does not implicitly
+ * mark drapeaux as read by re-hitting the auth REST endpoint. Explicit [refresh]
+ * calls always fetch and broadcast through a per-type [MutableSharedFlow].
  *
  * Caching to Room is deferred to issue #26. The in-memory cache is purged on
  * [clearSessionCache] (logout, account switch).
@@ -112,6 +114,13 @@ class DefaultFlagRepository @Inject constructor(
                 cats.map { category ->
                     async { fetchAllPages(cat = category.id, bucket = bucket, defaultType = type) }
                 }.awaitAll().flatten()
+                    // Per-category fan-out concatenates results in cat-iteration order — without a
+                    // global sort the screen would group by cat (Discussions block, then Tech block,
+                    // …) instead of showing the most recent activity first. `lastReplyAt` is the REST
+                    // string `YYYY-MM-DD HH:mm`, so lexicographic descending == chronological
+                    // descending. Empty strings (defensive — should not happen on REST flags) sort
+                    // last, which is the right "unknown date goes to the bottom" behaviour.
+                    .sortedByDescending { it.lastReplyAt }
             }
         }.fold(
             onSuccess = { flags ->

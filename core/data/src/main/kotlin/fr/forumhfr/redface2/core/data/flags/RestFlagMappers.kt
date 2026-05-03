@@ -9,11 +9,18 @@ import kotlin.math.ceil
 import kotlin.math.max
 
 /**
- * Maps REST drapeaux payloads (`forums/hardwarefr/topics/{bucket}/` global form, or
- * `forums/hardwarefr/categories/{cat}/topics/{bucket}/` per-cat form) to the domain
- * [Flag] model. Both endpoints share the [RestListEnvelope] / [RestTopic] envelope
- * shape exposed by the REST listing endpoints (verified by the captured fixture
- * `core/data/src/test/resources/fixtures/rest_cat23_participated.json`).
+ * Maps REST drapeaux payloads from the per-cat endpoint
+ * `forums/hardwarefr/categories/{cat}/topics/{bucket}/` to the domain [Flag] model.
+ * The envelope shape is [RestListEnvelope] / [RestTopic], proven by the captured
+ * fixture `core/data/src/test/resources/fixtures/rest_cat23_participated.json`.
+ *
+ * The mapper also handles a hypothetical "global" payload via [fallbackCat] = null —
+ * the cat would then come from each row's `links.category.href`. This is **not**
+ * exercised by Phase 1D-1 production code : `HfrApiClient` does not expose a global
+ * helper today (no fixture has been captured for the grouped-by-cat shape advertised
+ * by HFR's docs). The `fallbackCat = null` branch is kept here under direct test
+ * coverage so a follow-up that captures the global fixture can wire the helper
+ * without re-deriving the parsing.
  *
  * Mapping rules :
  * - `flag_owntopic` → [FlagType] (1=CYAN, 2=RED, 3=FAVORITE) ; unknown / null buckets
@@ -32,9 +39,8 @@ import kotlin.math.max
  *   posts_results_per_page)` mirror the existing forum mapper semantics so a topic
  *   summary surfaced from a flag list and from a category list look identical.
  * - `cat` is taken from [fallbackCat] when present (per-cat REST endpoint) ; otherwise
- *   it is parsed from `links.category.href` (global REST endpoint groups topics across
- *   categories). When neither is available, the row is skipped — the UI cannot route
- *   a tap on a flag without a known cat.
+ *   it is parsed from `links.category.href`. When neither is available, the row is
+ *   skipped — the UI cannot route a tap on a flag without a known cat.
  *
  * The mapper is pure ; tests live in `core/data/src/test/.../RestFlagMappersTest.kt`
  * and consume the captured fixture.

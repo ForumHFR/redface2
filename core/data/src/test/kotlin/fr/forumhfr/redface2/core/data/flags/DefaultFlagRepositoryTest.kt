@@ -271,6 +271,84 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
+    fun `flags from multiple categories are sorted globally by lastReplyAt descending`() = runTest {
+        // Per-cat fan-out concatenates in cat-iteration order ; without a global sort the
+        // screen would block-by-cat instead of by activity. Two cats, three flags total,
+        // older flag in the second-iterated cat must still land last.
+        val cat13Page = """
+            {
+              "resource": {
+                "page": 1,
+                "results_count": 2,
+                "results_per_page": 50,
+                "resources": [
+                  {
+                    "id": 100,
+                    "title": "old in cat 13",
+                    "links": {
+                      "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
+                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/100/posts/?page=1&results_per_page=40", "count": 1}
+                    },
+                    "is_read": false,
+                    "flag_owntopic": 1,
+                    "last_post_date": "2026-04-01 10:00"
+                  },
+                  {
+                    "id": 200,
+                    "title": "newest in cat 13",
+                    "links": {
+                      "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
+                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/200/posts/?page=1&results_per_page=40", "count": 1}
+                    },
+                    "is_read": false,
+                    "flag_owntopic": 1,
+                    "last_post_date": "2026-05-03 12:00"
+                  }
+                ]
+              }
+            }
+        """
+        val cat23Page = """
+            {
+              "resource": {
+                "page": 1,
+                "results_count": 1,
+                "results_per_page": 50,
+                "resources": [
+                  {
+                    "id": 300,
+                    "title": "middle in cat 23",
+                    "links": {
+                      "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"},
+                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/300/posts/?page=1&results_per_page=40", "count": 1}
+                    },
+                    "is_read": false,
+                    "flag_owntopic": 1,
+                    "last_post_date": "2026-04-15 18:30"
+                  }
+                ]
+              }
+            }
+        """
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, cat13Page)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, cat23Page)
+        }
+        val repo = buildRepository(apiClient, forumRepository)
+
+        repo.observe(FlagType.CYAN).test {
+            awaitItem() // Loading
+            val success = awaitItem() as FlagsResult.Success
+            assertEquals(
+                "globally sorted by lastReplyAt desc, regardless of cat iteration order",
+                listOf(200, 300, 100),
+                success.flags.map { it.topicId },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `pagination keeps walking when server inflates results_per_page on a partial page`() = runTest {
         // Regression guard: the old `seen = page * pageSize` heuristic stopped after
         // page 1 when the server advertised a results_per_page bigger than the actual
