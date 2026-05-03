@@ -19,7 +19,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
@@ -247,32 +246,6 @@ class CategoryViewModel @AssistedInject constructor(
 
     private companion object {
         const val STOP_TIMEOUT_MS: Long = 5_000L
-    }
-}
-
-/**
- * Hides a transient `Loading` re-emitted by a repository's `refresh*()` broadcast
- * when there is already a prior `Content` to keep showing. The first cold-start
- * `Loading` passes through (so the screen still renders its initial spinner) and
- * `Error` always passes through (so a failed refresh surfaces the "Réessayer"
- * button instead of silently keeping stale data).
- */
-private fun <T : Any> Flow<T>.keepContentDuringRefresh(
-    isLoading: (T) -> Boolean,
-    isContent: (T) -> Boolean,
-): Flow<T> = flow {
-    var lastContent: T? = null
-    collect { value ->
-        when {
-            isContent(value) -> {
-                lastContent = value
-                emit(value)
-            }
-            isLoading(value) && lastContent != null -> {
-                // Suppress: keep showing the previous Content under a refresh spinner.
-            }
-            else -> emit(value)
-        }
     }
 }
 
