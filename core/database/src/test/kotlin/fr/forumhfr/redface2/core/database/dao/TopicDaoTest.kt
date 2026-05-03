@@ -96,7 +96,6 @@ class TopicDaoTest {
         page: Int,
         authMode: FetchMode,
         title: String = "topic $post page $page",
-        fetchedAt: Instant = Instant.parse("2026-04-26T18:00:00Z"),
     ): TopicEntity = TopicEntity(
         cat = cat,
         post = post,
@@ -106,7 +105,7 @@ class TopicDaoTest {
         isFirstPostOwner = false,
         pollJson = null,
         numreponses = emptyList(),
-        fetchedAt = fetchedAt,
+        fetchedAt = Instant.parse("2026-04-26T18:00:00Z"),
         authMode = authMode,
     )
 }
