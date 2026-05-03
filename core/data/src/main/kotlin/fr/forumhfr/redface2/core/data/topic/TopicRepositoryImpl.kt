@@ -32,12 +32,16 @@ class TopicRepositoryImpl @Inject constructor(
     /**
      * Cache-first read with TTL-driven refresh.
      *
-     * - Cache hit, fresh → emit and stop. No network. This is the snappy back-nav
-     *   case: returning to a page within `CachePolicy.topicPage` does not refetch
-     *   and does not silently mark drapeaux as read.
-     * - Cache hit, stale → emit cache, then refresh in foreground. If the refresh
-     *   fails (offline, HFR 502, …) we swallow the failure — keeping the stale
-     *   page on screen is strictly better than wiping it.
+     * - Cache hit, **AUTHENTICATED** + fresh → emit and stop. No network. This is the
+     *   snappy back-nav case: returning to a page within `CachePolicy.topicPage` does
+     *   not refetch and does not silently mark drapeaux as read.
+     * - Cache hit, **ANONYMOUS** (warmed by [prefetchAnonymous]) → always emit cache
+     *   then re-fetch authenticated, regardless of TTL. The anon row is missing
+     *   per-user fields (`isOwnPost`, `isEditable`, …) and reading without re-fetching
+     *   would also skip the implicit "mark as read" the auth GET triggers server-side.
+     * - Cache hit, AUTHENTICATED + stale → emit cache, then refresh in foreground. If
+     *   the refresh fails (offline, HFR 502, …) we swallow the failure — keeping the
+     *   stale page on screen is strictly better than wiping it.
      * - Cache miss → fetch directly. A failure here propagates so the UI can
      *   show its error state.
      */
@@ -45,14 +49,16 @@ class TopicRepositoryImpl @Inject constructor(
         val cached = withContext(ioDispatcher) { loadFromCache(cat, post, page) }
         if (cached != null) {
             emit(cached.topic)
-            if (CachePolicy.isFresh(cached.fetchedAt, CachePolicy.topicPage, clock)) {
+            val canSkipRefresh = cached.authMode == FetchMode.AUTHENTICATED &&
+                CachePolicy.isFresh(cached.fetchedAt, CachePolicy.topicPage, clock)
+            if (canSkipRefresh) {
                 return@flow
             }
-            // Stale cache stays on screen if the background refresh fails. UI does
-            // nothing — a snackbar/banner for refresh failures is the responsibility
-            // of the caller (Phase 1D PR 2 added Retry; nothing else needs a
-            // structural change here). CancellationException is rethrown to keep
-            // structured concurrency semantics intact.
+            // Stale or ANONYMOUS cache stays on screen if the background refresh fails.
+            // UI does nothing — a snackbar/banner for refresh failures is the
+            // responsibility of the caller (Phase 1D PR 2 added Retry; nothing else
+            // needs a structural change here). CancellationException is rethrown to
+            // keep structured concurrency semantics intact.
             try {
                 emit(fetchAndPersist(cat, post, page, FetchMode.AUTHENTICATED))
             } catch (cancellation: CancellationException) {
@@ -140,10 +146,15 @@ class TopicRepositoryImpl @Inject constructor(
         return CachedTopic(
             topic = TopicMappers.toDomain(topicEntity, postEntities),
             fetchedAt = topicEntity.fetchedAt,
+            authMode = topicEntity.authMode,
         )
     }
 
-    private data class CachedTopic(val topic: Topic, val fetchedAt: java.time.Instant)
+    private data class CachedTopic(
+        val topic: Topic,
+        val fetchedAt: java.time.Instant,
+        val authMode: FetchMode,
+    )
 
     private companion object {
         const val LOG_TAG = "TopicRepository"

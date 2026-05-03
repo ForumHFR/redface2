@@ -175,6 +175,34 @@ class TopicRepositoryImplTest {
     }
 
     @Test
+    fun `observeTopicPage with a fresh ANONYMOUS cache still re-fetches authenticated`() = runTest {
+        // Cold cache → anonymous prefetch lands an ANONYMOUS row at T0.
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
+        repository(now = Instant.parse("2026-04-26T18:00:00Z")).prefetchAnonymous(1, 999_395, 1)
+        val anonRow = dao.getTopicPage(1, 999_395, 1)
+        assertEquals(FetchMode.ANONYMOUS, anonRow!!.authMode)
+        assertEquals("warm-up should have issued exactly one network request", 1, server.requestCount)
+
+        // Same fixed clock → cache fetchedAt equals "now" → fresh BY TTL. But because the
+        // row is ANONYMOUS, observeTopicPage must still re-fetch authenticated to surface
+        // per-user fields and let HFR mark drapeaux as read. Without this guard, a
+        // prefetched page would silently shortcut the read into a stale anon view.
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
+        val repo = repository(now = Instant.parse("2026-04-26T18:00:00Z"))
+        repo.observeTopicPage(1, 999_395, 1).test {
+            awaitItem() // cached anon emission
+            awaitItem() // authenticated refresh
+            awaitComplete()
+        }
+        assertEquals("anon cache must trigger an auth refresh regardless of TTL", 2, server.requestCount)
+        assertEquals(
+            "the cache must have been upgraded to AUTHENTICATED",
+            FetchMode.AUTHENTICATED,
+            dao.getTopicPage(1, 999_395, 1)!!.authMode,
+        )
+    }
+
+    @Test
     fun `refreshTopicPage upgrades an existing ANONYMOUS row to AUTHENTICATED`() = runTest {
         // Cold cache → an anonymous prefetch writes an ANONYMOUS row.
         server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
