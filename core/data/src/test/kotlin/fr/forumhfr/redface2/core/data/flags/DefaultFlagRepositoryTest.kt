@@ -320,13 +320,31 @@ class DefaultFlagRepositoryTest {
         """
         val apiClient = mockk<HfrApiClient>()
         coEvery {
-            apiClient.getCategoryFlagTopics(cat = 13, bucket = HfrRestFlagBucket.PARTICIPATED, page = 1, resultsPerPage = 50, useAuth = true)
+            apiClient.getCategoryFlagTopics(
+                cat = 13,
+                bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = 1,
+                resultsPerPage = 50,
+                useAuth = true,
+            )
         } returns page1
         coEvery {
-            apiClient.getCategoryFlagTopics(cat = 13, bucket = HfrRestFlagBucket.PARTICIPATED, page = 2, resultsPerPage = 50, useAuth = true)
+            apiClient.getCategoryFlagTopics(
+                cat = 13,
+                bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = 2,
+                resultsPerPage = 50,
+                useAuth = true,
+            )
         } returns page2
         coEvery {
-            apiClient.getCategoryFlagTopics(cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED, page = any(), resultsPerPage = any(), useAuth = true)
+            apiClient.getCategoryFlagTopics(
+                cat = 23,
+                bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(),
+                resultsPerPage = any(),
+                useAuth = true,
+            )
         } returns EMPTY_PAGE
         val forumRepository = stubForumRepository(sampleCategories)
         val repo = buildRepository(apiClient, forumRepository)
