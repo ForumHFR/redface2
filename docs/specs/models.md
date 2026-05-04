@@ -258,9 +258,9 @@ sealed interface PostBlock {
         val content: PostContent,
     ) : PostBlock
     data class Spoiler(val label: String?, val content: PostContent) : PostBlock
-    // Les blocs monospace [fixed] / [code] sont prévus par ADR-011 mais pas encore produits par le
-    // parser HTML de Phase 1 ; ils arrivent via [#79](https://github.com/ForumHFR/redface2/issues/79).
     data class Image(val url: String, val description: String?) : PostBlock
+    data class Fixed(val text: String) : PostBlock                           // BBCode [fixed], rendu monospace plein largeur
+    data class CodeBlock(val text: String, val language: String?) : PostBlock // BBCode [code], language depuis <pre class="<lang>"> ; null si [code] sans hint. Phase 1 : aplatissement de la coloration syntaxique HFR (kw3/me1/st0/de1) en texte brut, coloration reportée Phase 2.
 }
 
 sealed interface PostInline {
@@ -282,7 +282,7 @@ sealed interface SmileyKind {
 }
 ```
 
-`PostContent` est le contrat cible décrit par [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast). La dette de fragment HTML brut dans le slice topic fixe est résorbée par [#80](https://github.com/ForumHFR/redface2/pull/80) ; les blocs monospace `[fixed]` / `[code]` restent suivis par [#79](https://github.com/ForumHFR/redface2/issues/79). `PostInline.Color.colorHex` conserve la couleur sous forme textuelle normalisée (`#RRGGBB` ou `#AARRGGBB`) pour préserver le round-trip BBCode HFR.
+`PostContent` est le contrat cible décrit par [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast). La dette de fragment HTML brut dans le slice topic fixe est résorbée par [#80](https://github.com/ForumHFR/redface2/pull/80) ; les blocs monospace `[fixed]` / `[code]` sont parsés depuis Phase 1 via [#79](https://github.com/ForumHFR/redface2/issues/79). `PostInline.Color.colorHex` conserve la couleur sous forme textuelle normalisée (`#RRGGBB` ou `#AARRGGBB`) pour préserver le round-trip BBCode HFR.
 
 ---
 

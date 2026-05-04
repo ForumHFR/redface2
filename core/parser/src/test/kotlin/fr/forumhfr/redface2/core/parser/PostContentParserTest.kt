@@ -330,6 +330,133 @@ class PostContentParserTest {
     }
 
     @Test
+    fun `fixed and code tables are recognised as their own block kinds`() {
+        // Witness post on topic_redface2_p16 was authored explicitly to feed the parser:
+        // XaTriX posted a series of [fixed] / [code] blocks and re-quoted them. The fixture
+        // therefore contains 9 [fixed], 19 [code] (4 with a cpp language hint via <pre>).
+        val topic = pageParser.parse(fixture("topic_redface2_p16.html"))
+
+        val blocks = topic.posts.flatMap { post -> post.content.allBlocks() }
+        val fixedBlocks = blocks.filterIsInstance<PostBlock.Fixed>()
+        val codeBlocks = blocks.filterIsInstance<PostBlock.CodeBlock>()
+
+        assertTrue(
+            "page 16 fixture should expose [fixed] blocks; if 0 they fell back to inline text",
+            fixedBlocks.isNotEmpty(),
+        )
+        assertTrue(
+            "page 16 fixture should expose [code] blocks; if 0 they fell back to inline text",
+            codeBlocks.isNotEmpty(),
+        )
+        assertTrue(
+            "fixed text content should match what XaTriX posted (`Salut je suis un fixed`)",
+            fixedBlocks.any { it.text == "Salut je suis un fixed" },
+        )
+        assertTrue(
+            "default [code] body should be `je suis un truc de code`",
+            codeBlocks.any { it.text == "je suis un truc de code" && it.language == null },
+        )
+    }
+
+    @Test
+    fun `code block with explicit language hint surfaces the pre class as language`() {
+        val topic = pageParser.parse(fixture("topic_redface2_p16.html"))
+
+        val coloredCpp = topic.posts
+            .flatMap { post -> post.content.allBlocks() }
+            .filterIsInstance<PostBlock.CodeBlock>()
+            .firstOrNull { it.language == "cpp" }
+
+        assertNotNull("expected at least one [code lang=cpp] block on page 16", coloredCpp)
+        // HFR wraps the colored body in <pre class="cpp"><ol><li><div class="de1">...</div></li></ol></pre>.
+        // Phase 1 contract per issue #79: the syntax-highlight spans (kw3 / me1 / st0) collapse
+        // to raw source text — coloration is Phase 2 work.
+        assertEquals("là du code en cpp", coloredCpp!!.text)
+    }
+
+    @Test
+    fun `fixed and code blocks survive being nested inside a quote`() {
+        // XaTriX re-quoted his own [fixed] / [code] dump — the quote walker must descend into the
+        // citation and surface the wrapped blocks as Fixed/CodeBlock, not as flattened paragraphs.
+        val topic = pageParser.parse(fixture("topic_redface2_p16.html"))
+
+        val nestedFixed = topic.posts
+            .flatMap { post -> post.content.allBlocks() }
+            .filterIsInstance<PostBlock.Quote>()
+            .flatMap { it.content.blocks.filterIsInstance<PostBlock.Fixed>() }
+        val nestedCode = topic.posts
+            .flatMap { post -> post.content.allBlocks() }
+            .filterIsInstance<PostBlock.Quote>()
+            .flatMap { it.content.blocks.filterIsInstance<PostBlock.CodeBlock>() }
+
+        assertTrue(
+            "at least one quote on page 16 wraps a [fixed] block — got=${nestedFixed.size}",
+            nestedFixed.isNotEmpty(),
+        )
+        assertTrue(
+            "at least one quote on page 16 wraps a [code] block — got=${nestedCode.size}",
+            nestedCode.isNotEmpty(),
+        )
+    }
+
+    @Test
+    fun `synthetic fixed table is parsed as a single Fixed block`() {
+        // Boundary check decoupled from the live capture: confirms the classifier picks
+        // <table class="fixed"> before <table class="code"> falls through and prevents the
+        // legacy regression where a [fixed] body was flattened into the surrounding paragraph.
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            """
+            <div id="para123">
+                <p>before</p>
+                <div class="container">
+                    <table class="fixed"><tr class="none"><td><p>line one<br>line two</p></td></tr></table>
+                </div>
+                <p>after</p>
+            </div>
+            """.trimIndent(),
+        )
+
+        val result = parser.parse(element)
+
+        val fixed = result.ast.allBlocks().filterIsInstance<PostBlock.Fixed>()
+        assertEquals("exactly one Fixed block expected", 1, fixed.size)
+        assertEquals("line one\nline two", fixed.first().text)
+    }
+
+    @Test
+    fun `synthetic code table without pre wrapper has null language`() {
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            """
+            <div id="para123">
+                <div class="container">
+                    <table class="code">
+                        <tr class="none">
+                            <td>
+                                <b class="s1">Code :</b><br>
+                                <ol id="code1" class="olcode">
+                                    <li>line one</li>
+                                    <li>line two</li>
+                                </ol>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+            """.trimIndent(),
+        )
+
+        val result = parser.parse(element)
+
+        val code = result.ast.allBlocks().filterIsInstance<PostBlock.CodeBlock>()
+        assertEquals("exactly one CodeBlock expected", 1, code.size)
+        assertEquals(null, code.first().language)
+        // The "Code :" header is dropped; <li> children are joined with newlines.
+        assertEquals("line one\nline two", code.first().text)
+    }
+
+    @Test
     fun `non-http schemes other than data and javascript are also rejected`() {
         val parser = PostContentParser()
         val element = jsoupBody(
@@ -408,6 +535,8 @@ private fun walkBlocks(blocks: List<PostBlock>, out: MutableList<PostInline>) {
             is PostBlock.Quote -> walkBlocks(block.content.blocks, out)
             is PostBlock.Spoiler -> walkBlocks(block.content.blocks, out)
             is PostBlock.Image -> Unit
+            is PostBlock.Fixed -> Unit
+            is PostBlock.CodeBlock -> Unit
         }
     }
 }

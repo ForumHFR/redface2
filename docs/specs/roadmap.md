@@ -94,7 +94,7 @@ Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances e
 - [x] Deep linking (URLs HFR → app) — `parseHfrDeepLink` corrigé (mapping `forum1.php` ↔ `forum2.php` inversé, fixé en 1C-A) et branché sur les écrans réels Forum/Category/Topic
 - [x] **Prefetch pages suivantes Phase 1D-4 (#108)** — topic `page + 1` persisté en `ANONYMOUS` sans écraser l'authentifié, listing forum `page + 1` warm-up anonyme sans exposer le payload ; annulation au changement de page / sortie d'écran
 - [ ] Images + smileys (Coil 3 — split fetcher déjà câblé via `coil-network-okhttp`)
-- [ ] Blocs monospace `[fixed]` / `[code]` — restent suivis par [#79](https://github.com/ForumHFR/redface2/issues/79) et arriveront avec une fixture réelle
+- [x] **Blocs monospace `[fixed]` / `[code]` (#79)** — `PostBlock.Fixed(text)` et `PostBlock.CodeBlock(text, language?)` parsés depuis `<table class="fixed">` / `<table class="code">` ; `PostRenderer` rend chaque bloc dans une `Card surfaceContainerHighest` à police monospace avec scroll horizontal sur overflow. Coloration syntaxique aplatie en texte brut (Phase 2).
 
 **Livrable :** une app utilisable pour **lire** le forum au quotidien. Pas encore de possibilité d'écrire.
 
