@@ -492,6 +492,36 @@ class PostContentParserTest {
     }
 
     @Test
+    fun `fixed and code blocks preserve leading indentation`() {
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            """
+            <div id="para123">
+                <table class="fixed"><tr class="none"><td><p>    fixed indentation<br>  fixed second</p></td></tr></table>
+                <table class="code">
+                    <tr class="none">
+                        <td>
+                            <b class="s1">Code :</b><br>
+                            <ol id="code1" class="olcode">
+                                <li>    val value = 42</li>
+                                <li>        println(value)</li>
+                            </ol>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            """.trimIndent(),
+        )
+
+        val result = parser.parse(element)
+
+        val fixed = result.ast.allBlocks().filterIsInstance<PostBlock.Fixed>().single()
+        val code = result.ast.allBlocks().filterIsInstance<PostBlock.CodeBlock>().single()
+        assertEquals("    fixed indentation\n  fixed second", fixed.text)
+        assertEquals("    val value = 42\n        println(value)", code.text)
+    }
+
+    @Test
     fun `synthetic code table without pre wrapper has null language`() {
         val parser = PostContentParser()
         val element = jsoupBody(

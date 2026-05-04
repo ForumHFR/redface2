@@ -112,11 +112,10 @@ class PostContentParser {
         // HFR renders [quotemsg=...] as <table class="citation"> (with author anchor) and
         // [quote] (anonymous) as <table class="quote"> — both map to the same Quote block.
         element.selectFirst("table.citation, table.quote") != null -> NodeKind.QUOTE
-        // Speculative defense: every fixture captured so far emits [fixed] / [code] as a <table>
-        // child direct of <div id="paraN"> (handled by classifyTable above), never wrapped in a
-        // <div class="container">. If a future HFR skin starts wrapping these blocks the way it
-        // already wraps quotes, this branch keeps the body out of the surrounding paragraph
-        // instead of falling through to PARAGRAPH_CONTAINER. Not exercised by any current test.
+        // Defensive wrapper support: every fixture captured so far emits [fixed] / [code] as a
+        // <table> child direct of <div id="paraN"> (handled by classifyTable above), but quotes
+        // use <div class="container"> wrappers. Synthetic tests pin this fallback so a future HFR
+        // skin wrapping monospace blocks would still keep them out of the surrounding paragraph.
         element.selectFirst("table.fixed") != null -> NodeKind.FIXED_BLOCK
         element.selectFirst("table.code") != null -> NodeKind.CODE_BLOCK
         element.attr("style").contains("clear: both") -> NodeKind.IGNORE
@@ -255,12 +254,22 @@ class PostContentParser {
      *     paragraph separations — `wholeText()` does not insert whitespace between sibling block
      *     elements, so `<p>A</p><p>B</p>` would otherwise collapse into `AB` ;
      * then `wholeText()` walks the DOM preserving whitespace so indentation inside `<pre>` stays
-     * intact (unlike `text()`, which collapses runs of whitespace to a single space).
+     * intact (unlike `text()`, which collapses runs of whitespace to a single space). Only empty
+     * boundary lines injected by the HTML structure are trimmed; leading spaces on real content
+     * lines are part of the `[fixed]` / `[code]` contract and must survive.
      */
     private fun extractCellText(element: Element): String {
         element.select("br").forEach { it.replaceWith(TextNode("\n")) }
         element.select("p").forEach { it.appendChild(TextNode("\n")) }
-        return element.wholeText().trim()
+        return element.wholeText().trimStructuralBlankLines()
+    }
+
+    private fun String.trimStructuralBlankLines(): String {
+        val lines = replace("\r\n", "\n").replace('\r', '\n').split('\n')
+        val firstContentLine = lines.indexOfFirst { it.isNotBlank() }
+        if (firstContentLine == -1) return ""
+        val lastContentLine = lines.indexOfLast { it.isNotBlank() }
+        return lines.subList(firstContentLine, lastContentLine + 1).joinToString("\n")
     }
 
     /**
