@@ -330,6 +330,230 @@ class PostContentParserTest {
     }
 
     @Test
+    fun `fixed and code tables are recognised as their own block kinds`() {
+        // Witness post on topic_redface2_p16 was authored explicitly to feed the parser:
+        // XaTriX posted a series of [fixed] / [code] blocks and re-quoted them. The fixture
+        // therefore contains 9 [fixed], 19 [code] (4 with a cpp language hint via <pre>).
+        val topic = pageParser.parse(fixture("topic_redface2_p16.html"))
+
+        val blocks = topic.posts.flatMap { post -> post.content.allBlocks() }
+        val fixedBlocks = blocks.filterIsInstance<PostBlock.Fixed>()
+        val codeBlocks = blocks.filterIsInstance<PostBlock.CodeBlock>()
+
+        assertTrue(
+            "page 16 fixture should expose [fixed] blocks; if 0 they fell back to inline text",
+            fixedBlocks.isNotEmpty(),
+        )
+        assertTrue(
+            "page 16 fixture should expose [code] blocks; if 0 they fell back to inline text",
+            codeBlocks.isNotEmpty(),
+        )
+        assertTrue(
+            "fixed text content should match what XaTriX posted (`Salut je suis un fixed`)",
+            fixedBlocks.any { it.text == "Salut je suis un fixed" },
+        )
+        assertTrue(
+            "default [code] body should be `je suis un truc de code`",
+            codeBlocks.any { it.text == "je suis un truc de code" && it.language == null },
+        )
+    }
+
+    @Test
+    fun `code block with explicit language hint surfaces the pre class as language`() {
+        val topic = pageParser.parse(fixture("topic_redface2_p16.html"))
+
+        val coloredCpp = topic.posts
+            .flatMap { post -> post.content.allBlocks() }
+            .filterIsInstance<PostBlock.CodeBlock>()
+            .firstOrNull { it.language == "cpp" }
+
+        assertNotNull("expected at least one [code lang=cpp] block on page 16", coloredCpp)
+        // HFR wraps the colored body in <pre class="cpp"><ol><li><div class="de1">...</div></li></ol></pre>.
+        // Phase 1 contract per issue #79: the syntax-highlight spans (kw3 / me1 / st0) collapse
+        // to raw source text — coloration is Phase 2 work.
+        assertEquals("là du code en cpp", coloredCpp!!.text)
+    }
+
+    @Test
+    fun `fixed and code blocks survive being nested inside a quote`() {
+        // XaTriX re-quoted his own [fixed] / [code] dump — the quote walker must descend into the
+        // citation and surface the wrapped blocks as Fixed/CodeBlock, not as flattened paragraphs.
+        val topic = pageParser.parse(fixture("topic_redface2_p16.html"))
+
+        val nestedFixed = topic.posts
+            .flatMap { post -> post.content.allBlocks() }
+            .filterIsInstance<PostBlock.Quote>()
+            .flatMap { it.content.blocks.filterIsInstance<PostBlock.Fixed>() }
+        val nestedCode = topic.posts
+            .flatMap { post -> post.content.allBlocks() }
+            .filterIsInstance<PostBlock.Quote>()
+            .flatMap { it.content.blocks.filterIsInstance<PostBlock.CodeBlock>() }
+
+        assertTrue(
+            "at least one quote on page 16 wraps a [fixed] block — got=${nestedFixed.size}",
+            nestedFixed.isNotEmpty(),
+        )
+        assertTrue(
+            "at least one quote on page 16 wraps a [code] block — got=${nestedCode.size}",
+            nestedCode.isNotEmpty(),
+        )
+    }
+
+    @Test
+    fun `synthetic fixed table is parsed as a single Fixed block`() {
+        // Boundary check decoupled from the live capture: confirms the classifier picks
+        // <table class="fixed"> before <table class="code"> falls through and prevents the
+        // legacy regression where a [fixed] body was flattened into the surrounding paragraph.
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            """
+            <div id="para123">
+                <p>before</p>
+                <div class="container">
+                    <table class="fixed"><tr class="none"><td><p>line one<br>line two</p></td></tr></table>
+                </div>
+                <p>after</p>
+            </div>
+            """.trimIndent(),
+        )
+
+        val result = parser.parse(element)
+
+        val fixed = result.ast.allBlocks().filterIsInstance<PostBlock.Fixed>()
+        assertEquals("exactly one Fixed block expected", 1, fixed.size)
+        assertEquals("line one\nline two", fixed.first().text)
+    }
+
+    @Test
+    fun `witness fixture topic_page_multipage produces fixed and three code blocks`() {
+        // Issue #79 explicitly cites this fixture (line 218) as the original witness for
+        // [fixed] / [code] parsing. Asserting on its contents — not just on the richer
+        // topic_redface2_p16 — closes the issue's "Périmètre" checkbox literally and protects
+        // the historical baseline from silent regressions.
+        val topic = pageParser.parse(fixture("topic_page_multipage.html"))
+
+        val blocks = topic.posts.flatMap { post -> post.content.allBlocks() }
+        val fixedBlocks = blocks.filterIsInstance<PostBlock.Fixed>()
+        val codeBlocks = blocks.filterIsInstance<PostBlock.CodeBlock>()
+
+        assertEquals("witness fixture has exactly one [fixed] block", 1, fixedBlocks.size)
+        assertEquals("witness fixture has exactly three [code] blocks", 3, codeBlocks.size)
+
+        val fixed = fixedBlocks.first().text
+        assertTrue("fixed body must contain `Ceci est un test`, got=$fixed", fixed.contains("Ceci est un test"))
+        assertTrue("fixed body must contain `abcdefghi`, got=$fixed", fixed.contains("abcdefghi"))
+        assertTrue("fixed body must contain `123456789`, got=$fixed", fixed.contains("123456789"))
+
+        val javaBlock = codeBlocks.firstOrNull { it.language == "java" }
+        assertNotNull("expected one [code lang=java] block on the witness fixture", javaBlock)
+        // The colored cpp/java shape wraps the source in <pre class="java"><ol><li><div class="de1">…</div></li>…
+        // — wholeText() flattens the syntax-highlight spans so the body is the raw source line.
+        // HFR encodes ` );` (space before the closing paren) and decodes &quot; into ".
+        assertTrue(
+            "java code body must contain the println call, got=${javaBlock!!.text}",
+            javaBlock.text.contains("""System.out.println("Code Java" );"""),
+        )
+        assertEquals(
+            "two plain [code] blocks (no <pre lang>) must surface language=null",
+            2,
+            codeBlocks.count { it.language == null },
+        )
+    }
+
+    @Test
+    fun `multi paragraph fixed cell preserves a separator between paragraphs`() {
+        // Defensive coverage: HFR's current rendering wraps a single-paragraph [fixed] body in
+        // one <p>, but if a future skin emits multiple <p> siblings inside the cell, wholeText()
+        // would collapse them into a single line ("AB") because it does not insert whitespace
+        // between block-level elements. extractCellText counters that by suffixing each <p>
+        // with a newline before flattening.
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            """
+            <div id="para123">
+                <table class="fixed"><tr class="none"><td><p>line one</p><p>line two</p></td></tr></table>
+            </div>
+            """.trimIndent(),
+        )
+
+        val result = parser.parse(element)
+
+        val fixed = result.ast.allBlocks().filterIsInstance<PostBlock.Fixed>().firstOrNull()
+        assertNotNull("synthetic multi-paragraph [fixed] should still produce one Fixed block", fixed)
+        assertTrue(
+            "Fixed.text should keep paragraphs separated, got=${fixed!!.text}",
+            fixed.text.contains("line one") && fixed.text.contains("line two") &&
+                fixed.text.indexOf("line one") < fixed.text.indexOf("line two"),
+        )
+        assertTrue(
+            "Fixed.text should not collapse paragraphs into `line oneline two`",
+            !fixed.text.contains("line oneline two"),
+        )
+    }
+
+    @Test
+    fun `fixed and code blocks preserve leading indentation`() {
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            """
+            <div id="para123">
+                <table class="fixed"><tr class="none"><td><p>    fixed indentation<br>  fixed second</p></td></tr></table>
+                <table class="code">
+                    <tr class="none">
+                        <td>
+                            <b class="s1">Code :</b><br>
+                            <ol id="code1" class="olcode">
+                                <li>    val value = 42</li>
+                                <li>        println(value)</li>
+                            </ol>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            """.trimIndent(),
+        )
+
+        val result = parser.parse(element)
+
+        val fixed = result.ast.allBlocks().filterIsInstance<PostBlock.Fixed>().single()
+        val code = result.ast.allBlocks().filterIsInstance<PostBlock.CodeBlock>().single()
+        assertEquals("    fixed indentation\n  fixed second", fixed.text)
+        assertEquals("    val value = 42\n        println(value)", code.text)
+    }
+
+    @Test
+    fun `synthetic code table without pre wrapper has null language`() {
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            """
+            <div id="para123">
+                <div class="container">
+                    <table class="code">
+                        <tr class="none">
+                            <td>
+                                <b class="s1">Code :</b><br>
+                                <ol id="code1" class="olcode">
+                                    <li>line one</li>
+                                    <li>line two</li>
+                                </ol>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+            """.trimIndent(),
+        )
+
+        val result = parser.parse(element)
+
+        val code = result.ast.allBlocks().filterIsInstance<PostBlock.CodeBlock>()
+        assertEquals("exactly one CodeBlock expected", 1, code.size)
+        assertEquals(null, code.first().language)
+        // The "Code :" header is dropped; <li> children are joined with newlines.
+        assertEquals("line one\nline two", code.first().text)
+    }
+
+    @Test
     fun `non-http schemes other than data and javascript are also rejected`() {
         val parser = PostContentParser()
         val element = jsoupBody(
@@ -408,6 +632,8 @@ private fun walkBlocks(blocks: List<PostBlock>, out: MutableList<PostInline>) {
             is PostBlock.Quote -> walkBlocks(block.content.blocks, out)
             is PostBlock.Spoiler -> walkBlocks(block.content.blocks, out)
             is PostBlock.Image -> Unit
+            is PostBlock.Fixed -> Unit
+            is PostBlock.CodeBlock -> Unit
         }
     }
 }

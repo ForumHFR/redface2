@@ -68,6 +68,16 @@ class PostContentParser {
                     parseImageBlock(node as Element)?.let(blocks::add)
                 }
 
+                NodeKind.FIXED_BLOCK -> {
+                    flushParagraph()
+                    parseFixedBlock(node as Element)?.let(blocks::add)
+                }
+
+                NodeKind.CODE_BLOCK -> {
+                    flushParagraph()
+                    parseCodeBlock(node as Element)?.let(blocks::add)
+                }
+
                 NodeKind.INLINE -> paragraph += parseInline(node)
 
                 NodeKind.PARAGRAPH_CONTAINER -> {
@@ -88,6 +98,11 @@ class PostContentParser {
             "div" -> classifyDiv(element)
             "p" -> NodeKind.PARAGRAPH_CONTAINER
             "img" -> if (isStandaloneImage(element)) NodeKind.IMAGE_BLOCK else NodeKind.INLINE
+            // HFR emits [fixed] / [code] as <table> children direct of <div id="paraN">, with no
+            // wrapping <div class="container"> like quotes have. The classifyDiv path therefore
+            // never sees them; recognising them at the top level here is what keeps the body
+            // out of the surrounding paragraph (see classifyTable for the per-class dispatch).
+            "table" -> classifyTable(element)
             else -> NodeKind.INLINE
         }
     }
@@ -97,8 +112,22 @@ class PostContentParser {
         // HFR renders [quotemsg=...] as <table class="citation"> (with author anchor) and
         // [quote] (anonymous) as <table class="quote"> — both map to the same Quote block.
         element.selectFirst("table.citation, table.quote") != null -> NodeKind.QUOTE
+        // Defensive wrapper support: every fixture captured so far emits [fixed] / [code] as a
+        // <table> child direct of <div id="paraN"> (handled by classifyTable above), but quotes
+        // use <div class="container"> wrappers. Synthetic tests pin this fallback so a future HFR
+        // skin wrapping monospace blocks would still keep them out of the surrounding paragraph.
+        element.selectFirst("table.fixed") != null -> NodeKind.FIXED_BLOCK
+        element.selectFirst("table.code") != null -> NodeKind.CODE_BLOCK
         element.attr("style").contains("clear: both") -> NodeKind.IGNORE
         else -> NodeKind.PARAGRAPH_CONTAINER
+    }
+
+    private fun classifyTable(element: Element): NodeKind = when {
+        element.hasClass("spoiler") -> NodeKind.SPOILER
+        element.hasClass("citation") || element.hasClass("quote") -> NodeKind.QUOTE
+        element.hasClass("fixed") -> NodeKind.FIXED_BLOCK
+        element.hasClass("code") -> NodeKind.CODE_BLOCK
+        else -> NodeKind.INLINE
     }
 
     private fun isStandaloneImage(element: Element): Boolean {
@@ -114,7 +143,7 @@ class PostContentParser {
     }
 
     private fun parseQuote(element: Element): PostBlock.Quote? {
-        val table = element.selectFirst("table.citation, table.quote")
+        val table = resolveTable(element, "table.citation, table.quote")
         val cell = table?.selectFirst("td")?.clone()
         if (table == null || cell == null) return null
 
@@ -150,7 +179,7 @@ class PostContentParser {
     }
 
     private fun parseSpoiler(element: Element): PostBlock.Spoiler? {
-        val table = element.selectFirst("table.spoiler")
+        val table = resolveTable(element, "table.spoiler")
         val cell = table?.selectFirst("td")?.clone()
         if (table == null || cell == null) return null
 
@@ -182,6 +211,77 @@ class PostContentParser {
         val description = element.attr("alt").ifBlank { element.attr("title") }.takeIf(String::isNotBlank)
         return PostBlock.Image(url = url, description = description)
     }
+
+    private fun parseFixedBlock(element: Element): PostBlock.Fixed? {
+        val cell = resolveTable(element, "table.fixed")?.selectFirst("td")?.clone() ?: return null
+        // Defensive: HFR currently renders [fixed] without the "Code :" label, but if a future
+        // skin re-uses <b class="s1"> as a header here, drop it the same way parseCodeBlock does.
+        cell.select("b.s1").remove()
+        val text = extractCellText(cell)
+        return text.takeIf(String::isNotBlank)?.let { PostBlock.Fixed(it) }
+    }
+
+    private fun parseCodeBlock(element: Element): PostBlock.CodeBlock? {
+        val cell = resolveTable(element, "table.code")?.selectFirst("td")?.clone() ?: return null
+        cell.select("b.s1").remove()
+
+        // [code lang] renders the body inside <pre class="<lang>"> (e.g. <pre class="cpp">). The
+        // language hint sits on that element. Plain [code] uses <ol class="olcode"> directly under
+        // the <td> with no <pre>, hence language stays null.
+        val pre = cell.selectFirst("pre")
+        val language = pre?.classNames()?.firstOrNull()?.takeIf(String::isNotBlank)
+
+        // Both shapes ultimately wrap each source line in an <li>:
+        //   - plain:    <ol class="olcode"><li>line</li>...</ol>
+        //   - colored:  <pre class="cpp"><ol><li class="li1"><div class="de1">line</div></li>...</ol></pre>
+        // Joining li.wholeText() with \n flattens the syntax-highlight spans (kw3/me1/st0/de1)
+        // into raw source text — Phase 1 contract per issue #79; coloration is Phase 2 work.
+        val items = cell.select("li")
+        val text = if (items.isNotEmpty()) {
+            items.joinToString("\n") { extractCellText(it) }
+        } else {
+            extractCellText(cell)
+        }
+        return text.takeIf(String::isNotBlank)
+            ?.let { PostBlock.CodeBlock(text = it, language = language) }
+    }
+
+    /**
+     * Extracts the visible source text from a `[fixed]` / `[code]` table cell. The clone is
+     * mutated in place:
+     *   - each `<br>` becomes a literal newline so single-line authoring survives ;
+     *   - each `<p>` is suffixed with a newline so a multi-paragraph `[fixed]` body keeps its
+     *     paragraph separations — `wholeText()` does not insert whitespace between sibling block
+     *     elements, so `<p>A</p><p>B</p>` would otherwise collapse into `AB` ;
+     * then `wholeText()` walks the DOM preserving whitespace so indentation inside `<pre>` stays
+     * intact (unlike `text()`, which collapses runs of whitespace to a single space). Only empty
+     * boundary lines injected by the HTML structure are trimmed; leading spaces on real content
+     * lines are part of the `[fixed]` / `[code]` contract and must survive.
+     */
+    private fun extractCellText(element: Element): String {
+        element.select("br").forEach { it.replaceWith(TextNode("\n")) }
+        element.select("p").forEach { it.appendChild(TextNode("\n")) }
+        return element.wholeText().trimStructuralBlankLines()
+    }
+
+    private fun String.trimStructuralBlankLines(): String {
+        val lines = replace("\r\n", "\n").replace('\r', '\n').split('\n')
+        val firstContentLine = lines.indexOfFirst { it.isNotBlank() }
+        if (firstContentLine == -1) return ""
+        val lastContentLine = lines.indexOfLast { it.isNotBlank() }
+        return lines.subList(firstContentLine, lastContentLine + 1).joinToString("\n")
+    }
+
+    /**
+     * HFR can emit the same semantic block in two shapes:
+     *   - `<div class="container"><table class="<kind>">...</table></div>` (typical for quotes)
+     *   - `<table class="<kind>">...</table>` direct child of `<div id="paraN">` (typical for
+     *     `[fixed]` / `[code]`).
+     * The classifier dispatches both shapes to the same parse method; this helper resolves the
+     * table element regardless of whether [element] is the wrapping div or the table itself.
+     */
+    private fun resolveTable(element: Element, selector: String): Element? =
+        if (element.tagName() == "table") element else element.selectFirst(selector)
 
     private fun parseInline(node: Node): List<PostInline> = when (node) {
         is TextNode -> listOfNotNull(normalizeText(node.text())?.let(PostInline::Text))
@@ -350,6 +450,8 @@ class PostContentParser {
         QUOTE,
         SPOILER,
         IMAGE_BLOCK,
+        FIXED_BLOCK,
+        CODE_BLOCK,
         INLINE,
         PARAGRAPH_CONTAINER,
     }

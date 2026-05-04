@@ -60,6 +60,19 @@ sealed interface PostBlock {
         @SerialName("url") val url: String,
         @SerialName("description") val description: String?,
     ) : PostBlock
+
+    @Serializable
+    @SerialName("fr.forumhfr.redface2.core.model.PostBlock.Fixed")
+    data class Fixed(
+        @SerialName("text") val text: String,
+    ) : PostBlock
+
+    @Serializable
+    @SerialName("fr.forumhfr.redface2.core.model.PostBlock.CodeBlock")
+    data class CodeBlock(
+        @SerialName("text") val text: String,
+        @SerialName("language") val language: String?,
+    ) : PostBlock
 }
 
 @Serializable

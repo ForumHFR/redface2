@@ -182,6 +182,20 @@ class PostContentSerializerTest {
                   "type": "fr.forumhfr.redface2.core.model.PostBlock.Image",
                   "url": "https://example.invalid/i.png",
                   "description": "block alt"
+                },
+                {
+                  "type": "fr.forumhfr.redface2.core.model.PostBlock.Fixed",
+                  "text": "indented line\nsecond line"
+                },
+                {
+                  "type": "fr.forumhfr.redface2.core.model.PostBlock.CodeBlock",
+                  "text": "println(\"hi\")",
+                  "language": "kotlin"
+                },
+                {
+                  "type": "fr.forumhfr.redface2.core.model.PostBlock.CodeBlock",
+                  "text": "no lang here",
+                  "language": null
                 }
               ]
             }
@@ -281,6 +295,9 @@ class PostContentSerializerTest {
                 url = "https://example.invalid/i.png",
                 description = "block alt",
             ),
+            PostBlock.Fixed(text = "indented line\nsecond line"),
+            PostBlock.CodeBlock(text = "println(\"hi\")", language = "kotlin"),
+            PostBlock.CodeBlock(text = "no lang here", language = null),
         ),
     )
 

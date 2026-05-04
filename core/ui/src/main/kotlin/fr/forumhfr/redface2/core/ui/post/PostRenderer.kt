@@ -1,12 +1,14 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.Card
@@ -30,6 +32,7 @@ import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -70,6 +73,8 @@ private fun PostBlocksRenderer(
                 is PostBlock.Quote -> QuoteBlock(block, quoteDepth)
                 is PostBlock.Spoiler -> SpoilerBlock(block, quoteDepth)
                 is PostBlock.Image -> ImageBlock(block)
+                is PostBlock.Fixed -> FixedBlock(block)
+                is PostBlock.CodeBlock -> CodeBlockBlock(block)
             }
         }
     }
@@ -245,6 +250,69 @@ private fun ImageBlock(block: PostBlock.Image) {
         contentDescription = block.description,
         modifier = Modifier.fillMaxWidth(),
     )
+}
+
+@Composable
+private fun FixedBlock(block: PostBlock.Fixed) {
+    MonospaceContainer {
+        Text(
+            text = block.text,
+            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            color = MaterialTheme.colorScheme.onSurface,
+            softWrap = false,
+        )
+    }
+}
+
+@Composable
+private fun CodeBlockBlock(block: PostBlock.CodeBlock) {
+    MonospaceContainer {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            block.language?.let { lang ->
+                Text(
+                    text = lang,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = block.text,
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                color = MaterialTheme.colorScheme.onSurface,
+                softWrap = false,
+            )
+        }
+    }
+}
+
+/**
+ * Wraps a `[fixed]` / `[code]` body in a tinted card with horizontal scroll. Long lines (raw URL,
+ * indented snippets, syntax-highlighted source) must overflow horizontally instead of wrapping —
+ * wrap would mangle indentation and break the visual contract of a monospace block.
+ *
+ * Modifier order matters here: the **outer** [Card] carries [Modifier.fillMaxWidth] so the card
+ * itself spans the parent. The **inner** [Column] must NOT carry [Modifier.fillMaxWidth] before
+ * [Modifier.horizontalScroll] — that would clamp the children's measured width to the card's
+ * width and turn the scroll into a no-op. [Modifier.padding] sits before the scroll modifier so
+ * the inset is fixed and the children scroll inside it (otherwise the left padding would slide
+ * out of view on overflow). The monospace [Text] children opt out of soft wrap explicitly.
+ */
+@Composable
+private fun MonospaceContainer(content: @Composable () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(12.dp)
+                .horizontalScroll(rememberScrollState()),
+        ) {
+            content()
+        }
+    }
 }
 
 internal fun buildInlineText(

@@ -58,7 +58,7 @@ L'AST est sémantique, pas une copie de DOM HTML. Elle représente des blocs et 
 - smileys HFR builtin (`:code:`) et perso (`[:name]`) sans heuristique côté renderer ;
 - citations récursives avec auteur, `numreponse` et page quand connus ;
 - spoilers ;
-- blocs monospace `[fixed]` ;
+- blocs monospace `[fixed]` et `[code]` (avec hint langue optionnel pour `[code lang]`) ;
 - images et médias, en bloc ou inline selon le contexte HTML ou BBCode source ;
 - paragraphes et sauts de ligne.
 
