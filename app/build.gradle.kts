@@ -60,6 +60,17 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.core)
 
+    // The Coil singleton ImageLoader is configured in `RedfaceApplication` via
+    // `SingletonImageLoader.Factory` so the GIF decoder is registered once and shared by every
+    // `AsyncImage` in the app (most HFR smileys and a fair share of `[img]` payloads are
+    // animated GIFs). Both `coil-core` and `coil-gif` must therefore be on the `:app`
+    // classpath. `coil-network-okhttp` is also pinned at the app layer to keep the HTTP
+    // fetcher resolvable from the singleton config; `:core:ui` keeps its own coil-compose +
+    // coil-network-okhttp for the `AsyncImage` call sites.
+    implementation(libs.coil.core)
+    implementation(libs.coil.gif)
+    implementation(libs.coil.network.okhttp)
+
     testImplementation(libs.junit4)
     testImplementation(libs.mockk)
     testImplementation(libs.konsist)
