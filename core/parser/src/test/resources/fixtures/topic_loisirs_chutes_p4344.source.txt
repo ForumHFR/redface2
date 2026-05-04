@@ -1,0 +1,5 @@
+Source: https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=13&subcat=434&post=27848&page=4344&p=1&sondage=0&owntopic=0&trash=0&trash_post=0&print=0&numreponse=0&quote_only=0&new=0&nojs=0
+Captured: 2026-05-04
+Auth: logged-out
+Sanitization: verified logged-out capture; hash_check inputs empty; no session/cookie identifiers; curl with browser User-Agent only
+Purpose: parser fixture for issue #109, GIF-heavy variant. Topic "Chutes & moderation" - subforum Discussions/Loisirs. Contains 23 external GIFs (tumblr media, lingerie-fashion-channel, generic web hosts) + 27 other external images (.webp, .jpg) + 18 perso smileys + 55 builtin smileys + at least one BBCode [spoiler] wrapping a GIF. Stresses animated rendering decisions for Coil 3 (autoplay vs tap-to-play, decoder selection) and the spoiler/image interaction.

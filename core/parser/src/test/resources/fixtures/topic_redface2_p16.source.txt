@@ -1,0 +1,5 @@
+Source: https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&subcat=550&post=35395&page=16&p=1&sondage=0&owntopic=0&trash=0&trash_post=0&print=0&numreponse=0&quote_only=0&new=0&nojs=0
+Captured: 2026-05-04
+Auth: logged-out
+Sanitization: verified logged-out capture; hash_check inputs empty; no session/cookie identifiers; no verifrequet bound to a user; curl with browser User-Agent only, no cookie jar
+Purpose: parser fixture for issue #79 (BBCode [fixed] / [code] blocks). Contains the betatest dump that XaTriX produced explicitly to feed the parser: 9 [fixed] tables, 19 [code] cells (4 with explicit cpp language hint via <pre class="cpp">), and the same content quoted in nested form. Also useful as a secondary fixture for issue #109: 108 perso smiley <img>, 251 builtin smiley <img>, 7 external images, 4 external GIFs.

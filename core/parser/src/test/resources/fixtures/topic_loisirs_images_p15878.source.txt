@@ -1,0 +1,5 @@
+Source: https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=13&subcat=434&post=78667&page=15878&p=1&sondage=0&owntopic=0&trash=0&trash_post=0&print=0&numreponse=0&quote_only=0&new=0&nojs=0
+Captured: 2026-05-04
+Auth: logged-out
+Sanitization: verified logged-out capture; hash_check inputs empty; no session/cookie identifiers; curl with browser User-Agent only
+Purpose: parser fixture for issue #109 (images + smileys via Coil 3). Topic "Photos rigolotes" - subforum Discussions/Loisirs. Contains 17 external images hosted on third-party CDNs (rehost.diberie.com, m.media-amazon.com, comixtrip.fr, steamusercontent.com, etc.) + 2 external GIFs + 24 perso smileys + 71 builtin smileys. Stresses the [img] BBCode → <img> rendering pipeline with diverse hosts and explicit "(image cliquable)" annotations from posters.
