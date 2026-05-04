@@ -259,6 +259,7 @@ private fun FixedBlock(block: PostBlock.Fixed) {
             text = block.text,
             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
             color = MaterialTheme.colorScheme.onSurface,
+            softWrap = false,
         )
     }
 }
@@ -278,6 +279,7 @@ private fun CodeBlockBlock(block: PostBlock.CodeBlock) {
                 text = block.text,
                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurface,
+                softWrap = false,
             )
         }
     }
@@ -285,8 +287,15 @@ private fun CodeBlockBlock(block: PostBlock.CodeBlock) {
 
 /**
  * Wraps a `[fixed]` / `[code]` body in a tinted card with horizontal scroll. Long lines (raw URL,
- * indented snippets, syntax-highlighted source) overflow horizontally instead of wrapping — wrap
- * would mangle indentation and break the visual contract of a monospace block.
+ * indented snippets, syntax-highlighted source) must overflow horizontally instead of wrapping —
+ * wrap would mangle indentation and break the visual contract of a monospace block.
+ *
+ * Modifier order matters here: the **outer** [Card] carries [Modifier.fillMaxWidth] so the card
+ * itself spans the parent. The **inner** [Column] must NOT carry [Modifier.fillMaxWidth] before
+ * [Modifier.horizontalScroll] — that would clamp the children's measured width to the card's
+ * width and turn the scroll into a no-op. [Modifier.padding] sits before the scroll modifier so
+ * the inset is fixed and the children scroll inside it (otherwise the left padding would slide
+ * out of view on overflow). The monospace [Text] children opt out of soft wrap explicitly.
  */
 @Composable
 private fun MonospaceContainer(content: @Composable () -> Unit) {
@@ -298,9 +307,8 @@ private fun MonospaceContainer(content: @Composable () -> Unit) {
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(12.dp),
+                .padding(12.dp)
+                .horizontalScroll(rememberScrollState()),
         ) {
             content()
         }

@@ -425,6 +425,73 @@ class PostContentParserTest {
     }
 
     @Test
+    fun `witness fixture topic_page_multipage produces fixed and three code blocks`() {
+        // Issue #79 explicitly cites this fixture (line 218) as the original witness for
+        // [fixed] / [code] parsing. Asserting on its contents — not just on the richer
+        // topic_redface2_p16 — closes the issue's "Périmètre" checkbox literally and protects
+        // the historical baseline from silent regressions.
+        val topic = pageParser.parse(fixture("topic_page_multipage.html"))
+
+        val blocks = topic.posts.flatMap { post -> post.content.allBlocks() }
+        val fixedBlocks = blocks.filterIsInstance<PostBlock.Fixed>()
+        val codeBlocks = blocks.filterIsInstance<PostBlock.CodeBlock>()
+
+        assertEquals("witness fixture has exactly one [fixed] block", 1, fixedBlocks.size)
+        assertEquals("witness fixture has exactly three [code] blocks", 3, codeBlocks.size)
+
+        val fixed = fixedBlocks.first().text
+        assertTrue("fixed body must contain `Ceci est un test`, got=$fixed", fixed.contains("Ceci est un test"))
+        assertTrue("fixed body must contain `abcdefghi`, got=$fixed", fixed.contains("abcdefghi"))
+        assertTrue("fixed body must contain `123456789`, got=$fixed", fixed.contains("123456789"))
+
+        val javaBlock = codeBlocks.firstOrNull { it.language == "java" }
+        assertNotNull("expected one [code lang=java] block on the witness fixture", javaBlock)
+        // The colored cpp/java shape wraps the source in <pre class="java"><ol><li><div class="de1">…</div></li>…
+        // — wholeText() flattens the syntax-highlight spans so the body is the raw source line.
+        // HFR encodes ` );` (space before the closing paren) and decodes &quot; into ".
+        assertTrue(
+            "java code body must contain the println call, got=${javaBlock!!.text}",
+            javaBlock.text.contains("""System.out.println("Code Java" );"""),
+        )
+        assertEquals(
+            "two plain [code] blocks (no <pre lang>) must surface language=null",
+            2,
+            codeBlocks.count { it.language == null },
+        )
+    }
+
+    @Test
+    fun `multi paragraph fixed cell preserves a separator between paragraphs`() {
+        // Defensive coverage: HFR's current rendering wraps a single-paragraph [fixed] body in
+        // one <p>, but if a future skin emits multiple <p> siblings inside the cell, wholeText()
+        // would collapse them into a single line ("AB") because it does not insert whitespace
+        // between block-level elements. extractCellText counters that by suffixing each <p>
+        // with a newline before flattening.
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            """
+            <div id="para123">
+                <table class="fixed"><tr class="none"><td><p>line one</p><p>line two</p></td></tr></table>
+            </div>
+            """.trimIndent(),
+        )
+
+        val result = parser.parse(element)
+
+        val fixed = result.ast.allBlocks().filterIsInstance<PostBlock.Fixed>().firstOrNull()
+        assertNotNull("synthetic multi-paragraph [fixed] should still produce one Fixed block", fixed)
+        assertTrue(
+            "Fixed.text should keep paragraphs separated, got=${fixed!!.text}",
+            fixed.text.contains("line one") && fixed.text.contains("line two") &&
+                fixed.text.indexOf("line one") < fixed.text.indexOf("line two"),
+        )
+        assertTrue(
+            "Fixed.text should not collapse paragraphs into `line oneline two`",
+            !fixed.text.contains("line oneline two"),
+        )
+    }
+
+    @Test
     fun `synthetic code table without pre wrapper has null language`() {
         val parser = PostContentParser()
         val element = jsoupBody(
