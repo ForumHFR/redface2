@@ -15,6 +15,29 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v30 — `0.1.0-phase1d.2` — 2026-05-04
+
+**Statut** : `local`
+**Commit** : à venir
+**Fichier** : `redface2-v30-<date>-<sha>.aab`
+
+Release Phase 1D après merge de [#123](https://github.com/ForumHFR/redface2/pull/123) : support natif des blocs monospace HFR `[fixed]` / `[code]`.
+
+### Added
+- **Parser PostContent** : `PostBlock.Fixed(text)` et `PostBlock.CodeBlock(text, language?)` sont produits depuis `<table class="fixed">` / `<table class="code">`, y compris quand les blocs sont imbriqués dans une citation.
+- **Hints langue `[code lang]`** : la classe `<pre class="<lang>">` est exposée via `CodeBlock.language` (`cpp`, `java`, etc.). La coloration syntaxique HFR est volontairement aplatie en texte brut en Phase 1.
+- **PostRenderer** : rendu Compose natif en `Card` monospace avec scroll horizontal et `softWrap = false`.
+
+### Fixed
+- **Indentation monospace** : le parser ne fait plus de `trim()` global sur les blocs `[fixed]` / `[code]`; seules les lignes vides structurelles en bordure sont retirées.
+- **Scroll horizontal** : le conteneur monospace ne clamp plus sa largeur interne avant `horizontalScroll`.
+
+### Tests
+- Tests parser sur les fixtures réelles `topic_page_multipage.html` et `topic_redface2_p16.html`.
+- Test de sérialisation JSON pour les nouveaux variants `Fixed` / `CodeBlock`.
+
+---
+
 ## v24 — `0.1.0-phase1b.10` — 2026-05-01
 
 **Statut** : `local`
