@@ -211,11 +211,12 @@ class PostRendererInlineTest {
 
     @Test
     fun `inline image uses the bounded 240x180 placeholder centred`() {
-        // Pre-#109 the inline image placeholder was 240x180 but the inner Modifier was
+        // Pre-#109 the inline image placeholder was 240×180 but the inner Modifier was
         // fillMaxWidth() — meaningless inside InlineTextContent (the placeholder dictates the
-        // parent constraint), and the image stretched in unpredictable ways. The new bucket
-        // pins both placeholder + Modifier to the same dimensions, and ContentScale.Inside in
-        // the policy keeps small inline images from being blown up to the full 240×180.
+        // parent constraint), and the image stretched in unpredictable ways. The placeholder
+        // now pins the dimensions; the inner Modifier.fillMaxSize() makes the AsyncImage track
+        // them under any fontScale, and ContentScale.Inside in the policy keeps small inline
+        // images from being blown up to the full 240×180.
         val inlines = listOf(
             PostInline.InlineImage(
                 url = "https://forum.hardware.fr/images/foo.png",

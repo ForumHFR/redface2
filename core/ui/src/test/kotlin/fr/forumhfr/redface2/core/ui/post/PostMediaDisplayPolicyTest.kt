@@ -118,6 +118,7 @@ class PostMediaDisplayPolicyTest {
         val cases = listOf(
             Case(PixelSize(15, 15), PixelSize(15, 15), "tinostar (tiny square, no upscale)"),
             Case(PixelSize(39, 15), PixelSize(39, 15), "rofl (wide, native fits)"),
+            Case(PixelSize(40, 40), PixelSize(40, 40), "exact-fit (bucket frontier, scale clamps to 1f)"),
             Case(PixelSize(50, 50), PixelSize(40, 40), "median perso (uniform downscale)"),
             Case(PixelSize(70, 50), PixelSize(40, 29), "apges/eberhart (downscale, ratio preserved)"),
             Case(PixelSize(200, 150), PixelSize(40, 30), "rare oversize sprite (heavy downscale)"),
