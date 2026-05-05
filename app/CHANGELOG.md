@@ -15,13 +15,13 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
-## v33 — `0.1.0-phase1.2` — 2026-05-05
+## v34 — `0.1.0-phase1.3` — 2026-05-05
 
 **Statut** : `local`
 **Commit** : à venir
-**Fichier** : `redface2-v33-<date>-<sha>.aab`
+**Fichier** : `redface2-v34-<date>-<sha>.aab`
 
-Patch dogfood après retour visuel sur v32/v33 : les smileys perso en bucket `40sp` corrigent le chevauchement, mais sont trop petits sur smartphone. v33 garde le correctif clé de #129 (`fillMaxSize()` dans le placeholder `sp`), remonte le bucket perso à `56sp`, et repasse les smileys en `ContentScale.Fit` pour restaurer leur lisibilité.
+Patch dogfood après retour visuel sur v32/v33 : les smileys perso en bucket `40sp` corrigent le chevauchement, mais sont trop petits sur smartphone. v34 garde le correctif clé de #129 (`fillMaxSize()` dans le placeholder `sp`), remonte le bucket perso à `56sp`, et repasse les smileys en `ContentScale.Fit` pour restaurer leur lisibilité.
 
 ### Changed
 - `PostMediaDisplayPolicy.persoSmiley` : `40sp × 40sp` → `56sp × 56sp`.
@@ -37,6 +37,16 @@ Patch dogfood après retour visuel sur v32/v33 : les smileys perso en bucket `40
 ### Tests
 - `PostMediaDisplayPolicyTest` : dimensions 56sp, corpus `Fit`, séparation `smileyContentScale` / `inlineImageContentScale`, ratios extrêmes `1×100` / `100×1`, invariant `2.8×`.
 - `PostRendererInlineTest` : bucket perso 56sp explicitement distinct du builtin 18sp.
+
+---
+
+## v33 — `0.1.0-phase1.2` — 2026-05-05
+
+**Statut** : `burnt`
+**Commit** : `a55453a` puis `535b839`
+**Fichier** : `redface2-v33-20260505-a55453a.aab`, `redface2-v33-20260505-535b839.aab`
+
+Slot brûlé pendant le dogfood du correctif smileys perso. Le contenu final est repris en v34 avec un nouveau `versionCode` pour éviter tout conflit Play Console / distribution interne.
 
 ---
 

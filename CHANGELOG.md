@@ -10,6 +10,16 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## v0.8.2 — 2026-05-05
+
+Rebuild administratif du patch smileys perso : `versionCode = 33` est brûlé côté dogfood, donc le build final passe en `v34 / 0.1.0-phase1.3` sans changement fonctionnel par rapport au correctif `56sp / Fit`.
+
+### Changed
+- `app/build.gradle.kts` bump `versionCode = 34`, `versionName = "0.1.0-phase1.3"`.
+- `docs/specs/roadmap.md` et footer Jekyll alignés sur specs v0.8.2 / AAB `0.1.0-phase1.3`.
+
+---
+
 ## v0.8.1 — 2026-05-05
 
 Patch de stabilisation Phase 1 après dogfood des smileys perso sur smartphone.
@@ -17,7 +27,7 @@ Patch de stabilisation Phase 1 après dogfood des smileys perso sur smartphone.
 ### Changed
 - `:core:ui` — `PostMediaDisplayPolicy.persoSmiley` passe de **40×40** à **56×56**. Le bucket 40sp corrigeait le chevauchement de lignes, mais rendait trop petits les perso courants sur écran de smartphone. Le nouveau compromis utilise `ContentScale.Fit` pour les smileys : les mini-sprites 15×15 redeviennent visibles, les 70×50 descendent à 56×40, et le ratio est préservé.
 - `docs/specs/protocol-hfr.md` et `docs/specs/roadmap.md` alignent le contrat réel : smileys perso **56×56 / Fit**, images inline **240×180 / Inside**, Phase 1 marquée livrée.
-- `app/build.gradle.kts` bump `versionCode = 33`, `versionName = "0.1.0-phase1.2"` pour produire un AAB de dogfood corrigé.
+- `app/build.gradle.kts` bump `versionCode = 33`, `versionName = "0.1.0-phase1.2"` pour produire un AAB de dogfood corrigé. Ce slot est finalement considéré brûlé et remplacé par v34 / specs v0.8.2.
 
 ### Tests
 - `PostMediaDisplayPolicyTest` pin le bucket 56sp, l'invariant `≤ 2.8 × bodyMedium.lineHeight`, et les résultats `Fit` sur le corpus HFR réel.
