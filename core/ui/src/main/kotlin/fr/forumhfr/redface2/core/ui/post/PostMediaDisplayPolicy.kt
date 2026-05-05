@@ -68,10 +68,17 @@ internal object PostMediaDisplayPolicy {
     /**
      * Block-level `[img]` rendered standalone via `PostBlock.Image`. Width matches the parent
      * column; height is bounded so a 4000×3000 RAW screenshot doesn't blow up the post and
-     * destroy the scroll position. Outside `InlineTextContent`, so this is just a `Modifier.heightIn`
-     * cap — no placeholder needed.
+     * destroy the scroll position.
+     *
+     * The min/max pair matters during the async lifecycle of `SubcomposeAsyncImage`: while
+     * loading or on error the bitmap has no intrinsic size yet, so without [blockImageMinHeight]
+     * the container would collapse to the height of the loading label (~16dp), making the
+     * loading/error UX barely visible AND causing a layout jump when the bitmap finally
+     * resolves. The min reserves a stable visual slot; the max keeps long portrait shots in
+     * check (cf. issue #109 review by Codex on PR #126).
      */
     val blockImageMaxHeight: Dp = 480.dp
+    val blockImageMinHeight: Dp = 160.dp
 
     fun smileyBox(smiley: PostInline.Smiley): InlineMediaBox = when (smiley.kind) {
         is SmileyKind.Builtin -> builtinSmiley

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -46,7 +47,6 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
-
 import coil3.compose.SubcomposeAsyncImage
 import coil3.compose.SubcomposeAsyncImageContent
 import fr.forumhfr.redface2.core.ui.R
@@ -260,6 +260,7 @@ private fun ImageBlock(block: PostBlock.Image) {
     // material-icons-extended dependency just for a placeholder glyph.
     val containerModifier = Modifier
         .fillMaxWidth()
+        .defaultMinSize(minHeight = PostMediaDisplayPolicy.blockImageMinHeight)
         .heightIn(max = PostMediaDisplayPolicy.blockImageMaxHeight)
         .clip(RoundedCornerShape(8.dp))
         .background(MaterialTheme.colorScheme.surfaceContainerHighest)
