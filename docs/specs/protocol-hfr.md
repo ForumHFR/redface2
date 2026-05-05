@@ -243,10 +243,13 @@ Deux sources distinctes :
 
 **Règles de rendu** :
 
-- Cache Coil agressif (les smileys ne changent jamais) : `CachePolicy.ENABLED` + disque infini
-- Extraire le code smiley (`:jap:`, `:bounce:`) depuis l'attribut `alt` de l'`<img>` pour pouvoir le re-saisir côté éditeur
-- Les smileys custom d'un utilisateur sont exposés dans son profil (section `perso`)
-- Un catalogue "wiki smileys" est disponible via `message-smi-mp-aj.php` (recherche de smileys)
+- **Source de vérité côté lecture** : c'est l'attribut `src` de l'`<img>` produit par HFR qui pilote le rendu, pas une table embarquée client-side. Le parser pose `PostInline.Smiley(kind, imageUrl)` directement à partir de l'`alt`/`title` (pour le `kind`) et du `src` (pour `imageUrl`) — `:core:ui` consomme `imageUrl` tel quel via `AsyncImage`. Pas de reconstruction d'URL à partir du nom (les chemins perso peuvent contenir des sous-dossiers numérotés `images/perso/<N>/`, des espaces encodés, et des variantes — la source HTML est la seule fiable).
+- Cache Coil agressif (les smileys ne changent jamais) : `CachePolicy.ENABLED` + disque infini.
+- **GIFs animés** : builtins comme perso peuvent être des `.gif` animés (`:bounce:`, `:pt1cable:`, majorité des perso). Le décodeur `coil-gif` (`AnimatedImageDecoder.Factory`, API 28+) est enregistré sur le `SingletonImageLoader` côté `:app` pour autoplay sans configuration par-call-site.
+- **Tailles différentes** : les smileys ne sont pas tous 16×16 — perso peuvent atteindre 200×150. Phase 1 utilise une politique de buckets (`:core:ui` `PostMediaDisplayPolicy`) : builtin **bucket fixe 18×18**, perso **bucket fixe 64×64**. `ContentScale.Fit` à l'intérieur du bucket : un sprite plus grand est **downscalé** (jamais squash), un sprite plus petit reste à sa taille intrinsèque centrée dans le bucket (padding visible, pas de stretch). Mesure intrinsèque via `ImageLoader.execute()` reportée Phase 2/4 si le downscale perso devient gênant en pratique.
+- Extraire le code smiley (`:jap:`, `:bounce:`) depuis l'attribut `alt`/`title` de l'`<img>` pour pouvoir le re-saisir côté éditeur — c'est un sujet **éditeur Phase 2**, pas le chemin principal de lecture.
+- Les smileys custom d'un utilisateur sont exposés dans son profil (section `perso`).
+- Un catalogue "wiki smileys" est disponible via `message-smi-mp-aj.php` (recherche de smileys) — utile pour l'éditeur Phase 2, pas en lecture.
 
 ---
 

@@ -1,14 +1,19 @@
 package fr.forumhfr.redface2.core.ui.post
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material3.Card
@@ -23,7 +28,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -39,8 +46,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
+import coil3.compose.SubcomposeAsyncImageContent
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -245,11 +253,50 @@ private fun SpoilerBlock(block: PostBlock.Spoiler, quoteDepth: Int) {
 
 @Composable
 private fun ImageBlock(block: PostBlock.Image) {
-    AsyncImage(
+    // Bounded so a 4000×3000 RAW screenshot can't blow up the post and destroy the scroll
+    // position. SubcomposeAsyncImage exposes loading/error slots so the user gets visual
+    // feedback when an HFR image host (rehost.diberie.com, super-h.fr, …) is offline rather
+    // than a silent empty Box. Phase 1 keeps the loading + error layout minimal — no
+    // material-icons-extended dependency just for a placeholder glyph.
+    val containerModifier = Modifier
+        .fillMaxWidth()
+        .defaultMinSize(minHeight = PostMediaDisplayPolicy.blockImageMinHeight)
+        .heightIn(max = PostMediaDisplayPolicy.blockImageMaxHeight)
+        .clip(RoundedCornerShape(8.dp))
+        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+    SubcomposeAsyncImage(
         model = block.url,
         contentDescription = block.description,
-        modifier = Modifier.fillMaxWidth(),
+        contentScale = ContentScale.Fit,
+        modifier = containerModifier,
+        loading = { ImageBlockLoading() },
+        error = { ImageBlockError(block.description) },
+        success = { SubcomposeAsyncImageContent() },
     )
+}
+
+@Composable
+private fun ImageBlockLoading() {
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Text(
+            text = stringResource(R.string.post_image_loading),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun ImageBlockError(description: String?) {
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Text(
+            text = description?.takeIf(String::isNotBlank)?.let {
+                stringResource(R.string.post_image_error_with_alt, it)
+            } ?: stringResource(R.string.post_image_error),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable
@@ -394,11 +441,11 @@ private fun walkInlinesForMedia(
     inlines.forEach { inline ->
         when (inline) {
             is PostInline.InlineImage ->
-                out += media.nextImage() to imageInlineContent(inline.url, inline.description)
+                out += media.nextImage() to imageInlineContent(inline)
 
             is PostInline.Smiley -> {
-                val url = inline.imageUrl ?: return@forEach
-                out += media.nextSmiley() to smileyInlineContent(url, inline.kind.token())
+                if (inline.imageUrl == null) return@forEach
+                out += media.nextSmiley() to smileyInlineContent(inline)
             }
 
             is PostInline.Strong -> walkInlinesForMedia(inline.children, out, media)
@@ -412,35 +459,46 @@ private fun walkInlinesForMedia(
     }
 }
 
-private fun imageInlineContent(url: String, description: String?): InlineTextContent =
-    InlineTextContent(
+internal fun imageInlineContent(image: PostInline.InlineImage): InlineTextContent {
+    val box = PostMediaDisplayPolicy.inlineImage
+    return InlineTextContent(
         placeholder = Placeholder(
-            width = 240.sp,
-            height = 180.sp,
+            width = box.placeholderWidth,
+            height = box.placeholderHeight,
             placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
         ),
     ) {
+        // ContentScale.Fit downscales to the bucket without squashing landscape vs portrait
+        // sources. fillMaxWidth() inside InlineTextContent is meaningless (the placeholder
+        // dictates the parent constraint) and was previously a leftover from a pre-bucket
+        // implementation — replaced with the explicit Modifier.size from the policy.
         AsyncImage(
-            model = url,
-            contentDescription = description,
-            modifier = Modifier.fillMaxWidth(),
+            model = image.url,
+            contentDescription = image.description,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.size(width = box.modifierWidth, height = box.modifierHeight),
         )
     }
+}
 
-private fun smileyInlineContent(url: String, contentDescription: String): InlineTextContent =
-    InlineTextContent(
+internal fun smileyInlineContent(smiley: PostInline.Smiley): InlineTextContent {
+    val box = PostMediaDisplayPolicy.smileyBox(smiley)
+    val description = smiley.kind.token()
+    return InlineTextContent(
         placeholder = Placeholder(
-            width = 18.sp,
-            height = 18.sp,
+            width = box.placeholderWidth,
+            height = box.placeholderHeight,
             placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
         ),
     ) {
         AsyncImage(
-            model = url,
-            contentDescription = contentDescription,
-            modifier = Modifier.size(18.dp),
+            model = smiley.imageUrl,
+            contentDescription = description,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.size(width = box.modifierWidth, height = box.modifierHeight),
         )
     }
+}
 
 private fun SmileyKind.token(): String = when (this) {
     is SmileyKind.Builtin -> code
