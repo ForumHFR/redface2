@@ -15,6 +15,29 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v33 — `0.1.0-phase1.2` — 2026-05-05
+
+**Statut** : `local`
+**Commit** : à venir
+**Fichier** : `redface2-v33-<date>-<sha>.aab`
+
+Patch dogfood après retour visuel sur v32 : les smileys perso en bucket `40sp` corrigent le chevauchement, mais sont trop petits sur smartphone. v33 garde le principe sécurisé de #129 (`ContentScale.Inside`, `fillMaxSize()`, pas d'upscale des mini-sprites), mais remonte le bucket perso à `56sp`.
+
+### Changed
+- `PostMediaDisplayPolicy.persoSmiley` : `40sp × 40sp` → `56sp × 56sp`.
+- Corpus attendu à density 1 avec `ContentScale.Inside` :
+  - `15×15` reste `15×15` centré (pas de pixelisation).
+  - `50×50` reste `50×50` natif, donc lisible.
+  - `70×50` devient `56×40`, ratio préservé.
+  - `200×150` devient `56×42`, borne haute conservée.
+- Invariant typographique assoupli de `2.5×` à `2.8× bodyMedium.lineHeight` : on privilégie la lisibilité des perso HFR sans revenir au bucket cassé `64sp`.
+
+### Tests
+- `PostMediaDisplayPolicyTest` : dimensions 56sp, corpus `Inside`, ratios extrêmes `1×100` / `100×1`, invariant `2.8×`.
+- `PostRendererInlineTest` : bucket perso 56sp explicitement distinct du builtin 18sp.
+
+---
+
 ## v32 — `0.1.0-phase1.1` — 2026-05-05
 
 **Statut** : `local`

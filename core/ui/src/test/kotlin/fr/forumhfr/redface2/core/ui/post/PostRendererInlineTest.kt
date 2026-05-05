@@ -169,12 +169,11 @@ class PostRendererInlineTest {
     }
 
     @Test
-    fun `perso smiley with imageUrl uses the 40sp perso bucket not the builtin one`() {
+    fun `perso smiley with imageUrl uses the 56sp perso bucket not the builtin one`() {
         // Real perso GIFs sampled live (apges:5 70×50, lebeun 55×50, tinostar 15×15…) range
-        // from 15×15 to 70×50 with a median around 50×50. The 40sp bucket fits the bulk of the
-        // corpus with ContentScale.Inside — small sprites stay at native size centred, larger
-        // ones downscale uniformly. The previous 64sp bucket was bumping the line height past
-        // 3× bodyMedium, breaking inline rhythm (cf. post #74625731 capture).
+        // from 15×15 to 70×50 with a median around 50×50. The 56sp bucket keeps median sprites
+        // readable at native size with ContentScale.Inside, downscales larger ones uniformly,
+        // and avoids the previous 64sp + Fit combo that broke inline rhythm (post #74625731).
         val inlines = listOf(
             PostInline.Smiley(
                 kind = SmileyKind.Perso("cosmoschtroumpf"),
@@ -187,7 +186,7 @@ class PostRendererInlineTest {
 
         assertNotNull("perso smiley with imageUrl should yield an InlineTextContent", placeholder)
         assertEquals(
-            "perso bucket should match the policy (40sp), not the builtin 18sp bucket",
+            "perso bucket should match the policy (56sp), not the builtin 18sp bucket",
             PostMediaDisplayPolicy.persoSmiley.placeholderWidth,
             placeholder!!.width,
         )

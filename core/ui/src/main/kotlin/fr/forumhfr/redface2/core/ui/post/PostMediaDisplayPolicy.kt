@@ -23,11 +23,11 @@ import kotlin.math.roundToInt
  * maintain. Phase 1 therefore picks two smiley buckets keyed on [SmileyKind] (the parser already
  * classifies the BBCode token via `alt`/`title`) plus one inline-image bucket.
  *
- * [inlineMediaContentScale] is `ContentScale.Inside` (downscale only, never upscale): a tall
- * 70×50 perso lands as 40×29 centred in the 40×40 bucket, a tiny 15×15 perso stays at 15×15
- * centred with padding (no 4× pixelated upscale to 40×40). The previous `ContentScale.Fit`
- * upscaled small sprites and combined with a 64×64 bucket made line layout buckle on
- * `bodyMedium` (`lineHeight = 20.sp`) — see post #74625731 / fix PR for the bug capture.
+ * [inlineMediaContentScale] is `ContentScale.Inside` (downscale only, never upscale): a common
+ * 50×50 perso stays readable at native size in the 56×56 bucket, a 70×50 perso lands as 56×40,
+ * and a tiny 15×15 perso stays at 15×15 centred with padding (no pixelated upscale). The previous
+ * `ContentScale.Fit` upscaled small sprites and combined with a 64×64 bucket made line layout
+ * buckle on `bodyMedium` (`lineHeight = 20.sp`) — see post #74625731 / fix PR for the bug capture.
  *
  * Re-evaluate in Phase 2/4 if a fixed bucket still feels wrong on real corpora; intrinsic-size
  * measurement remains the open Phase 2/4 option.
@@ -58,15 +58,15 @@ internal object PostMediaDisplayPolicy {
      * of the corpus measured live (~25 GIFs sampled) lands at 50×50 to 70×50 native pixels, with
      * a fraction at 15-30 px and rare large outliers.
      *
-     * 40×40 is a bucket that:
-     * - fits the median 50×50 perso with a slight downscale (~80%, still readable);
+     * 56×56 is a readability-first bucket that:
+     * - keeps median 50×50 perso at native size, instead of shrinking them on smartphone screens;
+     * - downscales common 70×50 perso to 56×40 while preserving their ratio;
      * - leaves a 15×15 perso at native 15×15 thanks to `ContentScale.Inside` (no upscale);
-     * - keeps `placeholderHeight ≤ 2.5 × bodyMedium.lineHeight (20.sp)` so the line-height bump
-     *   is visually proportional to the surrounding text instead of dominating the paragraph.
+     * - stays below the old broken 64sp bucket, so the line-height bump remains bounded.
      */
     val persoSmiley: InlineMediaBox = InlineMediaBox(
-        placeholderWidth = 40.sp,
-        placeholderHeight = 40.sp,
+        placeholderWidth = 56.sp,
+        placeholderHeight = 56.sp,
     )
 
     /**
@@ -118,16 +118,16 @@ internal data class PixelSize(val width: Int, val height: Int)
  * while preserving aspect ratio, but never scale up. Returns the resulting size.
  *
  * The result is clamped to at least 1×1 to guard against extreme aspect ratios where rounding
- * would otherwise collapse one dimension to 0 (e.g. a 1×100 banner downscaled into a 40×40
- * bucket would `roundToInt()` to 0×40 without the clamp — visually invisible, technically
+ * would otherwise collapse one dimension to 0 (e.g. a 1×100 banner downscaled into a 56×56
+ * bucket would `roundToInt()` to 0×56 without the clamp — visually invisible, technically
  * "fitting").
  *
  * Exposed and tested in pure JVM so the corpus-of-real-HFR-perso assertions don't need a
  * Compose runtime. **Important** : this function models the `Inside` decision at density = 1
- * and fontScale = 1. At runtime the placeholder is `40.sp × density × fontScale` pixels, so the
+ * and fontScale = 1. At runtime the placeholder is `56.sp × density × fontScale` pixels, so the
  * absolute output sizes shift accordingly — but the *invariant* "never upscale, preserve aspect
  * ratio" survives any positive density/fontScale because `Inside` is invariant by uniform
- * scaling of the bucket. The numeric examples (`70×50 → 40×29`, etc.) are correct **at density
+ * scaling of the bucket. The numeric examples (`70×50 → 56×40`, etc.) are correct **at density
  * 1**; on a real xxhdpi device a 70×50 sprite is downscaled to a different absolute size, but
  * the same proportions and the same "no upscale" guarantee.
  */

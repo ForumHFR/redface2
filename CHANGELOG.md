@@ -10,6 +10,21 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## v0.8.1 — 2026-05-05
+
+Patch de stabilisation Phase 1 après dogfood des smileys perso sur smartphone.
+
+### Changed
+- `:core:ui` — `PostMediaDisplayPolicy.persoSmiley` passe de **40×40** à **56×56**. Le bucket 40sp corrigeait le chevauchement de lignes, mais rendait trop petits les perso courants sur écran de smartphone. Le nouveau compromis garde `ContentScale.Inside` : les smileys 50×50 restent à taille native, les 70×50 descendent à 56×40, les mini-sprites 15×15 ne sont pas upscalés/pixelisés.
+- `docs/specs/protocol-hfr.md` et `docs/specs/roadmap.md` alignent le contrat réel : perso **56×56 / Inside**, Phase 1 marquée livrée.
+- `app/build.gradle.kts` bump `versionCode = 33`, `versionName = "0.1.0-phase1.2"` pour produire un AAB de dogfood corrigé.
+
+### Tests
+- `PostMediaDisplayPolicyTest` pin le bucket 56sp, l'invariant `≤ 2.8 × bodyMedium.lineHeight`, et les résultats `Inside` sur le corpus HFR réel.
+- `PostRendererInlineTest` vérifie que les smileys perso utilisent le bucket 56sp et restent séparés du bucket builtin 18sp.
+
+---
+
 ## v0.8.0 — 2026-05-05
 
 Phase 1 close-out. Toutes les cases du Definition-of-Done ([#87](https://github.com/ForumHFR/redface2/issues/87)) sont cochées : parser `PostContent` complet avec `[fixed]` / `[code]` ([#79](https://github.com/ForumHFR/redface2/issues/79), [#123](https://github.com/ForumHFR/redface2/pull/123)), rendu Compose des images et smileys avec Coil ([#109](https://github.com/ForumHFR/redface2/issues/109), [#126](https://github.com/ForumHFR/redface2/pull/126)) et hotfix visuel sur les perso smileys inline ([#129](https://github.com/ForumHFR/redface2/pull/129)). L'umbrella `HfrParser` ([#15](https://github.com/ForumHFR/redface2/issues/15)) est fermée par la même occasion. AAB final `0.1.0-phase1.1` (versionCode 32) prêt pour ouverture du canal Play Console internal testing ([#72](https://github.com/ForumHFR/redface2/issues/72)).
