@@ -15,12 +15,12 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 Patch de stabilisation Phase 1 après dogfood des smileys perso sur smartphone.
 
 ### Changed
-- `:core:ui` — `PostMediaDisplayPolicy.persoSmiley` passe de **40×40** à **56×56**. Le bucket 40sp corrigeait le chevauchement de lignes, mais rendait trop petits les perso courants sur écran de smartphone. Le nouveau compromis garde `ContentScale.Inside` : les smileys 50×50 restent à taille native, les 70×50 descendent à 56×40, les mini-sprites 15×15 ne sont pas upscalés/pixelisés.
-- `docs/specs/protocol-hfr.md` et `docs/specs/roadmap.md` alignent le contrat réel : perso **56×56 / Inside**, Phase 1 marquée livrée.
+- `:core:ui` — `PostMediaDisplayPolicy.persoSmiley` passe de **40×40** à **56×56**. Le bucket 40sp corrigeait le chevauchement de lignes, mais rendait trop petits les perso courants sur écran de smartphone. Le nouveau compromis utilise `ContentScale.Fit` pour les smileys : les mini-sprites 15×15 redeviennent visibles, les 70×50 descendent à 56×40, et le ratio est préservé.
+- `docs/specs/protocol-hfr.md` et `docs/specs/roadmap.md` alignent le contrat réel : smileys perso **56×56 / Fit**, images inline **240×180 / Inside**, Phase 1 marquée livrée.
 - `app/build.gradle.kts` bump `versionCode = 33`, `versionName = "0.1.0-phase1.2"` pour produire un AAB de dogfood corrigé.
 
 ### Tests
-- `PostMediaDisplayPolicyTest` pin le bucket 56sp, l'invariant `≤ 2.8 × bodyMedium.lineHeight`, et les résultats `Inside` sur le corpus HFR réel.
+- `PostMediaDisplayPolicyTest` pin le bucket 56sp, l'invariant `≤ 2.8 × bodyMedium.lineHeight`, et les résultats `Fit` sur le corpus HFR réel.
 - `PostRendererInlineTest` vérifie que les smileys perso utilisent le bucket 56sp et restent séparés du bucket builtin 18sp.
 
 ---

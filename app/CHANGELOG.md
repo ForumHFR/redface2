@@ -21,19 +21,21 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 **Commit** : à venir
 **Fichier** : `redface2-v33-<date>-<sha>.aab`
 
-Patch dogfood après retour visuel sur v32 : les smileys perso en bucket `40sp` corrigent le chevauchement, mais sont trop petits sur smartphone. v33 garde le principe sécurisé de #129 (`ContentScale.Inside`, `fillMaxSize()`, pas d'upscale des mini-sprites), mais remonte le bucket perso à `56sp`.
+Patch dogfood après retour visuel sur v32/v33 : les smileys perso en bucket `40sp` corrigent le chevauchement, mais sont trop petits sur smartphone. v33 garde le correctif clé de #129 (`fillMaxSize()` dans le placeholder `sp`), remonte le bucket perso à `56sp`, et repasse les smileys en `ContentScale.Fit` pour restaurer leur lisibilité.
 
 ### Changed
 - `PostMediaDisplayPolicy.persoSmiley` : `40sp × 40sp` → `56sp × 56sp`.
-- Corpus attendu à density 1 avec `ContentScale.Inside` :
-  - `15×15` reste `15×15` centré (pas de pixelisation).
-  - `50×50` reste `50×50` natif, donc lisible.
+- Corpus attendu à density 1 avec `ContentScale.Fit` côté smileys :
+  - `15×15` devient `56×56`, lisible sur smartphone.
+  - `39×15` devient `56×22`, ratio préservé.
+  - `50×50` devient `56×56`, léger upscale assumé.
   - `70×50` devient `56×40`, ratio préservé.
   - `200×150` devient `56×42`, borne haute conservée.
+- Les images inline `[img]` restent en `ContentScale.Inside` pour ne pas agrandir une petite image arbitraire dans le bucket `240×180`.
 - Invariant typographique assoupli de `2.5×` à `2.8× bodyMedium.lineHeight` : on privilégie la lisibilité des perso HFR sans revenir au bucket cassé `64sp`.
 
 ### Tests
-- `PostMediaDisplayPolicyTest` : dimensions 56sp, corpus `Inside`, ratios extrêmes `1×100` / `100×1`, invariant `2.8×`.
+- `PostMediaDisplayPolicyTest` : dimensions 56sp, corpus `Fit`, séparation `smileyContentScale` / `inlineImageContentScale`, ratios extrêmes `1×100` / `100×1`, invariant `2.8×`.
 - `PostRendererInlineTest` : bucket perso 56sp explicitement distinct du builtin 18sp.
 
 ---

@@ -55,9 +55,8 @@ class PostMediaDisplayPolicyTest {
     @Test
     fun `perso bucket dimensions are 56sp x 56sp`() {
         // 40sp fixed the line overlap but was too conservative on phone screens: median 50×50
-        // HFR perso were downscaled and lost readability. 56sp keeps those sprites at native
-        // size with ContentScale.Inside, downscales 70×50 to 56×40, and still avoids the broken
-        // 64sp + Fit combination captured on post #74625731.
+        // HFR perso lost readability. 56sp plus ContentScale.Fit restores a readable visual size
+        // while keeping the reserved line below the old broken 64sp bucket.
         val box = PostMediaDisplayPolicy.persoSmiley
         assertEquals(56.sp, box.placeholderWidth)
         assertEquals(56.sp, box.placeholderHeight)
@@ -100,37 +99,42 @@ class PostMediaDisplayPolicyTest {
     }
 
     @Test
-    fun `inline media content scale is Inside so small sprites are never upscaled`() {
-        // Lock the policy intent: inline media (smileys + inline images) downscale to fit the
-        // bucket, never upscale. ContentScale.Fit upscales 15×15 perso to bucket size (4× scale,
-        // pixelated) — exactly what bit us in PR #126.
-        assertSame(ContentScale.Inside, PostMediaDisplayPolicy.inlineMediaContentScale)
+    fun `smiley content scale is Fit so tiny perso sprites stay readable`() {
+        // Dogfood on v33 showed the opposite failure of PR #126: Inside kept 15×15 historical
+        // perso at native size, making them nearly invisible on phones. Fit restores a readable
+        // glyph while fillMaxSize keeps the line-height tied to the placeholder.
+        assertSame(ContentScale.Fit, PostMediaDisplayPolicy.smileyContentScale)
     }
 
     @Test
-    fun `Inside sizing does not upscale the real HFR perso corpus`() {
+    fun `inline image content scale is Inside so arbitrary small images are not upscaled`() {
+        // Unlike smileys, inline [img] content can be an arbitrary small picture; keep no-upscale
+        // there to avoid turning a tiny linked image into a 240×180 thumbnail.
+        assertSame(ContentScale.Inside, PostMediaDisplayPolicy.inlineImageContentScale)
+    }
+
+    @Test
+    fun `Fit sizing preserves ratio while making the real HFR perso corpus readable`() {
         // Real GIFs sampled live from forum-images.hardware.fr (curl + file). Verifies the policy
-        // produces the expected fit-without-upscale result for each typical size class:
-        // - tiny perso (≤30 px): stay at native size, never upscaled to bucket
-        // - median perso (50×50): stays native in the 56×56 bucket for readability
-        // - wide perso (70×50): downscaled while preserving aspect ratio
-        // - rare big perso (200×150): aggressively downscaled, but still fits the bucket
+        // produces the expected fit-to-bucket result for each typical size class:
+        // - tiny perso (≤30 px): upscale to a readable phone-size glyph
+        // - median perso (50×50): upscale slightly to the 56×56 readability target
+        // - wide perso (70×50): downscale while preserving aspect ratio
+        // - rare big perso (200×150): aggressively downscale, but still fit the bucket
         val bucket = PixelSize(width = 56, height = 56)
         data class Case(val source: PixelSize, val expected: PixelSize, val label: String)
         val cases = listOf(
-            Case(PixelSize(15, 15), PixelSize(15, 15), "tinostar (tiny square, no upscale)"),
-            Case(PixelSize(39, 15), PixelSize(39, 15), "rofl (wide, native fits)"),
-            Case(PixelSize(50, 50), PixelSize(50, 50), "median perso (native, readability target)"),
-            Case(PixelSize(56, 56), PixelSize(56, 56), "exact-fit (bucket frontier, scale clamps to 1f)"),
+            Case(PixelSize(15, 15), PixelSize(56, 56), "tinostar (tiny square, readable upscale)"),
+            Case(PixelSize(39, 15), PixelSize(56, 22), "rofl (wide, readable upscale)"),
+            Case(PixelSize(50, 50), PixelSize(56, 56), "median perso (slight readability upscale)"),
+            Case(PixelSize(56, 56), PixelSize(56, 56), "exact-fit (bucket frontier)"),
             Case(PixelSize(70, 50), PixelSize(56, 40), "apges/eberhart (downscale, ratio preserved)"),
             Case(PixelSize(200, 150), PixelSize(56, 42), "rare oversize sprite (heavy downscale)"),
         )
 
         cases.forEach { (source, expected, label) ->
-            val actual = insideScaledMediaSize(source = source, bucket = bucket)
+            val actual = fitScaledMediaSize(source = source, bucket = bucket)
             assertEquals("[$label] mismatch", expected, actual)
-            assertTrue("[$label] width must not exceed source", actual.width <= source.width)
-            assertTrue("[$label] height must not exceed source", actual.height <= source.height)
             assertTrue("[$label] width must fit bucket", actual.width <= bucket.width)
             assertTrue("[$label] height must fit bucket", actual.height <= bucket.height)
         }
@@ -143,11 +147,11 @@ class PostMediaDisplayPolicyTest {
         // size — visually invisible and technically "fitting". Pin the lower bound so the helper
         // stays usable beyond the regular HFR corpus.
         val bucket = PixelSize(56, 56)
-        val tallStrip = insideScaledMediaSize(PixelSize(width = 1, height = 100), bucket)
+        val tallStrip = fitScaledMediaSize(PixelSize(width = 1, height = 100), bucket)
         assertTrue("tall strip must keep width ≥ 1", tallStrip.width >= 1)
         assertEquals(56, tallStrip.height)
 
-        val wideStrip = insideScaledMediaSize(PixelSize(width = 100, height = 1), bucket)
+        val wideStrip = fitScaledMediaSize(PixelSize(width = 100, height = 1), bucket)
         assertEquals(56, wideStrip.width)
         assertTrue("wide strip must keep height ≥ 1", wideStrip.height >= 1)
     }
