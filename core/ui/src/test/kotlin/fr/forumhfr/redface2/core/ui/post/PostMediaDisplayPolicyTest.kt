@@ -5,6 +5,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
+import fr.forumhfr.redface2.core.ui.theme.RedfaceTypography
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertSame
@@ -64,14 +65,15 @@ class PostMediaDisplayPolicyTest {
 
     @Test
     fun `perso placeholder height stays at most 2x5 times bodyMedium lineHeight`() {
-        // Type.kt fixes bodyMedium.lineHeight = 20.sp. The visual rule of thumb after PR #126
-        // bug: a single inline smiley should not bump the line height past ~2.5× the surrounding
-        // text rhythm, otherwise the paragraph reads as broken even if Compose technically lays
-        // out without overlap. This guards against a future bump back to 64.
-        val bodyMediumLineHeightSp = 20f
+        // The visual rule of thumb after PR #126 bug: a single inline smiley should not bump the
+        // line height past ~2.5× the surrounding text rhythm, otherwise the paragraph reads as
+        // broken even if Compose technically lays out without overlap. Reads bodyMedium directly
+        // from the project Typography so the invariant tracks any future typography tweak rather
+        // than freezing today's 20.sp value.
+        val bodyMediumLineHeightSp = RedfaceTypography.bodyMedium.lineHeight.value
         assertTrue(
             "perso placeholder height ${PostMediaDisplayPolicy.persoSmiley.placeholderHeight} " +
-                "must stay ≤ 2.5 × ${bodyMediumLineHeightSp}sp",
+                "must stay ≤ 2.5 × ${bodyMediumLineHeightSp}sp (bodyMedium.lineHeight)",
             PostMediaDisplayPolicy.persoSmiley.placeholderHeight.value <= bodyMediumLineHeightSp * 2.5f,
         )
     }
@@ -132,5 +134,21 @@ class PostMediaDisplayPolicyTest {
             assertTrue("[$label] width must fit bucket", actual.width <= bucket.width)
             assertTrue("[$label] height must fit bucket", actual.height <= bucket.height)
         }
+    }
+
+    @Test
+    fun `extreme aspect ratios never collapse a dimension to zero`() {
+        // 1×100 or 100×1 sources are user-uploadable on HFR (perso are user-generated GIFs);
+        // without the coerceAtLeast(1) guard, ratios this extreme would round to a 0×N or N×0
+        // size — visually invisible and technically "fitting". Pin the lower bound so the helper
+        // stays usable beyond the regular HFR corpus.
+        val bucket = PixelSize(40, 40)
+        val tallStrip = insideScaledMediaSize(PixelSize(width = 1, height = 100), bucket)
+        assertTrue("tall strip must keep width ≥ 1", tallStrip.width >= 1)
+        assertEquals(40, tallStrip.height)
+
+        val wideStrip = insideScaledMediaSize(PixelSize(width = 100, height = 1), bucket)
+        assertEquals(40, wideStrip.width)
+        assertTrue("wide strip must keep height ≥ 1", wideStrip.height >= 1)
     }
 }

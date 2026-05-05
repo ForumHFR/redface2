@@ -117,10 +117,19 @@ internal data class PixelSize(val width: Int, val height: Int)
  * Pure mirror of [ContentScale.Inside]: downscale [source] uniformly so it fits inside [bucket]
  * while preserving aspect ratio, but never scale up. Returns the resulting size.
  *
+ * The result is clamped to at least 1×1 to guard against extreme aspect ratios where rounding
+ * would otherwise collapse one dimension to 0 (e.g. a 1×100 banner downscaled into a 40×40
+ * bucket would `roundToInt()` to 0×40 without the clamp — visually invisible, technically
+ * "fitting").
+ *
  * Exposed and tested in pure JVM so the corpus-of-real-HFR-perso assertions don't need a
- * Compose runtime. The renderer uses [PostMediaDisplayPolicy.inlineMediaContentScale] directly
- * via `AsyncImage`, which delegates to the same Compose semantic — so this function and the
- * runtime stay in lockstep.
+ * Compose runtime. **Important** : this function models the `Inside` decision at density = 1
+ * and fontScale = 1. At runtime the placeholder is `40.sp × density × fontScale` pixels, so the
+ * absolute output sizes shift accordingly — but the *invariant* "never upscale, preserve aspect
+ * ratio" survives any positive density/fontScale because `Inside` is invariant by uniform
+ * scaling of the bucket. The numeric examples (`70×50 → 40×29`, etc.) are correct **at density
+ * 1**; on a real xxhdpi device a 70×50 sprite is downscaled to a different absolute size, but
+ * the same proportions and the same "no upscale" guarantee.
  */
 internal fun insideScaledMediaSize(source: PixelSize, bucket: PixelSize): PixelSize {
     require(source.width > 0 && source.height > 0) { "source must be positive" }
@@ -131,7 +140,7 @@ internal fun insideScaledMediaSize(source: PixelSize, bucket: PixelSize): PixelS
         bucket.height.toFloat() / source.height.toFloat(),
     )
     return PixelSize(
-        width = (source.width * scale).roundToInt(),
-        height = (source.height * scale).roundToInt(),
+        width = (source.width * scale).roundToInt().coerceAtLeast(1),
+        height = (source.height * scale).roundToInt().coerceAtLeast(1),
     )
 }
