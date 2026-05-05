@@ -15,6 +15,36 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v32 — `0.1.0-phase1.1` — 2026-05-05
+
+**Statut** : `local`
+**Commit** : à venir
+**Fichier** : `redface2-v32-<date>-<sha>.aab`
+
+Release Phase 1 close-out après merge de [#126](https://github.com/ForumHFR/redface2/pull/126) (rendu Compose des images et smileys HFR avec Coil 3) **et** [#129](https://github.com/ForumHFR/redface2/pull/129) (correctif visuel sur les perso smileys inline). Ferme [#109](https://github.com/ForumHFR/redface2/issues/109) et donc l'umbrella Phase 1 [#87](https://github.com/ForumHFR/redface2/issues/87).
+
+Le `versionName` perd le suffixe `-phase1d` parce que toutes les sous-phases 1A → 1D sont désormais sur `main` ; on entre dans la stabilisation Phase 1 avant ouverture du canal Play Console internal testing ([#72](https://github.com/ForumHFR/redface2/issues/72)). Note sur la trajectoire : `versionCode 31` (`0.1.0-phase1.0`) a été buildé localement avec le bucket perso 64×64 + `ContentScale.Fit` issu de #126 ; un bug visuel a été reproduit en dogfood sur le post HFR #74625731 (perso smileys oversize, lignes de texte intrudées). Pas de v31 distribuée — on saute directement à v32 avec le fix.
+
+### Added
+- **`PostMediaDisplayPolicy`** (`:core:ui`) : politique de buckets pure JVM-testable pour les médias inline. Builtin smiley `18×18`, perso smiley `40×40`, inline image `240×180`, block image `min 160dp / max 480dp`. `ContentScale.Inside` (downscale only, **jamais d'upscale**) pour les médias inline — un perso 70×50 est ramené à un ratio préservé (≈ 40×29 à density 1), un perso 15×15 reste à 15×15 centré avec padding visible (pas de pixelisation par 4× upscale).
+- **`SingletonImageLoader.Factory`** sur `RedfaceApplication` avec `AnimatedImageDecoder.Factory()` (`coil-gif`) : autoplay GIFs builtin (`:bounce:`, `:pt1cable:`) ET perso sans configuration par-call-site. minSdk 29 → pas de fallback `GifDecoder` legacy.
+- **`SubcomposeAsyncImage`** sur `PostRenderer.ImageBlock` : slots loading / error visibles pendant le fetch ou si l'host (rehost.diberie.com, super-h.fr…) est offline. `defaultMinSize(160dp)` réserve une hauteur de placeholder pour éviter un layout jump quand la bitmap résout (cf. review Codex sur PR #126).
+- **3 strings FR** pour les états image : `post_image_loading`, `post_image_error`, `post_image_error_with_alt`.
+- **Aliases libs** `coil-core`, `coil-gif`, `coil-network-okhttp` exposés au module `:app` pour mettre le décodeur GIF + le fetcher OkHttp sur le classpath du `SingletonImageLoader`.
+- **Fonction pure `insideScaledMediaSize(source, bucket)`** miroir de `ContentScale.Inside`, exposée pour tester le corpus HFR réel sans Compose runtime. `coerceAtLeast(1)` sur les sorties pour éviter qu'un ratio extrême (1×100) ne collapse une dimension à 0.
+
+### Fixed
+- **Smileys perso inline oversize** ([#129](https://github.com/ForumHFR/redface2/pull/129)) : trois facteurs cumulés diagnostiqués via arbitrage Codex et corrigés ensemble.
+  1. Bucket perso `64sp × 64sp` dans un paragraphe `bodyMedium` avec `lineHeight = 20.sp` explicite : le placeholder faisait 3.2× la hauteur de ligne, le `LineHeightStyleSpan` figé contraignait l'expansion automatique du `PlaceholderSpan` → débordement vertical sur les lignes adjacentes. Bucket réduit à `40sp × 40sp` (`≤ 2.5 × bodyMedium.lineHeight`, invariant pinned dans les tests).
+  2. `ContentScale.Fit` upscalait les petits sprites (`tinostar` 15×15 → 64×64 = 4× upscale pixelisé). Remplacé par `ContentScale.Inside` (downscale only) pour les trois call-sites inline.
+  3. `Modifier.size(64.dp)` côté `AsyncImage` figé en `dp` pendant que le placeholder est en `sp` → divergence sous `fontScale ≠ 1`. Remplacé par `Modifier.fillMaxSize()` : l'image suit le placeholder en `sp`, robuste sous `fontScale ≠ 1` (accessibility).
+
+### Tests
+- `PostMediaDisplayPolicyTest` (pure JVM) : pin les dimensions des 4 buckets, invariant typographique `persoSmiley.placeholderHeight ≤ 2.5 × bodyMedium.lineHeight` (lecture dynamique via `RedfaceTypography`), invariant `inlineMediaContentScale === ContentScale.Inside`. Test corpus HFR réel `[(15,15), (39,15), (40,40), (50,50), (70,50), (200,150)]` via `insideScaledMediaSize`. Test ratios extrêmes `1×100` / `100×1` (garde anti-collapse via `coerceAtLeast(1)`).
+- `PostRendererInlineTest` (pure JVM) : assert `PlaceholderVerticalAlign.Center` sur les trois chemins (builtin, perso, inline image). Vérifie que le bucket perso est bien `40sp` et **pas** le builtin (garde anti-collapse).
+
+---
+
 ## v30 — `0.1.0-phase1d.2` — 2026-05-04
 
 **Statut** : `local`

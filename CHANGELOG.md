@@ -10,6 +10,55 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## v0.8.0 — 2026-05-05
+
+Phase 1 close-out. Toutes les cases du Definition-of-Done ([#87](https://github.com/ForumHFR/redface2/issues/87)) sont cochées : parser `PostContent` complet avec `[fixed]` / `[code]` ([#79](https://github.com/ForumHFR/redface2/issues/79), [#123](https://github.com/ForumHFR/redface2/pull/123)), rendu Compose des images et smileys avec Coil ([#109](https://github.com/ForumHFR/redface2/issues/109), [#126](https://github.com/ForumHFR/redface2/pull/126)) et hotfix visuel sur les perso smileys inline ([#129](https://github.com/ForumHFR/redface2/pull/129)). L'umbrella `HfrParser` ([#15](https://github.com/ForumHFR/redface2/issues/15)) est fermée par la même occasion. AAB final `0.1.0-phase1.1` (versionCode 32) prêt pour ouverture du canal Play Console internal testing ([#72](https://github.com/ForumHFR/redface2/issues/72)).
+
+### Phase 1 — Rendu médias post (#109, [#126](https://github.com/ForumHFR/redface2/pull/126), [#129](https://github.com/ForumHFR/redface2/pull/129))
+
+Décision **B+** retenue après arbitrage Codex sur trois stratégies (taille fixe / buckets / mesure async + cache) : **buckets simples + `InlineTextContent` + autoplay GIFs**, sans cache de tailles intrinsèques mesurées async (qui causait un "size pop" visible au premier scroll), sans prefetch agressif (le HTTP cache OkHttp suffit en Phase 1). À ré-évaluer Phase 2/4 si le downscale des perso devient un problème UX en pratique.
+
+Trajectoire en deux PRs : #126 livre la policy initiale (bucket perso 64×64 + `ContentScale.Fit`), #129 corrige un bug visuel reproduit en dogfood sur le post HFR [#74625731](https://forum.hardware.fr/forum2.php?cat=13&post=78667&page=15880#t74625731) où trois perso smileys oversize intrudaient les lignes de texte adjacentes dans une citation.
+
+#### Added
+- `:core:ui` — `PostMediaDisplayPolicy` (pure JVM) : 4 buckets fixes (builtin smiley 18×18, perso smiley **40×40**, inline image 240×180, block image `min 160dp / max 480dp`). **`ContentScale.Inside`** (downscale only, **jamais d'upscale**) pour les médias inline — un perso 70×50 est ramené à un ratio préservé (≈ 40×29 à density 1), un perso 15×15 reste à 15×15 centré avec padding visible (pas de pixelisation par 4× upscale). `Modifier.fillMaxSize()` côté `AsyncImage` enfant : l'image suit le placeholder en `sp` même quand `fontScale ≠ 1` (accessibility).
+- `:app` — `RedfaceApplication` implémente `SingletonImageLoader.Factory` avec `AnimatedImageDecoder.Factory()` (autoplay GIFs builtin + perso, API 28+, minSdk 29 = pas de fallback legacy).
+- `:core:ui` — `PostRenderer.ImageBlock` migré sur `SubcomposeAsyncImage` avec slots loading / error visibles (rehost.diberie.com, super-h.fr offline). `defaultMinSize(160dp)` réserve la hauteur du placeholder pour éviter un layout jump à la résolution de la bitmap (review Codex PR #126).
+- Strings FR `post_image_loading`, `post_image_error`, `post_image_error_with_alt` dans `:core:ui`.
+- Aliases `coil-core`, `coil-gif`, `coil-network-okhttp` dans `gradle/libs.versions.toml`.
+- Fonction pure `insideScaledMediaSize(source, bucket)` miroir de `ContentScale.Inside`, exposée pour tester le corpus HFR réel sans Compose runtime. `coerceAtLeast(1)` sur les sorties pour éviter qu'un ratio extrême (1×100) ne collapse une dimension à 0.
+
+#### Fixed
+- **Perso smileys inline oversize** (#129) : trois facteurs cumulés diagnostiqués via arbitrage Codex et corrigés ensemble. (1) Bucket perso 64sp dans un paragraphe `bodyMedium` (`lineHeight = 20.sp` explicite) → placeholder 3.2× la hauteur de ligne, le `LineHeightStyleSpan` figé contraignait l'expansion du `PlaceholderSpan` → débordement vertical ; bucket réduit à 40sp avec invariant `placeholderHeight ≤ 2.5 × bodyMedium.lineHeight` pinned dans les tests. (2) `ContentScale.Fit` upscalait les petits sprites (15×15 → 64×64 = 4× upscale pixelisé) → remplacé par `ContentScale.Inside`. (3) `Modifier.size(64.dp)` figé en dp côté `AsyncImage` divergeait du placeholder en sp sous `fontScale ≠ 1` → remplacé par `Modifier.fillMaxSize()`.
+
+#### Changed
+- `docs/specs/protocol-hfr.md` § Smileys : section réécrite. Source de vérité côté lecture = `<img src=…>` (jamais reconstruction d'URL depuis le nom). Builtins ET perso peuvent être animés ET de tailles hétérogènes (corpus échantillonné live : majorité 50×50 à 70×50, fraction <30 px, rares grands formats). Politique de buckets explicite avec `ContentScale.Inside` + `Modifier.fillMaxSize()` + invariant `2.5 × bodyMedium.lineHeight`.
+- `docs/specs/roadmap.md` Phase 1 — case "Images + smileys" cochée.
+
+#### Tests
+- `PostMediaDisplayPolicyTest` (pure JVM, `:core:ui`) : pin les 4 buckets, invariant typographique `persoSmiley.placeholderHeight ≤ 2.5 × bodyMedium.lineHeight` (lecture dynamique via `RedfaceTypography`), invariant `inlineMediaContentScale === ContentScale.Inside`, garde-fou anti-collapse builtin/perso. Test corpus HFR réel `[(15,15), (39,15), (40,40), (50,50), (70,50), (200,150)]` via `insideScaledMediaSize`. Test ratios extrêmes `1×100` / `100×1` (garde anti-collapse via `coerceAtLeast(1)`).
+- `PostRendererInlineTest` (pure JVM, `:core:ui`) : invariant `appendInlineContent` IDs ↔ `collectInlineMedia` keys vérifié pour les 6 conteneurs `PostInline` (Strong/Emphasis/Underline/Strike/Color/Link). Vérif buckets builtin vs perso vs inline image avec asserts `PlaceholderVerticalAlign.Center` sur les trois chemins.
+
+### Phase 1 — Parser blocs monospace (#79, [#123](https://github.com/ForumHFR/redface2/pull/123))
+
+#### Added
+- `:core:parser` — `PostBlock.Fixed(text)` et `PostBlock.CodeBlock(text, language?)` produits depuis `<table class="fixed">` / `<table class="code">`, y compris à l'intérieur des citations imbriquées.
+- Hint langue depuis `<pre class="<lang>">` (`cpp`, `java`, …) exposé via `CodeBlock.language`. Coloration syntaxique HFR volontairement aplatie en texte brut en Phase 1.
+- `:core:ui` — `PostRenderer.MonospaceContainer` : `Card` monospace avec scroll horizontal, `softWrap = false`, ordre modifier `padding(12.dp).horizontalScroll(rememberScrollState())` (padding avant scroll, pas de `fillMaxWidth()` interne — sans quoi le contenu se clamp avant scroll).
+
+#### Fixed
+- Le parser ne fait plus de `trim()` global sur les blocs `[fixed]` / `[code]` : seules les lignes vides structurelles en bordure sont retirées (l'indentation interne est préservée — c'est le point de monospace).
+
+### Builds AAB Phase 1
+
+| versionCode | versionName | Commit | Statut | Note |
+|---|---|---|---|---|
+| 30 | `0.1.0-phase1d.2` | `2a3b2b5` (post #123) puis `80f5ece` (post #126) | livré | AAB intermédiaire après merge `[fixed]` / `[code]`, avant que les médias #109 ne soient sur `main`. |
+| 31 | `0.1.0-phase1.0` | `7e79bd3` | **burnt** | preview locale Phase 1 close-out (bucket perso 64×64 + `ContentScale.Fit` issu de #126). Bug visuel reproduit en dogfood sur le post HFR #74625731 (perso smileys oversize, lignes intrudées) → jamais distribuée. |
+| 32 | `0.1.0-phase1.1` | à venir | livré | Phase 1 close-out — toutes les cases #87 cochées, hotfix smileys de #129 inclus, prêt pour Play Console internal testing #72. |
+
+---
+
 ## v0.7.0 — 2026-05-03
 
 Phase 1D livrée : drapeaux REST, lecture longue topic, cache Room (TTL + persistance + isolation par compte), prefetch anonyme. AAB final `0.1.0-phase1d.1` (versionCode 29, commit `af66363`) couvrant Phase 1D-1 → 1D-4, le hotfix Room v3 (PR [#119](https://github.com/ForumHFR/redface2/pull/119)) et l'audit de gel des `@SerialName` (PR [#120](https://github.com/ForumHFR/redface2/pull/120)).
