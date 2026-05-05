@@ -8,10 +8,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
@@ -468,15 +468,15 @@ internal fun imageInlineContent(image: PostInline.InlineImage): InlineTextConten
             placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
         ),
     ) {
-        // ContentScale.Fit downscales to the bucket without squashing landscape vs portrait
-        // sources. fillMaxWidth() inside InlineTextContent is meaningless (the placeholder
-        // dictates the parent constraint) and was previously a leftover from a pre-bucket
-        // implementation — replaced with the explicit Modifier.size from the policy.
+        // The image fills the placeholder via fillMaxSize() so the rendered size tracks the
+        // sp-based placeholder under any fontScale. ContentScale.Inside in the policy ensures
+        // the bucket only downscales — small inline images stay at native pixel size centred,
+        // never upscaled into a blocky thumbnail.
         AsyncImage(
             model = image.url,
             contentDescription = image.description,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.size(width = box.modifierWidth, height = box.modifierHeight),
+            contentScale = PostMediaDisplayPolicy.inlineMediaContentScale,
+            modifier = Modifier.fillMaxSize(),
         )
     }
 }
@@ -494,8 +494,8 @@ internal fun smileyInlineContent(smiley: PostInline.Smiley): InlineTextContent {
         AsyncImage(
             model = smiley.imageUrl,
             contentDescription = description,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.size(width = box.modifierWidth, height = box.modifierHeight),
+            contentScale = PostMediaDisplayPolicy.inlineMediaContentScale,
+            modifier = Modifier.fillMaxSize(),
         )
     }
 }
