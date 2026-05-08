@@ -10,9 +10,25 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## v0.8.3 — 2026-05-08
+
+Patch dogfood guidé par le crawl exhaustif `wikismilies.php` : le bucket carré `56×56` rendait les micro-smileys lisibles, mais ne respectait pas la forme dominante réelle des smileys perso HFR (`70×50`, puis variantes `W×50`). Le build final passe en `v35 / 0.1.0-phase1.4`; `v34` est considéré brûlé.
+
+### Changed
+- `:core:ui` — `PostMediaDisplayPolicy.persoSmiley` passe de **56×56** à **70×50**. `ContentScale.Fit` reste utilisé pour les smileys : les micro-sprites `15×15` montent à `50×50`, les `50×50` restent natifs, les `70×50` ne sont plus réduits à `56×40`, et le ratio est préservé.
+- `docs/specs/protocol-hfr.md` documente la distribution issue du crawl wikismilies : **34 139** smileys perso, top tailles `70×50` (8047), `50×50` (2811), `67×50` (1142), plus micro-smileys `15×15`, `19×19`, `16×16`.
+- `app/build.gradle.kts` bump `versionCode = 35`, `versionName = "0.1.0-phase1.4"`.
+- `docs/specs/roadmap.md` et footer Jekyll alignés sur specs v0.8.3 / AAB `0.1.0-phase1.4`.
+
+### Tests
+- `PostMediaDisplayPolicyTest` pin le bucket 70×50, l'invariant `≤ 2.5 × bodyMedium.lineHeight`, et les résultats `Fit` sur les tailles dominantes du crawl.
+- `PostRendererInlineTest` vérifie que les smileys perso utilisent le bucket 70×50 et restent séparés du bucket builtin 18×18.
+
+---
+
 ## v0.8.2 — 2026-05-05
 
-Rebuild administratif du patch smileys perso : `versionCode = 33` est brûlé côté dogfood, donc le build final passe en `v34 / 0.1.0-phase1.3` sans changement fonctionnel par rapport au correctif `56sp / Fit`.
+Rebuild administratif du patch smileys perso : `versionCode = 33` est brûlé côté dogfood, donc le build passe en `v34 / 0.1.0-phase1.3` sans changement fonctionnel par rapport au correctif `56sp / Fit`. Ce slot `v34` est ensuite remplacé par v35 / specs v0.8.3 après analyse exhaustive wikismilies.
 
 ### Changed
 - `app/build.gradle.kts` bump `versionCode = 34`, `versionName = "0.1.0-phase1.3"`.

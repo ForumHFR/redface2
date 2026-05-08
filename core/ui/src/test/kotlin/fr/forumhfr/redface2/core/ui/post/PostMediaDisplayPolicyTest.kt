@@ -53,13 +53,13 @@ class PostMediaDisplayPolicyTest {
     }
 
     @Test
-    fun `perso bucket dimensions are 56sp x 56sp`() {
-        // 40sp fixed the line overlap but was too conservative on phone screens: median 50×50
-        // HFR perso lost readability. 56sp plus ContentScale.Fit restores a readable visual size
-        // while keeping the reserved line below the old broken 64sp bucket.
+    fun `perso bucket dimensions are 70sp x 50sp`() {
+        // Exhaustive wikismilies stats show HFR perso are mostly 50px tall, with 70×50 being
+        // the dominant size by far. Match that real corpus shape instead of reserving a square
+        // bucket that letterboxes common wide smileys.
         val box = PostMediaDisplayPolicy.persoSmiley
-        assertEquals(56.sp, box.placeholderWidth)
-        assertEquals(56.sp, box.placeholderHeight)
+        assertEquals(70.sp, box.placeholderWidth)
+        assertEquals(50.sp, box.placeholderHeight)
     }
 
     @Test
@@ -68,12 +68,12 @@ class PostMediaDisplayPolicyTest {
         // line height back to the old 64sp bucket, otherwise the paragraph risks reading as
         // broken even if Compose technically lays out without overlap. Reads bodyMedium directly
         // from the project Typography so the invariant tracks future typography tweaks. Current
-        // bodyMedium.lineHeight is 20sp, so 2.8× gives the readability target 56sp.
+        // bodyMedium.lineHeight is 20sp, so 2.5× gives the corpus target 50sp.
         val bodyMediumLineHeightSp = RedfaceTypography.bodyMedium.lineHeight.value
         assertTrue(
             "perso placeholder height ${PostMediaDisplayPolicy.persoSmiley.placeholderHeight} " +
-                "must stay ≤ 2.8 × ${bodyMediumLineHeightSp}sp (bodyMedium.lineHeight)",
-            PostMediaDisplayPolicy.persoSmiley.placeholderHeight.value <= bodyMediumLineHeightSp * 2.8f,
+                "must stay ≤ 2.5 × ${bodyMediumLineHeightSp}sp (bodyMedium.lineHeight)",
+            PostMediaDisplayPolicy.persoSmiley.placeholderHeight.value <= bodyMediumLineHeightSp * 2.5f,
         )
     }
 
@@ -114,22 +114,25 @@ class PostMediaDisplayPolicyTest {
     }
 
     @Test
-    fun `Fit sizing preserves ratio while making the real HFR perso corpus readable`() {
-        // Real GIFs sampled live from forum-images.hardware.fr (curl + file). Verifies the policy
+    fun `Fit sizing preserves ratio while matching the wikismilies corpus shape`() {
+        // Real wikismilies crawl stats (34k+ perso) show a dominant 70×50 / W×50 shape. Verifies
+        // the policy
         // produces the expected fit-to-bucket result for each typical size class:
         // - tiny perso (≤30 px): upscale to a readable phone-size glyph
-        // - median perso (50×50): upscale slightly to the 56×56 readability target
-        // - wide perso (70×50): downscale while preserving aspect ratio
+        // - median perso (50×50): stays native-sized inside the HFR line
+        // - dominant wide perso (70×50): stays native-sized, no letterboxing shrink
         // - rare big perso (200×150): aggressively downscale, but still fit the bucket
-        val bucket = PixelSize(width = 56, height = 56)
+        val bucket = PixelSize(width = 70, height = 50)
         data class Case(val source: PixelSize, val expected: PixelSize, val label: String)
         val cases = listOf(
-            Case(PixelSize(15, 15), PixelSize(56, 56), "tinostar (tiny square, readable upscale)"),
-            Case(PixelSize(39, 15), PixelSize(56, 22), "rofl (wide, readable upscale)"),
-            Case(PixelSize(50, 50), PixelSize(56, 56), "median perso (slight readability upscale)"),
-            Case(PixelSize(56, 56), PixelSize(56, 56), "exact-fit (bucket frontier)"),
-            Case(PixelSize(70, 50), PixelSize(56, 40), "apges/eberhart (downscale, ratio preserved)"),
-            Case(PixelSize(200, 150), PixelSize(56, 42), "rare oversize sprite (heavy downscale)"),
+            Case(PixelSize(15, 15), PixelSize(50, 50), "tiny square (readable upscale)"),
+            Case(PixelSize(19, 19), PixelSize(50, 50), "tiny 19×19 (readable upscale)"),
+            Case(PixelSize(39, 15), PixelSize(70, 27), "wide tiny (readable upscale)"),
+            Case(PixelSize(50, 50), PixelSize(50, 50), "median square perso (native height)"),
+            Case(PixelSize(67, 50), PixelSize(67, 50), "third-most common wikismilies size"),
+            Case(PixelSize(70, 50), PixelSize(70, 50), "dominant wikismilies size"),
+            Case(PixelSize(70, 49), PixelSize(70, 49), "common near-50 height size"),
+            Case(PixelSize(200, 150), PixelSize(67, 50), "rare oversize sprite (heavy downscale)"),
         )
 
         cases.forEach { (source, expected, label) ->
@@ -146,13 +149,13 @@ class PostMediaDisplayPolicyTest {
         // without the coerceAtLeast(1) guard, ratios this extreme would round to a 0×N or N×0
         // size — visually invisible and technically "fitting". Pin the lower bound so the helper
         // stays usable beyond the regular HFR corpus.
-        val bucket = PixelSize(56, 56)
+        val bucket = PixelSize(70, 50)
         val tallStrip = fitScaledMediaSize(PixelSize(width = 1, height = 100), bucket)
         assertTrue("tall strip must keep width ≥ 1", tallStrip.width >= 1)
-        assertEquals(56, tallStrip.height)
+        assertEquals(50, tallStrip.height)
 
         val wideStrip = fitScaledMediaSize(PixelSize(width = 100, height = 1), bucket)
-        assertEquals(56, wideStrip.width)
+        assertEquals(70, wideStrip.width)
         assertTrue("wide strip must keep height ≥ 1", wideStrip.height >= 1)
     }
 }

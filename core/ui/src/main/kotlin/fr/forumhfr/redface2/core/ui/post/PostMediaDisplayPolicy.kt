@@ -28,7 +28,8 @@ import kotlin.math.roundToInt
  * initial 64×64 policy came from the old `Modifier.size(.dp)` child drifting from the `sp`
  * placeholder, plus an overly large bucket — not from scaling the sprite to the placeholder.
  * Keeping `Modifier.fillMaxSize()` makes the rendered smiley track the reserved text line under
- * `fontScale`, while the 56×56 bucket stays below the old broken 64×64 visual rhythm.
+ * `fontScale`, while the 70×50 bucket follows the dominant wikismilies corpus shape without
+ * returning to the old broken 64sp line height.
  *
  * Re-evaluate in Phase 2/4 if a fixed bucket still feels wrong on real corpora; intrinsic-size
  * measurement remains the open Phase 2/4 option.
@@ -61,18 +62,20 @@ internal object PostMediaDisplayPolicy {
     /**
      * User-uploaded persona smileys (`[:cosmoschtroumpf]`, `[:rofl]`, …) — served from
      * `/images/perso/<x>.gif` or `/images/perso/<N>/<x>.gif`. Sizes are heterogeneous; the bulk
-     * of the corpus measured live (~25 GIFs sampled) lands at 50×50 to 70×50 native pixels, with
-     * a fraction at 15-30 px and rare large outliers.
+     * of the exhaustive wikismilies corpus lands on height 50 px, with width commonly ranging up
+     * to 70 px. The top sizes found during dogfood were 70×50 (8047), 50×50 (2811), 67×50
+     * (1142), then many W×50 variants; tiny historical sprites (15×15, 19×19, 16×16) exist too.
      *
-     * 56×56 is a readability-first bucket after dogfood on v32/v33:
+     * 70×50 is a corpus-first bucket after dogfood on v32-v34:
      * - 40×40 + Inside fixed overlap but made common perso unreadable on phones;
-     * - 56×56 + Fit restores the old visible size for tiny/median sprites;
-     * - common 70×50 perso render as 56×40 while preserving ratio;
-     * - the bucket still stays below the old broken 64sp line rhythm.
+     * - 56×56 + Fit made tiny sprites readable but letterboxed the dominant 70×50 shape;
+     * - 70×50 + Fit keeps common perso at their native HFR ratio while upscaling tiny ones to a
+     *   readable 50 px-high glyph;
+     * - placeholder height stays below the old broken 64sp line rhythm.
      */
     val persoSmiley: InlineMediaBox = InlineMediaBox(
-        placeholderWidth = 56.sp,
-        placeholderHeight = 56.sp,
+        placeholderWidth = 70.sp,
+        placeholderHeight = 50.sp,
     )
 
     /**
@@ -124,16 +127,16 @@ internal data class PixelSize(val width: Int, val height: Int)
  * preserving aspect ratio. Returns the resulting size.
  *
  * The result is clamped to at least 1×1 to guard against extreme aspect ratios where rounding
- * would otherwise collapse one dimension to 0 (e.g. a 1×100 banner downscaled into a 56×56
- * bucket would `roundToInt()` to 0×56 without the clamp — visually invisible, technically
+ * would otherwise collapse one dimension to 0 (e.g. a 1×100 banner downscaled into a 70×50
+ * bucket would `roundToInt()` to 0×50 without the clamp — visually invisible, technically
  * "fitting").
  *
  * Exposed and tested in pure JVM so the corpus-of-real-HFR-perso assertions don't need a
  * Compose runtime. **Important** : this function models the `Fit` decision at density = 1
- * and fontScale = 1. At runtime the placeholder is `56.sp × density × fontScale` pixels, so the
+ * and fontScale = 1. At runtime the placeholder is `70.sp × 50.sp × density × fontScale` pixels, so the
  * absolute output sizes shift accordingly — but the *invariant* "preserve aspect ratio and fit
  * the bucket" survives any positive density/fontScale because `Fit` is invariant by uniform
- * scaling of the bucket. The numeric examples (`70×50 → 56×40`, etc.) are correct **at density
+ * scaling of the bucket. The numeric examples (`15×15 → 50×50`, etc.) are correct **at density
  * 1**; on a real xxhdpi device a 70×50 sprite is scaled to a different absolute size, but the
  * same proportions and fit guarantee hold.
  */
