@@ -10,6 +10,21 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## v0.8.4 — 2026-05-10
+
+Itération CD : la pipeline `release.yml` rendait obligatoire l'activation manuelle du draft Play Console après chaque upload (`status: draft` câblé en dur). Cette PR rend le statut configurable et choisit un défaut intelligent selon le track ciblé. Le `versionCode = 35` ayant été consommé sur Play, le build final passe en `v36 / 0.1.0-phase1.5`.
+
+### Changed
+- `.github/workflows/release.yml` ajoute un input `play_release_status` au `workflow_dispatch` (`completed` / `draft` / `inProgress` / vide) et un défaut intelligent : `completed` (publish immédiat) pour les tracks de test (`alpha`, `beta`, `internal`, closed track), `draft` (activation UI obligatoire) pour `production`. Sur tag push, le défaut s'applique aussi → `git tag app-v36 && git push --tags` envoie directement aux testeurs alpha sans intervention UI.
+- `app/build.gradle.kts` bump `versionCode = 36`, `versionName = "0.1.0-phase1.5"`. Le slot `v35` est marqué `closed` (uploadé manuellement sur le track alpha avant la mise en place du push API).
+- `docs/specs/roadmap.md` et footer Jekyll alignés sur specs v0.8.4 / AAB `0.1.0-phase1.5`.
+
+### Notes
+- Pas de modification fonctionnelle de l'app — c'est un patch de tooling release.
+- La garde-fou production reste actif par défaut : un éventuel dispatch sur `production` sans override explicite continuera à produire un draft.
+
+---
+
 ## v0.8.3 — 2026-05-08
 
 Patch dogfood guidé par le crawl exhaustif `wikismilies.php` : le bucket carré `56×56` rendait les micro-smileys lisibles, mais ne respectait pas la forme dominante réelle des smileys perso HFR (`70×50`, puis variantes `W×50`). Le build final passe en `v35 / 0.1.0-phase1.4`; `v34` est considéré brûlé.
