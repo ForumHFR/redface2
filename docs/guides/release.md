@@ -9,10 +9,15 @@ nav_order: 5
 
 Comment construire un AAB signé et le publier sur le canal de tests Play Console depuis GitHub Actions. Le workflow couvre deux flux :
 
-1. **Tag git `v<N>`** — release officielle alignée sur le `versionCode`. Build → AAB + APK signés → upload Play Console (track `closed` par défaut, statut `DRAFT`) → GitHub Release avec les artefacts attachés.
-2. **`workflow_dispatch` manuel** — release intermédiaire / dogfood en cours de dev. Choix de la branche, du track Play (`closed`, `internal`, `alpha`, `beta`, `production`, `none`) et de l'attachement à une GitHub Release. Track `none` = build local, pas d'upload Play.
+1. **Tag git `app-v<N>`** — release officielle alignée sur le `versionCode`. Build → AAB + APK signés → upload Play Console (track `internal` par défaut, statut `DRAFT`) → GitHub Release avec les artefacts attachés.
+2. **`workflow_dispatch` manuel** — release intermédiaire / dogfood en cours de dev. Choix de la branche, du track Play (`internal` / `alpha` / `beta` / `production` / nom de closed track custom / `none`) et de l'attachement à une GitHub Release. Track `none` = build + sign uniquement, pas d'upload Play.
 
 Workflow source : [`.github/workflows/release.yml`](https://github.com/ForumHFR/redface2/blob/main/.github/workflows/release.yml).
+
+## Conventions
+
+- **Tag namespace** : les releases app utilisent `app-v<versionCode>` (ex: `app-v32`, `app-v33`). Cela évite de collisionner avec les tags `v0.x.0` du site / des specs.
+- **Track Play Console** : la CD utilise par défaut `internal` (track standard, toujours présent). Les **closed testing tracks** ont un nom **custom** défini par le maintainer dans Play Console UI (ex: `qa`, `beta-ferme`, `dogfood`). Pour cibler un closed track depuis le `workflow_dispatch`, passer le nom **exact** tel qu'il apparaît dans la Play Console. La validation de l'existence du track est faite côté Play API au moment de l'upload — un nom invalide fera échouer l'action avec une erreur claire.
 
 ## Pré-requis (à faire une fois)
 
@@ -33,7 +38,7 @@ Référence Google : [Use the Play Developer API with a service account](https:/
 
 ### 2. Premier upload manuel (obligatoire)
 
-Play Console exige **un premier AAB uploadé manuellement** avant que l'API service account puisse pousser sur un track. Faire ça avec l'AAB le plus récent généré localement :
+Play Console exige **un premier AAB uploadé manuellement** avant que l'API service account puisse pousser sur un track. Faire ça avec l'AAB le plus récent généré localement (le keystore vit sous `.gradle-user/signing/`, qui est gitignored — il faut soit le posséder déjà localement soit l'obtenir hors-repo) :
 
 ```bash
 ./scripts/docker-dev.sh ./gradlew :app:bundleRelease \
@@ -41,7 +46,7 @@ Play Console exige **un premier AAB uploadé manuellement** avant que l'API serv
 # AAB produit : app/build/outputs/bundle/release/redface2-v<N>-<date>-<sha>.aab
 ```
 
-Puis dans Play Console : **App → Test → Closed testing → Create new release** → upload manuel. Une fois ce premier draft créé, la CD prend le relais.
+Puis dans Play Console : **App → Test → \<le track ciblé\> → Create new release** → upload manuel. Une fois ce premier draft créé, la CD prend le relais.
 
 ### 3. Secrets GitHub Actions
 
@@ -49,11 +54,13 @@ Puis dans Play Console : **App → Test → Closed testing → Create new releas
 
 | Secret | Source / valeur |
 |---|---|
-| `UPLOAD_KEYSTORE_BASE64` | `base64 -w0 /work/xaat/redface2/.gradle-user/signing/upload.jks \| tee /tmp/keystore.b64` puis copier le contenu |
-| `UPLOAD_KEYSTORE_PASSWORD` | mot de passe du keystore (actuellement `redface2-upload` dans `signing.init.gradle`, à reprovisionner si rotation) |
-| `UPLOAD_KEY_ALIAS` | `upload` |
-| `UPLOAD_KEY_PASSWORD` | mot de passe de la clé (identique au keystore par défaut) |
+| `UPLOAD_KEYSTORE_BASE64` | depuis le repo cloné : `base64 -w0 .gradle-user/signing/upload.jks` puis copier le contenu (sans retours à la ligne) |
+| `UPLOAD_KEYSTORE_PASSWORD` | mot de passe du keystore configuré localement |
+| `UPLOAD_KEY_ALIAS` | alias de la clé dans le keystore (`upload` par défaut) |
+| `UPLOAD_KEY_PASSWORD` | mot de passe de la clé (souvent identique à celui du keystore) |
 | `PLAY_SERVICE_ACCOUNT_JSON` | contenu intégral du fichier JSON téléchargé à l'étape 1.3 |
+
+Le keystore (`.jks`) et son init-script Gradle vivent sous `.gradle-user/signing/`, **gitignored par construction** (cf. `.gitignore`). Ce dossier n'est pas versionné — chaque maintainer doit le posséder localement ou l'obtenir hors-repo (canal sécurisé).
 
 Le workflow refuse de tourner si `UPLOAD_KEYSTORE_BASE64` est manquant (un build non signé n'a pas de sens pour la CD). En revanche `PLAY_SERVICE_ACCOUNT_JSON` peut être absent : la CD construira et signera l'AAB, l'attachera comme artefact GitHub, et **skippera l'upload Play** avec un warning. Pratique pour valider le workflow avant que la partie Play Console soit prête.
 
@@ -65,15 +72,15 @@ Le workflow refuse de tourner si `UPLOAD_KEYSTORE_BASE64` est manquant (un build
 # 3. Merger la PR de release
 git switch main && git pull --ff-only
 
-# 4. Tag aligné sur versionCode et push
-git tag v32 -m 'v32 — Phase 1 close-out'
+# 4. Tag aligné sur versionCode et push (namespace `app-v<N>`)
+git tag app-v32 -m 'v32 — Phase 1 close-out'
 git push --tags
 ```
 
 La CD démarre automatiquement. Output :
-- AAB signé attaché à un nouvel objet **Releases** GitHub `v32`
+- AAB signé attaché à un nouvel objet **Releases** GitHub `app-v32`
 - APK release signé attaché également (utile pour sideload, F-Droid, dogfood manuel)
-- Upload Play Console **track `closed`**, **statut `DRAFT`** — aller dans Play Console pour activer le draft une fois testé en interne
+- Upload Play Console **track `internal`** par défaut, **statut `DRAFT`** — aller dans Play Console pour activer le draft une fois testé en interne
 
 ## Flux 2 — Build intermédiaire / dogfood manuel
 
@@ -82,7 +89,7 @@ La CD démarre automatiquement. Output :
 | Input | Choix typique |
 |---|---|
 | `ref` | `feat/ma-branche-en-cours` (vide = ref actuel) |
-| `play_track` | `closed` (par défaut) — ou `none` pour ne pas pousser sur Play |
+| `play_track` | `internal` (par défaut, track standard) ; nom exact du closed track Play Console (ex: `qa`, `beta-ferme`) ; ou `none` pour ne pas pousser sur Play |
 | `attach_release` | `false` (artefacts uniquement comme Workflow artefacts, pas de GitHub Release) |
 
 Output :
@@ -131,6 +138,6 @@ Procédure : voir [docs Play Console — Reset upload key](https://support.googl
 
 ## Note sur la signing config locale
 
-Le init-script Gradle [`.gradle-user/signing/signing.init.gradle`](https://github.com/ForumHFR/redface2/blob/main/.gradle-user/signing/signing.init.gradle) reste utilisable en local pour signer un AAB de test sans toucher aux secrets CI. Il est ignoré par git (cf. `.gitignore`) et ne s'active que quand on passe `--init-script` explicitement.
+Le init-script Gradle `.gradle-user/signing/signing.init.gradle` (gitignored, hors arbre versionné) reste utilisable en local pour signer un AAB de test sans toucher aux secrets CI. Il ne s'active que quand on passe `--init-script` explicitement.
 
 La CD, elle, lit les variables d'environnement `UPLOAD_KEYSTORE_PATH`, `UPLOAD_KEYSTORE_PASSWORD`, `UPLOAD_KEY_ALIAS`, `UPLOAD_KEY_PASSWORD` que le workflow remplit depuis les secrets GitHub. Ces variables sont prises en compte par `app/build.gradle.kts` qui pose alors un `signingConfigs.create("upload")` ad hoc — sans contaminer le flow dev local.

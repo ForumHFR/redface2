@@ -7,7 +7,10 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      # Namespaced under `app-v*` to avoid colliding with the `v0.x.0` tags used for
+      # spec/site versions (e.g. v0.7.0, v0.8.0). An app release tag looks like `app-v32`,
+      # `app-v33`, etc., aligned on `versionCode`.
+      - 'app-v*'
   workflow_dispatch:
     inputs:
       ref:
@@ -16,17 +19,14 @@ on:
         default: ''
         type: string
       play_track:
-        description: 'Play Console track (closed = default tester channel)'
+        description: |
+          Play Console track. Standard tracks: `internal`, `alpha`, `beta`, `production`.
+          Closed-testing tracks have custom names defined in the Play Console — pass the exact
+          track name as it appears there (e.g. `qa`, `dogfood`, `beta-ferme`). `none` skips
+          Play upload entirely (build + sign only).
         required: false
-        default: 'closed'
-        type: choice
-        options:
-          - closed
-          - internal
-          - alpha
-          - beta
-          - production
-          - none
+        default: 'internal'
+        type: string
       attach_release:
         description: 'Attach AAB+APK to a GitHub Release (only meaningful for tag-style runs)'
         required: false
@@ -54,7 +54,7 @@ jobs:
     env:
       # GPP picks track + service-account path from these. Track gets overwritten by the
       # workflow_dispatch input below.
-      PLAY_TRACK: ${{ inputs.play_track || 'closed' }}
+      PLAY_TRACK: ${{ inputs.play_track || 'internal' }}
 
     steps:
       - name: Checkout
@@ -157,11 +157,11 @@ jobs:
             exit 1
           fi
           echo "Built AAB: ${aab}"
-          # apksigner ships with build-tools; the cirruslabs image has it on PATH.
-          # bundletool would be more accurate for AAB but apksigner+`-min-sdk-version`
-          # against the AAB has been working historically; if it ever fails we'll wire
-          # bundletool here.
-          jarsigner -verify -strict "${aab}" >/dev/null
+          # `jarsigner -verify` (without -strict) checks the signature without rejecting
+          # self-signed certs. The upload key IS self-signed by construction (Play Store
+          # re-signs the artefact with its own App Signing key on the way to users), so
+          # `-strict` would always exit 4 here even though the AAB is fully valid for Play.
+          jarsigner -verify "${aab}" >/dev/null
 
       - name: Stage artefacts
         id: artefacts
@@ -199,9 +199,12 @@ jobs:
           serviceAccountJson: ${{ steps.service_account.outputs.path }}
           packageName: fr.forumhfr.redface2
           releaseFiles: ${{ steps.artefacts.outputs.aab }}
-          track: ${{ env.PLAY_TRACK }}
+          # `tracks` (plural) replaced the deprecated `track` input. Comma-separated for
+          # multi-track promotion, single value for our usual case.
+          tracks: ${{ env.PLAY_TRACK }}
           status: draft
-          whatsNewDirectory: app/src/main/play/release-notes
+          # Action expects `whatsnew-<LOCALE>` files placed flat in this directory.
+          whatsNewDirectory: app/src/main/play/whatsnew
 
       - name: Cleanup keystore + service account
         if: always()

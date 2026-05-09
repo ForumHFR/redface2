@@ -1,7 +1,0 @@
-Build de test interne — Redface 2 (client communautaire pour HFR).
-
-Détail des changements : voir CHANGELOG.md du dépôt
-https://github.com/ForumHFR/redface2/blob/main/CHANGELOG.md
-
-Cette version est en test fermé : merci de remonter tout bug via
-les outils internes du canal de test ou en ouvrant une issue.
