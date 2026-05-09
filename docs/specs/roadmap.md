@@ -25,7 +25,7 @@ Pour la liste des capabilities et des non-goals, voir le [scope fonctionnel]({{ 
 | Phase | Objectif | Taille | Dépend de | Statut |
 |---|---|---|---|---|
 | **0 — Bootstrap** | Squelette qui compile, CI, thème, navigation | S | — | ✅ Livrée |
-| **1 — Core** | Lecture du forum (drapeaux, topics, forum, deep links) | XL | Phase 0 | ✅ Livrée (AAB `0.1.0-phase1.4` / specs v0.8.3) |
+| **1 — Core** | Lecture du forum (drapeaux, topics, forum, deep links) | XL | Phase 0 | ✅ Livrée (AAB `0.1.0-phase1.5` / specs v0.8.4) |
 | **2 — Écriture** | Post / edit / quote / create topic / recherche | L | Phase 1 | À faire |
 | **3 — Messages** | MPs classiques + MultiMPs avec sync | M | Phase 2 + **MPStorage2** (hfr-redkit) | À faire |
 | **4 — Extensions** | Bookmarks, Blacklist, Qualitay, Redflag | L | Phase 3 + **hfr-redflag Worker** | À faire |

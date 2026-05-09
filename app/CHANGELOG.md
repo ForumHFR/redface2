@@ -15,11 +15,25 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
-## v35 — `0.1.0-phase1.4` — 2026-05-08
+## v36 — `0.1.0-phase1.5` — 2026-05-10
 
 **Statut** : `local`
 **Commit** : à venir
-**Fichier** : `redface2-v35-<date>-<sha>.aab`
+**Fichier** : `redface2-v36-<date>-<sha>.aab`
+
+Premier build CD avec auto-publish sur le track alpha. Pas de changement fonctionnel de l'app — c'est l'AAB qui valide bout-en-bout le nouveau pipeline avec `status: completed` (par défaut sur les tracks de test), pour ne plus avoir à activer le draft manuellement dans la Play Console après chaque upload.
+
+### Changed
+- `.github/workflows/release.yml` : ajout d'un input `play_release_status` au `workflow_dispatch` et d'un défaut intelligent (`completed` pour testing tracks, `draft` pour production).
+- `app/build.gradle.kts` bump `versionCode = 36`, `versionName = "0.1.0-phase1.5"`. Le slot `v35` est marqué `closed` (uploadé manuellement sur le track alpha avant la mise en place du push API).
+
+---
+
+## v35 — `0.1.0-phase1.4` — 2026-05-08
+
+**Statut** : `closed`
+**Commit** : `4bc6210`
+**Fichier** : `redface2-v35-4bc6210.aab`
 
 Patch dogfood après extraction exhaustive du wikismilies HFR : le bucket carré `56sp × 56sp` de v34 rendait les petits smileys lisibles, mais ne respectait pas la forme dominante réelle du corpus. Sur 34 139 smileys perso, la première taille est `70×50` (8047 occurrences), suivie de `50×50` (2811), `67×50` (1142), puis de nombreuses variantes `W×50`.
 

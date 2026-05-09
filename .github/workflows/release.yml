@@ -33,6 +33,18 @@ on:
         required: false
         default: false
         type: boolean
+      play_release_status:
+        description: |
+          Play Console release status. `completed` = publish immediately on the chosen track
+          (testers see it without manual intervention). `draft` = upload as draft, requires
+          manual activation in the Play Console UI (final guardrail before users see it).
+          `inProgress` = upload + start a staged rollout (rollout fraction is set via Play
+          Console UI afterwards). Leave empty to use the smart default: `completed` for
+          testing tracks (alpha/beta/internal/closed), `draft` for `production` (so an
+          accidental prod tag can never auto-publish to real users).
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   # Allow concurrent releases on different tags / refs but coalesce repeated dispatches on
@@ -60,6 +72,15 @@ jobs:
       # The historical comment here mentioned `gradle-play-publisher` which was retired in
       # the initial Codex review on this PR — the upload now goes through r0adkll directly.
       PLAY_TRACK: ${{ inputs.play_track || 'alpha' }}
+      # Smart default for the Play Console release status:
+      #   - explicit `play_release_status` input wins when non-empty
+      #   - otherwise: `draft` for production track (mandatory manual UI activation as a
+      #     final guardrail against accidental prod releases)
+      #   - otherwise: `completed` for any testing track (alpha/beta/internal/closed/none)
+      # On a tag push, `inputs.play_track` is empty so the default `completed` applies —
+      # tag = ship to alpha testers immediately. To target production, dispatch manually
+      # with `play_track: production` (which keeps the `draft` default unless overridden).
+      PLAY_RELEASE_STATUS: ${{ inputs.play_release_status != '' && inputs.play_release_status || (inputs.play_track == 'production' && 'draft' || 'completed') }}
 
     steps:
       - name: Checkout
@@ -111,7 +132,7 @@ jobs:
           echo "short_sha=${short_sha}" >>"$GITHUB_OUTPUT"
           echo "release_kind=${release_kind}" >>"$GITHUB_OUTPUT"
           echo "release_tag=${release_tag}" >>"$GITHUB_OUTPUT"
-          echo "::notice title=Release plan::kind=${release_kind} versionCode=${version_code} versionName=${version_name} sha=${short_sha} tag=${release_tag} track=${{ env.PLAY_TRACK }}"
+          echo "::notice title=Release plan::kind=${release_kind} versionCode=${version_code} versionName=${version_name} sha=${short_sha} tag=${release_tag} track=${{ env.PLAY_TRACK }} status=${{ env.PLAY_RELEASE_STATUS }}"
 
       - name: Setup Gradle
         # Pinned to v5 in lockstep with .github/workflows/ci.yml to keep both workflows on
@@ -220,9 +241,12 @@ jobs:
       - name: Publish to Play Console
         # gradle-play-publisher 4.0.0 had broken compat with our AGP 9.2 (project in
         # maintenance mode since April 2026), so we delegate the upload to the more focused
-        # r0adkll action that talks to the Play Developer API directly. status=draft means
-        # the maintainer activates the release in Play Console UI; releaseFiles points to
-        # the staged AAB; whatsNewDirectory pulls per-locale release-notes from the repo.
+        # r0adkll action that talks to the Play Developer API directly. The release status
+        # is configurable per run (`PLAY_RELEASE_STATUS`): `completed` publishes immediately
+        # on testing tracks (default for alpha/beta/internal), `draft` requires manual UI
+        # activation (default for production, override available via the dispatch input).
+        # `releaseFiles` points to the staged AAB; `whatsNewDirectory` pulls per-locale
+        # release-notes from the repo.
         if: ${{ env.PLAY_TRACK != 'none' && steps.service_account.outputs.path != '' }}
         # Pinned to a commit sha rather than the floating `v1` tag — this step pushes to
         # Play Console using the project's service account credentials, so we want a
@@ -239,7 +263,7 @@ jobs:
           # neither is deprecated as of v1.1.5 (verified against action.yml). We use `tracks`
           # to leave the door open for multi-track promotion later without renaming the input.
           tracks: ${{ env.PLAY_TRACK }}
-          status: draft
+          status: ${{ env.PLAY_RELEASE_STATUS }}
           # Action expects `whatsnew-<LOCALE>` files placed flat in this directory.
           whatsNewDirectory: app/src/main/play/whatsnew
 
