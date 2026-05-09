@@ -69,6 +69,16 @@ jobs:
           ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
 
+      - name: Trust workspace for git
+        # `actions/checkout` configures `safe.directory` for the runner user, but this job
+        # runs inside the `cirruslabs/android-sdk` container under a different uid. Without
+        # this step, every subsequent `git` call (rev-parse here, plus implicit calls inside
+        # `gradle/actions/setup-gradle` for cache fingerprinting) fails with
+        # `fatal: detected dubious ownership in repository at '/__w/redface2/redface2'`.
+        # Scoped to GITHUB_WORKSPACE to avoid trusting unrelated paths.
+        shell: bash
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Resolve refs and version metadata
         id: meta
         shell: bash
