@@ -75,6 +75,16 @@ jobs:
           version_code=$(grep -E '^[[:space:]]+versionCode[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*= *([0-9]+).*/\1/')
           version_name=$(grep -E '^[[:space:]]+versionName[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*= *"(.*)".*/\1/')
           short_sha=$(git rev-parse --short HEAD)
+          # Fail-loud guards: a silent empty extraction would propagate to the GitHub Release
+          # name and Play Console upload metadata as ugly placeholders. Better to crash here.
+          if [[ -z "${version_code}" ]]; then
+            echo "::error::versionCode not found in app/build.gradle.kts (regex match failed)"
+            exit 1
+          fi
+          if [[ -z "${version_name}" ]]; then
+            echo "::error::versionName not found in app/build.gradle.kts (regex match failed)"
+            exit 1
+          fi
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             release_kind="tag"
             release_tag="${GITHUB_REF_NAME}"
@@ -90,6 +100,11 @@ jobs:
           echo "::notice title=Release plan::kind=${release_kind} versionCode=${version_code} versionName=${version_name} sha=${short_sha} tag=${release_tag} track=${{ env.PLAY_TRACK }}"
 
       - name: Setup Gradle
+        # Pinned to v5 in lockstep with .github/workflows/ci.yml to keep both workflows on
+        # the same Gradle action major. v6 (April 2025) extracted caching into a separate
+        # `gradle-actions-caching` library that is no longer MIT-licensed; bumping is a
+        # single coordinated change to do across both workflows when we deliberately opt
+        # into the new caching license.
         uses: gradle/actions/setup-gradle@v5
 
       - name: Decode upload keystore
@@ -195,7 +210,13 @@ jobs:
         # the maintainer activates the release in Play Console UI; releaseFiles points to
         # the staged AAB; whatsNewDirectory pulls per-locale release-notes from the repo.
         if: ${{ env.PLAY_TRACK != 'none' && steps.service_account.outputs.path != '' }}
-        uses: r0adkll/upload-google-play@v1
+        # Pinned to a commit sha rather than the floating `v1` tag — this step pushes to
+        # Play Console using the project's service account credentials, so we want a
+        # supply-chain guarantee that the action code does not change under our feet.
+        # The sha below is `v1` resolved on 2026-05-09 → release v1.1.5
+        # (https://github.com/r0adkll/upload-google-play/releases/tag/v1.1.5). Bumping it
+        # is a deliberate review step, not a transparent floating-tag update.
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5  # v1.1.5
         with:
           serviceAccountJson: ${{ steps.service_account.outputs.path }}
           packageName: fr.forumhfr.redface2

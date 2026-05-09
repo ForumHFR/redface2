@@ -70,8 +70,9 @@ android {
 // 4.0.0 had documented incompat issues with AGP 9, and the project went into maintenance
 // mode in April 2026 — see https://github.com/Triple-T/gradle-play-publisher/issues/1188).
 //
-// Release notes per locale stay in app/src/main/play/release-notes/<lang>/default.txt and are
-// passed to the upload action via its `whatsNewDirectory` input.
+// Release notes per locale live in app/src/main/play/whatsnew/whatsnew-<BCP47> (flat files,
+// e.g. whatsnew-fr-FR, whatsnew-en-US — the layout that `r0adkll/upload-google-play` expects)
+// and are passed to the upload action via its `whatsNewDirectory` input.
 
 dependencies {
     implementation(project(":core:data"))
