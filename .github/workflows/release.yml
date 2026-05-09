@@ -20,12 +20,13 @@ on:
         type: string
       play_track:
         description: |
-          Play Console track. Standard tracks: `internal`, `alpha`, `beta`, `production`.
-          Closed-testing tracks have custom names defined in the Play Console — pass the exact
-          track name as it appears there (e.g. `qa`, `dogfood`, `beta-ferme`). `none` skips
-          Play upload entirely (build + sign only).
+          Play Console track. For Redface 2 the closed testing track is `alpha` (lowercase).
+          Promotion pipeline: `alpha` → `beta` → `production`. Other valid values: `internal`
+          (standard internal testing) or the exact name of a custom closed track if one is
+          created later in the Play Console. `none` skips Play upload entirely (build + sign
+          only).
         required: false
-        default: 'internal'
+        default: 'alpha'
         type: string
       attach_release:
         description: 'Attach AAB+APK to a GitHub Release (only meaningful for tag-style runs)'
@@ -54,7 +55,7 @@ jobs:
     env:
       # GPP picks track + service-account path from these. Track gets overwritten by the
       # workflow_dispatch input below.
-      PLAY_TRACK: ${{ inputs.play_track || 'internal' }}
+      PLAY_TRACK: ${{ inputs.play_track || 'alpha' }}
 
     steps:
       - name: Checkout

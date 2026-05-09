@@ -9,15 +9,15 @@ nav_order: 5
 
 Comment construire un AAB signé et le publier sur le canal de tests Play Console depuis GitHub Actions. Le workflow couvre deux flux :
 
-1. **Tag git `app-v<N>`** — release officielle alignée sur le `versionCode`. Build → AAB + APK signés → upload Play Console (track `internal` par défaut, statut `DRAFT`) → GitHub Release avec les artefacts attachés.
-2. **`workflow_dispatch` manuel** — release intermédiaire / dogfood en cours de dev. Choix de la branche, du track Play (`internal` / `alpha` / `beta` / `production` / nom de closed track custom / `none`) et de l'attachement à une GitHub Release. Track `none` = build + sign uniquement, pas d'upload Play.
+1. **Tag git `app-v<N>`** — release officielle alignée sur le `versionCode`. Build → AAB + APK signés → upload Play Console (track `alpha` = test fermé par défaut, statut `DRAFT`) → GitHub Release avec les artefacts attachés.
+2. **`workflow_dispatch` manuel** — release intermédiaire / dogfood en cours de dev. Choix de la branche, du track Play (`alpha` / `beta` / `production` / `internal` / nom de closed track custom / `none`) et de l'attachement à une GitHub Release. Track `none` = build + sign uniquement, pas d'upload Play.
 
 Workflow source : [`.github/workflows/release.yml`](https://github.com/ForumHFR/redface2/blob/main/.github/workflows/release.yml).
 
 ## Conventions
 
 - **Tag namespace** : les releases app utilisent `app-v<versionCode>` (ex: `app-v32`, `app-v33`). Cela évite de collisionner avec les tags `v0.x.0` du site / des specs.
-- **Track Play Console** : la CD utilise par défaut `internal` (track standard, toujours présent). Les **closed testing tracks** ont un nom **custom** défini par le maintainer dans Play Console UI (ex: `qa`, `beta-ferme`, `dogfood`). Pour cibler un closed track depuis le `workflow_dispatch`, passer le nom **exact** tel qu'il apparaît dans la Play Console. La validation de l'existence du track est faite côté Play API au moment de l'upload — un nom invalide fera échouer l'action avec une erreur claire.
+- **Track Play Console** : pour Redface 2, le track de **test fermé** initial est `alpha` (lowercase, c'est le nom tel qu'il apparaît dans la Play Console). La CD utilise donc `alpha` par défaut. Pipeline cible de promotion : `alpha` → `beta` → `production`. Pour cibler un autre track depuis le `workflow_dispatch`, passer le nom **exact** tel qu'il apparaît dans la Play Console (la validation est faite côté Play API au moment de l'upload — un nom invalide fait échouer l'action avec une erreur claire).
 
 ## Pré-requis (à faire une fois)
 
@@ -32,7 +32,8 @@ Le seul flux supporté en 2026 par Google pour les uploads CI est via **GCP IAM*
 5. Permissions Play Console minimales pour l'app `fr.forumhfr.redface2` :
    - `View app information`
    - `Manage testing track and edit drafts`
-   - `Manage closed testing release` (et `internal`, `alpha`, `beta`, `production` selon les tracks que la CD doit pouvoir cibler)
+   - `Manage testing track releases` (couvre `internal` + `alpha` + `beta`)
+   - `Release apps to production` quand la CD doit pouvoir promouvoir vers `production`
 
 Référence Google : [Use the Play Developer API with a service account](https://developers.google.com/android-publisher/getting_started).
 
@@ -80,7 +81,7 @@ git push --tags
 La CD démarre automatiquement. Output :
 - AAB signé attaché à un nouvel objet **Releases** GitHub `app-v32`
 - APK release signé attaché également (utile pour sideload, F-Droid, dogfood manuel)
-- Upload Play Console **track `internal`** par défaut, **statut `DRAFT`** — aller dans Play Console pour activer le draft une fois testé en interne
+- Upload Play Console **track `alpha`** (test fermé) par défaut, **statut `DRAFT`** — aller dans Play Console pour activer le draft une fois testé en interne
 
 ## Flux 2 — Build intermédiaire / dogfood manuel
 
@@ -89,7 +90,7 @@ La CD démarre automatiquement. Output :
 | Input | Choix typique |
 |---|---|
 | `ref` | `feat/ma-branche-en-cours` (vide = ref actuel) |
-| `play_track` | `internal` (par défaut, track standard) ; nom exact du closed track Play Console (ex: `qa`, `beta-ferme`) ; ou `none` pour ne pas pousser sur Play |
+| `play_track` | `alpha` (par défaut, test fermé Redface 2) ; `beta`, `production`, `internal` ; ou `none` pour ne pas pousser sur Play |
 | `attach_release` | `false` (artefacts uniquement comme Workflow artefacts, pas de GitHub Release) |
 
 Output :
