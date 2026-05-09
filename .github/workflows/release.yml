@@ -42,8 +42,11 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write   # needed by softprops/action-gh-release
-  id-token: read
+  # `contents: write` is the only scope needed — softprops/action-gh-release creates the
+  # GitHub Release + uploads assets via the REST API. We do not use OIDC tokens here
+  # (the Play Console upload uses a service-account JSON, not workload identity), so
+  # there is no `id-token: write/read` scope to grant.
+  contents: write
 
 jobs:
   build:
@@ -53,8 +56,9 @@ jobs:
       image: ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31
     timeout-minutes: 30
     env:
-      # GPP picks track + service-account path from these. Track gets overwritten by the
-      # workflow_dispatch input below.
+      # Resolved Play track for the upload action below; defaults to alpha (closed testing).
+      # The historical comment here mentioned `gradle-play-publisher` which was retired in
+      # the initial Codex review on this PR — the upload now goes through r0adkll directly.
       PLAY_TRACK: ${{ inputs.play_track || 'alpha' }}
 
     steps:
@@ -221,8 +225,9 @@ jobs:
           serviceAccountJson: ${{ steps.service_account.outputs.path }}
           packageName: fr.forumhfr.redface2
           releaseFiles: ${{ steps.artefacts.outputs.aab }}
-          # `tracks` (plural) replaced the deprecated `track` input. Comma-separated for
-          # multi-track promotion, single value for our usual case.
+          # The action accepts both `track` (single) and `tracks` (comma-separated list);
+          # neither is deprecated as of v1.1.5 (verified against action.yml). We use `tracks`
+          # to leave the door open for multi-track promotion later without renaming the input.
           tracks: ${{ env.PLAY_TRACK }}
           status: draft
           # Action expects `whatsnew-<LOCALE>` files placed flat in this directory.
@@ -252,6 +257,11 @@ jobs:
             release-artefacts/*.aab
             release-artefacts/*.apk
           draft: ${{ steps.meta.outputs.release_kind != 'tag' }}
+          # Treat any versionName carrying a `phase` or `rc` qualifier as a pre-release on
+          # GitHub. Phase 1/2/… builds (e.g. `0.1.0-phase1.1`) are dogfood/closed-testing
+          # artefacts and should not be advertised as the latest stable release on the repo
+          # landing page. Once we ship a clean SemVer (e.g. `1.0.0`) the flag flips to false
+          # automatically without touching the workflow.
           prerelease: ${{ contains(steps.meta.outputs.version_name, 'phase') || contains(steps.meta.outputs.version_name, 'rc') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

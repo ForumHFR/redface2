@@ -26,7 +26,7 @@ Workflow source : [`.github/workflows/release.yml`](https://github.com/ForumHFR/
 Le seul flux supporté en 2026 par Google pour les uploads CI est via **GCP IAM**. Il n'y a plus de "service account natif Play Console".
 
 1. Créer un projet GCP dédié au repo (ou réutiliser celui du compte développeur Play).
-2. **GCP Console → IAM → Service accounts** → créer `redface2-play-publisher`. Pas de rôle GCP nécessaire au-delà de `Service Account User` (c'est Play qui lui assignera ses droits).
+2. **GCP Console → IAM → Service accounts** → créer `redface2-play-publisher`. Aucun rôle GCP n'est nécessaire — la création du compte de service suffit. Les droits applicatifs (publication AAB, gestion tracks) sont accordés exclusivement côté Play Console à l'étape 1.5. Le rôle GCP `Service Account User` n'est utile **que si** d'autres principals doivent impersonner ce SA via la CLI `gcloud` ; pour un upload CI direct depuis GitHub Actions avec la clé JSON, on peut le laisser vide.
 3. Onglet **Keys → Add Key → JSON** → télécharger le fichier `redface2-play-publisher.json`. **Ne le commit nulle part.**
 4. **Play Console → Settings → Developer API → API access** → **Link existing project** (le projet GCP de l'étape 1) → **Grant access** au service account.
 5. Permissions Play Console minimales pour l'app `fr.forumhfr.redface2` :
@@ -127,6 +127,15 @@ L'upload key (PKCS12 RSA 4096 stockée dans `upload.jks`) est ce que **nous** si
 
 Procédure : voir [docs Play Console — Reset upload key](https://support.google.com/googleplay/android-developer/answer/9842756).
 
+## Récupérer un AAB si l'upload Play Console échoue
+
+Si l'étape `Publish to Play Console` du workflow échoue (auth Play, quota, track invalide…) **après** que la signature ait réussi, l'AAB et l'APK signés sont déjà stagés. Deux façons de les récupérer sans relancer le build :
+
+1. **Workflow artefacts** : aller sur la page Actions → run en échec → en bas du job, télécharger l'archive `redface2-v<N>-<sha>` (rétention 30 jours par défaut). C'est le chemin standard, qu'on parte d'un tag ou d'un dispatch.
+2. **GitHub Release** (chemin tag uniquement, ou `attach_release: true` en dispatch) : le step `Create GitHub Release` tourne **après** le step Play Console mais reste indépendant de son succès — si le build et la signature ont passé, l'AAB+APK sont attachés à la Release `app-v<N>` même si Play a refusé l'upload. Dans ce cas, après avoir corrigé la cause du refus (permissions Play, premier upload manuel, etc.), l'upload manuel via la Play Console UI à partir de l'AAB téléchargé évite de re-bumper inutilement le `versionCode`.
+
+Si la signature elle-même échoue (`keytool -list` ou `jarsigner -verify`), aucun artefact n'est produit — refixer le secret keystore avant de retenter.
+
 ## Dépannage
 
 | Symptôme | Cause probable | Fix |
@@ -136,6 +145,7 @@ Procédure : voir [docs Play Console — Reset upload key](https://support.googl
 | `INVALID_ARGUMENT: package fr.forumhfr.redface2 not found` | Premier upload manuel pas fait | Faire l'étape 2 du pré-requis |
 | AAB non signé en sortie de CD | Secret `UPLOAD_KEYSTORE_BASE64` manquant ou corrompu | Re-provisionner avec `base64 -w0` (pas de retours à la ligne) |
 | `keytool -list` échoue dans le job CI | Mauvais password ou base64 mangled | Vérifier `UPLOAD_KEYSTORE_PASSWORD` et regénérer le secret base64 |
+| Upload Play KO mais AAB OK | Voir § « Récupérer un AAB si l'upload Play Console échoue » | Télécharger l'artefact GH Actions, finir l'upload depuis Play Console |
 
 ## Note sur la signing config locale
 
