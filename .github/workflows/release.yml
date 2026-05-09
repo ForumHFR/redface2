@@ -1,0 +1,267 @@
+name: Release
+
+# Hybrid trigger: tag push for shipping ("v32", "v33"…) and manual dispatch for ad-hoc
+# intermediate builds during dev. Both paths produce a signed AAB + signed APK and attach
+# them to a GitHub Release (or workflow artifacts when no tag is present); the manual path
+# may also push to Play Console depending on the input.
+on:
+  push:
+    tags:
+      # Namespaced under `app-v*` to avoid colliding with the `v0.x.0` tags used for
+      # spec/site versions (e.g. v0.7.0, v0.8.0). An app release tag looks like `app-v32`,
+      # `app-v33`, etc., aligned on `versionCode`.
+      - 'app-v*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or tag to build (default: current ref)'
+        required: false
+        default: ''
+        type: string
+      play_track:
+        description: |
+          Play Console track. For Redface 2 the closed testing track is `alpha` (lowercase).
+          Promotion pipeline: `alpha` → `beta` → `production`. Other valid values: `internal`
+          (standard internal testing) or the exact name of a custom closed track if one is
+          created later in the Play Console. `none` skips Play upload entirely (build + sign
+          only).
+        required: false
+        default: 'alpha'
+        type: string
+      attach_release:
+        description: 'Attach AAB+APK to a GitHub Release (only meaningful for tag-style runs)'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  # Allow concurrent releases on different tags / refs but coalesce repeated dispatches on
+  # the same target to avoid double-uploading the same versionCode (Play Console rejects
+  # duplicates anyway, but the GH job would still consume secrets and time).
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  # `contents: write` is the only scope needed — softprops/action-gh-release creates the
+  # GitHub Release + uploads assets via the REST API. We do not use OIDC tokens here
+  # (the Play Console upload uses a service-account JSON, not workload identity), so
+  # there is no `id-token: write/read` scope to grant.
+  contents: write
+
+jobs:
+  build:
+    name: Build, sign and publish
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31
+    timeout-minutes: 30
+    env:
+      # Resolved Play track for the upload action below; defaults to alpha (closed testing).
+      # The historical comment here mentioned `gradle-play-publisher` which was retired in
+      # the initial Codex review on this PR — the upload now goes through r0adkll directly.
+      PLAY_TRACK: ${{ inputs.play_track || 'alpha' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # workflow_dispatch may pass a ref; tag pushes use the tag automatically.
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve refs and version metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Extract versionCode + versionName from app/build.gradle.kts so the release
+          # artefacts and the GitHub Release name stay aligned with the AAB they wrap.
+          version_code=$(grep -E '^[[:space:]]+versionCode[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*= *([0-9]+).*/\1/')
+          version_name=$(grep -E '^[[:space:]]+versionName[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*= *"(.*)".*/\1/')
+          short_sha=$(git rev-parse --short HEAD)
+          # Fail-loud guards: a silent empty extraction would propagate to the GitHub Release
+          # name and Play Console upload metadata as ugly placeholders. Better to crash here.
+          if [[ -z "${version_code}" ]]; then
+            echo "::error::versionCode not found in app/build.gradle.kts (regex match failed)"
+            exit 1
+          fi
+          if [[ -z "${version_name}" ]]; then
+            echo "::error::versionName not found in app/build.gradle.kts (regex match failed)"
+            exit 1
+          fi
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            release_kind="tag"
+            release_tag="${GITHUB_REF_NAME}"
+          else
+            release_kind="dispatch"
+            release_tag="dispatch-v${version_code}-${short_sha}"
+          fi
+          echo "version_code=${version_code}" >>"$GITHUB_OUTPUT"
+          echo "version_name=${version_name}" >>"$GITHUB_OUTPUT"
+          echo "short_sha=${short_sha}" >>"$GITHUB_OUTPUT"
+          echo "release_kind=${release_kind}" >>"$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >>"$GITHUB_OUTPUT"
+          echo "::notice title=Release plan::kind=${release_kind} versionCode=${version_code} versionName=${version_name} sha=${short_sha} tag=${release_tag} track=${{ env.PLAY_TRACK }}"
+
+      - name: Setup Gradle
+        # Pinned to v5 in lockstep with .github/workflows/ci.yml to keep both workflows on
+        # the same Gradle action major. v6 (April 2025) extracted caching into a separate
+        # `gradle-actions-caching` library that is no longer MIT-licensed; bumping is a
+        # single coordinated change to do across both workflows when we deliberately opt
+        # into the new caching license.
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Decode upload keystore
+        id: keystore
+        shell: bash
+        env:
+          UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${UPLOAD_KEYSTORE_BASE64:-}" ]]; then
+            echo "::error::Secret UPLOAD_KEYSTORE_BASE64 is missing — cannot sign release artefacts"
+            exit 1
+          fi
+          path="${RUNNER_TEMP}/upload.jks"
+          echo "${UPLOAD_KEYSTORE_BASE64}" | base64 -d > "${path}"
+          # Fail loudly if the decoded payload is not a real keystore (operator pasted base64
+          # of something else, encoding got mangled, etc.). keytool -list returns non-zero on
+          # malformed stores so this is the cheapest sanity check.
+          if ! keytool -list -keystore "${path}" -storepass "${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}" >/dev/null 2>&1; then
+            echo "::error::Decoded keystore at ${path} is not a valid PKCS12/JKS or the password is wrong"
+            exit 1
+          fi
+          echo "path=${path}" >>"$GITHUB_OUTPUT"
+
+      - name: Write Play Console service account JSON
+        id: service_account
+        shell: bash
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ env.PLAY_TRACK }}" == "none" ]]; then
+            echo "Track=none — skipping service account provisioning."
+            echo "path=" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ -z "${PLAY_SERVICE_ACCOUNT_JSON:-}" ]]; then
+            echo "::warning::PLAY_SERVICE_ACCOUNT_JSON not set; build will run but Play Console upload will be skipped."
+            echo "path=" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          path="${RUNNER_TEMP}/play-service-account.json"
+          printf '%s' "${PLAY_SERVICE_ACCOUNT_JSON}" > "${path}"
+          # Light JSON sanity check — must contain at least the "client_email" field.
+          if ! grep -q '"client_email"' "${path}"; then
+            echo "::error::PLAY_SERVICE_ACCOUNT_JSON does not look like a service account JSON (missing client_email)"
+            exit 1
+          fi
+          echo "path=${path}" >>"$GITHUB_OUTPUT"
+
+      - name: Build signed AAB and APK
+        env:
+          UPLOAD_KEYSTORE_PATH: ${{ steps.keystore.outputs.path }}
+          UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
+          UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+        run: ./gradlew :app:bundleRelease :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify AAB signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          aab=$(ls app/build/outputs/bundle/release/*.aab | head -1)
+          if [[ -z "${aab}" ]]; then
+            echo "::error::No AAB produced under app/build/outputs/bundle/release/"
+            exit 1
+          fi
+          echo "Built AAB: ${aab}"
+          # `jarsigner -verify` (without -strict) checks the signature without rejecting
+          # self-signed certs. The upload key IS self-signed by construction (Play Store
+          # re-signs the artefact with its own App Signing key on the way to users), so
+          # `-strict` would always exit 4 here even though the AAB is fully valid for Play.
+          jarsigner -verify "${aab}" >/dev/null
+
+      - name: Stage artefacts
+        id: artefacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-artefacts
+          aab=$(ls app/build/outputs/bundle/release/*.aab | head -1)
+          apk=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          aab_dest="release-artefacts/redface2-v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}.aab"
+          apk_dest="release-artefacts/redface2-v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}.apk"
+          cp "${aab}" "${aab_dest}"
+          cp "${apk}" "${apk_dest}"
+          echo "aab=${aab_dest}" >>"$GITHUB_OUTPUT"
+          echo "apk=${apk_dest}" >>"$GITHUB_OUTPUT"
+          ls -la release-artefacts/
+
+      - name: Upload workflow artefacts (always)
+        uses: actions/upload-artifact@v5
+        with:
+          name: redface2-v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}
+          path: release-artefacts/*
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Publish to Play Console
+        # gradle-play-publisher 4.0.0 had broken compat with our AGP 9.2 (project in
+        # maintenance mode since April 2026), so we delegate the upload to the more focused
+        # r0adkll action that talks to the Play Developer API directly. status=draft means
+        # the maintainer activates the release in Play Console UI; releaseFiles points to
+        # the staged AAB; whatsNewDirectory pulls per-locale release-notes from the repo.
+        if: ${{ env.PLAY_TRACK != 'none' && steps.service_account.outputs.path != '' }}
+        # Pinned to a commit sha rather than the floating `v1` tag — this step pushes to
+        # Play Console using the project's service account credentials, so we want a
+        # supply-chain guarantee that the action code does not change under our feet.
+        # The sha below is `v1` resolved on 2026-05-09 → release v1.1.5
+        # (https://github.com/r0adkll/upload-google-play/releases/tag/v1.1.5). Bumping it
+        # is a deliberate review step, not a transparent floating-tag update.
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5  # v1.1.5
+        with:
+          serviceAccountJson: ${{ steps.service_account.outputs.path }}
+          packageName: fr.forumhfr.redface2
+          releaseFiles: ${{ steps.artefacts.outputs.aab }}
+          # The action accepts both `track` (single) and `tracks` (comma-separated list);
+          # neither is deprecated as of v1.1.5 (verified against action.yml). We use `tracks`
+          # to leave the door open for multi-track promotion later without renaming the input.
+          tracks: ${{ env.PLAY_TRACK }}
+          status: draft
+          # Action expects `whatsnew-<LOCALE>` files placed flat in this directory.
+          whatsNewDirectory: app/src/main/play/whatsnew
+
+      - name: Cleanup keystore + service account
+        if: always()
+        shell: bash
+        run: |
+          rm -f "${RUNNER_TEMP}/upload.jks" "${RUNNER_TEMP}/play-service-account.json" || true
+
+      - name: Create GitHub Release
+        # Tag push always creates a Release; manual dispatch only when explicitly opted-in.
+        if: ${{ steps.meta.outputs.release_kind == 'tag' || inputs.attach_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.release_tag }}
+          name: 'Redface 2 v${{ steps.meta.outputs.version_code }} (${{ steps.meta.outputs.version_name }})'
+          body: |
+            **versionCode** : ${{ steps.meta.outputs.version_code }}
+            **versionName** : ${{ steps.meta.outputs.version_name }}
+            **commit** : ${{ steps.meta.outputs.short_sha }}
+            **Play Console track** : ${{ env.PLAY_TRACK }}
+
+            Détails dans [CHANGELOG.md](https://github.com/ForumHFR/redface2/blob/main/CHANGELOG.md) (specs) et [app/CHANGELOG.md](https://github.com/ForumHFR/redface2/blob/main/app/CHANGELOG.md) (binaire).
+          files: |
+            release-artefacts/*.aab
+            release-artefacts/*.apk
+          draft: ${{ steps.meta.outputs.release_kind != 'tag' }}
+          # Treat any versionName carrying a `phase` or `rc` qualifier as a pre-release on
+          # GitHub. Phase 1/2/… builds (e.g. `0.1.0-phase1.1`) are dogfood/closed-testing
+          # artefacts and should not be advertised as the latest stable release on the repo
+          # landing page. Once we ship a clean SemVer (e.g. `1.0.0`) the flag flips to false
+          # automatically without touching the workflow.
+          prerelease: ${{ contains(steps.meta.outputs.version_name, 'phase') || contains(steps.meta.outputs.version_name, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
