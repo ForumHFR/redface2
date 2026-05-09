@@ -4,6 +4,23 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+// CI-time signing config. The keystore (.jks) is provided as base64 in the GitHub Action
+// secret UPLOAD_KEYSTORE_BASE64 — the workflow decodes it into UPLOAD_KEYSTORE_PATH before
+// calling Gradle. When all four env vars are present we wire `buildTypes.release.signingConfig`
+// to the "upload" config below. When they are absent (local dev), the historical
+// .gradle-user/signing/signing.init.gradle init-script still kicks in via `--init-script` and
+// signs with the dev-only password; this codepath stays untouched so the local dogfood flow
+// keeps working without any contributor migration.
+val ciKeystorePath = providers.environmentVariable("UPLOAD_KEYSTORE_PATH").orNull
+val ciKeystorePassword = providers.environmentVariable("UPLOAD_KEYSTORE_PASSWORD").orNull
+val ciKeyAlias = providers.environmentVariable("UPLOAD_KEY_ALIAS").orNull
+val ciKeyPassword = providers.environmentVariable("UPLOAD_KEY_PASSWORD").orNull
+val hasCiSigningConfig =
+    !ciKeystorePath.isNullOrBlank() &&
+        !ciKeystorePassword.isNullOrBlank() &&
+        !ciKeyAlias.isNullOrBlank() &&
+        !ciKeyPassword.isNullOrBlank()
+
 android {
     namespace = "fr.forumhfr.redface2"
 
@@ -24,6 +41,20 @@ android {
         manifestPlaceholders["appLabel"] = "@string/app_name"
     }
 
+    if (hasCiSigningConfig) {
+        signingConfigs {
+            create("upload") {
+                storeFile = file(ciKeystorePath!!)
+                storePassword = ciKeystorePassword
+                keyAlias = ciKeyAlias
+                keyPassword = ciKeyPassword
+            }
+        }
+        buildTypes.named("release") {
+            signingConfig = signingConfigs.getByName("upload")
+        }
+    }
+
     buildFeatures {
         // Expose BuildConfig.VERSION_NAME / VERSION_CODE to Kotlin code so the
         // placeholder screens can show them while :feature:settings (the future
@@ -31,6 +62,17 @@ android {
         buildConfig = true
     }
 }
+
+// Play Console upload is delegated to the GitHub Action `r0adkll/upload-google-play` in
+// .github/workflows/release.yml — it consumes the AAB artefact produced by `:app:bundleRelease`
+// and pushes it via the Play Developer API directly. Keeping the upload step out of Gradle
+// avoids a hard dependency on a Gradle plugin tracking AGP version churn (gradle-play-publisher
+// 4.0.0 had documented incompat issues with AGP 9, and the project went into maintenance
+// mode in April 2026 — see https://github.com/Triple-T/gradle-play-publisher/issues/1188).
+//
+// Release notes per locale live in app/src/main/play/whatsnew/whatsnew-<BCP47> (flat files,
+// e.g. whatsnew-fr-FR, whatsnew-en-US — the layout that `r0adkll/upload-google-play` expects)
+// and are passed to the upload action via its `whatsNewDirectory` input.
 
 dependencies {
     implementation(project(":core:data"))
