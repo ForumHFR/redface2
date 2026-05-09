@@ -15,6 +15,68 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v35 — `0.1.0-phase1.4` — 2026-05-08
+
+**Statut** : `local`
+**Commit** : à venir
+**Fichier** : `redface2-v35-<date>-<sha>.aab`
+
+Patch dogfood après extraction exhaustive du wikismilies HFR : le bucket carré `56sp × 56sp` de v34 rendait les petits smileys lisibles, mais ne respectait pas la forme dominante réelle du corpus. Sur 34 139 smileys perso, la première taille est `70×50` (8047 occurrences), suivie de `50×50` (2811), `67×50` (1142), puis de nombreuses variantes `W×50`.
+
+### Changed
+- `PostMediaDisplayPolicy.persoSmiley` : `56sp × 56sp` → `70sp × 50sp`.
+- `ContentScale.Fit` reste la règle des smileys, mais le bucket cible devient corpus-first :
+  - `15×15` devient `50×50`, lisible sans réserver une ligne carrée de 56sp.
+  - `39×15` devient `70×27`, ratio préservé.
+  - `50×50` reste `50×50`, taille native dominante.
+  - `70×50` reste `70×50`, taille la plus fréquente du wikismilies.
+  - `200×150` devient `67×50`, borne haute conservée.
+- Les images inline `[img]` restent en `ContentScale.Inside` dans le bucket `240×180`.
+- Invariant typographique resserré : `persoSmiley.placeholderHeight ≤ 2.5 × bodyMedium.lineHeight`.
+
+### Tests
+- `PostMediaDisplayPolicyTest` : dimensions 70×50sp, corpus `Fit` aligné sur wikismilies, séparation `smileyContentScale` / `inlineImageContentScale`, ratios extrêmes `1×100` / `100×1`, invariant `2.5×`.
+- `PostRendererInlineTest` : bucket perso 70×50sp explicitement distinct du builtin 18sp.
+
+---
+
+## v34 — `0.1.0-phase1.3` — 2026-05-05
+
+**Statut** : `burnt`
+**Commit** : `21e04d6`
+**Fichier** : `redface2-v34-20260505-21e04d6.aab`
+
+Patch dogfood après retour visuel sur v32/v33 : les smileys perso en bucket `40sp` corrigent le chevauchement, mais sont trop petits sur smartphone. v34 garde le correctif clé de #129 (`fillMaxSize()` dans le placeholder `sp`), remonte le bucket perso à `56sp`, et repasse les smileys en `ContentScale.Fit` pour restaurer leur lisibilité.
+
+Slot remplacé par v35 après analyse du crawl exhaustif wikismilies : `56×56` est lisible, mais la distribution réelle justifie un bucket `70×50`.
+
+### Changed
+- `PostMediaDisplayPolicy.persoSmiley` : `40sp × 40sp` → `56sp × 56sp`.
+- Corpus attendu à density 1 avec `ContentScale.Fit` côté smileys :
+  - `15×15` devient `56×56`, lisible sur smartphone.
+  - `39×15` devient `56×22`, ratio préservé.
+  - `50×50` devient `56×56`, léger upscale assumé.
+  - `70×50` devient `56×40`, ratio préservé.
+  - `200×150` devient `56×42`, borne haute conservée.
+- Les images inline `[img]` restent en `ContentScale.Inside` pour ne pas agrandir une petite image arbitraire dans le bucket `240×180`.
+- Invariant typographique assoupli de `2.5×` à `2.8× bodyMedium.lineHeight` : on privilégie la lisibilité des perso HFR sans revenir au bucket cassé `64sp`.
+
+### Tests
+- `PostMediaDisplayPolicyTest` : dimensions 56sp, corpus `Fit`, séparation `smileyContentScale` / `inlineImageContentScale`, ratios extrêmes `1×100` / `100×1`, invariant `2.8×`.
+- `PostRendererInlineTest` : bucket perso 56sp explicitement distinct du builtin 18sp.
+
+---
+
+## v33 — `0.1.0-phase1.2` — 2026-05-05
+
+**Statut** : `burnt`
+**Commit** : `a55453a` puis `535b839`
+**Fichier** : `redface2-v33-20260505-a55453a.aab`, `redface2-v33-20260505-535b839.aab`
+
+Slot brûlé pendant le dogfood du correctif smileys perso. La trajectoire finale passe par v35 avec un nouveau `versionCode` pour éviter tout conflit Play Console / distribution interne.
+
+---
+
 ## v32 — `0.1.0-phase1.1` — 2026-05-05
 
 **Statut** : `local`

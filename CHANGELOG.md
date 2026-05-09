@@ -10,6 +10,47 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## v0.8.3 — 2026-05-08
+
+Patch dogfood guidé par le crawl exhaustif `wikismilies.php` : le bucket carré `56×56` rendait les micro-smileys lisibles, mais ne respectait pas la forme dominante réelle des smileys perso HFR (`70×50`, puis variantes `W×50`). Le build final passe en `v35 / 0.1.0-phase1.4`; `v34` est considéré brûlé.
+
+### Changed
+- `:core:ui` — `PostMediaDisplayPolicy.persoSmiley` passe de **56×56** à **70×50**. `ContentScale.Fit` reste utilisé pour les smileys : les micro-sprites `15×15` montent à `50×50`, les `50×50` restent natifs, les `70×50` ne sont plus réduits à `56×40`, et le ratio est préservé.
+- `docs/specs/protocol-hfr.md` documente la distribution issue du crawl wikismilies : **34 139** smileys perso, top tailles `70×50` (8047), `50×50` (2811), `67×50` (1142), plus micro-smileys `15×15`, `19×19`, `16×16`.
+- `app/build.gradle.kts` bump `versionCode = 35`, `versionName = "0.1.0-phase1.4"`.
+- `docs/specs/roadmap.md` et footer Jekyll alignés sur specs v0.8.3 / AAB `0.1.0-phase1.4`.
+
+### Tests
+- `PostMediaDisplayPolicyTest` pin le bucket 70×50, l'invariant `≤ 2.5 × bodyMedium.lineHeight`, et les résultats `Fit` sur les tailles dominantes du crawl.
+- `PostRendererInlineTest` vérifie que les smileys perso utilisent le bucket 70×50 et restent séparés du bucket builtin 18×18.
+
+---
+
+## v0.8.2 — 2026-05-05
+
+Rebuild administratif du patch smileys perso : `versionCode = 33` est brûlé côté dogfood, donc le build passe en `v34 / 0.1.0-phase1.3` sans changement fonctionnel par rapport au correctif `56sp / Fit`. Ce slot `v34` est ensuite remplacé par v35 / specs v0.8.3 après analyse exhaustive wikismilies.
+
+### Changed
+- `app/build.gradle.kts` bump `versionCode = 34`, `versionName = "0.1.0-phase1.3"`.
+- `docs/specs/roadmap.md` et footer Jekyll alignés sur specs v0.8.2 / AAB `0.1.0-phase1.3`.
+
+---
+
+## v0.8.1 — 2026-05-05
+
+Patch de stabilisation Phase 1 après dogfood des smileys perso sur smartphone.
+
+### Changed
+- `:core:ui` — `PostMediaDisplayPolicy.persoSmiley` passe de **40×40** à **56×56**. Le bucket 40sp corrigeait le chevauchement de lignes, mais rendait trop petits les perso courants sur écran de smartphone. Le nouveau compromis utilise `ContentScale.Fit` pour les smileys : les mini-sprites 15×15 redeviennent visibles, les 70×50 descendent à 56×40, et le ratio est préservé.
+- `docs/specs/protocol-hfr.md` et `docs/specs/roadmap.md` alignent le contrat réel : smileys perso **56×56 / Fit**, images inline **240×180 / Inside**, Phase 1 marquée livrée.
+- `app/build.gradle.kts` bump `versionCode = 33`, `versionName = "0.1.0-phase1.2"` pour produire un AAB de dogfood corrigé. Ce slot est finalement considéré brûlé et remplacé par v34 / specs v0.8.2.
+
+### Tests
+- `PostMediaDisplayPolicyTest` pin le bucket 56sp, l'invariant `≤ 2.8 × bodyMedium.lineHeight`, et les résultats `Fit` sur le corpus HFR réel.
+- `PostRendererInlineTest` vérifie que les smileys perso utilisent le bucket 56sp et restent séparés du bucket builtin 18sp.
+
+---
+
 ## v0.8.0 — 2026-05-05
 
 Phase 1 close-out. Toutes les cases du Definition-of-Done ([#87](https://github.com/ForumHFR/redface2/issues/87)) sont cochées : parser `PostContent` complet avec `[fixed]` / `[code]` ([#79](https://github.com/ForumHFR/redface2/issues/79), [#123](https://github.com/ForumHFR/redface2/pull/123)), rendu Compose des images et smileys avec Coil ([#109](https://github.com/ForumHFR/redface2/issues/109), [#126](https://github.com/ForumHFR/redface2/pull/126)) et hotfix visuel sur les perso smileys inline ([#129](https://github.com/ForumHFR/redface2/pull/129)). L'umbrella `HfrParser` ([#15](https://github.com/ForumHFR/redface2/issues/15)) est fermée par la même occasion. AAB final `0.1.0-phase1.1` (versionCode 32) prêt pour ouverture du canal Play Console internal testing ([#72](https://github.com/ForumHFR/redface2/issues/72)).

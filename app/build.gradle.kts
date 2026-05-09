@@ -32,8 +32,8 @@ android {
         // upload signing config).
         // versionName is also surfaced in the app footer via BuildConfig.VERSION_NAME so
         // dogfood builds advertise their phase / commit lineage to the user.
-        versionCode = 32
-        versionName = "0.1.0-phase1.1"
+        versionCode = 35
+        versionName = "0.1.0-phase1.4"
 
         // Manifest placeholder so a side-by-side install (dogfood/preview overlay)
         // can override the launcher label without touching tracked manifest/strings.

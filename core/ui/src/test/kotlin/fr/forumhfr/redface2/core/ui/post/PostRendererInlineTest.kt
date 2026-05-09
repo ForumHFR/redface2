@@ -169,12 +169,10 @@ class PostRendererInlineTest {
     }
 
     @Test
-    fun `perso smiley with imageUrl uses the 40sp perso bucket not the builtin one`() {
-        // Real perso GIFs sampled live (apges:5 70×50, lebeun 55×50, tinostar 15×15…) range
-        // from 15×15 to 70×50 with a median around 50×50. The 40sp bucket fits the bulk of the
-        // corpus with ContentScale.Inside — small sprites stay at native size centred, larger
-        // ones downscale uniformly. The previous 64sp bucket was bumping the line height past
-        // 3× bodyMedium, breaking inline rhythm (cf. post #74625731 capture).
+    fun `perso smiley with imageUrl uses the 70x50sp perso bucket not the builtin one`() {
+        // Exhaustive wikismilies stats show HFR perso mostly target a 50px-high line, with 70×50
+        // as the dominant size. The bucket follows that real corpus shape while keeping the
+        // placeholder height below the previous 64sp line rhythm that broke post #74625731.
         val inlines = listOf(
             PostInline.Smiley(
                 kind = SmileyKind.Perso("cosmoschtroumpf"),
@@ -187,7 +185,7 @@ class PostRendererInlineTest {
 
         assertNotNull("perso smiley with imageUrl should yield an InlineTextContent", placeholder)
         assertEquals(
-            "perso bucket should match the policy (40sp), not the builtin 18sp bucket",
+            "perso bucket should match the policy (70×50sp), not the builtin 18sp bucket",
             PostMediaDisplayPolicy.persoSmiley.placeholderWidth,
             placeholder!!.width,
         )
@@ -215,8 +213,8 @@ class PostRendererInlineTest {
         // fillMaxWidth() — meaningless inside InlineTextContent (the placeholder dictates the
         // parent constraint), and the image stretched in unpredictable ways. The placeholder
         // now pins the dimensions; the inner Modifier.fillMaxSize() makes the AsyncImage track
-        // them under any fontScale, and ContentScale.Inside in the policy keeps small inline
-        // images from being blown up to the full 240×180.
+        // them under any fontScale, while the inline image policy keeps small arbitrary images
+        // from being blown up to the full 240×180.
         val inlines = listOf(
             PostInline.InlineImage(
                 url = "https://forum.hardware.fr/images/foo.png",

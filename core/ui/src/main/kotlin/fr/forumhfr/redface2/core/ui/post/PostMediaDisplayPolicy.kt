@@ -23,11 +23,13 @@ import kotlin.math.roundToInt
  * maintain. Phase 1 therefore picks two smiley buckets keyed on [SmileyKind] (the parser already
  * classifies the BBCode token via `alt`/`title`) plus one inline-image bucket.
  *
- * [inlineMediaContentScale] is `ContentScale.Inside` (downscale only, never upscale): a tall
- * 70×50 perso lands as 40×29 centred in the 40×40 bucket, a tiny 15×15 perso stays at 15×15
- * centred with padding (no 4× pixelated upscale to 40×40). The previous `ContentScale.Fit`
- * upscaled small sprites and combined with a 64×64 bucket made line layout buckle on
- * `bodyMedium` (`lineHeight = 20.sp`) — see post #74625731 / fix PR for the bug capture.
+ * [smileyContentScale] is `ContentScale.Fit`: HFR perso smileys are expressive sprites, and tiny
+ * 15×15 sources become unreadable on phones when left at native size. The line-height bug from the
+ * initial 64×64 policy came from the old `Modifier.size(.dp)` child drifting from the `sp`
+ * placeholder, plus an overly large bucket — not from scaling the sprite to the placeholder.
+ * Keeping `Modifier.fillMaxSize()` makes the rendered smiley track the reserved text line under
+ * `fontScale`, while the 70×50 bucket follows the dominant wikismilies corpus shape without
+ * returning to the old broken 64sp line height.
  *
  * Re-evaluate in Phase 2/4 if a fixed bucket still feels wrong on real corpora; intrinsic-size
  * measurement remains the open Phase 2/4 option.
@@ -35,12 +37,17 @@ import kotlin.math.roundToInt
 internal object PostMediaDisplayPolicy {
 
     /**
-     * `ContentScale.Inside` for inline media (smileys + inline `[img]`): downscale to fit the
-     * bucket while preserving aspect ratio, but **never** upscale beyond the source's intrinsic
-     * pixel size. Small sprites (15×15 perso) stay at native size centred in the bucket — no
-     * pixelation, no blocky scale-up.
+     * Smileys are textual/emotive glyphs: fit them to the reserved bucket so even tiny historical
+     * perso sprites remain visible on high-density phones. Ratio is preserved; square smileys fill
+     * the bucket, wide/tall ones are letterboxed.
      */
-    val inlineMediaContentScale: ContentScale = ContentScale.Inside
+    val smileyContentScale: ContentScale = ContentScale.Fit
+
+    /**
+     * Inline `[img]` content is arbitrary user media, not an emotive glyph. Keep the no-upscale
+     * rule there so a tiny linked image is not blown up to the 240×180 inline bucket.
+     */
+    val inlineImageContentScale: ContentScale = ContentScale.Inside
 
     /**
      * Built-in HFR smileys (`:jap:`, `:o`, `:D`, `;)`, `:??:`, …) — served from `/icones/<x>.gif`
@@ -55,25 +62,27 @@ internal object PostMediaDisplayPolicy {
     /**
      * User-uploaded persona smileys (`[:cosmoschtroumpf]`, `[:rofl]`, …) — served from
      * `/images/perso/<x>.gif` or `/images/perso/<N>/<x>.gif`. Sizes are heterogeneous; the bulk
-     * of the corpus measured live (~25 GIFs sampled) lands at 50×50 to 70×50 native pixels, with
-     * a fraction at 15-30 px and rare large outliers.
+     * of the exhaustive wikismilies corpus lands on height 50 px, with width commonly ranging up
+     * to 70 px. The top sizes found during dogfood were 70×50 (8047), 50×50 (2811), 67×50
+     * (1142), then many W×50 variants; tiny historical sprites (15×15, 19×19, 16×16) exist too.
      *
-     * 40×40 is a bucket that:
-     * - fits the median 50×50 perso with a slight downscale (~80%, still readable);
-     * - leaves a 15×15 perso at native 15×15 thanks to `ContentScale.Inside` (no upscale);
-     * - keeps `placeholderHeight ≤ 2.5 × bodyMedium.lineHeight (20.sp)` so the line-height bump
-     *   is visually proportional to the surrounding text instead of dominating the paragraph.
+     * 70×50 is a corpus-first bucket after dogfood on v32-v34:
+     * - 40×40 + Inside fixed overlap but made common perso unreadable on phones;
+     * - 56×56 + Fit made tiny sprites readable but letterboxed the dominant 70×50 shape;
+     * - 70×50 + Fit keeps common perso at their native HFR ratio while upscaling tiny ones to a
+     *   readable 50 px-high glyph;
+     * - placeholder height stays below the old broken 64sp line rhythm.
      */
     val persoSmiley: InlineMediaBox = InlineMediaBox(
-        placeholderWidth = 40.sp,
-        placeholderHeight = 40.sp,
+        placeholderWidth = 70.sp,
+        placeholderHeight = 50.sp,
     )
 
     /**
      * Inline `[img]` BBCode embedded inside a paragraph (`PostInline.InlineImage`). 240×180 is the
      * historical HFR thumbnail aspect (4:3) that fits next to wrapped text on a phone without
      * blowing the line height; landscape and portrait shots both downscale via
-     * [inlineMediaContentScale]. The `:core:ui` parser already strips data:/javascript:/file:
+     * [inlineImageContentScale]. The `:core:ui` parser already strips data:/javascript:/file:
      * schemes so only http(s) URLs reach this bucket.
      */
     val inlineImage: InlineMediaBox = InlineMediaBox(
@@ -114,28 +123,27 @@ internal data class InlineMediaBox(
 internal data class PixelSize(val width: Int, val height: Int)
 
 /**
- * Pure mirror of [ContentScale.Inside]: downscale [source] uniformly so it fits inside [bucket]
- * while preserving aspect ratio, but never scale up. Returns the resulting size.
+ * Pure mirror of [ContentScale.Fit]: uniformly scale [source] so it fits inside [bucket] while
+ * preserving aspect ratio. Returns the resulting size.
  *
  * The result is clamped to at least 1×1 to guard against extreme aspect ratios where rounding
- * would otherwise collapse one dimension to 0 (e.g. a 1×100 banner downscaled into a 40×40
- * bucket would `roundToInt()` to 0×40 without the clamp — visually invisible, technically
+ * would otherwise collapse one dimension to 0 (e.g. a 1×100 banner downscaled into a 70×50
+ * bucket would `roundToInt()` to 0×50 without the clamp — visually invisible, technically
  * "fitting").
  *
  * Exposed and tested in pure JVM so the corpus-of-real-HFR-perso assertions don't need a
- * Compose runtime. **Important** : this function models the `Inside` decision at density = 1
- * and fontScale = 1. At runtime the placeholder is `40.sp × density × fontScale` pixels, so the
- * absolute output sizes shift accordingly — but the *invariant* "never upscale, preserve aspect
- * ratio" survives any positive density/fontScale because `Inside` is invariant by uniform
- * scaling of the bucket. The numeric examples (`70×50 → 40×29`, etc.) are correct **at density
- * 1**; on a real xxhdpi device a 70×50 sprite is downscaled to a different absolute size, but
- * the same proportions and the same "no upscale" guarantee.
+ * Compose runtime. **Important** : this function models the `Fit` decision at density = 1
+ * and fontScale = 1. At runtime the placeholder is `70.sp × 50.sp × density × fontScale` pixels, so the
+ * absolute output sizes shift accordingly — but the *invariant* "preserve aspect ratio and fit
+ * the bucket" survives any positive density/fontScale because `Fit` is invariant by uniform
+ * scaling of the bucket. The numeric examples (`15×15 → 50×50`, etc.) are correct **at density
+ * 1**; on a real xxhdpi device a 70×50 sprite is scaled to a different absolute size, but the
+ * same proportions and fit guarantee hold.
  */
-internal fun insideScaledMediaSize(source: PixelSize, bucket: PixelSize): PixelSize {
+internal fun fitScaledMediaSize(source: PixelSize, bucket: PixelSize): PixelSize {
     require(source.width > 0 && source.height > 0) { "source must be positive" }
     require(bucket.width > 0 && bucket.height > 0) { "bucket must be positive" }
     val scale = minOf(
-        1f,
         bucket.width.toFloat() / source.width.toFloat(),
         bucket.height.toFloat() / source.height.toFloat(),
     )

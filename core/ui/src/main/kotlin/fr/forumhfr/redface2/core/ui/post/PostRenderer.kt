@@ -469,13 +469,12 @@ internal fun imageInlineContent(image: PostInline.InlineImage): InlineTextConten
         ),
     ) {
         // The image fills the placeholder via fillMaxSize() so the rendered size tracks the
-        // sp-based placeholder under any fontScale. ContentScale.Inside in the policy ensures
-        // the bucket only downscales — small inline images stay at native pixel size centred,
-        // never upscaled into a blocky thumbnail.
+        // sp-based placeholder under any fontScale. Inline [img] keeps a no-upscale content
+        // scale, unlike smileys: arbitrary small user images should not be blown up.
         AsyncImage(
             model = image.url,
             contentDescription = image.description,
-            contentScale = PostMediaDisplayPolicy.inlineMediaContentScale,
+            contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -494,7 +493,7 @@ internal fun smileyInlineContent(smiley: PostInline.Smiley): InlineTextContent {
         AsyncImage(
             model = smiley.imageUrl,
             contentDescription = description,
-            contentScale = PostMediaDisplayPolicy.inlineMediaContentScale,
+            contentScale = PostMediaDisplayPolicy.smileyContentScale,
             modifier = Modifier.fillMaxSize(),
         )
     }
