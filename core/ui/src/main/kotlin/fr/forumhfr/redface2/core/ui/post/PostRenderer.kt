@@ -55,11 +55,15 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
 
-// Issue #3 explicit contract: "Max N=3 niveaux visibles, reste collapsible". Beyond that the
-// quote tail collapses to a "Afficher les citations imbriquées" Card so the user can opt in.
-// Exposed as `internal` (not `private`) so the JVM unit test in `PostRendererQuoteDepthTest`
-// can pin both the constant value and the depth predicate behaviour without instantiating the
-// `@Composable` `QuoteBlock` (which would require Robolectric — see #130 for that path).
+/**
+ * Maximum number of nested quote levels that render expanded inline. Issue #3 explicit
+ * contract: "Max N=3 niveaux visibles, reste collapsible". Beyond that the quote tail
+ * collapses to an "Afficher les citations imbriquées" Card so the user can opt in.
+ *
+ * Exposed `internal` (not `private`) so the JVM unit test in [PostRendererQuoteDepthTest] can
+ * pin both the value and the depth predicate without instantiating the `@Composable`
+ * [QuoteBlock] (which would require Robolectric — see issue #130 for that path).
+ */
 internal const val MAX_VISIBLE_QUOTE_DEPTH = 3
 
 /**

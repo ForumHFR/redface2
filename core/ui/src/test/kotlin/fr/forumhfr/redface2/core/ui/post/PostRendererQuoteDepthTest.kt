@@ -43,10 +43,11 @@ class PostRendererQuoteDepthTest {
     }
 
     @Test
-    fun `quote depth at and beyond the limit collapse to opt-in reveal`() {
-        // Depth 3 is the first level that crosses the issue #3 threshold, so it collapses to
-        // `CollapsedQuoteBlock`. Anything deeper stays collapsed too — the recursion never
-        // re-expands by accident.
+    fun `quote depth at and beyond the limit must collapse`() {
+        // Depth 3 is the first level that crosses the issue #3 threshold, so the predicate
+        // returns true and `QuoteBlock` will branch to `CollapsedQuoteBlock` at the call site.
+        // The reveal/reset behaviour of `CollapsedQuoteBlock` itself (clicking re-expands with
+        // depth reset to 0) lives inside the `@Composable` and is tracked under issue #130.
         assertTrue(
             "depth 3 (4th nested quote) must collapse to the 'Afficher' card per issue #3",
             isCollapsedQuoteDepth(3),
