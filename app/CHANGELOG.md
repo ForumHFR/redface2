@@ -15,10 +15,30 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v37 — `0.1.0-phase1.6` — 2026-05-10
+
+**Statut** : `local` (sera `closed` après upload alpha automatique)
+**Commit** : à venir
+**Fichier** : `redface2-v37-<date>-<sha>.aab`
+
+Build de finalisation Phase 1. Pas de changement fonctionnel visible utilisateur — uniquement de l'instrumentation perf et des tests qui figent les invariants du `PostRenderer` pour Phase 2.
+
+### Added
+- `androidx.tracing` 1.3.0 (#143, closes #117) : 7 sections `rf2.topic.*` couvrent le parcours « ouvrir un topic et commencer à lire ». 4 sections sync (`network`, `body_read`, `parse_html`, `map_domain`) + 3 async (`room_read`, `room_write`, `first_content`). Catalogue stable dans [`docs/guides/profiling.md`](https://github.com/ForumHFR/redface2/blob/main/docs/guides/profiling.md), prêt à être consommé par un `TraceSectionMetric` macrobenchmark futur (#142).
+- Test `core/ui` qui fige le contrat de profondeur de quote ≥ 3 collapsable (#138, closes #83).
+- Test `core/ui` qui fige la symétrie d'ensemble du `MediaCounter` sur un AST non-trivial (#140, closes #139).
+
+### Closed-out
+- Phase 1 marquée ✅ livrée dans [`docs/specs/roadmap.md`](https://github.com/ForumHFR/redface2/blob/main/docs/specs/roadmap.md).
+- Issues finalisation Phase 1 fermées : #28 (référence behaviors HFR — repris dans #81), #51 (primitives UI — `FlagItem` livré, `TopicRow`/`PostCard` reportés au 2e usage réel), #117 (tracing).
+- Follow-ups Phase 2 ouverts : #141 (microbench parser), #142 (macrobench parcours topic), #131 (validation visuelle smileys dogfood), #130 (test Robolectric `fillMaxSize`).
+
+---
+
 ## v36 — `0.1.0-phase1.5` — 2026-05-10
 
-**Statut** : `local`
-**Commit** : à venir
+**Statut** : `closed`
+**Commit** : `100038d`
 **Fichier** : `redface2-v36-<date>-<sha>.aab`
 
 Premier build CD avec auto-publish sur le track alpha. Pas de changement fonctionnel de l'app — c'est l'AAB qui valide bout-en-bout le nouveau pipeline avec `status: completed` (par défaut sur les tracks de test), pour ne plus avoir à activer le draft manuellement dans la Play Console après chaque upload.
