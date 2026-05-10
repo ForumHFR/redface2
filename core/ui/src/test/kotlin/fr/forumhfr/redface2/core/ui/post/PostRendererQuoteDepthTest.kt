@@ -1,0 +1,57 @@
+package fr.forumhfr.redface2.core.ui.post
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * Pins the quote-recursion-depth contract spelled out in issue #3
+ * (https://github.com/ForumHFR/redface2/issues/3) — "Max N=3 niveaux visibles, reste collapsible
+ * ('Afficher les citations imbriquées'). Au-delà, HFR est illisible de toute façon. Évite
+ * l'explosion de stack et limite la récursion d'UI."
+ *
+ * The actual rendering branch lives in the `@Composable` `QuoteBlock`, which needs Robolectric
+ * to drive — that's tracked separately under issue #130 alongside the `fillMaxSize()` /
+ * `fontScale` invariants. The decision predicate `isCollapsedQuoteDepth` was extracted out of
+ * `QuoteBlock` so the contract can be locked in a pure JVM test today and any later change
+ * (e.g. lowering N to 2 or raising it to 4) becomes a deliberate review step rather than a
+ * silent drift.
+ */
+class PostRendererQuoteDepthTest {
+
+    @Test
+    fun `MAX_VISIBLE_QUOTE_DEPTH stays at the issue 3 contract value`() {
+        assertEquals(
+            "Issue #3 mandates N=3 visible quote levels — bumping this constant must be a " +
+                "deliberate review step, not a silent change.",
+            3,
+            MAX_VISIBLE_QUOTE_DEPTH,
+        )
+    }
+
+    @Test
+    fun `quote depths below the limit render expanded`() {
+        // The first three nesting levels (0, 1, 2) must render as a regular `Card` quote so the
+        // typical 1- and 2-level quote chains found in HFR threads stay readable.
+        assertFalse("depth 0 (top-level quote) must render expanded", isCollapsedQuoteDepth(0))
+        assertFalse("depth 1 (quote-in-quote) must render expanded", isCollapsedQuoteDepth(1))
+        assertFalse(
+            "depth 2 (quote-in-quote-in-quote) must render expanded",
+            isCollapsedQuoteDepth(2),
+        )
+    }
+
+    @Test
+    fun `quote depth at and beyond the limit collapse to opt-in reveal`() {
+        // Depth 3 is the first level that crosses the issue #3 threshold, so it collapses to
+        // `CollapsedQuoteBlock`. Anything deeper stays collapsed too — the recursion never
+        // re-expands by accident.
+        assertTrue(
+            "depth 3 (4th nested quote) must collapse to the 'Afficher' card per issue #3",
+            isCollapsedQuoteDepth(3),
+        )
+        assertTrue("depth 4 must collapse", isCollapsedQuoteDepth(4))
+        assertTrue("very deep quotes must keep collapsing", isCollapsedQuoteDepth(99))
+    }
+}

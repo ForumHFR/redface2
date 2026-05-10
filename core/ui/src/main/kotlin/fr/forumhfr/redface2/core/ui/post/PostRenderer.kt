@@ -55,7 +55,19 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
 
-private const val MAX_VISIBLE_QUOTE_DEPTH = 3
+// Issue #3 explicit contract: "Max N=3 niveaux visibles, reste collapsible". Beyond that the
+// quote tail collapses to a "Afficher les citations imbriquées" Card so the user can opt in.
+// Exposed as `internal` (not `private`) so the JVM unit test in `PostRendererQuoteDepthTest`
+// can pin both the constant value and the depth predicate behaviour without instantiating the
+// `@Composable` `QuoteBlock` (which would require Robolectric — see #130 for that path).
+internal const val MAX_VISIBLE_QUOTE_DEPTH = 3
+
+/**
+ * Returns true when a `Quote` block at the given recursion depth must render as
+ * `CollapsedQuoteBlock` instead of expanding inline. Pure decision so the rule is testable
+ * without entering Compose; `QuoteBlock` is the only call site.
+ */
+internal fun isCollapsedQuoteDepth(depth: Int): Boolean = depth >= MAX_VISIBLE_QUOTE_DEPTH
 
 @Composable
 fun PostRenderer(
@@ -117,7 +129,7 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
 
 @Composable
 private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
-    if (quoteDepth >= MAX_VISIBLE_QUOTE_DEPTH) {
+    if (isCollapsedQuoteDepth(quoteDepth)) {
         CollapsedQuoteBlock(block)
         return
     }
