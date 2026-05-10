@@ -15,17 +15,19 @@ Issue tracker : [#117](https://github.com/ForumHFR/redface2/issues/117) (instrum
 
 Toutes les sections sont préfixées `rf2.topic.` pour faciliter le filtrage côté Perfetto / `TraceSectionMetric`. Le préfixe est stable : un bump de phase ne le renomme pas. Tout changement de nom doit être reflété simultanément ici et dans la (future) configuration `TraceSectionMetric` du macrobenchmark.
 
-| Section | Module / fichier | Phase mesurée |
-|---|---|---|
-| `rf2.topic.network` | `core/network/.../HfrClient.kt` | Appel OkHttp `execute()` jusqu'aux headers (DNS + connect + TLS + send + receive headers). Émise sur les deux paths (auth + anon). |
-| `rf2.topic.body_read` | `core/network/.../HfrClient.kt` | `response.body.string()` — lecture des bytes du body. Mesure isolée du téléchargement, distincte du handshake. |
-| `rf2.topic.parse_html` | `core/data/.../TopicRepositoryImpl.kt` | `HfrParser.parseTopicPage(html)` — coût CPU pur du parsing Jsoup → AST `PostContent`. |
-| `rf2.topic.map_domain` | `core/data/.../TopicRepositoryImpl.kt` | `TopicMappers.toEntities(...)` — conversion modèles domaine → entités Room. |
-| `rf2.topic.room_read` | `core/data/.../TopicRepositoryImpl.kt` | `loadFromCache(...)` — lecture cache-aside (hit ou miss). |
-| `rf2.topic.room_write` | `core/data/.../TopicRepositoryImpl.kt` | `persist(...)` — écriture transactionnelle Room (auth ou anon prefetch). |
-| `rf2.topic.first_content` | `feature/topic/.../TopicViewModel.kt` | Section **asynchrone** : commence quand `loadCurrentPage()` démarre, finit au premier emit `Mode.Loaded` ou `Mode.Error`. Mesure le ressenti utilisateur entre intent et premier contenu, qu'il vienne du cache ou du réseau. |
+| Section | Type | Module / fichier | Phase mesurée |
+|---|---|---|---|
+| `rf2.topic.network` | sync | `core/network/.../HfrClient.kt` | Appel OkHttp `execute()` jusqu'aux headers (DNS + connect + TLS + send + receive headers). Émise sur les deux paths du parcours topic (auth + anon) — `executeAuthenticatedHtml` reçoit le préfixe `rf2.topic` uniquement quand `getTopicPage(useAuth=true)` l'appelle, donc `getPrivateMessageListPage` et tout autre appelant restent hors namespace. |
+| `rf2.topic.body_read` | sync | `core/network/.../HfrClient.kt` | `response.body.string()` — lecture des bytes du body. Mesure isolée du téléchargement, distincte du handshake. Même conditionnel d'émission que `network`. |
+| `rf2.topic.parse_html` | sync | `core/data/.../TopicRepositoryImpl.kt` | `HfrParser.parseTopicPage(html)` — coût CPU pur du parsing Jsoup → AST `PostContent`. |
+| `rf2.topic.map_domain` | sync | `core/data/.../TopicRepositoryImpl.kt` | `TopicMappers.toEntities(...)` — conversion modèles domaine → entités Room. |
+| `rf2.topic.room_read` | async | `core/data/.../TopicRepositoryImpl.kt` | `loadFromCache(...)` — lecture cache-aside (hit ou miss). Wrap `traceAsync` car les `suspend` DAO Room peuvent reprendre sur un thread différent de celui qui a émis le begin. |
+| `rf2.topic.room_write` | async | `core/data/.../TopicRepositoryImpl.kt` | `persist(...)` — écriture transactionnelle Room (auth ou anon prefetch). Async pour la même raison que `room_read`. |
+| `rf2.topic.first_content` | async | `feature/topic/.../TopicViewModel.kt` | Commence quand `loadCurrentPage()` démarre, finit au premier emit `Mode.Loaded` ou `Mode.Error`. Mesure le ressenti utilisateur entre intent et premier contenu, qu'il vienne du cache ou du réseau. |
 
-`first_content` est la seule section asynchrone — elle traverse plusieurs threads (UI → IO → UI) et utilise `Trace.beginAsyncSection` / `endAsyncSection` avec un cookie incrémenté à chaque retry / re-load. Les autres sections sont synchrones (un seul thread pendant leur durée).
+Sections **synchrones** (`Trace.beginSection` / `Trace.endSection` via le helper `trace { … }`) : begin et end doivent se produire sur le même thread. C'est garanti ici parce que `network`, `body_read`, `parse_html` et `map_domain` enrobent du code non-`suspend` qui ne peut pas changer de thread pendant son exécution.
+
+Sections **asynchrones** (`Trace.beginAsyncSection` / `Trace.endAsyncSection` via le helper `traceAsync(name, cookie) { … }`) : tolèrent les changements de thread (begin sur thread A, end sur thread B). Utilisées pour tout code qui suspend ou qui peut être resumé sur un dispatcher différent — `room_read`, `room_write` (DAO Room `suspend`) et `first_content` (UI → IO → UI). Le cookie est un entier monotone (un par scope : compteur process-wide pour les sections Room, compteur par-VM pour `first_content`) — il garantit qu'un retry mid-load ferme la section précédente avant qu'une nouvelle commence.
 
 ## Visualiser les sections en local
 

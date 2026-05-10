@@ -38,21 +38,23 @@ class HfrClient @Inject constructor(
         return if (useAuth) {
             // Authenticated read: an expired session would otherwise be parsed silently as an
             // empty topic. executeAuthenticatedHtml() raises SessionExpiredException so the
-            // caller can surface a reconnect CTA instead of a misleading empty screen.
-            authenticated.newCall(request).executeAuthenticatedHtml()
+            // caller can surface a reconnect CTA instead of a misleading empty screen. The
+            // `rf2.topic` prefix scopes the trace sections to the topic feature only — other
+            // callers (MP list, …) opt out of tracing by omitting the prefix.
+            authenticated.newCall(request).executeAuthenticatedHtml(tracePrefix = TOPIC_TRACE_PREFIX)
         } else {
             // `rf2.topic.network` covers DNS + connect + TLS + headers (the part OkHttp returns
             // before we touch the body). `rf2.topic.body_read` covers the bytes-on-the-wire
             // pull from the response body. Splitting them lets a profiler tell a slow handshake
-            // apart from a slow body download. The same split lives in
-            // `executeAuthenticatedHtml` for the auth path.
-            trace("rf2.topic.network") {
+            // apart from a slow body download. The auth branch above wires the same prefix into
+            // `executeAuthenticatedHtml`.
+            trace("$TOPIC_TRACE_PREFIX.network") {
                 anonymous.newCall(request).execute()
             }.use { response ->
                 if (!response.isSuccessful) {
                     throw IOException("HFR returned ${response.code} for $url")
                 }
-                trace("rf2.topic.body_read") { response.body.string() }
+                trace("$TOPIC_TRACE_PREFIX.body_read") { response.body.string() }
             }
         }
     }
@@ -84,23 +86,42 @@ class HfrClient @Inject constructor(
         return authenticated.newCall(request).executeAuthenticatedHtml()
     }
 
-    private fun Call.executeAuthenticatedHtml(): String {
-        // Same split as the anonymous branch in `getTopicPage` — `rf2.topic.network` for the
-        // OkHttp call up to headers, `rf2.topic.body_read` for the body pull. The session-expiry
-        // detection (login redirect / login form sniff) runs after the body is already in
-        // memory, so it has no measurable cost worth a third section.
-        val response: Response = trace("rf2.topic.network") { execute() }
+    /**
+     * Executes the call, returns the body as a UTF-8 string, and raises
+     * [SessionExpiredException] if HFR redirected to the login page or returned the login form
+     * inline. When [tracePrefix] is non-null, the OkHttp call up to headers is wrapped in
+     * `<prefix>.network` and the body pull in `<prefix>.body_read` (cf. `docs/guides/profiling.md`).
+     * Callers that don't belong to the topic parcours pass `null` to stay out of `rf2.topic.*`.
+     */
+    private fun Call.executeAuthenticatedHtml(tracePrefix: String? = null): String {
+        val response: Response = if (tracePrefix != null) {
+            trace("$tracePrefix.network") { execute() }
+        } else {
+            execute()
+        }
         return response.use {
             if (!response.isSuccessful) {
                 throw IOException("HFR returned ${response.code} for ${response.request.url}")
             }
-            val html = trace("rf2.topic.body_read") { response.body.string() }
+            val html = if (tracePrefix != null) {
+                // Session-expiry detection (login redirect / login form sniff) runs after the body
+                // is in memory, so its cost is negligible relative to body_read; not worth a third
+                // section.
+                trace("$tracePrefix.body_read") { response.body.string() }
+            } else {
+                response.body.string()
+            }
             val finalUrl = response.request.url
             if (finalUrl.isLoginUrl() || html.looksLikeLoginPage()) {
                 throw SessionExpiredException(finalUrl.toString())
             }
             html
         }
+    }
+
+    private companion object {
+        // Prefix consumed by `docs/guides/profiling.md` — keep in lockstep with the catalogue.
+        private const val TOPIC_TRACE_PREFIX = "rf2.topic"
     }
 
     private fun HttpUrl.isLoginUrl(): Boolean =
