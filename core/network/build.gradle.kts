@@ -24,6 +24,11 @@ dependencies {
     api(libs.okhttp)
     implementation(libs.okhttp.logging)
 
+    // androidx.tracing for `Trace.beginSection`/`endSection` and the `trace { … }` extension
+    // used by `HfrClient` to mark `rf2.topic.network` and `rf2.topic.body_read` phases. See
+    // #117 / `docs/guides/profiling.md` for the section-name catalogue.
+    implementation(libs.androidx.tracing)
+
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
 

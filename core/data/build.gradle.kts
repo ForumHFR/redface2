@@ -32,6 +32,10 @@ dependencies {
     implementation(platform(libs.okhttp.bom))
     implementation(libs.okhttp)
 
+    // androidx.tracing for `rf2.topic.parse_html`, `rf2.topic.map_domain`, `rf2.topic.room_read`,
+    // `rf2.topic.room_write` markers around the topic-page repository pipeline (#117).
+    implementation(libs.androidx.tracing)
+
     testImplementation(libs.junit4)
     testImplementation(libs.mockk)
     testImplementation(libs.robolectric)

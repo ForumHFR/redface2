@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.topic
 
 import android.util.Log
+import androidx.tracing.trace
 import fr.forumhfr.redface2.core.data.cache.CachePolicy
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
@@ -96,15 +97,20 @@ class TopicRepositoryImpl @Inject constructor(
         page: Int,
         authMode: FetchMode,
     ): Topic = withContext(ioDispatcher) {
+        // The `rf2.topic.network` and `rf2.topic.body_read` sections live inside `HfrClient`
+        // (same coroutine, same IO dispatcher). The remaining phases — parse, map, persist —
+        // are wrapped here. Section names match `docs/guides/profiling.md`.
         val html = client.getTopicPage(
             cat = cat,
             post = post,
             page = page,
             useAuth = authMode == FetchMode.AUTHENTICATED,
         )
-        val topic = parser.parseTopicPage(html)
-        val (topicEntity, postEntities) = TopicMappers.toEntities(topic, clock.instant(), authMode)
-        persist(topicEntity, postEntities, authMode)
+        val topic = trace("rf2.topic.parse_html") { parser.parseTopicPage(html) }
+        val (topicEntity, postEntities) = trace("rf2.topic.map_domain") {
+            TopicMappers.toEntities(topic, clock.instant(), authMode)
+        }
+        trace("rf2.topic.room_write") { persist(topicEntity, postEntities, authMode) }
         topic
     }
 
@@ -142,15 +148,16 @@ class TopicRepositoryImpl @Inject constructor(
         }
     }
 
-    private suspend fun loadFromCache(cat: Int, post: Int, page: Int): CachedTopic? {
-        val topicEntity = topicDao.getTopicPage(cat, post, page) ?: return null
-        val postEntities = topicDao.getPostsByNumreponse(cat, topicEntity.numreponses)
-        return CachedTopic(
-            topic = TopicMappers.toDomain(topicEntity, postEntities),
-            fetchedAt = topicEntity.fetchedAt,
-            authMode = topicEntity.authMode,
-        )
-    }
+    private suspend fun loadFromCache(cat: Int, post: Int, page: Int): CachedTopic? =
+        trace("rf2.topic.room_read") {
+            val topicEntity = topicDao.getTopicPage(cat, post, page) ?: return@trace null
+            val postEntities = topicDao.getPostsByNumreponse(cat, topicEntity.numreponses)
+            CachedTopic(
+                topic = TopicMappers.toDomain(topicEntity, postEntities),
+                fetchedAt = topicEntity.fetchedAt,
+                authMode = topicEntity.authMode,
+            )
+        }
 
     private data class CachedTopic(
         val topic: Topic,

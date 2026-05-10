@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.network
 
+import androidx.tracing.trace
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
@@ -11,6 +12,7 @@ import okhttp3.Call
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 
 @Singleton
 class HfrClient @Inject constructor(
@@ -39,11 +41,18 @@ class HfrClient @Inject constructor(
             // caller can surface a reconnect CTA instead of a misleading empty screen.
             authenticated.newCall(request).executeAuthenticatedHtml()
         } else {
-            anonymous.newCall(request).execute().use { response ->
+            // `rf2.topic.network` covers DNS + connect + TLS + headers (the part OkHttp returns
+            // before we touch the body). `rf2.topic.body_read` covers the bytes-on-the-wire
+            // pull from the response body. Splitting them lets a profiler tell a slow handshake
+            // apart from a slow body download. The same split lives in
+            // `executeAuthenticatedHtml` for the auth path.
+            trace("rf2.topic.network") {
+                anonymous.newCall(request).execute()
+            }.use { response ->
                 if (!response.isSuccessful) {
                     throw IOException("HFR returned ${response.code} for $url")
                 }
-                response.body.string()
+                trace("rf2.topic.body_read") { response.body.string() }
             }
         }
     }
@@ -75,16 +84,23 @@ class HfrClient @Inject constructor(
         return authenticated.newCall(request).executeAuthenticatedHtml()
     }
 
-    private fun Call.executeAuthenticatedHtml(): String = execute().use { response ->
-        if (!response.isSuccessful) {
-            throw IOException("HFR returned ${response.code} for ${response.request.url}")
+    private fun Call.executeAuthenticatedHtml(): String {
+        // Same split as the anonymous branch in `getTopicPage` — `rf2.topic.network` for the
+        // OkHttp call up to headers, `rf2.topic.body_read` for the body pull. The session-expiry
+        // detection (login redirect / login form sniff) runs after the body is already in
+        // memory, so it has no measurable cost worth a third section.
+        val response: Response = trace("rf2.topic.network") { execute() }
+        return response.use {
+            if (!response.isSuccessful) {
+                throw IOException("HFR returned ${response.code} for ${response.request.url}")
+            }
+            val html = trace("rf2.topic.body_read") { response.body.string() }
+            val finalUrl = response.request.url
+            if (finalUrl.isLoginUrl() || html.looksLikeLoginPage()) {
+                throw SessionExpiredException(finalUrl.toString())
+            }
+            html
         }
-        val html = response.body.string()
-        val finalUrl = response.request.url
-        if (finalUrl.isLoginUrl() || html.looksLikeLoginPage()) {
-            throw SessionExpiredException(finalUrl.toString())
-        }
-        html
     }
 
     private fun HttpUrl.isLoginUrl(): Boolean =
