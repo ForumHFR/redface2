@@ -208,6 +208,119 @@ class PostRendererInlineTest {
     }
 
     @Test
+    fun `non-trivial AST keeps inlineContentIds and media keys in lockstep`() {
+        // Issue #139 (suite #83): the existing tests cover the symmetry one container at a time
+        // (`MediaCounter recursion is symmetric across every PostInline container`) plus a
+        // 3-smiley flat case. They do not exercise a deep mix of containers + smileys (with and
+        // without `imageUrl`) + inline images all in one AST, which is how a real HFR post looks.
+        // A drift between `appendInline` and `walkInlinesForMedia` (e.g. a future container that
+        // recurses in one walk and not the other) would slip past the per-container tests but
+        // not this composite one — the set equality is the contract MediaCounter's KDoc spells
+        // out: "do not break that symmetry".
+        val inlines = listOf(
+            PostInline.Strong(
+                children = listOf(
+                    PostInline.Text("intro "),
+                    PostInline.Underline(
+                        children = listOf(
+                            PostInline.Smiley(
+                                kind = SmileyKind.Builtin(":jap:"),
+                                imageUrl = "https://forum-images.hardware.fr/icones/smilies/jap.gif",
+                            ),
+                        ),
+                    ),
+                    // Smiley without imageUrl: must NOT advance the smiley counter and must NOT
+                    // appear in the media map. Asymmetry trap if either walk forgets the gate.
+                    PostInline.Smiley(kind = SmileyKind.Builtin(":notapic"), imageUrl = null),
+                ),
+            ),
+            PostInline.Color(
+                colorHex = "#FF0000",
+                children = listOf(
+                    PostInline.InlineImage(
+                        url = "https://forum.hardware.fr/images/foo.png",
+                        description = "foo",
+                    ),
+                    PostInline.Smiley(
+                        kind = SmileyKind.Perso("cosmoschtroumpf"),
+                        imageUrl = "https://forum-images.hardware.fr/images/perso/cosmoschtroumpf.gif",
+                    ),
+                ),
+            ),
+            PostInline.LineBreak,
+            PostInline.Link(
+                url = "https://example.com",
+                children = listOf(
+                    PostInline.Emphasis(
+                        children = listOf(
+                            PostInline.Strike(
+                                children = listOf(
+                                    PostInline.Smiley(
+                                        kind = SmileyKind.Perso("rofl"),
+                                        imageUrl = "https://forum-images.hardware.fr/images/perso/rofl.gif",
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            PostInline.InlineImage(
+                url = "https://forum.hardware.fr/images/bar.png",
+                description = "bar",
+            ),
+        )
+
+        val annotated = buildInlineText(inlines, emptyLinkStyles, imageAlt = "img")
+        val media = collectInlineMedia(inlines)
+
+        // Set equality: every appendInlineContent placeholder must have an InlineTextContent and
+        // vice versa. A drift here is the orphan-placeholder bug the MediaCounter KDoc warns
+        // against ("do not break that symmetry").
+        assertEquals(annotated.inlineContentIds(), media.keys)
+        // Belt-and-braces: the count must also reflect what we constructed (3 smileys with
+        // imageUrl + 2 inline images = 5 placeholders, the no-imageUrl smiley contributes 0).
+        assertEquals("3 smileys + 2 inline images expected", 5, media.size)
+    }
+
+    @Test
+    fun `inline content IDs are zero-indexed and contiguous per media kind`() {
+        // The MediaCounter is created fresh per Text per its KDoc, so every paragraph restarts
+        // at 0. Pin both indexings so a future change that, say, switched to a shared mutable
+        // counter or a UUID-based ID would fail loudly here.
+        val inlines = listOf(
+            PostInline.Smiley(
+                kind = SmileyKind.Builtin(":jap:"),
+                imageUrl = "https://forum-images.hardware.fr/icones/smilies/jap.gif",
+            ),
+            PostInline.InlineImage(url = "https://forum.hardware.fr/images/a.png", description = "a"),
+            PostInline.Smiley(
+                kind = SmileyKind.Perso("rofl"),
+                imageUrl = "https://forum-images.hardware.fr/images/perso/rofl.gif",
+            ),
+            PostInline.InlineImage(url = "https://forum.hardware.fr/images/b.png", description = "b"),
+            PostInline.Smiley(
+                kind = SmileyKind.Builtin(":o"),
+                imageUrl = "https://forum-images.hardware.fr/icones/smilies/o.gif",
+            ),
+        )
+
+        val media = collectInlineMedia(inlines)
+
+        // Smiley counter: 3 distinct entries, zero-indexed, no gap.
+        assertEquals(
+            setOf("post-smiley-0", "post-smiley-1", "post-smiley-2"),
+            media.keys.filter { it.startsWith("post-smiley-") }.toSet(),
+        )
+        // Image counter: 2 distinct entries, zero-indexed, no gap. The two counters are
+        // independent — image-0 does not skip ahead because of smiley-0/1/2.
+        assertEquals(
+            setOf("post-image-0", "post-image-1"),
+            media.keys.filter { it.startsWith("post-image-") }.toSet(),
+        )
+    }
+
+    @Test
     fun `inline image uses the bounded 240x180 placeholder centred`() {
         // Pre-#109 the inline image placeholder was 240×180 but the inner Modifier was
         // fillMaxWidth() — meaningless inside InlineTextContent (the placeholder dictates the
