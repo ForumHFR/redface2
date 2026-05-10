@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.topic
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.tracing.Trace
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -55,6 +56,17 @@ class TopicViewModel @AssistedInject constructor(
      */
     private var scrollEffectEmitted: Boolean = false
 
+    /**
+     * Async-trace cookie for the `rf2.topic.first_content` section. The section starts when
+     * [loadCurrentPage] kicks off and ends on the first emission that lands in
+     * [TopicUiState.Mode.Loaded] (cache hit or first network reply, whichever comes first).
+     * The cookie is monotonically incremented on each retry / re-load so a previous in-flight
+     * section can be ended cleanly before a new one starts; without this the trace would show
+     * an open-ended section that never closes when the user retries mid-load.
+     */
+    private var firstContentCookie: Int = 0
+    private var firstContentInFlight: Boolean = false
+
     init {
         loadCurrentPage()
     }
@@ -65,10 +77,33 @@ class TopicViewModel @AssistedInject constructor(
         }
     }
 
+    override fun onCleared() {
+        // Close the in-flight async trace section if the ViewModel dies before the first
+        // emission lands — leaving an open async section in the trace would skew the next
+        // measurement window and Perfetto would draw a never-ending sliver.
+        endFirstContentSectionIfNeeded()
+        super.onCleared()
+    }
+
+    private fun beginFirstContentSection() {
+        endFirstContentSectionIfNeeded()
+        firstContentCookie++
+        Trace.beginAsyncSection(FIRST_CONTENT_SECTION, firstContentCookie)
+        firstContentInFlight = true
+    }
+
+    private fun endFirstContentSectionIfNeeded() {
+        if (firstContentInFlight) {
+            Trace.endAsyncSection(FIRST_CONTENT_SECTION, firstContentCookie)
+            firstContentInFlight = false
+        }
+    }
+
     private fun loadCurrentPage() {
         loadJob?.cancel()
         prefetchJob?.cancel()
         prefetchedPage = null
+        beginFirstContentSection()
         _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
         loadJob = viewModelScope.launch {
             topicRepository
@@ -83,6 +118,9 @@ class TopicViewModel @AssistedInject constructor(
                         if (current.mode is TopicUiState.Mode.Loaded) current
                         else current.copy(mode = TopicUiState.Mode.Error(error.message ?: "Unknown error"))
                     }
+                    // Close the async trace section even on the error path so the trace
+                    // still draws a bounded sliver from intent to terminal state.
+                    endFirstContentSectionIfNeeded()
                 }
                 .collect { topic ->
                     _state.update {
@@ -91,6 +129,10 @@ class TopicViewModel @AssistedInject constructor(
                             availablePages = (1..topic.totalPages).toList(),
                         )
                     }
+                    // First content visible — close the async section. Subsequent emissions
+                    // (stale-cache then refresh) already see `firstContentInFlight = false`
+                    // and the helper short-circuits.
+                    endFirstContentSectionIfNeeded()
                     maybeEmitScroll(topic.posts.map { it.numreponse })
                     maybeSchedulePrefetch(totalPages = topic.totalPages)
                 }
@@ -140,5 +182,12 @@ class TopicViewModel @AssistedInject constructor(
     @AssistedFactory
     interface Factory {
         fun create(request: TopicRequest): TopicViewModel
+    }
+
+    private companion object {
+        // Keep the section-name catalogue in lockstep with `docs/guides/profiling.md` so a
+        // `TraceSectionMetric("rf2.topic.first_content")` consumer (future macrobenchmark
+        // under #117 follow-up) keeps matching after refactors.
+        private const val FIRST_CONTENT_SECTION = "rf2.topic.first_content"
     }
 }
