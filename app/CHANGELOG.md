@@ -18,8 +18,8 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 ## v38 — `0.1.0-phase1.7` — 2026-05-11
 
 **Statut** : `closed`
-**Commit** : à venir
-**Fichier** : `redface2-v38-<sha>.aab`
+**Commit** : `b5ef0b8`
+**Fichier** : `redface2-v38-b5ef0b8.aab`
 
 Build de polish pré-Phase 2 pour le track alpha Play. L'objectif est de présenter une app de lecture cohérente pendant la revue manuelle Play, sans faux boutons laissant croire que Recherche ou Messages sont déjà livrés.
 
