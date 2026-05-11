@@ -15,9 +15,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -43,6 +43,22 @@ class FlagsViewModel @Inject constructor(
     private val _selectedTab = MutableStateFlow(FlagType.CYAN)
     val selectedTab: StateFlow<FlagType> = _selectedTab.asStateFlow()
 
+    /**
+     * User-controlled visibility of CYAN flags whose [Flag.hasUnread] is false — i.e. topics
+     * the user already finished reading but still participated in. Default `false`: a fresh
+     * launch shows only actionable « Mes sujets » entries. Toggling this reactively re-emits
+     * the filtered list without a refetch (cf. [combine] in [flagsState]).
+     *
+     * Filter applies only when [selectedTab] == [FlagType.CYAN]. RED (unread topics) and
+     * FAVORITE keep their full content regardless — they don't have the « stale read »
+     * pollution problem CYAN does.
+     *
+     * In-memory only for now (#154 polish scope) — persisting the preference is deferred
+     * until a real settings surface exists.
+     */
+    private val _showReadParticipatedTopics = MutableStateFlow(false)
+    val showReadParticipatedTopics: StateFlow<Boolean> = _showReadParticipatedTopics.asStateFlow()
+
     val authState: StateFlow<AuthState?> = authRepository.observeAuthState()
         .stateIn(
             scope = viewModelScope,
@@ -67,10 +83,15 @@ class FlagsViewModel @Inject constructor(
         .onEach(::clearFlagsCacheIfSessionChanged)
         .flatMapLatest { state ->
             when (state) {
-                null -> flowOf(null)
-                AuthState.Anonymous -> flowOf(null)
+                null -> flowOf<FlagsResult?>(null)
+                AuthState.Anonymous -> flowOf<FlagsResult?>(null)
                 is AuthState.Authenticated -> selectedTab.flatMapLatest { type ->
-                    flagRepository.observe(type).map { it as FlagsResult? }
+                    combine(
+                        flagRepository.observe(type),
+                        _showReadParticipatedTopics,
+                    ) { result, showRead ->
+                        filterReadParticipatedIfNeeded(result, type, showRead)
+                    }
                 }
             }
         }
@@ -84,6 +105,10 @@ class FlagsViewModel @Inject constructor(
         _selectedTab.value = type
     }
 
+    fun setShowReadParticipatedTopics(value: Boolean) {
+        _showReadParticipatedTopics.value = value
+    }
+
     fun refresh() {
         viewModelScope.launch { flagRepository.refresh(_selectedTab.value) }
     }
@@ -92,6 +117,21 @@ class FlagsViewModel @Inject constructor(
         viewModelScope.launch {
             flagRepository.clearSessionCache()
             authRepository.logout()
+        }
+    }
+
+    private fun filterReadParticipatedIfNeeded(
+        result: FlagsResult,
+        type: FlagType,
+        showReadParticipated: Boolean,
+    ): FlagsResult {
+        // Only CYAN suffers from « old read flags pollute the actionable view ». RED and
+        // FAVORITE keep both read and unread by design — RED is « unread topics I'm not in »
+        // and FAVORITE is a bookmark list.
+        if (type != FlagType.CYAN || showReadParticipated) return result
+        return when (result) {
+            is FlagsResult.Success -> result.copy(flags = result.flags.filter { it.hasUnread })
+            else -> result
         }
     }
 

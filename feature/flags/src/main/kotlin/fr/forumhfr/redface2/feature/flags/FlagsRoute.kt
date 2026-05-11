@@ -1,17 +1,13 @@
 package fr.forumhfr.redface2.feature.flags
 
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -20,10 +16,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,10 +28,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
@@ -47,27 +41,23 @@ import fr.forumhfr.redface2.core.ui.FlagItem
 import fr.forumhfr.redface2.core.ui.FlagItemDivider
 
 /**
- * Home tab entry point. The [versionName] / [versionCode] params are passed in by `:app`
- * because BuildConfig lives in the application module; surfacing them here keeps the
- * dogfood "what build am I running" affordance on screen without needing `:feature:flags`
- * to depend on the app's BuildConfig.
+ * Home tab entry point.
+ *
+ * Phase 1 polish (#154): the alpha footer (Connecté en tant que, logout, version,
+ * Signaler un contenu, Diagnostics) has been moved to the Messages tab so the home
+ * stays focused on the flag list. The CYAN tab now hides `hasUnread = false` rows by
+ * default and exposes a switch to bring them back — controlled by [FlagsViewModel].
  */
 @Composable
 fun FlagsRoute(
-    versionName: String,
-    versionCode: Int,
     onOpenFlag: (Flag) -> Unit,
     onLoginRequested: () -> Unit,
-    onOpenDiagnostics: () -> Unit,
 ) {
     val viewModel: FlagsViewModel = hiltViewModel()
     val authState by viewModel.authState.collectAsStateWithLifecycle()
-    val unreadMpCount by viewModel.unreadMpCount.collectAsStateWithLifecycle()
     val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
     val flagsState by viewModel.flagsState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val reportEmailSubject = stringResource(R.string.flags_report_email_subject)
-    val reportNoEmailClient = stringResource(R.string.flags_report_no_email_client)
+    val showReadParticipated by viewModel.showReadParticipatedTopics.collectAsStateWithLifecycle()
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -95,40 +85,16 @@ fun FlagsRoute(
                     is AuthState.Authenticated -> AuthenticatedBody(
                         selectedTab = selectedTab,
                         flagsState = flagsState,
+                        showReadParticipated = showReadParticipated,
                         actions = AuthenticatedActions(
                             onSelectTab = viewModel::selectTab,
                             onOpenFlag = onOpenFlag,
                             onRefresh = viewModel::refresh,
                             onLoginRequested = onLoginRequested,
+                            onToggleShowReadParticipated = viewModel::setShowReadParticipatedTopics,
                         ),
                     )
                 }
-
-                FooterSlot(
-                    state = state,
-                    unreadMpCount = unreadMpCount,
-                    versionLabel = stringResource(
-                        R.string.flags_app_version_footer,
-                        versionName,
-                        versionCode,
-                    ),
-                    actions = FooterActions(
-                        onLogout = viewModel::logout,
-                        onReportContent = {
-                            val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                data = "mailto:$REPORT_EMAIL".toUri()
-                                putExtra(Intent.EXTRA_EMAIL, arrayOf(REPORT_EMAIL))
-                                putExtra(Intent.EXTRA_SUBJECT, reportEmailSubject)
-                            }
-                            try {
-                                context.startActivity(intent)
-                            } catch (_: ActivityNotFoundException) {
-                                Toast.makeText(context, reportNoEmailClient, Toast.LENGTH_LONG).show()
-                            }
-                        },
-                        onOpenDiagnostics = onOpenDiagnostics,
-                    ),
-                )
             }
         }
     }
@@ -160,6 +126,7 @@ private fun AnonymousBody(onLoginRequested: () -> Unit) {
 private fun ColumnScope.AuthenticatedBody(
     selectedTab: FlagType,
     flagsState: FlagsResult?,
+    showReadParticipated: Boolean,
     actions: AuthenticatedActions,
 ) {
     val tabs = listOf(
@@ -177,6 +144,13 @@ private fun ColumnScope.AuthenticatedBody(
                 text = { Text(label, style = MaterialTheme.typography.labelLarge) },
             )
         }
+    }
+
+    if (selectedTab == FlagType.CYAN) {
+        ShowReadParticipatedToggle(
+            checked = showReadParticipated,
+            onCheckedChange = actions.onToggleShowReadParticipated,
+        )
     }
 
     when (val current = flagsState) {
@@ -264,62 +238,30 @@ private data class AuthenticatedActions(
     val onOpenFlag: (Flag) -> Unit,
     val onRefresh: () -> Unit,
     val onLoginRequested: () -> Unit,
-)
-
-private data class FooterActions(
-    val onLogout: () -> Unit,
-    val onReportContent: () -> Unit,
-    val onOpenDiagnostics: () -> Unit,
+    val onToggleShowReadParticipated: (Boolean) -> Unit,
 )
 
 @Composable
-private fun FooterSlot(
-    state: AuthState,
-    unreadMpCount: Int?,
-    versionLabel: String,
-    actions: FooterActions,
+private fun ShowReadParticipatedToggle(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
 ) {
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(horizontal = 24.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        if (state is AuthState.Authenticated) {
-            Text(
-                text = stringResource(R.string.flags_logged_in_as, state.pseudo),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            unreadMpCount?.let { count ->
-                Text(
-                    text = stringResource(R.string.flags_unread_mps, count),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            TextButton(onClick = actions.onLogout, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.flags_logout_cta))
-            }
-        }
-
         Text(
-            text = versionLabel,
-            style = MaterialTheme.typography.labelSmall,
+            text = stringResource(R.string.flags_show_read_participated_toggle),
+            style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 12.dp),
         )
-        TextButton(onClick = actions.onReportContent, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.flags_report_content_cta))
-        }
-        TextButton(onClick = actions.onOpenDiagnostics, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.flags_diagnostics_cta))
-        }
-        Spacer(modifier = Modifier.height(4.dp))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
-
-private const val REPORT_EMAIL = "xat@azora.fr"
 
 @Composable
 private fun flagMetadata(flag: Flag): String =

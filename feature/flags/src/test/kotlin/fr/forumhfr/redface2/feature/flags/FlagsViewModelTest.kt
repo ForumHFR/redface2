@@ -143,6 +143,118 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `CYAN tab hides read participated topics by default`() = runTest {
+        // #154: « Mes sujets » should not pollute the actionable view with topics the user
+        // already finished reading. The filter is applied at the ViewModel layer (not in
+        // the repository) so toggling the preference reactively re-emits the filtered list
+        // without re-fetching.
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val flags = FakeFlagRepository()
+        val vm = FlagsViewModel(auth, flags, FakeMessagesRepository())
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+
+            flags.emit(
+                FlagType.CYAN,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(1, FlagType.CYAN, hasUnread = true),
+                        stubFlag(2, FlagType.CYAN, hasUnread = false),
+                        stubFlag(3, FlagType.CYAN, hasUnread = true),
+                    ),
+                ),
+            )
+
+            val filtered = awaitItem() as FlagsResult.Success
+            assertEquals(
+                "expected only hasUnread=true topics under default CYAN filter",
+                listOf(1, 3),
+                filtered.flags.map { it.topicId },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setShowReadParticipatedTopics true reveals read CYAN topics without refetch`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val flags = FakeFlagRepository()
+        val vm = FlagsViewModel(auth, flags, FakeMessagesRepository())
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+
+            flags.emit(
+                FlagType.CYAN,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(1, FlagType.CYAN, hasUnread = true),
+                        stubFlag(2, FlagType.CYAN, hasUnread = false),
+                    ),
+                ),
+            )
+            assertEquals(listOf(1), (awaitItem() as FlagsResult.Success).flags.map { it.topicId })
+
+            vm.setShowReadParticipatedTopics(true)
+            // No new refresh() call — the toggle alone must re-emit the unfiltered list
+            // because flagsState combines the source flow with showReadParticipatedTopics.
+            val full = awaitItem() as FlagsResult.Success
+            assertEquals(listOf(1, 2), full.flags.map { it.topicId })
+            assertTrue("toggle must not trigger a network refresh", flags.refreshCalls.isEmpty())
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `RED and FAVORITE tabs are never filtered by the read participated toggle`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val flags = FakeFlagRepository()
+        val vm = FlagsViewModel(auth, flags, FakeMessagesRepository())
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+
+            vm.selectTab(FlagType.RED)
+            flags.emit(
+                FlagType.RED,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(10, FlagType.RED, hasUnread = true),
+                        stubFlag(11, FlagType.RED, hasUnread = false),
+                    ),
+                ),
+            )
+            val red = awaitItem() as FlagsResult.Success
+            assertEquals(
+                "RED must include both read and unread regardless of the toggle",
+                listOf(10, 11),
+                red.flags.map { it.topicId },
+            )
+
+            vm.selectTab(FlagType.FAVORITE)
+            flags.emit(
+                FlagType.FAVORITE,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(20, FlagType.FAVORITE, hasUnread = false),
+                        stubFlag(21, FlagType.FAVORITE, hasUnread = true),
+                    ),
+                ),
+            )
+            val favorite = awaitItem() as FlagsResult.Success
+            assertEquals(
+                "FAVORITE must include both read and unread regardless of the toggle",
+                listOf(20, 21),
+                favorite.flags.map { it.topicId },
+            )
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `switching authenticated pseudo clears the private flags cache`() = runTest {
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
         val flags = FakeFlagRepository()
@@ -160,7 +272,11 @@ class FlagsViewModelTest {
         }
     }
 
-    private fun stubFlag(topicId: Int, type: FlagType): Flag = Flag(
+    private fun stubFlag(
+        topicId: Int,
+        type: FlagType,
+        hasUnread: Boolean = true,
+    ): Flag = Flag(
         cat = 1,
         subcat = null,
         topicId = topicId,
@@ -168,7 +284,7 @@ class FlagsViewModelTest {
         totalPages = 1,
         replyCount = 0,
         type = type,
-        hasUnread = true,
+        hasUnread = hasUnread,
         lastReadPage = 1,
         lastPostReadId = null,
         firstPostAuthor = "",

@@ -38,18 +38,6 @@ import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import kotlinx.serialization.Serializable
 
-// Stubs used by the remaining placeholder tabs (Search/Messages) whose models are not
-// yet wired. Each "open topic" button currently navigates to a hard-coded HFR thread so
-// the navigation graph itself can be exercised end-to-end. Forum/Category dropped this
-// crutch in Phase 1C-A (real REST-backed ForumScreen / ForumCategoryScreen). The
-// remaining call-sites disappear as Phase 1C+ lands the real SearchResult / MpThread.
-//
-// The target is the community topic dedicated to Redface 2 itself
-// (https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35395) — recent, short,
-// and the most natural place to dogfood the app on the topic that discusses the app.
-private const val DEMO_TOPIC_CAT: Int = 23
-private const val DEMO_TOPIC_POST: Int = 35_395
-
 @Serializable
 sealed interface RedfaceNavKey : NavKey
 
@@ -180,8 +168,6 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
         entryProvider = entryProvider {
             entry<FlagsListRoute> {
                 FlagsRoute(
-                    versionName = BuildConfig.VERSION_NAME,
-                    versionCode = BuildConfig.VERSION_CODE,
                     onOpenFlag = { flag ->
                         backStack.add(
                             TopicRoute(
@@ -203,9 +189,6 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     },
                     onLoginRequested = {
                         backStack.add(LoginRoute)
-                    },
-                    onOpenDiagnostics = {
-                        backStack.add(DiagnosticsRoute)
                     },
                 )
             }
@@ -242,29 +225,14 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                 )
             }
             entry<SearchRoute> {
-                SearchScreen(
-                    onOpenResult = {
-                        backStack.add(
-                            TopicRoute(
-                                cat = DEMO_TOPIC_CAT,
-                                post = DEMO_TOPIC_POST,
-                                page = 1,
-                            ),
-                        )
-                    },
-                )
+                SearchScreen()
             }
             entry<MessagesRoute> {
                 MessagesScreen(
-                    onOpenTopic = {
-                        backStack.add(
-                            TopicRoute(
-                                cat = DEMO_TOPIC_CAT,
-                                post = DEMO_TOPIC_POST,
-                                page = 1,
-                            ),
-                        )
-                    },
+                    versionName = BuildConfig.VERSION_NAME,
+                    versionCode = BuildConfig.VERSION_CODE,
+                    onLoginRequested = { backStack.add(LoginRoute) },
+                    onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
                 )
             }
             entry<CategoryRoute> { route ->
