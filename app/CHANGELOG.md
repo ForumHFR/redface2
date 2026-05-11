@@ -15,6 +15,25 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v38 — `0.1.0-phase1.7` — 2026-05-11
+
+**Statut** : `closed`
+**Commit** : à venir
+**Fichier** : `redface2-v38-<sha>.aab`
+
+Build de polish pré-Phase 2 pour le track alpha Play. L'objectif est de présenter une app de lecture cohérente pendant la revue manuelle Play, sans faux boutons laissant croire que Recherche ou Messages sont déjà livrés.
+
+### Changed
+- Écran Drapeaux recentré sur la lecture : footer alpha retiré, liste + refresh + login/reconnect gardés.
+- Les sujets CYAN déjà lus (`hasUnread = false`) sont masqués par défaut, avec un toggle « Afficher les sujets participés déjà lus ».
+- Écran Messages transformé en surface temporaire « Compte + Outils alpha » : login/logout, version, diagnostics et signalement.
+- Écran Recherche remplacé par une annonce sobre de la future recherche HFR Phase 2, sans bouton de topic démo.
+
+### Docs
+- Specs `architecture.md`, `mvi.md`, `navigation.md` et `roadmap.md` alignées avec le polish #154.
+
+---
+
 ## v37 — `0.1.0-phase1.6` — 2026-05-10
 
 **Statut** : `closed`
