@@ -1,7 +1,9 @@
-Test build — Redface 2 (community client for the French HFR forum).
+Alpha build Redface 2 — pre-Phase 2 polish.
 
-Full changelog: see the repo CHANGELOG.md
-https://github.com/ForumHFR/redface2/blob/main/CHANGELOG.md
+Changes:
+- Flags tab is now focused on reading.
+- Read participated topics are hidden by default, with a toggle to show them again.
+- Search and Messages tabs now explain the upcoming features instead of showing fake demo actions.
+- Diagnostics, reporting and account details moved to Messages.
 
-Please report any bug via the testing channel tools or by opening an
-issue on the repository.
+Please report bugs via the alpha channel or the GitHub repository.

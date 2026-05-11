@@ -1,7 +1,9 @@
-Build de test — Redface 2 (client communautaire pour HFR).
+Build alpha Redface 2 — polish pré-Phase 2.
 
-Détail des changements : voir CHANGELOG.md du dépôt
-https://github.com/ForumHFR/redface2/blob/main/CHANGELOG.md
+Nouveautés :
+- Drapeaux recentrés sur la lecture.
+- Sujets participés déjà lus masqués par défaut, avec option pour les réafficher.
+- Onglets Recherche et Messages clarifiés en attendant les vraies features Phase 2/3.
+- Diagnostics, signalement et infos de compte déplacés dans Messages.
 
-Merci de remonter tout bug via les outils du canal de test ou en
-ouvrant une issue sur le dépôt.
+Merci de remonter tout bug via le canal alpha ou le dépôt GitHub.
