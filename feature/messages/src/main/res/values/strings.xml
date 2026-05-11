@@ -1,5 +1,18 @@
 <resources>
     <string name="messages_title">Messages</string>
-    <string name="messages_body">Bootstrap du tab MPs / MultiMPs. Le détail réel des conversations viendra ensuite.</string>
-    <string name="messages_open_topic">Ouvrir un topic partagé</string>
+    <string name="messages_phase3_notice">Les messages privés (MP, MultiMP) arriveront en Phase 3.</string>
+
+    <string name="messages_section_account">Compte</string>
+    <string name="messages_auth_loading">Chargement de la session…</string>
+    <string name="messages_anonymous_intro">Connecte-toi à HFR pour activer tes drapeaux et tes MPs.</string>
+    <string name="messages_login_cta">Se connecter à HFR</string>
+    <string name="messages_logged_in_as">Connecté en tant que %1$s</string>
+    <string name="messages_logout_cta">Se déconnecter</string>
+
+    <string name="messages_section_alpha_tools">Outils alpha</string>
+    <string name="messages_app_version_footer">Redface 2 — v%1$s (build %2$d)</string>
+    <string name="messages_diagnostics_cta">Diagnostics alpha</string>
+    <string name="messages_report_content_cta">Signaler un contenu</string>
+    <string name="messages_report_email_subject">Redface 2 — Signalement</string>
+    <string name="messages_report_no_email_client">Aucune application e-mail trouvée. Écrivez à xat@azora.fr.</string>
 </resources>

@@ -6,7 +6,6 @@ import fr.forumhfr.redface2.core.domain.auth.LoginError
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
-import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
@@ -43,9 +42,9 @@ class FlagsViewModelTest {
 
     @Test
     fun `flagsState stays null while user is anonymous`() = runTest {
-        val auth = FakeAuthRepository(AuthState.Anonymous)
         val flags = FakeFlagRepository()
-        val vm = FlagsViewModel(auth, flags, FakeMessagesRepository())
+        val auth = FakeAuthRepository(AuthState.Anonymous, flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
 
         vm.flagsState.test {
             assertNull(awaitItem())
@@ -55,9 +54,9 @@ class FlagsViewModelTest {
 
     @Test
     fun `flagsState mirrors the current tab when authenticated`() = runTest {
-        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
         val flags = FakeFlagRepository()
-        val vm = FlagsViewModel(auth, flags, FakeMessagesRepository())
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
 
         vm.flagsState.test {
             // Initial value (null) before stateIn fires.
@@ -74,9 +73,9 @@ class FlagsViewModelTest {
 
     @Test
     fun `selectTab switches the flagsState source`() = runTest {
-        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
         val flags = FakeFlagRepository()
-        val vm = FlagsViewModel(auth, flags, FakeMessagesRepository())
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -96,9 +95,9 @@ class FlagsViewModelTest {
 
     @Test
     fun `refresh forwards to the repository for the current tab`() = runTest {
-        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
         val flags = FakeFlagRepository()
-        val vm = FlagsViewModel(auth, flags, FakeMessagesRepository())
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
 
         vm.selectTab(FlagType.FAVORITE)
         vm.refresh()
@@ -107,15 +106,34 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `logout forwards to the auth repository`() = runTest {
-        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+    fun `logout clears the private flags cache before resetting auth state`() = runTest {
+        // Same invariant as MessagesViewModelTest: clearSessionCache() must fire BEFORE
+        // authRepository.logout() resets the cookie state. The fake AuthRepository
+        // captures the flag-cache clear count at the moment its logout() runs, so a
+        // future refactor that inverts the calls would leave cacheClearsObservedBeforeLogout
+        // at the pre-logout baseline and fail this test.
+        //
+        // Note: the eager subscription to `flagsState` triggers
+        // `clearFlagsCacheIfSessionChanged` on the first Authenticated emission, so the
+        // cache is already at 1 before the test runs `logout()`. After the logout flips
+        // AuthState → Anonymous, the same observer fires again from the Anonymous branch
+        // (another clear). We therefore assert ordering via the snapshot captured *inside*
+        // AuthRepository.logout(), not via a strict equality on the final count.
         val flags = FakeFlagRepository()
-        val vm = FlagsViewModel(auth, flags, FakeMessagesRepository())
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+
+        val clearsBeforeLogout = flags.clearSessionCacheCallCount
 
         vm.logout()
 
         assertTrue(auth.logoutCalled)
-        assertTrue("expected logout to clear private flags cache", flags.clearSessionCacheCallCount >= 1)
+        val observed = auth.cacheClearsObservedBeforeLogout
+        assertTrue(
+            "logout must call clearSessionCache() before AuthRepository.logout() — " +
+                "saw $clearsBeforeLogout clears pre-logout, $observed snapshot at logout",
+            observed > clearsBeforeLogout,
+        )
     }
 
     @Test
@@ -125,9 +143,9 @@ class FlagsViewModelTest {
         // it to a `String message`) would silently break that detection. This test pins the
         // contract: the SessionExpiredException must traverse the repository → ViewModel →
         // exposed state without being unwrapped.
-        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
         val flags = FakeFlagRepository()
-        val vm = FlagsViewModel(auth, flags, FakeMessagesRepository())
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
         val expired = SessionExpiredException("https://forum.hardware.fr/login.php")
 
         vm.flagsState.test {
@@ -143,10 +161,122 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `switching authenticated pseudo clears the private flags cache`() = runTest {
-        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+    fun `CYAN tab hides read participated topics by default`() = runTest {
+        // #154: « Mes sujets » should not pollute the actionable view with topics the user
+        // already finished reading. The filter is applied at the ViewModel layer (not in
+        // the repository) so toggling the preference reactively re-emits the filtered list
+        // without re-fetching.
         val flags = FakeFlagRepository()
-        val vm = FlagsViewModel(auth, flags, FakeMessagesRepository())
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+
+            flags.emit(
+                FlagType.CYAN,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(1, FlagType.CYAN, hasUnread = true),
+                        stubFlag(2, FlagType.CYAN, hasUnread = false),
+                        stubFlag(3, FlagType.CYAN, hasUnread = true),
+                    ),
+                ),
+            )
+
+            val filtered = awaitItem() as FlagsResult.Success
+            assertEquals(
+                "expected only hasUnread=true topics under default CYAN filter",
+                listOf(1, 3),
+                filtered.flags.map { it.topicId },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setShowReadParticipatedTopics true reveals read CYAN topics without refetch`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+
+            flags.emit(
+                FlagType.CYAN,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(1, FlagType.CYAN, hasUnread = true),
+                        stubFlag(2, FlagType.CYAN, hasUnread = false),
+                    ),
+                ),
+            )
+            assertEquals(listOf(1), (awaitItem() as FlagsResult.Success).flags.map { it.topicId })
+
+            vm.setShowReadParticipatedTopics(true)
+            // No new refresh() call — the toggle alone must re-emit the unfiltered list
+            // because flagsState combines the source flow with showReadParticipatedTopics.
+            val full = awaitItem() as FlagsResult.Success
+            assertEquals(listOf(1, 2), full.flags.map { it.topicId })
+            assertTrue("toggle must not trigger a network refresh", flags.refreshCalls.isEmpty())
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `RED and FAVORITE tabs are never filtered by the read participated toggle`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+
+            vm.selectTab(FlagType.RED)
+            flags.emit(
+                FlagType.RED,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(10, FlagType.RED, hasUnread = true),
+                        stubFlag(11, FlagType.RED, hasUnread = false),
+                    ),
+                ),
+            )
+            val red = awaitItem() as FlagsResult.Success
+            assertEquals(
+                "RED must include both read and unread regardless of the toggle",
+                listOf(10, 11),
+                red.flags.map { it.topicId },
+            )
+
+            vm.selectTab(FlagType.FAVORITE)
+            flags.emit(
+                FlagType.FAVORITE,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(20, FlagType.FAVORITE, hasUnread = false),
+                        stubFlag(21, FlagType.FAVORITE, hasUnread = true),
+                    ),
+                ),
+            )
+            val favorite = awaitItem() as FlagsResult.Success
+            assertEquals(
+                "FAVORITE must include both read and unread regardless of the toggle",
+                listOf(20, 21),
+                favorite.flags.map { it.topicId },
+            )
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `switching authenticated pseudo clears the private flags cache`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -160,7 +290,11 @@ class FlagsViewModelTest {
         }
     }
 
-    private fun stubFlag(topicId: Int, type: FlagType): Flag = Flag(
+    private fun stubFlag(
+        topicId: Int,
+        type: FlagType,
+        hasUnread: Boolean = true,
+    ): Flag = Flag(
         cat = 1,
         subcat = null,
         topicId = topicId,
@@ -168,7 +302,7 @@ class FlagsViewModelTest {
         totalPages = 1,
         replyCount = 0,
         type = type,
-        hasUnread = true,
+        hasUnread = hasUnread,
         lastReadPage = 1,
         lastPostReadId = null,
         firstPostAuthor = "",
@@ -176,9 +310,23 @@ class FlagsViewModelTest {
         lastReplyAt = "",
     )
 
-    private class FakeAuthRepository(initial: AuthState) : AuthRepository {
+    private class FakeAuthRepository(
+        initial: AuthState,
+        private val flagRepository: FakeFlagRepository? = null,
+    ) : AuthRepository {
         private val state = MutableStateFlow(initial)
         var logoutCalled: Boolean = false
+            private set
+
+        /**
+         * Snapshot of [FakeFlagRepository.clearSessionCacheCallCount] taken at the moment
+         * this fake's [logout] runs. The contract pinned by `logout clears the private
+         * flags cache before resetting auth state` is: the ViewModel must have called
+         * `clearSessionCache()` *before* delegating to `AuthRepository.logout()`. If the
+         * order is ever flipped, this number stays at its pre-logout baseline and the
+         * test fails.
+         */
+        var cacheClearsObservedBeforeLogout: Int = 0
             private set
 
         override fun observeAuthState(): Flow<AuthState> = state.asStateFlow()
@@ -186,6 +334,7 @@ class FlagsViewModelTest {
             Result.failure<AuthState.Authenticated>(LoginError.Unknown("not used"))
 
         override suspend fun logout() {
+            cacheClearsObservedBeforeLogout = flagRepository?.clearSessionCacheCallCount ?: 0
             logoutCalled = true
             state.value = AuthState.Anonymous
         }
@@ -217,9 +366,5 @@ class FlagsViewModelTest {
         suspend fun emit(type: FlagType, result: FlagsResult) {
             perType.getValue(type).emit(result)
         }
-    }
-
-    private class FakeMessagesRepository : MessagesRepository {
-        override fun observeUnreadMpCount(): Flow<Int?> = MutableStateFlow<Int?>(null).asStateFlow()
     }
 }
