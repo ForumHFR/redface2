@@ -17,9 +17,9 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## v37 — `0.1.0-phase1.6` — 2026-05-10
 
-**Statut** : `local` (sera `closed` après upload alpha automatique)
-**Commit** : à venir
-**Fichier** : `redface2-v37-<date>-<sha>.aab`
+**Statut** : `closed`
+**Commit** : `1832ed1`
+**Fichier** : `redface2-v37-1832ed1.aab`
 
 Build de finalisation Phase 1. Pas de changement fonctionnel visible utilisateur — uniquement de l'instrumentation perf et des tests qui figent les invariants du `PostRenderer` pour Phase 2.
 
