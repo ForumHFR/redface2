@@ -128,10 +128,11 @@ class FlagsViewModelTest {
         vm.logout()
 
         assertTrue(auth.logoutCalled)
+        val observed = auth.cacheClearsObservedBeforeLogout
         assertTrue(
-            "logout must have called clearSessionCache() before reaching AuthRepository.logout() — " +
-                "snapshot saw $clearsBeforeLogout clears at start, ${auth.cacheClearsObservedBeforeLogout} when logout ran",
-            auth.cacheClearsObservedBeforeLogout > clearsBeforeLogout,
+            "logout must call clearSessionCache() before AuthRepository.logout() — " +
+                "saw $clearsBeforeLogout clears pre-logout, $observed snapshot at logout",
+            observed > clearsBeforeLogout,
         )
     }
 
