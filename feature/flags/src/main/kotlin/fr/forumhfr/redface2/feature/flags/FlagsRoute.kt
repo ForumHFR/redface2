@@ -43,10 +43,14 @@ import fr.forumhfr.redface2.core.ui.FlagItemDivider
 /**
  * Home tab entry point.
  *
- * Phase 1 polish (#154): the alpha footer (Connecté en tant que, logout, version,
- * Signaler un contenu, Diagnostics) has been moved to the Messages tab so the home
- * stays focused on the flag list. The CYAN tab now hides `hasUnread = false` rows by
- * default and exposes a switch to bring them back — controlled by [FlagsViewModel].
+ * Phase 1 polish (#154):
+ * - The alpha footer no longer lives here. The account affordances (pseudo, logout)
+ *   and the alpha tools (Diagnostics, content report, version) moved to the Messages
+ *   tab where they sit until Phase 3 lands real MPs. The legacy « MPs non lus »
+ *   counter was dropped along the way — it will come back through `MessagesViewModel`
+ *   once real MPs ship, not as a transient footer pin.
+ * - The CYAN tab hides `hasUnread = false` rows by default and exposes a switch to
+ *   bring them back — controlled by [FlagsViewModel.showReadParticipatedTopics].
  */
 @Composable
 fun FlagsRoute(
@@ -207,10 +211,11 @@ private fun ColumnScope.AuthenticatedBody(
                     modifier = Modifier
                         .fillMaxWidth()
                         // Without weight(1f), this LazyColumn would consume all remaining
-                        // vertical space inside the parent Column (FlagsRoute) and push
-                        // FooterSlot off-screen — invariably reproducible on the cyan tab
-                        // (127 rows in the captured fixture). Weight is the canonical
-                        // Compose pattern for "header + scrollable list + footer".
+                        // vertical space inside the parent Column (FlagsRoute) and push any
+                        // sibling rendered after it off-screen — reproducible on long lists
+                        // (e.g. the cyan tab on the captured fixture, 127 rows). Weight is
+                        // the canonical Compose pattern for "header + scrollable list" inside
+                        // a Column with extra trailing content.
                         .weight(1f)
                         .clip(RoundedCornerShape(0.dp))
                         .background(MaterialTheme.colorScheme.surface),

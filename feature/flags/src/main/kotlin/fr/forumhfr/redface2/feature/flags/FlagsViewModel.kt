@@ -6,7 +6,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
-import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.FlagType
 import javax.inject.Inject
@@ -23,19 +22,18 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
- * Home tab ViewModel. Owns the auth-aware flag list rendering plus the auxiliary state
- * the home screen surfaces (pseudo / MP count) so the UI layer can stay declarative.
+ * Home tab ViewModel. Owns the auth-aware flag list rendering and the per-tab filtering
+ * state so the UI layer can stay declarative.
  *
  * State flows are nullable where "not known yet" is meaningful: a `null` `authState`
  * means the cookie jar is still warming up from DataStore, and Compose renders nothing
- * to avoid a cold-start flicker (cf. PR #91 review). Same convention for `unreadMpCount`.
+ * to avoid a cold-start flicker (cf. PR #91 review).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class FlagsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val flagRepository: FlagRepository,
-    messagesRepository: MessagesRepository,
 ) : ViewModel() {
 
     private var observedPseudo: String? = null
@@ -44,14 +42,15 @@ class FlagsViewModel @Inject constructor(
     val selectedTab: StateFlow<FlagType> = _selectedTab.asStateFlow()
 
     /**
-     * User-controlled visibility of CYAN flags whose [Flag.hasUnread] is false — i.e. topics
-     * the user already finished reading but still participated in. Default `false`: a fresh
-     * launch shows only actionable « Mes sujets » entries. Toggling this reactively re-emits
-     * the filtered list without a refetch (cf. [combine] in [flagsState]).
+     * User-controlled visibility of CYAN flags whose [fr.forumhfr.redface2.core.model.Flag.hasUnread]
+     * is `false` — i.e. topics the user already finished reading but still participated in.
+     * Default `false`: a fresh launch shows only actionable « Mes sujets » entries. Toggling this
+     * reactively re-emits the filtered list without a refetch (cf. [combine] in [flagsState]).
      *
-     * Filter applies only when [selectedTab] == [FlagType.CYAN]. RED (unread topics) and
-     * FAVORITE keep their full content regardless — they don't have the « stale read »
-     * pollution problem CYAN does.
+     * Filter applies only when [selectedTab] == [FlagType.CYAN]. RED (« Lus uniquement » — topics
+     * the user reads without participating) and FAVORITE (bookmarks) keep their full content
+     * regardless — they don't have the « stale read flag » pollution problem CYAN does, where the
+     * user explicitly wants the actionable subset by default.
      *
      * In-memory only for now (#154 polish scope) — persisting the preference is deferred
      * until a real settings surface exists.
@@ -60,13 +59,6 @@ class FlagsViewModel @Inject constructor(
     val showReadParticipatedTopics: StateFlow<Boolean> = _showReadParticipatedTopics.asStateFlow()
 
     val authState: StateFlow<AuthState?> = authRepository.observeAuthState()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.Eagerly,
-            initialValue = null,
-        )
-
-    val unreadMpCount: StateFlow<Int?> = messagesRepository.observeUnreadMpCount()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
@@ -125,9 +117,11 @@ class FlagsViewModel @Inject constructor(
         type: FlagType,
         showReadParticipated: Boolean,
     ): FlagsResult {
-        // Only CYAN suffers from « old read flags pollute the actionable view ». RED and
-        // FAVORITE keep both read and unread by design — RED is « unread topics I'm not in »
-        // and FAVORITE is a bookmark list.
+        // CYAN is the only bucket where « topics already finished reading » legitimately
+        // pollutes the actionable view (the user *participated*, then moved on). RED
+        // (« Lus uniquement » — topics watched without participation) and FAVORITE
+        // (bookmarks) are not filtered: their value comes from listing both read and
+        // unread entries.
         if (type != FlagType.CYAN || showReadParticipated) return result
         return when (result) {
             is FlagsResult.Success -> result.copy(flags = result.flags.filter { it.hasUnread })

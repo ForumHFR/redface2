@@ -239,16 +239,20 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
         entryProvider = entryProvider {
             entry<FlagsListRoute> {
                 FlagsRoute(
-                    versionName,
-                    versionCode,
                     onOpenFlag = { flag -> /* ... */ },
+                    onLoginRequested = { /* ... */ },
+                )
+            }
+            entry<ForumRoute> { ForumScreen(onOpenCategory = { /* ... */ }) }
+            entry<SearchRoute> { SearchScreen() }
+            entry<MessagesRoute> {
+                MessagesScreen(
+                    versionName = BuildConfig.VERSION_NAME,
+                    versionCode = BuildConfig.VERSION_CODE,
                     onLoginRequested = { /* ... */ },
                     onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
                 )
             }
-            entry<ForumRoute> { ForumScreen(onOpenCategory = { /* ... */ }) }
-            entry<SearchRoute> { SearchScreen(onOpenResult = { /* ... */ }) }
-            entry<MessagesRoute> { MessagesScreen(onOpenTopic = { /* ... */ }) }
             entry<CategoryRoute> { route ->
                 ForumCategoryScreen(
                     request = CategoryRequest(
@@ -397,7 +401,7 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 > **Statut Phase 5+** — multi-pane n'est pas livré en Phase 1. Dans le snippet ci-dessous :
 >
 > - le **pattern de composition** (`NavDisplay` + `ListDetailPaneScaffold` sur le même back stack, switch `WindowSizeClass`) est **illustratif** — c'est ce qui sera implémenté Phase 5+ ;
-> - les **signatures de screens** appelées (`FlagsRoute(versionName, versionCode, onOpenFlag, onLoginRequested, onOpenDiagnostics)`, `TopicScreen(request: TopicRequest, onReply, onOpenPage)`, `EditorScreen(mode: String, cat, post)`) sont les signatures **réelles Phase 1** livrées dans le repo aujourd'hui (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/editor/.../EditorScreen.kt`).
+> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested)`, `MessagesScreen(versionName, versionCode, onLoginRequested, onOpenDiagnostics)`, `SearchScreen()`, `TopicScreen(request: TopicRequest, onReply, onOpenPage)`, `EditorScreen(mode: String, cat, post)`) sont les signatures **réelles Phase 1** livrées dans le repo aujourd'hui (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../EditorScreen.kt`).
 >
 > Le call-site `onOpenFlag = { flag -> backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = ...)) }` passe désormais le topic concerné — Phase 1B.4 a remplacé le placeholder mock par la liste réelle des drapeaux.
 
@@ -411,8 +415,6 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
         ListDetailPaneScaffold(
             listPane = {
                 FlagsRoute(
-                    versionName = BuildConfig.VERSION_NAME,
-                    versionCode = BuildConfig.VERSION_CODE,
                     onOpenFlag = { flag ->
                         backStack.add(
                             TopicRoute(
@@ -426,7 +428,6 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
                         )
                     },
                     onLoginRequested = { backStack.add(LoginRoute) },
-                    onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
                 )
             },
             detailPane = {
@@ -461,7 +462,7 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
 }
 ```
 
-Phase 1B.4 a livré `FlagsRoute` (dans `:feature:flags`) avec le vrai modèle `Flag` ; en Phase 1D-1 le scroll anchor est passé de `firstUnreadPostId` à `lastPostReadId` (REST `last_post_read_id`) : `backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.lastPostReadId?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()))`. Phase 1C-A a ensuite remplacé les placeholders Forum/Category par `ForumScreen` + `ForumCategoryScreen` alimentés par `ForumRepository` REST. Les constantes privées `DEMO_TOPIC_CAT` / `DEMO_TOPIC_POST` restent uniquement pour `SearchScreen` et `MessagesScreen`, qui sont encore des placeholders ; chaque call-site disparaîtra au fur et à mesure que les phases Search/Messages livreront les modèles `SearchResult` et `MpThread`.
+Phase 1B.4 a livré `FlagsRoute` (dans `:feature:flags`) avec le vrai modèle `Flag` ; en Phase 1D-1 le scroll anchor est passé de `firstUnreadPostId` à `lastPostReadId` (REST `last_post_read_id`) : `backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.lastPostReadId?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()))`. Phase 1C-A a ensuite remplacé les placeholders Forum/Category par `ForumScreen` + `ForumCategoryScreen` alimentés par `ForumRepository` REST. Le polish pré-Phase 2 (#154) a retiré les constantes `DEMO_TOPIC_*` et leurs callbacks : `SearchScreen()` n'expose plus de bouton de navigation, et `MessagesScreen(versionName, versionCode, onLoginRequested, onOpenDiagnostics)` accueille temporairement les actions compte (login/logout) et outils alpha (Diagnostics, signalement, version) jusqu'à ce que Phase 3 livre la vraie liste de MPs.
 
 ---
 

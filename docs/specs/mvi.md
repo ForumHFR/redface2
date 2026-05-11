@@ -59,11 +59,11 @@ Les exemples ViewModel ci-dessous sont **des squelettes illustratifs** — certa
 ### ViewModel — forme livrée
 
 ```kotlin
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class FlagsViewModel @Inject constructor(
-    authRepository: AuthRepository,
+    private val authRepository: AuthRepository,
     private val flagRepository: FlagRepository,
-    messagesRepository: MessagesRepository,
 ) : ViewModel() {
 
     private var observedPseudo: String? = null
@@ -71,31 +71,32 @@ class FlagsViewModel @Inject constructor(
     private val _selectedTab = MutableStateFlow(FlagType.CYAN)
     val selectedTab: StateFlow<FlagType> = _selectedTab.asStateFlow()
 
+    // #154 polish — CYAN-only client filter, default hides `hasUnread = false` rows.
+    private val _showReadParticipatedTopics = MutableStateFlow(false)
+    val showReadParticipatedTopics: StateFlow<Boolean> = _showReadParticipatedTopics.asStateFlow()
+
     val authState: StateFlow<AuthState?> =
         authRepository.observeAuthState()
             .stateIn(viewModelScope, SharingStarted.Eagerly, initialValue = null)
 
-    val unreadMpCount: StateFlow<Int?> =
-        messagesRepository.observeUnreadMpCount()
-            .stateIn(viewModelScope, SharingStarted.Eagerly, initialValue = null)
-
-    @OptIn(ExperimentalCoroutinesApi::class)
     val flagsState: StateFlow<FlagsResult?> = authState
         .onEach(::clearFlagsCacheIfSessionChanged)
         .flatMapLatest { state ->
             when (state) {
-                null, AuthState.Anonymous -> flowOf(null)
+                null -> flowOf<FlagsResult?>(null)
+                AuthState.Anonymous -> flowOf<FlagsResult?>(null)
                 is AuthState.Authenticated -> selectedTab.flatMapLatest { type ->
-                    // The .map { it as FlagsResult? } upcast is required so the `when`
-                    // branches share a common type — `flowOf(null)` is `Flow<Nothing?>`,
-                    // and stateIn needs the upstream `Flow<FlagsResult?>`.
-                    flagRepository.observe(type).map { it as FlagsResult? }
+                    combine(
+                        flagRepository.observe(type),
+                        _showReadParticipatedTopics,
+                    ) { result, showRead -> filterReadParticipatedIfNeeded(result, type, showRead) }
                 }
             }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, initialValue = null)
 
     fun selectTab(type: FlagType) { _selectedTab.value = type }
+    fun setShowReadParticipatedTopics(value: Boolean) { _showReadParticipatedTopics.value = value }
 
     fun refresh() {
         viewModelScope.launch { flagRepository.refresh(_selectedTab.value) }
@@ -103,8 +104,23 @@ class FlagsViewModel @Inject constructor(
 
     fun logout() {
         viewModelScope.launch {
+            // Order matters: drop the private cache before flipping AuthState to
+            // Anonymous so the Flags tab can't redraw the previous user's rows
+            // for a frame after logout fires.
             flagRepository.clearSessionCache()
             authRepository.logout()
+        }
+    }
+
+    private fun filterReadParticipatedIfNeeded(
+        result: FlagsResult,
+        type: FlagType,
+        showReadParticipated: Boolean,
+    ): FlagsResult {
+        if (type != FlagType.CYAN || showReadParticipated) return result
+        return when (result) {
+            is FlagsResult.Success -> result.copy(flags = result.flags.filter { it.hasUnread })
+            else -> result
         }
     }
 
@@ -125,6 +141,8 @@ class FlagsViewModel @Inject constructor(
     }
 }
 ```
+
+> **Polish #154** — `MessagesRepository` n'est plus injectée dans `FlagsViewModel` : l'ancien `unreadMpCount` était surfacé dans le footer Drapeaux mais ce footer (pseudo, logout, version, signalement, Diagnostics) a été déplacé sur `MessagesScreen` en attendant Phase 3. Le compteur MP reviendra à côté de la liste réelle des MPs, pas en tant qu'overlay temporaire sur Drapeaux.
 
 `FlagRepository` est livrée comme un contrat à deux verbes (cf. `core/domain/.../FlagRepository.kt`) :
 
@@ -156,7 +174,7 @@ Quand cette extension arrive, `FlagsState` agrégé peut redevenir préférable 
 
 ### Screen (Compose) — forme livrée
 
-`feature/flags/src/main/kotlin/.../FlagsRoute.kt` est l'entrée stateful (récupère `FlagsViewModel` via `hiltViewModel()`, collecte ses `StateFlow` via `collectAsStateWithLifecycle()`). Le footer (auth, MP unread, version, bouton signalement, logout) et l'écran lui-même (3 onglets, liste, retry) cohabitent dans le même composable parce que la surface utile reste petite Phase 1B. Le découpage `<Name>Screen` / `<Name>Content` reste l'objectif quand la complexité justifie le coût (filtre, tri, undo) — cf. cible Phase 1D.
+`feature/flags/src/main/kotlin/.../FlagsRoute.kt` est l'entrée stateful (récupère `FlagsViewModel` via `hiltViewModel()`, collecte ses `StateFlow` via `collectAsStateWithLifecycle()`). Depuis le polish #154, `FlagsRoute` se concentre sur la liste : 3 onglets, toggle « afficher les sujets participés déjà lus » (CYAN uniquement), bouton Actualiser, branche login si anonyme, branche reconnect si `SessionExpiredException`. Pas de footer alpha — les actions compte (pseudo / logout) et outils (Diagnostics, signalement, version) vivent sur `MessagesScreen` jusqu'à Phase 3. Le découpage `<Name>Screen` / `<Name>Content` reste l'objectif quand la complexité justifie le coût (filtre, tri, undo) — cf. cible Phase 2.
 
 ---
 

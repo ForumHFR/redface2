@@ -21,8 +21,9 @@ import androidx.compose.ui.unit.dp
  *
  * The demo button that opened a hardcoded topic was misleading (suggested the search
  * was already wired) so it's gone. Real search is tracked in #150; this screen exists
- * mainly to keep the bottom-nav slot reserved and to communicate the planned scope
- * (titles / post content, optional category/author/date filters pending #81 validation).
+ * mainly to keep the bottom-nav slot reserved and to communicate the planned scope —
+ * search over topic titles and post content, with optional category/author/date filters
+ * pending what the HFR captures confirm.
  */
 @Composable
 fun SearchScreen() {
