@@ -104,7 +104,7 @@ class BbcodeContentParser {
                     flushParagraph()
                     handleRawTextBlock(tokens, i, close, token, tagName, out)
                 }
-                "img" -> handleImageBlock(tokens, i, close, out, flushParagraph)
+                "img" -> handleImageBlock(tokens, i, close, out, paragraph, flushParagraph)
                 else -> error("Unhandled block-level tag $tagName")
             }
         }
@@ -169,19 +169,24 @@ class BbcodeContentParser {
         return close + 1
     }
 
+    @Suppress("LongParameterList") // image fallback needs both block output and current paragraph buffer
     private fun handleImageBlock(
         tokens: List<Token>,
         i: Int,
         close: Int,
         out: MutableList<PostBlock>,
+        paragraph: MutableList<PostInline>,
         flushParagraph: () -> Unit,
     ): Int {
-        val url = flattenRawText(tokens, i + 1, close).trim()
-        if (url.isNotEmpty()) {
+        val rawUrl = flattenRawText(tokens, i + 1, close).trim()
+        val url = sanitizeImageHref(rawUrl)
+        if (url != null) {
             // HFR inserts images via the toolbar as block-level — render the same way so
             // the preview matches what users see on the web.
             flushParagraph()
             out += PostBlock.Image(url = url, description = null)
+        } else {
+            paragraph += PostInline.Text(flattenRawText(tokens, i, close + 1))
         }
         return close + 1
     }
@@ -258,9 +263,15 @@ class BbcodeContentParser {
             return InlineSlice(PostInline.Text(open.raw), 1)
         }
         val children = parseInlinesOnly(tokens, from + 1, close, depth + 1)
-        val url = open.params.takeIf { it.isNotBlank() } ?: flattenInlineText(children)
+        val rawUrl = open.params.takeIf { it.isNotBlank() } ?: flattenInlineText(children)
+        val url = sanitizeLinkHref(rawUrl)
+        val node = if (url == null) {
+            PostInline.Text(flattenRawText(tokens, from, close + 1))
+        } else {
+            PostInline.Link(url = url, children = children)
+        }
         return InlineSlice(
-            PostInline.Link(url = url, children = children),
+            node,
             close - from + 1,
         )
     }

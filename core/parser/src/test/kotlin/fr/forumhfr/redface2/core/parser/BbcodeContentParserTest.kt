@@ -69,6 +69,23 @@ class BbcodeContentParserTest {
     }
 
     @Test
+    fun `url rejects unsafe schemes and keeps raw bbcode visible`() {
+        val ast = parser.parse("[url=javascript:alert(1)]label[/url]")
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        assertTrue("javascript: URL must not reach PostInline.Link", paragraph.inlines.none { it is PostInline.Link })
+        val text = paragraph.inlines.filterIsInstance<PostInline.Text>().joinToString(separator = "") { it.value }
+        assertEquals("[url=javascript:alert(1)]label[/url]", text)
+    }
+
+    @Test
+    fun `url accepts absolute HFR paths by normalising them`() {
+        val ast = parser.parse("[url=/hfr/gsmgpspda/android/redface-sujet_35395_1.htm]topic[/url]")
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        val link = paragraph.inlines.single() as PostInline.Link
+        assertEquals("https://forum.hardware.fr/hfr/gsmgpspda/android/redface-sujet_35395_1.htm", link.url)
+    }
+
+    @Test
     fun `email becomes a mailto link`() {
         val ast = parser.parse("[email]a@b.c[/email]")
         val paragraph = ast.blocks.single() as PostBlock.Paragraph
@@ -121,6 +138,22 @@ class BbcodeContentParserTest {
         val block = ast.blocks.single() as PostBlock.Image
         assertEquals("https://example.com/a.png", block.url)
         assertNull(block.description)
+    }
+
+    @Test
+    fun `img rejects unsafe schemes and keeps raw bbcode visible`() {
+        val ast = parser.parse("[img]javascript:alert(1)[/img]")
+        assertTrue("javascript: image URL must not reach PostBlock.Image", ast.blocks.none { it is PostBlock.Image })
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        val text = paragraph.inlines.filterIsInstance<PostInline.Text>().joinToString(separator = "") { it.value }
+        assertEquals("[img]javascript:alert(1)[/img]", text)
+    }
+
+    @Test
+    fun `img accepts absolute HFR paths by normalising them`() {
+        val ast = parser.parse("[img]/images/forum/icon.gif[/img]")
+        val block = ast.blocks.single() as PostBlock.Image
+        assertEquals("https://forum.hardware.fr/images/forum/icon.gif", block.url)
     }
 
     @Test
