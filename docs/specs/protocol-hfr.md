@@ -37,14 +37,17 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Drapeaux (accueil Redface 2) — REST | GET | `/webservices/rest_api.php?uri=forums/hardwarefr/topics/{participated,read,favorites}/&page={page}&results_per_page={n}` | **oui** |
 | Drapeaux par catégorie — REST | GET | `/webservices/rest_api.php?uri=forums/hardwarefr/categories/{cat}/topics/{participated,read,favorites}/&page={page}&results_per_page={n}` | **oui** |
 | Login | POST | `/login_validation.php?config=hfr.inc&redirect=&url=` | — |
-| Reply (post) | POST | `/bddpost.php?config=hfr.inc&cat={cat}` | **oui** |
-| Edit (post) | POST | `/bdd.php?config=hfr.inc&cat={cat}` | **oui** |
-| Edit FP (premier post) | POST | `/bdd.php?config=hfr.inc&cat={cat}` avec champ spécifique | **oui** |
-| Nouveau topic | POST | `/bddpost.php?config=hfr.inc&cat={cat}&subcat={subcat}&new=1` | **oui** |
+| Formulaire reply | GET | `/message.php?config=hfr.inc&cat={cat}&post={post}&page={page}&p=1&subcat={subcat}&sondage=0&owntopic=0&new=0` | **oui** |
+| Formulaire quote | GET | `/message.php?config=hfr.inc&cat={cat}&post={post}&numrep={numreponse}&ref={ref}&page={page}&p=1&subcat={subcat}&sondage=0&owntopic=0&new=0#formulaire` | **oui** |
+| Formulaire edit post | GET | `/message.php?config=hfr.inc&cat={cat}&post={post}&page={page}&p=1&subcat={subcat}&sondage=0&owntopic=0&new=0&numreponse={numreponse}` | **oui** |
+| Formulaire nouveau topic | GET | `/message.php?config=hfr.inc&cat={cat}&subcat={subcat}&sondage=0&owntopic=0&new=0` | **oui** |
+| Reply / quote (post) | POST | `/bddpost.php?config=hfr.inc` | **oui** |
+| Edit (post) | POST | `/bdd.php?config=hfr.inc` | **oui** |
+| Edit FP (premier post) | POST | `/bdd.php?config=hfr.inc` avec champs spécifiques | **oui** |
+| Nouveau topic | POST | `/bddpost.php?config=hfr.inc` | **oui** |
 | MP (envoi) | POST | `/bddpost.php?config=hfr.inc&cat=prive&pseudo={dest}` | **oui** |
 | Conversation MP | GET | `/message.php?config=hfr.inc&cat=prive&post={mp_id}&page={page}` | **oui** |
 | Liste des MPs | GET | `/forum1.php?config=hfr.inc&cat=prive&page={page}&subcat=&sondage=0&owntopic=0&trash=0&trash_post=0&moderation=0&new=0&nojs=0&subcatgroup=0` | **oui** |
-| Page d'édition d'un post | GET | `/message.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Ajouter aux drapeaux | GET | `/user/addflag.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Retirer des drapeaux | GET | `/user/delflag.php?config=hfr.inc&cat={cat}&post={post}&p=1&sondage=0&owntopic={0,1}&new=0` | **oui** |
 | Profil public | GET | `/hfr/profil-{user_id}.htm` | non |
@@ -60,27 +63,69 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 
 ## Form fields critiques
 
-### POST `bddpost.php` (reply ou nouveau topic)
+### POST `bddpost.php` (reply, quote ou nouveau topic)
+
+Contrat recapturé sur HFR réel le 2026-05-17 avec le compte de test `XaTelitte`, topic Redface 2 `cat=23`, `post=35395`, `subcat=550`, post de test `numreponse=2784595`. Fixtures de référence : `write_reply_form_open_topic.html`, `write_quote_form_test_post.html`, `write_create_topic_form_android_cat.html`.
 
 | Field | Valeur | Obligatoire | Description |
 |---|---|---|---|
 | `hash_check` | `<token>` extrait de la page GET précédente | **oui** | Anti-CSRF. Voir section dédiée. |
 | `verifrequet` | `"1100"` | **oui** | Constante anti-bot. String, pas entier. |
 | `cat` | ID catégorie | oui | ou `"prive"` pour MP |
-| `post` | ID topic | oui si reply | Absent si nouveau topic |
+| `post` | ID topic | oui si reply | Vide si nouveau topic. |
+| `subcat` | ID sous-catégorie | oui | Observé `550` pour Android. |
+| `numreponse` | `""` | oui | Vide sur reply/quote/create. Ne pas confondre avec `numrep`. |
+| `numrep` | `""` ou numreponse cité | oui | Vide en reply simple. Renseigné en quote. |
 | `MsgIcon` | `"1"` | conventionnel | Icône du message (1 = défaut) |
 | `signature` | `"1"` | conventionnel | Inclure la signature |
 | `wysiwyg` | `"0"` | conventionnel | Mode BBCode brut |
-| `new` | `"0"` ou `"1"` | oui | `"1"` pour nouveau topic |
-| `page` | `"1"` | conventionnel | |
+| `new` | `"0"` observé | oui | Même le formulaire de création topic observé expose `new="0"`. Ne pas supposer `1` sans nouvelle capture. |
+| `page` | page topic courante | oui | Observé `20` sur reply/quote/edit ; `1` sur nouveau topic. |
 | `p` | `"1"` | conventionnel | |
 | `sondage` | `"0"` ou `"1"` | oui si topic | `"1"` si nouveau topic avec sondage |
+| `sond` | `"0"` | oui | Présent dans les formulaires observés. |
+| `cache` | `"cache"` | oui | Présent dans les formulaires observés. |
 | `owntopic` | `"0"` ou `"1"` | oui | Topic favori ? |
 | `config` | `"hfr.inc"` | oui | Toujours `hfr.inc` pour HFR |
+| `sujet` | titre topic | oui | Champ réel observé. Pas `subject`. En reply/quote il reprend le titre existant. |
 | `content_form` | contenu BBCode | oui | Le corps du message |
-| `subject` | titre | oui si nouveau topic | Absent si reply |
+| `from_subcat` | ID sous-catégorie | nouveau topic | Présent sur le formulaire de création topic. |
+| `toread1..5` | options visibles | nouveau topic | Présents sur le formulaire de création topic, à traiter comme opaques avant implémentation sondage/options. |
+
+#### Reply simple
+
+Le formulaire reply est obtenu par GET `message.php`. Le POST part vers `bddpost.php?config=hfr.inc`.
+
+Champs observés sur le topic Redface 2 page 20 :
+
+- `post=35395`
+- `cat=23`
+- `subcat=550`
+- `page=20`
+- `numreponse=""`
+- `numrep=""`
+- `sujet="Redface 2 — PHASE 2 @ ALPHA"`
+- `content_form` vide avant saisie utilisateur
+
+#### Quote
+
+Le lien `quote+` utilise `numrep`, pas `numreponse` :
+
+```text
+GET /message.php?...&post=35395&numrep=2784595&ref=0&page=20&...
+```
+
+HFR préremplit ensuite `content_form` :
+
+```bbcode
+[quotemsg=2784595,768,1214571]...[/quotemsg]
+```
+
+Le premier paramètre est le `numreponse` cité. Le troisième paramètre observé correspond à l'ID utilisateur de l'auteur cité. Le second paramètre (`768` dans la capture du post `2784595`, `640` dans une capture antérieure page 16) est une position/index HFR à traiter comme **opaque** tant que son calcul exact n'a pas été confirmé. Pour le MVP, Redface 2 doit récupérer le formulaire quote côté HFR et réutiliser le `content_form` prérempli, au lieu de reconstruire `[quotemsg=...]` localement.
 
 ### POST `bdd.php` (edit)
+
+Contrat recapturé sur HFR réel le 2026-05-17 avec le post de test `numreponse=2784595`. Fixtures de référence : `write_edit_form_test_post.html`, `write_edit_success_response.html`.
 
 | Field | Valeur | Description |
 |---|---|---|
@@ -89,11 +134,22 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | `cat` | ID catégorie | |
 | `post` | ID topic | |
 | `numreponse` | ID post | Post à éditer |
+| `numrep` | `""` | Présent mais vide dans le formulaire d'édition observé. |
+| `page` | page topic courante | Observé `20`. |
+| `subcat` | ID sous-catégorie | Observé `550`. |
+| `sujet` | titre topic | Champ réel observé. Pas `subject`. |
 | `content_form` | nouveau contenu BBCode | |
-| `subject` | nouveau sujet | Seulement si edit FP |
 | `pollsondage` | données sondage | Seulement si edit FP avec sondage |
 
 Le fait qu'une édition concerne le **premier post** (FP) vs un post normal est déduit côté client (`isFirstPostOwner`) puis pris en compte dans la construction du form.
+
+Réponse succès observée après POST `bdd.php?config=hfr.inc` :
+
+```text
+Votre message a été édité avec succès !
+```
+
+La réponse succès ne contient pas le contenu édité. Le client doit recharger la page topic ou mettre à jour son cache local après succès.
 
 ### POST `login_validation.php`
 

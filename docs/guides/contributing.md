@@ -260,8 +260,8 @@ core/parser/src/test/resources/fixtures/
 | `topic_multipage.html` | Topic multi-pages | logué + non-logué | `cat=23, post=35395` (>1 page) |
 | `topic_singlepage.html` | Topic 1 seule page | non-logué | topic court cat=23 |
 | `topic_posts.html` | Posts d'un topic | logué + non-logué | `cat=23, post=35395, page=1` |
-| `edit_post.html` | Page d'édition d'un post | logué uniquement | `message.php?numreponse=X` sur propre post |
-| `quote.html` | Contenu de citation BBCode | logué uniquement | `message.php?quote=X` |
+| `edit_post.html` | Page d'édition d'un post | logué uniquement | `message.php?...&numreponse=X` sur propre post |
+| `quote.html` | Contenu de citation BBCode | logué uniquement | `message.php?...&numrep=X` |
 | `categories.html` | Page d'accueil (catégories) | non-logué | `/hfr/` |
 | `topic_list.html` | Liste topics d'une sous-catégorie | logué + non-logué | `forum2.php?cat=23&subcat=0` |
 | `profile_standard.html` | Profil utilisateur standard | non-logué | `hfr/profil-<id>.htm` (membre) |
@@ -281,7 +281,11 @@ core/parser/src/test/resources/fixtures/
 | `login_success.html` | Réponse login OK | — | Détection succès auth | Après POST login OK |
 | `login_failure.html` | Réponse login échoué | — | Détection échec auth | Après POST bad pass |
 | `edit_fp.html` | Édition First Post (sujet + sondage) | logué uniquement | Distinct de l'édition normale | propre topic avec sondage |
-| `new_topic.html` | Page de création de topic | logué uniquement | Formulaire avec sous-catégories | `forum1.php?cat=23&action=new` |
+| `new_topic.html` | Page de création de topic | logué uniquement | Formulaire avec sous-catégories | `message.php?config=hfr.inc&cat=23&subcat=550&new=0` |
+| `write_reply_form_open_topic.html` | Formulaire reply Phase 2A | logué uniquement | Contrat `bddpost.php` réel | `message.php?...&post=35395&page=20&subcat=550` |
+| `write_quote_form_test_post.html` | Formulaire quote Phase 2A | logué uniquement | `numrep` + `[quotemsg=...]` prérempli | `message.php?...&numrep=2784595` |
+| `write_edit_form_test_post.html` | Formulaire edit Phase 2A | logué uniquement | `numreponse` + contrat `bdd.php` réel | `message.php?...&numreponse=2784595` |
+| `write_edit_success_response.html` | Réponse succès edit Phase 2A | logué uniquement | Message succès `bdd.php` | `POST bdd.php?config=hfr.inc` |
 | `multimp_conversation.html` | MultiMP | logué uniquement | Différent des MPs classiques | MultiMP existant |
 | `topic_with_poll.html` | Topic avec sondage | logué + non-logué | Parsing du sondage | topic public avec sondage |
 | `topic_last_page.html` | Dernière page (< 40 posts) | non-logué | Pagination edge case | dernière page d'un topic |
@@ -304,7 +308,7 @@ core/parser/src/test/resources/fixtures/
 | `contact_list.html` | `contactlist.php` | Liste de contacts : ajout/suppression, statut en ligne, liens MP | idem |
 | `modo_history.html` | `modo/historique.php` | Historique des sanctions : modérateur, catégorie, date, raison | modérateur test |
 
-**Total : ~36 fixtures** (13 reprises testées de v1 + 14 nouvelles + 9 profil/paramètres).
+**Total : ~40 fixtures** (13 reprises testées de v1 + 18 nouvelles + 9 profil/paramètres).
 
 ### Fixtures REST JSON (Phase 1C-A)
 
