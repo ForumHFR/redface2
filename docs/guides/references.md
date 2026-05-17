@@ -92,8 +92,8 @@ Pas trouvé via les sondages publics (`/aide.php`, `/charte.html`, `/faq.php` �
 |---|---|---|---|---|---|---|
 | [FLKone/HFRplus](https://github.com/FLKone/HFRplus) | FLKone | Objective-C | 2017-12-05 | 16 | aucune | iOS 5+ — origine de la lignée. |
 | [FLKone/SuperHFRplus](https://github.com/FLKone/SuperHFRplus) | FLKone | Objective-C | 2021-06-12 | 2 | aucune | iOS 11+, successeur de HFRplus. |
-| [ezzz/HFRnow](https://github.com/ezzz/HFRnow) | ezzz | Objective-C | **2026-05-17** | 1 | aucune | Fork de SuperHFRplus, **actif** : 52 263 commits, ciblage iOS 15+ pour v2.0. C'est la branche vivante actuelle côté open source. |
-| [Aynolor/SuperHFRplus](https://github.com/Aynolor/SuperHFRplus) | Aynolor | Objective-C | 2023-11-06 | 6 | aucune | Fork intermédiaire entre FLKone et ezzz, 48 238 commits. |
+| [ezzz/HFRnow](https://github.com/ezzz/HFRnow) | ezzz | Objective-C | **2026-05-17** | 1 | aucune | Fork de SuperHFRplus, **actif** : 1 267 commits, ciblage iOS 15+ pour v2.0. C'est la branche vivante actuelle côté open source. |
+| [Aynolor/SuperHFRplus](https://github.com/Aynolor/SuperHFRplus) | Aynolor | Objective-C | 2023-11-06 | 6 | aucune | Fork intermédiaire entre FLKone et ezzz, 533 commits. |
 | [feilaoda/HFRplus](https://github.com/feilaoda/HFRplus) | feilaoda | Objective-C | 2013-06-25 | 0 | aucune | Fork ancien de HFRplus, abandonné. |
 | [FLKone/HFRrehost](https://github.com/FLKone/HFRrehost) | FLKone | Objective-C | 2015-02-12 | 2 | aucune | App iOS compagnon pour `reho.st` — pas un client forum mais écosystème iOS HFR. |
 | [flaiehfr/hfr-rehost](https://github.com/flaiehfr/hfr-rehost) | flaiehfr | Swift | 2021-09-03 | 0 | aucune | Share Extension Swift pour envoyer des images vers Rehost + générer du BBCode. Non distribué sur App Store. |
@@ -131,7 +131,7 @@ Topic forum officiel : [`forum.hardware.fr/hfr/apple` topic_id 1711](https://for
 
 | Repo | Langage | Dernier push | ⭐ | Licence | Notes |
 |---|---|---|---|---|---|
-| [chef-du-quiche/hfr-parser](https://github.com/chef-du-quiche/hfr-parser) | Java | 2015-10-29 | 0 | **MIT** | Utilitaires de parsing HFR — petit (144 commits) mais code lisible, source d'inspiration BBCode. Licence MIT compatible. |
+| [chef-du-quiche/hfr-parser](https://github.com/chef-du-quiche/hfr-parser) | Java | 2015-10-29 | 0 | **MIT** | Utilitaires de parsing HFR — repo minimaliste (3 commits) mais code lisible, source d'inspiration BBCode. Licence MIT compatible. |
 
 ---
 
@@ -181,7 +181,7 @@ Composants maintenus dans l'écosystème Redface 2 (pas des clients HFR mais des
 | Statut | Compteur | Conséquences pour Redface 2 (GPL-3.0-only, cf. [ADR-010]({{ site.baseurl }}/adr/010-licence-client-android)) |
 |---|---|---|
 | Sans `LICENSE` (= tous droits réservés par défaut) | 15 repos | Code non empruntable sans accord écrit. Inspiration et compréhension du protocole HFR uniquement. |
-| Apache-2.0 | 3 repos (`ForumHFR/Redface`, `ToYonos/HFR-stuff`, et licence ADR-010) | Compatible avec emprunt sous GPL-3.0. |
+| Apache-2.0 | 2 repos (`ForumHFR/Redface`, `ToYonos/HFR-stuff`) | Compatible avec emprunt sous GPL-3.0. Note : Redface 2 lui-même est sous GPL-3.0-only ([ADR-010]({{ site.baseurl }}/adr/010-licence-client-android)), pas Apache-2.0. |
 | GPL-3.0 | 1 repo (`tinanigro/HFR10`) | Compatible directement. |
 | MIT | 3 repos (`chef-du-quiche/hfr-parser`, `Orken/Infinite-Scroll-4-HFR`, `XaaT/hfr-redflag`) | Compatible avec emprunt sous GPL-3.0. |
 | AGPL-3.0 | 6 repos (suite DdsT) | Compatible mais contagieuse — réflexion à mener au cas par cas avant d'intégrer du code AGPL dans Redface 2. |
