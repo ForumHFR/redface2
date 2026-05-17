@@ -27,7 +27,11 @@ import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.feature.auth.LoginScreen
-import fr.forumhfr.redface2.feature.editor.EditorScreen
+import fr.forumhfr.redface2.feature.editor.PostEditorMode
+import fr.forumhfr.redface2.feature.editor.PostEditorRequest
+import fr.forumhfr.redface2.feature.editor.PostEditorScreen
+import fr.forumhfr.redface2.feature.editor.TopicFormMode
+import fr.forumhfr.redface2.feature.editor.TopicFormScreen
 import fr.forumhfr.redface2.feature.flags.FlagsRoute
 import fr.forumhfr.redface2.feature.forum.CategoryRequest
 import fr.forumhfr.redface2.feature.forum.ForumCategoryScreen
@@ -69,18 +73,20 @@ data class TopicRoute(
 ) : RedfaceNavKey
 
 @Serializable
-data class EditorRoute(
-    val mode: EditorMode,
+data class PostEditorRoute(
+    val mode: PostEditorMode,
     val cat: Int,
-    val post: Int? = null,
+    val topicId: Int? = null,
+    val numreponse: Int? = null,
 ) : RedfaceNavKey
 
 @Serializable
-enum class EditorMode {
-    Reply,
-    Edit,
-    EditFirstPost,
-}
+data class TopicFormRoute(
+    val mode: TopicFormMode,
+    val cat: Int? = null,
+    val subcat: Int? = null,
+    val topicId: Int? = null,
+) : RedfaceNavKey
 
 @Serializable
 data object LoginRoute : RedfaceNavKey
@@ -269,12 +275,12 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                         page = route.page,
                         scrollTo = route.scrollTo,
                     ),
-                    onReply = { postId ->
+                    onReply = { topicId ->
                         backStack.add(
-                            EditorRoute(
-                                mode = EditorMode.Reply,
+                            PostEditorRoute(
+                                mode = PostEditorMode.Reply,
                                 cat = route.cat,
-                                post = postId,
+                                topicId = topicId,
                             ),
                         )
                     },
@@ -291,11 +297,22 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     },
                 )
             }
-            entry<EditorRoute> { route ->
-                EditorScreen(
-                    mode = route.mode.name,
+            entry<PostEditorRoute> { route ->
+                PostEditorScreen(
+                    request = PostEditorRequest(
+                        mode = route.mode,
+                        cat = route.cat,
+                        topicId = route.topicId,
+                        numreponse = route.numreponse,
+                    ),
+                )
+            }
+            entry<TopicFormRoute> { route ->
+                TopicFormScreen(
+                    mode = route.mode,
                     cat = route.cat,
-                    post = route.post,
+                    subcat = route.subcat,
+                    topicId = route.topicId,
                 )
             }
         },

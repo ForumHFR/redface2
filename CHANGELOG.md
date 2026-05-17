@@ -13,12 +13,18 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 - Fixtures Phase 2A ownership : création d'un topic temporaire, édition du premier post, suppression d'un post, suppression du topic et réponse 404 post-suppression.
 - Fixtures Phase 2A BBCode riche : formulaire d'édition et formulaire quote contenant `b/i/u/strike/url/fixed/spoiler/img`, plus réponse succès quote dédiée.
 - `docs/guides/references.md` — nouvelle page Phase 2A inventoriant l'écosystème HFR : doc MesDiscussions archivée (user / modo / admin / SDK sur Wayback Machine), clients Android / iOS / autres plateformes, parsers, userscripts, et outillage compagnon Redface 2 (`hfr-mcp`, `hfr-redflag`, `hfr-redkit`). Closes #32.
+- Phase 2B-A éditeur local (#86, refs #144) : routes `PostEditorRoute` / `TopicFormRoute` et enums associés `PostEditorMode { Reply, Edit }` / `TopicFormMode { New, EditFirstPost }`. `PostEditorScreen` + `PostEditorViewModel` (Hilt assisted) livrent un éditeur post-level avec toolbar BBCode (gras / italique / souligné / barré / quote / code / cpp / fixed / spoiler / url / image), preview locale via `PostRenderer` et sélection préservée. `TopicFormScreen` reste un placeholder explicite jusqu'à Phase 2D / 2E.
+- Composables `:core:ui` `BBCodeTextField`, `BBCodeToolbar`, `BBCodePreview` et helper pur `applyBbcodeAction` testable JVM.
+- `:core:parser` `BbcodeContentParser` + `HfrParser.parsePostContentFromBbcode(bbcode: String): PostContent` — parser BBCode tolérant qui couvre `[b]`, `[i]`, `[u]`, `[strike]`, `[quote]`, `[quotemsg=numreponse,opaque,userId]`, `[fixed]`, `[code]`, `[cpp]`, `[spoiler]`, `[url]`, `[url=…]`, `[email]`, `[img]`, et la couleur `[#RRGGBB]…[/#RRGGBB]`. Tags inconnus et balises non fermées dégradent en texte sans crash.
+- Interface `BbcodePreviewParser` dans `:core:domain` exposée aux features via Hilt binding dans `PlatformBindingsModule`.
 
 ### Changed
 - `docs/specs/protocol-hfr.md` aligne le contrat d'écriture sur HFR réel : `numrep` pour quote, `numreponse` pour edit, champ titre réel `sujet`, endpoints GET `message.php`, POST `bddpost.php` / `bdd.php`, suppression via `delete=1`, et messages d'erreur `content_form` vide / `hash_check` invalide / anti-flood / topic fermé.
 - `docs/guides/contributing.md` met à jour la matrice des fixtures d'écriture Phase 2A.
 - `docs/specs/protocol-hfr.md` § Sources pointe désormais vers `references#documentation-mesdiscussions` au lieu d'un lien Wayback générique.
 - `docs/index.md` et `docs/guides/index.md` référencent la nouvelle page Références.
+- `docs/specs/mvi.md` § Editor : remplace l'encart placeholder Phase 1 par l'état réel Phase 2B-A — `PostEditorMode { Reply, Edit }` / `TopicFormMode { New, EditFirstPost }`, state MVI `PostEditorState`, intents `PostEditorIntent`. Mentionne explicitement qu'il n'y a pas encore d'envoi HFR.
+- `docs/specs/navigation.md` : `EditorRoute(EditorMode)` remplacé par `PostEditorRoute(PostEditorMode, cat, topicId?, numreponse?)` + `TopicFormRoute(TopicFormMode, cat?, subcat?, topicId?)`. Le call-site `TopicScreen.onReply` ouvre désormais `PostEditorRoute(Reply, route.cat, topicId = topicId)`.
 
 ---
 

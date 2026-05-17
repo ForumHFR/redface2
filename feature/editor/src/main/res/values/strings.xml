@@ -1,5 +1,13 @@
 <resources>
-    <string name="editor_title">Éditeur %1$s</string>
-    <string name="editor_body_without_post">Mode éditeur sur la catégorie %1$d sans post cible.</string>
-    <string name="editor_body_with_post">Mode éditeur sur la catégorie %1$d pour le post %2$d.</string>
+    <string name="editor_post_reply_title">Répondre au sujet</string>
+    <string name="editor_post_edit_title">Modifier votre message</string>
+    <string name="editor_topic_new_title">Nouveau sujet</string>
+    <string name="editor_topic_edit_first_post_title">Modifier le premier message</string>
+    <string name="editor_field_label">Contenu BBCode</string>
+    <string name="editor_field_placeholder">Saisissez votre message…</string>
+    <string name="editor_preview_show">Afficher l\'aperçu</string>
+    <string name="editor_preview_hide">Masquer l\'aperçu</string>
+    <string name="editor_submit_disabled">L\'envoi HFR arrive en Phase 2C — éditeur local seulement pour l\'instant.</string>
+    <string name="editor_validation_empty">Message vide</string>
+    <string name="editor_topic_form_placeholder">Le formulaire de création / édition de sujet arrive en Phase 2D-2E (#148, #149). Cette tranche 2B-A ne livre que l\'éditeur post-level.</string>
 </resources>

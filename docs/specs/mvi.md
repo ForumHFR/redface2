@@ -221,51 +221,38 @@ sealed interface TopicEffect {
 
 ---
 
-## Écran Editor (reply / edit / FP)
+## Écran Editor (post-level reply / edit) + formulaire de topic
 
-L'éditeur est partagé entre reply, edit et edit FP. Le mode détermine les champs visibles.
+Phase 2B-A (#86 + #144) sépare l'éditeur en **deux familles** plutôt qu'en un mode unique. Le post-level editor (`PostEditorScreen`) gère le contenu BBCode pour Reply / Edit ; le formulaire de topic (`TopicFormScreen`) gérera New / Edit FP — pour l'instant placeholder en attendant #148 / #149.
 
 ```kotlin
-data class EditorState(
-    val mode: EditorMode = EditorMode.Reply,
-    val content: String = "",
-    val subject: String = "",           // visible en mode EditFirstPost
-    val poll: PollData? = null,         // visible en mode EditFirstPost
-    val isSending: Boolean = false,
-    val preview: PostContent? = null,   // AST de preview issue du BBCode courant, rendu par PostRenderer
-    val error: String? = null,
+// Post-level editor — édition de niveau post (contenu BBCode seulement)
+enum class PostEditorMode { Reply, Edit }
+
+// Topic-level form — sujet + cat/subcat + contenu + sondage
+enum class TopicFormMode { New, EditFirstPost }
+
+data class PostEditorState(
+    val mode: PostEditorMode,
+    val cat: Int,
+    val topicId: Int?,
+    val numreponse: Int?,
+    val draft: TextFieldValue = TextFieldValue(),
+    val preview: PostContent = PostContent(blocks = emptyList()),
+    val isPreviewVisible: Boolean = false,
+    val validation: BbcodeValidation = BbcodeValidation.Idle,
 )
 
-enum class EditorMode {
-    Reply,           // nouveau message dans un topic existant
-    Edit,            // éditer un post existant
-    EditFirstPost,   // éditer le first post (sujet + sondage + cat + subcat)
-}
-
-sealed interface EditorIntent {
-    data class UpdateContent(val text: String) : EditorIntent
-    data class UpdateSubject(val text: String) : EditorIntent
-    data class InsertBBCode(val tag: String) : EditorIntent
-    data object Preview : EditorIntent
-    data object Send : EditorIntent
+sealed interface PostEditorIntent {
+    data class ContentChanged(val value: TextFieldValue) : PostEditorIntent
+    data class ToolbarActionClicked(val action: BbcodeAction) : PostEditorIntent
+    data object TogglePreview : PostEditorIntent
 }
 ```
 
-> **Statut Phase 1 — placeholder, pas une décision figée** : l'enum `EditorMode` actuelle (3 valeurs, pas de `NewTopic`) vient du bootstrap navigation Phase 0 (commit `66e242c`, par GPT-5 Codex). C'était un état de code minimal pour faire compiler le graphe de routes et naviguer entre placeholders, **pas un arbitrage produit**. Aucune action de création de topic, d'édition, de reply ou d'édition FP n'est encore implémentée — l'`EditorScreen` reste un placeholder.
+> **Statut Phase 2B-A — éditeur local, pas d'envoi HFR** : `PostEditorViewModel` est livré et tient la draft BBCode + la preview locale. Aucune mutation réseau (`bddpost.php`, `apercu.php`) n'est branchée ; reply/edit réels arrivent avec #145 / #146 / #147. `TopicFormScreen` est un placeholder explicite jusqu'à #148 (Edit FP) / #149 (Create topic).
 >
-> **Décision Phase 2 — découpage en deux écrans** ([#86](https://github.com/ForumHFR/redface2/issues/86)) : quand l'éditeur réel arrivera, il sera découpé par **famille métier** plutôt que par mode unique :
->
-> ```kotlin
-> // Post-level editor — édition de niveau post (contenu BBCode seulement)
-> enum class PostEditorMode { Reply, Edit }
->
-> // Topic-level editor — édition de niveau topic (sujet + cat/subcat + contenu + sondage)
-> enum class TopicFormMode { New, EditFirstPost }
-> ```
->
-> Les deux écrans partagent leurs **capacités** via composables `:core:ui` (`BBCodeToolbar`, `BBCodePreview`, `PollEditor`, `CatSubcatPicker`) et use cases `:core:domain` (`validateBbcode`). `BBCodePreview` reçoit un `PostContent` déjà parsé (ou une lambda `() -> PostContent`) — il **ne parse pas lui-même**, ce qui garde `:core:ui` libre de toute logique métier. Le parsing BBCode reste une responsabilité `:core:parser` (`parsePostContentFromBbcode`) exposée aux features via une interface/use case injectée, afin de préserver la frontière `:feature:*` → `:core:domain` + `:core:ui` (les ViewModels appellent le use case et passent le `PostContent` résultant à `BBCodePreview`). Pas de duplication, juste deux contrats de formulaire distincts. Rationale : l'endpoint HFR n'est pas une bonne frontière UI (`Reply` et `NewTopic` passent tous deux par `bddpost.php` mais leurs formulaires diffèrent ; `EditFirstPost` et `NewTopic` partagent presque toute la structure malgré des endpoints différents). La frontière utile est **post-level** vs **topic-level**.
->
-> Cette section sera révisée quand l'éditeur Phase 2 sera prototypé — c'est cohérent avec la méthodologie hybride (prototype-first sur l'UI). Voir [#86](https://github.com/ForumHFR/redface2/issues/86) pour le suivi.
+> Les deux écrans partagent leurs **capacités** via composables `:core:ui` (`BBCodeTextField`, `BBCodeToolbar`, `BBCodePreview`, et plus tard `PollEditor`, `CatSubcatPicker`). `BBCodePreview` reçoit un `PostContent` déjà parsé — il **ne parse pas lui-même**, ce qui garde `:core:ui` libre de toute logique métier. Le parsing BBCode reste une responsabilité `:core:parser` (`parsePostContentFromBbcode`) exposée aux features via une interface `BbcodePreviewParser` (`:core:domain`) injectée par Hilt, afin de préserver la frontière `:feature:*` → `:core:domain` + `:core:ui` (les ViewModels appellent le use case et passent le `PostContent` résultant à `BBCodePreview`). Pas de duplication, juste deux contrats de formulaire distincts. Rationale : l'endpoint HFR n'est pas une bonne frontière UI (`Reply` et `NewTopic` passent tous deux par `bddpost.php` mais leurs formulaires diffèrent ; `EditFirstPost` et `NewTopic` partagent presque toute la structure malgré des endpoints différents). La frontière utile est **post-level** vs **topic-level**.
 
 ---
 

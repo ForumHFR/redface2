@@ -12,4 +12,16 @@
     <string name="post_image_loading">Chargement…</string>
     <string name="post_image_error">Image indisponible</string>
     <string name="post_image_error_with_alt">Image indisponible — %1$s</string>
+    <string name="bbcode_action_bold">Gras</string>
+    <string name="bbcode_action_italic">Italique</string>
+    <string name="bbcode_action_underline">Souligné</string>
+    <string name="bbcode_action_strike">Barré</string>
+    <string name="bbcode_action_quote">Citation</string>
+    <string name="bbcode_action_code">Code</string>
+    <string name="bbcode_action_cpp">C/C++</string>
+    <string name="bbcode_action_fixed">Bloc fixé</string>
+    <string name="bbcode_action_spoiler">Spoiler</string>
+    <string name="bbcode_action_url">Lien</string>
+    <string name="bbcode_action_image">Image</string>
+    <string name="bbcode_preview_empty">La prévisualisation s\'affiche ici dès que vous saisissez du texte.</string>
 </resources>
