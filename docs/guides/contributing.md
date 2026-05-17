@@ -280,19 +280,19 @@ core/parser/src/test/resources/fixtures/
 | `search_results.html` | `/search.php` | logué + non-logué | Recherche | `search.php?search=redface` |
 | `login_success.html` | Réponse login OK | — | Détection succès auth | Après POST login OK |
 | `login_failure.html` | Réponse login échoué | — | Détection échec auth | Après POST bad pass |
-| `edit_fp.html` | Édition First Post (sujet + sondage) | logué uniquement | Distinct de l'édition normale | propre topic avec sondage |
-| `new_topic.html` | Page de création de topic | logué uniquement | Formulaire avec sous-catégories | `message.php?config=hfr.inc&cat=23&subcat=550&new=0` |
+| `edit_fp.html` | Édition First Post avec sondage | logué uniquement | Distinct de l'édition normale | propre topic avec sondage |
 | `write_reply_form_open_topic.html` | Formulaire reply Phase 2A | logué uniquement | Contrat `bddpost.php` réel | `message.php?...&post=35395&page=20&subcat=550` |
 | `write_quote_form_test_post.html` | Formulaire quote Phase 2A | logué uniquement | `numrep` + `[quotemsg=...]` prérempli | `message.php?...&numrep=2784595` |
 | `write_quote_form_bbcode_rich.html` | Formulaire quote BBCode riche Phase 2A | logué uniquement | Quote préremplie depuis un post contenant `b/i/u/strike/url/fixed/spoiler/img` | `message.php?...&numrep=2523833` |
 | `write_edit_form_test_post.html` | Formulaire edit Phase 2A | logué uniquement | `numreponse` + contrat `bdd.php` réel | `message.php?...&numreponse=2784595` |
+| `write_create_topic_form_android_cat.html` | Formulaire création topic Phase 2A | logué uniquement | `sujet`, `from_subcat`, `new=0`, sous-catégories | `message.php?...&cat=23&subcat=550` |
 | `write_reply_anonymous_form.html` | Formulaire reply anonyme Phase 2A | non-logué | Composer legacy avec pseudo/password | `message.php?...&post=35395&page=20` |
 | `write_create_topic_anonymous_form.html` | Formulaire création anonyme Phase 2A | non-logué | Composer legacy avec pseudo/password | `message.php?...&cat=23&subcat=550` |
 | `write_edit_success_response.html` | Réponse succès edit Phase 2A | logué uniquement | Message succès `bdd.php` | `POST bdd.php?config=hfr.inc` |
 | `write_reply_success_response.html` | Réponse succès reply Phase 2A | logué uniquement | Message succès `bddpost.php` | `POST bddpost.php?config=hfr.inc` |
 | `write_empty_message_error.html` | Erreur contenu vide Phase 2A | logué uniquement | Validation HFR, aucun post créé | `POST bddpost.php?config=hfr.inc` |
 | `write_invalid_token_error.html` | Erreur `hash_check` invalide Phase 2A | logué uniquement | Rejet HFR avant post | `POST bddpost.php?config=hfr.inc` |
-| `write_antiflood_error.html` | Erreur anti-flood Phase 2A | logué uniquement | 4e réponse consécutive en 10 minutes refusée | `POST bddpost.php?config=hfr.inc` |
+| `write_antiflood_error.html` | Erreur anti-flood Phase 2A | logué uniquement | Plus de 3 réponses consécutives en 10 minutes refusées | `POST bddpost.php?config=hfr.inc` |
 | `write_locked_topic_page.html` | Topic fermé Phase 2A | logué uniquement | Pas de lien reply exposé | topic fermé `post=14227` |
 | `write_reply_locked_topic_forced_form.html` | Formulaire forcé topic fermé Phase 2A | logué uniquement | `message.php` sert encore un composer | `message.php?...&post=14227` |
 | `write_locked_topic_error.html` | Erreur POST topic fermé Phase 2A | logué uniquement | Rejet `bddpost.php`, aucun post créé | `POST bddpost.php?config=hfr.inc` |
@@ -350,7 +350,9 @@ Mêmes règles que les fixtures HTML : capturées live, **jamais inventées**, n
 - Les fixtures sont capturées depuis le vrai site HFR, **jamais** fabriquées par une IA ou à la main.
 - Capture via MCP `hfr-mcp` : `hfr_read cat=X post=Y page=Z output=path/to/fixture.html` écrit le HTML brut.
 - Chaque fixture est accompagnée d'un fichier `.source.txt` frère ou d'un commentaire HTML en tête précisant `cat`, `post`, `numreponse`, date de capture.
-- Les fixtures loguées ne doivent **jamais** contenir de cookies, tokens `hash_check`, emails, identifiants réels — nettoyer avant commit (voir skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/parse-fixture/SKILL.md) étape 9).
+- Les fixtures loguées ne doivent **jamais** contenir de cookies, tokens `hash_check`, emails, mots de passe, identifiants réels personnels — nettoyer avant commit (voir skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/parse-fixture/SKILL.md) étape 9).
+- Exception contrôlée : les pseudos et profils des comptes de test dédiés publics (`XaTelitte` / `xatelitte`, profil HFR `1214571`) peuvent rester en clair pour conserver la fidélité parser. Ne jamais appliquer cette exception à un compte personnel non dédié.
+- Ne pas reformatter les fixtures HTML : elles doivent rester proches de la réponse HFR. Un nettoyage minimal des fins de ligne/trailing whitespace est acceptable pour satisfaire `git diff --check`, sans modifier la structure DOM.
 - Quand un bug de parsing est corrigé, le HTML problématique est ajouté aux fixtures avec un test de non-régression.
 - Un **smoke test CI mensuel** (cf. cron `0 2 1 * *` ci-dessus) vérifie que les sélecteurs CSS critiques matchent toujours sur une vraie page HFR publique.
 

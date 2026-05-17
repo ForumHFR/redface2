@@ -1,6 +1,6 @@
 Source: forum.hardware.fr
 Captured: 2026-05-17
 URL: POST https://forum.hardware.fr/bddpost.php?config=hfr.inc
-Notes: POST bddpost.php with invalid hash_check and non-empty content; HFR rejects before posting.
+Notes: POST bddpost.php with invalid hash_check and non-empty content; HFR rejects before posting. HFR returned this as the complete response body, with no HTML wrapper in the captured payload.
 Sanitization: hash_check/codehex redacted; MP unread target id and MP count redacted when present; no cookies stored.
 Test context: Authenticated XaTelitte session, Redface 2 topic cat=23 post=35395 page=20 subcat=550.
