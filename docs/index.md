@@ -100,3 +100,4 @@ Les contributions sont les bienvenues : ouvrez une issue, commentez les existant
 - [Contribuer]({{ site.baseurl }}/guides/contributing) — Comment participer
 - [Pourquoi Redface 2 ?]({{ site.baseurl }}/guides/rationale) — Le contexte et les doutes assumés
 - [Nommage]({{ site.baseurl }}/guides/naming) — Le futur nom de l'app
+- [Références écosystème HFR]({{ site.baseurl }}/guides/references) — Clients tiers, docs MesDiscussions, outillage compagnon
