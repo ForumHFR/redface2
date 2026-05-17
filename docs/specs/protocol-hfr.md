@@ -44,6 +44,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Reply / quote (post) | POST | `/bddpost.php?config=hfr.inc` | **oui** |
 | Edit (post) | POST | `/bdd.php?config=hfr.inc` | **oui** |
 | Edit FP (premier post) | POST | `/bdd.php?config=hfr.inc` avec champs spécifiques | **oui** |
+| Suppression post/topic owned | POST | `/bdd.php?config=hfr.inc` avec `delete=1` | **oui** |
 | Nouveau topic | POST | `/bddpost.php?config=hfr.inc` | **oui** |
 | MP (envoi) | POST | `/bddpost.php?config=hfr.inc&cat=prive&pseudo={dest}` | **oui** |
 | Conversation MP | GET | `/message.php?config=hfr.inc&cat=prive&post={mp_id}&page={page}` | **oui** |
@@ -148,7 +149,7 @@ Erreurs observées :
 
 ### POST `bdd.php` (edit)
 
-Contrat recapturé sur HFR réel le 2026-05-17 avec le post de test `numreponse=2784595`. Fixtures de référence : `write_edit_form_test_post.html`, `write_edit_success_response.html`.
+Contrat recapturé sur HFR réel le 2026-05-17 avec le post de test `numreponse=2784595` sur le topic Redface 2, puis complété avec un topic temporaire owned en Programmation / Divers (`cat=10`, `post=148749`, `subcat=388`). Fixtures de référence : `write_edit_form_test_post.html`, `write_edit_success_response.html`, `write_created_owned_topic_page.html`, `write_edit_first_post_form.html`, `write_edit_first_post_success_response.html`, `write_delete_post_form.html`, `write_delete_post_success_response.html`, `write_delete_topic_form.html`, `write_delete_topic_success_response.html`, `write_deleted_topic_404.html`.
 
 | Field | Valeur | Description |
 |---|---|---|
@@ -163,8 +164,9 @@ Contrat recapturé sur HFR réel le 2026-05-17 avec le post de test `numreponse=
 | `sujet` | titre topic | Champ réel observé. Pas `subject`. |
 | `content_form` | nouveau contenu BBCode | |
 | `pollsondage` | données sondage | Seulement si edit FP avec sondage |
+| `delete` | `"1"` | Présent uniquement si l'utilisateur coche la suppression dans le formulaire d'édition. |
 
-Le fait qu'une édition concerne le **premier post** (FP) vs un post normal est déduit côté client (`isFirstPostOwner`) puis pris en compte dans la construction du form.
+Le fait qu'une édition concerne le **premier post** (FP) vs un post normal est déduit côté client (`isFirstPostOwner`) puis pris en compte dans la construction du form. HFR expose aussi des champs supplémentaires sur le FP : `sujet` éditable en input texte, `subcat` en `<select>`, options sondage, et champs `toread1..5`.
 
 Réponse succès observée après POST `bdd.php?config=hfr.inc` :
 
@@ -173,6 +175,25 @@ Votre message a été édité avec succès !
 ```
 
 La réponse succès ne contient pas le contenu édité. Le client doit recharger la page topic ou mettre à jour son cache local après succès.
+
+#### Suppression post/topic
+
+La suppression utilise le **même formulaire d'édition** que `bdd.php` :
+
+- post normal owned : le formulaire expose `<input name="delete" value="1">` avec le libellé `Effacer ce message` ;
+- premier post owned : le formulaire expose `<input name="delete" value="1">` avec le libellé `Effacer l'intégralité du sujet`.
+
+Le POST conserve les champs d'édition (`hash_check`, `cat`, `post`, `numreponse`, `sujet`, `content_form`, etc.) et ajoute `delete=1`. HFR répond dans les deux cas avec le même message générique :
+
+```text
+Message effacé avec succès !
+```
+
+Dans la capture du topic temporaire `post=148749`, la suppression du FP a supprimé le topic complet : l'URL `forum2.php?...&post=148749` répond ensuite HTTP `404`, et la réponse succès contient un refresh vers la liste de sous-catégorie. Redface 2 doit donc :
+
+1. traiter `delete=1` sur FP comme une action destructrice distincte "supprimer le topic" ;
+2. demander une confirmation UI forte avant d'envoyer le POST ;
+3. après succès, revenir à la liste de topics plutôt que tenter de recharger le topic supprimé.
 
 ### POST `login_validation.php`
 

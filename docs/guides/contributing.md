@@ -295,6 +295,14 @@ core/parser/src/test/resources/fixtures/
 | `write_locked_topic_page.html` | Topic fermé Phase 2A | logué uniquement | Pas de lien reply exposé | topic fermé `post=14227` |
 | `write_reply_locked_topic_forced_form.html` | Formulaire forcé topic fermé Phase 2A | logué uniquement | `message.php` sert encore un composer | `message.php?...&post=14227` |
 | `write_locked_topic_error.html` | Erreur POST topic fermé Phase 2A | logué uniquement | Rejet `bddpost.php`, aucun post créé | `POST bddpost.php?config=hfr.inc` |
+| `write_created_owned_topic_page.html` | Topic temporaire owned Phase 2A | logué uniquement | Page topic après création + édition FP | topic temporaire `cat=10 post=148749` |
+| `write_edit_first_post_form.html` | Formulaire edit FP Phase 2A | logué uniquement | `sujet`, `subcat`, sondage, `delete=1` topic | `message.php?...&numreponse=2523829` |
+| `write_edit_first_post_success_response.html` | Réponse succès edit FP Phase 2A | logué uniquement | Message succès `bdd.php` | `POST bdd.php?config=hfr.inc` |
+| `write_delete_post_form.html` | Formulaire suppression post Phase 2A | logué uniquement | `delete=1` libellé `Effacer ce message` | `message.php?...&numreponse=2523830` |
+| `write_delete_post_success_response.html` | Réponse succès suppression post Phase 2A | logué uniquement | Message succès `bdd.php` | `POST bdd.php?config=hfr.inc` |
+| `write_delete_topic_form.html` | Formulaire suppression topic Phase 2A | logué uniquement | `delete=1` libellé `Effacer l'intégralité du sujet` | edit FP avant suppression |
+| `write_delete_topic_success_response.html` | Réponse succès suppression topic Phase 2A | logué uniquement | Message succès + refresh vers sous-catégorie | `POST bdd.php?config=hfr.inc` |
+| `write_deleted_topic_404.html` | Topic supprimé Phase 2A | logué uniquement | L'URL du topic supprimé répond HTTP 404 | `forum2.php?...&post=148749` |
 | `multimp_conversation.html` | MultiMP | logué uniquement | Différent des MPs classiques | MultiMP existant |
 | `topic_with_poll.html` | Topic avec sondage | logué + non-logué | Parsing du sondage | topic public avec sondage |
 | `topic_last_page.html` | Dernière page (< 40 posts) | non-logué | Pagination edge case | dernière page d'un topic |
@@ -317,7 +325,7 @@ core/parser/src/test/resources/fixtures/
 | `contact_list.html` | `contactlist.php` | Liste de contacts : ajout/suppression, statut en ligne, liens MP | idem |
 | `modo_history.html` | `modo/historique.php` | Historique des sanctions : modérateur, catégorie, date, raison | modérateur test |
 
-**Total : ~50 fixtures** (13 reprises testées de v1 + 28 nouvelles + 9 profil/paramètres).
+**Total : ~58 fixtures** (13 reprises testées de v1 + 36 nouvelles + 9 profil/paramètres).
 
 ### Fixtures REST JSON (Phase 1C-A)
 
