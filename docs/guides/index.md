@@ -15,5 +15,6 @@ Cette section regroupe :
 - comment contribuer
 - le contexte et les raisons du rewrite
 - les notes de nommage
+- l'inventaire des références écosystème HFR (clients tiers, docs MesDiscussions, outillage compagnon)
 
 Pour les sources canoniques qui décrivent le projet lui-même, voir la section [Spécifications]({{ site.baseurl }}/specs).

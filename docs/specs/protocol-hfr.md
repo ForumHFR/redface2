@@ -571,6 +571,6 @@ Catalogue initial :
 
 - [Redface v1 code](https://github.com/ForumHFR/Redface/tree/master/app/src/main/java/com/ayuget/redface/data/api/hfr)
 - [Redface v1 fixtures](https://github.com/ForumHFR/Redface/tree/master/app/src/test/resources)
-- [MesDiscussions SDK (Wayback Machine)](https://web.archive.org/web/*/mesdiscussions.net) — ancienne doc partielle des paramètres URL HFR
+- [Références écosystème HFR]({{ site.baseurl }}/guides/references#documentation-mesdiscussions) — inventaire complet : doc MesDiscussions (user / modo / admin / SDK) archivée sur Wayback Machine, clients tiers Android/iOS/autres, parsers
 - Skill [`/parse-fixture`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/parse-fixture/SKILL.md) pour l'analyse d'une fixture
 - MCP [`hfr-mcp`](https://github.com/XaaT/hfr-mcp) pour interagir avec forum.hardware.fr depuis les agents LLM
