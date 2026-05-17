@@ -8,17 +8,39 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
+---
+
+## v0.9.0 — 2026-05-18
+
+Phase 2A clôturée et Phase 2B-A livrée : le client a désormais une cartographie complète du protocole d'écriture HFR, un inventaire de l'écosystème, et un socle éditeur local utilisable. Le naming app passe au semver pur (`versionName = 0.2.0` côté `app/build.gradle.kts`) après plusieurs cycles `0.1.0-phaseN.X` qui mélangeaient version applicative et phase produit. Le footer Jekyll spec passe à `v0.9.0` ; les deux numérotations restent distinctes (specs vs app) mais bumpent ensemble sur les jalons structurants.
+
 ### Added
 - Fixtures Phase 2A pour le protocole d'écriture HFR : formulaires réels reply, quote, edit, création topic, anonyme, topic fermé, réponses succès et erreurs HFR, capturés avec `hash_check` et données sensibles sanitizés.
 - Fixtures Phase 2A ownership : création d'un topic temporaire, édition du premier post, suppression d'un post, suppression du topic et réponse 404 post-suppression.
 - Fixtures Phase 2A BBCode riche : formulaire d'édition et formulaire quote contenant `b/i/u/strike/url/fixed/spoiler/img`, plus réponse succès quote dédiée.
 - `docs/guides/references.md` — nouvelle page Phase 2A inventoriant l'écosystème HFR : doc MesDiscussions archivée (user / modo / admin / SDK sur Wayback Machine), clients Android / iOS / autres plateformes, parsers, userscripts, et outillage compagnon Redface 2 (`hfr-mcp`, `hfr-redflag`, `hfr-redkit`). Closes #32.
+- Phase 2B-A éditeur local (#86, refs #144) : routes `PostEditorRoute` / `TopicFormRoute` et enums associés `PostEditorMode { Reply, Edit }` / `TopicFormMode { New, EditFirstPost }`. `PostEditorScreen` + `PostEditorViewModel` (Hilt assisted) livrent un éditeur post-level avec toolbar BBCode (gras / italique / souligné / barré / quote / cpp / fixed / spoiler / url / image — HFR n'expose pas `[code]` dans sa toolbar, le parser le tolère néanmoins pour le copier-coller), preview locale via `PostRenderer` et sélection préservée. `TopicFormScreen` reste un placeholder explicite jusqu'à Phase 2D / 2E.
+- Composables `:core:ui` `BbcodeTextField`, `BbcodeToolbar`, `BbcodePreview` et helper pur `applyBbcodeAction` testable JVM.
+- `:core:parser` `BbcodeContentParser` + `HfrParser.parsePostContentFromBbcode(bbcode: String): PostContent` — parser BBCode tolérant qui couvre `[b]`, `[i]`, `[u]`, `[strike]`, `[quote]`, `[quotemsg=numreponse,opaque,userId]`, `[fixed]`, `[code]`, `[cpp]`, `[spoiler]`, `[url]`, `[url=…]`, `[email]`, `[img]`, et la couleur `[#RRGGBB]…[/#RRGGBB]`. Tags inconnus dégradent en texte ; balises non fermées préservent l'open tag brut au lieu d'émettre un bloc vide (Codex review fix sur PR #161) ; récursion bornée à `MAX_NESTING_DEPTH = 64` pour éviter `StackOverflowError` sur input pathologique ; schemes `[url]` / `[img]` filtrés comme le parser HTML (`http(s)` + chemins HFR absolus).
+- Interface `BbcodePreviewParser` dans `:core:domain/editor` exposée aux features via Hilt binding dans `PlatformBindingsModule`. `BbcodeValidation` (sealed `Idle` / `EmptyDraft`) et `validateBbcodeDraft(...)` également dans `:core:domain/editor` pour que le futur `TopicFormViewModel` (#148 / #149) puisse réutiliser le même vocabulaire sans coupling cross-feature.
 
 ### Changed
+- **Naming app** : convention `versionName` passe de `0.1.0-phaseN.X` à du semver pur (`MAJOR.MINOR.PATCH`). Cette version 0.2.0 marque le passage de Phase 1 → Phase 2. Le suffixe pré-release vit côté Play Console (track `alpha`) et GitHub Release, pas dans le `versionName`. Voir `app/build.gradle.kts:29-37` pour le commentaire de convention.
+- `app/build.gradle.kts` : `versionCode = 39`, `versionName = "0.2.0"`.
+- `docs/_config.yml` : footer Jekyll passe à `Specs v0.9.0`.
 - `docs/specs/protocol-hfr.md` aligne le contrat d'écriture sur HFR réel : `numrep` pour quote, `numreponse` pour edit, champ titre réel `sujet`, endpoints GET `message.php`, POST `bddpost.php` / `bdd.php`, suppression via `delete=1`, et messages d'erreur `content_form` vide / `hash_check` invalide / anti-flood / topic fermé.
 - `docs/guides/contributing.md` met à jour la matrice des fixtures d'écriture Phase 2A.
 - `docs/specs/protocol-hfr.md` § Sources pointe désormais vers `references#documentation-mesdiscussions` au lieu d'un lien Wayback générique.
 - `docs/index.md` et `docs/guides/index.md` référencent la nouvelle page Références.
+- `docs/specs/mvi.md` § Editor : remplace l'encart placeholder Phase 1 par l'état réel Phase 2B-A — `PostEditorMode { Reply, Edit }` / `TopicFormMode { New, EditFirstPost }`, state MVI `PostEditorState`, intents `PostEditorIntent`. Mentionne explicitement qu'il n'y a pas encore d'envoi HFR.
+- `docs/specs/navigation.md` : `EditorRoute(EditorMode)` remplacé par `PostEditorRoute(PostEditorMode, cat, topicId?, numreponse?)` + `TopicFormRoute(TopicFormMode, cat?, subcat?, topicId?)`. Le call-site `TopicScreen.onReply` ouvre désormais `PostEditorRoute(Reply, route.cat, topicId = topicId)`.
+- `docs/specs/roadmap.md` § Phase 2 : 2A et 2B-A cochés, items individuels précisés.
+
+### Fixed
+- Parser BBCode : `[quote]hello` / `[fixed]hello` / `[img]url` (et autres tags block-level) sans close ne fabriquent plus de bloc vide ou ne perdent plus l'URL. Le KDoc d'en-tête promet « degrade to plain text » — désormais vrai. 7 tests dédiés.
+- Parser BBCode : récursion `[quote]` × N (ou `[b]` × N) ne crash plus l'app via `StackOverflowError`. Cap à 64 niveaux ; au-delà, dégradation en texte. 2 tests dédiés sur N = 256.
+- Parser BBCode : alias `[s]` retiré (HFR n'émet que `[strike]` et `findMatchingClose` était asymétrique). 1 test pinning le comportement.
+- Parser BBCode : `[url=javascript:…]` et `[img]javascript:…[/img]` ne produisent plus de liens/images rendables ; le BBCode brut reste visible dans la preview. Les chemins absolus HFR (`/hfr/...`, `/images/...`) sont normalisés en `https://forum.hardware.fr/...`.
 
 ---
 

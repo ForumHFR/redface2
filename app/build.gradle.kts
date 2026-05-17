@@ -30,10 +30,16 @@ android {
         // whose versionCode is already uploaded, so this is the canonical source of truth
         // (the local signing init-script no longer overrides these — it only injects the
         // upload signing config).
+        //
+        // Naming convention (effective v39 / 0.2.0): pure semver `MAJOR.MINOR.PATCH`,
+        // detached from the spec/site version (`docs/_config.yml`). The previous
+        // `0.1.0-phaseN.X` tail confused the app version with the project phase milestone;
+        // they evolve on different cadences. Pre-release suffix lives in the Play Console
+        // track (alpha) and in the GitHub Release flag, not in versionName itself.
         // versionName is also surfaced in the app footer via BuildConfig.VERSION_NAME so
-        // dogfood builds advertise their phase / commit lineage to the user.
-        versionCode = 38
-        versionName = "0.1.0-phase1.7"
+        // dogfood builds advertise their lineage to the user.
+        versionCode = 39
+        versionName = "0.2.0"
 
         // Manifest placeholder so a side-by-side install (dogfood/preview overlay)
         // can override the launcher label without touching tracked manifest/strings.

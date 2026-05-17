@@ -80,7 +80,7 @@ graph TB
     style TOPIC fill:#e74c3c,color:#fff
 ```
 
-> **Lecture du graphe** : ce diagramme décrit le **flow utilisateur**, pas le découpage en `NavKey`. Les sept routes typées réelles sont `FlagsListRoute`, `ForumRoute`, `CategoryRoute`, `TopicRoute`, `SearchRoute`, `MessagesRoute`, `EditorRoute` (cf. § Implémentation ci-dessous). Plusieurs nœuds du graphe sont des **states internes au screen** plutôt que des routes distinctes : `TABMP` / `TABMULTI` correspondent à `MessageTab.CLASSIC` / `MessageTab.MULTI` dans le `MessagesState` ; `CATS` / `SUBCATS` / `TOPICLIST` sont couverts par la même `CategoryRoute(cat, subcat?, page)`. Le mapping flow → routes typées est explicite dans le code de `entryProvider` plus bas.
+> **Lecture du graphe** : ce diagramme décrit le **flow utilisateur**, pas le découpage en `NavKey`. Les huit routes typées réelles sont `FlagsListRoute`, `ForumRoute`, `CategoryRoute`, `TopicRoute`, `SearchRoute`, `MessagesRoute`, `PostEditorRoute`, `TopicFormRoute` (cf. § Implémentation ci-dessous). Plusieurs nœuds du graphe sont des **states internes au screen** plutôt que des routes distinctes : `TABMP` / `TABMULTI` correspondent à `MessageTab.CLASSIC` / `MessageTab.MULTI` dans le `MessagesState` ; `CATS` / `SUBCATS` / `TOPICLIST` sont couverts par la même `CategoryRoute(cat, subcat?, page)`. Le mapping flow → routes typées est explicite dans le code de `entryProvider` plus bas.
 
 ---
 
@@ -211,13 +211,22 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
     val page: Int = 1,
     val scrollTo: Int? = null,            // numreponse cible pour #t{numreponse}
 ) : RedfaceNavKey
-@Serializable data class EditorRoute(
-    val mode: EditorMode,
+@Serializable data class PostEditorRoute(
+    val mode: PostEditorMode,
     val cat: Int,
-    val post: Int? = null,
+    val topicId: Int? = null,             // requis à terme pour Reply, attendu par TopicScreen.onReply
+    val numreponse: Int? = null,          // requis à terme pour Edit
 ) : RedfaceNavKey
 
-@Serializable enum class EditorMode { Reply, Edit, EditFirstPost }
+@Serializable data class TopicFormRoute(
+    val mode: TopicFormMode,
+    val cat: Int? = null,
+    val subcat: Int? = null,
+    val topicId: Int? = null,
+) : RedfaceNavKey
+
+@Serializable enum class PostEditorMode { Reply, Edit }
+@Serializable enum class TopicFormMode { New, EditFirstPost }
 ```
 
 Chaque onglet de bottom nav a son propre back stack (`rememberNavBackStack`), partagé via une `Map<TopLevelDestination, NavBackStack<NavKey>>` côté `RedfaceApp`. Le rendu se fait via l'API stable `NavDisplay(backStack, onBack, entryDecorators, entryProvider)` — pas besoin du couple `rememberDecoratedNavEntries` + `rememberSceneState` pour le cas single-pane :
@@ -275,8 +284,8 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
             entry<TopicRoute> { route ->
                 TopicScreen(
                     request = TopicRequest(route.cat, route.post, route.page, route.scrollTo),
-                    onReply = { postId ->
-                        backStack.add(EditorRoute(EditorMode.Reply, route.cat, postId))
+                    onReply = { topicId ->
+                        backStack.add(PostEditorRoute(PostEditorMode.Reply, route.cat, topicId = topicId))
                     },
                     onOpenPage = { targetPage ->
                         backStack.removeAt(backStack.lastIndex)
@@ -284,8 +293,18 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     },
                 )
             }
-            entry<EditorRoute> { route ->
-                EditorScreen(mode = route.mode.name, cat = route.cat, post = route.post)
+            entry<PostEditorRoute> { route ->
+                PostEditorScreen(
+                    request = PostEditorRequest(route.mode, route.cat, route.topicId, route.numreponse),
+                )
+            }
+            entry<TopicFormRoute> { route ->
+                TopicFormScreen(
+                    mode = route.mode,
+                    cat = route.cat,
+                    subcat = route.subcat,
+                    topicId = route.topicId,
+                )
             }
         },
     )
@@ -378,14 +397,14 @@ Le `TopicScreen` reçoit le `scrollTo` (numreponse cible) via la `TopicRoute` et
 
 ### Predictive back
 
-Nav 3 intègre `PredictiveBackHandler` via `NavDisplay` — aucun code custom requis pour les écrans standards. Seuls les écrans à interaction custom (ex : éditeur avec draft) ajoutent leur propre handler :
+Nav 3 intègre `PredictiveBackHandler` via `NavDisplay` — aucun code custom requis pour les écrans standards. Seuls les écrans à interaction custom (ex : éditeur avec draft) ajoutent leur propre handler ; Phase 2B-A livre `PostEditorScreen` sans cette confirmation (pas encore de draft persistant) — l'exemple ci-dessous reste le pattern cible quand la persistance arrivera :
 
 ```kotlin
 @Composable
-fun EditorScreen(state: EditorState, onIntent: (EditorIntent) -> Unit) {
+fun PostEditorScreen(state: PostEditorState, onIntent: (PostEditorIntent) -> Unit) {
     var showDiscardDialog by remember { mutableStateOf(false) }
 
-    PredictiveBackHandler(enabled = state.content.isNotEmpty()) { progress ->
+    PredictiveBackHandler(enabled = state.draft.text.isNotEmpty()) { progress ->
         progress.collect { /* animation personnalisée si besoin */ }
         showDiscardDialog = true  // à la fin, on demande confirmation
     }
@@ -401,7 +420,7 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 > **Statut Phase 5+** — multi-pane n'est pas livré en Phase 1. Dans le snippet ci-dessous :
 >
 > - le **pattern de composition** (`NavDisplay` + `ListDetailPaneScaffold` sur le même back stack, switch `WindowSizeClass`) est **illustratif** — c'est ce qui sera implémenté Phase 5+ ;
-> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested)`, `MessagesScreen(versionName, versionCode, onLoginRequested, onOpenDiagnostics)`, `SearchScreen()`, `TopicScreen(request: TopicRequest, onReply, onOpenPage)`, `EditorScreen(mode: String, cat, post)`) sont les signatures **réelles Phase 1** livrées dans le repo aujourd'hui (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../EditorScreen.kt`).
+> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested)`, `MessagesScreen(versionName, versionCode, onLoginRequested, onOpenDiagnostics)`, `SearchScreen()`, `TopicScreen(request: TopicRequest, onReply, onOpenPage)`, `PostEditorScreen(request: PostEditorRequest)`, `TopicFormScreen(mode, cat?, subcat?, topicId?)`) sont les signatures **réelles** livrées dans le repo (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../PostEditorScreen.kt`, `feature/editor/.../TopicFormScreen.kt`).
 >
 > Le call-site `onOpenFlag = { flag -> backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = ...)) }` passe désormais le topic concerné — Phase 1B.4 a remplacé le placeholder mock par la liste réelle des drapeaux.
 
@@ -439,18 +458,22 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
                             page = current.page,
                             scrollTo = current.scrollTo,
                         ),
-                        onReply = { postId ->
-                            backStack.add(EditorRoute(EditorMode.Reply, current.cat, postId))
+                        onReply = { topicId ->
+                            backStack.add(PostEditorRoute(PostEditorMode.Reply, current.cat, topicId = topicId))
                         },
                         onOpenPage = { targetPage ->
                             backStack.removeAt(backStack.lastIndex)
                             backStack.add(current.copy(page = targetPage, scrollTo = null))
                         },
                     )
-                    is EditorRoute -> EditorScreen(
-                        mode = current.mode.name,
+                    is PostEditorRoute -> PostEditorScreen(
+                        request = PostEditorRequest(current.mode, current.cat, current.topicId, current.numreponse),
+                    )
+                    is TopicFormRoute -> TopicFormScreen(
+                        mode = current.mode,
                         cat = current.cat,
-                        post = current.post,
+                        subcat = current.subcat,
+                        topicId = current.topicId,
                     )
                     else -> Text("Select a topic")
                 }

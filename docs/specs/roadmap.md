@@ -121,14 +121,16 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 
 **Objectif :** interagir avec le forum.
 
+- [x] **2A — Reality check protocole d'écriture HFR (#81) + références écosystème (#32)** — fixtures live, spec écriture alignée HFR, page `docs/guides/references.md` consolidée. Mergé via PR #159 (writes) + PR #160 (références).
+- [x] **2B-A — Socle éditeur local (#86, refs #144)** — `PostEditorRoute` / `TopicFormRoute`, `PostEditorScreen` + ViewModel, toolbar BBCode complète (gras / italique / souligné / barré / quote / code / cpp / fixed / spoiler / url / image), preview locale via `parsePostContentFromBbcode`. Pas encore d'envoi HFR — local seulement.
 - [ ] Recherche — titres de topics et contenu de posts, filtres par catégorie/auteur/date
 - [ ] Reply — répondre à un topic
 - [ ] Quote — citer un post → reply pré-rempli
 - [ ] Edit — éditer son propre post
 - [ ] Edit FP — éditer le first post (sujet, contenu, sondage)
 - [ ] Create topic — nouveau topic avec catégorie, sujet, contenu, sondage optionnel
-- [ ] Toolbar BBCode — boutons de formatage dans l'éditeur
-- [ ] Preview BBCode — avant-première du rendu
+- [ ] Toolbar BBCode — boutons de formatage dans l'éditeur (livré 2B-A pour le subset Phase 2B ; couleur picker / smileys perso restent pour 2B-B et #11)
+- [ ] Preview BBCode — avant-première du rendu (livré 2B-A en local ; preview `apercu.php` HFR reste hors scope)
 - [ ] Hébergement d'images — upload, rehost, bibliothèque (diberie, super-h.fr, imgur)
 
 **Livrable :** une app complète pour lire ET écrire sur le forum.
