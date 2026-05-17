@@ -8,6 +8,15 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
+### Added
+- Fixtures Phase 2A pour le protocole d'écriture HFR : formulaires réels reply, quote, edit, création topic, anonyme, topic fermé, réponses succès et erreurs HFR, capturés avec `hash_check` et données sensibles sanitizés.
+- Fixtures Phase 2A ownership : création d'un topic temporaire, édition du premier post, suppression d'un post, suppression du topic et réponse 404 post-suppression.
+- Fixtures Phase 2A BBCode riche : formulaire d'édition et formulaire quote contenant `b/i/u/strike/url/fixed/spoiler/img`, plus réponse succès quote dédiée.
+
+### Changed
+- `docs/specs/protocol-hfr.md` aligne le contrat d'écriture sur HFR réel : `numrep` pour quote, `numreponse` pour edit, champ titre réel `sujet`, endpoints GET `message.php`, POST `bddpost.php` / `bdd.php`, suppression via `delete=1`, et messages d'erreur `content_form` vide / `hash_check` invalide / anti-flood / topic fermé.
+- `docs/guides/contributing.md` met à jour la matrice des fixtures d'écriture Phase 2A.
+
 ---
 
 ## v0.8.4 — 2026-05-10

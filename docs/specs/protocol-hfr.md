@@ -37,14 +37,18 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Drapeaux (accueil Redface 2) — REST | GET | `/webservices/rest_api.php?uri=forums/hardwarefr/topics/{participated,read,favorites}/&page={page}&results_per_page={n}` | **oui** |
 | Drapeaux par catégorie — REST | GET | `/webservices/rest_api.php?uri=forums/hardwarefr/categories/{cat}/topics/{participated,read,favorites}/&page={page}&results_per_page={n}` | **oui** |
 | Login | POST | `/login_validation.php?config=hfr.inc&redirect=&url=` | — |
-| Reply (post) | POST | `/bddpost.php?config=hfr.inc&cat={cat}` | **oui** |
-| Edit (post) | POST | `/bdd.php?config=hfr.inc&cat={cat}` | **oui** |
-| Edit FP (premier post) | POST | `/bdd.php?config=hfr.inc&cat={cat}` avec champ spécifique | **oui** |
-| Nouveau topic | POST | `/bddpost.php?config=hfr.inc&cat={cat}&subcat={subcat}&new=1` | **oui** |
+| Formulaire reply | GET | `/message.php?config=hfr.inc&cat={cat}&post={post}&page={page}&p=1&subcat={subcat}&sondage=0&owntopic=0&new=0` | **oui** |
+| Formulaire quote | GET | `/message.php?config=hfr.inc&cat={cat}&post={post}&numrep={numreponse}&ref={ref}&page={page}&p=1&subcat={subcat}&sondage=0&owntopic=0&new=0#formulaire` | **oui** |
+| Formulaire edit post | GET | `/message.php?config=hfr.inc&cat={cat}&post={post}&page={page}&p=1&subcat={subcat}&sondage=0&owntopic=0&new=0&numreponse={numreponse}` | **oui** |
+| Formulaire nouveau topic | GET | `/message.php?config=hfr.inc&cat={cat}&subcat={subcat}&sondage=0&owntopic=0&new=0` | **oui** |
+| Reply / quote (post) | POST | `/bddpost.php?config=hfr.inc` | **oui** |
+| Edit (post) | POST | `/bdd.php?config=hfr.inc` | **oui** |
+| Edit FP (premier post) | POST | `/bdd.php?config=hfr.inc` avec champs spécifiques | **oui** |
+| Suppression post/topic owned | POST | `/bdd.php?config=hfr.inc` avec `delete=1` | **oui** |
+| Nouveau topic | POST | `/bddpost.php?config=hfr.inc` | **oui** |
 | MP (envoi) | POST | `/bddpost.php?config=hfr.inc&cat=prive&pseudo={dest}` | **oui** |
 | Conversation MP | GET | `/message.php?config=hfr.inc&cat=prive&post={mp_id}&page={page}` | **oui** |
 | Liste des MPs | GET | `/forum1.php?config=hfr.inc&cat=prive&page={page}&subcat=&sondage=0&owntopic=0&trash=0&trash_post=0&moderation=0&new=0&nojs=0&subcatgroup=0` | **oui** |
-| Page d'édition d'un post | GET | `/message.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Ajouter aux drapeaux | GET | `/user/addflag.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Retirer des drapeaux | GET | `/user/delflag.php?config=hfr.inc&cat={cat}&post={post}&p=1&sondage=0&owntopic={0,1}&new=0` | **oui** |
 | Profil public | GET | `/hfr/profil-{user_id}.htm` | non |
@@ -60,27 +64,99 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 
 ## Form fields critiques
 
-### POST `bddpost.php` (reply ou nouveau topic)
+### POST `bddpost.php` (reply, quote ou nouveau topic)
+
+Contrat recapturé sur HFR réel le 2026-05-17 avec le compte de test `XaTelitte` (affiché `xatelitte` par HFR), topic Redface 2 `cat=23`, `post=35395`, `subcat=550`, post de test `numreponse=2784595`, puis complété avec des topics temporaires owned en Programmation / Divers. Fixtures de référence : `write_reply_form_open_topic.html`, `write_quote_form_test_post.html`, `write_quote_form_bbcode_rich.html`, `write_create_topic_form_android_cat.html`, `write_reply_success_response.html`, `write_quote_success_response.html`, `write_empty_message_error.html`, `write_invalid_token_error.html`, `write_antiflood_error.html`, `write_locked_topic_page.html`, `write_reply_locked_topic_forced_form.html`, `write_locked_topic_error.html`.
 
 | Field | Valeur | Obligatoire | Description |
 |---|---|---|---|
 | `hash_check` | `<token>` extrait de la page GET précédente | **oui** | Anti-CSRF. Voir section dédiée. |
 | `verifrequet` | `"1100"` | **oui** | Constante anti-bot. String, pas entier. |
 | `cat` | ID catégorie | oui | ou `"prive"` pour MP |
-| `post` | ID topic | oui si reply | Absent si nouveau topic |
+| `post` | ID topic | oui si reply | Vide si nouveau topic. |
+| `subcat` | ID sous-catégorie | oui | Observé `550` pour Android. |
+| `numreponse` | `""` | oui | Vide sur reply/quote/create. Ne pas confondre avec `numrep`. |
+| `numrep` | `""` ou numreponse cité | oui | Vide en reply simple. Renseigné en quote. |
 | `MsgIcon` | `"1"` | conventionnel | Icône du message (1 = défaut) |
-| `signature` | `"1"` | conventionnel | Inclure la signature |
+| `signature` | `"1"` | conventionnel | Checkbox ; absent du POST si décochée (comportement HTML standard). |
 | `wysiwyg` | `"0"` | conventionnel | Mode BBCode brut |
-| `new` | `"0"` ou `"1"` | oui | `"1"` pour nouveau topic |
-| `page` | `"1"` | conventionnel | |
+| `new` | `"0"` observé dans le formulaire GET | oui | Valeur POST création non validée par une réponse succès dédiée ; ne pas supposer `1` sans nouvelle capture. |
+| `page` | page topic courante | oui | Observé `20` sur reply/quote/edit ; `1` sur nouveau topic. |
 | `p` | `"1"` | conventionnel | |
 | `sondage` | `"0"` ou `"1"` | oui si topic | `"1"` si nouveau topic avec sondage |
+| `sond` | `"0"` | oui | Présent dans les formulaires observés. |
+| `cache` | `"cache"` | oui | Présent dans les formulaires observés. |
 | `owntopic` | `"0"` ou `"1"` | oui | Topic favori ? |
 | `config` | `"hfr.inc"` | oui | Toujours `hfr.inc` pour HFR |
+| `sujet` | titre topic | oui | Champ réel observé. Pas `subject`. En reply/quote il reprend le titre existant. |
 | `content_form` | contenu BBCode | oui | Le corps du message |
-| `subject` | titre | oui si nouveau topic | Absent si reply |
+| `pseudo` | pseudo connecté | présent dans le form | Présent même en session loguée (`xatelitte` observé). Le cookie HFR reste l'autorité d'authentification. |
+| `password` | `""` en session loguée | présent dans le form | Champ legacy ; ne jamais stocker ni préremplir côté app. |
+| `from_subcat` | ID sous-catégorie | nouveau topic | Présent sur le formulaire de création topic. |
+| `toread1..5` | options visibles | nouveau topic | Présents sur le formulaire de création topic, à traiter comme opaques avant implémentation sondage/options. |
+
+#### Reply simple
+
+Le formulaire reply est obtenu par GET `message.php`. Le POST part vers `bddpost.php?config=hfr.inc`.
+
+Champs observés sur le topic Redface 2 page 20 :
+
+- `post=35395`
+- `cat=23`
+- `subcat=550`
+- `page=20`
+- `numreponse=""`
+- `numrep=""`
+- `sujet="Redface 2 — PHASE 2 @ ALPHA"`
+- `content_form` vide avant saisie utilisateur
+
+#### Quote
+
+Le lien `quote+` utilise `numrep`, pas `numreponse` :
+
+```text
+GET /message.php?...&post=35395&numrep=2784595&ref=0&page=20&...
+```
+
+HFR préremplit ensuite `content_form` :
+
+```bbcode
+[quotemsg=2784595,768,1214571]...[/quotemsg]
+```
+
+Le premier paramètre est le `numreponse` cité. Le troisième paramètre observé correspond à l'ID utilisateur de l'auteur cité. Le second paramètre (`768` dans la capture du post `2784595`, `640` dans une capture antérieure page 16) est une position/index HFR à traiter comme **opaque** tant que son calcul exact n'a pas été confirmé. Pour le MVP, Redface 2 doit récupérer le formulaire quote côté HFR et réutiliser le `content_form` prérempli, au lieu de reconstruire `[quotemsg=...]` localement.
+
+#### Succès et erreurs reply
+
+Réponse succès observée après POST `bddpost.php?config=hfr.inc` :
+
+```text
+Votre réponse a été postée avec succès !
+```
+
+La réponse succès est identique pour une réponse simple et pour une quote (`write_reply_success_response.html`, `write_quote_success_response.html`) et ne contient pas le message posté. HFR fournit un `<meta http-equiv="Refresh">` exploitable :
+
+- reply simple : refresh vers le topic avec ancre `#bas` ;
+- quote : refresh vers le topic avec ancre `#t{numreponse_cité}` dans la capture dédiée.
+
+Le client doit recharger la page topic et localiser le nouveau `numreponse` dans le topic. Lors du test anti-flood, les trois réponses consécutives acceptées ont créé `numreponse=2784599`, `2784600`, puis `2784601`.
+
+Erreurs observées :
+
+| Cas | Réponse HFR | Impact client |
+|---|---|---|
+| `content_form` vide avec `hash_check` valide | `Vous devez remplir tous les champs avant de poster ce message` | Rester dans l'éditeur, afficher l'erreur. |
+| `hash_check` invalide avec contenu non vide | `Une erreur est survenue lors de l'envoi des données. Essayez de vider le cache de votre navigateur` | Recharger le formulaire avant retry ; ne pas rejouer le POST tel quel. |
+| Plus de 3 réponses consécutives en 10 minutes | `Afin de prevenir les tentatives de flood, vous ne pouvez poster plus de 3 réponses consécutives dans un intervalle de 10 minutes` | Bloquer temporairement l'envoi et proposer de réessayer plus tard. |
+| Topic fermé | `Désolé ce sujet a été fermé...` | Bloquer l'éditeur et revenir au topic. |
+
+> **Note anonyme** : GET `message.php` en session anonyme ne redirige pas immédiatement vers le login. HFR sert le même composer avec champs `pseudo` et `password` visibles (`write_reply_anonymous_form.html`, `write_create_topic_anonymous_form.html`). Redface 2 ne doit pas exposer ce mode legacy : l'app passe par login HFR explicite avant tout POST.
+
+> **Note topic fermé** : la page topic fermée ne contient pas de lien reply (`write_locked_topic_page.html`). Si l'utilisateur force l'URL `message.php?...&post=14227`, HFR sert quand même un composer (`write_reply_locked_topic_forced_form.html`) mais le POST `bddpost.php` refuse (`write_locked_topic_error.html`). Le client ne doit donc pas se contenter de l'existence du formulaire pour conclure qu'un topic est éditable.
 
 ### POST `bdd.php` (edit)
+
+Contrat recapturé sur HFR réel le 2026-05-17 avec le post de test `numreponse=2784595` sur le topic Redface 2, puis complété avec des topics temporaires owned en Programmation / Divers (`cat=10`, `subcat=388`). Fixtures de référence : `write_edit_form_test_post.html`, `write_edit_success_response.html`, `write_created_owned_topic_page.html`, `write_edit_first_post_form.html`, `write_edit_first_post_success_response.html`, `write_edit_form_bbcode_rich.html`, `write_delete_post_form.html`, `write_delete_post_success_response.html`, `write_delete_topic_form.html`, `write_delete_topic_success_response.html`, `write_deleted_topic_404.html`.
 
 | Field | Valeur | Description |
 |---|---|---|
@@ -89,11 +165,52 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | `cat` | ID catégorie | |
 | `post` | ID topic | |
 | `numreponse` | ID post | Post à éditer |
+| `numrep` | `""` | Présent mais vide dans le formulaire d'édition observé. |
+| `page` | page topic courante | Observé `20`. |
+| `subcat` | ID sous-catégorie | Observé `550`. |
+| `sujet` | titre topic | Champ réel observé. Pas `subject`. |
 | `content_form` | nouveau contenu BBCode | |
-| `subject` | nouveau sujet | Seulement si edit FP |
-| `pollsondage` | données sondage | Seulement si edit FP avec sondage |
+| `have_sondage`, `textreponse1..10`, `allowvisitor`, `max_votes`, `jour`, `mois`, `annee`, `heure`, `minute` | données sondage | Champs observés sur le formulaire FP ; POST sondage non validé dans cette campagne. |
+| `delete` | `"1"` | Présent uniquement si l'utilisateur coche la suppression dans le formulaire d'édition. |
 
-Le fait qu'une édition concerne le **premier post** (FP) vs un post normal est déduit côté client (`isFirstPostOwner`) puis pris en compte dans la construction du form.
+Le fait qu'une édition concerne le **premier post** (FP) vs un post normal est déduit côté client (`isFirstPostOwner`) puis pris en compte dans la construction du form. HFR expose aussi des champs supplémentaires sur le FP : `sujet` éditable en input texte, `subcat` en `<select>`, options sondage, et champs `toread1..5`.
+
+Réponse succès observée après POST `bdd.php?config=hfr.inc` :
+
+```text
+Votre message a été édité avec succès !
+```
+
+La réponse succès ne contient pas le contenu édité. HFR fournit un refresh vers l'ancre du post édité (`#t{numreponse}`), observé pour un post normal et pour le FP owned. Le client doit recharger la page topic ou mettre à jour son cache local après succès.
+
+#### Suppression post/topic
+
+La suppression utilise le **même formulaire d'édition** que `bdd.php` :
+
+- post normal owned : le formulaire expose `<input name="delete" value="1">` avec le libellé `Effacer ce message` ;
+- premier post owned : le formulaire expose `<input name="delete" value="1">` avec le libellé `Effacer l'intégralité du sujet`.
+
+Le POST conserve les champs d'édition (`hash_check`, `cat`, `post`, `numreponse`, `sujet`, `content_form`, etc.) et ajoute `delete=1`. HFR répond dans les deux cas avec le même message générique :
+
+```text
+Message effacé avec succès !
+```
+
+Pour un post normal, la réponse succès contient un refresh vers la page du topic. Dans la capture du topic temporaire `post=148749`, la suppression du FP a supprimé le topic complet : l'URL `forum2.php?...&post=148749` répond ensuite HTTP `404`, et la réponse succès contient un refresh vers la liste de sous-catégorie. Redface 2 doit donc :
+
+1. traiter `delete=1` sur FP comme une action destructrice distincte "supprimer le topic" ;
+2. demander une confirmation UI forte avant d'envoyer le POST ;
+3. après succès, revenir à la liste de topics plutôt que tenter de recharger le topic supprimé.
+
+#### Limites de cette campagne de capture
+
+Les inconnues restantes sont explicitement limitées aux points suivants :
+
+- succès de création topic : formulaire GET capturé (`write_create_topic_form_android_cat.html`), mais pas de fixture `write_create_topic_success_response.html`. Impact : Phase 2C devra valider le POST création sur un topic temporaire supprimé ensuite, ou traiter la réponse succès comme non garantie ;
+- sondage : les champs de formulaire FP sont observés, mais aucun POST avec sondage n'a été envoyé. Impact : création/édition de sondage hors MVP écriture ;
+- `verifrequet=1100` : valeur observée dans tous les formulaires, pas de variant négatif testé. Impact : envoyer la valeur observée telle quelle ;
+- second paramètre de `[quotemsg=numreponse,X,user_id]` : valeurs observées `768`, `640`, `1`; le sens exact reste opaque. Impact : ne pas reconstruire localement les quotes, réutiliser le `content_form` prérempli par HFR ;
+- edit FP du topic Redface 2 : non testé car `XaTelitte` ne possède pas le FP ; edit FP owned validé sur topic temporaire Programmation.
 
 ### POST `login_validation.php`
 
