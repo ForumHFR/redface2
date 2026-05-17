@@ -8,6 +8,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -58,7 +59,7 @@ class PostEditorViewModel @AssistedInject constructor(
         }
     }
 
-    private fun onToolbarActionClicked(action: fr.forumhfr.redface2.core.ui.editor.BbcodeAction) {
+    private fun onToolbarActionClicked(action: BbcodeAction) {
         _state.update { current ->
             val draft = current.draft
             val selection = draft.selection

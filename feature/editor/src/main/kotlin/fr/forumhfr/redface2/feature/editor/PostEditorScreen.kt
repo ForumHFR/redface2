@@ -18,14 +18,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import fr.forumhfr.redface2.core.ui.editor.BBCodePreview
-import fr.forumhfr.redface2.core.ui.editor.BBCodeTextField
-import fr.forumhfr.redface2.core.ui.editor.BBCodeToolbar
+import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
+import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
+import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 
 /**
  * Phase 2B-A post-level editor screen. Local-only: text field + toolbar + preview.
@@ -72,18 +73,18 @@ private fun PostEditorContent(
                 color = MaterialTheme.colorScheme.onSurface,
             )
 
-            BBCodeToolbar(
+            BbcodeToolbar(
                 onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
             )
 
-            BBCodeTextField(
+            BbcodeTextField(
                 value = state.draft,
                 onValueChange = { value -> onIntent(PostEditorIntent.ContentChanged(value)) },
                 label = stringResource(R.string.editor_field_label),
                 placeholder = stringResource(R.string.editor_field_placeholder),
             )
 
-            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = androidx.compose.ui.Alignment.CenterStart) {
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
                 TextButton(onClick = { onIntent(PostEditorIntent.TogglePreview) }) {
                     Text(
                         text = stringResource(
@@ -95,7 +96,7 @@ private fun PostEditorContent(
 
             if (state.isPreviewVisible) {
                 HorizontalDivider()
-                BBCodePreview(content = state.preview)
+                BbcodePreview(content = state.preview)
             }
 
             Text(

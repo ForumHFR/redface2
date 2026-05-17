@@ -24,11 +24,11 @@ class BbcodeContentParser {
 
     fun parse(bbcode: String): PostContent {
         val tokens = if (bbcode.isEmpty()) emptyList() else Tokenizer(bbcode).tokenize()
-        val blocks = parseBlocks(tokens, 0, tokens.size).blocks
+        val blocks = parseBlocks(tokens, 0, tokens.size, depth = 0).blocks
         return if (blocks.isEmpty()) EMPTY_AST else PostContent(blocks = blocks)
     }
 
-    private fun parseBlocks(tokens: List<Token>, from: Int, to: Int): BlockSlice {
+    private fun parseBlocks(tokens: List<Token>, from: Int, to: Int, depth: Int): BlockSlice {
         val out = mutableListOf<PostBlock>()
         val paragraph = mutableListOf<PostInline>()
         var i = from
@@ -52,6 +52,7 @@ class BbcodeContentParser {
                     tokens = tokens,
                     i = i,
                     to = to,
+                    depth = depth,
                     token = token,
                     out = out,
                     paragraph = paragraph,
@@ -70,47 +71,66 @@ class BbcodeContentParser {
         return BlockSlice(out, i)
     }
 
-    @Suppress("LongParameterList") // dispatcher needs all the buffers and the flush hook
+    // 3 returns is the natural shape of a dispatcher: text-fallback when missing close,
+    // dispatched block handler when block-level, inline parsing for the rest.
+    @Suppress("LongParameterList", "ReturnCount")
     private fun handleOpenToken(
         tokens: List<Token>,
         i: Int,
         to: Int,
+        depth: Int,
         token: Token.Open,
         out: MutableList<PostBlock>,
         paragraph: MutableList<PostInline>,
         flushParagraph: () -> Unit,
     ): Int {
         val tagName = token.name.lowercase()
-        return when (tagName) {
-            "quote", "quotemsg", "spoiler" -> {
-                flushParagraph()
-                handleNestableBlock(tokens, i, to, token, tagName, out)
+
+        // Block-level tags require a matching close. Without one, the contract is "degrade
+        // to plain text" — keep the raw open token in the paragraph buffer so the user sees
+        // what they typed instead of conjuring an empty block (Codex review on PR #161).
+        if (tagName in BlockLevelTags) {
+            val close = findMatchingClose(tokens, i, to, tagName)
+            if (close <= i) {
+                paragraph += PostInline.Text(token.raw)
+                return i + 1
             }
-
-            "fixed", "code", "cpp" -> {
-                flushParagraph()
-                handleRawTextBlock(tokens, i, to, token, tagName, out)
+            return when (tagName) {
+                "quote", "quotemsg", "spoiler" -> {
+                    flushParagraph()
+                    handleNestableBlock(tokens, i, close, depth, token, tagName, out)
+                }
+                "fixed", "code", "cpp" -> {
+                    flushParagraph()
+                    handleRawTextBlock(tokens, i, close, token, tagName, out)
+                }
+                "img" -> handleImageBlock(tokens, i, close, out, flushParagraph)
+                else -> error("Unhandled block-level tag $tagName")
             }
-
-            "img" -> handleImageBlock(tokens, i, to, tagName, out, flushParagraph)
-
-            else -> handleInlineOpen(tokens, i, to, token, paragraph)
         }
+
+        return handleInlineOpen(tokens, i, to, depth, token, paragraph)
     }
 
     @Suppress("LongParameterList") // intentionally explicit — context object would add noise
     private fun handleNestableBlock(
         tokens: List<Token>,
         i: Int,
-        to: Int,
+        close: Int,
+        depth: Int,
         token: Token.Open,
         tagName: String,
         out: MutableList<PostBlock>,
     ): Int {
-        val close = findMatchingClose(tokens, i, to, tagName)
-        val inner = if (close > i) parseBlocks(tokens, i + 1, close).blocks else emptyList()
+        // Bound recursion. The contract says we degrade to text on pathological input —
+        // a deeply nested [quote] tower would otherwise blow the JVM stack.
+        val inner = if (depth + 1 >= MAX_NESTING_DEPTH) {
+            listOf(PostBlock.Paragraph(listOf(PostInline.Text(flattenRawText(tokens, i + 1, close)))))
+        } else {
+            parseBlocks(tokens, i + 1, close, depth = depth + 1).blocks
+        }
         out += buildNestableBlock(tagName, token, inner)
-        return if (close > i) close + 1 else i + 1
+        return close + 1
     }
 
     private fun buildNestableBlock(
@@ -134,50 +154,48 @@ class BbcodeContentParser {
     private fun handleRawTextBlock(
         tokens: List<Token>,
         i: Int,
-        to: Int,
+        close: Int,
         token: Token.Open,
         tagName: String,
         out: MutableList<PostBlock>,
     ): Int {
-        val close = findMatchingClose(tokens, i, to, tagName)
-        val text = if (close > i) flattenRawText(tokens, i + 1, close) else ""
+        val text = flattenRawText(tokens, i + 1, close)
         out += when (tagName) {
             "fixed" -> PostBlock.Fixed(text = text)
             "code" -> PostBlock.CodeBlock(text = text, language = token.params.takeIf { it.isNotBlank() })
             "cpp" -> PostBlock.CodeBlock(text = text, language = "cpp")
             else -> error("Unsupported raw-text tag $tagName")
         }
-        return if (close > i) close + 1 else i + 1
+        return close + 1
     }
 
-    @Suppress("LongParameterList") // intentionally explicit — context object would add noise
     private fun handleImageBlock(
         tokens: List<Token>,
         i: Int,
-        to: Int,
-        tagName: String,
+        close: Int,
         out: MutableList<PostBlock>,
         flushParagraph: () -> Unit,
     ): Int {
-        val close = findMatchingClose(tokens, i, to, tagName)
-        val url = if (close > i) flattenRawText(tokens, i + 1, close).trim() else ""
+        val url = flattenRawText(tokens, i + 1, close).trim()
         if (url.isNotEmpty()) {
             // HFR inserts images via the toolbar as block-level — render the same way so
             // the preview matches what users see on the web.
             flushParagraph()
             out += PostBlock.Image(url = url, description = null)
         }
-        return if (close > i) close + 1 else i + 1
+        return close + 1
     }
 
+    @Suppress("LongParameterList") // intentionally explicit — context object would add noise
     private fun handleInlineOpen(
         tokens: List<Token>,
         i: Int,
         to: Int,
+        depth: Int,
         token: Token.Open,
         paragraph: MutableList<PostInline>,
     ): Int {
-        val inline = parseInline(tokens, i, to)
+        val inline = parseInline(tokens, i, to, depth)
         return if (inline.consumed == 0) {
             paragraph += PostInline.Text(token.raw)
             i + 1
@@ -187,19 +205,22 @@ class BbcodeContentParser {
         }
     }
 
-    private fun parseInline(tokens: List<Token>, from: Int, to: Int): InlineSlice {
+    private fun parseInline(tokens: List<Token>, from: Int, to: Int, depth: Int): InlineSlice {
         val open = tokens[from] as Token.Open
         val tag = open.name.lowercase()
+        if (depth >= MAX_NESTING_DEPTH) {
+            return InlineSlice(PostInline.Text(open.raw), 1)
+        }
         return when (tag) {
-            "b" -> wrapInline(tokens, from, to, tag) { PostInline.Strong(it) }
-            "i" -> wrapInline(tokens, from, to, tag) { PostInline.Emphasis(it) }
-            "u" -> wrapInline(tokens, from, to, tag) { PostInline.Underline(it) }
-            "strike", "s" -> wrapInline(tokens, from, to, tag) { PostInline.Strike(it) }
-            "url" -> parseInlineUrl(tokens, from, to, open)
-            "email" -> parseInlineEmail(tokens, from, to, open)
+            "b" -> wrapInline(tokens, from, to, depth, tag) { PostInline.Strong(it) }
+            "i" -> wrapInline(tokens, from, to, depth, tag) { PostInline.Emphasis(it) }
+            "u" -> wrapInline(tokens, from, to, depth, tag) { PostInline.Underline(it) }
+            "strike" -> wrapInline(tokens, from, to, depth, tag) { PostInline.Strike(it) }
+            "url" -> parseInlineUrl(tokens, from, to, depth, open)
+            "email" -> parseInlineEmail(tokens, from, to, depth, open)
             else -> {
                 if (tag.startsWith("#") && tag.length == 7 && tag.drop(1).all { it.isHexDigit() }) {
-                    parseInlineColor(tokens, from, to, tag)
+                    parseInlineColor(tokens, from, to, depth, tag)
                 } else {
                     InlineSlice(PostInline.Text(open.raw), 0)
                 }
@@ -207,10 +228,12 @@ class BbcodeContentParser {
         }
     }
 
+    @Suppress("LongParameterList") // intentionally explicit — context object would add noise
     private fun wrapInline(
         tokens: List<Token>,
         from: Int,
         to: Int,
+        depth: Int,
         tagName: String,
         wrap: (List<PostInline>) -> PostInline,
     ): InlineSlice {
@@ -219,7 +242,7 @@ class BbcodeContentParser {
             // Unclosed inline → keep raw open tag as text, but keep walking
             return InlineSlice(PostInline.Text((tokens[from] as Token.Open).raw), 1)
         }
-        val children = parseInlinesOnly(tokens, from + 1, close)
+        val children = parseInlinesOnly(tokens, from + 1, close, depth + 1)
         return InlineSlice(wrap(children), close - from + 1)
     }
 
@@ -227,13 +250,14 @@ class BbcodeContentParser {
         tokens: List<Token>,
         from: Int,
         to: Int,
+        depth: Int,
         open: Token.Open,
     ): InlineSlice {
         val close = findMatchingClose(tokens, from, to, "url")
         if (close <= from) {
             return InlineSlice(PostInline.Text(open.raw), 1)
         }
-        val children = parseInlinesOnly(tokens, from + 1, close)
+        val children = parseInlinesOnly(tokens, from + 1, close, depth + 1)
         val url = open.params.takeIf { it.isNotBlank() } ?: flattenInlineText(children)
         return InlineSlice(
             PostInline.Link(url = url, children = children),
@@ -245,13 +269,14 @@ class BbcodeContentParser {
         tokens: List<Token>,
         from: Int,
         to: Int,
+        depth: Int,
         open: Token.Open,
     ): InlineSlice {
         val close = findMatchingClose(tokens, from, to, "email")
         if (close <= from) {
             return InlineSlice(PostInline.Text(open.raw), 1)
         }
-        val children = parseInlinesOnly(tokens, from + 1, close)
+        val children = parseInlinesOnly(tokens, from + 1, close, depth + 1)
         val address = open.params.takeIf { it.isNotBlank() } ?: flattenInlineText(children)
         return InlineSlice(
             PostInline.Link(url = "mailto:$address", children = children),
@@ -263,20 +288,21 @@ class BbcodeContentParser {
         tokens: List<Token>,
         from: Int,
         to: Int,
+        depth: Int,
         tag: String,
     ): InlineSlice {
         val close = findMatchingClose(tokens, from, to, tag)
         if (close <= from) {
             return InlineSlice(PostInline.Text((tokens[from] as Token.Open).raw), 1)
         }
-        val children = parseInlinesOnly(tokens, from + 1, close)
+        val children = parseInlinesOnly(tokens, from + 1, close, depth + 1)
         return InlineSlice(
             PostInline.Color(colorHex = tag.uppercase(), children = children),
             close - from + 1,
         )
     }
 
-    private fun parseInlinesOnly(tokens: List<Token>, from: Int, to: Int): List<PostInline> {
+    private fun parseInlinesOnly(tokens: List<Token>, from: Int, to: Int, depth: Int): List<PostInline> {
         val out = mutableListOf<PostInline>()
         var i = from
         while (i < to) {
@@ -288,7 +314,7 @@ class BbcodeContentParser {
                 }
 
                 is Token.Open -> {
-                    val inline = parseInline(tokens, i, to)
+                    val inline = parseInline(tokens, i, to, depth)
                     if (inline.consumed == 0) {
                         out += PostInline.Text(token.raw)
                         i += 1
@@ -411,6 +437,26 @@ class BbcodeContentParser {
 
     private companion object {
         val EMPTY_AST: PostContent = PostContent(blocks = emptyList())
+
+        /**
+         * Tag names handled at block level (paragraph flush + dedicated block node).
+         * Anything outside this set falls through to inline parsing or text fallback.
+         */
+        val BlockLevelTags: Set<String> = setOf(
+            "quote", "quotemsg", "spoiler",
+            "fixed", "code", "cpp",
+            "img",
+        )
+
+        /**
+         * Hard cap on how deep [parseBlocks] and [parseInlinesOnly] are willing to
+         * recurse. The contract is "never crash on user input" — without this guard a
+         * deeply nested `[quote]` (or `[b][b][b]...`) chain would blow the JVM stack on
+         * Android (~500 frames). Once reached, the parser degrades to plain text rather
+         * than recursing further. 64 is well below the JVM stack budget and well above
+         * anything a real HFR thread is likely to produce.
+         */
+        const val MAX_NESTING_DEPTH = 64
     }
 }
 

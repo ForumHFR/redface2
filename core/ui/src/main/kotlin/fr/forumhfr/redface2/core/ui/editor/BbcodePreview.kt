@@ -24,7 +24,7 @@ import fr.forumhfr.redface2.core.ui.post.PostRenderer
  * exposed to features via `BbcodePreviewParser` in `:core:domain`.
  */
 @Composable
-fun BBCodePreview(
+fun BbcodePreview(
     content: PostContent,
     modifier: Modifier = Modifier,
 ) {

@@ -67,17 +67,6 @@ class BbcodeFormatterTest {
     }
 
     @Test
-    fun `code tag uses code wrap`() {
-        val result = applyBbcodeAction(
-            action = BbcodeAction.Code,
-            text = "x = 1",
-            selectionStart = 0,
-            selectionEnd = 5,
-        )
-        assertEquals("[code]x = 1[/code]", result.text)
-    }
-
-    @Test
     fun `cpp tag uses the HFR-real cpp tag, not code`() {
         val result = applyBbcodeAction(
             action = BbcodeAction.Cpp,

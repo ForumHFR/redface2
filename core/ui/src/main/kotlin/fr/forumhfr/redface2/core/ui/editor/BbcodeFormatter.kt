@@ -7,7 +7,7 @@ package fr.forumhfr.redface2.core.ui.editor
  * Tags with a real `[/...]` close (Block-level fixed/code/cpp included) all share the
  * same wrap-the-selection logic — the formatter does not care whether HFR renders
  * them as inline or block-level on the receiving end. The renderer side
- * (`PostRenderer` + `BBCodePreview`) is what makes that distinction.
+ * (`PostRenderer` + `BbcodePreview`) is what makes that distinction.
  */
 enum class BbcodeAction(val openTag: String, val closeTag: String) {
     Bold(openTag = "[b]", closeTag = "[/b]"),
@@ -15,7 +15,10 @@ enum class BbcodeAction(val openTag: String, val closeTag: String) {
     Underline(openTag = "[u]", closeTag = "[/u]"),
     Strike(openTag = "[strike]", closeTag = "[/strike]"),
     Quote(openTag = "[quote]", closeTag = "[/quote]"),
-    Code(openTag = "[code]", closeTag = "[/code]"),
+    // HFR's web toolbar only exposes [cpp] as the code button (verified against the
+    // Phase 2A fixtures — `grep "TAinsert" write_*_form_*.html` finds [cpp] and [fixed]
+    // but no [code]). We mirror that here and keep the parser tolerant to [code] so
+    // pasted content keeps rendering — but the editor toolbar matches HFR.
     Cpp(openTag = "[cpp]", closeTag = "[/cpp]"),
     Fixed(openTag = "[fixed]", closeTag = "[/fixed]"),
     Spoiler(openTag = "[spoiler]", closeTag = "[/spoiler]"),

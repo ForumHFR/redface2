@@ -15,7 +15,7 @@ import androidx.compose.ui.text.input.TextFieldValue
  * losing the caret position.
  */
 @Composable
-fun BBCodeTextField(
+fun BbcodeTextField(
     value: TextFieldValue,
     onValueChange: (TextFieldValue) -> Unit,
     label: String,

@@ -164,6 +164,106 @@ class BbcodeContentParserTest {
     }
 
     @Test
+    fun `unclosed quote degrades to plain text rather than producing an empty Quote block`() {
+        val ast = parser.parse("[quote]hello")
+        assertTrue("No Quote block must be emitted for unclosed [quote]", ast.blocks.none { it is PostBlock.Quote })
+        val text = (ast.blocks.single() as PostBlock.Paragraph).inlines
+            .filterIsInstance<PostInline.Text>().joinToString(separator = "") { it.value }
+        assertEquals("[quote]hello", text)
+    }
+
+    @Test
+    fun `unclosed fixed degrades to plain text rather than producing an empty Fixed block`() {
+        val ast = parser.parse("[fixed]hello")
+        assertTrue("No Fixed block must be emitted for unclosed [fixed]", ast.blocks.none { it is PostBlock.Fixed })
+        val text = (ast.blocks.single() as PostBlock.Paragraph).inlines
+            .filterIsInstance<PostInline.Text>().joinToString(separator = "") { it.value }
+        assertEquals("[fixed]hello", text)
+    }
+
+    @Test
+    fun `unclosed code degrades to plain text rather than producing an empty CodeBlock`() {
+        val ast = parser.parse("[code]int x;")
+        assertTrue("No CodeBlock must be emitted for unclosed [code]", ast.blocks.none { it is PostBlock.CodeBlock })
+        val text = (ast.blocks.single() as PostBlock.Paragraph).inlines
+            .filterIsInstance<PostInline.Text>().joinToString(separator = "") { it.value }
+        assertEquals("[code]int x;", text)
+    }
+
+    @Test
+    fun `unclosed cpp degrades to plain text rather than producing an empty CodeBlock`() {
+        val ast = parser.parse("[cpp]int x;")
+        assertTrue("No CodeBlock must be emitted for unclosed [cpp]", ast.blocks.none { it is PostBlock.CodeBlock })
+    }
+
+    @Test
+    fun `unclosed spoiler degrades to plain text rather than producing an empty Spoiler block`() {
+        val ast = parser.parse("[spoiler]hello")
+        assertTrue(
+            "No Spoiler block must be emitted for unclosed [spoiler]",
+            ast.blocks.none { it is PostBlock.Spoiler },
+        )
+    }
+
+    @Test
+    fun `unclosed img degrades to plain text rather than losing the URL`() {
+        val ast = parser.parse("[img]https://example.com/a.png")
+        assertTrue("No Image block must be emitted for unclosed [img]", ast.blocks.none { it is PostBlock.Image })
+        val text = (ast.blocks.single() as PostBlock.Paragraph).inlines
+            .filterIsInstance<PostInline.Text>().joinToString(separator = "") { it.value }
+        assertEquals("[img]https://example.com/a.png", text)
+    }
+
+    @Test
+    fun `unclosed quotemsg degrades to plain text rather than producing an empty Quote block`() {
+        val ast = parser.parse("[quotemsg=42,1,2]hello")
+        assertTrue("No Quote block must be emitted for unclosed [quotemsg]", ast.blocks.none { it is PostBlock.Quote })
+    }
+
+    @Test
+    fun `deeply nested quote degrades gracefully without StackOverflowError`() {
+        val depth = 256
+        val nested = buildString {
+            repeat(depth) { append("[quote]") }
+            append("payload")
+            repeat(depth) { append("[/quote]") }
+        }
+        // Must not throw. The parser caps recursion via MAX_NESTING_DEPTH and falls back
+        // to raw text inside the deepest levels.
+        val ast = parser.parse(nested)
+        assertNotNull(ast)
+        assertTrue("Parser must keep at least one outer Quote block", ast.blocks.any { it is PostBlock.Quote })
+    }
+
+    @Test
+    fun `deeply nested bold degrades gracefully without StackOverflowError`() {
+        val depth = 256
+        val nested = buildString {
+            repeat(depth) { append("[b]") }
+            append("payload")
+            repeat(depth) { append("[/b]") }
+        }
+        val ast = parser.parse(nested)
+        assertNotNull(ast)
+        // We don't assert on the structure, only that the parser returns without crashing.
+    }
+
+    @Test
+    fun `s alias is no longer recognised and stays raw text`() {
+        // [s] used to alias [strike]. We removed the alias to keep the parser observable
+        // surface aligned on HFR's real toolbar (which only emits [strike]).
+        val ast = parser.parse("[s]hello[/s]")
+        assertTrue("No Strike inline must be emitted for [s]", ast.blocks.none {
+            it is PostBlock.Paragraph && it.inlines.any { node -> node is PostInline.Strike }
+        })
+        val text = (ast.blocks.single() as PostBlock.Paragraph).inlines
+            .filterIsInstance<PostInline.Text>().joinToString(separator = "") { it.value }
+        assertTrue(text.contains("[s]"))
+        assertTrue(text.contains("[/s]"))
+        assertTrue(text.contains("hello"))
+    }
+
+    @Test
     fun `paragraph break splits double newlines`() {
         val ast = parser.parse("para1\n\npara2")
         assertEquals(2, ast.blocks.size)

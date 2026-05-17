@@ -1,7 +1,8 @@
 package fr.forumhfr.redface2.feature.editor
 
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
+import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
 import fr.forumhfr.redface2.core.model.PostContent
 
 /**
@@ -23,21 +24,8 @@ data class PostEditorState(
     val isSubmitEnabled: Boolean get() = draft.text.isNotBlank()
 }
 
-/**
- * Lightweight, non-blocking BBCode validation snapshot. Phase 2B-A intentionally
- * keeps this minimal — the editor never blocks the user, it just hints. A richer
- * `validateBbcode` use case (mismatched closes, length warnings) will live in
- * `:core:domain` once a real submission flow needs the gate.
- */
-sealed interface BbcodeValidation {
-    data object Idle : BbcodeValidation
-    data object EmptyDraft : BbcodeValidation
-}
-
 internal fun PostEditorState.withDraft(updated: TextFieldValue): PostEditorState =
     copy(
         draft = updated,
-        validation = if (updated.text.isBlank()) BbcodeValidation.EmptyDraft else BbcodeValidation.Idle,
+        validation = validateBbcodeDraft(updated.text),
     )
-
-internal fun emptyDraft(): TextFieldValue = TextFieldValue(text = "", selection = TextRange.Zero)

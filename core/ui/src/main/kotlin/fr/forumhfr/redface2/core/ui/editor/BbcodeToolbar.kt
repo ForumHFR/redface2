@@ -25,7 +25,7 @@ import fr.forumhfr.redface2.core.ui.R
  * inherits the elevation, focus and pressed states from the theme.
  */
 @Composable
-fun BBCodeToolbar(
+fun BbcodeToolbar(
     onAction: (BbcodeAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -48,7 +48,6 @@ private val ToolbarOrder: List<BbcodeAction> = listOf(
     BbcodeAction.Underline,
     BbcodeAction.Strike,
     BbcodeAction.Quote,
-    BbcodeAction.Code,
     BbcodeAction.Cpp,
     BbcodeAction.Fixed,
     BbcodeAction.Spoiler,
@@ -76,7 +75,6 @@ private val BbcodeAction.labelResId: Int
         BbcodeAction.Underline -> R.string.bbcode_action_underline
         BbcodeAction.Strike -> R.string.bbcode_action_strike
         BbcodeAction.Quote -> R.string.bbcode_action_quote
-        BbcodeAction.Code -> R.string.bbcode_action_code
         BbcodeAction.Cpp -> R.string.bbcode_action_cpp
         BbcodeAction.Fixed -> R.string.bbcode_action_fixed
         BbcodeAction.Spoiler -> R.string.bbcode_action_spoiler

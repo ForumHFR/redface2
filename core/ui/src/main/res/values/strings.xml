@@ -17,8 +17,7 @@
     <string name="bbcode_action_underline">Souligné</string>
     <string name="bbcode_action_strike">Barré</string>
     <string name="bbcode_action_quote">Citation</string>
-    <string name="bbcode_action_code">Code</string>
-    <string name="bbcode_action_cpp">C/C++</string>
+    <string name="bbcode_action_cpp">Code</string>
     <string name="bbcode_action_fixed">Bloc fixé</string>
     <string name="bbcode_action_spoiler">Spoiler</string>
     <string name="bbcode_action_url">Lien</string>
