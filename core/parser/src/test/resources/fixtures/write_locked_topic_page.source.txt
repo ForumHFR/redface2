@@ -1,0 +1,6 @@
+Source: forum.hardware.fr
+Captured: 2026-05-17
+URL: https://forum.hardware.fr/hfr/gsmgpspda/regles-lire-poster-sujet_14227_1.htm
+Notes: Public locked topic page: no reply link exposed on the topic page.
+Sanitization: hash_check/codehex redacted; MP unread target id and MP count redacted when present; no cookies stored.
+Test context: Authenticated XaTelitte session, public locked topic cat=23 post=14227 page=1.

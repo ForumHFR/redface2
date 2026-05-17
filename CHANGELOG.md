@@ -9,10 +9,10 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 ## [Unreleased]
 
 ### Added
-- Fixtures Phase 2A pour le protocole d'écriture HFR : formulaires réels reply, quote, edit, création topic et réponse succès edit, capturés sur le topic Redface 2 avec `hash_check` et données sensibles sanitizés.
+- Fixtures Phase 2A pour le protocole d'écriture HFR : formulaires réels reply, quote, edit, création topic, anonyme, topic fermé, réponses succès et erreurs HFR, capturés avec `hash_check` et données sensibles sanitizés.
 
 ### Changed
-- `docs/specs/protocol-hfr.md` aligne le contrat d'écriture sur HFR réel : `numrep` pour quote, `numreponse` pour edit, champ titre réel `sujet`, endpoints GET `message.php` et POST `bddpost.php` / `bdd.php`.
+- `docs/specs/protocol-hfr.md` aligne le contrat d'écriture sur HFR réel : `numrep` pour quote, `numreponse` pour edit, champ titre réel `sujet`, endpoints GET `message.php`, POST `bddpost.php` / `bdd.php`, et messages d'erreur `content_form` vide / `hash_check` invalide / anti-flood / topic fermé.
 - `docs/guides/contributing.md` met à jour la matrice des fixtures d'écriture Phase 2A.
 
 ---

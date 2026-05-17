@@ -285,7 +285,16 @@ core/parser/src/test/resources/fixtures/
 | `write_reply_form_open_topic.html` | Formulaire reply Phase 2A | logué uniquement | Contrat `bddpost.php` réel | `message.php?...&post=35395&page=20&subcat=550` |
 | `write_quote_form_test_post.html` | Formulaire quote Phase 2A | logué uniquement | `numrep` + `[quotemsg=...]` prérempli | `message.php?...&numrep=2784595` |
 | `write_edit_form_test_post.html` | Formulaire edit Phase 2A | logué uniquement | `numreponse` + contrat `bdd.php` réel | `message.php?...&numreponse=2784595` |
+| `write_reply_anonymous_form.html` | Formulaire reply anonyme Phase 2A | non-logué | Composer legacy avec pseudo/password | `message.php?...&post=35395&page=20` |
+| `write_create_topic_anonymous_form.html` | Formulaire création anonyme Phase 2A | non-logué | Composer legacy avec pseudo/password | `message.php?...&cat=23&subcat=550` |
 | `write_edit_success_response.html` | Réponse succès edit Phase 2A | logué uniquement | Message succès `bdd.php` | `POST bdd.php?config=hfr.inc` |
+| `write_reply_success_response.html` | Réponse succès reply Phase 2A | logué uniquement | Message succès `bddpost.php` | `POST bddpost.php?config=hfr.inc` |
+| `write_empty_message_error.html` | Erreur contenu vide Phase 2A | logué uniquement | Validation HFR, aucun post créé | `POST bddpost.php?config=hfr.inc` |
+| `write_invalid_token_error.html` | Erreur `hash_check` invalide Phase 2A | logué uniquement | Rejet HFR avant post | `POST bddpost.php?config=hfr.inc` |
+| `write_antiflood_error.html` | Erreur anti-flood Phase 2A | logué uniquement | 4e réponse consécutive en 10 minutes refusée | `POST bddpost.php?config=hfr.inc` |
+| `write_locked_topic_page.html` | Topic fermé Phase 2A | logué uniquement | Pas de lien reply exposé | topic fermé `post=14227` |
+| `write_reply_locked_topic_forced_form.html` | Formulaire forcé topic fermé Phase 2A | logué uniquement | `message.php` sert encore un composer | `message.php?...&post=14227` |
+| `write_locked_topic_error.html` | Erreur POST topic fermé Phase 2A | logué uniquement | Rejet `bddpost.php`, aucun post créé | `POST bddpost.php?config=hfr.inc` |
 | `multimp_conversation.html` | MultiMP | logué uniquement | Différent des MPs classiques | MultiMP existant |
 | `topic_with_poll.html` | Topic avec sondage | logué + non-logué | Parsing du sondage | topic public avec sondage |
 | `topic_last_page.html` | Dernière page (< 40 posts) | non-logué | Pagination edge case | dernière page d'un topic |
@@ -308,7 +317,7 @@ core/parser/src/test/resources/fixtures/
 | `contact_list.html` | `contactlist.php` | Liste de contacts : ajout/suppression, statut en ligne, liens MP | idem |
 | `modo_history.html` | `modo/historique.php` | Historique des sanctions : modérateur, catégorie, date, raison | modérateur test |
 
-**Total : ~40 fixtures** (13 reprises testées de v1 + 18 nouvelles + 9 profil/paramètres).
+**Total : ~50 fixtures** (13 reprises testées de v1 + 28 nouvelles + 9 profil/paramètres).
 
 ### Fixtures REST JSON (Phase 1C-A)
 

@@ -1,0 +1,6 @@
+Source: forum.hardware.fr
+Captured: 2026-05-17
+URL: https://forum.hardware.fr/message.php?config=hfr.inc&cat=23&post=14227&page=1&p=1&subcat=0&sondage=0&owntopic=0&new=0
+Notes: Forced direct GET message.php on locked topic still returns a composer form.
+Sanitization: hash_check/codehex redacted; MP unread target id and MP count redacted when present; no cookies stored.
+Test context: Authenticated XaTelitte session, forced direct composer URL for locked topic cat=23 post=14227.

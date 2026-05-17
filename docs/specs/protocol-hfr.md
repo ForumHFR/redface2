@@ -65,7 +65,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 
 ### POST `bddpost.php` (reply, quote ou nouveau topic)
 
-Contrat recapturé sur HFR réel le 2026-05-17 avec le compte de test `XaTelitte`, topic Redface 2 `cat=23`, `post=35395`, `subcat=550`, post de test `numreponse=2784595`. Fixtures de référence : `write_reply_form_open_topic.html`, `write_quote_form_test_post.html`, `write_create_topic_form_android_cat.html`.
+Contrat recapturé sur HFR réel le 2026-05-17 avec le compte de test `XaTelitte`, topic Redface 2 `cat=23`, `post=35395`, `subcat=550`, post de test `numreponse=2784595`. Fixtures de référence : `write_reply_form_open_topic.html`, `write_quote_form_test_post.html`, `write_create_topic_form_android_cat.html`, `write_reply_success_response.html`, `write_empty_message_error.html`, `write_invalid_token_error.html`, `write_antiflood_error.html`, `write_locked_topic_page.html`, `write_reply_locked_topic_forced_form.html`, `write_locked_topic_error.html`.
 
 | Field | Valeur | Obligatoire | Description |
 |---|---|---|---|
@@ -122,6 +122,29 @@ HFR préremplit ensuite `content_form` :
 ```
 
 Le premier paramètre est le `numreponse` cité. Le troisième paramètre observé correspond à l'ID utilisateur de l'auteur cité. Le second paramètre (`768` dans la capture du post `2784595`, `640` dans une capture antérieure page 16) est une position/index HFR à traiter comme **opaque** tant que son calcul exact n'a pas été confirmé. Pour le MVP, Redface 2 doit récupérer le formulaire quote côté HFR et réutiliser le `content_form` prérempli, au lieu de reconstruire `[quotemsg=...]` localement.
+
+#### Succès et erreurs reply
+
+Réponse succès observée après POST `bddpost.php?config=hfr.inc` :
+
+```text
+Votre réponse a été postée avec succès !
+```
+
+La réponse succès ne contient pas le message posté. Le client doit recharger la page topic et localiser le nouveau `numreponse` dans le topic. Lors du test anti-flood, les trois réponses consécutives acceptées ont créé `numreponse=2784599`, `2784600`, puis `2784601`.
+
+Erreurs observées :
+
+| Cas | Réponse HFR | Impact client |
+|---|---|---|
+| `content_form` vide avec `hash_check` valide | `Vous devez remplir tous les champs avant de poster ce message` | Rester dans l'éditeur, afficher l'erreur. |
+| `hash_check` invalide avec contenu non vide | `Une erreur est survenue lors de l'envoi des données. Essayez de vider le cache de votre navigateur` | Recharger le formulaire avant retry ; ne pas rejouer le POST tel quel. |
+| Plus de 3 réponses consécutives en 10 minutes | `Afin de prevenir les tentatives de flood, vous ne pouvez poster plus de 3 réponses consécutives dans un intervalle de 10 minutes` | Bloquer temporairement l'envoi et proposer de réessayer plus tard. |
+| Topic fermé | `Désolé ce sujet a été fermé...` | Bloquer l'éditeur et revenir au topic. |
+
+> **Note anonyme** : GET `message.php` en session anonyme ne redirige pas immédiatement vers le login. HFR sert le même composer avec champs `pseudo` et `password` visibles (`write_reply_anonymous_form.html`, `write_create_topic_anonymous_form.html`). Redface 2 ne doit pas exposer ce mode legacy : l'app passe par login HFR explicite avant tout POST.
+
+> **Note topic fermé** : la page topic fermée ne contient pas de lien reply (`write_locked_topic_page.html`). Si l'utilisateur force l'URL `message.php?...&post=14227`, HFR sert quand même un composer (`write_reply_locked_topic_forced_form.html`) mais le POST `bddpost.php` refuse (`write_locked_topic_error.html`). Le client ne doit donc pas se contenter de l'existence du formulaire pour conclure qu'un topic est éditable.
 
 ### POST `bdd.php` (edit)
 
