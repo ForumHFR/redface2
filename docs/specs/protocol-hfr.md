@@ -66,7 +66,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 
 ### POST `bddpost.php` (reply, quote ou nouveau topic)
 
-Contrat recapturé sur HFR réel le 2026-05-17 avec le compte de test `XaTelitte`, topic Redface 2 `cat=23`, `post=35395`, `subcat=550`, post de test `numreponse=2784595`. Fixtures de référence : `write_reply_form_open_topic.html`, `write_quote_form_test_post.html`, `write_create_topic_form_android_cat.html`, `write_reply_success_response.html`, `write_empty_message_error.html`, `write_invalid_token_error.html`, `write_antiflood_error.html`, `write_locked_topic_page.html`, `write_reply_locked_topic_forced_form.html`, `write_locked_topic_error.html`.
+Contrat recapturé sur HFR réel le 2026-05-17 avec le compte de test `XaTelitte`, topic Redface 2 `cat=23`, `post=35395`, `subcat=550`, post de test `numreponse=2784595`, puis complété avec des topics temporaires owned en Programmation / Divers. Fixtures de référence : `write_reply_form_open_topic.html`, `write_quote_form_test_post.html`, `write_quote_form_bbcode_rich.html`, `write_create_topic_form_android_cat.html`, `write_reply_success_response.html`, `write_quote_success_response.html`, `write_empty_message_error.html`, `write_invalid_token_error.html`, `write_antiflood_error.html`, `write_locked_topic_page.html`, `write_reply_locked_topic_forced_form.html`, `write_locked_topic_error.html`.
 
 | Field | Valeur | Obligatoire | Description |
 |---|---|---|---|
@@ -132,7 +132,7 @@ Réponse succès observée après POST `bddpost.php?config=hfr.inc` :
 Votre réponse a été postée avec succès !
 ```
 
-La réponse succès ne contient pas le message posté. Le client doit recharger la page topic et localiser le nouveau `numreponse` dans le topic. Lors du test anti-flood, les trois réponses consécutives acceptées ont créé `numreponse=2784599`, `2784600`, puis `2784601`.
+La réponse succès est identique pour une réponse simple et pour une quote (`write_reply_success_response.html`, `write_quote_success_response.html`) et ne contient pas le message posté. Le client doit recharger la page topic et localiser le nouveau `numreponse` dans le topic. Lors du test anti-flood, les trois réponses consécutives acceptées ont créé `numreponse=2784599`, `2784600`, puis `2784601`.
 
 Erreurs observées :
 
@@ -149,7 +149,7 @@ Erreurs observées :
 
 ### POST `bdd.php` (edit)
 
-Contrat recapturé sur HFR réel le 2026-05-17 avec le post de test `numreponse=2784595` sur le topic Redface 2, puis complété avec un topic temporaire owned en Programmation / Divers (`cat=10`, `post=148749`, `subcat=388`). Fixtures de référence : `write_edit_form_test_post.html`, `write_edit_success_response.html`, `write_created_owned_topic_page.html`, `write_edit_first_post_form.html`, `write_edit_first_post_success_response.html`, `write_delete_post_form.html`, `write_delete_post_success_response.html`, `write_delete_topic_form.html`, `write_delete_topic_success_response.html`, `write_deleted_topic_404.html`.
+Contrat recapturé sur HFR réel le 2026-05-17 avec le post de test `numreponse=2784595` sur le topic Redface 2, puis complété avec des topics temporaires owned en Programmation / Divers (`cat=10`, `subcat=388`). Fixtures de référence : `write_edit_form_test_post.html`, `write_edit_success_response.html`, `write_created_owned_topic_page.html`, `write_edit_first_post_form.html`, `write_edit_first_post_success_response.html`, `write_edit_form_bbcode_rich.html`, `write_delete_post_form.html`, `write_delete_post_success_response.html`, `write_delete_topic_form.html`, `write_delete_topic_success_response.html`, `write_deleted_topic_404.html`.
 
 | Field | Valeur | Description |
 |---|---|---|

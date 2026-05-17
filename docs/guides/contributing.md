@@ -284,6 +284,7 @@ core/parser/src/test/resources/fixtures/
 | `new_topic.html` | Page de création de topic | logué uniquement | Formulaire avec sous-catégories | `message.php?config=hfr.inc&cat=23&subcat=550&new=0` |
 | `write_reply_form_open_topic.html` | Formulaire reply Phase 2A | logué uniquement | Contrat `bddpost.php` réel | `message.php?...&post=35395&page=20&subcat=550` |
 | `write_quote_form_test_post.html` | Formulaire quote Phase 2A | logué uniquement | `numrep` + `[quotemsg=...]` prérempli | `message.php?...&numrep=2784595` |
+| `write_quote_form_bbcode_rich.html` | Formulaire quote BBCode riche Phase 2A | logué uniquement | Quote préremplie depuis un post contenant `b/i/u/strike/url/fixed/spoiler/img` | `message.php?...&numrep=2523833` |
 | `write_edit_form_test_post.html` | Formulaire edit Phase 2A | logué uniquement | `numreponse` + contrat `bdd.php` réel | `message.php?...&numreponse=2784595` |
 | `write_reply_anonymous_form.html` | Formulaire reply anonyme Phase 2A | non-logué | Composer legacy avec pseudo/password | `message.php?...&post=35395&page=20` |
 | `write_create_topic_anonymous_form.html` | Formulaire création anonyme Phase 2A | non-logué | Composer legacy avec pseudo/password | `message.php?...&cat=23&subcat=550` |
@@ -298,6 +299,8 @@ core/parser/src/test/resources/fixtures/
 | `write_created_owned_topic_page.html` | Topic temporaire owned Phase 2A | logué uniquement | Page topic après création + édition FP | topic temporaire `cat=10 post=148749` |
 | `write_edit_first_post_form.html` | Formulaire edit FP Phase 2A | logué uniquement | `sujet`, `subcat`, sondage, `delete=1` topic | `message.php?...&numreponse=2523829` |
 | `write_edit_first_post_success_response.html` | Réponse succès edit FP Phase 2A | logué uniquement | Message succès `bdd.php` | `POST bdd.php?config=hfr.inc` |
+| `write_edit_form_bbcode_rich.html` | Formulaire edit BBCode riche Phase 2A | logué uniquement | `content_form` conserve `b/i/u/strike/url/fixed/spoiler/img` | `message.php?...&numreponse=2523833` |
+| `write_quote_success_response.html` | Réponse succès quote Phase 2A | logué uniquement | Même succès `bddpost.php` que reply simple | `POST bddpost.php?config=hfr.inc` |
 | `write_delete_post_form.html` | Formulaire suppression post Phase 2A | logué uniquement | `delete=1` libellé `Effacer ce message` | `message.php?...&numreponse=2523830` |
 | `write_delete_post_success_response.html` | Réponse succès suppression post Phase 2A | logué uniquement | Message succès `bdd.php` | `POST bdd.php?config=hfr.inc` |
 | `write_delete_topic_form.html` | Formulaire suppression topic Phase 2A | logué uniquement | `delete=1` libellé `Effacer l'intégralité du sujet` | edit FP avant suppression |
@@ -325,7 +328,7 @@ core/parser/src/test/resources/fixtures/
 | `contact_list.html` | `contactlist.php` | Liste de contacts : ajout/suppression, statut en ligne, liens MP | idem |
 | `modo_history.html` | `modo/historique.php` | Historique des sanctions : modérateur, catégorie, date, raison | modérateur test |
 
-**Total : ~58 fixtures** (13 reprises testées de v1 + 36 nouvelles + 9 profil/paramètres).
+**Total : ~61 fixtures** (13 reprises testées de v1 + 39 nouvelles + 9 profil/paramètres).
 
 ### Fixtures REST JSON (Phase 1C-A)
 

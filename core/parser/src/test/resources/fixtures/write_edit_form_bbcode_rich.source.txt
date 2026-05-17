@@ -1,0 +1,6 @@
+Source: forum.hardware.fr
+Captured: 2026-05-17 with authenticated XaTelitte session
+URL: https://forum.hardware.fr/message.php?config=hfr.inc&cat=10&post=148750&numreponse=2523833&page=1&p=1&subcat=388&sondage=0&owntopic=0#formulaire
+Notes: GET edit form for the first post of a controlled temporary topic containing varied BBCode: bold, italic, underline, strike, url, fixed, spoiler, img.
+Sanitization: hash_check/codehex redacted; MP unread target id and MP count redacted when present; no cookies stored.
+Test context: Temporary owned topic cat=10 post=148750 subcat=388; first post numreponse=2523833. Topic deleted after capture.
