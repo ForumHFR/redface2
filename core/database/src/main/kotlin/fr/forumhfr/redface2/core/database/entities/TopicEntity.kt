@@ -24,4 +24,12 @@ data class TopicEntity(
      * v1 rows keep their richer auth-derived fields after the v1→v2 migration.
      */
     val authMode: FetchMode,
+    /**
+     * Sub-category id captured from the topic page HTML (Phase 2C, #145). Required by
+     * HFR's write endpoints (`message.php` / `bddpost.php`). Defaults to `-1` for rows
+     * persisted before the v3 → v4 migration; the value `-1` is a sentinel meaning
+     * "unknown, refresh required" and is **never** sent to HFR — write flows check
+     * `subcat >= 0` before posting.
+     */
+    val subcat: Int = -1,
 )

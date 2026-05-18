@@ -78,6 +78,18 @@ data class PostEditorRoute(
     val cat: Int,
     val topicId: Int? = null,
     val numreponse: Int? = null,
+    /**
+     * Page index of the topic the user is replying to. Required by HFR's
+     * `message.php` reply form URL (cf. `docs/specs/protocol-hfr.md` § POST `bddpost.php`)
+     * — Phase 2C captures the value from the active topic state.
+     */
+    val page: Int? = null,
+    /**
+     * Sub-category id of the topic. Required by HFR's reply contract; carried
+     * over from `Topic.subcat` parsed from the loaded topic page. Phase 2C-A
+     * refuses to open the editor when this is null.
+     */
+    val subcat: Int? = null,
 ) : RedfaceNavKey
 
 @Serializable
@@ -275,12 +287,14 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                         page = route.page,
                         scrollTo = route.scrollTo,
                     ),
-                    onReply = { topicId ->
+                    onReply = { subcat, page ->
                         backStack.add(
                             PostEditorRoute(
                                 mode = PostEditorMode.Reply,
                                 cat = route.cat,
-                                topicId = topicId,
+                                topicId = route.post,
+                                page = page,
+                                subcat = subcat,
                             ),
                         )
                     },
@@ -304,7 +318,25 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                         cat = route.cat,
                         topicId = route.topicId,
                         numreponse = route.numreponse,
+                        page = route.page,
+                        subcat = route.subcat,
                     ),
+                    onSubmitSucceeded = { targetPage ->
+                        // Pop the editor and refresh the topic page. Phase 2C-A always
+                        // pops back to the topic; targetPage informs which page to
+                        // reload — null falls back to the page we replied from.
+                        backStack.removeAt(backStack.lastIndex)
+                        val topicEntry = backStack.lastOrNull() as? TopicRoute
+                        if (topicEntry != null) {
+                            backStack.removeAt(backStack.lastIndex)
+                            backStack.add(
+                                topicEntry.copy(
+                                    page = targetPage ?: topicEntry.page,
+                                    scrollTo = null,
+                                ),
+                            )
+                        }
+                    },
                 )
             }
             entry<TopicFormRoute> { route ->

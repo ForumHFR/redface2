@@ -3,31 +3,52 @@ package fr.forumhfr.redface2.feature.editor
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.model.write.ReplyContext
+import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.model.write.ReplyForm
+import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
+import java.io.IOException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 /**
- * ViewModel backing the Phase 2B-A post-level editor. Owns the BBCode draft
- * (`TextFieldValue` so the selection survives rotations), the parsed preview AST
- * and the preview-visibility toggle.
+ * ViewModel backing the post-level editor. Owns the BBCode draft, the parsed
+ * preview AST, the preview-visibility toggle, and the Phase 2C (#145) reply
+ * submission lifecycle :
  *
- * No network effect, no draft persistence — those land in Phase 2C-D (#145, #146,
- * #147). The ViewModel keeps the draft alive across recompositions / rotations by
- * holding it in [_state]; process-death persistence is intentionally out of scope.
+ * 1. On init, when the request is a reply with a known `(page, subcat, topicId)`,
+ *    fetches the HFR reply form (`message.php`) to grab the per-session
+ *    `hash_check` and the hidden contract fields.
+ * 2. On [PostEditorIntent.SubmitClicked], POSTs `bddpost.php` via the repository
+ *    and emits a one-shot [PostEditorEffect.SubmitSucceeded] on success.
+ *
+ * Anti-double-submit is enforced via [PostEditorState.isSubmitting] + a single
+ * [submitJob] reference that ignores re-entry while in flight. Errors classified
+ * by the repository are surfaced via [SubmitError]; the draft is preserved.
  */
 @HiltViewModel(assistedFactory = PostEditorViewModel.Factory::class)
 class PostEditorViewModel @AssistedInject constructor(
     @Assisted private val request: PostEditorRequest,
     private val previewParser: BbcodePreviewParser,
+    private val replyRepository: ReplyRepository,
 ) : ViewModel() {
 
     private val _state: MutableStateFlow<PostEditorState> = MutableStateFlow(
@@ -36,15 +57,36 @@ class PostEditorViewModel @AssistedInject constructor(
             cat = request.cat,
             topicId = request.topicId,
             numreponse = request.numreponse,
+            page = request.page,
+            subcat = request.subcat,
         ),
     )
     val state: StateFlow<PostEditorState> = _state.asStateFlow()
+
+    private val _effects: Channel<PostEditorEffect> = Channel(capacity = Channel.BUFFERED)
+    val effects: Flow<PostEditorEffect> = _effects.receiveAsFlow()
+
+    /**
+     * Cached form pulled lazily on [PostEditorMode.Reply]. Keeping it on the
+     * ViewModel rather than the [PostEditorState] avoids leaking `hash_check`
+     * through Compose snapshot tooling / state restoration.
+     */
+    private var loadedForm: ReplyForm? = null
+    private var submitJob: Job? = null
+
+    init {
+        if (request.mode == PostEditorMode.Reply) {
+            loadReplyFormIfPossible()
+        }
+    }
 
     fun submit(intent: PostEditorIntent) {
         when (intent) {
             is PostEditorIntent.ContentChanged -> onContentChanged(intent.value)
             is PostEditorIntent.ToolbarActionClicked -> onToolbarActionClicked(intent.action)
             PostEditorIntent.TogglePreview -> onTogglePreview()
+            PostEditorIntent.SubmitClicked -> onSubmitClicked()
+            PostEditorIntent.ErrorDismissed -> _state.update { it.copy(submitError = null) }
         }
     }
 
@@ -90,6 +132,121 @@ class PostEditorViewModel @AssistedInject constructor(
                 preview = if (nextVisible) previewParser.parsePreview(current.draft.text) else current.preview,
             )
         }
+    }
+
+    private fun loadReplyFormIfPossible() {
+        val context = buildReplyContext() ?: run {
+            _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
+            return
+        }
+        _state.update { it.copy(isLoadingForm = true, submitError = null) }
+        viewModelScope.launch {
+            val outcome = runCatching { replyRepository.fetchReplyForm(context) }
+            outcome.fold(
+                onSuccess = { form ->
+                    loadedForm = form
+                    _state.update { current ->
+                        current.copy(
+                            isLoadingForm = false,
+                            submitError = if (form.isAnonymous) {
+                                SubmitError.Hfr(ReplyFailureReason.LoginRequired)
+                            } else {
+                                current.submitError
+                            },
+                        )
+                    }
+                },
+                onFailure = { error -> handleFetchFailure(error) },
+            )
+        }
+    }
+
+    private fun handleFetchFailure(error: Throwable) {
+        if (error is CancellationException) throw error
+        val mapped = when (error) {
+            is SessionExpiredException -> SubmitError.SessionExpired
+            is IOException -> SubmitError.Network
+            else -> throw error
+        }
+        _state.update { it.copy(isLoadingForm = false, submitError = mapped) }
+    }
+
+    @Suppress("ReturnCount") // guard clauses are the natural shape of the dispatcher
+    private fun onSubmitClicked() {
+        val snapshot = _state.value
+        if (!snapshot.canSubmit) return
+        val context = buildReplyContext() ?: run {
+            _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
+            return
+        }
+        val form = loadedForm ?: run {
+            // Form not loaded yet — fetch it then bail out; user re-clicks once ready.
+            loadReplyFormIfPossible()
+            return
+        }
+        if (form.isAnonymous) {
+            _state.update { it.copy(submitError = SubmitError.Hfr(ReplyFailureReason.LoginRequired)) }
+            return
+        }
+        if (submitJob?.isActive == true) return
+
+        _state.update { it.copy(isSubmitting = true, submitError = null) }
+        submitJob = viewModelScope.launch {
+            val outcome = runCatching {
+                replyRepository.submitReply(
+                    context = context,
+                    form = form,
+                    bbcodeContent = snapshot.draft.text,
+                )
+            }
+            outcome.fold(
+                onSuccess = ::handleSubmitOutcome,
+                onFailure = ::handleSubmitFailure,
+            )
+        }
+    }
+
+    private fun handleSubmitOutcome(result: ReplySubmitResult) {
+        when (result) {
+            is ReplySubmitResult.Success -> {
+                _effects.trySend(PostEditorEffect.SubmitSucceeded(targetPage = result.targetPage))
+                _state.update { it.copy(isSubmitting = false, submitError = null) }
+            }
+            is ReplySubmitResult.Failure -> {
+                // InvalidHashCheck typically means the cached form has expired ;
+                // refetch silently and let the user re-submit.
+                if (result.reason == ReplyFailureReason.InvalidHashCheck) {
+                    loadedForm = null
+                    loadReplyFormIfPossible()
+                }
+                _state.update {
+                    it.copy(isSubmitting = false, submitError = SubmitError.Hfr(result.reason))
+                }
+            }
+        }
+    }
+
+    private fun handleSubmitFailure(error: Throwable) {
+        if (error is CancellationException) {
+            _state.update { it.copy(isSubmitting = false) }
+            throw error
+        }
+        val mapped = when (error) {
+            is SessionExpiredException -> SubmitError.SessionExpired
+            is IOException -> SubmitError.Network
+            else -> throw error
+        }
+        _state.update { it.copy(isSubmitting = false, submitError = mapped) }
+    }
+
+    @Suppress("ReturnCount") // Each guard returns null with a distinct reason
+    private fun buildReplyContext(): ReplyContext? {
+        val snapshot = state.value
+        val page = snapshot.page ?: return null
+        val subcat = snapshot.subcat ?: return null
+        val topicId = snapshot.topicId ?: return null
+        if (subcat < 0) return null
+        return ReplyContext(cat = snapshot.cat, subcat = subcat, topicId = topicId, page = page)
     }
 
     @AssistedFactory

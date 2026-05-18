@@ -8,6 +8,19 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
+### Added
+- Phase 2C — Reply MVP (#145) : première mutation HFR réelle livrée. `PostEditorViewModel` reçoit `ReplyRepository` (interface `:core:domain/write/`, impl `DefaultReplyRepository` dans `:core:data/write/`). En mode Reply, le ViewModel fetch `message.php` au démarrage pour obtenir `hash_check`, puis sur `SubmitClicked` POSTe `bddpost.php?config=hfr.inc` avec le formulaire HFR complet (`verifrequet=1100`, `content_form`, `cat`, `subcat`, `post`, `page`, etc.).
+- `:core:parser/write/ReplyFormParser` extrait les hidden fields HFR (sans `password`, sans `pseudo` anonyme) ; `ReplySubmitResponseParser` classifie les 5 retours observés (succès, `empty_message`, `invalid_token`, `antiflood`, `locked_topic`).
+- `:core:network/HfrClient` ajoute `getReplyForm()` (GET `message.php`) et `submitReply()` (POST `bddpost.php`). Cookies réutilisés via l'`AuthenticatedClient` existant ; `hash_check` jamais loggué.
+- Navigation : `PostEditorRoute` reçoit maintenant `page` et `subcat` ; `TopicScreen.onReply` capture ces deux valeurs depuis le topic chargé. `PostEditorScreen` expose `onSubmitSucceeded(targetPage)` qui pop l'éditeur et recharge la page topic cible (la nav `NavBackStack` remplace l'entrée `TopicRoute` par `topicEntry.copy(page = targetPage ?: topicEntry.page)`).
+- Anti-double-submit : `submitJob.isActive` bloque les clics répétés pendant le POST.
+- `Topic.subcat: Int` + `TopicEntity.subcat: Int` (sentinel `-1` = `SUBCAT_UNKNOWN`) parsés depuis `input[name=subcat]` du HTML topic. Migration Room v3 → v4 (`ALTER TABLE topic_pages ADD COLUMN subcat INTEGER NOT NULL DEFAULT -1`). Le bouton « Répondre » est désactivé si `topic.hasSubcat == false` (cache pré-v4) — la valeur `-1` n'est jamais transmise à HFR.
+
+### Changed
+- `docs/specs/mvi.md` § Editor : actualisé pour le state submit + effets one-shot.
+- `docs/specs/navigation.md` : `PostEditorRoute` étendu, callbacks de TopicScreen et signature `PostEditorScreen` mis à jour.
+- `docs/specs/roadmap.md` : Phase 2 Reply MVP cochée.
+
 ---
 
 ## v0.9.0 — 2026-05-18

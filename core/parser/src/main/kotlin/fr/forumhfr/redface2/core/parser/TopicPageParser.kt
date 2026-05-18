@@ -23,6 +23,7 @@ class TopicPageParser(
         return Topic(
             cat = requireInputValue(document, HfrSelectors.CATEGORY_ID_INPUT),
             post = requireInputValue(document, HfrSelectors.TOPIC_ID_INPUT),
+            subcat = requireInputValue(document, HfrSelectors.SUBCATEGORY_ID_INPUT),
             title = document.selectFirst(HfrSelectors.TOPIC_TITLE)?.text()?.trim()
                 ?: error("Topic title not found"),
             posts = posts,

@@ -56,7 +56,14 @@ import kotlinx.coroutines.flow.first
 @Composable
 fun TopicScreen(
     request: TopicRequest,
-    onReply: (Int) -> Unit,
+    /**
+     * Open the reply editor for this topic. The lambda receives the topic's
+     * sub-category id (parsed from the loaded page) and the current page number ;
+     * cat and topicId are derived from [request]. Phase 2C-A only invokes this
+     * callback when the topic carries a valid `subcat` (otherwise the reply button
+     * stays disabled to avoid passing a sentinel value to the HFR write contract).
+     */
+    onReply: (subcat: Int, page: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
 ) {
     val viewModel = hiltViewModel<TopicViewModel, TopicViewModel.Factory>(
@@ -97,7 +104,7 @@ fun TopicScreen(
         state = state,
         listState = lazyListState,
         onIntent = viewModel::send,
-        onReply = { onReply(request.post) },
+        onReply = onReply,
         onOpenPage = onOpenPage,
     )
 }
@@ -107,7 +114,7 @@ internal fun TopicContent(
     state: TopicUiState,
     listState: LazyListState,
     onIntent: (TopicIntent) -> Unit,
-    onReply: () -> Unit,
+    onReply: (subcat: Int, page: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
 ) {
     Surface(
@@ -167,7 +174,7 @@ internal fun TopicContent(
 private fun TopicLoadedContent(
     state: TopicUiState,
     topic: Topic,
-    onReply: () -> Unit,
+    onReply: (subcat: Int, page: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
     listState: LazyListState,
 ) {
@@ -205,7 +212,7 @@ private fun TopicLoadedContent(
 private fun TopicHeaderCard(
     topic: Topic,
     state: TopicUiState,
-    onReply: () -> Unit,
+    onReply: (subcat: Int, page: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
 ) {
     Card {
@@ -247,7 +254,13 @@ private fun TopicHeaderCard(
             topic.poll?.let { poll ->
                 TopicPollCard(poll)
             }
-            Button(onClick = onReply) {
+            Button(
+                onClick = { onReply(topic.subcat, topic.page) },
+                // Topic pages cached before Phase 2C have `subcat = SUBCAT_UNKNOWN`. We
+                // refuse to open the editor in that state — the next live refresh of
+                // the topic will populate a real subcat and the button comes back.
+                enabled = topic.hasSubcat,
+            ) {
                 Text(text = stringResource(R.string.topic_reply))
             }
         }

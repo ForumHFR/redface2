@@ -9,6 +9,7 @@ import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 import okhttp3.Call
+import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -83,6 +84,60 @@ class HfrClient @Inject constructor(
             .build()
 
         val request = Request.Builder().url(url).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
+     * Phase 2C (#145) — GET the HFR reply form for a `(cat, subcat, post, page)`
+     * tuple. The returned HTML carries the per-session `hash_check` plus all the
+     * hidden inputs the subsequent POST must echo back. The URL shape mirrors what
+     * HFR's web UI hits when a logged-in user clicks « Répondre » (cf.
+     * `docs/specs/protocol-hfr.md` § POST `bddpost.php` and the Phase 2A fixture
+     * `write_reply_form_open_topic.html`).
+     *
+     * Always uses the authenticated client : a session-expired GET surfaces
+     * [SessionExpiredException] via [executeAuthenticatedHtml] rather than
+     * silently returning the anonymous composer.
+     */
+    suspend fun getReplyForm(
+        cat: Int,
+        subcat: Int,
+        post: Int,
+        page: Int,
+    ): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("message.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", cat.toString())
+            .addQueryParameter("post", post.toString())
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("p", "1")
+            .addQueryParameter("subcat", subcat.toString())
+            .addQueryParameter("sondage", "0")
+            .addQueryParameter("owntopic", "0")
+            .addQueryParameter("new", "0")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
+     * Phase 2C (#145) — POST the reply payload to `bddpost.php`. The [formBody]
+     * is built by the repository from the parsed [ReplyForm] (hidden fields +
+     * `hash_check` + the user's BBCode `content_form`). HFR never returns a
+     * proper HTTP error code on failure: success and the four documented error
+     * variants (`empty`, `invalid_token`, `antiflood`, `locked`) all come back as
+     * HTTP 200 with distinct body text — see `ReplySubmitResponseParser` for the
+     * classification.
+     *
+     * `hash_check` is **never** logged, including on transport errors.
+     */
+    suspend fun submitReply(formBody: FormBody): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("bddpost.php")
+            .addQueryParameter("config", "hfr.inc")
+            .build()
+        val request = Request.Builder().url(url).post(formBody).build()
         return authenticated.newCall(request).executeAuthenticatedHtml()
     }
 
