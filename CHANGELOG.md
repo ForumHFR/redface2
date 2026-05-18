@@ -10,7 +10,16 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
-## v0.10.0 — 2026-05-18
+## v0.10.1 — 2026-05-18
+
+App patch 0.3.1 (build v41) — instrumente le flow reply via le canal
+`DiagnosticsLog` existant pour permettre aux testeurs alpha de remonter
+les détails d'un échec du GET form ou d'un POST classifié `Unknown`.
+
+### Added
+- `DefaultReplyRepository` enregistre chaque GET `message.php` (cat / subcat / post / page), le résultat du parsing (`hiddenFields.size`, `isAnonymous`, `sujet`), chaque POST `bddpost.php` (incl. `bbcode.length`), et le verdict du parser réponse. Sur échec parser ou retour `Unknown`, dump un extrait HTML de 600 caractères avec `hash_check=…` masqué, plus la liste des `<form action="…">` détectés — utile pour diagnostiquer un changement de structure HFR sans capturer la session.
+- Visible dans l'écran Diagnostics (Messages → Outils alpha → Diagnostics).
+- `hash_check` toujours redacté (regex `hash_check[=:][^"&\s]+` → `<REDACTED>`).
 
 Premier flux de mutation HFR réelle livré : depuis un topic, l'utilisateur peut composer un BBCode et le poster via `bddpost.php`, avec gestion typée des 5 erreurs HFR observées et anti-double-submit. App bump à `0.3.0` (semver MINOR pour la première mutation HFR). 2 rounds de reviews croisées (4 flavors × 2 = 8 rapports) ont validé l'absence de blocker critique et corrigé 2 bugs latents avant tag : (1) le filtre `password` du `ReplyFormParser` était documenté mais inopérant car `<input type="password">` n'est pas hidden — corrigé en itérant sur `input[name]` avec deny rules explicites ; (2) `Topic.hasSubcat` acceptait `subcat = 0` (wire shape moderator-space HFR `cat=0` family) sans fixture utilisateur qui prouve la validité — durci à `subcat > 0`. Migration Room v3 → v4 ajoute `subcat` à `topic_pages` avec sentinel `-1`.
 

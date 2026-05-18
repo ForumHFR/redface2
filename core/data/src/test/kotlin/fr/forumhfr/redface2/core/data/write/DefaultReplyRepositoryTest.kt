@@ -38,6 +38,7 @@ class DefaultReplyRepositoryTest {
             hfrClient = client,
             replyFormParser = ReplyFormParser(),
             replySubmitResponseParser = ReplySubmitResponseParser(),
+            diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
         )
     }
 
