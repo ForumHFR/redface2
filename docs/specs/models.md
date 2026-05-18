@@ -68,6 +68,7 @@ classDiagram
         +Boolean isOwnPost
         +List~String~ quotedAuthors
         +Int? postIndex
+        +Int? quoteRef
     }
 
     class PostContent {
@@ -249,6 +250,7 @@ data class Post(
     val isOwnPost: Boolean,              // calculé client-side : post.author == currentUser
     val quotedAuthors: List<String>,     // dérivé de PostContent pour recherche, filtres et décorateurs
     val postIndex: Int?,                 // (page-1) * postsPerPage + position — null quand le parser n'a pas le contexte page/postsPerPage (preview, fixtures isolées). postsPerPage vient des préférences HFR de l'utilisateur, PAS une constante (voir UserSettings)
+    val quoteRef: Int? = null,           // Phase 2C (#146) : `ref` opaque parsé depuis le href du lien quote HFR (`message.php?…&numrep=…&ref=N`). Null = post sans lien quote (locked, anonyme). **Non persisté** Room — recalculé à chaque parse, donc une restauration de process via back stack tue le bouton « Citer » jusqu'au prochain refresh.
 )
 
 data class PostContent(

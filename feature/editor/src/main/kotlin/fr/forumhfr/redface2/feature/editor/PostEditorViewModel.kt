@@ -173,17 +173,18 @@ class PostEditorViewModel @AssistedInject constructor(
                         } else {
                             current.draft
                         }
+                        // If the user had toggled the preview on before the form
+                        // landed (rare), we deliberately leave the preview AST
+                        // stale rather than parsing on whichever dispatcher
+                        // `viewModelScope.launch {}` resolved to (default
+                        // `Dispatchers.Main.immediate`). The next `ContentChanged`
+                        // or `TogglePreview` intent will refresh it via the
+                        // existing pipeline — see #146 review round 1 note re.
+                        // « preview parse non-IO » follow-up for Phase 2D.
                         current.copy(
                             isLoadingForm = false,
                             draft = nextDraft,
                             draftHydratedFromForm = current.draftHydratedFromForm || shouldHydrate,
-                            // Keep the preview AST consistent if the user was already showing
-                            // it before the prefill arrived (rare, but free to handle).
-                            preview = if (shouldHydrate && current.isPreviewVisible) {
-                                previewParser.parsePreview(nextDraft.text)
-                            } else {
-                                current.preview
-                            },
                             submitError = if (form.isAnonymous) {
                                 SubmitError.Hfr(ReplyFailureReason.LoginRequired)
                             } else {

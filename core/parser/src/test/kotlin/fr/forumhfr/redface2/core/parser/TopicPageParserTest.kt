@@ -211,6 +211,42 @@ class TopicPageParserTest {
     }
 
     @Test
+    fun `quoteRef ignores a numrep link whose params only carry foreign ref suffixes`() {
+        // Belt-and-braces regression : if HFR ever adds an unrelated `…&myref=…`
+        // or `…&referrer=…` to the toolbar (or a tracking attribute), our quote
+        // detector must NOT treat it as a quote link. Round 1 review finding —
+        // the previous `.contains("ref=")` matched any substring.
+        val html = """
+            <html><body>
+              <input name="cat" value="13" />
+              <input name="post" value="84540" />
+              <input name="subcat" value="432" />
+              <table><tbody>
+                <tr class="fondForum2Title">
+                  <th class="messCase1">Auteur</th>
+                  <th><h3>Foreign suffix sanity</h3></th>
+                </tr>
+              </tbody></table>
+              <table class="messagetable"><tbody>
+                <tr class="message">
+                  <td class="messCase1"><a name="t12345"></a><b class="s2">UserA</b></td>
+                  <td class="messCase2">
+                    <div class="toolbar"><div class="left">Posté le 18-05-2026&nbsp;à&nbsp;10:00:00</div></div>
+                    <a href="/foo.php?numrep=12345&amp;myref=99&amp;referrer=bar">spurious</a>
+                    <div id="para12345"><p>content</p></div>
+                  </td>
+                </tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        assertNull(
+            "Foreign &myref / &referrer suffixes must not be picked up as quote ref",
+            topic.posts.single().quoteRef,
+        )
+    }
+
+    @Test
     fun `quoteRef is null for a post that has no quote link in the source HTML`() {
         // Synthesised minimal page : one post table without any `a[href*=numrep=]`
         // entry. Mirrors HFR's locked-topic special pages where the toolbar drops

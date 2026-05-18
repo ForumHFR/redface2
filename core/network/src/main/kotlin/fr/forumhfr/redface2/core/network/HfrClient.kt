@@ -109,10 +109,11 @@ class HfrClient @Inject constructor(
      * post id and `ref` is HFR's per-page positional id (server-controlled). The
      * caller must pass them through unchanged from the topic page HTML. Either
      * may be null for a simple reply ; both null = reply, both non-null = quote.
-     * Mixed shape (one null, one set) is technically accepted by HFR but the
-     * call sites in `DefaultReplyRepository` keep them aligned and we document
-     * that contract upstream rather than asserting here, to leave room for an
-     * eventual HFR change that drops `ref`.
+     * The mixed shape (one null, one set) is **not validated** — behaviour was
+     * never captured and we leave the API surface tolerant in case a future HFR
+     * change drops `ref` from the quote contract. Call sites in
+     * `DefaultReplyRepository` always feed the two fields together from a
+     * `ReplyContext`, so this looseness is contained to the network layer.
      *
      * Always uses the authenticated client : a session-expired GET surfaces
      * [SessionExpiredException] via [executeAuthenticatedHtml] rather than

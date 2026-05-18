@@ -110,13 +110,16 @@ class TopicPageParser(
         // class `Topic` (for the first post of the page). We anchor on `numrep`
         // because that is the distinguishing parameter — if it is missing, the
         // link is not a quote.
+        //
+        // Both filters re-use `QUOTE_REF_REGEX` (`[?&]ref=…`) so a future HFR
+        // href that happens to embed `…&myref=…` or `…&referrer=…` does not
+        // pretend to be a quote link. `&amp;` is normalised by Jsoup to `&` in
+        // the parsed attribute value.
         val quoteLink = postTable
             .select("a[href*=numrep=]")
-            .firstOrNull { it.attr("href").contains("ref=") }
+            .firstOrNull { QUOTE_REF_REGEX.containsMatchIn(it.attr("href")) }
             ?: return null
         val href = quoteLink.attr("href")
-        // `&amp;ref=N` is normalised by Jsoup to `&ref=N` in the parsed attribute
-        // value, so we can match the raw form here.
         return QUOTE_REF_REGEX.find(href)?.groupValues?.getOrNull(1)?.toIntOrNull()
     }
 

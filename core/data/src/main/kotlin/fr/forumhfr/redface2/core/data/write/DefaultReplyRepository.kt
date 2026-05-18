@@ -254,7 +254,15 @@ class DefaultReplyRepository @Inject constructor(
         form.hiddenFields.forEach { (key, value) ->
             if (key in emitted) return@forEach
             // Belt-and-braces : even though `ReplyFormParser` already filters
-            // `password` and anonymous `pseudo`, never relay them here.
+            // `password` and anonymous `pseudo`, never relay `password` here.
+            // We deliberately do NOT also filter `pseudo` : on an authenticated
+            // form HFR carries the user's pseudo in the hidden fields and
+            // expects us to echo it back on POST (mirrors HFR's own composer).
+            // On an anonymous form `pseudo` is already absent from
+            // `form.hiddenFields` (parser-side filter) AND `submitReply` short-
+            // circuits via `guardAgainstInvalidSubmission` before reaching this
+            // builder, so we never have to defend twice against the anonymous
+            // shape here.
             if (key == "password") return@forEach
             builder.add(key, value)
             emitted += key
