@@ -8,7 +8,11 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-Phase 2C boucle complète : quote MVP (#146) en plus du reply (#145). Bouton « Citer » sur chaque post, GET du formulaire HFR avec `numrep` + `ref`, hydratation du draft depuis le `[quotemsg=…]` prérempli sans écraser une saisie en cours, POST sur le même `bddpost.php` que le reply. Aucun `QuoteRepository` ajouté — c'est une variante de `ReplyRepository`.
+---
+
+## v0.10.4 — 2026-05-18
+
+App patch 0.3.4 (build v44) — Phase 2C boucle complète : quote MVP (#146) en plus du reply (#145). Bouton « Citer » sur chaque post, GET du formulaire HFR avec `numrep` + `ref`, hydratation du draft depuis le `[quotemsg=…]` prérempli sans écraser une saisie en cours, POST sur le même `bddpost.php` que le reply. Aucun `QuoteRepository` ajouté — c'est une variante de `ReplyRepository`.
 
 ### Added
 - `ReplyContext` étendu avec `quotedNumreponse: Int?` + `quoteRef: Int?` (opaque, parsé depuis le href HFR jamais reconstruit côté app), helper `isQuote`.
