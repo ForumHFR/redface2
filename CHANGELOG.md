@@ -35,6 +35,22 @@ puis logue à nouveau le mapping `SubmitError` côté ViewModel.
 - `DefaultReplyRepository` wrappe les appels `hfrClient.getReplyForm` et `hfrClient.submitReply` dans un try/catch qui enregistre un `WARN` `GET reply form FAILED: <ClassName>: <message>` (resp. `POST reply FAILED…`) avant de propager l'exception. `SessionExpiredException` est tracée séparément, `CancellationException` passe sans log.
 - `PostEditorViewModel.handleFetchFailure` / `handleSubmitFailure` enregistrent un `WARN` `PostEditorVM` indiquant l'exception reçue et le `SubmitError` dans lequel elle a été mappée (`Network` / `SessionExpired` / `Hfr(Unknown)`).
 
+---
+
+## v0.10.1 — 2026-05-18
+
+App patch 0.3.1 (build v41) — instrumente le flow Phase 2C reply via le canal `DiagnosticsLog` existant pour permettre aux testeurs alpha de remonter les détails d'un échec à un mainteneur sans capturer la session.
+
+### Added
+- `DefaultReplyRepository` injecte `DiagnosticsLog` et enregistre `INFO` sur chaque GET `message.php` (cat / subcat / post / page) et POST `bddpost.php`, `DEBUG` sur le parsing réussi du formulaire, `WARN` sur tout échec parser ou retour `Unknown`.
+- Sur échec parser, dump d'un extrait HTML (max 600 chars) avec `hash_check=…` masqué via regex, plus la liste des `<form action="…">` détectés — utile pour diagnostiquer un changement de structure HFR sans capturer la session.
+- Visible dans l'écran Diagnostics (Messages → Outils alpha → Diagnostics).
+- `hash_check` jamais sérialisé dans un message log natif Android.
+
+---
+
+## v0.10.0 — 2026-05-18
+
 Premier flux de mutation HFR réelle livré : depuis un topic, l'utilisateur peut composer un BBCode et le poster via `bddpost.php`, avec gestion typée des 5 erreurs HFR observées et anti-double-submit. App bump à `0.3.0` (semver MINOR pour la première mutation HFR). 2 rounds de reviews croisées (4 flavors × 2 = 8 rapports) ont validé l'absence de blocker critique et corrigé 2 bugs latents avant tag : (1) le filtre `password` du `ReplyFormParser` était documenté mais inopérant car `<input type="password">` n'est pas hidden — corrigé en itérant sur `input[name]` avec deny rules explicites ; (2) `Topic.hasSubcat` acceptait `subcat = 0` (wire shape moderator-space HFR `cat=0` family) sans fixture utilisateur qui prouve la validité — durci à `subcat > 0`. Migration Room v3 → v4 ajoute `subcat` à `topic_pages` avec sentinel `-1`.
 
 ### Added

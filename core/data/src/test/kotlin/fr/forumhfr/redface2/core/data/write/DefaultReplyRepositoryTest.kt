@@ -34,6 +34,7 @@ class DefaultReplyRepositoryTest {
             authenticated = okHttp,
             anonymous = okHttp,
             baseUrl = server.url("/"),
+            ioDispatcher = Dispatchers.Unconfined,
         )
         repository = DefaultReplyRepository(
             hfrClient = client,

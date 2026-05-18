@@ -268,7 +268,9 @@ class MigrationTest {
      * the sentinel default `-1`, that pre-existing rows are preserved and that the
      * new column is queryable as a real `INTEGER`. The sentinel value is the
      * "unknown, must be refreshed before any write flow" marker; write paths gate
-     * on `subcat >= 0` so the value is never transmitted to HFR.
+     * on `subcat > 0` (excluding both the sentinel and HFR's `cat=0` /
+     * `cat=prive` moderator-space wire shape) so the value is never transmitted
+     * to HFR.
      */
     @Test
     fun migrate_3_to_4_adds_subcat_with_sentinel_default_to_topic_pages() {

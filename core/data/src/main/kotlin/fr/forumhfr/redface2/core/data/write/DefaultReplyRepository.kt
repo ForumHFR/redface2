@@ -48,17 +48,54 @@ class DefaultReplyRepository @Inject constructor(
             "GET reply form cat=${context.cat} subcat=${context.subcat} " +
                 "post=${context.topicId} page=${context.page}",
         )
-        val html = try {
-            // OkHttp `.execute()` is blocking IO ; hop off the main thread or the
-            // ViewModel's `viewModelScope.launch {}` (Dispatchers.Main.immediate by
-            // default) throws NetworkOnMainThreadException. Mirrors what the other
-            // repositories already do (DefaultForumRepository, …).
+        // `HfrClient` already wraps its OkHttp call in `withContext(ioDispatcher)` (PR #162 round 3
+        // round-trip), but we keep `withContext` here so the Jsoup parse (CPU-bound, ~30 KB HTML)
+        // also runs off the main thread — aligned with `TopicRepositoryImpl.fetchAndPersist` which
+        // brackets `client.get* + parser.parse*` as a single IO block.
+        return try {
             withContext(ioDispatcher) {
-                hfrClient.getReplyForm(
+                val html = hfrClient.getReplyForm(
                     cat = context.cat,
                     subcat = context.subcat,
                     post = context.topicId,
                     page = context.page,
+                )
+                replyFormParser.parse(html).fold(
+                    onSuccess = { form ->
+                        diagnostics.record(
+                            DiagnosticsLog.Level.DEBUG,
+                            LOG_TAG,
+                            "reply form parsed: hiddenFields=${form.hiddenFields.size} " +
+                                "anonymous=${form.isAnonymous} sujet=\"${form.sujet}\"",
+                        )
+                        form
+                    },
+                    onFailure = { error ->
+                        // Alpha-only diagnostic snapshot: when the parser refuses the HTML
+                        // HFR returned, we dump a redacted excerpt to the in-app diagnostics
+                        // panel so a tester can copy/paste it back to a maintainer. The
+                        // excerpt is post-processed to mask `hash_check` in both KV and HTML
+                        // input forms (see `redactHashCheck`).
+                        diagnostics.record(
+                            DiagnosticsLog.Level.WARN,
+                            LOG_TAG,
+                            "reply form parse FAILED: ${error.message ?: error::class.simpleName}",
+                        )
+                        val redactedHead = redactHashCheckForDiagnostics(
+                            html.take(DIAG_HTML_HEAD),
+                        )
+                        diagnostics.record(
+                            DiagnosticsLog.Level.WARN,
+                            LOG_TAG,
+                            "html.length=${html.length}; head=$redactedHead",
+                        )
+                        diagnostics.record(
+                            DiagnosticsLog.Level.WARN,
+                            LOG_TAG,
+                            "form actions=${extractFormActions(html)}",
+                        )
+                        throw error
+                    },
                 )
             }
         } catch (cancel: CancellationException) {
@@ -82,41 +119,6 @@ class DefaultReplyRepository @Inject constructor(
             )
             throw error
         }
-        return replyFormParser.parse(html).fold(
-            onSuccess = { form ->
-                diagnostics.record(
-                    DiagnosticsLog.Level.DEBUG,
-                    LOG_TAG,
-                    "reply form parsed: hiddenFields=${form.hiddenFields.size} " +
-                        "anonymous=${form.isAnonymous} sujet=\"${form.sujet}\"",
-                )
-                form
-            },
-            onFailure = { error ->
-                // Alpha-only diagnostic snapshot: when the parser refuses the HTML
-                // HFR returned, we dump a redacted excerpt to the in-app diagnostics
-                // panel so a tester can copy/paste it back to a maintainer. The
-                // excerpt is post-processed to mask any `hash_check=...` value that
-                // might appear in the markup (even though the typical "form not
-                // found" case fires before we read one).
-                diagnostics.record(
-                    DiagnosticsLog.Level.WARN,
-                    LOG_TAG,
-                    "reply form parse FAILED: ${error.message ?: error::class.simpleName}",
-                )
-                diagnostics.record(
-                    DiagnosticsLog.Level.WARN,
-                    LOG_TAG,
-                    "html.length=${html.length}; head=${html.take(DIAG_HTML_HEAD).redactHashCheck()}",
-                )
-                diagnostics.record(
-                    DiagnosticsLog.Level.WARN,
-                    LOG_TAG,
-                    "form actions=${extractFormActions(html)}",
-                )
-                throw error
-            },
-        )
     }
 
     override suspend fun submitReply(
@@ -143,8 +145,37 @@ class DefaultReplyRepository @Inject constructor(
                 "post=${context.topicId} page=${context.page} bbcode.length=${bbcodeContent.length}",
         )
         val formBody = buildFormBody(context, form, bbcodeContent)
-        val responseHtml = try {
-            withContext(ioDispatcher) { hfrClient.submitReply(formBody) }
+        // Same rationale as `fetchReplyForm` : keep network + Jsoup parse in a single IO block.
+        return try {
+            withContext(ioDispatcher) {
+                val responseHtml = hfrClient.submitReply(formBody)
+                val outcome = replySubmitResponseParser.parse(responseHtml)
+                when (outcome) {
+                    is ReplySubmitResult.Success ->
+                        diagnostics.record(
+                            DiagnosticsLog.Level.INFO,
+                            LOG_TAG,
+                            "POST reply Success refreshUrl=${outcome.refreshUrl} " +
+                                "targetPage=${outcome.targetPage}",
+                        )
+                    is ReplySubmitResult.Failure -> {
+                        diagnostics.record(
+                            DiagnosticsLog.Level.WARN,
+                            LOG_TAG,
+                            "POST reply Failure reason=${outcome.reason::class.simpleName}",
+                        )
+                        if (outcome.reason == ReplyFailureReason.Unknown) {
+                            diagnostics.record(
+                                DiagnosticsLog.Level.WARN,
+                                LOG_TAG,
+                                "Unknown response head=" +
+                                    redactHashCheckForDiagnostics(responseHtml.take(DIAG_HTML_HEAD)),
+                            )
+                        }
+                    }
+                }
+                outcome
+            }
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (error: SessionExpiredException) {
@@ -162,31 +193,6 @@ class DefaultReplyRepository @Inject constructor(
             )
             throw error
         }
-        val outcome = replySubmitResponseParser.parse(responseHtml)
-        when (outcome) {
-            is ReplySubmitResult.Success ->
-                diagnostics.record(
-                    DiagnosticsLog.Level.INFO,
-                    LOG_TAG,
-                    "POST reply Success refreshUrl=${outcome.refreshUrl} targetPage=${outcome.targetPage}",
-                )
-            is ReplySubmitResult.Failure -> {
-                diagnostics.record(
-                    DiagnosticsLog.Level.WARN,
-                    LOG_TAG,
-                    "POST reply Failure reason=${outcome.reason::class.simpleName}",
-                )
-                if (outcome.reason == ReplyFailureReason.Unknown) {
-                    diagnostics.record(
-                        DiagnosticsLog.Level.WARN,
-                        LOG_TAG,
-                        "Unknown response head=" +
-                            responseHtml.take(DIAG_HTML_HEAD).redactHashCheck(),
-                    )
-                }
-            }
-        }
-        return outcome
     }
 
     private fun guardAgainstInvalidSubmission(
@@ -248,16 +254,13 @@ class DefaultReplyRepository @Inject constructor(
             .mapNotNull { it.groupValues.getOrNull(1) }
             .take(MAX_FORM_ACTIONS_DUMP)
             .toList()
-        return if (matches.isEmpty()) "(none)" else matches.joinToString(", ")
+        // Defense-in-depth : HFR's reply form action is the bare endpoint URL today, but if a
+        // future page ever inlined `hash_check` into the action URL (legacy HFR forms have been
+        // observed doing so on neighbouring endpoints), we'd leak it through this diagnostic
+        // line. Pipe the join result through the same redactor that already covers HTML input
+        // and KV / JS forms.
+        return if (matches.isEmpty()) "(none)" else redactHashCheckForDiagnostics(matches.joinToString(", "))
     }
-
-    /**
-     * Masks any `hash_check=<value>` substring with `hash_check=<REDACTED>`. Diagnostic
-     * snapshots are user-visible in the alpha diagnostics screen, so we strip the
-     * token even though the typical "form not found" branch fires before reaching it.
-     */
-    private fun String.redactHashCheck(): String =
-        HASH_CHECK_REGEX.replace(this) { "hash_check=<REDACTED>" }
 
     private companion object {
         private const val LOG_TAG = "ReplyRepository"
@@ -267,9 +270,54 @@ class DefaultReplyRepository @Inject constructor(
             """<form[^>]*action="([^"]+)"""",
             RegexOption.IGNORE_CASE,
         )
-        private val HASH_CHECK_REGEX: Regex = Regex(
-            """hash_check[=:][^"&\s]+""",
-            RegexOption.IGNORE_CASE,
-        )
     }
 }
+
+/**
+ * Strips every observed `hash_check` carrier from a diagnostic snapshot before it lands in
+ * `DiagnosticsLog`. Public-to-the-module so the unit test in `DefaultReplyRepositoryDiagnosticsTest`
+ * can pin the contract without going through the full repository plumbing. Patterns covered :
+ *
+ *  - query / KV : `hash_check=abc`, `hash_check:abc`, `&hash_check=abc`
+ *  - JS literal : `var hash_check = "abc";` (covered by the KV form once the literal opens)
+ *  - HTML input, attribute order `name` then `value`
+ *    (`<input ... name="hash_check" ... value="abc" ...>`)
+ *  - HTML input, attribute order `value` then `name`
+ *    (`<input ... value="abc" ... name="hash_check" ...>`)
+ *
+ * Never logs or returns the raw value ; failure to redact is the canonical regression to test.
+ */
+internal fun redactHashCheckForDiagnostics(input: String): String {
+    var output = HASH_CHECK_KV_REGEX.replace(input) { match ->
+        // `hash_check=abc` / `hash_check:abc` — preserve the separator the caller used.
+        val separator = match.value[match.value.indexOf("hash_check") + "hash_check".length]
+        "hash_check${separator}<REDACTED>"
+    }
+    output = HASH_CHECK_INPUT_NAME_FIRST_REGEX.replace(output) { match ->
+        match.value.replace(match.groupValues[1], "<REDACTED>")
+    }
+    output = HASH_CHECK_INPUT_VALUE_FIRST_REGEX.replace(output) { match ->
+        match.value.replace(match.groupValues[1], "<REDACTED>")
+    }
+    return output
+}
+
+private val HASH_CHECK_KV_REGEX: Regex = Regex(
+    """hash_check[=:][^"&\s<>]+""",
+    RegexOption.IGNORE_CASE,
+)
+
+// `<input ... name="hash_check" ... value="VALUE" ...>`. We allow arbitrary other attributes
+// between `name` and `value`. The inner `[^>]*?` stays non-greedy so we don't swallow a closing
+// `>` of another tag.
+private val HASH_CHECK_INPUT_NAME_FIRST_REGEX: Regex = Regex(
+    """<input\b[^>]*?\bname=["']hash_check["'][^>]*?\bvalue=["']([^"']*)["'][^>]*>""",
+    RegexOption.IGNORE_CASE,
+)
+
+// `<input ... value="VALUE" ... name="hash_check" ...>`. Symmetric form for templates that
+// emit `value` before `name`.
+private val HASH_CHECK_INPUT_VALUE_FIRST_REGEX: Regex = Regex(
+    """<input\b[^>]*?\bvalue=["']([^"']*)["'][^>]*?\bname=["']hash_check["'][^>]*>""",
+    RegexOption.IGNORE_CASE,
+)

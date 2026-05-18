@@ -164,7 +164,13 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun handleFetchFailure(error: Throwable) {
-        if (error is CancellationException) throw error
+        if (error is CancellationException) {
+            // Symmetry with `handleSubmitFailure` : reset the in-flight flag before the throw so
+            // a parent ViewModel that survives the cancellation (or any state observer reading
+            // the snapshot before death) does not see `isLoadingForm = true` forever.
+            _state.update { it.copy(isLoadingForm = false) }
+            throw error
+        }
         // Map known transport-level failures to a typed SubmitError ; classify the
         // rest as Unknown rather than letting the exception bubble up and crash the
         // process. The UI surfaces the same "unexpected response" message either way.

@@ -128,10 +128,13 @@ val MIGRATION_2_3: Migration = object : Migration(2, 3) {
  * `cat`, `post`, `page`.
  *
  * Existing v3 rows are backfilled to `-1`, a sentinel that means "unknown, must be
- * refreshed before any write flow". Write paths refuse to POST when `subcat < 0` —
- * the value is *never* transmitted to HFR. Setting the column NOT NULL via the
- * `-1` default keeps Room's schema verification happy without forcing a row rewrite
- * (topic pages are short-lived cache, the next live fetch replaces the sentinel).
+ * refreshed before any write flow". Write paths refuse to POST when `subcat <= 0` —
+ * the value is *never* transmitted to HFR. The strict `<= 0` (instead of `< 0`) also
+ * excludes the `cat=0` / `cat=prive` moderator-space wire shape (HFR emits
+ * `subcat=0` there) for which Phase 2C has no validated fixture. Setting the column
+ * NOT NULL via the `-1` default keeps Room's schema verification happy without
+ * forcing a row rewrite (topic pages are short-lived cache, the next live fetch
+ * replaces the sentinel).
  */
 val MIGRATION_3_4: Migration = object : Migration(3, 4) {
     override fun migrate(db: SupportSQLiteDatabase) {

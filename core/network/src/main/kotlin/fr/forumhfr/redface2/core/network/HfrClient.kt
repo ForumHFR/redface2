@@ -2,12 +2,15 @@ package fr.forumhfr.redface2.core.network
 
 import androidx.tracing.trace
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.FormBody
 import okhttp3.HttpUrl
@@ -20,6 +23,7 @@ class HfrClient @Inject constructor(
     @param:AuthenticatedClient private val authenticated: OkHttpClient,
     @param:AnonymousClient private val anonymous: OkHttpClient,
     @param:HfrBaseUrl private val baseUrl: HttpUrl,
+    @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
     suspend fun getTopicPage(
         cat: Int,
@@ -49,13 +53,18 @@ class HfrClient @Inject constructor(
             // pull from the response body. Splitting them lets a profiler tell a slow handshake
             // apart from a slow body download. The auth branch above wires the same prefix into
             // `executeAuthenticatedHtml`.
-            trace("$TOPIC_TRACE_PREFIX.network") {
-                anonymous.newCall(request).execute()
-            }.use { response ->
-                if (!response.isSuccessful) {
-                    throw IOException("HFR returned ${response.code} for $url")
+            // `withContext(ioDispatcher)` ensures we never call OkHttp `.execute()` on the main
+            // thread, regardless of the caller's coroutine context (cf. PR #162 v43 — repository
+            // layer forgot the hop and triggered `NetworkOnMainThreadException`).
+            withContext(ioDispatcher) {
+                trace("$TOPIC_TRACE_PREFIX.network") {
+                    anonymous.newCall(request).execute()
+                }.use { response ->
+                    if (!response.isSuccessful) {
+                        throw IOException("HFR returned ${response.code} for $url")
+                    }
+                    trace("$TOPIC_TRACE_PREFIX.body_read") { response.body.string() }
                 }
-                trace("$TOPIC_TRACE_PREFIX.body_read") { response.body.string() }
             }
         }
     }
@@ -147,32 +156,39 @@ class HfrClient @Inject constructor(
      * inline. When [tracePrefix] is non-null, the OkHttp call up to headers is wrapped in
      * `<prefix>.network` and the body pull in `<prefix>.body_read` (cf. `docs/guides/profiling.md`).
      * Callers that don't belong to the topic parcours pass `null` to stay out of `rf2.topic.*`.
+     *
+     * Wraps the blocking OkHttp `.execute()` in `withContext(ioDispatcher)` so callers can safely
+     * invoke `HfrClient.*` from any coroutine context, including `viewModelScope.launch {}`'s
+     * default `Dispatchers.Main.immediate`. Repositories may keep their own `withContext` for
+     * defense in depth (notably to cover CPU-bound parsers in the same IO block), but they are
+     * not required to do so to avoid `NetworkOnMainThreadException`.
      */
-    private fun Call.executeAuthenticatedHtml(tracePrefix: String? = null): String {
-        val response: Response = if (tracePrefix != null) {
-            trace("$tracePrefix.network") { execute() }
-        } else {
-            execute()
-        }
-        return response.use {
-            if (!response.isSuccessful) {
-                throw IOException("HFR returned ${response.code} for ${response.request.url}")
-            }
-            val html = if (tracePrefix != null) {
-                // Session-expiry detection (login redirect / login form sniff) runs after the body
-                // is in memory, so its cost is negligible relative to body_read; not worth a third
-                // section.
-                trace("$tracePrefix.body_read") { response.body.string() }
+    private suspend fun Call.executeAuthenticatedHtml(tracePrefix: String? = null): String =
+        withContext(ioDispatcher) {
+            val response: Response = if (tracePrefix != null) {
+                trace("$tracePrefix.network") { execute() }
             } else {
-                response.body.string()
+                execute()
             }
-            val finalUrl = response.request.url
-            if (finalUrl.isLoginUrl() || html.looksLikeLoginPage()) {
-                throw SessionExpiredException(finalUrl.toString())
+            response.use {
+                if (!response.isSuccessful) {
+                    throw IOException("HFR returned ${response.code} for ${response.request.url}")
+                }
+                val html = if (tracePrefix != null) {
+                    // Session-expiry detection (login redirect / login form sniff) runs after the
+                    // body is in memory, so its cost is negligible relative to body_read; not
+                    // worth a third section.
+                    trace("$tracePrefix.body_read") { response.body.string() }
+                } else {
+                    response.body.string()
+                }
+                val finalUrl = response.request.url
+                if (finalUrl.isLoginUrl() || html.looksLikeLoginPage()) {
+                    throw SessionExpiredException(finalUrl.toString())
+                }
+                html
             }
-            html
         }
-    }
 
     private companion object {
         // Prefix consumed by `docs/guides/profiling.md` — keep in lockstep with the catalogue.
