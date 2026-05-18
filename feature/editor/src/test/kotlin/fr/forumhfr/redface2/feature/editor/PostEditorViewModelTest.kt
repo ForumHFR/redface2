@@ -310,6 +310,7 @@ class PostEditorViewModelTest {
             ),
             previewParser = previewParser,
             replyRepository = replyRepository,
+            diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
         )
 
     private fun authenticatedForm(): ReplyForm = ReplyForm(

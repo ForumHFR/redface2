@@ -9,6 +9,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.model.write.ReplyContext
@@ -49,6 +50,7 @@ class PostEditorViewModel @AssistedInject constructor(
     @Assisted private val request: PostEditorRequest,
     private val previewParser: BbcodePreviewParser,
     private val replyRepository: ReplyRepository,
+    private val diagnostics: DiagnosticsLog,
 ) : ViewModel() {
 
     private val _state: MutableStateFlow<PostEditorState> = MutableStateFlow(
@@ -171,6 +173,12 @@ class PostEditorViewModel @AssistedInject constructor(
             is IOException -> SubmitError.Network
             else -> SubmitError.Hfr(ReplyFailureReason.Unknown)
         }
+        diagnostics.record(
+            DiagnosticsLog.Level.WARN,
+            LOG_TAG_VM,
+            "fetch bubbled: ${error::class.simpleName}: ${error.message ?: "(no message)"} " +
+                "→ ${mapped::class.simpleName}",
+        )
         _state.update { it.copy(isLoadingForm = false, submitError = mapped) }
     }
 
@@ -239,6 +247,12 @@ class PostEditorViewModel @AssistedInject constructor(
             is IOException -> SubmitError.Network
             else -> SubmitError.Hfr(ReplyFailureReason.Unknown)
         }
+        diagnostics.record(
+            DiagnosticsLog.Level.WARN,
+            LOG_TAG_VM,
+            "submit bubbled: ${error::class.simpleName}: ${error.message ?: "(no message)"} " +
+                "→ ${mapped::class.simpleName}",
+        )
         _state.update { it.copy(isSubmitting = false, submitError = mapped) }
     }
 
@@ -257,5 +271,11 @@ class PostEditorViewModel @AssistedInject constructor(
     @AssistedFactory
     interface Factory {
         fun create(request: PostEditorRequest): PostEditorViewModel
+    }
+
+    private companion object {
+        // Distinct from the repository's "ReplyRepository" tag so the diagnostics
+        // panel makes it obvious which layer recorded an entry.
+        private const val LOG_TAG_VM = "PostEditorVM"
     }
 }

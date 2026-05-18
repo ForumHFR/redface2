@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.data.write
 
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.model.write.ReplyContext
@@ -12,6 +13,7 @@ import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import okhttp3.FormBody
 
 /**
@@ -42,12 +44,34 @@ class DefaultReplyRepository @Inject constructor(
             "GET reply form cat=${context.cat} subcat=${context.subcat} " +
                 "post=${context.topicId} page=${context.page}",
         )
-        val html = hfrClient.getReplyForm(
-            cat = context.cat,
-            subcat = context.subcat,
-            post = context.topicId,
-            page = context.page,
-        )
+        val html = try {
+            hfrClient.getReplyForm(
+                cat = context.cat,
+                subcat = context.subcat,
+                post = context.topicId,
+                page = context.page,
+            )
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: SessionExpiredException) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "GET reply form SessionExpired: ${error.message ?: "(no message)"}",
+            )
+            throw error
+        } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
+            // Alpha diagnostic : surface every transport-level failure (OkHttp IOException,
+            // HFR returning non-2xx, body decoding error…) with class + message before
+            // rethrowing. The VM still maps to a user-facing SubmitError downstream, but
+            // we want the tester to see *which* class actually fired.
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "GET reply form FAILED: ${error::class.simpleName}: ${error.message ?: "(no message)"}",
+            )
+            throw error
+        }
         return replyFormParser.parse(html).fold(
             onSuccess = { form ->
                 diagnostics.record(
@@ -109,7 +133,25 @@ class DefaultReplyRepository @Inject constructor(
                 "post=${context.topicId} page=${context.page} bbcode.length=${bbcodeContent.length}",
         )
         val formBody = buildFormBody(context, form, bbcodeContent)
-        val responseHtml = hfrClient.submitReply(formBody)
+        val responseHtml = try {
+            hfrClient.submitReply(formBody)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: SessionExpiredException) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "POST reply SessionExpired: ${error.message ?: "(no message)"}",
+            )
+            throw error
+        } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "POST reply FAILED: ${error::class.simpleName}: ${error.message ?: "(no message)"}",
+            )
+            throw error
+        }
         val outcome = replySubmitResponseParser.parse(responseHtml)
         when (outcome) {
             is ReplySubmitResult.Success ->
