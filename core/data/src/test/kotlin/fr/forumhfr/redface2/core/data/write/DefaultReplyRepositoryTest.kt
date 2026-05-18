@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
 import java.net.URLDecoder
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -39,6 +40,7 @@ class DefaultReplyRepositoryTest {
             replyFormParser = ReplyFormParser(),
             replySubmitResponseParser = ReplySubmitResponseParser(),
             diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
+            ioDispatcher = Dispatchers.Unconfined,
         )
     }
 

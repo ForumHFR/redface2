@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.write
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.model.write.ReplyContext
@@ -14,6 +15,8 @@ import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 
 /**
@@ -35,6 +38,7 @@ class DefaultReplyRepository @Inject constructor(
     private val replyFormParser: ReplyFormParser,
     private val replySubmitResponseParser: ReplySubmitResponseParser,
     private val diagnostics: DiagnosticsLog,
+    @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ReplyRepository {
 
     override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
@@ -45,12 +49,18 @@ class DefaultReplyRepository @Inject constructor(
                 "post=${context.topicId} page=${context.page}",
         )
         val html = try {
-            hfrClient.getReplyForm(
-                cat = context.cat,
-                subcat = context.subcat,
-                post = context.topicId,
-                page = context.page,
-            )
+            // OkHttp `.execute()` is blocking IO ; hop off the main thread or the
+            // ViewModel's `viewModelScope.launch {}` (Dispatchers.Main.immediate by
+            // default) throws NetworkOnMainThreadException. Mirrors what the other
+            // repositories already do (DefaultForumRepository, …).
+            withContext(ioDispatcher) {
+                hfrClient.getReplyForm(
+                    cat = context.cat,
+                    subcat = context.subcat,
+                    post = context.topicId,
+                    page = context.page,
+                )
+            }
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (error: SessionExpiredException) {
@@ -134,7 +144,7 @@ class DefaultReplyRepository @Inject constructor(
         )
         val formBody = buildFormBody(context, form, bbcodeContent)
         val responseHtml = try {
-            hfrClient.submitReply(formBody)
+            withContext(ioDispatcher) { hfrClient.submitReply(formBody) }
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (error: SessionExpiredException) {

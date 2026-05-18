@@ -10,6 +10,18 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## v0.10.3 — 2026-05-18
+
+App patch 0.3.3 (build v43) — fix `NetworkOnMainThreadException`
+sur le flow Phase 2C reply, identifié grâce à l'instrumentation
+diagnostics v42.
+
+### Fixed
+- `DefaultReplyRepository.fetchReplyForm` et `submitReply` n'utilisaient pas le dispatcher IO injecté — les appels `hfrClient.getReplyForm` / `hfrClient.submitReply` tournaient donc sur `Dispatchers.Main.immediate` (le défaut de `viewModelScope.launch`), et OkHttp `.execute()` (blocking) levait `NetworkOnMainThreadException` avant même que la requête parte. Les autres repositories (`DefaultForumRepository`, …) wrappent déjà leurs appels HfrClient avec `withContext(ioDispatcher)` ; alignement maintenu.
+- L'erreur se manifestait côté utilisateur par « HFR a renvoyé une réponse inattendue » à l'ouverture de l'éditeur ET à chaque clic « Envoyer », sans aucun GET ni POST réellement émis vers HFR.
+
+---
+
 ## v0.10.2 — 2026-05-18
 
 App patch 0.3.2 (build v42) — élargit l'instrumentation alpha au cas où
