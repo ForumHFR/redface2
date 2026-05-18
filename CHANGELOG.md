@@ -10,6 +10,64 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## v0.10.3 — 2026-05-18
+
+App patch 0.3.3 (build v43) — fix `NetworkOnMainThreadException`
+sur le flow Phase 2C reply, identifié grâce à l'instrumentation
+diagnostics v42.
+
+### Fixed
+- `DefaultReplyRepository.fetchReplyForm` et `submitReply` n'utilisaient pas le dispatcher IO injecté — les appels `hfrClient.getReplyForm` / `hfrClient.submitReply` tournaient donc sur `Dispatchers.Main.immediate` (le défaut de `viewModelScope.launch`), et OkHttp `.execute()` (blocking) levait `NetworkOnMainThreadException` avant même que la requête parte. Les autres repositories (`DefaultForumRepository`, …) wrappent déjà leurs appels HfrClient avec `withContext(ioDispatcher)` ; alignement maintenu.
+- L'erreur se manifestait côté utilisateur par « HFR a renvoyé une réponse inattendue » à l'ouverture de l'éditeur ET à chaque clic « Envoyer », sans aucun GET ni POST réellement émis vers HFR.
+
+---
+
+## v0.10.2 — 2026-05-18
+
+App patch 0.3.2 (build v42) — élargit l'instrumentation alpha au cas où
+l'exception est levée **dans** `HfrClient` (HTTP non-2xx, IO, session
+expirée) plutôt que dans le parser. Sur v41 le test alpha n'a vu que les
+`INFO` du GET sans aucun `WARN` derrière → l'exception sortait avant le
+parse. Cette version log la classe + le message à la frontière transport,
+puis logue à nouveau le mapping `SubmitError` côté ViewModel.
+
+### Added
+- `DefaultReplyRepository` wrappe les appels `hfrClient.getReplyForm` et `hfrClient.submitReply` dans un try/catch qui enregistre un `WARN` `GET reply form FAILED: <ClassName>: <message>` (resp. `POST reply FAILED…`) avant de propager l'exception. `SessionExpiredException` est tracée séparément, `CancellationException` passe sans log.
+- `PostEditorViewModel.handleFetchFailure` / `handleSubmitFailure` enregistrent un `WARN` `PostEditorVM` indiquant l'exception reçue et le `SubmitError` dans lequel elle a été mappée (`Network` / `SessionExpired` / `Hfr(Unknown)`).
+
+---
+
+## v0.10.1 — 2026-05-18
+
+App patch 0.3.1 (build v41) — instrumente le flow Phase 2C reply via le canal `DiagnosticsLog` existant pour permettre aux testeurs alpha de remonter les détails d'un échec à un mainteneur sans capturer la session.
+
+### Added
+- `DefaultReplyRepository` injecte `DiagnosticsLog` et enregistre `INFO` sur chaque GET `message.php` (cat / subcat / post / page) et POST `bddpost.php`, `DEBUG` sur le parsing réussi du formulaire, `WARN` sur tout échec parser ou retour `Unknown`.
+- Sur échec parser, dump d'un extrait HTML (max 600 chars) avec `hash_check=…` masqué via regex, plus la liste des `<form action="…">` détectés — utile pour diagnostiquer un changement de structure HFR sans capturer la session.
+- Visible dans l'écran Diagnostics (Messages → Outils alpha → Diagnostics).
+- `hash_check` jamais sérialisé dans un message log natif Android.
+
+---
+
+## v0.10.0 — 2026-05-18
+
+Premier flux de mutation HFR réelle livré : depuis un topic, l'utilisateur peut composer un BBCode et le poster via `bddpost.php`, avec gestion typée des 5 erreurs HFR observées et anti-double-submit. App bump à `0.3.0` (semver MINOR pour la première mutation HFR). 2 rounds de reviews croisées (4 flavors × 2 = 8 rapports) ont validé l'absence de blocker critique et corrigé 2 bugs latents avant tag : (1) le filtre `password` du `ReplyFormParser` était documenté mais inopérant car `<input type="password">` n'est pas hidden — corrigé en itérant sur `input[name]` avec deny rules explicites ; (2) `Topic.hasSubcat` acceptait `subcat = 0` (wire shape moderator-space HFR `cat=0` family) sans fixture utilisateur qui prouve la validité — durci à `subcat > 0`. Migration Room v3 → v4 ajoute `subcat` à `topic_pages` avec sentinel `-1`.
+
+### Added
+- Phase 2C — Reply MVP (#145) : première mutation HFR réelle livrée. `PostEditorViewModel` reçoit `ReplyRepository` (interface `:core:domain/write/`, impl `DefaultReplyRepository` dans `:core:data/write/`). En mode Reply, le ViewModel fetch `message.php` au démarrage pour obtenir `hash_check`, puis sur `SubmitClicked` POSTe `bddpost.php?config=hfr.inc` avec le formulaire HFR complet (`verifrequet=1100`, `content_form`, `cat`, `subcat`, `post`, `page`, etc.).
+- `:core:parser/write/ReplyFormParser` extrait les hidden fields HFR (sans `password`, sans `pseudo` anonyme) ; `ReplySubmitResponseParser` classifie les 5 retours observés (succès, `empty_message`, `invalid_token`, `antiflood`, `locked_topic`).
+- `:core:network/HfrClient` ajoute `getReplyForm()` (GET `message.php`) et `submitReply()` (POST `bddpost.php`). Cookies réutilisés via l'`AuthenticatedClient` existant ; `hash_check` jamais loggué.
+- Navigation : `PostEditorRoute` reçoit maintenant `page` et `subcat` ; `TopicScreen.onReply` capture ces deux valeurs depuis le topic chargé. `PostEditorScreen` expose `onSubmitSucceeded(targetPage)` qui pop l'éditeur et recharge la page topic cible (la nav `NavBackStack` remplace l'entrée `TopicRoute` par `topicEntry.copy(page = targetPage ?: topicEntry.page)`).
+- Anti-double-submit : `submitJob.isActive` bloque les clics répétés pendant le POST.
+- `Topic.subcat: Int` + `TopicEntity.subcat: Int` (sentinel `-1` = `SUBCAT_UNKNOWN`) parsés depuis `input[name=subcat]` du HTML topic. Migration Room v3 → v4 (`ALTER TABLE topic_pages ADD COLUMN subcat INTEGER NOT NULL DEFAULT -1`). Le bouton « Répondre » est désactivé si `topic.hasSubcat == false` (cache pré-v4) — la valeur `-1` n'est jamais transmise à HFR.
+
+### Changed
+- `docs/specs/mvi.md` § Editor : actualisé pour le state submit + effets one-shot.
+- `docs/specs/navigation.md` : `PostEditorRoute` étendu, callbacks de TopicScreen et signature `PostEditorScreen` mis à jour.
+- `docs/specs/roadmap.md` : Phase 2 Reply MVP cochée.
+
+---
+
 ## v0.9.0 — 2026-05-18
 
 Phase 2A clôturée et Phase 2B-A livrée : le client a désormais une cartographie complète du protocole d'écriture HFR, un inventaire de l'écosystème, et un socle éditeur local utilisable. Le naming app passe au semver pur (`versionName = 0.2.0` côté `app/build.gradle.kts`) après plusieurs cycles `0.1.0-phaseN.X` qui mélangeaient version applicative et phase produit. Le footer Jekyll spec passe à `v0.9.0` ; les deux numérotations restent distinctes (specs vs app) mais bumpent ensemble sur les jalons structurants.

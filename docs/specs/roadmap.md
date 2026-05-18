@@ -124,7 +124,7 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 - [x] **2A — Reality check protocole d'écriture HFR (#81) + références écosystème (#32)** — fixtures live, spec écriture alignée HFR, page `docs/guides/references.md` consolidée. Mergé via PR #159 (writes) + PR #160 (références).
 - [x] **2B-A — Socle éditeur local (#86, refs #144)** — `PostEditorRoute` / `TopicFormRoute`, `PostEditorScreen` + ViewModel, toolbar BBCode complète (gras / italique / souligné / barré / quote / code / cpp / fixed / spoiler / url / image), preview locale via `parsePostContentFromBbcode`. Pas encore d'envoi HFR — local seulement.
 - [ ] Recherche — titres de topics et contenu de posts, filtres par catégorie/auteur/date
-- [ ] Reply — répondre à un topic
+- [x] **2C — Reply MVP (#145)** — POST réel `bddpost.php` via `ReplyRepository` (`:core:domain/write/` + `:core:data/write/`), `PostEditorViewModel` wire submit + erreurs typées (`empty`, `invalid_token`, `antiflood`, `locked`, `login_required`). Migration Room v3 → v4 ajoute `subcat` à `topic_pages` ; HFR write contract recapturé sur fixtures Phase 2A.
 - [ ] Quote — citer un post → reply pré-rempli
 - [ ] Edit — éditer son propre post
 - [ ] Edit FP — éditer le first post (sujet, contenu, sondage)

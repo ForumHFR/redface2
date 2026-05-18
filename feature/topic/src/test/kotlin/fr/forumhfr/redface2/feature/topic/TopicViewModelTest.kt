@@ -323,6 +323,7 @@ class TopicViewModelTest {
     ): Topic = Topic(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
+        subcat = SAMPLE_SUBCAT,
         title = title,
         posts = posts,
         page = page,
@@ -352,6 +353,7 @@ class TopicViewModelTest {
     companion object {
         private const val SAMPLE_CAT = 13
         private const val SAMPLE_POST = 84_540
+        private const val SAMPLE_SUBCAT = 432
         private const val CANCEL_TIMEOUT_MS = 2_000L
     }
 }

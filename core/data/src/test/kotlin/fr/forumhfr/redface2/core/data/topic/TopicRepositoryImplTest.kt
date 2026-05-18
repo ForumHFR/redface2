@@ -52,6 +52,7 @@ class TopicRepositoryImplTest {
             authenticated = okHttp,
             anonymous = okHttp,
             baseUrl = server.url("/"),
+            ioDispatcher = Dispatchers.Unconfined,
         )
     }
 

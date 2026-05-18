@@ -37,6 +37,7 @@ internal object TopicMappers {
             numreponses = topic.posts.map { it.numreponse },
             fetchedAt = fetchedAt,
             authMode = authMode,
+            subcat = topic.subcat,
         )
         val postEntities = topic.posts.map { post ->
             post.toEntity(topic.cat, topic.post, fetchedAt, authMode)
@@ -50,6 +51,7 @@ internal object TopicMappers {
         return Topic(
             cat = topic.cat,
             post = topic.post,
+            subcat = topic.subcat,
             page = topic.page,
             title = topic.title,
             totalPages = topic.totalPages,

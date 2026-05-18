@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -24,6 +25,7 @@ class HfrClientTest {
             authenticated = okHttp,
             anonymous = okHttp,
             baseUrl = server.url("/"),
+            ioDispatcher = Dispatchers.Unconfined,
         )
     }
 

@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.parser.common
 
 object HfrSelectors {
     const val CATEGORY_ID_INPUT = "input[name=cat]"
+    const val SUBCATEGORY_ID_INPUT = "input[name=subcat]"
     const val TOPIC_ID_INPUT = "input[name=post]"
     const val TOPIC_TITLE = "tr.fondForum2Title h3"
     const val TOP_PAGER = "tr.fondForum2PagesHaut"

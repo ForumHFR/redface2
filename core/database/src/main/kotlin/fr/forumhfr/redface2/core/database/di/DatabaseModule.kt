@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_1_2
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_2_3
+import fr.forumhfr.redface2.core.database.migrations.MIGRATION_3_4
 import javax.inject.Singleton
 
 @Module
@@ -26,7 +27,7 @@ object DatabaseModule {
         RedfaceDatabase::class.java,
         RedfaceDatabase.DATABASE_NAME,
     )
-        .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
         .build()
 
     @Provides

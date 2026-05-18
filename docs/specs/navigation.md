@@ -214,8 +214,10 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
 @Serializable data class PostEditorRoute(
     val mode: PostEditorMode,
     val cat: Int,
-    val topicId: Int? = null,             // requis à terme pour Reply, attendu par TopicScreen.onReply
+    val topicId: Int? = null,             // requis pour Reply (Phase 2C)
     val numreponse: Int? = null,          // requis à terme pour Edit
+    val page: Int? = null,                // page topic en cours, requis Reply (#145)
+    val subcat: Int? = null,              // sous-cat HFR, requis Reply (#145) — TopicScreen ne pousse PostEditorRoute que si topic.hasSubcat
 ) : RedfaceNavKey
 
 @Serializable data class TopicFormRoute(
@@ -284,8 +286,19 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
             entry<TopicRoute> { route ->
                 TopicScreen(
                     request = TopicRequest(route.cat, route.post, route.page, route.scrollTo),
-                    onReply = { topicId ->
-                        backStack.add(PostEditorRoute(PostEditorMode.Reply, route.cat, topicId = topicId))
+                    // Phase 2C (#145): TopicScreen exposes subcat from the parsed topic
+                    // page; the reply button is disabled when `topic.hasSubcat` is false
+                    // (cached row from before the v3 → v4 Room migration).
+                    onReply = { subcat, page ->
+                        backStack.add(
+                            PostEditorRoute(
+                                PostEditorMode.Reply,
+                                route.cat,
+                                topicId = route.post,
+                                page = page,
+                                subcat = subcat,
+                            ),
+                        )
                     },
                     onOpenPage = { targetPage ->
                         backStack.removeAt(backStack.lastIndex)
@@ -295,7 +308,25 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
             }
             entry<PostEditorRoute> { route ->
                 PostEditorScreen(
-                    request = PostEditorRequest(route.mode, route.cat, route.topicId, route.numreponse),
+                    request = PostEditorRequest(
+                        route.mode,
+                        route.cat,
+                        route.topicId,
+                        route.numreponse,
+                        route.page,
+                        route.subcat,
+                    ),
+                    // Phase 2C (#145): pop editor + replace topic entry to refresh the
+                    // target page (defaults to the page the user replied from when HFR
+                    // does not surface a different one in the meta refresh URL).
+                    onSubmitSucceeded = { targetPage ->
+                        backStack.removeAt(backStack.lastIndex)
+                        val topicEntry = backStack.lastOrNull() as? TopicRoute
+                        if (topicEntry != null) {
+                            backStack.removeAt(backStack.lastIndex)
+                            backStack.add(topicEntry.copy(page = targetPage ?: topicEntry.page, scrollTo = null))
+                        }
+                    },
                 )
             }
             entry<TopicFormRoute> { route ->
@@ -420,7 +451,7 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 > **Statut Phase 5+** — multi-pane n'est pas livré en Phase 1. Dans le snippet ci-dessous :
 >
 > - le **pattern de composition** (`NavDisplay` + `ListDetailPaneScaffold` sur le même back stack, switch `WindowSizeClass`) est **illustratif** — c'est ce qui sera implémenté Phase 5+ ;
-> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested)`, `MessagesScreen(versionName, versionCode, onLoginRequested, onOpenDiagnostics)`, `SearchScreen()`, `TopicScreen(request: TopicRequest, onReply, onOpenPage)`, `PostEditorScreen(request: PostEditorRequest)`, `TopicFormScreen(mode, cat?, subcat?, topicId?)`) sont les signatures **réelles** livrées dans le repo (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../PostEditorScreen.kt`, `feature/editor/.../TopicFormScreen.kt`).
+> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested)`, `MessagesScreen(versionName, versionCode, onLoginRequested, onOpenDiagnostics)`, `SearchScreen()`, `TopicScreen(request: TopicRequest, onReply: (subcat, page) -> Unit, onOpenPage)`, `PostEditorScreen(request: PostEditorRequest, onSubmitSucceeded: (targetPage?) -> Unit)`, `TopicFormScreen(mode, cat?, subcat?, topicId?)`) sont les signatures **réelles** livrées dans le repo (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../PostEditorScreen.kt`, `feature/editor/.../TopicFormScreen.kt`).
 >
 > Le call-site `onOpenFlag = { flag -> backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = ...)) }` passe désormais le topic concerné — Phase 1B.4 a remplacé le placeholder mock par la liste réelle des drapeaux.
 
@@ -458,8 +489,8 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
                             page = current.page,
                             scrollTo = current.scrollTo,
                         ),
-                        onReply = { topicId ->
-                            backStack.add(PostEditorRoute(PostEditorMode.Reply, current.cat, topicId = topicId))
+                        onReply = { subcat, page ->
+                            backStack.add(PostEditorRoute(PostEditorMode.Reply, current.cat, topicId = current.post, page = page, subcat = subcat))
                         },
                         onOpenPage = { targetPage ->
                             backStack.removeAt(backStack.lastIndex)
@@ -467,7 +498,8 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
                         },
                     )
                     is PostEditorRoute -> PostEditorScreen(
-                        request = PostEditorRequest(current.mode, current.cat, current.topicId, current.numreponse),
+                        request = PostEditorRequest(current.mode, current.cat, current.topicId, current.numreponse, current.page, current.subcat),
+                        onSubmitSucceeded = { /* multi-pane refresh handled by parent observer */ },
                     )
                     is TopicFormRoute -> TopicFormScreen(
                         mode = current.mode,

@@ -223,7 +223,7 @@ sealed interface TopicEffect {
 
 ## Écran Editor (post-level reply / edit) + formulaire de topic
 
-Phase 2B-A (#86 + #144) sépare l'éditeur en **deux familles** plutôt qu'en un mode unique. Le post-level editor (`PostEditorScreen`) gère le contenu BBCode pour Reply / Edit ; le formulaire de topic (`TopicFormScreen`) gérera New / Edit FP — pour l'instant placeholder en attendant #148 / #149.
+Phase 2B-A (#86 + #144) a séparé l'éditeur en **deux familles** plutôt qu'en un mode unique. Phase 2C (#145) ajoute la première mutation HFR utile : le submit reply via `bddpost.php`. Le formulaire de topic (`TopicFormScreen`) reste placeholder en attendant #148 / #149.
 
 ```kotlin
 // Post-level editor — édition de niveau post (contenu BBCode seulement)
@@ -237,20 +237,32 @@ data class PostEditorState(
     val cat: Int,
     val topicId: Int?,
     val numreponse: Int?,
+    val page: Int?,                 // (Phase 2C) page topic en cours
+    val subcat: Int?,               // (Phase 2C) sous-cat HFR, requis pour reply
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
     val validation: BbcodeValidation = BbcodeValidation.Idle,
+    val isLoadingForm: Boolean = false,  // GET message.php avant submit
+    val isSubmitting: Boolean = false,   // POST bddpost.php en cours
+    val submitError: SubmitError? = null,
 )
 
 sealed interface PostEditorIntent {
     data class ContentChanged(val value: TextFieldValue) : PostEditorIntent
     data class ToolbarActionClicked(val action: BbcodeAction) : PostEditorIntent
     data object TogglePreview : PostEditorIntent
+    data object SubmitClicked : PostEditorIntent       // (Phase 2C)
+    data object ErrorDismissed : PostEditorIntent      // (Phase 2C)
+}
+
+// Effets one-shot bypassant le state (jamais rejoués sur recomposition)
+sealed interface PostEditorEffect {
+    data class SubmitSucceeded(val targetPage: Int?) : PostEditorEffect
 }
 ```
 
-> **Statut Phase 2B-A — éditeur local, pas d'envoi HFR** : `PostEditorViewModel` est livré et tient la draft BBCode + la preview locale. Aucune mutation réseau (`bddpost.php`, `apercu.php`) n'est branchée ; reply/edit réels arrivent avec #145 / #146 / #147. `TopicFormScreen` est un placeholder explicite jusqu'à #148 (Edit FP) / #149 (Create topic).
+> **Statut Phase 2C — reply MVP livré** : `PostEditorViewModel` injecte `ReplyRepository` (interface `:core:domain/write/`, impl `:core:data/write/`). Sur init en mode Reply, il fetch `message.php` pour obtenir `hash_check` + les hidden fields HFR, puis sur `SubmitClicked` POSTe `bddpost.php?config=hfr.inc`. Anti-double-submit via `submitJob.isActive`. Errors typées via `ReplyFailureReason` (empty / invalid_token / antiflood / locked / login_required / unknown) + `SubmitError.Network` / `SessionExpired` / `MissingSubcat`. Sur succès, effet `SubmitSucceeded(targetPage)` → la navigation pop l'éditeur et recharge la page topic. Edit / Quote / Edit FP / Create restent dans #146 / #147 / #148 / #149. `TopicFormScreen` reste placeholder.
 >
 > Les deux écrans partagent leurs **capacités** via composables `:core:ui` (`BbcodeTextField`, `BbcodeToolbar`, `BbcodePreview`, et plus tard `PollEditor`, `CatSubcatPicker`). `BbcodePreview` reçoit un `PostContent` déjà parsé — il **ne parse pas lui-même**, ce qui garde `:core:ui` libre de toute logique métier. Le parsing BBCode reste une responsabilité `:core:parser` (`parsePostContentFromBbcode`) exposée aux features via une interface `BbcodePreviewParser` (`:core:domain`) injectée par Hilt, afin de préserver la frontière `:feature:*` → `:core:domain` + `:core:ui` (les ViewModels appellent le use case et passent le `PostContent` résultant à `BbcodePreview`). Pas de duplication, juste deux contrats de formulaire distincts. Rationale : l'endpoint HFR n'est pas une bonne frontière UI (`Reply` et `NewTopic` passent tous deux par `bddpost.php` mais leurs formulaires diffèrent ; `EditFirstPost` et `NewTopic` partagent presque toute la structure malgré des endpoints différents). La frontière utile est **post-level** vs **topic-level**.
 
