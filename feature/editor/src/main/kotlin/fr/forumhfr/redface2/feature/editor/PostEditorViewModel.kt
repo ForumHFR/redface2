@@ -61,6 +61,8 @@ class PostEditorViewModel @AssistedInject constructor(
             numreponse = request.numreponse,
             page = request.page,
             subcat = request.subcat,
+            quotedNumreponse = request.quotedNumreponse,
+            quoteRef = request.quoteRef,
         ),
     )
     val state: StateFlow<PostEditorState> = _state.asStateFlow()
@@ -148,8 +150,40 @@ class PostEditorViewModel @AssistedInject constructor(
                 onSuccess = { form ->
                     loadedForm = form
                     _state.update { current ->
+                        // Hydrate the draft from HFR's quote prefill the first time the form
+                        // lands and only when the user has not typed anything yet. Two
+                        // important guards :
+                        //   1. `draftHydratedFromForm` flips to true once we've ever
+                        //      prefilled, so an InvalidHashCheck silent refetch later
+                        //      cannot overwrite the user's edits with the same prefill.
+                        //   2. Even on the *first* load, if the user already typed before
+                        //      the network came back, `draft.text.isNotBlank()` wins.
+                        // For a simple reply, `form.initialContent` is empty and we leave
+                        // the draft untouched.
+                        val shouldHydrate = !current.draftHydratedFromForm &&
+                            current.draft.text.isBlank() &&
+                            form.initialContent.isNotBlank()
+                        val nextDraft = if (shouldHydrate) {
+                            TextFieldValue(
+                                text = form.initialContent,
+                                // Place caret at the end so the user can type their reply
+                                // right after the cited block — matches HFR's web behavior.
+                                selection = TextRange(form.initialContent.length),
+                            )
+                        } else {
+                            current.draft
+                        }
                         current.copy(
                             isLoadingForm = false,
+                            draft = nextDraft,
+                            draftHydratedFromForm = current.draftHydratedFromForm || shouldHydrate,
+                            // Keep the preview AST consistent if the user was already showing
+                            // it before the prefill arrived (rare, but free to handle).
+                            preview = if (shouldHydrate && current.isPreviewVisible) {
+                                previewParser.parsePreview(nextDraft.text)
+                            } else {
+                                current.preview
+                            },
                             submitError = if (form.isAnonymous) {
                                 SubmitError.Hfr(ReplyFailureReason.LoginRequired)
                             } else {
@@ -271,7 +305,18 @@ class PostEditorViewModel @AssistedInject constructor(
         // Mirror the `Topic.hasSubcat` / `ReplyContext.init` rule : reject both the
         // sentinel (-1) and the moderator-space wire shape (0).
         if (subcat <= 0) return null
-        return ReplyContext(cat = snapshot.cat, subcat = subcat, topicId = topicId, page = page)
+        return ReplyContext(
+            cat = snapshot.cat,
+            subcat = subcat,
+            topicId = topicId,
+            page = page,
+            // Phase 2C (#146) : both fields are null for a simple reply ; both
+            // non-null for a quote launched from `TopicScreen.onQuote`. The model
+            // tolerates a quote with a null `quoteRef` for forward compat (HFR
+            // could drop `ref` someday), but we keep them aligned in practice.
+            quotedNumreponse = snapshot.quotedNumreponse,
+            quoteRef = snapshot.quoteRef,
+        )
     }
 
     @AssistedFactory

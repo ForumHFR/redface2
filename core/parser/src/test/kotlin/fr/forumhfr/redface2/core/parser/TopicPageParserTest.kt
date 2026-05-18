@@ -189,6 +189,69 @@ class TopicPageParserTest {
         assertTrue(topic.hasSubcat)
     }
 
+    @Test
+    fun `quoteRef extracted from quote link href on the khakha page 2 fixture`() {
+        // page 2 of the khakha fixture exposes a stable ref distribution (0, 1, 2, …)
+        // because each post sits at its own position in the page (40 posts visible).
+        // Three representative posts cover the contract :
+        //   - first quote-able post → ref=0
+        //   - mid-page post           → ref=2
+        //   - late post               → ref=5
+        // We do not over-specify the rest of the page : the parser only promises
+        // « whatever HFR put in the href » and a future capture might shift positions.
+        val topic = parser.parse(fixture("topic_khakha_page_2.html"))
+
+        val byNumreponse = topic.posts.associateBy { it.numreponse }
+        // n°16628071 = Mora1651 (1st quote-able post on the page, ref=0 in fixture)
+        assertEquals(0, byNumreponse[16628071]?.quoteRef)
+        // n°16628106 = groux (ref=2)
+        assertEquals(2, byNumreponse[16628106]?.quoteRef)
+        // n°16628222 = Maverick (ref=5)
+        assertEquals(5, byNumreponse[16628222]?.quoteRef)
+    }
+
+    @Test
+    fun `quoteRef is null for a post that has no quote link in the source HTML`() {
+        // Synthesised minimal page : one post table without any `a[href*=numrep=]`
+        // entry. Mirrors HFR's locked-topic special pages where the toolbar drops
+        // the quote action. The parser must keep the post readable AND leave
+        // `quoteRef` null so the UI suppresses the « Citer » button.
+        //
+        // The HFR selector requires a <table><tr class="fondForum2Title"><th><h3>
+        // wrapper for the topic title and `td.messCase1 a[name^=t]` for the post
+        // anchor, plus `td.messCase1 b.s2` for the author.
+        val html = """
+            <html><body>
+              <input name="cat" value="13" />
+              <input name="post" value="84540" />
+              <input name="subcat" value="432" />
+              <table>
+                <tbody>
+                  <tr class="fondForum2Title">
+                    <th class="messCase1">Auteur</th>
+                    <th><h3>Locked topic</h3></th>
+                  </tr>
+                </tbody>
+              </table>
+              <table class="messagetable">
+                <tbody>
+                  <tr class="message">
+                    <td class="messCase1"><a name="t99999"></a><b class="s2">SomeAuthor</b></td>
+                    <td class="messCase2">
+                      <div class="toolbar"><div class="left">Posté le 18-05-2026&nbsp;à&nbsp;10:00:00</div></div>
+                      <div id="para99999"><p>locked content</p></div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        val post = topic.posts.single()
+        assertEquals(99999, post.numreponse)
+        assertNull("quote-less post must expose null quoteRef", post.quoteRef)
+    }
+
     private fun fixture(name: String): String {
         return requireNotNull(javaClass.getResource("/fixtures/$name")) {
             "Fixture not found: $name"

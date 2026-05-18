@@ -409,13 +409,18 @@ data class ReplyContext(
     val subcat: Int,                 // requis > 0 ; `ReplyContext.init` refuse à la fois le sentinel `SUBCAT_UNKNOWN` (-1) et la wire shape moderator-space HFR (0, cat=0/cat=prive)
     val topicId: Int,
     val page: Int,                   // page topic depuis laquelle l'utilisateur a cliqué "Répondre"
-)
+    val quotedNumreponse: Int? = null, // Phase 2C (#146) : numreponse cité ; null = reply simple, non-null = quote (HFR `numrep` query param + POST field)
+    val quoteRef: Int? = null,         // Phase 2C (#146) : ref opaque parsé depuis le href quote HFR ; null = reply simple ou post sans lien quote
+) {
+    val isQuote: Boolean get() = quotedNumreponse != null
+}
 
 data class ReplyForm(
     val hashCheck: String,           // CSRF token HFR, jamais loggué
     val sujet: String,
     val hiddenFields: Map<String, String>,   // password filtré au parse ; pseudo anonyme filtré
     val isAnonymous: Boolean,
+    val initialContent: String = "",  // Phase 2C (#146) : reply → "" ; quote → bloc `[quotemsg=…]` prérempli par HFR (verbatim, jamais reconstruit côté app)
 )
 
 sealed interface ReplySubmitResult {

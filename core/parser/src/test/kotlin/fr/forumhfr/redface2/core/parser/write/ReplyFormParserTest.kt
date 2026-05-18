@@ -68,6 +68,62 @@ class ReplyFormParserTest {
     }
 
     @Test
+    fun `simple reply form has an empty initialContent`() {
+        val html = readFixture("write_reply_form_open_topic.html")
+        val form = parser.parse(html).getOrThrow()
+        assertEquals("Reply-simple form must not prefill content_form", "", form.initialContent)
+    }
+
+    @Test
+    fun `quote form initialContent carries the prefilled quotemsg block`() {
+        val html = readFixture("write_quote_form_test_post.html")
+        val form = parser.parse(html).getOrThrow()
+
+        // HFR prefilled `<textarea name="content_form">` with the cited block. The
+        // first parameter inside `[quotemsg=…]` is the cited numreponse (2784595 in
+        // this capture). The second parameter is opaque (server-controlled position
+        // id, never recompute client-side), so we don't pin its exact value here ;
+        // we only assert that the prefix lands and the closing tag is present.
+        assertTrue(
+            "initialContent must start with the cited numreponse — got ${form.initialContent.take(80)}",
+            form.initialContent.startsWith("[quotemsg=2784595,"),
+        )
+        assertTrue(
+            "initialContent must close the quotemsg block — got ${form.initialContent.takeLast(40)}",
+            form.initialContent.contains("[/quotemsg]"),
+        )
+    }
+
+    @Test
+    fun `quote form with rich BBCode preserves the prefilled markup verbatim`() {
+        val html = readFixture("write_quote_form_bbcode_rich.html")
+        val form = parser.parse(html).getOrThrow()
+
+        // The bbcode_rich fixture is a temporary topic post containing several BBCode
+        // tags ; HFR ships it back inside the quote prefill exactly as it was emitted.
+        // The capture's `[quotemsg=2523833,1,1214571]` header is fixed across replays
+        // (it's the cited post, not the position), so we can pin it.
+        assertTrue(
+            "Quote header must reference the cited post — got ${form.initialContent.take(80)}",
+            form.initialContent.startsWith("[quotemsg=2523833,1,1214571]"),
+        )
+        // A handful of BBCode markers that the rich fixture is known to carry. Pinning
+        // the exhaustive list would make the test fragile on a future re-capture ; we
+        // pick three representative markers that prove the verbatim payload survived
+        // Jsoup's textarea decoding (wholeText() must not collapse them).
+        listOf("[b]", "[/b]", "[i]").forEach { marker ->
+            assertTrue(
+                "Quote prefill must include BBCode marker '$marker' verbatim",
+                form.initialContent.contains(marker),
+            )
+        }
+        assertTrue(
+            "Quote prefill must close the citation block",
+            form.initialContent.contains("[/quotemsg]"),
+        )
+    }
+
+    @Test
     fun `fails fast when hash_check is missing`() {
         val html = """<html><body><form action="/bddpost.php?config=hfr.inc" method="post">
             <input type="hidden" name="cat" value="23" />

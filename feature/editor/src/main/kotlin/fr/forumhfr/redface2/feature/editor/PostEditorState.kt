@@ -20,6 +20,14 @@ data class PostEditorState(
     val page: Int?,
     /** Sub-category id required by HFR's write contract. Null when unknown — reply disabled. */
     val subcat: Int?,
+    /**
+     * `numreponse` of the post being quoted (Phase 2C, #146). When non-null the
+     * editor opened in quote mode : HFR prefills `[quotemsg=…]` and we hydrate
+     * the draft with it on form load. Same surface as a simple reply otherwise.
+     */
+    val quotedNumreponse: Int? = null,
+    /** `ref` parameter HFR included in the quote link — opaque, forwarded as-is. */
+    val quoteRef: Int? = null,
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
@@ -30,6 +38,12 @@ data class PostEditorState(
     val isSubmitting: Boolean = false,
     /** Surfaces an HFR-classified failure to the UI. Null means "no error to show". */
     val submitError: SubmitError? = null,
+    /**
+     * Tracks whether we already prefilled [draft] from `ReplyForm.initialContent`.
+     * Used by the ViewModel to make sure a stale form refetch (e.g. after
+     * `InvalidHashCheck`) does not overwrite the user's in-progress edit.
+     */
+    val draftHydratedFromForm: Boolean = false,
 ) {
     /**
      * Reply submission is allowed when : we know the routing context (page + subcat),

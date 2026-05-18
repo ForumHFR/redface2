@@ -64,6 +64,16 @@ fun TopicScreen(
      * stays disabled to avoid passing a sentinel value to the HFR write contract).
      */
     onReply: (subcat: Int, page: Int) -> Unit,
+    /**
+     * Open the editor in quote mode (Phase 2C, #146). Same destination as [onReply],
+     * but the editor will GET HFR's quote form (`?numrep=…&ref=…`) and hydrate the
+     * draft with the `[quotemsg=…]` block HFR prefills. The call-site supplies
+     * `quotedNumreponse = post.numreponse` and `quoteRef = post.quoteRef`, captured
+     * from the topic page HTML. Posts whose HTML did not expose a quote link
+     * (locked topic special cases, anonymous fallback) keep the « Citer » button
+     * hidden — we never reach this callback for those.
+     */
+    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
 ) {
     val viewModel = hiltViewModel<TopicViewModel, TopicViewModel.Factory>(
@@ -105,16 +115,19 @@ fun TopicScreen(
         listState = lazyListState,
         onIntent = viewModel::send,
         onReply = onReply,
+        onQuote = onQuote,
         onOpenPage = onOpenPage,
     )
 }
 
 @Composable
+@Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
 internal fun TopicContent(
     state: TopicUiState,
     listState: LazyListState,
     onIntent: (TopicIntent) -> Unit,
     onReply: (subcat: Int, page: Int) -> Unit,
+    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
 ) {
     Surface(
@@ -162,6 +175,7 @@ internal fun TopicContent(
                     state = state,
                     topic = mode.topic,
                     onReply = onReply,
+                    onQuote = onQuote,
                     onOpenPage = onOpenPage,
                     listState = listState,
                 )
@@ -171,10 +185,12 @@ internal fun TopicContent(
 }
 
 @Composable
+@Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
 private fun TopicLoadedContent(
     state: TopicUiState,
     topic: Topic,
     onReply: (subcat: Int, page: Int) -> Unit,
+    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
     listState: LazyListState,
 ) {
@@ -200,9 +216,16 @@ private fun TopicLoadedContent(
             items = topic.posts,
             key = { post -> post.numreponse },
         ) { post ->
+            // « Citer » is enabled only when (a) the topic has a usable subcat
+            // (same gate as Reply) and (b) HFR exposed a quote link for *this*
+            // post (locked topics, anonymous-fallback rows do not). Both go via
+            // the same `PostEditorRoute`, only the editor request shape differs.
+            val quoteAction: (() -> Unit)? = post.quoteRef?.takeIf { topic.hasSubcat }
+                ?.let { ref -> { onQuote(topic.subcat, topic.page, post.numreponse, ref) } }
             TopicPostCard(
                 post = post,
                 highlighted = highlight == post.numreponse,
+                onQuote = quoteAction,
             )
         }
     }
@@ -437,6 +460,7 @@ private fun TopicPollCard(poll: Poll) {
 private fun TopicPostCard(
     post: Post,
     highlighted: Boolean,
+    onQuote: (() -> Unit)?,
 ) {
     Card(
         colors = CardDefaults.cardColors(
@@ -475,6 +499,20 @@ private fun TopicPostCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             PostRenderer(content = post.content)
+            if (onQuote != null) {
+                // « Citer » sits at the bottom of the post card, sober TextButton
+                // so it stays subordinate to the post content. Hidden entirely
+                // when the parent did not provide an action (post has no quote
+                // link or topic has no subcat).
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onQuote) {
+                        Text(text = stringResource(R.string.topic_post_quote))
+                    }
+                }
+            }
         }
     }
 }

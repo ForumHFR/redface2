@@ -23,4 +23,17 @@ data class ReplyForm(
     val sujet: String,
     val hiddenFields: Map<String, String>,
     val isAnonymous: Boolean,
+    /**
+     * Initial value HFR prefills inside `<textarea name="content_form">`. For a
+     * reply-simple form it is empty ; for a quote form HFR ships the BBCode
+     * `[quotemsg=N,opaque,userId]...[/quotemsg]` block already wrapped, with
+     * the cited content rendered as the user would see it on the topic page.
+     *
+     * Redface 2 must reuse this prefill verbatim rather than reconstructing it
+     * client-side: the second parameter (`opaque` above) is a server-controlled
+     * positional id whose exact computation is undocumented (cf. `protocol-hfr.md`
+     * § Quote). Surface this value to the editor so the user can edit-around the
+     * quote block, but never tamper with the block itself before POST.
+     */
+    val initialContent: String = "",
 )

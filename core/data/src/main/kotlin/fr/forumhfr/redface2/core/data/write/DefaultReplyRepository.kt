@@ -42,11 +42,13 @@ class DefaultReplyRepository @Inject constructor(
 ) : ReplyRepository {
 
     override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
+        val mode = if (context.isQuote) "quote" else "reply"
         diagnostics.record(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
-            "GET reply form cat=${context.cat} subcat=${context.subcat} " +
-                "post=${context.topicId} page=${context.page}",
+            "GET $mode form cat=${context.cat} subcat=${context.subcat} " +
+                "post=${context.topicId} page=${context.page} " +
+                "numrep=${context.quotedNumreponse ?: "-"} ref=${context.quoteRef ?: "-"}",
         )
         // `HfrClient` already wraps its OkHttp call in `withContext(ioDispatcher)` (PR #162 round 3
         // round-trip), but we keep `withContext` here so the Jsoup parse (CPU-bound, ~30 KB HTML)
@@ -59,6 +61,8 @@ class DefaultReplyRepository @Inject constructor(
                     subcat = context.subcat,
                     post = context.topicId,
                     page = context.page,
+                    quotedNumreponse = context.quotedNumreponse,
+                    quoteRef = context.quoteRef,
                 )
                 replyFormParser.parse(html).fold(
                     onSuccess = { form ->
@@ -211,6 +215,12 @@ class DefaultReplyRepository @Inject constructor(
      * from the parsed form. Any local override (notably `content_form`,
      * `numreponse`, `numrep`) wins over the parsed value to keep simple-reply
      * semantics — see the `numrep` / `numreponse` notes in `protocol-hfr.md`.
+     *
+     * `numreponse` (post being edited) stays empty for both reply and quote.
+     * `numrep` (post being cited) is empty for a simple reply, and carries the
+     * cited `numreponse` for a quote — the `ReplyContext.quotedNumreponse`
+     * value drives the choice. Edit will be wired in Phase 2D and will flip
+     * `numreponse` instead of `numrep`.
      */
     private fun buildFormBody(
         context: ReplyContext,
@@ -222,9 +232,12 @@ class DefaultReplyRepository @Inject constructor(
             "hash_check" to form.hashCheck,
             "verifrequet" to HfrConstants.VERIF_REQUET,
             "content_form" to bbcodeContent,
-            // numreponse / numrep are empty for a simple reply (no quote, no edit).
             "numreponse" to "",
-            "numrep" to "",
+            // Quote: HFR identifies the cited post via `numrep`. Reply: empty.
+            // The form's own hidden `numrep` (if any) is already echoed correctly
+            // by HFR's reply page (always empty), and our override pins the
+            // contract regardless of any future server-side change.
+            "numrep" to (context.quotedNumreponse?.toString().orEmpty()),
             // Re-assert the (cat, subcat, post, page) tuple to match HFR's contract
             // even if the form ever forgets to echo them.
             "cat" to context.cat.toString(),

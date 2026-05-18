@@ -8,6 +8,26 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
+Phase 2C boucle complète : quote MVP (#146) en plus du reply (#145). Bouton « Citer » sur chaque post, GET du formulaire HFR avec `numrep` + `ref`, hydratation du draft depuis le `[quotemsg=…]` prérempli sans écraser une saisie en cours, POST sur le même `bddpost.php` que le reply. Aucun `QuoteRepository` ajouté — c'est une variante de `ReplyRepository`.
+
+### Added
+- `ReplyContext` étendu avec `quotedNumreponse: Int?` + `quoteRef: Int?` (opaque, parsé depuis le href HFR jamais reconstruit côté app), helper `isQuote`.
+- `ReplyForm.initialContent: String` — `""` pour reply simple, BBCode `[quotemsg=…]` verbatim pour quote.
+- `TopicPageParser` extrait `Post.quoteRef` depuis l'attribut `href` du lien « quote » de chaque post. Champ nullable, transitoire (non persisté Room — recalculé à chaque parse).
+- `HfrClient.getReplyForm(quotedNumreponse, quoteRef)` ajoute les query params optionnels dans l'ordre canonique HFR (`numrep`, `ref` entre `post` et `page`).
+- `DefaultReplyRepository.buildFormBody` route `numrep` selon `context.quotedNumreponse` (vide pour reply, valeur cited pour quote) ; `numreponse` reste vide dans les deux cas.
+- `PostEditorViewModel` hydrate le draft depuis `ReplyForm.initialContent` une seule fois (`draftHydratedFromForm` mémoise), jamais après une saisie utilisateur — protège contre l'écrasement par un refetch silencieux post `InvalidHashCheck`.
+- Navigation : `PostEditorRoute` reçoit `quotedNumreponse` + `quoteRef` ; `TopicScreen.onQuote` poussé depuis chaque `TopicPostCard` qui a un `quoteRef` non-null et un topic avec `hasSubcat`. Bouton « Citer » masqué sinon (locked topic, pages anonymes).
+
+### Changed
+- `docs/specs/models.md` : `ReplyContext` + `ReplyForm` mis à jour avec les nouveaux champs.
+- `docs/specs/navigation.md` : `PostEditorRoute` étendu, callback `onQuote` documenté dans l'`entryProvider`.
+- `docs/specs/mvi.md` § Editor : statut Phase 2C devient « Reply + Quote MVP livrés ».
+- `docs/specs/roadmap.md` : Quote (#146) cochée.
+
+### Fixed
+- `ReplyFormParser` lit `<textarea name="content_form">` via `wholeText()` plutôt que `text()` — préserve le BBCode verbatim que HFR ship dans la quote prefill (la décodage HTML d'entités appliquée par `text()` cassait `[quotemsg=N,X,user]` sur certaines captures).
+
 ---
 
 ## v0.10.3 — 2026-05-18

@@ -86,12 +86,23 @@ class ReplyFormParser {
         // some HFR renderings (it can be either visible or hidden depending on layout).
         val sujet = sujetInput?.attr("value").orEmpty()
 
+        // Phase 2C (#146) — capture the textarea HFR uses to ship a quote prefill.
+        // For a simple reply the textarea is empty ; for a quote HFR wraps the cited
+        // post in a `[quotemsg=N,opaque,userId]...[/quotemsg]` block which we forward
+        // verbatim (the `opaque` middle parameter is server-controlled, never recompute
+        // it client-side). Jsoup's `.text()` would collapse whitespace and HTML-decode
+        // entities — we deliberately use `wholeText()` so the user sees the raw BBCode
+        // exactly as HFR composed it.
+        val contentTextarea = replyForm.selectFirst("textarea[name=content_form]")
+        val initialContent = contentTextarea?.wholeText().orEmpty()
+
         return Result.success(
             ReplyForm(
                 hashCheck = resolvedHashCheck,
                 sujet = sujet,
                 hiddenFields = collected.toMap(),
                 isAnonymous = isAnonymous,
+                initialContent = initialContent,
             ),
         )
     }

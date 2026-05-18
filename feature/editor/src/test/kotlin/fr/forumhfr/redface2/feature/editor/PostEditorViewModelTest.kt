@@ -25,6 +25,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -298,7 +299,77 @@ class PostEditorViewModelTest {
         }
     }
 
-    private fun newReplyViewModel(subcat: Int? = SAMPLE_SUBCAT): PostEditorViewModel =
+    @Test
+    fun `quote VM forwards quotedNumreponse and quoteRef to ReplyRepository on form fetch`() = runTest {
+        replyRepository.formResult = Result.success(
+            authenticatedForm(initialContent = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"),
+        )
+        newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        // Let the launched form fetch complete.
+        testScheduler.advanceUntilIdle()
+
+        val context = replyRepository.lastFetchedContext
+        assertNotNull("fetchReplyForm must have been called", context)
+        requireNotNull(context)
+        assertEquals("quoted numreponse must propagate", 2784595, context.quotedNumreponse)
+        assertEquals("quote ref must propagate", 0, context.quoteRef)
+        assertTrue("isQuote must be true", context.isQuote)
+    }
+
+    @Test
+    fun `quote VM hydrates the draft from initialContent on first form load`() = runTest {
+        val prefill = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"
+        replyRepository.formResult = Result.success(authenticatedForm(initialContent = prefill))
+
+        val viewModel = newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertFalse("Form must be fully loaded", settled.isLoadingForm)
+            assertEquals("Draft hydrated with HFR prefill", prefill, settled.draft.text)
+            assertTrue("Caret placed at the end of the prefill", settled.draftHydratedFromForm)
+            assertEquals(prefill.length, settled.draft.selection.start)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `quote VM does not overwrite a draft the user already typed`() = runTest {
+        // User-typed content lands on the VM before the form fetch completes —
+        // we gate the fetch with a CompletableDeferred so we can interleave them
+        // exactly like the production race (network in flight, user typing).
+        val formGate = CompletableDeferred<Unit>()
+        replyRepository.formResult = Result.success(
+            authenticatedForm(initialContent = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"),
+        )
+        replyRepository.formGate = formGate
+
+        val viewModel = newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        // Type before the form lands.
+        viewModel.submit(
+            PostEditorIntent.ContentChanged(
+                androidx.compose.ui.text.input.TextFieldValue("My own message"),
+            ),
+        )
+        // Now let the form load.
+        formGate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals(
+                "User-typed content must be preserved when the form arrives late",
+                "My own message",
+                settled.draft.text,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    private fun newReplyViewModel(
+        subcat: Int? = SAMPLE_SUBCAT,
+        quotedNumreponse: Int? = null,
+        quoteRef: Int? = null,
+    ): PostEditorViewModel =
         PostEditorViewModel(
             request = PostEditorRequest(
                 mode = PostEditorMode.Reply,
@@ -307,17 +378,20 @@ class PostEditorViewModelTest {
                 numreponse = null,
                 page = SAMPLE_PAGE,
                 subcat = subcat,
+                quotedNumreponse = quotedNumreponse,
+                quoteRef = quoteRef,
             ),
             previewParser = previewParser,
             replyRepository = replyRepository,
             diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
         )
 
-    private fun authenticatedForm(): ReplyForm = ReplyForm(
+    private fun authenticatedForm(initialContent: String = ""): ReplyForm = ReplyForm(
         hashCheck = "FAKE_HASH",
         sujet = "Fake Topic",
         hiddenFields = mapOf("cat" to "23", "subcat" to "550", "post" to "35395", "page" to "20"),
         isAnonymous = false,
+        initialContent = initialContent,
     )
 
     private fun anonymousForm(): ReplyForm = ReplyForm(
@@ -353,15 +427,24 @@ class PostEditorViewModelTest {
         var submitResult: ReplySubmitResult? = null
         var submitException: Throwable? = null
         var submitGate: CompletableDeferred<Unit>? = null
+        var formGate: CompletableDeferred<Unit>? = null
         var formException: Throwable? = null
 
         var formFetches: Int = 0
             private set
         var submitCalls: Int = 0
             private set
+        var lastFetchedContext: ReplyContext? = null
+            private set
+        var lastSubmittedContext: ReplyContext? = null
+            private set
+        var lastSubmittedBbcode: String? = null
+            private set
 
         override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
             formFetches += 1
+            lastFetchedContext = context
+            formGate?.await()
             formException?.let { throw it }
             return formResult.getOrThrow()
         }
@@ -372,6 +455,8 @@ class PostEditorViewModelTest {
             bbcodeContent: String,
         ): ReplySubmitResult {
             submitCalls += 1
+            lastSubmittedContext = context
+            lastSubmittedBbcode = bbcodeContent
             submitGate?.await()
             submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")

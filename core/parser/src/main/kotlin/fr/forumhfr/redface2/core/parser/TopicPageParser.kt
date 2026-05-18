@@ -90,7 +90,34 @@ class TopicPageParser(
             isOwnPost = false,
             quotedAuthors = content.quotedAuthors,
             postIndex = null,
+            quoteRef = parseQuoteRef(postTable),
         )
+    }
+
+    /**
+     * Phase 2C (#146) — extracts the `ref` query parameter from the post's quote
+     * link. HFR renders each post toolbar with an `<a href="…/message.php?…&numrep=
+     * {numreponse}&ref={N}…">` element. `ref` is opaque (correlates with the post's
+     * position on the current topic page, exact semantic undocumented), so we
+     * forward whatever HFR provided and never compute it client-side. When the
+     * link is absent (locked topic, special post types) we return `null` and the
+     * UI suppresses the « Citer » action for that post — never a magic default.
+     */
+    private fun parseQuoteRef(postTable: Element): Int? {
+        // The reply-form GET URL is the same shape for both « Répondre » (no
+        // numrep) and « Citer » (numrep=<post>). The toolbar may carry only the
+        // quote link (for posts on a normal topic) or only an anchor link with
+        // class `Topic` (for the first post of the page). We anchor on `numrep`
+        // because that is the distinguishing parameter — if it is missing, the
+        // link is not a quote.
+        val quoteLink = postTable
+            .select("a[href*=numrep=]")
+            .firstOrNull { it.attr("href").contains("ref=") }
+            ?: return null
+        val href = quoteLink.attr("href")
+        // `&amp;ref=N` is normalised by Jsoup to `&ref=N` in the parsed attribute
+        // value, so we can match the raw form here.
+        return QUOTE_REF_REGEX.find(href)?.groupValues?.getOrNull(1)?.toIntOrNull()
     }
 
     private fun parsePageInfo(document: Document): PageInfo {
@@ -202,3 +229,5 @@ private data class PageInfo(
     val current: Int,
     val total: Int,
 )
+
+private val QUOTE_REF_REGEX: Regex = Regex("""[?&]ref=(\d+)""")
