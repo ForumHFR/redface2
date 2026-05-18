@@ -8,6 +8,12 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
+---
+
+## v0.10.0 — 2026-05-18
+
+Premier flux de mutation HFR réelle livré : depuis un topic, l'utilisateur peut composer un BBCode et le poster via `bddpost.php`, avec gestion typée des 5 erreurs HFR observées et anti-double-submit. App bump à `0.3.0` (semver MINOR pour la première mutation HFR). 2 rounds de reviews croisées (4 flavors × 2 = 8 rapports) ont validé l'absence de blocker critique et corrigé 2 bugs latents avant tag : (1) le filtre `password` du `ReplyFormParser` était documenté mais inopérant car `<input type="password">` n'est pas hidden — corrigé en itérant sur `input[name]` avec deny rules explicites ; (2) `Topic.hasSubcat` acceptait `subcat = 0` (wire shape moderator-space HFR `cat=0` family) sans fixture utilisateur qui prouve la validité — durci à `subcat > 0`. Migration Room v3 → v4 ajoute `subcat` à `topic_pages` avec sentinel `-1`.
+
 ### Added
 - Phase 2C — Reply MVP (#145) : première mutation HFR réelle livrée. `PostEditorViewModel` reçoit `ReplyRepository` (interface `:core:domain/write/`, impl `DefaultReplyRepository` dans `:core:data/write/`). En mode Reply, le ViewModel fetch `message.php` au démarrage pour obtenir `hash_check`, puis sur `SubmitClicked` POSTe `bddpost.php?config=hfr.inc` avec le formulaire HFR complet (`verifrequet=1100`, `content_form`, `cat`, `subcat`, `post`, `page`, etc.).
 - `:core:parser/write/ReplyFormParser` extrait les hidden fields HFR (sans `password`, sans `pseudo` anonyme) ; `ReplySubmitResponseParser` classifie les 5 retours observés (succès, `empty_message`, `invalid_token`, `antiflood`, `locked_topic`).
