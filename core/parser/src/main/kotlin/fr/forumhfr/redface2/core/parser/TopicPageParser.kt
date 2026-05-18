@@ -23,7 +23,15 @@ class TopicPageParser(
         return Topic(
             cat = requireInputValue(document, HfrSelectors.CATEGORY_ID_INPUT),
             post = requireInputValue(document, HfrSelectors.TOPIC_ID_INPUT),
-            subcat = requireInputValue(document, HfrSelectors.SUBCATEGORY_ID_INPUT),
+            // subcat is required by Phase 2C's write contract but the Phase 1
+            // read flow is older — falling back to the SUBCAT_UNKNOWN sentinel
+            // keeps a topic readable even if HFR ever stops emitting the field,
+            // at the cost of disabling reply until a future capture surfaces a
+            // real id. Several HFR widgets render `input[name=subcat]` on the
+            // same page (fast-search header, reply form, …), so we explicitly
+            // pick the last occurrence which is the one that lives next to the
+            // reply form.
+            subcat = optionalSubcat(document),
             title = document.selectFirst(HfrSelectors.TOPIC_TITLE)?.text()?.trim()
                 ?: error("Topic title not found"),
             posts = posts,
@@ -32,6 +40,17 @@ class TopicPageParser(
             isFirstPostOwner = false,
             poll = parsePoll(document),
         )
+    }
+
+    private fun optionalSubcat(document: Document): Int {
+        val inputs = document.select(HfrSelectors.SUBCATEGORY_ID_INPUT)
+        if (inputs.isEmpty()) return Topic.SUBCAT_UNKNOWN
+        // Several HFR widgets ship a subcat hidden input on the same page (search
+        // header, reply form, …) — they all carry the same value in practice. We
+        // pick the last occurrence because the reply form (Phase 2C write target)
+        // is rendered after the search widget, so the last write is the most
+        // trustworthy from the write-contract perspective.
+        return inputs.last()?.attr("value")?.toIntOrNull() ?: Topic.SUBCAT_UNKNOWN
     }
 
     private fun parsePosts(

@@ -81,29 +81,6 @@ val MIGRATION_1_2: Migration = object : Migration(1, 2) {
  * `topic_pages` and `posts` are untouched : their schema didn't change between
  * v2 and v3, only `flag_topics` did.
  */
-/**
- * v3 → v4 (Phase 2C, #145):
- *
- * Adds `subcat` to `topic_pages`. Phase 2C requires the sub-category id to build a
- * valid `message.php` GET form and a valid `bddpost.php` POST (cf.
- * `docs/specs/protocol-hfr.md` § POST `bddpost.php`). The parser extracts the value
- * from the topic page HTML (`input[name=subcat]`), the entity stores it next to
- * `cat`, `post`, `page`.
- *
- * Existing v3 rows are backfilled to `-1`, a sentinel that means "unknown, must be
- * refreshed before any write flow". Write paths refuse to POST when `subcat < 0` —
- * the value is *never* transmitted to HFR. Setting the column NOT NULL via the
- * `-1` default keeps Room's schema verification happy without forcing a row rewrite
- * (topic pages are short-lived cache, the next live fetch replaces the sentinel).
- */
-val MIGRATION_3_4: Migration = object : Migration(3, 4) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL(
-            "ALTER TABLE topic_pages ADD COLUMN subcat INTEGER NOT NULL DEFAULT -1",
-        )
-    }
-}
-
 val MIGRATION_2_3: Migration = object : Migration(2, 3) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("DROP TABLE IF EXISTS `flag_topics`")
@@ -137,6 +114,29 @@ val MIGRATION_2_3: Migration = object : Migration(2, 3) {
         db.execSQL(
             "CREATE INDEX IF NOT EXISTS `index_flag_topics_userId_fetchedAt` " +
                 "ON `flag_topics` (`userId`, `fetchedAt`)",
+        )
+    }
+}
+
+/**
+ * v3 → v4 (Phase 2C, #145):
+ *
+ * Adds `subcat` to `topic_pages`. Phase 2C requires the sub-category id to build a
+ * valid `message.php` GET form and a valid `bddpost.php` POST (cf.
+ * `docs/specs/protocol-hfr.md` § POST `bddpost.php`). The parser extracts the value
+ * from the topic page HTML (`input[name=subcat]`), the entity stores it next to
+ * `cat`, `post`, `page`.
+ *
+ * Existing v3 rows are backfilled to `-1`, a sentinel that means "unknown, must be
+ * refreshed before any write flow". Write paths refuse to POST when `subcat < 0` —
+ * the value is *never* transmitted to HFR. Setting the column NOT NULL via the
+ * `-1` default keeps Room's schema verification happy without forcing a row rewrite
+ * (topic pages are short-lived cache, the next live fetch replaces the sentinel).
+ */
+val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "ALTER TABLE topic_pages ADD COLUMN subcat INTEGER NOT NULL DEFAULT -1",
         )
     }
 }

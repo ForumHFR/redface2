@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.network.HfrClient
+import fr.forumhfr.redface2.core.network.HfrConstants
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
 import javax.inject.Inject
@@ -82,7 +83,7 @@ class DefaultReplyRepository @Inject constructor(
         val builder = FormBody.Builder(Charsets.UTF_8)
         val overrides = mapOf(
             "hash_check" to form.hashCheck,
-            "verifrequet" to "1100",
+            "verifrequet" to HfrConstants.VERIF_REQUET,
             "content_form" to bbcodeContent,
             // numreponse / numrep are empty for a simple reply (no quote, no edit).
             "numreponse" to "",

@@ -48,6 +48,12 @@ sealed interface ReplyFailureReason {
      */
     data object LoginRequired : ReplyFailureReason
 
-    /** Unrecognised response. The repository preserves the raw text for diagnostics only — never logged. */
+    /**
+     * Unrecognised response. The UI surfaces a generic "unexpected response" message
+     * and keeps the user's draft intact. No raw text is carried — the response body
+     * is intentionally dropped to avoid leaking `hash_check` or session metadata
+     * into a snapshot or a log. If we ever need to ship diagnostics, add a dedicated,
+     * pre-redacted field rather than storing the full body here.
+     */
     data object Unknown : ReplyFailureReason
 }

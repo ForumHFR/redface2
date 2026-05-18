@@ -225,13 +225,18 @@ enum class FlagType {
 data class Topic(
     val cat: Int,
     val post: Int,
+    val subcat: Int,                 // Phase 2C : sous-cat HFR, requis par message.php/bddpost.php. Sentinel SUBCAT_UNKNOWN=-1 pour les caches pré-MIGRATION_3_4 (lecture autorisée, écriture désactivée). Jamais transmis tel quel à HFR.
     val title: String,
     val posts: List<Post>,
     val page: Int,
     val totalPages: Int,
     val isFirstPostOwner: Boolean,   // Phase 1 : figé à false par TopicPageParser tant que parseEditPage n'est pas livrée (Phase 2). Renseigné côté serveur via la page d'édition du FP.
     val poll: Poll?,
-)
+) {
+    val hasSubcat: Boolean get() = subcat != SUBCAT_UNKNOWN
+
+    companion object { const val SUBCAT_UNKNOWN: Int = -1 }
+}
 
 data class Post(
     val numreponse: Int,                 // unique par (cat), PAS globalement — clé composite (cat, numreponse) au niveau base
@@ -388,6 +393,49 @@ data class TopicListPage(
 ```
 
 **Champs absents en REST** : `views` n'est pas exposé en JSON — ne pas inventer `0`, ne pas l'afficher. Le calcul de pages côté topic (`TopicSummary.totalPages`) utilise le `results_per_page` exposé par `links.posts.href` (typiquement 40 dans les fixtures, mais c'est l'API qui décide — `40` n'est pas une constante globale, cf. [protocol-hfr.md § postsPerPage configurable]({{ site.baseurl }}/specs/protocol-hfr#postsperpage-configurable) pour la pagination HTML). Le `results_per_page` du wrapper REST englobe la **liste de topics**, distinct de celui imbriqué dans `links.posts.href` qui pagine les **posts** d'un topic.
+
+---
+
+## Écriture HFR
+
+Types vivant dans `:core:model/write/` ; consommés par `:core:parser/write/`,
+`:core:data/write/` et `:feature:editor`. Livrés en Phase 2C (#145) ; étendus
+plus tard pour Edit / Quote / Edit FP / Create.
+
+```kotlin
+data class ReplyContext(
+    val cat: Int,
+    val subcat: Int,                 // requis ≥ 0 ; ReplyContext.init refuse le sentinel SUBCAT_UNKNOWN
+    val topicId: Int,
+    val page: Int,                   // page topic depuis laquelle l'utilisateur a cliqué "Répondre"
+)
+
+data class ReplyForm(
+    val hashCheck: String,           // CSRF token HFR, jamais loggué
+    val sujet: String,
+    val hiddenFields: Map<String, String>,   // password filtré au parse ; pseudo anonyme filtré
+    val isAnonymous: Boolean,
+)
+
+sealed interface ReplySubmitResult {
+    data class Success(
+        val refreshUrl: String?,     // <meta http-equiv="Refresh" content="N; url=…">
+        val targetPage: Int?,        // dérivé du shape sujet_X_Y.htm
+    ) : ReplySubmitResult
+    data class Failure(val reason: ReplyFailureReason) : ReplySubmitResult
+}
+
+sealed interface ReplyFailureReason {
+    data object EmptyMessage : ReplyFailureReason
+    data object InvalidHashCheck : ReplyFailureReason
+    data object AntiFlood : ReplyFailureReason
+    data object TopicLocked : ReplyFailureReason
+    data object LoginRequired : ReplyFailureReason   // form anonyme servi par HFR
+    data object Unknown : ReplyFailureReason         // réponse non reconnue ; pas de raw body conservé (cf. KDoc)
+}
+```
+
+Le contrat HFR sous-jacent est documenté dans [`protocol-hfr.md` § POST `bddpost.php`]({{ site.baseurl }}/specs/protocol-hfr). Les `ReplyFailureReason` mappent un-à-un sur les fixtures `write_*_error.html` / `write_*_response.html` capturées en Phase 2A.
 
 ---
 

@@ -163,10 +163,13 @@ class PostEditorViewModel @AssistedInject constructor(
 
     private fun handleFetchFailure(error: Throwable) {
         if (error is CancellationException) throw error
+        // Map known transport-level failures to a typed SubmitError ; classify the
+        // rest as Unknown rather than letting the exception bubble up and crash the
+        // process. The UI surfaces the same "unexpected response" message either way.
         val mapped = when (error) {
             is SessionExpiredException -> SubmitError.SessionExpired
             is IOException -> SubmitError.Network
-            else -> throw error
+            else -> SubmitError.Hfr(ReplyFailureReason.Unknown)
         }
         _state.update { it.copy(isLoadingForm = false, submitError = mapped) }
     }
@@ -234,7 +237,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val mapped = when (error) {
             is SessionExpiredException -> SubmitError.SessionExpired
             is IOException -> SubmitError.Network
-            else -> throw error
+            else -> SubmitError.Hfr(ReplyFailureReason.Unknown)
         }
         _state.update { it.copy(isSubmitting = false, submitError = mapped) }
     }

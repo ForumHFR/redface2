@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.parser
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -122,6 +123,38 @@ class TopicPageParserTest {
         val topic = parser.parse(fixture("topic_khakha_page_2.html"))
 
         assertNull(topic.posts.first().postIndex)
+    }
+
+    @Test
+    fun `parse extracts the subcat from the HFR topic page so Phase 2C can build a reply URL`() {
+        // `input[name=subcat]` appears multiple times on a HFR topic page (fast-search
+        // header + reply form). The parser must pick a real value, not the
+        // SUBCAT_UNKNOWN sentinel — Phase 2C's reply flow refuses to open the editor
+        // when the topic carries the sentinel (cache pre-dating MIGRATION_3_4).
+        val topic = parser.parse(fixture("topic_khakha_page_1.html"))
+
+        assertEquals(432, topic.subcat)
+        assertTrue(topic.hasSubcat)
+    }
+
+    @Test
+    fun `parse falls back to SUBCAT_UNKNOWN when the topic HTML drops the subcat input`() {
+        // Stripped-down topic page : cat + post + title + page are present so Phase 1
+        // read keeps working ; subcat input is intentionally missing. Phase 2C must
+        // tolerate this gracefully — the topic stays openable, only reply is disabled.
+        val html = """
+            <html><body>
+              <input type="hidden" name="cat" value="13" />
+              <input type="hidden" name="post" value="84540" />
+              <table><tbody>
+                <tr class="fondForum2Title"><td><h3>Stripped topic</h3></td></tr>
+                <tr class="fondForum2PagesHaut"><td class="left"><b>1</b></td></tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        assertEquals(fr.forumhfr.redface2.core.model.Topic.SUBCAT_UNKNOWN, topic.subcat)
+        assertFalse(topic.hasSubcat)
     }
 
     private fun fixture(name: String): String {

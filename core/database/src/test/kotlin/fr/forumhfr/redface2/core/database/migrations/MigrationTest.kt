@@ -262,4 +262,65 @@ class MigrationTest {
             migrated.close()
         }
     }
+
+    /**
+     * Phase 2C (#145) — proves `MIGRATION_3_4` adds `subcat` to `topic_pages` with
+     * the sentinel default `-1`, that pre-existing rows are preserved and that the
+     * new column is queryable as a real `INTEGER`. The sentinel value is the
+     * "unknown, must be refreshed before any write flow" marker; write paths gate
+     * on `subcat >= 0` so the value is never transmitted to HFR.
+     */
+    @Test
+    fun migrate_3_to_4_adds_subcat_with_sentinel_default_to_topic_pages() {
+        val dbName = "redface-test-migration-3-to-4.db"
+
+        // 1. Build the v3 DB and insert a topic_pages row that pre-dates `subcat`.
+        helper.createDatabase(dbName, 3).use { v3 ->
+            v3.insert(
+                "topic_pages",
+                android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE,
+                ContentValues().apply {
+                    put("cat", 23)
+                    put("post", 35395)
+                    put("page", 1)
+                    put("title", "v3 cached topic")
+                    put("totalPages", 1)
+                    put("isFirstPostOwner", 0)
+                    putNull("pollJson")
+                    put("numreponses", "[\"100\"]")
+                    put("fetchedAt", 1_700_000_000_000L)
+                    put("authMode", "AUTHENTICATED")
+                },
+            )
+        }
+
+        // 2. Run MIGRATION_3_4 and validate against the v4 schema.
+        helper.runMigrationsAndValidate(dbName, 4, true, MIGRATION_3_4).close()
+
+        // 3. Open the production Room database (which chains every migration) so
+        //    the post-migration schema is what real users land on.
+        val migrated = Room.databaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java,
+            dbName,
+        )
+            .allowMainThreadQueries()
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .build()
+
+        try {
+            migrated.openHelper.readableDatabase.query(
+                "SELECT subcat FROM topic_pages WHERE cat = 23 AND post = 35395 AND page = 1",
+            ).use { cursor ->
+                assertTrue("v3 row must survive MIGRATION_3_4", cursor.moveToFirst())
+                assertEquals(
+                    "subcat must default to the SUBCAT_UNKNOWN sentinel for pre-v4 rows",
+                    -1,
+                    cursor.getInt(0),
+                )
+            }
+        } finally {
+            migrated.close()
+        }
+    }
 }

@@ -2,7 +2,6 @@ package fr.forumhfr.redface2.core.parser.write
 
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import org.jsoup.Jsoup
-import org.jsoup.nodes.Element
 
 /**
  * Parses HFR's `message.php` reply form. The page returned by HFR contains many
@@ -34,7 +33,14 @@ class ReplyFormParser {
         val replyForm = document.selectFirst("form[action*=bddpost.php]")
             ?: return Result.failure(IllegalStateException("Reply form not found"))
 
-        val hiddenInputs = replyForm.select("input[type=hidden]")
+        // Iterate every <input> below the reply form (hidden, text, password, …) so
+        // we can apply the explicit allow/deny rules below regardless of the input
+        // type HFR uses. Restricting to `input[type=hidden]` would silently drop the
+        // user-typed pseudo field (which HFR renders as `type=text` even when the
+        // user is authenticated) and would *not* protect against password input
+        // either (which has `type=password`, not hidden) — both deny rules are
+        // necessary, and both come from a single pass over the full input list.
+        val allInputs = replyForm.select("input[name]")
         val pseudoInput = replyForm.selectFirst("input[name=pseudo]")
         val sujetInput = replyForm.selectFirst("input[name=sujet]")
 
@@ -43,20 +49,30 @@ class ReplyFormParser {
 
         val collected = mutableMapOf<String, String>()
         var hashCheck: String? = null
-        hiddenInputs.forEach { input ->
+        allInputs.forEach { input ->
             val name = input.attr("name")
             if (name.isEmpty()) return@forEach
+            val type = input.attr("type").lowercase()
+            // Hard deny: password is never echoed back to HFR (HFR's hidden composer
+            // fallback would re-authenticate over an existing cookie — never the path
+            // we want). The `password` *name* check is belt-and-braces in case HFR
+            // ever ships a non-`type=password` element with that name.
+            if (type == "password" || name == "password") return@forEach
             val value = input.attr("value")
             when (name) {
                 "hash_check" -> {
-                    // Keep the first non-empty hash_check we see; HFR sometimes renders
-                    // it twice (search widget + reply form). The reply form copy comes
-                    // after the search one, so the last-write-wins behaviour below also
-                    // works, but pin the contract explicitly here.
+                    // HFR sometimes renders hash_check twice (search widget + reply
+                    // form). Last non-empty write wins; the reply form copy appears
+                    // after the search one in the document, so this picks up the
+                    // authoritative value naturally.
                     if (value.isNotEmpty()) hashCheck = value
                 }
-                // We forward the static hidden inputs verbatim — keeps Phase 2C honest
-                // against future HFR additions without code change.
+                "pseudo" -> {
+                    // Only forward when authenticated (non-empty value). On the
+                    // anonymous composer, HFR re-types the same field as an editable
+                    // text input — we still skip it.
+                    if (!isAnonymous && pseudoValue.isNotEmpty()) collected[name] = pseudoValue
+                }
                 else -> collected[name] = value
             }
         }
@@ -64,13 +80,6 @@ class ReplyFormParser {
         val resolvedHashCheck = hashCheck
         if (resolvedHashCheck.isNullOrBlank()) {
             return Result.failure(IllegalStateException("hash_check missing from reply form"))
-        }
-
-        // Pseudo: only forward when authenticated (non-empty). Password is always
-        // dropped: HFR's hidden composer is the one we never want to use.
-        if (!isAnonymous && pseudoInput != null) {
-            val name = pseudoInput.attr("name")
-            if (name.isNotEmpty() && pseudoValue.isNotEmpty()) collected[name] = pseudoValue
         }
 
         // Sujet is part of the form contract but lives outside the hidden inputs in
@@ -86,8 +95,4 @@ class ReplyFormParser {
             ),
         )
     }
-
-    @Suppress("unused")
-    private fun Element.hiddenInputValue(name: String): String? =
-        selectFirst("input[type=hidden][name=$name]")?.attr("value")?.takeIf { it.isNotEmpty() }
 }

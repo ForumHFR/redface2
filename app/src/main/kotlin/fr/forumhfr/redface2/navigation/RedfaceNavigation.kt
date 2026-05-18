@@ -325,7 +325,11 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                         // Pop the editor and refresh the topic page. Phase 2C-A always
                         // pops back to the topic; targetPage informs which page to
                         // reload — null falls back to the page we replied from.
-                        backStack.removeAt(backStack.lastIndex)
+                        // Guard the pop the same way the global `onBack` lambda does:
+                        // never collapse the back stack below the tab root.
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
                         val topicEntry = backStack.lastOrNull() as? TopicRoute
                         if (topicEntry != null) {
                             backStack.removeAt(backStack.lastIndex)
