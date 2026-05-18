@@ -248,7 +248,9 @@ class PostEditorViewModel @AssistedInject constructor(
         val page = snapshot.page ?: return null
         val subcat = snapshot.subcat ?: return null
         val topicId = snapshot.topicId ?: return null
-        if (subcat < 0) return null
+        // Mirror the `Topic.hasSubcat` / `ReplyContext.init` rule : reject both the
+        // sentinel (-1) and the moderator-space wire shape (0).
+        if (subcat <= 0) return null
         return ReplyContext(cat = snapshot.cat, subcat = subcat, topicId = topicId, page = page)
     }
 

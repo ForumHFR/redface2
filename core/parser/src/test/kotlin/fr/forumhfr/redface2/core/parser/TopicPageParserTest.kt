@@ -139,9 +139,15 @@ class TopicPageParserTest {
 
     @Test
     fun `parse falls back to SUBCAT_UNKNOWN when the topic HTML drops the subcat input`() {
-        // Stripped-down topic page : cat + post + title + page are present so Phase 1
-        // read keeps working ; subcat input is intentionally missing. Phase 2C must
-        // tolerate this gracefully — the topic stays openable, only reply is disabled.
+        // Synthetic HTML is **explicitly** allowed for this regression check :
+        // CLAUDE.md § Fixtures HTML requires real HFR captures via hfr-mcp for
+        // anything that exercises the production parser path on a representative
+        // page. Here we only exercise the *missing-input fallback branch* of
+        // `optionalSubcat`, which by definition cannot be captured live (every
+        // real HFR topic ships a `subcat` input). Building the minimal valid
+        // shape locally is the cheapest way to pin the contract — if HFR ever
+        // changes the topic layout to drop subcat altogether, real fixtures will
+        // overtake this test.
         val html = """
             <html><body>
               <input type="hidden" name="cat" value="13" />
@@ -155,6 +161,32 @@ class TopicPageParserTest {
         val topic = parser.parse(html)
         assertEquals(fr.forumhfr.redface2.core.model.Topic.SUBCAT_UNKNOWN, topic.subcat)
         assertFalse(topic.hasSubcat)
+    }
+
+    @Test
+    fun `parse picks the last subcat occurrence when multiple widgets share the field`() {
+        // HFR ships `input[name=subcat]` in several widgets on a single topic page
+        // (fast-search header + reply form). The reply form occurrence is the one
+        // we want — it's emitted after the search widget. This regression test
+        // synthesises two occurrences with different values to prove the
+        // `optionalSubcat` `last()` choice is wired the way the KDoc claims.
+        val html = """
+            <html><body>
+              <input type="hidden" name="cat" value="13" />
+              <input type="hidden" name="post" value="84540" />
+              <input type="hidden" name="subcat" value="111" />
+              <table><tbody>
+                <tr class="fondForum2Title"><td><h3>Topic with two subcat inputs</h3></td></tr>
+                <tr class="fondForum2PagesHaut"><td class="left"><b>1</b></td></tr>
+              </tbody></table>
+              <form action="/bddpost.php?config=hfr.inc">
+                <input type="hidden" name="subcat" value="432" />
+              </form>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        assertEquals(432, topic.subcat)
+        assertTrue(topic.hasSubcat)
     }
 
     private fun fixture(name: String): String {

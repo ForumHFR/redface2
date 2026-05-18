@@ -39,9 +39,9 @@ data class PostEditorState(
     val canSubmit: Boolean
         get() = mode == PostEditorMode.Reply &&
             page != null &&
-            // Reject both the "unknown" null and the v3-cache sentinel `-1` —
-            // the latter would silently fail `ReplyContext.init` later.
-            (subcat != null && subcat >= 0) &&
+            // Reject the `null` unknown, the `-1` SUBCAT_UNKNOWN sentinel and the `0`
+            // moderator-space wire shape (`Topic.hasSubcat` uses the same rule).
+            (subcat != null && subcat > 0) &&
             topicId != null &&
             draft.text.isNotBlank() &&
             !isSubmitting &&

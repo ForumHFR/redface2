@@ -223,18 +223,7 @@ class PostEditorViewModelTest {
 
     @Test
     fun `submit refuses when subcat is null and surfaces MissingSubcat`() = runTest {
-        val viewModel = PostEditorViewModel(
-            request = PostEditorRequest(
-                mode = PostEditorMode.Reply,
-                cat = SAMPLE_CAT,
-                topicId = SAMPLE_TOPIC_ID,
-                numreponse = null,
-                page = SAMPLE_PAGE,
-                subcat = null, // sentinel reached
-            ),
-            previewParser = previewParser,
-            replyRepository = replyRepository,
-        )
+        val viewModel = newReplyViewModel(subcat = null)
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertEquals(SubmitError.MissingSubcat, settled.submitError)
@@ -244,18 +233,84 @@ class PostEditorViewModelTest {
         assertEquals(0, replyRepository.formFetches)
     }
 
-    private fun newReplyViewModel(): PostEditorViewModel = PostEditorViewModel(
-        request = PostEditorRequest(
-            mode = PostEditorMode.Reply,
-            cat = SAMPLE_CAT,
-            topicId = SAMPLE_TOPIC_ID,
-            numreponse = null,
-            page = SAMPLE_PAGE,
-            subcat = SAMPLE_SUBCAT,
-        ),
-        previewParser = previewParser,
-        replyRepository = replyRepository,
-    )
+    @Test
+    fun `submit refuses when subcat is the SUBCAT_UNKNOWN sentinel`() = runTest {
+        // Distinct from `subcat = null` : a v3-cache row carries the -1 sentinel,
+        // which is non-null but must be treated as "unknown, refresh required".
+        val viewModel = newReplyViewModel(subcat = -1)
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals(SubmitError.MissingSubcat, settled.submitError)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(0, replyRepository.formFetches)
+    }
+
+    @Test
+    fun `submit refuses when subcat is zero (HFR moderator-space wire shape)`() = runTest {
+        // 0 is HFR's wire shape for the moderator-only space (cf. cat=0 family).
+        // No fixture exercises subcat=0 on a user topic, so write flows refuse it
+        // to avoid sending a malformed POST.
+        val viewModel = newReplyViewModel(subcat = 0)
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals(SubmitError.MissingSubcat, settled.submitError)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(0, replyRepository.formFetches)
+    }
+
+    @Test
+    fun `init form fetch surfaces SessionExpired when HFR redirects to login`() = runTest {
+        replyRepository.formException = fr.forumhfr.redface2.core.domain.auth.SessionExpiredException(
+            "https://forum.hardware.fr/login.php",
+        )
+        val viewModel = newReplyViewModel()
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertFalse(settled.isLoadingForm)
+            assertEquals(SubmitError.SessionExpired, settled.submitError)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `init form fetch surfaces Network error on IOException`() = runTest {
+        replyRepository.formException = java.io.IOException("disconnected")
+        val viewModel = newReplyViewModel()
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertFalse(settled.isLoadingForm)
+            assertEquals(SubmitError.Network, settled.submitError)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `init form fetch maps unexpected exceptions to Hfr(Unknown) instead of crashing`() = runTest {
+        replyRepository.formException = IllegalStateException("HFR returned a 500 page we don't know")
+        val viewModel = newReplyViewModel()
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertFalse(settled.isLoadingForm)
+            assertEquals(SubmitError.Hfr(ReplyFailureReason.Unknown), settled.submitError)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    private fun newReplyViewModel(subcat: Int? = SAMPLE_SUBCAT): PostEditorViewModel =
+        PostEditorViewModel(
+            request = PostEditorRequest(
+                mode = PostEditorMode.Reply,
+                cat = SAMPLE_CAT,
+                topicId = SAMPLE_TOPIC_ID,
+                numreponse = null,
+                page = SAMPLE_PAGE,
+                subcat = subcat,
+            ),
+            previewParser = previewParser,
+            replyRepository = replyRepository,
+        )
 
     private fun authenticatedForm(): ReplyForm = ReplyForm(
         hashCheck = "FAKE_HASH",
@@ -297,6 +352,7 @@ class PostEditorViewModelTest {
         var submitResult: ReplySubmitResult? = null
         var submitException: Throwable? = null
         var submitGate: CompletableDeferred<Unit>? = null
+        var formException: Throwable? = null
 
         var formFetches: Int = 0
             private set
@@ -305,6 +361,7 @@ class PostEditorViewModelTest {
 
         override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
             formFetches += 1
+            formException?.let { throw it }
             return formResult.getOrThrow()
         }
 

@@ -18,7 +18,14 @@ data class Topic(
     val isFirstPostOwner: Boolean,
     val poll: Poll?,
 ) {
-    val hasSubcat: Boolean get() = subcat != SUBCAT_UNKNOWN
+    /**
+     * True only when [subcat] is a strictly positive HFR identifier. Excludes both
+     * the [SUBCAT_UNKNOWN] sentinel and `0` — the latter is the same wire shape HFR
+     * uses for its moderator-only space (`cat=0` family) and we have no captured
+     * fixture proving it is a valid value for a user-visible topic. Read flows can
+     * still surface the topic ; only write flows gate on `hasSubcat`.
+     */
+    val hasSubcat: Boolean get() = subcat > 0
 
     companion object {
         const val SUBCAT_UNKNOWN: Int = -1

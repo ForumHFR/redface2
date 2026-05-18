@@ -16,7 +16,9 @@ data class ReplyContext(
 ) {
     init {
         require(cat >= 0) { "cat must be >= 0, was $cat" }
-        require(subcat >= 0) { "subcat must be >= 0 (sentinel reached), was $subcat" }
+        // Refuse both the SUBCAT_UNKNOWN sentinel (-1) and the moderator-space wire
+        // shape (0). Mirrors `Topic.hasSubcat` — see its KDoc.
+        require(subcat > 0) { "subcat must be > 0 (sentinel or moderator space), was $subcat" }
         require(topicId >= 0) { "topicId must be >= 0, was $topicId" }
         require(page >= 1) { "page must be >= 1, was $page" }
     }
