@@ -19,10 +19,11 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Robolectric-driven migration tests for `MIGRATION_1_2` and `MIGRATION_2_3`. Both
- * migrations are hand-written DDL ; without these tests a typo (missing column,
- * wrong index name, wrong default) would only crash on a real upgrade-in-place
- * install, where the diagnostic loop is days long. The tests take seconds.
+ * Robolectric-driven migration tests for `MIGRATION_1_2`, `MIGRATION_2_3` and
+ * `MIGRATION_3_4`. The migrations are hand-written DDL ; without these tests a typo
+ * (missing column, wrong index name, wrong default) would only crash on a real
+ * upgrade-in-place install, where the diagnostic loop is days long. The tests take
+ * seconds.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [33])
@@ -104,7 +105,7 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .build()
 
         try {
@@ -234,7 +235,7 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
             .build()
 
         try {
