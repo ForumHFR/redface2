@@ -10,6 +10,25 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## v0.10.5 — 2026-05-19
+
+App patch 0.3.5 (build v45) — fix radio/checkbox parser + UI options post.
+
+### Fixed
+- `ReplyFormParser` respecte la sémantique browser : `<input type="radio|checkbox">` sans `checked` est ignoré. Avant ce fix, le POST shippait `MsgIcon=16` (`:heink:`) au lieu du défaut HFR `1` (icône normale) parce que l'itération laissait la dernière radio gagner. Et les 3 checkboxes options (`signature`, `smiley`, `emaill`) étaient transmises avec `value=1` quel que soit leur état coché.
+- `ReplyForm.msgIcon: String?` + `ReplyForm.options: ReplyFormOptions` exposent les défauts HFR lus depuis les attributs `checked`. Le `MsgIcon` UI picker reste hors scope (Phase 2D si demande utilisateur).
+
+### Added
+- 3 toggles « Options du message » dans `PostEditorScreen` : « Activer votre signature », « Désactiver les smilies », « Activer la notification par email du sujet ». Hydratés depuis `ReplyForm.options` (lecture `checked` HFR) au premier load. Un refetch silencieux après `InvalidHashCheck` n'écrase pas un toggle utilisateur — même règle anti-clobber que `draftHydratedFromForm`, mémorisée via `optionsHydratedFromForm`.
+- 3 nouveaux `PostEditorIntent` : `ToggleSignature(enabled)`, `ToggleSmileyDisabled(disabled)`, `ToggleEmailNotification(enabled)`.
+- `DefaultReplyRepository.buildFormBody(options: ReplyFormOptions)` POSTe `signature=1` / `smiley=1` / `emaill=1` uniquement quand le toggle correspondant est ON (sinon le champ est entièrement omis, comme un browser le ferait). `emaill` (double `l`) est la typo HFR conservée verbatim.
+- Variante fixture `write_reply_form_signature_checked.html` (patch local de `write_reply_form_open_topic.html` : ajout `checked="checked"` sur l'input signature) pour pinner le cas nominal HFR « signature pré-cochée » que la fixture originale (compte sans signature configurée) ne couvrait pas.
+
+### Changed
+- `ReplyRepository.submitReply(options: ReplyFormOptions = ReplyFormOptions())` étendu — la valeur par défaut préserve la compatibilité avec les anciens call-sites internes.
+
+---
+
 ## v0.10.4 — 2026-05-18
 
 App patch 0.3.4 (build v44) — Phase 2C boucle complète : quote MVP (#146) en plus du reply (#145). Bouton « Citer » sur chaque post, GET du formulaire HFR avec `numrep` + `ref`, hydratation du draft depuis le `[quotemsg=…]` prérempli sans écraser une saisie en cours, POST sur le même `bddpost.php` que le reply. Aucun `QuoteRepository` ajouté — c'est une variante de `ReplyRepository`.
