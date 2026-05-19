@@ -211,6 +211,44 @@ class TopicPageParserTest {
     }
 
     @Test
+    fun `quoteRef ignores numrep links inside the post body and only reads the toolbar`() {
+        // A user can quote another post inline in the body of their own post (HFR
+        // renders such a link as a plain anchor to message.php?…&numrep=…&ref=N…).
+        // `parseQuoteRef` must NOT pick that up : the « Citer » action belongs to
+        // the toolbar of the post we're rendering, not to whatever it cites in
+        // its content. Round 2 fix — scopes the lookup to POST_TOOLBAR_LEFT.
+        val html = """
+            <html><body>
+              <input name="cat" value="13" />
+              <input name="post" value="84540" />
+              <input name="subcat" value="432" />
+              <table><tbody>
+                <tr class="fondForum2Title">
+                  <th class="messCase1">Auteur</th>
+                  <th><h3>Body link sanity</h3></th>
+                </tr>
+              </tbody></table>
+              <table class="messagetable"><tbody>
+                <tr class="message">
+                  <td class="messCase1"><a name="t77777"></a><b class="s2">UserA</b></td>
+                  <td class="messCase2">
+                    <div class="toolbar"><div class="left">Posté le 18-05-2026&nbsp;à&nbsp;10:00:00</div></div>
+                    <div id="para77777">
+                      <p>See <a href="/message.php?config=hfr.inc&amp;cat=13&amp;post=84540&amp;numrep=12345&amp;ref=99&amp;page=1&amp;subcat=432">that other post</a></p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        assertNull(
+            "numrep link inside the post body must not be promoted to quoteRef",
+            topic.posts.single().quoteRef,
+        )
+    }
+
+    @Test
     fun `quoteRef ignores a numrep link whose params only carry foreign ref suffixes`() {
         // Belt-and-braces regression : if HFR ever adds an unrelated `…&myref=…`
         // or `…&referrer=…` to the toolbar (or a tracking attribute), our quote

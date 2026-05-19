@@ -118,6 +118,13 @@ Phase 2A clôturée et Phase 2B-A livrée : le client a désormais une cartograp
 - `docs/specs/navigation.md` : `EditorRoute(EditorMode)` remplacé par `PostEditorRoute(PostEditorMode, cat, topicId?, numreponse?)` + `TopicFormRoute(TopicFormMode, cat?, subcat?, topicId?)`. Le call-site `TopicScreen.onReply` ouvre désormais `PostEditorRoute(Reply, route.cat, topicId = topicId)`.
 - `docs/specs/roadmap.md` § Phase 2 : 2A et 2B-A cochés, items individuels précisés.
 
+### Fixed (PR #163 round 2 review)
+- `Post.quoteRef` est désormais persisté en Room v5 (`MIGRATION_4_5` : `ALTER TABLE posts ADD COLUMN quoteRef INTEGER` nullable). Avant ce fix, un cache hit frais perdait tous les `quoteRef` et le bouton « Citer » disparaissait jusqu'au prochain refresh réseau. Test repository `observeTopicPage fresh cache preserves quoteRef without network refresh` + migration test `migrate_4_to_5_adds_nullable_quoteRef_to_posts` (chaîné dans tous les builders de tests `.addMigrations(...)`).
+- `PostEditorViewModel` recalcule la preview AST lors de l'hydratation quote si la preview était visible pendant `isLoadingForm` — avant, l'utilisateur voyait un panneau de preview vide sous un draft prérempli. Test dédié `quote hydration refreshes preview when preview was already visible`.
+- Test de non-régression `submit with InvalidHashCheck silently refetches without clobbering quote draft` — vérifie que `draftHydratedFromForm` bloque bien la ré-hydratation du draft édité après un refetch silencieux.
+- `parseQuoteRef` scopé à la toolbar HFR (`POST_TOOLBAR_LEFT`) — un lien quote inline dans le body d'un post n'est plus interprété comme l'action « Citer » du post lui-même. Test dédié.
+- KDoc et commentaires nettoyés : `PostEditorState`, `PostEditorScreen`, `Post.quoteRef` ne disent plus « Quote arrive plus tard » ni « non persisté Room ».
+
 ### Fixed
 - Parser BBCode : `[quote]hello` / `[fixed]hello` / `[img]url` (et autres tags block-level) sans close ne fabriquent plus de bloc vide ou ne perdent plus l'URL. Le KDoc d'en-tête promet « degrade to plain text » — désormais vrai. 7 tests dédiés.
 - Parser BBCode : récursion `[quote]` × N (ou `[b]` × N) ne crash plus l'app via `StackOverflowError`. Cap à 64 niveaux ; au-delà, dégradation en texte. 2 tests dédiés sur N = 256.

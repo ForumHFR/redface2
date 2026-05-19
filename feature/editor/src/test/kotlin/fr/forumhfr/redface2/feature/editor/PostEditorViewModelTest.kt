@@ -365,6 +365,76 @@ class PostEditorViewModelTest {
         }
     }
 
+    @Test
+    fun `submit with InvalidHashCheck silently refetches without clobbering quote draft`() = runTest {
+        // `handleSubmitOutcome(InvalidHashCheck)` resets `loadedForm = null` and
+        // re-invokes `loadReplyFormIfPossible()`. The `draftHydratedFromForm`
+        // guard must prevent the refetch from overwriting whatever the user has
+        // typed since the initial hydration. We assert : (a) the second form
+        // fetch did happen, (b) the user's edited draft survives.
+        val prefill = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"
+        replyRepository.formResult = Result.success(authenticatedForm(initialContent = prefill))
+        replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+
+        val viewModel = newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        testScheduler.advanceUntilIdle()
+        assertEquals("initial form fetch", 1, replyRepository.formFetches)
+
+        // User edits the prefill (cursor at end → add a real reply after the quote).
+        val edited = "$prefill\n\nReply"
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue(edited)))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("silent refetch after InvalidHashCheck", 2, replyRepository.formFetches)
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals(
+                "User edit must survive the silent refetch — draftHydratedFromForm blocks the rewrite",
+                edited,
+                settled.draft.text,
+            )
+            assertTrue("draftHydratedFromForm stays true across refetch", settled.draftHydratedFromForm)
+            assertEquals(
+                SubmitError.Hfr(ReplyFailureReason.InvalidHashCheck),
+                settled.submitError,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `quote hydration refreshes preview when preview was already visible`() = runTest {
+        // Race : user opens quote editor, opens the preview pane WHILE the form
+        // is still loading, form arrives → both `draft` and `preview` must reflect
+        // the `[quotemsg=…]` prefill. Before round 2 the preview AST stayed empty
+        // until the next `ContentChanged` / `TogglePreview`, which felt like a bug
+        // even though the draft was fine.
+        val formGate = CompletableDeferred<Unit>()
+        val prefill = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"
+        replyRepository.formResult = Result.success(authenticatedForm(initialContent = prefill))
+        replyRepository.formGate = formGate
+
+        val viewModel = newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        // Toggle preview BEFORE the form lands.
+        viewModel.submit(PostEditorIntent.TogglePreview)
+        // Now release the form fetch.
+        formGate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals("Draft hydrated with HFR prefill", prefill, settled.draft.text)
+            assertTrue("Preview was visible before hydration", settled.isPreviewVisible)
+            assertEquals(
+                "Preview AST must reflect the hydrated draft",
+                previewParser.contentFor(prefill),
+                settled.preview,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun newReplyViewModel(
         subcat: Int? = SAMPLE_SUBCAT,
         quotedNumreponse: Int? = null,

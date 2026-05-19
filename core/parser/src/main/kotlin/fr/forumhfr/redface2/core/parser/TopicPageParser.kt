@@ -103,25 +103,24 @@ class TopicPageParser(
      * link is absent (locked topic, special post types) we return `null` and the
      * UI suppresses the « Citer » action for that post — never a magic default.
      */
-    private fun parseQuoteRef(postTable: Element): Int? {
-        // The reply-form GET URL is the same shape for both « Répondre » (no
-        // numrep) and « Citer » (numrep=<post>). The toolbar may carry only the
-        // quote link (for posts on a normal topic) or only an anchor link with
-        // class `Topic` (for the first post of the page). We anchor on `numrep`
-        // because that is the distinguishing parameter — if it is missing, the
-        // link is not a quote.
-        //
-        // Both filters re-use `QUOTE_REF_REGEX` (`[?&]ref=…`) so a future HFR
-        // href that happens to embed `…&myref=…` or `…&referrer=…` does not
-        // pretend to be a quote link. `&amp;` is normalised by Jsoup to `&` in
-        // the parsed attribute value.
-        val quoteLink = postTable
-            .select("a[href*=numrep=]")
-            .firstOrNull { QUOTE_REF_REGEX.containsMatchIn(it.attr("href")) }
-            ?: return null
-        val href = quoteLink.attr("href")
-        return QUOTE_REF_REGEX.find(href)?.groupValues?.getOrNull(1)?.toIntOrNull()
-    }
+    // The quote action lives on the post's left toolbar — HFR renders it as
+    // an `<img src="…quote.gif">` wrapped in an `<a href="…message.php?…
+    // &numrep=…&ref=N…">`. The body of a post may legitimately contain links
+    // to other posts (e.g. an inline reference to `message.php?…&numrep=…`),
+    // so scoping the lookup to the toolbar is what makes « Citer » mean
+    // « cite this post » and not « cite whichever post this one mentions ».
+    //
+    // Two filters use `QUOTE_REF_REGEX` (`[?&]ref=…`) so a future HFR href
+    // embedding `…&myref=…` / `…&referrer=…` does not pretend to be a quote
+    // link. `&amp;` is normalised by Jsoup to `&` in the parsed attribute
+    // value. The chain is null-safe end-to-end : missing toolbar, missing
+    // quote link, or unparseable ref all return `null` without a fallback.
+    private fun parseQuoteRef(postTable: Element): Int? =
+        postTable.selectFirst(HfrSelectors.POST_TOOLBAR_LEFT)
+            ?.select("a[href*=numrep=]")
+            ?.firstOrNull { QUOTE_REF_REGEX.containsMatchIn(it.attr("href")) }
+            ?.attr("href")
+            ?.let { QUOTE_REF_REGEX.find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
 
     private fun parsePageInfo(document: Document): PageInfo {
         val pagerLeft = document

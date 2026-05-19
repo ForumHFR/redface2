@@ -250,7 +250,7 @@ data class Post(
     val isOwnPost: Boolean,              // calculé client-side : post.author == currentUser
     val quotedAuthors: List<String>,     // dérivé de PostContent pour recherche, filtres et décorateurs
     val postIndex: Int?,                 // (page-1) * postsPerPage + position — null quand le parser n'a pas le contexte page/postsPerPage (preview, fixtures isolées). postsPerPage vient des préférences HFR de l'utilisateur, PAS une constante (voir UserSettings)
-    val quoteRef: Int? = null,           // Phase 2C (#146) : `ref` opaque parsé depuis le href du lien quote HFR (`message.php?…&numrep=…&ref=N`). Null = post sans lien quote (locked, anonyme). **Non persisté** Room — recalculé à chaque parse, donc une restauration de process via back stack tue le bouton « Citer » jusqu'au prochain refresh.
+    val quoteRef: Int? = null,           // Phase 2C (#146) : `ref` opaque parsé depuis le href du lien quote HFR (`message.php?…&numrep=…&ref=N`). Null = post sans lien quote (locked, anonyme). Persisté en Room v5 (`MIGRATION_4_5`) — un cache hit garde le bouton « Citer » disponible sans round-trip réseau.
 )
 
 data class PostContent(

@@ -150,8 +150,10 @@ private fun PostEditorContent(
                     }
                 }
             } else {
-                // Edit / Quote / Create flows arrive later — keep the placeholder
-                // language as a reminder this surface is not yet wired up.
+                // Edit / Create flows arrive later (#147 / #149). Quote is already
+                // wired through `PostEditorMode.Reply` (it's the same submit path
+                // with a non-null `quotedNumreponse`), so the `else` branch only
+                // covers Edit today — keep the placeholder until #147 lands.
                 Text(
                     text = stringResource(R.string.editor_submit_disabled),
                     style = MaterialTheme.typography.labelMedium,

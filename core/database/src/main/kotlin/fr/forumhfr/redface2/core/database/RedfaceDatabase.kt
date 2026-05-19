@@ -12,7 +12,7 @@ import fr.forumhfr.redface2.core.database.entities.TopicEntity
 
 @Database(
     entities = [TopicEntity::class, PostEntity::class, FlagTopicEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)

@@ -174,16 +174,23 @@ class PostEditorViewModel @AssistedInject constructor(
                             current.draft
                         }
                         // If the user had toggled the preview on before the form
-                        // landed (rare), we deliberately leave the preview AST
-                        // stale rather than parsing on whichever dispatcher
-                        // `viewModelScope.launch {}` resolved to (default
-                        // `Dispatchers.Main.immediate`). The next `ContentChanged`
-                        // or `TogglePreview` intent will refresh it via the
-                        // existing pipeline — see #146 review round 1 note re.
-                        // « preview parse non-IO » follow-up for Phase 2D.
+                        // landed (rare race : user opens quote editor, opens
+                        // preview while `isLoadingForm=true`, form arrives with a
+                        // `[quotemsg=…]` prefill), recompute the preview now so
+                        // the panel reflects the hydrated draft. `parsePreview`
+                        // is the same synchronous call used by `ContentChanged` /
+                        // `TogglePreview` ; for a quote prefill (one block, ~hundreds
+                        // of chars) the cost on the resolved dispatcher is below
+                        // the noise floor of a normal UI tick.
+                        val nextPreview = if (shouldHydrate && current.isPreviewVisible) {
+                            previewParser.parsePreview(nextDraft.text)
+                        } else {
+                            current.preview
+                        }
                         current.copy(
                             isLoadingForm = false,
                             draft = nextDraft,
+                            preview = nextPreview,
                             draftHydratedFromForm = current.draftHydratedFromForm || shouldHydrate,
                             submitError = if (form.isAnonymous) {
                                 SubmitError.Hfr(ReplyFailureReason.LoginRequired)

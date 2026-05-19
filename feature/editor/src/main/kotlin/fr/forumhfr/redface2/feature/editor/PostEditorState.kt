@@ -8,8 +8,9 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 
 /**
  * MVI state of the post-level editor. Local draft + parsed preview AST + the Phase
- * 2C (#145) submit lifecycle. Submission for Edit / Edit FP / Create / Quote arrives
- * later (#146, #147, #148, #149).
+ * 2C submit lifecycle — reply (#145) and quote (#146) both reach HFR through
+ * the same `ReplyRepository` and share this state. Edit / Edit FP / Create
+ * topic come later (#147 / #148 / #149).
  */
 data class PostEditorState(
     val mode: PostEditorMode,

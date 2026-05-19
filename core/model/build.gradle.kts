@@ -5,4 +5,5 @@ plugins {
 
 dependencies {
     api(libs.kotlinx.serialization.core)
+    testImplementation(libs.junit4)
 }

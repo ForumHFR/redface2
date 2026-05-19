@@ -48,6 +48,14 @@ data class ReplyContext(
         quoteRef?.let {
             require(it >= 0) { "quoteRef must be >= 0 when present, was $it" }
         }
+        // `quoteRef` is the per-page positional id of the *cited* post — only
+        // meaningful in conjunction with `quotedNumreponse`. The reverse shape
+        // (`quotedNumreponse != null && quoteRef == null`) stays tolerated for
+        // forward compat in case HFR drops `ref` one day ; see
+        // `HfrClient.getReplyForm` KDoc.
+        require(quotedNumreponse != null || quoteRef == null) {
+            "quoteRef requires quotedNumreponse"
+        }
     }
 
     val isQuote: Boolean get() = quotedNumreponse != null
