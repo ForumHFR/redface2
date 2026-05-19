@@ -17,6 +17,15 @@ sealed interface PostEditorIntent {
 
     /** User dismissed an in-flight error banner. Clears [PostEditorState.submitError]. */
     data object ErrorDismissed : PostEditorIntent
+
+    /** Toggle « Activer votre signature » (HFR `signature=1`). */
+    data class ToggleSignature(val enabled: Boolean) : PostEditorIntent
+
+    /** Toggle « Désactiver les smilies » (HFR `smiley=1` ; when checked, HFR renders BBCode smileys as plain text). */
+    data class ToggleSmileyDisabled(val disabled: Boolean) : PostEditorIntent
+
+    /** Toggle « Activer la notification par email du sujet » (HFR `emaill=1`). */
+    data class ToggleEmailNotification(val enabled: Boolean) : PostEditorIntent
 }
 
 /**

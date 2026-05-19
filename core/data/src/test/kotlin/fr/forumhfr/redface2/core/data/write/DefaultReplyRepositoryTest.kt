@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.data.write
 
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
@@ -201,6 +202,64 @@ class DefaultReplyRepositoryTest {
             result,
         )
         assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `POST omits option fields when toggles are off (default ReplyFormOptions)`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("write_reply_form_open_topic.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+        val context = ReplyContext(cat = 23, subcat = 550, topicId = 35395, page = 20)
+        val form = repository.fetchReplyForm(context)
+        repository.submitReply(context, form, bbcodeContent = "hi", options = ReplyFormOptions())
+
+        // Drop the GET, inspect POST.
+        server.takeRequest()
+        val recorded = server.takeRequest()
+        val body = parseFormBody(recorded.body.readUtf8())
+        // All three option fields must be absent (browser-style "unchecked = not submitted").
+        assertFalse("signature must be absent when toggle off", body.containsKey("signature"))
+        assertFalse("smiley must be absent when toggle off", body.containsKey("smiley"))
+        assertFalse("emaill must be absent when toggle off", body.containsKey("emaill"))
+    }
+
+    @Test
+    fun `POST emits each option field with value 1 only when its toggle is on`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("write_reply_form_open_topic.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+        val context = ReplyContext(cat = 23, subcat = 550, topicId = 35395, page = 20)
+        val form = repository.fetchReplyForm(context)
+        repository.submitReply(
+            context = context,
+            form = form,
+            bbcodeContent = "hi",
+            options = ReplyFormOptions(
+                signatureEnabled = true,
+                smileyDisabled = false,
+                emailNotificationEnabled = true,
+            ),
+        )
+        server.takeRequest()
+        val recorded = server.takeRequest()
+        val body = parseFormBody(recorded.body.readUtf8())
+        assertEquals("1", body["signature"])
+        assertFalse("smiley must stay absent when toggle off", body.containsKey("smiley"))
+        assertEquals("1", body["emaill"])
+    }
+
+    @Test
+    fun `POST sends MsgIcon equal to HFR checked default and never to a later DOM occurrence`() = runTest {
+        // Belt-and-braces : on top of the parser unit test, the repository end-to-
+        // end POST must carry `MsgIcon=1` because that is the only `checked` radio
+        // in the fixture. Pre-round2 the wire would have shipped `MsgIcon=16`.
+        server.enqueue(MockResponse().setBody(fixture("write_reply_form_open_topic.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+        val context = ReplyContext(cat = 23, subcat = 550, topicId = 35395, page = 20)
+        val form = repository.fetchReplyForm(context)
+        repository.submitReply(context, form, bbcodeContent = "hi")
+        server.takeRequest()
+        val recorded = server.takeRequest()
+        val body = parseFormBody(recorded.body.readUtf8())
+        assertEquals("1", body["MsgIcon"])
     }
 
     @Test

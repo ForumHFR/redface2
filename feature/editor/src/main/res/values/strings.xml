@@ -21,4 +21,8 @@
     <string name="editor_error_network">Erreur réseau. Vérifiez votre connexion et réessayez.</string>
     <string name="editor_error_session_expired">Votre session HFR a expiré. Reconnectez-vous.</string>
     <string name="editor_error_missing_subcat">La page de sujet en cache ne contient pas la sous-catégorie HFR. Actualisez le sujet avant de répondre.</string>
+    <string name="editor_options_title">Options du message</string>
+    <string name="editor_option_signature">Activer votre signature</string>
+    <string name="editor_option_smiley_disabled">Désactiver les smilies</string>
+    <string name="editor_option_email_notification">Activer la notification par email du sujet</string>
 </resources>

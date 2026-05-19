@@ -17,6 +17,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -127,6 +128,19 @@ private fun PostEditorContent(
             }
 
             if (state.mode == PostEditorMode.Reply) {
+                // HFR per-post option toggles. Defaults come from `ReplyForm.options`
+                // (the `checked` attribute of each HTML checkbox HFR rendered for
+                // this user / topic). The repository only adds the matching POST
+                // field when the toggle is on — mirroring how a browser submits.
+                PostEditorOptions(
+                    signatureEnabled = state.signatureEnabled,
+                    smileyDisabled = state.smileyDisabled,
+                    emailNotificationEnabled = state.emailNotificationEnabled,
+                    enabled = !state.isSubmitting && !state.isLoadingForm,
+                    onSignatureChanged = { onIntent(PostEditorIntent.ToggleSignature(it)) },
+                    onSmileyDisabledChanged = { onIntent(PostEditorIntent.ToggleSmileyDisabled(it)) },
+                    onEmailNotificationChanged = { onIntent(PostEditorIntent.ToggleEmailNotification(it)) },
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
@@ -161,6 +175,69 @@ private fun PostEditorContent(
                 )
             }
         }
+    }
+}
+
+@Composable
+@Suppress("LongParameterList") // 3 toggles + 3 callbacks + enabled — each call-site distinct.
+private fun PostEditorOptions(
+    signatureEnabled: Boolean,
+    smileyDisabled: Boolean,
+    emailNotificationEnabled: Boolean,
+    enabled: Boolean,
+    onSignatureChanged: (Boolean) -> Unit,
+    onSmileyDisabledChanged: (Boolean) -> Unit,
+    onEmailNotificationChanged: (Boolean) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.editor_options_title),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OptionToggle(
+            label = stringResource(R.string.editor_option_signature),
+            checked = signatureEnabled,
+            enabled = enabled,
+            onCheckedChange = onSignatureChanged,
+        )
+        OptionToggle(
+            label = stringResource(R.string.editor_option_smiley_disabled),
+            checked = smileyDisabled,
+            enabled = enabled,
+            onCheckedChange = onSmileyDisabledChanged,
+        )
+        OptionToggle(
+            label = stringResource(R.string.editor_option_email_notification),
+            checked = emailNotificationEnabled,
+            enabled = enabled,
+            onCheckedChange = onEmailNotificationChanged,
+        )
+    }
+}
+
+@Composable
+private fun OptionToggle(
+    label: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(end = 16.dp),
+        )
+        Switch(
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = onCheckedChange,
+        )
     }
 }
 

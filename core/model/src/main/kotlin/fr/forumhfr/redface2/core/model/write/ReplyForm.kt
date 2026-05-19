@@ -36,4 +36,43 @@ data class ReplyForm(
      * quote block, but never tamper with the block itself before POST.
      */
     val initialContent: String = "",
+    /**
+     * Initial state of the three per-post option checkboxes HFR exposes (Activer
+     * signature, Désactiver smileys, Activer notification par email). Read from
+     * the `checked` attribute of each `<input type="checkbox">` so we mirror the
+     * server-side preference for this user / this topic. The editor seeds its
+     * own toggleable state from these defaults ; the repository overrides the
+     * matching POST fields (`signature` / `smiley` / `emaill`) from the user's
+     * final choice, so the parsed defaults never silently leak into the wire.
+     */
+    val options: ReplyFormOptions = ReplyFormOptions(),
+    /**
+     * `MsgIcon` HFR radio value (the « ton du message » row). HFR renders ~16
+     * icons ; the one with `checked="checked"` is the server-side default for
+     * the user. We forward this value verbatim on POST without exposing it to
+     * the UI for Phase 2C — Edit / Phase 2D may add a picker if there is real
+     * user demand. `null` keeps HFR's own server-side default (the field is
+     * simply not transmitted) ; in practice every authenticated form ships a
+     * checked icon (typically `1`).
+     */
+    val msgIcon: String? = null,
+)
+
+/**
+ * Per-post options HFR exposes as three checkboxes on the reply form. Captured
+ * from the `checked` attribute server-side, then surfaced to the editor so the
+ * user can flip them per post. The wire field names are HFR's own:
+ *
+ * - `signature` (« Activer votre signature » ; HFR default = on for most users)
+ * - `smiley` (« Désactiver les smilies » ; off = smileys rendered as usual)
+ * - `emaill` (« Activer la notification par email du sujet » ; off = no email)
+ *
+ * The repository only adds the corresponding form field to the POST when the
+ * boolean is `true`, mirroring how a browser would submit an unchecked
+ * checkbox (i.e. by omitting it entirely).
+ */
+data class ReplyFormOptions(
+    val signatureEnabled: Boolean = false,
+    val smileyDisabled: Boolean = false,
+    val emailNotificationEnabled: Boolean = false,
 )

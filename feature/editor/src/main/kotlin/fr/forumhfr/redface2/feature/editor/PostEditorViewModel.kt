@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
+import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
@@ -91,6 +92,12 @@ class PostEditorViewModel @AssistedInject constructor(
             PostEditorIntent.TogglePreview -> onTogglePreview()
             PostEditorIntent.SubmitClicked -> onSubmitClicked()
             PostEditorIntent.ErrorDismissed -> _state.update { it.copy(submitError = null) }
+            is PostEditorIntent.ToggleSignature ->
+                _state.update { it.copy(signatureEnabled = intent.enabled) }
+            is PostEditorIntent.ToggleSmileyDisabled ->
+                _state.update { it.copy(smileyDisabled = intent.disabled) }
+            is PostEditorIntent.ToggleEmailNotification ->
+                _state.update { it.copy(emailNotificationEnabled = intent.enabled) }
         }
     }
 
@@ -187,11 +194,32 @@ class PostEditorViewModel @AssistedInject constructor(
                         } else {
                             current.preview
                         }
+                        // Hydrate the three per-post options the same way as the
+                        // draft : only the first time, never on a refetch (the
+                        // user may already have flipped a toggle between the
+                        // initial load and the InvalidHashCheck refetch).
+                        val hydrateOptions = !current.optionsHydratedFromForm
                         current.copy(
                             isLoadingForm = false,
                             draft = nextDraft,
                             preview = nextPreview,
                             draftHydratedFromForm = current.draftHydratedFromForm || shouldHydrate,
+                            signatureEnabled = if (hydrateOptions) {
+                                form.options.signatureEnabled
+                            } else {
+                                current.signatureEnabled
+                            },
+                            smileyDisabled = if (hydrateOptions) {
+                                form.options.smileyDisabled
+                            } else {
+                                current.smileyDisabled
+                            },
+                            emailNotificationEnabled = if (hydrateOptions) {
+                                form.options.emailNotificationEnabled
+                            } else {
+                                current.emailNotificationEnabled
+                            },
+                            optionsHydratedFromForm = true,
                             submitError = if (form.isAnonymous) {
                                 SubmitError.Hfr(ReplyFailureReason.LoginRequired)
                             } else {
@@ -256,6 +284,11 @@ class PostEditorViewModel @AssistedInject constructor(
                     context = context,
                     form = form,
                     bbcodeContent = snapshot.draft.text,
+                    options = ReplyFormOptions(
+                        signatureEnabled = snapshot.signatureEnabled,
+                        smileyDisabled = snapshot.smileyDisabled,
+                        emailNotificationEnabled = snapshot.emailNotificationEnabled,
+                    ),
                 )
             }
             outcome.fold(

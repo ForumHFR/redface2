@@ -68,6 +68,40 @@ class ReplyFormParserTest {
     }
 
     @Test
+    fun `MsgIcon picks the checked radio not the last one`() {
+        // Round 2 fix : before the radio/checkbox `checked` guard, the parser
+        // iterated every `input[name=MsgIcon]` and stored each in the hiddenFields
+        // map, so the LAST radio (value=16, the :heink: icon) won. The fixture
+        // has `<input id="icone1" type="radio" value="1" name="MsgIcon" checked />`
+        // — the only radio with the `checked` attribute — so the parser must
+        // surface `MsgIcon=1` and nothing else.
+        val html = readFixture("write_reply_form_open_topic.html")
+        val form = parser.parse(html).getOrThrow()
+        assertEquals("HFR default icon must be 1, not the last DOM occurrence", "1", form.msgIcon)
+        assertEquals("hiddenFields must carry the same value", "1", form.hiddenFields["MsgIcon"])
+    }
+
+    @Test
+    fun `option checkboxes follow checked attribute browser-style`() {
+        // HFR ships three per-post checkboxes (`signature`, `smiley`, `emaill`).
+        // The captured fixture is from a session where none are pre-checked ;
+        // a browser would submit zero of them, and the parser must mirror that
+        // by leaving them out of `hiddenFields`. The defaults exposed on
+        // `form.options` come straight from the `checked` attribute — false
+        // across the board for this capture.
+        val html = readFixture("write_reply_form_open_topic.html")
+        val form = parser.parse(html).getOrThrow()
+
+        assertFalse("signature must not be in hidden fields when unchecked", form.hiddenFields.containsKey("signature"))
+        assertFalse("smiley must not be in hidden fields when unchecked", form.hiddenFields.containsKey("smiley"))
+        assertFalse("emaill must not be in hidden fields when unchecked", form.hiddenFields.containsKey("emaill"))
+
+        assertFalse("signature default reflects unchecked HTML", form.options.signatureEnabled)
+        assertFalse("smiley default reflects unchecked HTML", form.options.smileyDisabled)
+        assertFalse("emaill default reflects unchecked HTML", form.options.emailNotificationEnabled)
+    }
+
+    @Test
     fun `simple reply form has an empty initialContent`() {
         val html = readFixture("write_reply_form_open_topic.html")
         val form = parser.parse(html).getOrThrow()

@@ -45,6 +45,24 @@ data class PostEditorState(
      * `InvalidHashCheck`) does not overwrite the user's in-progress edit.
      */
     val draftHydratedFromForm: Boolean = false,
+    /**
+     * Per-post options the user can flip from the editor (Phase 2C, #146 round
+     * 2 follow-up). Seeded from `ReplyForm.options` on the first form load and
+     * never auto-overwritten by a refetch — same anti-clobber rule as
+     * [draftHydratedFromForm]. The repository reads these values when building
+     * the POST body, so flipping the toggle is immediately reflected on the
+     * next submit.
+     */
+    val signatureEnabled: Boolean = false,
+    val smileyDisabled: Boolean = false,
+    val emailNotificationEnabled: Boolean = false,
+    /**
+     * Mirror of [draftHydratedFromForm] for the options. We do not want a
+     * second form fetch (`InvalidHashCheck` refetch) to silently reset the
+     * three toggles the user may have flipped between the first load and the
+     * submit attempt.
+     */
+    val optionsHydratedFromForm: Boolean = false,
 ) {
     /**
      * Reply submission is allowed when : we know the routing context (page + subcat),

@@ -1,7 +1,9 @@
 package fr.forumhfr.redface2.core.parser.write
 
 import fr.forumhfr.redface2.core.model.write.ReplyForm
+import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
 
 /**
  * Parses HFR's `message.php` reply form. The page returned by HFR contains many
@@ -27,29 +29,69 @@ import org.jsoup.Jsoup
  */
 class ReplyFormParser {
 
-    @Suppress("ReturnCount") // Guard clauses for hash_check / form absent / etc.
+    @Suppress("ReturnCount") // Two failure guards + the success return — splitting hurts readability.
     fun parse(html: String): Result<ReplyForm> {
         val document = Jsoup.parse(html)
         val replyForm = document.selectFirst("form[action*=bddpost.php]")
             ?: return Result.failure(IllegalStateException("Reply form not found"))
 
-        // Iterate every <input> below the reply form (hidden, text, password, …) so
-        // we can apply the explicit allow/deny rules below regardless of the input
-        // type HFR uses. Restricting to `input[type=hidden]` would silently drop the
-        // user-typed pseudo field (which HFR renders as `type=text` even when the
-        // user is authenticated) and would *not* protect against password input
-        // either (which has `type=password`, not hidden) — both deny rules are
-        // necessary, and both come from a single pass over the full input list.
-        val allInputs = replyForm.select("input[name]")
         val pseudoInput = replyForm.selectFirst("input[name=pseudo]")
-        val sujetInput = replyForm.selectFirst("input[name=sujet]")
-
         val pseudoValue = pseudoInput?.attr("value").orEmpty()
         val isAnonymous = pseudoInput != null && pseudoValue.isEmpty()
 
+        val collection = collectInputs(replyForm, isAnonymous, pseudoValue)
+        val resolvedHashCheck = collection.hashCheck
+        if (resolvedHashCheck.isNullOrBlank()) {
+            return Result.failure(IllegalStateException("hash_check missing from reply form"))
+        }
+
+        // Sujet is part of the form contract but lives outside the hidden inputs in
+        // some HFR renderings (it can be either visible or hidden depending on layout).
+        val sujet = replyForm.selectFirst("input[name=sujet]")?.attr("value").orEmpty()
+
+        // Phase 2C (#146) — capture the textarea HFR uses to ship a quote prefill.
+        // For a simple reply the textarea is empty ; for a quote HFR wraps the cited
+        // post in a `[quotemsg=N,opaque,userId]...[/quotemsg]` block which we forward
+        // verbatim (the `opaque` middle parameter is server-controlled, never recompute
+        // it client-side). Jsoup's `.text()` would collapse whitespace and HTML-decode
+        // entities — we deliberately use `wholeText()` so the user sees the raw BBCode
+        // exactly as HFR composed it.
+        val initialContent = replyForm.selectFirst("textarea[name=content_form]")
+            ?.wholeText()
+            .orEmpty()
+
+        return Result.success(
+            ReplyForm(
+                hashCheck = resolvedHashCheck,
+                sujet = sujet,
+                hiddenFields = collection.fields,
+                isAnonymous = isAnonymous,
+                initialContent = initialContent,
+                options = parseOptions(replyForm),
+                msgIcon = parseMsgIcon(replyForm),
+            ),
+        )
+    }
+
+    /**
+     * Iterates every input under the reply form and applies the deny/allow rules
+     * documented in the class header. Returns the collected `hiddenFields` map +
+     * the resolved `hash_check`. The two are bundled so we only walk the DOM once.
+     *
+     * Restricting the initial selector to `input[type=hidden]` would silently drop
+     * the user-typed pseudo field (which HFR renders as `type=text` even when the
+     * user is authenticated) and would not protect against password input either
+     * (which has `type=password`, not hidden) — both deny rules require seeing
+     * every input on the form.
+     */
+    private fun collectInputs(
+        replyForm: Element,
+        isAnonymous: Boolean,
+        pseudoValue: String,
+    ): CollectedInputs {
         val collected = mutableMapOf<String, String>()
         var hashCheck: String? = null
-        allInputs.forEach { input ->
+        replyForm.select("input[name]").forEach { input ->
             val name = input.attr("name")
             if (name.isEmpty()) return@forEach
             val type = input.attr("type").lowercase()
@@ -58,6 +100,16 @@ class ReplyFormParser {
             // we want). The `password` *name* check is belt-and-braces in case HFR
             // ever ships a non-`type=password` element with that name.
             if (type == "password" || name == "password") return@forEach
+            // Radios and checkboxes follow browser semantics : a browser only submits
+            // them when `checked`. Without this guard we would (a) overwrite the
+            // chosen `MsgIcon` with whichever radio appears last in the DOM
+            // (`MsgIcon=16` = `:heink:` instead of the default icon 1), and (b)
+            // silently transmit every option checkbox (`signature`, `smiley`,
+            // `emaill`) regardless of the user's intent. The check is structural
+            // so any future HFR-added toggle stays inert until explicitly opted-in.
+            if ((type == "radio" || type == "checkbox") && !input.hasAttr("checked")) {
+                return@forEach
+            }
             val value = input.attr("value")
             when (name) {
                 "hash_check" -> {
@@ -76,34 +128,38 @@ class ReplyFormParser {
                 else -> collected[name] = value
             }
         }
-
-        val resolvedHashCheck = hashCheck
-        if (resolvedHashCheck.isNullOrBlank()) {
-            return Result.failure(IllegalStateException("hash_check missing from reply form"))
-        }
-
-        // Sujet is part of the form contract but lives outside the hidden inputs in
-        // some HFR renderings (it can be either visible or hidden depending on layout).
-        val sujet = sujetInput?.attr("value").orEmpty()
-
-        // Phase 2C (#146) — capture the textarea HFR uses to ship a quote prefill.
-        // For a simple reply the textarea is empty ; for a quote HFR wraps the cited
-        // post in a `[quotemsg=N,opaque,userId]...[/quotemsg]` block which we forward
-        // verbatim (the `opaque` middle parameter is server-controlled, never recompute
-        // it client-side). Jsoup's `.text()` would collapse whitespace and HTML-decode
-        // entities — we deliberately use `wholeText()` so the user sees the raw BBCode
-        // exactly as HFR composed it.
-        val contentTextarea = replyForm.selectFirst("textarea[name=content_form]")
-        val initialContent = contentTextarea?.wholeText().orEmpty()
-
-        return Result.success(
-            ReplyForm(
-                hashCheck = resolvedHashCheck,
-                sujet = sujet,
-                hiddenFields = collected.toMap(),
-                isAnonymous = isAnonymous,
-                initialContent = initialContent,
-            ),
-        )
+        return CollectedInputs(fields = collected.toMap(), hashCheck = hashCheck)
     }
+
+    /**
+     * HFR per-post options : three independent checkboxes whose `checked`
+     * attribute carries the server-side default for this user / topic. We surface
+     * them on `ReplyForm.options` so the editor can seed its own toggle state
+     * from the same defaults the HFR web composer would show.
+     */
+    private fun parseOptions(replyForm: Element): ReplyFormOptions = ReplyFormOptions(
+        signatureEnabled = replyForm.optionCheckbox("signature"),
+        smileyDisabled = replyForm.optionCheckbox("smiley"),
+        emailNotificationEnabled = replyForm.optionCheckbox("emaill"),
+    )
+
+    private fun Element.optionCheckbox(name: String): Boolean =
+        selectFirst("input[type=checkbox][name=$name]")?.hasAttr("checked") == true
+
+    /**
+     * `MsgIcon` is HFR's icon picker rendered as a row of radio inputs. The
+     * server pre-checks the user's default ; we forward whichever radio is
+     * `checked` instead of trusting iteration order. The value also lands in
+     * `hiddenFields` (via [collectInputs]) ; we keep a dedicated field for
+     * diagnostic clarity and for a future Phase 2D icon picker UI.
+     */
+    private fun parseMsgIcon(replyForm: Element): String? = replyForm
+        .selectFirst("input[type=radio][name=MsgIcon][checked]")
+        ?.attr("value")
+        ?.takeIf { it.isNotEmpty() }
+
+    private data class CollectedInputs(
+        val fields: Map<String, String>,
+        val hashCheck: String?,
+    )
 }

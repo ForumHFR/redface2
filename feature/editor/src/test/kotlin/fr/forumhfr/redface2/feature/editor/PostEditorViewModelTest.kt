@@ -366,6 +366,64 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `option toggle intents flip the corresponding state booleans`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ToggleSignature(true))
+        viewModel.submit(PostEditorIntent.ToggleSmileyDisabled(true))
+        viewModel.submit(PostEditorIntent.ToggleEmailNotification(true))
+        testScheduler.advanceUntilIdle()
+
+        val settled = viewModel.state.value
+        assertTrue("signatureEnabled flipped", settled.signatureEnabled)
+        assertTrue("smileyDisabled flipped", settled.smileyDisabled)
+        assertTrue("emailNotificationEnabled flipped", settled.emailNotificationEnabled)
+    }
+
+    @Test
+    fun `options are seeded from form options on first load`() = runTest {
+        replyRepository.formResult = Result.success(
+            authenticatedForm().copy(
+                options = fr.forumhfr.redface2.core.model.write.ReplyFormOptions(
+                    signatureEnabled = true,
+                    smileyDisabled = false,
+                    emailNotificationEnabled = true,
+                ),
+            ),
+        )
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        val settled = viewModel.state.value
+        assertTrue("signature default true reflects HFR checked attribute", settled.signatureEnabled)
+        assertFalse(settled.smileyDisabled)
+        assertTrue(settled.emailNotificationEnabled)
+        assertTrue("optionsHydratedFromForm flips after first load", settled.optionsHydratedFromForm)
+    }
+
+    @Test
+    fun `silent refetch must not overwrite user-toggled options`() = runTest {
+        // First load : HFR ships everything false. User flips signature on.
+        // InvalidHashCheck triggers a silent refetch with the same defaults.
+        // The user's toggle must survive — same anti-clobber rule as the draft.
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ToggleSignature(true))
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("hi")))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("refetch happened", 2, replyRepository.formFetches)
+        val settled = viewModel.state.value
+        assertTrue("signature toggle must survive the refetch", settled.signatureEnabled)
+    }
+
+    @Test
     fun `submit with InvalidHashCheck silently refetches without clobbering quote draft`() = runTest {
         // `handleSubmitOutcome(InvalidHashCheck)` resets `loadedForm = null` and
         // re-invokes `loadReplyFormIfPossible()`. The `draftHydratedFromForm`
@@ -519,14 +577,19 @@ class PostEditorViewModelTest {
             return formResult.getOrThrow()
         }
 
+        var lastSubmittedOptions: fr.forumhfr.redface2.core.model.write.ReplyFormOptions? = null
+            private set
+
         override suspend fun submitReply(
             context: ReplyContext,
             form: ReplyForm,
             bbcodeContent: String,
+            options: fr.forumhfr.redface2.core.model.write.ReplyFormOptions,
         ): ReplySubmitResult {
             submitCalls += 1
             lastSubmittedContext = context
             lastSubmittedBbcode = bbcodeContent
+            lastSubmittedOptions = options
             submitGate?.await()
             submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")

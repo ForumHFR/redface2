@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
+import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.network.HfrConstants
@@ -129,6 +130,7 @@ class DefaultReplyRepository @Inject constructor(
         context: ReplyContext,
         form: ReplyForm,
         bbcodeContent: String,
+        options: ReplyFormOptions,
     ): ReplySubmitResult {
         // Defence in depth — the ViewModel is supposed to gate on these but we
         // re-check here so any bug upstream surfaces as a typed failure rather
@@ -148,7 +150,7 @@ class DefaultReplyRepository @Inject constructor(
             "POST reply cat=${context.cat} subcat=${context.subcat} " +
                 "post=${context.topicId} page=${context.page} bbcode.length=${bbcodeContent.length}",
         )
-        val formBody = buildFormBody(context, form, bbcodeContent)
+        val formBody = buildFormBody(context, form, bbcodeContent, options)
         // Same rationale as `fetchReplyForm` : keep network + Jsoup parse in a single IO block.
         return try {
             withContext(ioDispatcher) {
@@ -222,10 +224,12 @@ class DefaultReplyRepository @Inject constructor(
      * value drives the choice. Edit will be wired in Phase 2D and will flip
      * `numreponse` instead of `numrep`.
      */
+    @Suppress("LongMethod") // HFR write contract = one declarative POST body, splitting hurts readability.
     private fun buildFormBody(
         context: ReplyContext,
         form: ReplyForm,
         bbcodeContent: String,
+        options: ReplyFormOptions,
     ): FormBody {
         val builder = FormBody.Builder(Charsets.UTF_8)
         val overrides = mapOf(
@@ -251,6 +255,32 @@ class DefaultReplyRepository @Inject constructor(
             builder.add(key, value)
             emitted += key
         }
+        // Per-post HFR options. Browser-style submit semantics : a field is only
+        // present in the POST body when the user opted in. Parser-side filtering
+        // already drops the unchecked-by-default state ; this branch adds the
+        // explicit toggle. The three name strings come straight from HFR's HTML
+        // (`signature`, `smiley`, `emaill` — `emaill` with two `l`s is HFR's own
+        // typo, kept as-is to match the wire).
+        if (options.signatureEnabled) {
+            builder.add("signature", "1")
+            emitted += "signature"
+        }
+        if (options.smileyDisabled) {
+            builder.add("smiley", "1")
+            emitted += "smiley"
+        }
+        if (options.emailNotificationEnabled) {
+            builder.add("emaill", "1")
+            emitted += "emaill"
+        }
+        // Mark `signature` / `smiley` / `emaill` as already emitted (or
+        // deliberately omitted) so the generic forwarder below cannot
+        // resurrect a stale default value from `hiddenFields`. Even when an
+        // option is OFF in the UI, leaving the corresponding key out of the
+        // POST is the correct browser behaviour.
+        emitted += "signature"
+        emitted += "smiley"
+        emitted += "emaill"
         form.hiddenFields.forEach { (key, value) ->
             if (key in emitted) return@forEach
             // Belt-and-braces : even though `ReplyFormParser` already filters
