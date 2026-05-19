@@ -40,10 +40,21 @@ data class ReplyForm(
      * Initial state of the three per-post option checkboxes HFR exposes (Activer
      * signature, Désactiver smileys, Activer notification par email). Read from
      * the `checked` attribute of each `<input type="checkbox">` so we mirror the
-     * server-side preference for this user / this topic. The editor seeds its
-     * own toggleable state from these defaults ; the repository overrides the
-     * matching POST fields (`signature` / `smiley` / `emaill`) from the user's
-     * final choice, so the parsed defaults never silently leak into the wire.
+     * server-side preference for this user / this topic.
+     *
+     * Lifecycle :
+     *  1. `ReplyFormParser` extracts these defaults from the HFR HTML.
+     *  2. `PostEditorViewModel` seeds the editor toggles from `ReplyForm.options`
+     *     on the first form load and flips `optionsHydratedFromForm` true.
+     *  3. The user may toggle any of the three switches via the
+     *     `ToggleSignature` / `ToggleSmileyDisabled` / `ToggleEmailNotification`
+     *     intents — these mutate the editor state, not this field.
+     *  4. At submit time, the VM hands the **final** editor choice to
+     *     `ReplyRepository.submitReply(...)` through its `options` parameter.
+     *
+     * The repository never re-reads `ReplyForm.options` at POST time. This field
+     * is solely the « defaults from HFR » seed for hydration, never a source of
+     * truth for the wire shape.
      */
     val options: ReplyFormOptions = ReplyFormOptions(),
     /**

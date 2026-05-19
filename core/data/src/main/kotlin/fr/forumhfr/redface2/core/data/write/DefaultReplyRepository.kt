@@ -232,24 +232,33 @@ class DefaultReplyRepository @Inject constructor(
         options: ReplyFormOptions,
     ): FormBody {
         val builder = FormBody.Builder(Charsets.UTF_8)
-        val overrides = mapOf(
-            "hash_check" to form.hashCheck,
-            "verifrequet" to HfrConstants.VERIF_REQUET,
-            "content_form" to bbcodeContent,
-            "numreponse" to "",
+        val overrides = buildMap {
+            put("hash_check", form.hashCheck)
+            put("verifrequet", HfrConstants.VERIF_REQUET)
+            put("content_form", bbcodeContent)
+            put("numreponse", "")
             // Quote: HFR identifies the cited post via `numrep`. Reply: empty.
             // The form's own hidden `numrep` (if any) is already echoed correctly
             // by HFR's reply page (always empty), and our override pins the
             // contract regardless of any future server-side change.
-            "numrep" to (context.quotedNumreponse?.toString().orEmpty()),
+            put("numrep", context.quotedNumreponse?.toString().orEmpty())
             // Re-assert the (cat, subcat, post, page) tuple to match HFR's contract
             // even if the form ever forgets to echo them.
-            "cat" to context.cat.toString(),
-            "subcat" to context.subcat.toString(),
-            "post" to context.topicId.toString(),
-            "page" to context.page.toString(),
-            "sujet" to form.sujet,
-        )
+            put("cat", context.cat.toString())
+            put("subcat", context.subcat.toString())
+            put("post", context.topicId.toString())
+            put("page", context.page.toString())
+            put("sujet", form.sujet)
+            // `MsgIcon` is already echoed via `form.hiddenFields` (the parser writes
+            // the `checked` radio there), but routing the typed field as the
+            // override makes `ReplyForm.msgIcon` the single source of truth on the
+            // POST. If a future HFR change renames the radios or moves them out of
+            // the form, the generic `hiddenFields` forwarder would silently drop
+            // the field — the typed override keeps the POST shape stable. When
+            // `msgIcon == null`, we fall back to whatever `hiddenFields` carries
+            // (no entry added here = the forwarder's value wins).
+            form.msgIcon?.let { put("MsgIcon", it) }
+        }
         val emitted = mutableSetOf<String>()
         overrides.forEach { (key, value) ->
             builder.add(key, value)

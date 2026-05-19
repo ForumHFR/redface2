@@ -95,6 +95,24 @@ class ReplyFormParserTest {
         val form = parser.parse(html).getOrThrow()
         assertTrue("HFR pre-checked signature must surface as default-on", form.options.signatureEnabled)
         assertEquals("Checked checkbox must round-trip into hiddenFields", "1", form.hiddenFields["signature"])
+        // Final-polish guard : the variant fixture must only flip `signature`. If a
+        // future patch accidentally adds `checked` on `smiley` or `emaill` (e.g. a
+        // sloppy regenerate), these assertions catch it before it leaks into wire
+        // tests. Belt-and-braces vs. the byte-exact derivation rule documented in
+        // `write_reply_form_signature_checked.source.txt`.
+        assertFalse("smiley must stay unchecked in signature variant", form.options.smileyDisabled)
+        assertFalse(
+            "emaill must stay unchecked in signature variant",
+            form.options.emailNotificationEnabled,
+        )
+        assertFalse(
+            "smiley must stay absent from hiddenFields in signature variant",
+            form.hiddenFields.containsKey("smiley"),
+        )
+        assertFalse(
+            "emaill must stay absent from hiddenFields in signature variant",
+            form.hiddenFields.containsKey("emaill"),
+        )
     }
 
     @Test
