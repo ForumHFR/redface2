@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -179,7 +180,21 @@ class PostEditorViewModel @AssistedInject constructor(
             outcome.fold(
                 onSuccess = { form ->
                     loadedForm = form
-                    _state.update { current -> current.withFormHydration(form) }
+                    // Pre-compute the preview AST outside the `_state.update {}`
+                    // lambda : the lambda runs synchronously on whichever thread
+                    // pumps the StateFlow (in practice the coroutine's dispatcher,
+                    // i.e. `Dispatchers.Main.immediate` here) and `parsePreview`
+                    // is a CPU-bound Jsoup-shaped pass that can block on long
+                    // BBCode prefills. Reading the latest snapshot once, deciding,
+                    // then handing the result to the lambda keeps the update body
+                    // pure copy.
+                    val snapshot = _state.value
+                    val nextPreview = if (snapshot.shouldHydrateFrom(form) && snapshot.isPreviewVisible) {
+                        previewParser.parsePreview(form.initialContent)
+                    } else {
+                        snapshot.preview
+                    }
+                    _state.update { current -> current.withFormHydration(form, nextPreview) }
                 },
                 onFailure = { error -> handleFetchFailure(error) },
             )
@@ -187,9 +202,20 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     /**
+     * Mirror of the hydration condition used inside [withFormHydration] — kept
+     * here so [launchFormFetch] can pre-compute the preview AST off the state
+     * lambda without duplicating the truth.
+     */
+    private fun PostEditorState.shouldHydrateFrom(form: ReplyForm): Boolean =
+        !draftHydratedFromForm &&
+            draft.text.isBlank() &&
+            form.initialContent.isNotBlank()
+
+    /**
      * Pure state transformer : produces the next [PostEditorState] after a form
-     * fetch lands. Lives on the ViewModel rather than the state file so it can
-     * call into the injected [previewParser].
+     * fetch lands. The preview AST is supplied by the caller (pre-computed off
+     * the state-flow lambda to keep the heavier `parsePreview` call off the
+     * UI dispatcher) ; everything else is a straight copy.
      *
      * Guarantees :
      * - `draft` is hydrated from `form.initialContent` only the first time and
@@ -199,14 +225,12 @@ class PostEditorViewModel @AssistedInject constructor(
      * - Options are hydrated from `form.options` only the first time
      *   (`optionsHydratedFromForm`) so a refetch never resets the user's
      *   toggle choices.
-     * - The preview AST is recomputed only when the draft is actually mutated
-     *   AND the preview pane is currently visible — otherwise the next
-     *   `ContentChanged` / `TogglePreview` will refresh it.
      */
-    private fun PostEditorState.withFormHydration(form: ReplyForm): PostEditorState {
-        val shouldHydrate = !draftHydratedFromForm &&
-            draft.text.isBlank() &&
-            form.initialContent.isNotBlank()
+    private fun PostEditorState.withFormHydration(
+        form: ReplyForm,
+        nextPreview: PostContent,
+    ): PostEditorState {
+        val shouldHydrate = shouldHydrateFrom(form)
         val nextDraft = if (shouldHydrate) {
             TextFieldValue(
                 text = form.initialContent,
@@ -216,11 +240,6 @@ class PostEditorViewModel @AssistedInject constructor(
             )
         } else {
             draft
-        }
-        val nextPreview = if (shouldHydrate && isPreviewVisible) {
-            previewParser.parsePreview(nextDraft.text)
-        } else {
-            preview
         }
         val hydrateOptions = !optionsHydratedFromForm
         return copy(

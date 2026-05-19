@@ -51,11 +51,14 @@ class DefaultEditPostRepository @Inject constructor(
 ) : EditPostRepository {
 
     override suspend fun fetchEditPostForm(context: EditPostContext): ReplyForm {
+        // `numreponse` identifies one of the user's own posts ; we keep it out
+        // of the INFO line to stay aligned with `DefaultReplyRepository`, which
+        // also omits the `numrep` / `quotedNumreponse` values from its log.
         diagnostics.record(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
             "GET edit form cat=${context.cat} subcat=${context.subcat} " +
-                "post=${context.topicId} page=${context.page} numreponse=${context.numreponse}",
+                "post=${context.topicId} page=${context.page}",
         )
         return try {
             withContext(ioDispatcher) {
@@ -125,8 +128,7 @@ class DefaultEditPostRepository @Inject constructor(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
             "POST edit cat=${context.cat} subcat=${context.subcat} " +
-                "post=${context.topicId} page=${context.page} " +
-                "numreponse=${context.numreponse} bbcode.length=${bbcodeContent.length}",
+                "post=${context.topicId} page=${context.page} bbcode.length=${bbcodeContent.length}",
         )
         val formBody = buildEditFormBody(context, form, bbcodeContent, options)
         return try {

@@ -71,7 +71,16 @@ class TopicPageParser(
         postTable: Element,
     ): Post {
         val content = postContentParser.parse(postTable.selectFirst(HfrSelectors.POST_CONTENT))
-
+        // Phase 2D (#147) : the toolbar exposes an `<a href="…message.php?…
+        // &numreponse=…">` only when HFR considers the post editable by the
+        // current authenticated user (i.e. it is their own post and the
+        // topic is not locked). We treat both flags as equivalent for now —
+        // HFR does not distinguish « own but not editable » from « editable »
+        // at the topic-page level. Quote (#146) uses `numrep` instead, so
+        // these two scopes never collide. Compute once : a 40-post topic page
+        // would otherwise re-run the Jsoup selector 80 times for the two
+        // identical fields.
+        val hasEditLink = parseHasEditLink(postTable)
         return Post(
             numreponse = postTable
                 .selectFirst(HfrSelectors.POST_ANCHOR)
@@ -86,15 +95,8 @@ class TopicPageParser(
             ),
             content = content.ast,
             avatarUrl = postTable.selectFirst(HfrSelectors.POST_AVATAR)?.attr("src"),
-            // Phase 2D (#147) : the toolbar exposes an `<a href="…message.php?…
-            // &numreponse=…">` only when HFR considers the post editable by the
-            // current authenticated user (i.e. it is their own post and the
-            // topic is not locked). We treat both flags as equivalent for now —
-            // HFR does not distinguish « own but not editable » from « editable »
-            // at the topic-page level. Quote (#146) uses `numrep` instead, so
-            // these two scopes never collide.
-            isEditable = parseHasEditLink(postTable),
-            isOwnPost = parseHasEditLink(postTable),
+            isEditable = hasEditLink,
+            isOwnPost = hasEditLink,
             quotedAuthors = content.quotedAuthors,
             postIndex = null,
             quoteRef = parseQuoteRef(postTable),
