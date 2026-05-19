@@ -215,7 +215,10 @@ class PostEditorViewModel @AssistedInject constructor(
      * Pure state transformer : produces the next [PostEditorState] after a form
      * fetch lands. The preview AST is supplied by the caller (pre-computed off
      * the state-flow lambda to keep the heavier `parsePreview` call off the
-     * UI dispatcher) ; everything else is a straight copy.
+     * UI dispatcher) ; we still re-check `shouldHydrate` against `current` so
+     * a state mutation interleaved with the fetch (rare but possible) does
+     * not push a preview derived from `form.initialContent` onto a draft the
+     * user already started editing.
      *
      * Guarantees :
      * - `draft` is hydrated from `form.initialContent` only the first time and
@@ -225,6 +228,9 @@ class PostEditorViewModel @AssistedInject constructor(
      * - Options are hydrated from `form.options` only the first time
      *   (`optionsHydratedFromForm`) so a refetch never resets the user's
      *   toggle choices.
+     * - `preview` is replaced by [nextPreview] only when the same
+     *   `shouldHydrate` condition holds on the latest state AND the preview
+     *   pane is visible. Otherwise the existing preview is preserved.
      */
     private fun PostEditorState.withFormHydration(
         form: ReplyForm,
@@ -245,7 +251,12 @@ class PostEditorViewModel @AssistedInject constructor(
         return copy(
             isLoadingForm = false,
             draft = nextDraft,
-            preview = nextPreview,
+            // Only adopt the caller's pre-computed preview when the same
+            // hydration condition holds on the *latest* state. If the user
+            // typed in between the snapshot and this update, `shouldHydrate`
+            // flips to false on `current` and we keep the user-driven
+            // preview ; the parsed `nextPreview` is dropped.
+            preview = if (shouldHydrate && isPreviewVisible) nextPreview else preview,
             draftHydratedFromForm = draftHydratedFromForm || shouldHydrate,
             signatureEnabled = if (hydrateOptions) form.options.signatureEnabled else signatureEnabled,
             smileyDisabled = if (hydrateOptions) form.options.smileyDisabled else smileyDisabled,
