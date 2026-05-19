@@ -82,6 +82,22 @@ class ReplyFormParserTest {
     }
 
     @Test
+    fun `signatureEnabled default is true when HFR pre-checks the signature checkbox`() {
+        // Round 1 review (round 2 of PR #163) — the original `write_reply_form
+        // _open_topic.html` was captured from an account where `signature` is not
+        // checked, which is NOT the nominal HFR experience (most users have a
+        // configured signature → HFR pre-checks the box). Without this assertion,
+        // the parser could "look correct" against the empty-default fixture but
+        // silently regress the real-user case. The variant fixture differs only
+        // by an added `checked="checked"` on the `signature` input — see the
+        // `.source.txt` for the derivation rationale.
+        val html = readFixture("write_reply_form_signature_checked.html")
+        val form = parser.parse(html).getOrThrow()
+        assertTrue("HFR pre-checked signature must surface as default-on", form.options.signatureEnabled)
+        assertEquals("Checked checkbox must round-trip into hiddenFields", "1", form.hiddenFields["signature"])
+    }
+
+    @Test
     fun `option checkboxes follow checked attribute browser-style`() {
         // HFR ships three per-post checkboxes (`signature`, `smiley`, `emaill`).
         // The captured fixture is from a session where none are pre-checked ;

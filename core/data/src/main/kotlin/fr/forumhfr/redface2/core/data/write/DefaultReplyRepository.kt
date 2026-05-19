@@ -261,26 +261,18 @@ class DefaultReplyRepository @Inject constructor(
         // explicit toggle. The three name strings come straight from HFR's HTML
         // (`signature`, `smiley`, `emaill` — `emaill` with two `l`s is HFR's own
         // typo, kept as-is to match the wire).
-        if (options.signatureEnabled) {
-            builder.add("signature", "1")
-            emitted += "signature"
-        }
-        if (options.smileyDisabled) {
-            builder.add("smiley", "1")
-            emitted += "smiley"
-        }
-        if (options.emailNotificationEnabled) {
-            builder.add("emaill", "1")
-            emitted += "emaill"
-        }
+        if (options.signatureEnabled) builder.add("signature", "1")
+        if (options.smileyDisabled) builder.add("smiley", "1")
+        if (options.emailNotificationEnabled) builder.add("emaill", "1")
         // Mark `signature` / `smiley` / `emaill` as already emitted (or
         // deliberately omitted) so the generic forwarder below cannot
         // resurrect a stale default value from `hiddenFields`. Even when an
         // option is OFF in the UI, leaving the corresponding key out of the
-        // POST is the correct browser behaviour.
-        emitted += "signature"
-        emitted += "smiley"
-        emitted += "emaill"
+        // POST is the correct browser behaviour — we must NOT echo the parsed
+        // checkbox `value="1"` from the form just because it sits in
+        // `hiddenFields`. The unconditional marking below makes the
+        // toggle-off branch impossible to short-circuit by accident.
+        emitted += setOf("signature", "smiley", "emaill")
         form.hiddenFields.forEach { (key, value) ->
             if (key in emitted) return@forEach
             // Belt-and-braces : even though `ReplyFormParser` already filters

@@ -73,6 +73,14 @@ data class ReplyForm(
  */
 data class ReplyFormOptions(
     val signatureEnabled: Boolean = false,
+    /**
+     * **Inverted semantics warning** : `true` means the user wants HFR to render
+     * BBCode smiley shortcodes as plain text (the « Désactiver les smilies » HFR
+     * checkbox is ON). It does **NOT** mean « smileys are active ». Wire mapping :
+     * `smileyDisabled = true` → POST `smiley=1` → HFR strips smileys. This is the
+     * only one of the three options where ON = privation ; future code reading
+     * this field must keep the name's literal meaning to avoid silent inversion.
+     */
     val smileyDisabled: Boolean = false,
     val emailNotificationEnabled: Boolean = false,
 )

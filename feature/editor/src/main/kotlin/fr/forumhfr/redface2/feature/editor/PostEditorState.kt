@@ -54,6 +54,11 @@ data class PostEditorState(
      * next submit.
      */
     val signatureEnabled: Boolean = false,
+    /**
+     * **Inverted semantics** (matches `ReplyFormOptions.smileyDisabled`): `true`
+     * = the user opted to render HFR smileys as plain text. Do not read this as
+     * « smileys actifs ». UI label : « Désactiver les smilies ».
+     */
     val smileyDisabled: Boolean = false,
     val emailNotificationEnabled: Boolean = false,
     /**

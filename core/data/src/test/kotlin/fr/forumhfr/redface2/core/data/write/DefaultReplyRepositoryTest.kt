@@ -247,6 +247,37 @@ class DefaultReplyRepositoryTest {
     }
 
     @Test
+    fun `POST emits smiley=1 when smileyDisabled toggle is on`() = runTest {
+        // `smileyDisabled` is the only one of the three options where ON = privation
+        // (HFR's checkbox label is « Désactiver les smilies »). The wire mapping
+        // `smileyDisabled = true` → POST `smiley=1` is the most regression-prone
+        // because a future inversion would look semantically opposite to what HFR
+        // does. Pin it explicitly here ; the other two « positive » options are
+        // covered by `POST emits each option field when on`.
+        server.enqueue(MockResponse().setBody(fixture("write_reply_form_open_topic.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+        val context = ReplyContext(cat = 23, subcat = 550, topicId = 35395, page = 20)
+        val form = repository.fetchReplyForm(context)
+        repository.submitReply(
+            context = context,
+            form = form,
+            bbcodeContent = "hi",
+            options = ReplyFormOptions(smileyDisabled = true),
+        )
+        server.takeRequest()
+        val recorded = server.takeRequest()
+        val body = parseFormBody(recorded.body.readUtf8())
+        assertEquals(
+            "smileyDisabled=true must POST smiley=1 (HFR « Désactiver » semantics)",
+            "1",
+            body["smiley"],
+        )
+        // The two « positive » toggles stay off → must be absent from the POST body.
+        assertFalse("signature absent when off", body.containsKey("signature"))
+        assertFalse("emaill absent when off", body.containsKey("emaill"))
+    }
+
+    @Test
     fun `POST sends MsgIcon equal to HFR checked default and never to a later DOM occurrence`() = runTest {
         // Belt-and-braces : on top of the parser unit test, the repository end-to-
         // end POST must carry `MsgIcon=1` because that is the only `checked` radio
