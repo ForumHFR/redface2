@@ -11,7 +11,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -51,6 +53,7 @@ class PostEditorViewModel @AssistedInject constructor(
     @Assisted private val request: PostEditorRequest,
     private val previewParser: BbcodePreviewParser,
     private val replyRepository: ReplyRepository,
+    private val editPostRepository: EditPostRepository,
     private val diagnostics: DiagnosticsLog,
 ) : ViewModel() {
 
@@ -80,8 +83,9 @@ class PostEditorViewModel @AssistedInject constructor(
     private var submitJob: Job? = null
 
     init {
-        if (request.mode == PostEditorMode.Reply) {
-            loadReplyFormIfPossible()
+        when (request.mode) {
+            PostEditorMode.Reply -> loadReplyFormIfPossible()
+            PostEditorMode.Edit -> loadEditFormIfPossible()
         }
     }
 
@@ -150,87 +154,94 @@ class PostEditorViewModel @AssistedInject constructor(
             _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
             return
         }
+        launchFormFetch { replyRepository.fetchReplyForm(context) }
+    }
+
+    private fun loadEditFormIfPossible() {
+        val context = buildEditPostContext() ?: run {
+            _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
+            return
+        }
+        launchFormFetch { editPostRepository.fetchEditPostForm(context) }
+    }
+
+    /**
+     * Shared form-fetch pipeline used by reply (Phase 2C) and edit (Phase 2D).
+     * The state update body is identical between the two flows : both hydrate
+     * `draft`, `preview`, and the three per-post options once from
+     * [ReplyForm.initialContent] / [ReplyForm.options], and both honour the
+     * anti-clobber guards on refetch.
+     */
+    private fun launchFormFetch(fetch: suspend () -> ReplyForm) {
         _state.update { it.copy(isLoadingForm = true, submitError = null) }
         viewModelScope.launch {
-            val outcome = runCatching { replyRepository.fetchReplyForm(context) }
+            val outcome = runCatching { fetch() }
             outcome.fold(
                 onSuccess = { form ->
                     loadedForm = form
-                    _state.update { current ->
-                        // Hydrate the draft from HFR's quote prefill the first time the form
-                        // lands and only when the user has not typed anything yet. Two
-                        // important guards :
-                        //   1. `draftHydratedFromForm` flips to true once we've ever
-                        //      prefilled, so an InvalidHashCheck silent refetch later
-                        //      cannot overwrite the user's edits with the same prefill.
-                        //   2. Even on the *first* load, if the user already typed before
-                        //      the network came back, `draft.text.isNotBlank()` wins.
-                        // For a simple reply, `form.initialContent` is empty and we leave
-                        // the draft untouched.
-                        val shouldHydrate = !current.draftHydratedFromForm &&
-                            current.draft.text.isBlank() &&
-                            form.initialContent.isNotBlank()
-                        val nextDraft = if (shouldHydrate) {
-                            TextFieldValue(
-                                text = form.initialContent,
-                                // Place caret at the end so the user can type their reply
-                                // right after the cited block — matches HFR's web behavior.
-                                selection = TextRange(form.initialContent.length),
-                            )
-                        } else {
-                            current.draft
-                        }
-                        // If the user had toggled the preview on before the form
-                        // landed (rare race : user opens quote editor, opens
-                        // preview while `isLoadingForm=true`, form arrives with a
-                        // `[quotemsg=…]` prefill), recompute the preview now so
-                        // the panel reflects the hydrated draft. `parsePreview`
-                        // is the same synchronous call used by `ContentChanged` /
-                        // `TogglePreview` ; for a quote prefill (one block, ~hundreds
-                        // of chars) the cost on the resolved dispatcher is below
-                        // the noise floor of a normal UI tick.
-                        val nextPreview = if (shouldHydrate && current.isPreviewVisible) {
-                            previewParser.parsePreview(nextDraft.text)
-                        } else {
-                            current.preview
-                        }
-                        // Hydrate the three per-post options the same way as the
-                        // draft : only the first time, never on a refetch (the
-                        // user may already have flipped a toggle between the
-                        // initial load and the InvalidHashCheck refetch).
-                        val hydrateOptions = !current.optionsHydratedFromForm
-                        current.copy(
-                            isLoadingForm = false,
-                            draft = nextDraft,
-                            preview = nextPreview,
-                            draftHydratedFromForm = current.draftHydratedFromForm || shouldHydrate,
-                            signatureEnabled = if (hydrateOptions) {
-                                form.options.signatureEnabled
-                            } else {
-                                current.signatureEnabled
-                            },
-                            smileyDisabled = if (hydrateOptions) {
-                                form.options.smileyDisabled
-                            } else {
-                                current.smileyDisabled
-                            },
-                            emailNotificationEnabled = if (hydrateOptions) {
-                                form.options.emailNotificationEnabled
-                            } else {
-                                current.emailNotificationEnabled
-                            },
-                            optionsHydratedFromForm = true,
-                            submitError = if (form.isAnonymous) {
-                                SubmitError.Hfr(ReplyFailureReason.LoginRequired)
-                            } else {
-                                current.submitError
-                            },
-                        )
-                    }
+                    _state.update { current -> current.withFormHydration(form) }
                 },
                 onFailure = { error -> handleFetchFailure(error) },
             )
         }
+    }
+
+    /**
+     * Pure state transformer : produces the next [PostEditorState] after a form
+     * fetch lands. Lives on the ViewModel rather than the state file so it can
+     * call into the injected [previewParser].
+     *
+     * Guarantees :
+     * - `draft` is hydrated from `form.initialContent` only the first time and
+     *   only if the user has not typed anything yet (`draftHydratedFromForm`
+     *   prevents an `InvalidHashCheck` silent refetch from clobbering user
+     *   edits).
+     * - Options are hydrated from `form.options` only the first time
+     *   (`optionsHydratedFromForm`) so a refetch never resets the user's
+     *   toggle choices.
+     * - The preview AST is recomputed only when the draft is actually mutated
+     *   AND the preview pane is currently visible — otherwise the next
+     *   `ContentChanged` / `TogglePreview` will refresh it.
+     */
+    private fun PostEditorState.withFormHydration(form: ReplyForm): PostEditorState {
+        val shouldHydrate = !draftHydratedFromForm &&
+            draft.text.isBlank() &&
+            form.initialContent.isNotBlank()
+        val nextDraft = if (shouldHydrate) {
+            TextFieldValue(
+                text = form.initialContent,
+                // Place caret at the end so the user can type their content
+                // right after the prefill — matches HFR's web behavior.
+                selection = TextRange(form.initialContent.length),
+            )
+        } else {
+            draft
+        }
+        val nextPreview = if (shouldHydrate && isPreviewVisible) {
+            previewParser.parsePreview(nextDraft.text)
+        } else {
+            preview
+        }
+        val hydrateOptions = !optionsHydratedFromForm
+        return copy(
+            isLoadingForm = false,
+            draft = nextDraft,
+            preview = nextPreview,
+            draftHydratedFromForm = draftHydratedFromForm || shouldHydrate,
+            signatureEnabled = if (hydrateOptions) form.options.signatureEnabled else signatureEnabled,
+            smileyDisabled = if (hydrateOptions) form.options.smileyDisabled else smileyDisabled,
+            emailNotificationEnabled = if (hydrateOptions) {
+                form.options.emailNotificationEnabled
+            } else {
+                emailNotificationEnabled
+            },
+            optionsHydratedFromForm = true,
+            submitError = if (form.isAnonymous) {
+                SubmitError.Hfr(ReplyFailureReason.LoginRequired)
+            } else {
+                submitError
+            },
+        )
     }
 
     private fun handleFetchFailure(error: Throwable) {
@@ -262,13 +273,12 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun onSubmitClicked() {
         val snapshot = _state.value
         if (!snapshot.canSubmit) return
-        val context = buildReplyContext() ?: run {
-            _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
-            return
-        }
         val form = loadedForm ?: run {
             // Form not loaded yet — fetch it then bail out; user re-clicks once ready.
-            loadReplyFormIfPossible()
+            when (snapshot.mode) {
+                PostEditorMode.Reply -> loadReplyFormIfPossible()
+                PostEditorMode.Edit -> loadEditFormIfPossible()
+            }
             return
         }
         if (form.isAnonymous) {
@@ -277,39 +287,70 @@ class PostEditorViewModel @AssistedInject constructor(
         }
         if (submitJob?.isActive == true) return
 
+        val options = ReplyFormOptions(
+            signatureEnabled = snapshot.signatureEnabled,
+            smileyDisabled = snapshot.smileyDisabled,
+            emailNotificationEnabled = snapshot.emailNotificationEnabled,
+        )
         _state.update { it.copy(isSubmitting = true, submitError = null) }
         submitJob = viewModelScope.launch {
             val outcome = runCatching {
-                replyRepository.submitReply(
-                    context = context,
-                    form = form,
-                    bbcodeContent = snapshot.draft.text,
-                    options = ReplyFormOptions(
-                        signatureEnabled = snapshot.signatureEnabled,
-                        smileyDisabled = snapshot.smileyDisabled,
-                        emailNotificationEnabled = snapshot.emailNotificationEnabled,
-                    ),
-                )
+                when (snapshot.mode) {
+                    PostEditorMode.Reply -> {
+                        val context = buildReplyContext() ?: error("canSubmit lied about reply context")
+                        replyRepository.submitReply(
+                            context = context,
+                            form = form,
+                            bbcodeContent = snapshot.draft.text,
+                            options = options,
+                        )
+                    }
+                    PostEditorMode.Edit -> {
+                        val context = buildEditPostContext() ?: error("canSubmit lied about edit context")
+                        editPostRepository.submitEditPost(
+                            context = context,
+                            form = form,
+                            bbcodeContent = snapshot.draft.text,
+                            options = options,
+                        )
+                    }
+                }
             }
             outcome.fold(
-                onSuccess = ::handleSubmitOutcome,
+                onSuccess = { result -> handleSubmitOutcome(snapshot.mode, snapshot.numreponse, result) },
                 onFailure = ::handleSubmitFailure,
             )
         }
     }
 
-    private fun handleSubmitOutcome(result: ReplySubmitResult) {
+    private fun handleSubmitOutcome(
+        mode: PostEditorMode,
+        numreponse: Int?,
+        result: ReplySubmitResult,
+    ) {
         when (result) {
             is ReplySubmitResult.Success -> {
-                _effects.trySend(PostEditorEffect.SubmitSucceeded(targetPage = result.targetPage))
+                // For Phase 2D edit, the topic refresh should land on the
+                // edited post — HFR's refresh URL anchors `#t{numreponse}`. We
+                // pass it explicitly so the navigation host can scroll to it
+                // after popping the editor. Reply / quote leave `scrollTo` null
+                // (the refresh anchors `#bas`, end of page).
+                val scrollTo = if (mode == PostEditorMode.Edit) numreponse else null
+                _effects.trySend(
+                    PostEditorEffect.SubmitSucceeded(targetPage = result.targetPage, scrollTo = scrollTo),
+                )
                 _state.update { it.copy(isSubmitting = false, submitError = null) }
             }
             is ReplySubmitResult.Failure -> {
                 // InvalidHashCheck typically means the cached form has expired ;
-                // refetch silently and let the user re-submit.
+                // refetch silently and let the user re-submit. The mode dictates
+                // which fetch path to follow.
                 if (result.reason == ReplyFailureReason.InvalidHashCheck) {
                     loadedForm = null
-                    loadReplyFormIfPossible()
+                    when (mode) {
+                        PostEditorMode.Reply -> loadReplyFormIfPossible()
+                        PostEditorMode.Edit -> loadEditFormIfPossible()
+                    }
                 }
                 _state.update {
                     it.copy(isSubmitting = false, submitError = SubmitError.Hfr(result.reason))
@@ -335,6 +376,23 @@ class PostEditorViewModel @AssistedInject constructor(
                 "→ ${mapped::class.simpleName}",
         )
         _state.update { it.copy(isSubmitting = false, submitError = mapped) }
+    }
+
+    @Suppress("ReturnCount") // Each guard returns null with a distinct reason
+    private fun buildEditPostContext(): EditPostContext? {
+        val snapshot = state.value
+        val page = snapshot.page ?: return null
+        val subcat = snapshot.subcat ?: return null
+        val topicId = snapshot.topicId ?: return null
+        val numreponse = snapshot.numreponse ?: return null
+        if (subcat <= 0 || topicId <= 0 || numreponse <= 0) return null
+        return EditPostContext(
+            cat = snapshot.cat,
+            subcat = subcat,
+            topicId = topicId,
+            page = page,
+            numreponse = numreponse,
+        )
     }
 
     @Suppress("ReturnCount") // Each guard returns null with a distinct reason

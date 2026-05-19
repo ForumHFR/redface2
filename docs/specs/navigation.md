@@ -302,6 +302,21 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                             ),
                         )
                     },
+                    // Phase 2D (#147): edit uses `PostEditorMode.Edit` and routes
+                    // through `EditPostRepository` (bdd.php) ; success refreshes
+                    // the topic and scrolls to the edited post.
+                    onEdit = { subcat, page, numreponse ->
+                        backStack.add(
+                            PostEditorRoute(
+                                PostEditorMode.Edit,
+                                route.cat,
+                                topicId = route.post,
+                                numreponse = numreponse,
+                                page = page,
+                                subcat = subcat,
+                            ),
+                        )
+                    },
                     // Phase 2C (#146): quote shares the destination with reply ; the
                     // editor switches behavior based on `quotedNumreponse != null`.
                     onQuote = { subcat, page, quotedNumreponse, quoteRef ->

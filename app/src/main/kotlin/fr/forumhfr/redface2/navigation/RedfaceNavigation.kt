@@ -327,6 +327,22 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                             ),
                         )
                     },
+                    onEdit = { subcat, page, numreponse ->
+                        // Phase 2D (#147) — `PostEditorMode.Edit` triggers the
+                        // `bdd.php` flow inside the editor. `numreponse` identifies
+                        // the post being rewritten ; HFR's edit form prefills the
+                        // existing BBCode in `<textarea name=content_form>`.
+                        backStack.add(
+                            PostEditorRoute(
+                                mode = PostEditorMode.Edit,
+                                cat = route.cat,
+                                topicId = route.post,
+                                numreponse = numreponse,
+                                page = page,
+                                subcat = subcat,
+                            ),
+                        )
+                    },
                     onOpenPage = { targetPage ->
                         backStack.removeAt(backStack.lastIndex)
                         backStack.add(
@@ -352,10 +368,13 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                         quotedNumreponse = route.quotedNumreponse,
                         quoteRef = route.quoteRef,
                     ),
-                    onSubmitSucceeded = { targetPage ->
+                    onSubmitSucceeded = { targetPage, scrollTo ->
                         // Pop the editor and refresh the topic page. Phase 2C-A always
                         // pops back to the topic; targetPage informs which page to
                         // reload — null falls back to the page we replied from.
+                        // Phase 2D (#147) edit sets `scrollTo = numreponse` so the
+                        // topic screen jumps to the edited post after refresh ;
+                        // reply / quote leave it null (refresh anchors `#bas`).
                         // Guard the pop the same way the global `onBack` lambda does:
                         // never collapse the back stack below the tab root.
                         if (backStack.size > 1) {
@@ -367,7 +386,7 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                             backStack.add(
                                 topicEntry.copy(
                                     page = targetPage ?: topicEntry.page,
-                                    scrollTo = null,
+                                    scrollTo = scrollTo ?: topicEntry.scrollTo,
                                 ),
                             )
                         }

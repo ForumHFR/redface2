@@ -68,6 +68,31 @@ class ReplyFormParserTest {
     }
 
     @Test
+    fun `accepts edit form whose action targets bdd_php`() {
+        // Phase 2D (#147) : the edit-post form has `action="/bdd.php?config=hfr.inc"`
+        // instead of `bddpost.php`. The parser must find it, extract the same
+        // shape (hash_check, hidden fields, sujet, initialContent, options,
+        // msgIcon) and pre-populate `numreponse` (HFR's edit form ships
+        // `<input type=hidden name=numreponse value="…">` for the edited post).
+        val html = readFixture("write_edit_form_test_post.html")
+        val form = parser.parse(html).getOrThrow()
+
+        assertFalse("Authenticated edit form must not flag as anonymous", form.isAnonymous)
+        assertEquals("REDACTED_HASH_CHECK", form.hashCheck)
+        assertEquals("2784595", form.hiddenFields["numreponse"])
+        assertEquals("", form.hiddenFields["numrep"])
+        // The edit form also exposes a `delete=1` checkbox we never want to
+        // forward in the edit MVP — parser-side it stays out of hiddenFields
+        // because it's NOT checked in this fixture.
+        assertFalse("delete must be absent when unchecked", form.hiddenFields.containsKey("delete"))
+        // initialContent carries the post's existing BBCode (test post #81).
+        assertTrue(
+            "initialContent must include the test post body — got ${form.initialContent.take(80)}",
+            form.initialContent.contains("Test technique Redface2"),
+        )
+    }
+
+    @Test
     fun `MsgIcon picks the checked radio not the last one`() {
         // Round 2 fix : before the radio/checkbox `checked` guard, the parser
         // iterated every `input[name=MsgIcon]` and stored each in the hiddenFields

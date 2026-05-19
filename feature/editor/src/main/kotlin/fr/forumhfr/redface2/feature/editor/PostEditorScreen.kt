@@ -44,7 +44,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 @Composable
 fun PostEditorScreen(
     request: PostEditorRequest,
-    onSubmitSucceeded: (targetPage: Int?) -> Unit,
+    onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: PostEditorViewModel = hiltViewModel<PostEditorViewModel, PostEditorViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -54,7 +54,8 @@ fun PostEditorScreen(
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
-                is PostEditorEffect.SubmitSucceeded -> onSubmitSucceeded(effect.targetPage)
+                is PostEditorEffect.SubmitSucceeded ->
+                    onSubmitSucceeded(effect.targetPage, effect.scrollTo)
             }
         }
     }

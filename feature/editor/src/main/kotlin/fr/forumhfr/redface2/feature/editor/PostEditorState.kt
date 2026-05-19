@@ -70,12 +70,14 @@ data class PostEditorState(
     val optionsHydratedFromForm: Boolean = false,
 ) {
     /**
-     * Reply submission is allowed when : we know the routing context (page + subcat),
+     * Submission is allowed when : we know the routing context (page + subcat + topicId),
      * the user has typed something non-blank, the editor is not already submitting,
-     * and we are not still fetching the form.
+     * and we are not still fetching the form. Phase 2D (#147) additionally requires
+     * `numreponse` for [PostEditorMode.Edit] — without it we cannot identify which
+     * post HFR should rewrite.
      */
     val canSubmit: Boolean
-        get() = mode == PostEditorMode.Reply &&
+        get() = (mode == PostEditorMode.Reply || (mode == PostEditorMode.Edit && numreponse != null)) &&
             page != null &&
             // Reject the `null` unknown, the `-1` SUBCAT_UNKNOWN sentinel and the `0`
             // moderator-space wire shape (`Topic.hasSubcat` uses the same rule).

@@ -211,6 +211,80 @@ class TopicPageParserTest {
     }
 
     @Test
+    fun `isEditable is true when the toolbar exposes a message_php numreponse link`() {
+        // Phase 2D (#147) — HFR renders an edit link on the post's left toolbar
+        // only when the current authenticated session owns the post and the
+        // topic is unlocked. We mirror the synthetic-fixture pattern used by
+        // `quoteRef ignores …` ; full topic fixtures don't carry edit links
+        // because they were captured with non-owner accounts.
+        val html = """
+            <html><body>
+              <input name="cat" value="13" />
+              <input name="post" value="84540" />
+              <input name="subcat" value="432" />
+              <table><tbody>
+                <tr class="fondForum2Title">
+                  <th class="messCase1">Auteur</th>
+                  <th><h3>Editable post sanity</h3></th>
+                </tr>
+              </tbody></table>
+              <table class="messagetable"><tbody>
+                <tr class="message">
+                  <td class="messCase1"><a name="t55555"></a><b class="s2">OwnerUser</b></td>
+                  <td class="messCase2">
+                    <div class="toolbar"><div class="left">
+                      Posté le 19-05-2026&nbsp;à&nbsp;12:00:00
+                      <a href="/message.php?config=hfr.inc&amp;cat=13&amp;post=84540&amp;page=2&amp;p=1&amp;subcat=432&amp;sondage=0&amp;owntopic=0&amp;new=0&amp;numreponse=55555">edit</a>
+                    </div></div>
+                    <div id="para55555"><p>edited content</p></div>
+                  </td>
+                </tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        val post = topic.posts.single()
+        assertTrue("Owner post must surface isEditable=true", post.isEditable)
+        assertTrue("Owner post must surface isOwnPost=true", post.isOwnPost)
+    }
+
+    @Test
+    fun `isEditable is false when a numreponse link sits in the post body but not the toolbar`() {
+        // Round-trip the same scope guard we already apply to `quoteRef` :
+        // an inline link to another post's `message.php?…&numreponse=…` (which
+        // a user can paste in their content) must NOT promote the host post
+        // to editable.
+        val html = """
+            <html><body>
+              <input name="cat" value="13" />
+              <input name="post" value="84540" />
+              <input name="subcat" value="432" />
+              <table><tbody>
+                <tr class="fondForum2Title">
+                  <th class="messCase1">Auteur</th>
+                  <th><h3>Body link sanity</h3></th>
+                </tr>
+              </tbody></table>
+              <table class="messagetable"><tbody>
+                <tr class="message">
+                  <td class="messCase1"><a name="t66666"></a><b class="s2">OtherUser</b></td>
+                  <td class="messCase2">
+                    <div class="toolbar"><div class="left">
+                      Posté le 19-05-2026&nbsp;à&nbsp;12:00:00
+                    </div></div>
+                    <div id="para66666"><p>See <a href="/message.php?cat=13&amp;numreponse=11111">that post</a></p></div>
+                  </td>
+                </tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        val post = topic.posts.single()
+        assertFalse("Body link must not promote isEditable", post.isEditable)
+        assertFalse("Body link must not promote isOwnPost", post.isOwnPost)
+    }
+
+    @Test
     fun `quoteRef ignores numrep links inside the post body and only reads the toolbar`() {
         // A user can quote another post inline in the body of their own post (HFR
         // renders such a link as a plain anchor to message.php?…&numrep=…&ref=N…).

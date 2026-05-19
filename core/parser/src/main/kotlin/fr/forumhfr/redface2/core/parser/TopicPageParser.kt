@@ -86,12 +86,36 @@ class TopicPageParser(
             ),
             content = content.ast,
             avatarUrl = postTable.selectFirst(HfrSelectors.POST_AVATAR)?.attr("src"),
-            isEditable = false,
-            isOwnPost = false,
+            // Phase 2D (#147) : the toolbar exposes an `<a href="…message.php?…
+            // &numreponse=…">` only when HFR considers the post editable by the
+            // current authenticated user (i.e. it is their own post and the
+            // topic is not locked). We treat both flags as equivalent for now —
+            // HFR does not distinguish « own but not editable » from « editable »
+            // at the topic-page level. Quote (#146) uses `numrep` instead, so
+            // these two scopes never collide.
+            isEditable = parseHasEditLink(postTable),
+            isOwnPost = parseHasEditLink(postTable),
             quotedAuthors = content.quotedAuthors,
             postIndex = null,
             quoteRef = parseQuoteRef(postTable),
         )
+    }
+
+    /**
+     * Phase 2D (#147) — returns `true` when the post's left toolbar exposes an
+     * edit link of the shape `<a href="…message.php?…&numreponse={N}…">`. The
+     * quote link is at the same place but uses `numrep` (not `numreponse`), and
+     * the post body may carry unrelated `numreponse=` links (`viewbbcode.php`,
+     * `forum2.php?…&numreponse=0`, modo / addflag). Scoping the lookup to
+     * `POST_TOOLBAR_LEFT` + matching only `message.php` + `numreponse=` is what
+     * separates « this post is editable » from « this post happens to link to
+     * another post ».
+     */
+    private fun parseHasEditLink(postTable: Element): Boolean {
+        val toolbar = postTable.selectFirst(HfrSelectors.POST_TOOLBAR_LEFT) ?: return false
+        return toolbar
+            .select("a[href*=message.php]")
+            .any { EDIT_NUMREPONSE_REGEX.containsMatchIn(it.attr("href")) }
     }
 
     /**
@@ -233,3 +257,4 @@ private data class PageInfo(
 )
 
 private val QUOTE_REF_REGEX: Regex = Regex("""[?&]ref=(\d+)""")
+private val EDIT_NUMREPONSE_REGEX: Regex = Regex("""[?&]numreponse=(\d+)""")

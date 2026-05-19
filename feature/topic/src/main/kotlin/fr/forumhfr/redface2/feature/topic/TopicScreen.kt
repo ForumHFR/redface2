@@ -74,6 +74,16 @@ fun TopicScreen(
      * hidden — we never reach this callback for those.
      */
     onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
+    /**
+     * Open the editor in edit mode (Phase 2D, #147). HFR exposes the edit link on
+     * the post's left toolbar only when the post belongs to the current user and
+     * the topic is not locked — `TopicPageParser` translates that into
+     * `Post.isEditable = true`. The call-site supplies `numreponse = post.numreponse`
+     * and the topic-wide `(subcat, page)`. Posts whose toolbar did not carry an
+     * edit link keep the « Modifier » button hidden — we never reach this
+     * callback for those.
+     */
+    onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
 ) {
     val viewModel = hiltViewModel<TopicViewModel, TopicViewModel.Factory>(
@@ -116,6 +126,7 @@ fun TopicScreen(
         onIntent = viewModel::send,
         onReply = onReply,
         onQuote = onQuote,
+        onEdit = onEdit,
         onOpenPage = onOpenPage,
     )
 }
@@ -128,6 +139,7 @@ internal fun TopicContent(
     onIntent: (TopicIntent) -> Unit,
     onReply: (subcat: Int, page: Int) -> Unit,
     onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
+    onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
 ) {
     Surface(
@@ -176,6 +188,7 @@ internal fun TopicContent(
                     topic = mode.topic,
                     onReply = onReply,
                     onQuote = onQuote,
+                    onEdit = onEdit,
                     onOpenPage = onOpenPage,
                     listState = listState,
                 )
@@ -191,6 +204,7 @@ private fun TopicLoadedContent(
     topic: Topic,
     onReply: (subcat: Int, page: Int) -> Unit,
     onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
+    onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
     listState: LazyListState,
 ) {
@@ -222,10 +236,19 @@ private fun TopicLoadedContent(
             // the same `PostEditorRoute`, only the editor request shape differs.
             val quoteAction: (() -> Unit)? = post.quoteRef?.takeIf { topic.hasSubcat }
                 ?.let { ref -> { onQuote(topic.subcat, topic.page, post.numreponse, ref) } }
+            // Phase 2D (#147) — « Modifier » is exposed by HFR only on the
+            // user's own posts of an unlocked topic. Same hasSubcat gate as
+            // Citer to refuse the SUBCAT_UNKNOWN cache.
+            val editAction: (() -> Unit)? = if (post.isEditable && topic.hasSubcat) {
+                { onEdit(topic.subcat, topic.page, post.numreponse) }
+            } else {
+                null
+            }
             TopicPostCard(
                 post = post,
                 highlighted = highlight == post.numreponse,
                 onQuote = quoteAction,
+                onEdit = editAction,
             )
         }
     }
@@ -461,6 +484,7 @@ private fun TopicPostCard(
     post: Post,
     highlighted: Boolean,
     onQuote: (() -> Unit)?,
+    onEdit: (() -> Unit)?,
 ) {
     Card(
         colors = CardDefaults.cardColors(
@@ -499,17 +523,26 @@ private fun TopicPostCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             PostRenderer(content = post.content)
-            if (onQuote != null) {
-                // « Citer » sits at the bottom of the post card, sober TextButton
-                // so it stays subordinate to the post content. Hidden entirely
-                // when the parent did not provide an action (post has no quote
-                // link or topic has no subcat).
+            if (onQuote != null || onEdit != null) {
+                // Actions row at the bottom of the post card, sober TextButtons
+                // so they stay subordinate to the post content. « Modifier »
+                // (Phase 2D, #147) appears only on the user's own editable posts.
+                // « Citer » (Phase 2C, #146) appears whenever HFR exposed a
+                // quote link. Either can be absent — we only render the row at
+                // all if at least one action is provided.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                 ) {
-                    TextButton(onClick = onQuote) {
-                        Text(text = stringResource(R.string.topic_post_quote))
+                    if (onEdit != null) {
+                        TextButton(onClick = onEdit) {
+                            Text(text = stringResource(R.string.topic_post_edit))
+                        }
+                    }
+                    if (onQuote != null) {
+                        TextButton(onClick = onQuote) {
+                            Text(text = stringResource(R.string.topic_post_quote))
+                        }
                     }
                 }
             }
