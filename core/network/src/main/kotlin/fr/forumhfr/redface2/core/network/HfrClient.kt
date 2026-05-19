@@ -97,28 +97,49 @@ class HfrClient @Inject constructor(
     }
 
     /**
-     * Phase 2C (#145) — GET the HFR reply form for a `(cat, subcat, post, page)`
-     * tuple. The returned HTML carries the per-session `hash_check` plus all the
-     * hidden inputs the subsequent POST must echo back. The URL shape mirrors what
-     * HFR's web UI hits when a logged-in user clicks « Répondre » (cf.
-     * `docs/specs/protocol-hfr.md` § POST `bddpost.php` and the Phase 2A fixture
-     * `write_reply_form_open_topic.html`).
+     * Phase 2C — GET the HFR reply or quote form. The shape is the same in both
+     * cases (`/message.php?cat=…&post=…&page=…&p=1&subcat=…&sondage=0&owntopic=0
+     * &new=0`); a quote additionally carries `numrep={quotedNumreponse}` and
+     * `ref={quoteRef}` so HFR prefills `<textarea name="content_form">` with the
+     * cited `[quotemsg=…]` block (cf. `docs/specs/protocol-hfr.md` § Quote, and
+     * the Phase 2A fixtures `write_reply_form_open_topic.html` /
+     * `write_quote_form_test_post.html`).
+     *
+     * [quotedNumreponse] and [quoteRef] are both opaque — `numrep` is the cited
+     * post id and `ref` is HFR's per-page positional id (server-controlled). The
+     * caller must pass them through unchanged from the topic page HTML. Either
+     * may be null for a simple reply ; both null = reply, both non-null = quote.
+     * The mixed shape (one null, one set) is **not validated** — behaviour was
+     * never captured and we leave the API surface tolerant in case a future HFR
+     * change drops `ref` from the quote contract. Call sites in
+     * `DefaultReplyRepository` always feed the two fields together from a
+     * `ReplyContext`, so this looseness is contained to the network layer.
      *
      * Always uses the authenticated client : a session-expired GET surfaces
      * [SessionExpiredException] via [executeAuthenticatedHtml] rather than
      * silently returning the anonymous composer.
      */
+    @Suppress("LongParameterList") // HFR contract: 4 mandatory ids + 2 optional quote params.
     suspend fun getReplyForm(
         cat: Int,
         subcat: Int,
         post: Int,
         page: Int,
+        quotedNumreponse: Int? = null,
+        quoteRef: Int? = null,
     ): String {
         val url = baseUrl.newBuilder()
             .addPathSegment("message.php")
             .addQueryParameter("config", "hfr.inc")
             .addQueryParameter("cat", cat.toString())
             .addQueryParameter("post", post.toString())
+            .apply {
+                // Quote params come before `page` in the canonical HFR URL —
+                // mirror that order so a `recorded.requestUrl` round-trip is
+                // textually identical to what the web composer sends.
+                quotedNumreponse?.let { addQueryParameter("numrep", it.toString()) }
+                quoteRef?.let { addQueryParameter("ref", it.toString()) }
+            }
             .addQueryParameter("page", page.toString())
             .addQueryParameter("p", "1")
             .addQueryParameter("subcat", subcat.toString())

@@ -95,6 +95,7 @@ internal object TopicMappers {
         postIndex = postIndex,
         fetchedAt = fetchedAt,
         authMode = authMode,
+        quoteRef = quoteRef,
     )
 
     private fun PostEntity.toDomain(): Post = Post(
@@ -107,6 +108,7 @@ internal object TopicMappers {
         isOwnPost = isOwnPost,
         quotedAuthors = quotedAuthors,
         postIndex = postIndex,
+        quoteRef = quoteRef,
     )
 
     /**

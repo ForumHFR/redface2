@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
+import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.network.HfrConstants
@@ -42,11 +43,13 @@ class DefaultReplyRepository @Inject constructor(
 ) : ReplyRepository {
 
     override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
+        val mode = if (context.isQuote) "quote" else "reply"
         diagnostics.record(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
-            "GET reply form cat=${context.cat} subcat=${context.subcat} " +
-                "post=${context.topicId} page=${context.page}",
+            "GET $mode form cat=${context.cat} subcat=${context.subcat} " +
+                "post=${context.topicId} page=${context.page} " +
+                "numrep=${context.quotedNumreponse ?: "-"} ref=${context.quoteRef ?: "-"}",
         )
         // `HfrClient` already wraps its OkHttp call in `withContext(ioDispatcher)` (PR #162 round 3
         // round-trip), but we keep `withContext` here so the Jsoup parse (CPU-bound, ~30 KB HTML)
@@ -59,6 +62,8 @@ class DefaultReplyRepository @Inject constructor(
                     subcat = context.subcat,
                     post = context.topicId,
                     page = context.page,
+                    quotedNumreponse = context.quotedNumreponse,
+                    quoteRef = context.quoteRef,
                 )
                 replyFormParser.parse(html).fold(
                     onSuccess = { form ->
@@ -125,6 +130,7 @@ class DefaultReplyRepository @Inject constructor(
         context: ReplyContext,
         form: ReplyForm,
         bbcodeContent: String,
+        options: ReplyFormOptions,
     ): ReplySubmitResult {
         // Defence in depth — the ViewModel is supposed to gate on these but we
         // re-check here so any bug upstream surfaces as a typed failure rather
@@ -144,7 +150,7 @@ class DefaultReplyRepository @Inject constructor(
             "POST reply cat=${context.cat} subcat=${context.subcat} " +
                 "post=${context.topicId} page=${context.page} bbcode.length=${bbcodeContent.length}",
         )
-        val formBody = buildFormBody(context, form, bbcodeContent)
+        val formBody = buildFormBody(context, form, bbcodeContent, options)
         // Same rationale as `fetchReplyForm` : keep network + Jsoup parse in a single IO block.
         return try {
             withContext(ioDispatcher) {
@@ -211,37 +217,83 @@ class DefaultReplyRepository @Inject constructor(
      * from the parsed form. Any local override (notably `content_form`,
      * `numreponse`, `numrep`) wins over the parsed value to keep simple-reply
      * semantics — see the `numrep` / `numreponse` notes in `protocol-hfr.md`.
+     *
+     * `numreponse` (post being edited) stays empty for both reply and quote.
+     * `numrep` (post being cited) is empty for a simple reply, and carries the
+     * cited `numreponse` for a quote — the `ReplyContext.quotedNumreponse`
+     * value drives the choice. Edit will be wired in Phase 2D and will flip
+     * `numreponse` instead of `numrep`.
      */
+    @Suppress("LongMethod") // HFR write contract = one declarative POST body, splitting hurts readability.
     private fun buildFormBody(
         context: ReplyContext,
         form: ReplyForm,
         bbcodeContent: String,
+        options: ReplyFormOptions,
     ): FormBody {
         val builder = FormBody.Builder(Charsets.UTF_8)
-        val overrides = mapOf(
-            "hash_check" to form.hashCheck,
-            "verifrequet" to HfrConstants.VERIF_REQUET,
-            "content_form" to bbcodeContent,
-            // numreponse / numrep are empty for a simple reply (no quote, no edit).
-            "numreponse" to "",
-            "numrep" to "",
+        val overrides = buildMap {
+            put("hash_check", form.hashCheck)
+            put("verifrequet", HfrConstants.VERIF_REQUET)
+            put("content_form", bbcodeContent)
+            put("numreponse", "")
+            // Quote: HFR identifies the cited post via `numrep`. Reply: empty.
+            // The form's own hidden `numrep` (if any) is already echoed correctly
+            // by HFR's reply page (always empty), and our override pins the
+            // contract regardless of any future server-side change.
+            put("numrep", context.quotedNumreponse?.toString().orEmpty())
             // Re-assert the (cat, subcat, post, page) tuple to match HFR's contract
             // even if the form ever forgets to echo them.
-            "cat" to context.cat.toString(),
-            "subcat" to context.subcat.toString(),
-            "post" to context.topicId.toString(),
-            "page" to context.page.toString(),
-            "sujet" to form.sujet,
-        )
+            put("cat", context.cat.toString())
+            put("subcat", context.subcat.toString())
+            put("post", context.topicId.toString())
+            put("page", context.page.toString())
+            put("sujet", form.sujet)
+            // `MsgIcon` is already echoed via `form.hiddenFields` (the parser writes
+            // the `checked` radio there), but routing the typed field as the
+            // override makes `ReplyForm.msgIcon` the single source of truth on the
+            // POST. If a future HFR change renames the radios or moves them out of
+            // the form, the generic `hiddenFields` forwarder would silently drop
+            // the field — the typed override keeps the POST shape stable. When
+            // `msgIcon == null`, we fall back to whatever `hiddenFields` carries
+            // (no entry added here = the forwarder's value wins).
+            form.msgIcon?.let { put("MsgIcon", it) }
+        }
         val emitted = mutableSetOf<String>()
         overrides.forEach { (key, value) ->
             builder.add(key, value)
             emitted += key
         }
+        // Per-post HFR options. Browser-style submit semantics : a field is only
+        // present in the POST body when the user opted in. Parser-side filtering
+        // already drops the unchecked-by-default state ; this branch adds the
+        // explicit toggle. The three name strings come straight from HFR's HTML
+        // (`signature`, `smiley`, `emaill` — `emaill` with two `l`s is HFR's own
+        // typo, kept as-is to match the wire).
+        if (options.signatureEnabled) builder.add("signature", "1")
+        if (options.smileyDisabled) builder.add("smiley", "1")
+        if (options.emailNotificationEnabled) builder.add("emaill", "1")
+        // Mark `signature` / `smiley` / `emaill` as already emitted (or
+        // deliberately omitted) so the generic forwarder below cannot
+        // resurrect a stale default value from `hiddenFields`. Even when an
+        // option is OFF in the UI, leaving the corresponding key out of the
+        // POST is the correct browser behaviour — we must NOT echo the parsed
+        // checkbox `value="1"` from the form just because it sits in
+        // `hiddenFields`. The unconditional marking below makes the
+        // toggle-off branch impossible to short-circuit by accident.
+        emitted += setOf("signature", "smiley", "emaill")
         form.hiddenFields.forEach { (key, value) ->
             if (key in emitted) return@forEach
             // Belt-and-braces : even though `ReplyFormParser` already filters
-            // `password` and anonymous `pseudo`, never relay them here.
+            // `password` and anonymous `pseudo`, never relay `password` here.
+            // We deliberately do NOT also filter `pseudo` : on an authenticated
+            // form HFR carries the user's pseudo in the hidden fields and
+            // expects us to echo it back on POST (mirrors HFR's own composer).
+            // On an anonymous form `pseudo` is already absent from
+            // `form.hiddenFields` (parser-side filter) AND `submitReply` short-
+            // circuits via `guardAgainstInvalidSubmission` before reaching this
+            // builder, so we never have to defend twice against the anonymous
+            // shape here.
             if (key == "password") return@forEach
             builder.add(key, value)
             emitted += key

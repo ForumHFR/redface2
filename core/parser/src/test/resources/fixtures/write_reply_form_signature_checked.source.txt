@@ -1,0 +1,5 @@
+Source: fr.forumhfr.redface2.core.parser.write.ReplyFormParserTest (variant from `write_reply_form_open_topic.html`)
+Captured: 2026-05-19 — derived locally, NOT from a live HFR session
+Derivation: copy of `write_reply_form_open_topic.html` + single textual patch on the `signature` checkbox to add `checked="checked"`. No other byte modified.
+Reason: HFR ships `<input name="signature" checked>` by default for accounts that have a non-empty signature configured (the majority case per Phase 2C-quote UX brief, screenshot 2026-05-18). The original `write_reply_form_open_topic.html` was captured from an account where the checkbox happens to be unchecked, which is unrepresentative of the nominal HFR user. This variant lets the parser tests assert the `signature default = true` branch without re-capturing a whole session.
+Sanitization: hash_check stays REDACTED_HASH_CHECK (inherited from parent fixture); no new sensitive data introduced by the patch.

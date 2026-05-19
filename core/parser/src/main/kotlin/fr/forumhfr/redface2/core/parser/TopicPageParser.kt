@@ -90,8 +90,37 @@ class TopicPageParser(
             isOwnPost = false,
             quotedAuthors = content.quotedAuthors,
             postIndex = null,
+            quoteRef = parseQuoteRef(postTable),
         )
     }
+
+    /**
+     * Phase 2C (#146) — extracts the `ref` query parameter from the post's quote
+     * link. HFR renders each post toolbar with an `<a href="…/message.php?…&numrep=
+     * {numreponse}&ref={N}…">` element. `ref` is opaque (correlates with the post's
+     * position on the current topic page, exact semantic undocumented), so we
+     * forward whatever HFR provided and never compute it client-side. When the
+     * link is absent (locked topic, special post types) we return `null` and the
+     * UI suppresses the « Citer » action for that post — never a magic default.
+     */
+    // The quote action lives on the post's left toolbar — HFR renders it as
+    // an `<img src="…quote.gif">` wrapped in an `<a href="…message.php?…
+    // &numrep=…&ref=N…">`. The body of a post may legitimately contain links
+    // to other posts (e.g. an inline reference to `message.php?…&numrep=…`),
+    // so scoping the lookup to the toolbar is what makes « Citer » mean
+    // « cite this post » and not « cite whichever post this one mentions ».
+    //
+    // Two filters use `QUOTE_REF_REGEX` (`[?&]ref=…`) so a future HFR href
+    // embedding `…&myref=…` / `…&referrer=…` does not pretend to be a quote
+    // link. `&amp;` is normalised by Jsoup to `&` in the parsed attribute
+    // value. The chain is null-safe end-to-end : missing toolbar, missing
+    // quote link, or unparseable ref all return `null` without a fallback.
+    private fun parseQuoteRef(postTable: Element): Int? =
+        postTable.selectFirst(HfrSelectors.POST_TOOLBAR_LEFT)
+            ?.select("a[href*=numrep=]")
+            ?.firstOrNull { QUOTE_REF_REGEX.containsMatchIn(it.attr("href")) }
+            ?.attr("href")
+            ?.let { QUOTE_REF_REGEX.find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
 
     private fun parsePageInfo(document: Document): PageInfo {
         val pagerLeft = document
@@ -202,3 +231,5 @@ private data class PageInfo(
     val current: Int,
     val total: Int,
 )
+
+private val QUOTE_REF_REGEX: Regex = Regex("""[?&]ref=(\d+)""")

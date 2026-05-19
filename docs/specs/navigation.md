@@ -218,6 +218,8 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
     val numreponse: Int? = null,          // requis à terme pour Edit
     val page: Int? = null,                // page topic en cours, requis Reply (#145)
     val subcat: Int? = null,              // sous-cat HFR, requis Reply (#145) — TopicScreen ne pousse PostEditorRoute que si topic.hasSubcat
+    val quotedNumreponse: Int? = null,    // Phase 2C (#146) : null = reply simple ; non-null = quote (numreponse du post cité)
+    val quoteRef: Int? = null,            // Phase 2C (#146) : ref opaque parsé depuis le href quote ; transmis verbatim à HFR
 ) : RedfaceNavKey
 
 @Serializable data class TopicFormRoute(
@@ -297,6 +299,21 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                                 topicId = route.post,
                                 page = page,
                                 subcat = subcat,
+                            ),
+                        )
+                    },
+                    // Phase 2C (#146): quote shares the destination with reply ; the
+                    // editor switches behavior based on `quotedNumreponse != null`.
+                    onQuote = { subcat, page, quotedNumreponse, quoteRef ->
+                        backStack.add(
+                            PostEditorRoute(
+                                PostEditorMode.Reply,
+                                route.cat,
+                                topicId = route.post,
+                                page = page,
+                                subcat = subcat,
+                                quotedNumreponse = quotedNumreponse,
+                                quoteRef = quoteRef,
                             ),
                         )
                     },

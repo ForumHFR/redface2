@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
+import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
@@ -61,6 +62,8 @@ class PostEditorViewModel @AssistedInject constructor(
             numreponse = request.numreponse,
             page = request.page,
             subcat = request.subcat,
+            quotedNumreponse = request.quotedNumreponse,
+            quoteRef = request.quoteRef,
         ),
     )
     val state: StateFlow<PostEditorState> = _state.asStateFlow()
@@ -89,6 +92,12 @@ class PostEditorViewModel @AssistedInject constructor(
             PostEditorIntent.TogglePreview -> onTogglePreview()
             PostEditorIntent.SubmitClicked -> onSubmitClicked()
             PostEditorIntent.ErrorDismissed -> _state.update { it.copy(submitError = null) }
+            is PostEditorIntent.ToggleSignature ->
+                _state.update { it.copy(signatureEnabled = intent.enabled) }
+            is PostEditorIntent.ToggleSmileyDisabled ->
+                _state.update { it.copy(smileyDisabled = intent.disabled) }
+            is PostEditorIntent.ToggleEmailNotification ->
+                _state.update { it.copy(emailNotificationEnabled = intent.enabled) }
         }
     }
 
@@ -148,8 +157,69 @@ class PostEditorViewModel @AssistedInject constructor(
                 onSuccess = { form ->
                     loadedForm = form
                     _state.update { current ->
+                        // Hydrate the draft from HFR's quote prefill the first time the form
+                        // lands and only when the user has not typed anything yet. Two
+                        // important guards :
+                        //   1. `draftHydratedFromForm` flips to true once we've ever
+                        //      prefilled, so an InvalidHashCheck silent refetch later
+                        //      cannot overwrite the user's edits with the same prefill.
+                        //   2. Even on the *first* load, if the user already typed before
+                        //      the network came back, `draft.text.isNotBlank()` wins.
+                        // For a simple reply, `form.initialContent` is empty and we leave
+                        // the draft untouched.
+                        val shouldHydrate = !current.draftHydratedFromForm &&
+                            current.draft.text.isBlank() &&
+                            form.initialContent.isNotBlank()
+                        val nextDraft = if (shouldHydrate) {
+                            TextFieldValue(
+                                text = form.initialContent,
+                                // Place caret at the end so the user can type their reply
+                                // right after the cited block — matches HFR's web behavior.
+                                selection = TextRange(form.initialContent.length),
+                            )
+                        } else {
+                            current.draft
+                        }
+                        // If the user had toggled the preview on before the form
+                        // landed (rare race : user opens quote editor, opens
+                        // preview while `isLoadingForm=true`, form arrives with a
+                        // `[quotemsg=…]` prefill), recompute the preview now so
+                        // the panel reflects the hydrated draft. `parsePreview`
+                        // is the same synchronous call used by `ContentChanged` /
+                        // `TogglePreview` ; for a quote prefill (one block, ~hundreds
+                        // of chars) the cost on the resolved dispatcher is below
+                        // the noise floor of a normal UI tick.
+                        val nextPreview = if (shouldHydrate && current.isPreviewVisible) {
+                            previewParser.parsePreview(nextDraft.text)
+                        } else {
+                            current.preview
+                        }
+                        // Hydrate the three per-post options the same way as the
+                        // draft : only the first time, never on a refetch (the
+                        // user may already have flipped a toggle between the
+                        // initial load and the InvalidHashCheck refetch).
+                        val hydrateOptions = !current.optionsHydratedFromForm
                         current.copy(
                             isLoadingForm = false,
+                            draft = nextDraft,
+                            preview = nextPreview,
+                            draftHydratedFromForm = current.draftHydratedFromForm || shouldHydrate,
+                            signatureEnabled = if (hydrateOptions) {
+                                form.options.signatureEnabled
+                            } else {
+                                current.signatureEnabled
+                            },
+                            smileyDisabled = if (hydrateOptions) {
+                                form.options.smileyDisabled
+                            } else {
+                                current.smileyDisabled
+                            },
+                            emailNotificationEnabled = if (hydrateOptions) {
+                                form.options.emailNotificationEnabled
+                            } else {
+                                current.emailNotificationEnabled
+                            },
+                            optionsHydratedFromForm = true,
                             submitError = if (form.isAnonymous) {
                                 SubmitError.Hfr(ReplyFailureReason.LoginRequired)
                             } else {
@@ -214,6 +284,11 @@ class PostEditorViewModel @AssistedInject constructor(
                     context = context,
                     form = form,
                     bbcodeContent = snapshot.draft.text,
+                    options = ReplyFormOptions(
+                        signatureEnabled = snapshot.signatureEnabled,
+                        smileyDisabled = snapshot.smileyDisabled,
+                        emailNotificationEnabled = snapshot.emailNotificationEnabled,
+                    ),
                 )
             }
             outcome.fold(
@@ -271,7 +346,18 @@ class PostEditorViewModel @AssistedInject constructor(
         // Mirror the `Topic.hasSubcat` / `ReplyContext.init` rule : reject both the
         // sentinel (-1) and the moderator-space wire shape (0).
         if (subcat <= 0) return null
-        return ReplyContext(cat = snapshot.cat, subcat = subcat, topicId = topicId, page = page)
+        return ReplyContext(
+            cat = snapshot.cat,
+            subcat = subcat,
+            topicId = topicId,
+            page = page,
+            // Phase 2C (#146) : both fields are null for a simple reply ; both
+            // non-null for a quote launched from `TopicScreen.onQuote`. The model
+            // tolerates a quote with a null `quoteRef` for forward compat (HFR
+            // could drop `ref` someday), but we keep them aligned in practice.
+            quotedNumreponse = snapshot.quotedNumreponse,
+            quoteRef = snapshot.quoteRef,
+        )
     }
 
     @AssistedFactory

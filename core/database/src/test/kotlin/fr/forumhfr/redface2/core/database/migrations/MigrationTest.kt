@@ -105,7 +105,7 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
 
         try {
@@ -235,7 +235,7 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
 
         try {
@@ -257,6 +257,87 @@ class MigrationTest {
                 "SELECT lastPostReadId FROM flag_topics LIMIT 1",
             ).use { cursor ->
                 assertEquals(0, cursor.count)
+            }
+        } finally {
+            migrated.close()
+        }
+    }
+
+    /**
+     * Phase 2C (#146 round 2) — proves `MIGRATION_4_5` adds `quoteRef` to `posts`
+     * as a nullable column, backfills pre-v5 rows to `NULL`, and that the column
+     * is queryable. Without this migration, every fresh cache hit would reset
+     * `quoteRef` to null and the « Citer » button would vanish from the UI until
+     * the next live fetch — see `MIGRATION_4_5` KDoc.
+     */
+    @Test
+    fun migrate_4_to_5_adds_nullable_quoteRef_to_posts() {
+        val dbName = "redface-test-migration-4-to-5.db"
+
+        // 1. Build the v4 DB and insert one topic_pages row + one posts row that
+        //    pre-date `quoteRef`. We write through the raw SQLite helper because
+        //    the v4 entity classes no longer exist in source — only the schema does.
+        helper.createDatabase(dbName, 4).use { v4 ->
+            v4.insert(
+                "topic_pages",
+                android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE,
+                ContentValues().apply {
+                    put("cat", 23)
+                    put("post", 35395)
+                    put("page", 1)
+                    put("title", "v4 cached topic")
+                    put("totalPages", 1)
+                    put("isFirstPostOwner", 0)
+                    putNull("pollJson")
+                    put("numreponses", "[\"100\"]")
+                    put("fetchedAt", 1_700_000_000_000L)
+                    put("authMode", "AUTHENTICATED")
+                    put("subcat", 550)
+                },
+            )
+            v4.insert(
+                "posts",
+                android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE,
+                ContentValues().apply {
+                    put("cat", 23)
+                    put("numreponse", 100)
+                    put("post", 35395)
+                    put("author", "fixtureUser")
+                    put("date", 1_700_000_000_000L)
+                    put("content", "{\"blocks\":[]}")
+                    putNull("avatarUrl")
+                    put("isEditable", 0)
+                    put("isOwnPost", 0)
+                    put("quotedAuthors", "[]")
+                    putNull("postIndex")
+                    put("fetchedAt", 1_700_000_000_000L)
+                    put("authMode", "AUTHENTICATED")
+                },
+            )
+        }
+
+        // 2. Run MIGRATION_4_5 and validate against the v5 schema.
+        helper.runMigrationsAndValidate(dbName, 5, true, MIGRATION_4_5).close()
+
+        // 3. Open the production Room database (chains every migration).
+        val migrated = Room.databaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java,
+            dbName,
+        )
+            .allowMainThreadQueries()
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .build()
+
+        try {
+            migrated.openHelper.readableDatabase.query(
+                "SELECT quoteRef FROM posts WHERE cat = 23 AND numreponse = 100",
+            ).use { cursor ->
+                assertTrue("v4 post row must survive MIGRATION_4_5", cursor.moveToFirst())
+                assertTrue(
+                    "quoteRef must default to NULL for pre-v5 rows (sentinel = refresh required)",
+                    cursor.isNull(0),
+                )
             }
         } finally {
             migrated.close()
@@ -307,7 +388,7 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
             .build()
 
         try {

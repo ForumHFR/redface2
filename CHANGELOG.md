@@ -10,6 +10,49 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## v0.10.5 — 2026-05-19
+
+App patch 0.3.5 (build v45) — fix radio/checkbox parser + UI options post.
+
+### Fixed
+- `ReplyFormParser` respecte la sémantique browser : `<input type="radio|checkbox">` sans `checked` est ignoré. Avant ce fix, le POST shippait `MsgIcon=16` (`:heink:`) au lieu du défaut HFR `1` (icône normale) parce que l'itération laissait la dernière radio gagner. Et les 3 checkboxes options (`signature`, `smiley`, `emaill`) étaient transmises avec `value=1` quel que soit leur état coché.
+- `ReplyForm.msgIcon: String?` + `ReplyForm.options: ReplyFormOptions` exposent les défauts HFR lus depuis les attributs `checked`. Le `MsgIcon` UI picker reste hors scope (Phase 2D si demande utilisateur).
+
+### Added
+- 3 toggles « Options du message » dans `PostEditorScreen` : « Activer votre signature », « Désactiver les smilies », « Activer la notification par email du sujet ». Hydratés depuis `ReplyForm.options` (lecture `checked` HFR) au premier load. Un refetch silencieux après `InvalidHashCheck` n'écrase pas un toggle utilisateur — même règle anti-clobber que `draftHydratedFromForm`, mémorisée via `optionsHydratedFromForm`.
+- 3 nouveaux `PostEditorIntent` : `ToggleSignature(enabled)`, `ToggleSmileyDisabled(disabled)`, `ToggleEmailNotification(enabled)`.
+- `DefaultReplyRepository.buildFormBody(options: ReplyFormOptions)` POSTe `signature=1` / `smiley=1` / `emaill=1` uniquement quand le toggle correspondant est ON (sinon le champ est entièrement omis, comme un browser le ferait). `emaill` (double `l`) est la typo HFR conservée verbatim.
+- Variante fixture `write_reply_form_signature_checked.html` (patch local de `write_reply_form_open_topic.html` : ajout `checked="checked"` sur l'input signature) pour pinner le cas nominal HFR « signature pré-cochée » que la fixture originale (compte sans signature configurée) ne couvrait pas.
+
+### Changed
+- `ReplyRepository.submitReply(options: ReplyFormOptions = ReplyFormOptions())` étendu — la valeur par défaut préserve la compatibilité avec les anciens call-sites internes.
+
+---
+
+## v0.10.4 — 2026-05-18
+
+App patch 0.3.4 (build v44) — Phase 2C boucle complète : quote MVP (#146) en plus du reply (#145). Bouton « Citer » sur chaque post, GET du formulaire HFR avec `numrep` + `ref`, hydratation du draft depuis le `[quotemsg=…]` prérempli sans écraser une saisie en cours, POST sur le même `bddpost.php` que le reply. Aucun `QuoteRepository` ajouté — c'est une variante de `ReplyRepository`.
+
+### Added
+- `ReplyContext` étendu avec `quotedNumreponse: Int?` + `quoteRef: Int?` (opaque, parsé depuis le href HFR jamais reconstruit côté app), helper `isQuote`.
+- `ReplyForm.initialContent: String` — `""` pour reply simple, BBCode `[quotemsg=…]` verbatim pour quote.
+- `TopicPageParser` extrait `Post.quoteRef` depuis l'attribut `href` du lien « quote » de chaque post. Champ nullable, transitoire (non persisté Room — recalculé à chaque parse).
+- `HfrClient.getReplyForm(quotedNumreponse, quoteRef)` ajoute les query params optionnels dans l'ordre canonique HFR (`numrep`, `ref` entre `post` et `page`).
+- `DefaultReplyRepository.buildFormBody` route `numrep` selon `context.quotedNumreponse` (vide pour reply, valeur cited pour quote) ; `numreponse` reste vide dans les deux cas.
+- `PostEditorViewModel` hydrate le draft depuis `ReplyForm.initialContent` une seule fois (`draftHydratedFromForm` mémoise), jamais après une saisie utilisateur — protège contre l'écrasement par un refetch silencieux post `InvalidHashCheck`.
+- Navigation : `PostEditorRoute` reçoit `quotedNumreponse` + `quoteRef` ; `TopicScreen.onQuote` poussé depuis chaque `TopicPostCard` qui a un `quoteRef` non-null et un topic avec `hasSubcat`. Bouton « Citer » masqué sinon (locked topic, pages anonymes).
+
+### Changed
+- `docs/specs/models.md` : `ReplyContext` + `ReplyForm` mis à jour avec les nouveaux champs.
+- `docs/specs/navigation.md` : `PostEditorRoute` étendu, callback `onQuote` documenté dans l'`entryProvider`.
+- `docs/specs/mvi.md` § Editor : statut Phase 2C devient « Reply + Quote MVP livrés ».
+- `docs/specs/roadmap.md` : Quote (#146) cochée.
+
+### Fixed
+- `ReplyFormParser` lit `<textarea name="content_form">` via `wholeText()` plutôt que `text()` — préserve le BBCode verbatim que HFR ship dans la quote prefill (la décodage HTML d'entités appliquée par `text()` cassait `[quotemsg=N,X,user]` sur certaines captures).
+
+---
+
 ## v0.10.3 — 2026-05-18
 
 App patch 0.3.3 (build v43) — fix `NetworkOnMainThreadException`
@@ -93,6 +136,13 @@ Phase 2A clôturée et Phase 2B-A livrée : le client a désormais une cartograp
 - `docs/specs/mvi.md` § Editor : remplace l'encart placeholder Phase 1 par l'état réel Phase 2B-A — `PostEditorMode { Reply, Edit }` / `TopicFormMode { New, EditFirstPost }`, state MVI `PostEditorState`, intents `PostEditorIntent`. Mentionne explicitement qu'il n'y a pas encore d'envoi HFR.
 - `docs/specs/navigation.md` : `EditorRoute(EditorMode)` remplacé par `PostEditorRoute(PostEditorMode, cat, topicId?, numreponse?)` + `TopicFormRoute(TopicFormMode, cat?, subcat?, topicId?)`. Le call-site `TopicScreen.onReply` ouvre désormais `PostEditorRoute(Reply, route.cat, topicId = topicId)`.
 - `docs/specs/roadmap.md` § Phase 2 : 2A et 2B-A cochés, items individuels précisés.
+
+### Fixed (PR #163 round 2 review)
+- `Post.quoteRef` est désormais persisté en Room v5 (`MIGRATION_4_5` : `ALTER TABLE posts ADD COLUMN quoteRef INTEGER` nullable). Avant ce fix, un cache hit frais perdait tous les `quoteRef` et le bouton « Citer » disparaissait jusqu'au prochain refresh réseau. Test repository `observeTopicPage fresh cache preserves quoteRef without network refresh` + migration test `migrate_4_to_5_adds_nullable_quoteRef_to_posts` (chaîné dans tous les builders de tests `.addMigrations(...)`).
+- `PostEditorViewModel` recalcule la preview AST lors de l'hydratation quote si la preview était visible pendant `isLoadingForm` — avant, l'utilisateur voyait un panneau de preview vide sous un draft prérempli. Test dédié `quote hydration refreshes preview when preview was already visible`.
+- Test de non-régression `submit with InvalidHashCheck silently refetches without clobbering quote draft` — vérifie que `draftHydratedFromForm` bloque bien la ré-hydratation du draft édité après un refetch silencieux.
+- `parseQuoteRef` scopé à la toolbar HFR (`POST_TOOLBAR_LEFT`) — un lien quote inline dans le body d'un post n'est plus interprété comme l'action « Citer » du post lui-même. Test dédié.
+- KDoc et commentaires nettoyés : `PostEditorState`, `PostEditorScreen`, `Post.quoteRef` ne disent plus « Quote arrive plus tard » ni « non persisté Room ».
 
 ### Fixed
 - Parser BBCode : `[quote]hello` / `[fixed]hello` / `[img]url` (et autres tags block-level) sans close ne fabriquent plus de bloc vide ou ne perdent plus l'URL. Le KDoc d'en-tête promet « degrade to plain text » — désormais vrai. 7 tests dédiés.

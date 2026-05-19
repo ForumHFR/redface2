@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.domain.write
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
+import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 
 /**
@@ -29,5 +30,6 @@ interface ReplyRepository {
         context: ReplyContext,
         form: ReplyForm,
         bbcodeContent: String,
+        options: ReplyFormOptions = ReplyFormOptions(),
     ): ReplySubmitResult
 }

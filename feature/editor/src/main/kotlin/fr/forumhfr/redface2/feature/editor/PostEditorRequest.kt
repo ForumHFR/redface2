@@ -19,4 +19,16 @@ data class PostEditorRequest(
     val numreponse: Int?,
     val page: Int?,
     val subcat: Int?,
+    /**
+     * `numreponse` of the post the user is quoting (Phase 2C, #146). `null` for a
+     * simple reply. When non-null, the ViewModel builds a quote `ReplyContext`
+     * and HFR returns a prefilled `[quotemsg=…]` block via `ReplyForm.initialContent`.
+     */
+    val quotedNumreponse: Int? = null,
+    /**
+     * `ref` parameter HFR included in the quote link of the source post. Opaque
+     * positional id, parsed from `Post.quoteRef`. Forwarded unchanged ; never
+     * synthesised. `null` when the source post had no quote link.
+     */
+    val quoteRef: Int? = null,
 )

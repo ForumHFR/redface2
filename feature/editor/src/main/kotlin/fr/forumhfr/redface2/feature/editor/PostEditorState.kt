@@ -8,8 +8,9 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 
 /**
  * MVI state of the post-level editor. Local draft + parsed preview AST + the Phase
- * 2C (#145) submit lifecycle. Submission for Edit / Edit FP / Create / Quote arrives
- * later (#146, #147, #148, #149).
+ * 2C submit lifecycle — reply (#145) and quote (#146) both reach HFR through
+ * the same `ReplyRepository` and share this state. Edit / Edit FP / Create
+ * topic come later (#147 / #148 / #149).
  */
 data class PostEditorState(
     val mode: PostEditorMode,
@@ -20,6 +21,14 @@ data class PostEditorState(
     val page: Int?,
     /** Sub-category id required by HFR's write contract. Null when unknown — reply disabled. */
     val subcat: Int?,
+    /**
+     * `numreponse` of the post being quoted (Phase 2C, #146). When non-null the
+     * editor opened in quote mode : HFR prefills `[quotemsg=…]` and we hydrate
+     * the draft with it on form load. Same surface as a simple reply otherwise.
+     */
+    val quotedNumreponse: Int? = null,
+    /** `ref` parameter HFR included in the quote link — opaque, forwarded as-is. */
+    val quoteRef: Int? = null,
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
@@ -30,6 +39,35 @@ data class PostEditorState(
     val isSubmitting: Boolean = false,
     /** Surfaces an HFR-classified failure to the UI. Null means "no error to show". */
     val submitError: SubmitError? = null,
+    /**
+     * Tracks whether we already prefilled [draft] from `ReplyForm.initialContent`.
+     * Used by the ViewModel to make sure a stale form refetch (e.g. after
+     * `InvalidHashCheck`) does not overwrite the user's in-progress edit.
+     */
+    val draftHydratedFromForm: Boolean = false,
+    /**
+     * Per-post options the user can flip from the editor (Phase 2C, #146 round
+     * 2 follow-up). Seeded from `ReplyForm.options` on the first form load and
+     * never auto-overwritten by a refetch — same anti-clobber rule as
+     * [draftHydratedFromForm]. The repository reads these values when building
+     * the POST body, so flipping the toggle is immediately reflected on the
+     * next submit.
+     */
+    val signatureEnabled: Boolean = false,
+    /**
+     * **Inverted semantics** (matches `ReplyFormOptions.smileyDisabled`): `true`
+     * = the user opted to render HFR smileys as plain text. Do not read this as
+     * « smileys actifs ». UI label : « Désactiver les smilies ».
+     */
+    val smileyDisabled: Boolean = false,
+    val emailNotificationEnabled: Boolean = false,
+    /**
+     * Mirror of [draftHydratedFromForm] for the options. We do not want a
+     * second form fetch (`InvalidHashCheck` refetch) to silently reset the
+     * three toggles the user may have flipped between the first load and the
+     * submit attempt.
+     */
+    val optionsHydratedFromForm: Boolean = false,
 ) {
     /**
      * Reply submission is allowed when : we know the routing context (page + subcat),

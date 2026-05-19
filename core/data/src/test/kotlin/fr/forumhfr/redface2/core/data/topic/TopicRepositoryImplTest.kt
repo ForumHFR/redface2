@@ -263,6 +263,40 @@ class TopicRepositoryImplTest {
         }
     }
 
+    @Test
+    fun `observeTopicPage fresh cache preserves quoteRef without network refresh`() = runTest {
+        // Phase 2C (#146 round 2) regression : before Room v5, Post.quoteRef was not
+        // persisted, so a fresh cache hit would emit posts with quoteRef = null and
+        // the « Citer » button would silently disappear. This test pins the
+        // contract — the warmup parses real HFR-quote hrefs from the topic_khakha
+        // fixture (refs 0/1/2/3/4/5 on the first 6 quotable posts) and the cache
+        // re-emission must keep at least one of them non-null.
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_khakha_page_2.html")))
+        val repo = repository(now = Instant.parse("2026-04-26T18:00:00Z"))
+        val fresh = repo.refreshTopicPage(13, 84_540, 2)
+        assertEquals("warmup must issue exactly one network request", 1, server.requestCount)
+
+        val freshWithQuote = fresh.posts.firstOrNull { it.quoteRef != null }
+        assertNotNull(
+            "Phase 2C fixture must expose at least one parsed quoteRef on warmup",
+            freshWithQuote,
+        )
+        requireNotNull(freshWithQuote)
+
+        // Same clock → fresh cache → no network refresh.
+        repo.observeTopicPage(13, 84_540, 2).test {
+            val cached = awaitItem()
+            awaitComplete()
+            val cachedSamePost = cached.posts.first { it.numreponse == freshWithQuote.numreponse }
+            assertEquals(
+                "quoteRef must round-trip Room v5 unchanged on cache hit",
+                freshWithQuote.quoteRef,
+                cachedSamePost.quoteRef,
+            )
+        }
+        assertEquals("fresh cache hit must not trigger a refresh", 1, server.requestCount)
+    }
+
     private fun repository(now: Instant): TopicRepositoryImpl = TopicRepositoryImpl(
         client = client,
         parser = HfrParser(),

@@ -189,6 +189,143 @@ class TopicPageParserTest {
         assertTrue(topic.hasSubcat)
     }
 
+    @Test
+    fun `quoteRef extracted from quote link href on the khakha page 2 fixture`() {
+        // page 2 of the khakha fixture exposes a stable ref distribution (0, 1, 2, …)
+        // because each post sits at its own position in the page (40 posts visible).
+        // Three representative posts cover the contract :
+        //   - first quote-able post → ref=0
+        //   - mid-page post           → ref=2
+        //   - late post               → ref=5
+        // We do not over-specify the rest of the page : the parser only promises
+        // « whatever HFR put in the href » and a future capture might shift positions.
+        val topic = parser.parse(fixture("topic_khakha_page_2.html"))
+
+        val byNumreponse = topic.posts.associateBy { it.numreponse }
+        // n°16628071 = Mora1651 (1st quote-able post on the page, ref=0 in fixture)
+        assertEquals(0, byNumreponse[16628071]?.quoteRef)
+        // n°16628106 = groux (ref=2)
+        assertEquals(2, byNumreponse[16628106]?.quoteRef)
+        // n°16628222 = Maverick (ref=5)
+        assertEquals(5, byNumreponse[16628222]?.quoteRef)
+    }
+
+    @Test
+    fun `quoteRef ignores numrep links inside the post body and only reads the toolbar`() {
+        // A user can quote another post inline in the body of their own post (HFR
+        // renders such a link as a plain anchor to message.php?…&numrep=…&ref=N…).
+        // `parseQuoteRef` must NOT pick that up : the « Citer » action belongs to
+        // the toolbar of the post we're rendering, not to whatever it cites in
+        // its content. Round 2 fix — scopes the lookup to POST_TOOLBAR_LEFT.
+        val html = """
+            <html><body>
+              <input name="cat" value="13" />
+              <input name="post" value="84540" />
+              <input name="subcat" value="432" />
+              <table><tbody>
+                <tr class="fondForum2Title">
+                  <th class="messCase1">Auteur</th>
+                  <th><h3>Body link sanity</h3></th>
+                </tr>
+              </tbody></table>
+              <table class="messagetable"><tbody>
+                <tr class="message">
+                  <td class="messCase1"><a name="t77777"></a><b class="s2">UserA</b></td>
+                  <td class="messCase2">
+                    <div class="toolbar"><div class="left">Posté le 18-05-2026&nbsp;à&nbsp;10:00:00</div></div>
+                    <div id="para77777">
+                      <p>See <a href="/message.php?config=hfr.inc&amp;cat=13&amp;post=84540&amp;numrep=12345&amp;ref=99&amp;page=1&amp;subcat=432">that other post</a></p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        assertNull(
+            "numrep link inside the post body must not be promoted to quoteRef",
+            topic.posts.single().quoteRef,
+        )
+    }
+
+    @Test
+    fun `quoteRef ignores a numrep link whose params only carry foreign ref suffixes`() {
+        // Belt-and-braces regression : if HFR ever adds an unrelated `…&myref=…`
+        // or `…&referrer=…` to the toolbar (or a tracking attribute), our quote
+        // detector must NOT treat it as a quote link. Round 1 review finding —
+        // the previous `.contains("ref=")` matched any substring.
+        val html = """
+            <html><body>
+              <input name="cat" value="13" />
+              <input name="post" value="84540" />
+              <input name="subcat" value="432" />
+              <table><tbody>
+                <tr class="fondForum2Title">
+                  <th class="messCase1">Auteur</th>
+                  <th><h3>Foreign suffix sanity</h3></th>
+                </tr>
+              </tbody></table>
+              <table class="messagetable"><tbody>
+                <tr class="message">
+                  <td class="messCase1"><a name="t12345"></a><b class="s2">UserA</b></td>
+                  <td class="messCase2">
+                    <div class="toolbar"><div class="left">Posté le 18-05-2026&nbsp;à&nbsp;10:00:00</div></div>
+                    <a href="/foo.php?numrep=12345&amp;myref=99&amp;referrer=bar">spurious</a>
+                    <div id="para12345"><p>content</p></div>
+                  </td>
+                </tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        assertNull(
+            "Foreign &myref / &referrer suffixes must not be picked up as quote ref",
+            topic.posts.single().quoteRef,
+        )
+    }
+
+    @Test
+    fun `quoteRef is null for a post that has no quote link in the source HTML`() {
+        // Synthesised minimal page : one post table without any `a[href*=numrep=]`
+        // entry. Mirrors HFR's locked-topic special pages where the toolbar drops
+        // the quote action. The parser must keep the post readable AND leave
+        // `quoteRef` null so the UI suppresses the « Citer » button.
+        //
+        // The HFR selector requires a <table><tr class="fondForum2Title"><th><h3>
+        // wrapper for the topic title and `td.messCase1 a[name^=t]` for the post
+        // anchor, plus `td.messCase1 b.s2` for the author.
+        val html = """
+            <html><body>
+              <input name="cat" value="13" />
+              <input name="post" value="84540" />
+              <input name="subcat" value="432" />
+              <table>
+                <tbody>
+                  <tr class="fondForum2Title">
+                    <th class="messCase1">Auteur</th>
+                    <th><h3>Locked topic</h3></th>
+                  </tr>
+                </tbody>
+              </table>
+              <table class="messagetable">
+                <tbody>
+                  <tr class="message">
+                    <td class="messCase1"><a name="t99999"></a><b class="s2">SomeAuthor</b></td>
+                    <td class="messCase2">
+                      <div class="toolbar"><div class="left">Posté le 18-05-2026&nbsp;à&nbsp;10:00:00</div></div>
+                      <div id="para99999"><p>locked content</p></div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        val post = topic.posts.single()
+        assertEquals(99999, post.numreponse)
+        assertNull("quote-less post must expose null quoteRef", post.quoteRef)
+    }
+
     private fun fixture(name: String): String {
         return requireNotNull(javaClass.getResource("/fixtures/$name")) {
             "Fixture not found: $name"

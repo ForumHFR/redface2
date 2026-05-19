@@ -68,6 +68,7 @@ classDiagram
         +Boolean isOwnPost
         +List~String~ quotedAuthors
         +Int? postIndex
+        +Int? quoteRef
     }
 
     class PostContent {
@@ -249,6 +250,7 @@ data class Post(
     val isOwnPost: Boolean,              // calculé client-side : post.author == currentUser
     val quotedAuthors: List<String>,     // dérivé de PostContent pour recherche, filtres et décorateurs
     val postIndex: Int?,                 // (page-1) * postsPerPage + position — null quand le parser n'a pas le contexte page/postsPerPage (preview, fixtures isolées). postsPerPage vient des préférences HFR de l'utilisateur, PAS une constante (voir UserSettings)
+    val quoteRef: Int? = null,           // Phase 2C (#146) : `ref` opaque parsé depuis le href du lien quote HFR (`message.php?…&numrep=…&ref=N`). Null = post sans lien quote (locked, anonyme). Persisté en Room v5 (`MIGRATION_4_5`) — un cache hit garde le bouton « Citer » disponible sans round-trip réseau.
 )
 
 data class PostContent(
@@ -409,13 +411,18 @@ data class ReplyContext(
     val subcat: Int,                 // requis > 0 ; `ReplyContext.init` refuse à la fois le sentinel `SUBCAT_UNKNOWN` (-1) et la wire shape moderator-space HFR (0, cat=0/cat=prive)
     val topicId: Int,
     val page: Int,                   // page topic depuis laquelle l'utilisateur a cliqué "Répondre"
-)
+    val quotedNumreponse: Int? = null, // Phase 2C (#146) : numreponse cité ; null = reply simple, non-null = quote (HFR `numrep` query param + POST field)
+    val quoteRef: Int? = null,         // Phase 2C (#146) : ref opaque parsé depuis le href quote HFR ; null = reply simple ou post sans lien quote
+) {
+    val isQuote: Boolean get() = quotedNumreponse != null
+}
 
 data class ReplyForm(
     val hashCheck: String,           // CSRF token HFR, jamais loggué
     val sujet: String,
     val hiddenFields: Map<String, String>,   // password filtré au parse ; pseudo anonyme filtré
     val isAnonymous: Boolean,
+    val initialContent: String = "",  // Phase 2C (#146) : reply → "" ; quote → bloc `[quotemsg=…]` prérempli par HFR (verbatim, jamais reconstruit côté app)
 )
 
 sealed interface ReplySubmitResult {

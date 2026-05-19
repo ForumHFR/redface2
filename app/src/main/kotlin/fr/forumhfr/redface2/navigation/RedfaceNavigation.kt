@@ -90,6 +90,18 @@ data class PostEditorRoute(
      * refuses to open the editor when this is null.
      */
     val subcat: Int? = null,
+    /**
+     * `numreponse` of the post being quoted (Phase 2C, #146). `null` for a
+     * simple reply ; non-null when the user tapped « Citer » on a specific post.
+     * Routed verbatim into `PostEditorRequest.quotedNumreponse`.
+     */
+    val quotedNumreponse: Int? = null,
+    /**
+     * `ref` parameter extracted from HFR's quote link on the source post.
+     * Opaque positional id ; forwarded as-is to `HfrClient.getReplyForm`. `null`
+     * for a simple reply or for a post whose HTML did not expose a quote link.
+     */
+    val quoteRef: Int? = null,
 ) : RedfaceNavKey
 
 @Serializable
@@ -298,6 +310,23 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                             ),
                         )
                     },
+                    onQuote = { subcat, page, quotedNumreponse, quoteRef ->
+                        // Phase 2C (#146) — same destination as reply ; only the
+                        // editor's request differs (quotedNumreponse pulls the HFR
+                        // quote prefill). Route is `PostEditorMode.Reply` because
+                        // quote is a flavour of reply, not a new editor mode.
+                        backStack.add(
+                            PostEditorRoute(
+                                mode = PostEditorMode.Reply,
+                                cat = route.cat,
+                                topicId = route.post,
+                                page = page,
+                                subcat = subcat,
+                                quotedNumreponse = quotedNumreponse,
+                                quoteRef = quoteRef,
+                            ),
+                        )
+                    },
                     onOpenPage = { targetPage ->
                         backStack.removeAt(backStack.lastIndex)
                         backStack.add(
@@ -320,6 +349,8 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                         numreponse = route.numreponse,
                         page = route.page,
                         subcat = route.subcat,
+                        quotedNumreponse = route.quotedNumreponse,
+                        quoteRef = route.quoteRef,
                     ),
                     onSubmitSucceeded = { targetPage ->
                         // Pop the editor and refresh the topic page. Phase 2C-A always

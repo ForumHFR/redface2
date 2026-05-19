@@ -25,6 +25,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -298,7 +299,205 @@ class PostEditorViewModelTest {
         }
     }
 
-    private fun newReplyViewModel(subcat: Int? = SAMPLE_SUBCAT): PostEditorViewModel =
+    @Test
+    fun `quote VM forwards quotedNumreponse and quoteRef to ReplyRepository on form fetch`() = runTest {
+        replyRepository.formResult = Result.success(
+            authenticatedForm(initialContent = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"),
+        )
+        newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        // Let the launched form fetch complete.
+        testScheduler.advanceUntilIdle()
+
+        val context = replyRepository.lastFetchedContext
+        assertNotNull("fetchReplyForm must have been called", context)
+        requireNotNull(context)
+        assertEquals("quoted numreponse must propagate", 2784595, context.quotedNumreponse)
+        assertEquals("quote ref must propagate", 0, context.quoteRef)
+        assertTrue("isQuote must be true", context.isQuote)
+    }
+
+    @Test
+    fun `quote VM hydrates the draft from initialContent on first form load`() = runTest {
+        val prefill = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"
+        replyRepository.formResult = Result.success(authenticatedForm(initialContent = prefill))
+
+        val viewModel = newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertFalse("Form must be fully loaded", settled.isLoadingForm)
+            assertEquals("Draft hydrated with HFR prefill", prefill, settled.draft.text)
+            assertTrue("Caret placed at the end of the prefill", settled.draftHydratedFromForm)
+            assertEquals(prefill.length, settled.draft.selection.start)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `quote VM does not overwrite a draft the user already typed`() = runTest {
+        // User-typed content lands on the VM before the form fetch completes —
+        // we gate the fetch with a CompletableDeferred so we can interleave them
+        // exactly like the production race (network in flight, user typing).
+        val formGate = CompletableDeferred<Unit>()
+        replyRepository.formResult = Result.success(
+            authenticatedForm(initialContent = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"),
+        )
+        replyRepository.formGate = formGate
+
+        val viewModel = newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        // Type before the form lands.
+        viewModel.submit(
+            PostEditorIntent.ContentChanged(
+                androidx.compose.ui.text.input.TextFieldValue("My own message"),
+            ),
+        )
+        // Now let the form load.
+        formGate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals(
+                "User-typed content must be preserved when the form arrives late",
+                "My own message",
+                settled.draft.text,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `option toggle intents flip the corresponding state booleans`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ToggleSignature(true))
+        viewModel.submit(PostEditorIntent.ToggleSmileyDisabled(true))
+        viewModel.submit(PostEditorIntent.ToggleEmailNotification(true))
+        testScheduler.advanceUntilIdle()
+
+        val settled = viewModel.state.value
+        assertTrue("signatureEnabled flipped", settled.signatureEnabled)
+        assertTrue("smileyDisabled flipped", settled.smileyDisabled)
+        assertTrue("emailNotificationEnabled flipped", settled.emailNotificationEnabled)
+    }
+
+    @Test
+    fun `options are seeded from form options on first load`() = runTest {
+        replyRepository.formResult = Result.success(
+            authenticatedForm().copy(
+                options = fr.forumhfr.redface2.core.model.write.ReplyFormOptions(
+                    signatureEnabled = true,
+                    smileyDisabled = false,
+                    emailNotificationEnabled = true,
+                ),
+            ),
+        )
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        val settled = viewModel.state.value
+        assertTrue("signature default true reflects HFR checked attribute", settled.signatureEnabled)
+        assertFalse(settled.smileyDisabled)
+        assertTrue(settled.emailNotificationEnabled)
+        assertTrue("optionsHydratedFromForm flips after first load", settled.optionsHydratedFromForm)
+    }
+
+    @Test
+    fun `silent refetch must not overwrite user-toggled options`() = runTest {
+        // First load : HFR ships everything false. User flips signature on.
+        // InvalidHashCheck triggers a silent refetch with the same defaults.
+        // The user's toggle must survive — same anti-clobber rule as the draft.
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ToggleSignature(true))
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("hi")))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("refetch happened", 2, replyRepository.formFetches)
+        val settled = viewModel.state.value
+        assertTrue("signature toggle must survive the refetch", settled.signatureEnabled)
+    }
+
+    @Test
+    fun `submit with InvalidHashCheck silently refetches without clobbering quote draft`() = runTest {
+        // `handleSubmitOutcome(InvalidHashCheck)` resets `loadedForm = null` and
+        // re-invokes `loadReplyFormIfPossible()`. The `draftHydratedFromForm`
+        // guard must prevent the refetch from overwriting whatever the user has
+        // typed since the initial hydration. We assert : (a) the second form
+        // fetch did happen, (b) the user's edited draft survives.
+        val prefill = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"
+        replyRepository.formResult = Result.success(authenticatedForm(initialContent = prefill))
+        replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+
+        val viewModel = newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        testScheduler.advanceUntilIdle()
+        assertEquals("initial form fetch", 1, replyRepository.formFetches)
+
+        // User edits the prefill (cursor at end → add a real reply after the quote).
+        val edited = "$prefill\n\nReply"
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue(edited)))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("silent refetch after InvalidHashCheck", 2, replyRepository.formFetches)
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals(
+                "User edit must survive the silent refetch — draftHydratedFromForm blocks the rewrite",
+                edited,
+                settled.draft.text,
+            )
+            assertTrue("draftHydratedFromForm stays true across refetch", settled.draftHydratedFromForm)
+            assertEquals(
+                SubmitError.Hfr(ReplyFailureReason.InvalidHashCheck),
+                settled.submitError,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `quote hydration refreshes preview when preview was already visible`() = runTest {
+        // Race : user opens quote editor, opens the preview pane WHILE the form
+        // is still loading, form arrives → both `draft` and `preview` must reflect
+        // the `[quotemsg=…]` prefill. Before round 2 the preview AST stayed empty
+        // until the next `ContentChanged` / `TogglePreview`, which felt like a bug
+        // even though the draft was fine.
+        val formGate = CompletableDeferred<Unit>()
+        val prefill = "[quotemsg=2784595,768,1214571]hi[/quotemsg]"
+        replyRepository.formResult = Result.success(authenticatedForm(initialContent = prefill))
+        replyRepository.formGate = formGate
+
+        val viewModel = newReplyViewModel(quotedNumreponse = 2784595, quoteRef = 0)
+        // Toggle preview BEFORE the form lands.
+        viewModel.submit(PostEditorIntent.TogglePreview)
+        // Now release the form fetch.
+        formGate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals("Draft hydrated with HFR prefill", prefill, settled.draft.text)
+            assertTrue("Preview was visible before hydration", settled.isPreviewVisible)
+            assertEquals(
+                "Preview AST must reflect the hydrated draft",
+                previewParser.contentFor(prefill),
+                settled.preview,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    private fun newReplyViewModel(
+        subcat: Int? = SAMPLE_SUBCAT,
+        quotedNumreponse: Int? = null,
+        quoteRef: Int? = null,
+    ): PostEditorViewModel =
         PostEditorViewModel(
             request = PostEditorRequest(
                 mode = PostEditorMode.Reply,
@@ -307,17 +506,20 @@ class PostEditorViewModelTest {
                 numreponse = null,
                 page = SAMPLE_PAGE,
                 subcat = subcat,
+                quotedNumreponse = quotedNumreponse,
+                quoteRef = quoteRef,
             ),
             previewParser = previewParser,
             replyRepository = replyRepository,
             diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
         )
 
-    private fun authenticatedForm(): ReplyForm = ReplyForm(
+    private fun authenticatedForm(initialContent: String = ""): ReplyForm = ReplyForm(
         hashCheck = "FAKE_HASH",
         sujet = "Fake Topic",
         hiddenFields = mapOf("cat" to "23", "subcat" to "550", "post" to "35395", "page" to "20"),
         isAnonymous = false,
+        initialContent = initialContent,
     )
 
     private fun anonymousForm(): ReplyForm = ReplyForm(
@@ -353,25 +555,41 @@ class PostEditorViewModelTest {
         var submitResult: ReplySubmitResult? = null
         var submitException: Throwable? = null
         var submitGate: CompletableDeferred<Unit>? = null
+        var formGate: CompletableDeferred<Unit>? = null
         var formException: Throwable? = null
 
         var formFetches: Int = 0
             private set
         var submitCalls: Int = 0
             private set
+        var lastFetchedContext: ReplyContext? = null
+            private set
+        var lastSubmittedContext: ReplyContext? = null
+            private set
+        var lastSubmittedBbcode: String? = null
+            private set
 
         override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
             formFetches += 1
+            lastFetchedContext = context
+            formGate?.await()
             formException?.let { throw it }
             return formResult.getOrThrow()
         }
+
+        var lastSubmittedOptions: fr.forumhfr.redface2.core.model.write.ReplyFormOptions? = null
+            private set
 
         override suspend fun submitReply(
             context: ReplyContext,
             form: ReplyForm,
             bbcodeContent: String,
+            options: fr.forumhfr.redface2.core.model.write.ReplyFormOptions,
         ): ReplySubmitResult {
             submitCalls += 1
+            lastSubmittedContext = context
+            lastSubmittedBbcode = bbcodeContent
+            lastSubmittedOptions = options
             submitGate?.await()
             submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")

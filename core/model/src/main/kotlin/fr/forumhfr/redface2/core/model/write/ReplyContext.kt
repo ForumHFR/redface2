@@ -13,6 +13,23 @@ data class ReplyContext(
     val subcat: Int,
     val topicId: Int,
     val page: Int,
+    /**
+     * `numreponse` of the post the user is quoting (Phase 2C, #146). `null` for a
+     * simple reply. When non-null, the repository switches to the HFR « quote »
+     * form: GET `message.php?...&numrep={quotedNumreponse}&ref={quoteRef}...` and
+     * POST `bddpost.php` with `numrep={quotedNumreponse}`. The `numreponse` form
+     * field stays empty in both reply and quote — it's only used for edit.
+     */
+    val quotedNumreponse: Int? = null,
+    /**
+     * `ref` query parameter HFR includes in the « quote+ » link of each post. Phase
+     * 2C (#146) ships it through as-is: the value is opaque (it correlates with
+     * post position on the topic page but the exact contract is undocumented), so
+     * the model carries whatever the topic page HTML gave us and forbids guessing
+     * a default. `null` when the source post had no quote link — in that case the
+     * UI suppresses the « Citer » action upstream and we never reach this code path.
+     */
+    val quoteRef: Int? = null,
 ) {
     init {
         require(cat >= 0) { "cat must be >= 0, was $cat" }
@@ -21,5 +38,25 @@ data class ReplyContext(
         require(subcat > 0) { "subcat must be > 0 (sentinel or moderator space), was $subcat" }
         require(topicId >= 0) { "topicId must be >= 0, was $topicId" }
         require(page >= 1) { "page must be >= 1, was $page" }
+        // Quote requires a positive cited numreponse (the HFR `numrep` query param
+        // does not have a documented sentinel meaning). `quoteRef` may legitimately
+        // travel as null even on a quote when a future HFR change drops `ref` —
+        // we only assert its sign when present.
+        quotedNumreponse?.let {
+            require(it > 0) { "quotedNumreponse must be > 0 when present, was $it" }
+        }
+        quoteRef?.let {
+            require(it >= 0) { "quoteRef must be >= 0 when present, was $it" }
+        }
+        // `quoteRef` is the per-page positional id of the *cited* post — only
+        // meaningful in conjunction with `quotedNumreponse`. The reverse shape
+        // (`quotedNumreponse != null && quoteRef == null`) stays tolerated for
+        // forward compat in case HFR drops `ref` one day ; see
+        // `HfrClient.getReplyForm` KDoc.
+        require(quotedNumreponse != null || quoteRef == null) {
+            "quoteRef requires quotedNumreponse"
+        }
     }
+
+    val isQuote: Boolean get() = quotedNumreponse != null
 }

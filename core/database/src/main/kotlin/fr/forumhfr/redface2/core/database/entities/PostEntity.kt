@@ -29,4 +29,14 @@ data class PostEntity(
      * `isEditable` flags.
      */
     val authMode: FetchMode,
+    /**
+     * `ref` parameter parsed from HFR's quote link href (Phase 2C, #146 — round
+     * 2 fix). Persisted in Room v5 so the « Citer » button stays available on a
+     * cache hit ; without this column, a fresh cache load would reset all
+     * quoteRefs to `null` and the UI would suppress quote until the next live
+     * fetch. Nullable on disk : pre-v5 rows backfill to `NULL` (sentinel for
+     * « unknown, refresh required »), and posts whose HFR HTML did not expose a
+     * quote link (locked topic, anonymous read) keep `NULL` legitimately.
+     */
+    val quoteRef: Int? = null,
 )
