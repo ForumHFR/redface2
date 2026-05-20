@@ -172,6 +172,67 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * Phase 2D (#147) — GET the HFR edit form for a post the user owns. The URL
+     * shape is the same as the reply form, but with a `numreponse={N}` parameter
+     * that tells HFR to render the « edit existing post » composer (prefills
+     * `<textarea name=content_form>` with the post's current BBCode + flips the
+     * action target to `bdd.php`). `numreponse` is unique per category, so the
+     * full `(cat, post, page, subcat, numreponse)` tuple is always required —
+     * cf. `docs/specs/protocol-hfr.md` § Edit post and the Phase 2A fixture
+     * `write_edit_form_test_post.html`.
+     *
+     * Always uses the authenticated client : edit is destructive enough that we
+     * never want to land on the anonymous composer by accident
+     * ([SessionExpiredException] is raised instead of silently returning login
+     * HTML).
+     */
+    @Suppress("LongParameterList") // HFR contract : 5 mandatory ids.
+    suspend fun getEditPostForm(
+        cat: Int,
+        subcat: Int,
+        post: Int,
+        page: Int,
+        numreponse: Int,
+    ): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("message.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", cat.toString())
+            .addQueryParameter("post", post.toString())
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("p", "1")
+            .addQueryParameter("subcat", subcat.toString())
+            .addQueryParameter("sondage", "0")
+            .addQueryParameter("owntopic", "0")
+            .addQueryParameter("new", "0")
+            .addQueryParameter("numreponse", numreponse.toString())
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
+     * Phase 2D (#147) — POST the edit payload to `bdd.php` (not `bddpost.php` —
+     * HFR routes the two flows through distinct endpoints). The [formBody]
+     * carries the same shape as a reply POST (`hash_check`, `verifrequet=1100`,
+     * `cat`/`subcat`/`post`/`page`/`sujet`, options) plus the edited post's
+     * `numreponse={N}` and a blank `numrep`. The repository is responsible for
+     * filtering out the `delete=1` flag that the edit form also exposes —
+     * deletion is out of scope for the edit MVP.
+     *
+     * Same success-vs-error classification as reply : HFR returns HTTP 200 with
+     * distinct body text in both cases ; the response parser disambiguates.
+     */
+    suspend fun submitEditPost(formBody: FormBody): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("bdd.php")
+            .addQueryParameter("config", "hfr.inc")
+            .build()
+        val request = Request.Builder().url(url).post(formBody).build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Executes the call, returns the body as a UTF-8 string, and raises
      * [SessionExpiredException] if HFR redirected to the login page or returned the login form
      * inline. When [tracePrefix] is non-null, the OkHttp call up to headers is wrapped in

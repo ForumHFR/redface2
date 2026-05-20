@@ -1,0 +1,6 @@
+Source: forum.hardware.fr
+Captured: 2026-05-17 with authenticated XaTelitte session
+URL: https://forum.hardware.fr/message.php?config=hfr.inc&cat=23&post=35395&page=20&p=1&subcat=550&sondage=0&owntopic=0&new=0&numreponse=2784595
+Notes: GET edit form using numreponse on test post 2784595 after controlled edit.
+Sanitization: hash_check/codehex redacted; MP unread target id and MP count redacted when present; no cookies stored.
+Test context: Redface 2 topic cat=23 post=35395 subcat=550; controlled test post numreponse=2784595.

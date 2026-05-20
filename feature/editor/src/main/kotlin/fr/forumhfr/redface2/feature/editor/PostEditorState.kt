@@ -7,10 +7,11 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 
 /**
- * MVI state of the post-level editor. Local draft + parsed preview AST + the Phase
- * 2C submit lifecycle — reply (#145) and quote (#146) both reach HFR through
- * the same `ReplyRepository` and share this state. Edit / Edit FP / Create
- * topic come later (#147 / #148 / #149).
+ * MVI state of the post-level editor. Local draft + parsed preview AST + the
+ * write submit lifecycle. Reply (#145) and quote (#146) reach HFR through
+ * `ReplyRepository` (POST `bddpost.php`) ; edit (#147) goes through
+ * `EditPostRepository` (POST `bdd.php`). All three share this state. Edit FP
+ * (#148) and create topic (#149) still come later.
  */
 data class PostEditorState(
     val mode: PostEditorMode,
@@ -33,9 +34,9 @@ data class PostEditorState(
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
     val validation: BbcodeValidation = BbcodeValidation.Idle,
-    /** True while we GET the reply form to grab `hash_check`. */
+    /** True while we GET `message.php` (reply / quote / edit form) to grab `hash_check`. */
     val isLoadingForm: Boolean = false,
-    /** True while we POST `bddpost.php`. Guards against double submit. */
+    /** True while we POST `bddpost.php` (reply / quote) or `bdd.php` (edit). Guards against double submit. */
     val isSubmitting: Boolean = false,
     /** Surfaces an HFR-classified failure to the UI. Null means "no error to show". */
     val submitError: SubmitError? = null,
@@ -70,12 +71,14 @@ data class PostEditorState(
     val optionsHydratedFromForm: Boolean = false,
 ) {
     /**
-     * Reply submission is allowed when : we know the routing context (page + subcat),
+     * Submission is allowed when : we know the routing context (page + subcat + topicId),
      * the user has typed something non-blank, the editor is not already submitting,
-     * and we are not still fetching the form.
+     * and we are not still fetching the form. Phase 2D (#147) additionally requires
+     * `numreponse` for [PostEditorMode.Edit] — without it we cannot identify which
+     * post HFR should rewrite.
      */
     val canSubmit: Boolean
-        get() = mode == PostEditorMode.Reply &&
+        get() = (mode == PostEditorMode.Reply || (mode == PostEditorMode.Edit && numreponse != null)) &&
             page != null &&
             // Reject the `null` unknown, the `-1` SUBCAT_UNKNOWN sentinel and the `0`
             // moderator-space wire shape (`Topic.hasSubcat` uses the same rule).

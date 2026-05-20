@@ -34,8 +34,15 @@ sealed interface PostEditorIntent {
  */
 sealed interface PostEditorEffect {
     /**
-     * The reply was accepted by HFR. The receiver navigates back to the topic and
-     * refreshes the page if [targetPage] is known.
+     * The reply / quote / edit was accepted by HFR. The receiver navigates back
+     * to the topic and refreshes the page if [targetPage] is known. For Phase 2D
+     * edit, [scrollTo] additionally tells the topic screen which `numreponse` to
+     * scroll to after the refresh — reply / quote always leave it null (HFR's
+     * refresh URL anchors `#bas`, scrolling to the bottom of the page, which is
+     * already what `TopicScreen` does by default for an unanchored navigation).
      */
-    data class SubmitSucceeded(val targetPage: Int?) : PostEditorEffect
+    data class SubmitSucceeded(
+        val targetPage: Int?,
+        val scrollTo: Int? = null,
+    ) : PostEditorEffect
 }

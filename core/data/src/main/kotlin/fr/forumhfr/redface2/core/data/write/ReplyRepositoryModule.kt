@@ -5,14 +5,18 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
 import javax.inject.Singleton
 
 /**
- * Hilt wiring for the Phase 2C reply repository. Mirrors the (`@Binds` interface,
- * `@Provides` parsers) split adopted by `FlagRepositoryModule` and friends.
+ * Hilt wiring for the Phase 2C reply repository + Phase 2D edit-post repository.
+ * Mirrors the (`@Binds` interface, `@Provides` parsers) split adopted by
+ * `FlagRepositoryModule` and friends. The two repositories share the form +
+ * response parsers (the wire shapes are identical apart from the `bddpost.php`
+ * vs `bdd.php` endpoint and the `numreponse` field).
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -21,6 +25,10 @@ abstract class ReplyRepositoryModule {
     @Binds
     @Singleton
     abstract fun bindReplyRepository(impl: DefaultReplyRepository): ReplyRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindEditPostRepository(impl: DefaultEditPostRepository): EditPostRepository
 
     companion object {
         @Provides

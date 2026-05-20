@@ -36,6 +36,7 @@ class PostEditorViewModelTest {
 
     private val previewParser = FakePreviewParser()
     private val replyRepository = FakeReplyRepository()
+    private val editPostRepository = FakeEditPostRepository()
 
     @Before
     fun setUp() {
@@ -424,6 +425,100 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `Edit init fetches the edit form and hydrates draft from existing BBCode`() = runTest {
+        editPostRepository.formResult = Result.success(
+            ReplyForm(
+                hashCheck = "EDIT_HASH",
+                sujet = "Existing topic",
+                hiddenFields = mapOf("numreponse" to SAMPLE_EDITED_NUMREPONSE.toString()),
+                isAnonymous = false,
+                initialContent = "Existing post body",
+            ),
+        )
+        val viewModel = newEditViewModel()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("edit fetch called once", 1, editPostRepository.formFetches)
+        val context = editPostRepository.lastFetchedContext
+        assertNotNull("EditPostContext must reach the repository", context)
+        requireNotNull(context)
+        assertEquals(SAMPLE_EDITED_NUMREPONSE, context.numreponse)
+        assertEquals(SAMPLE_TOPIC_ID, context.topicId)
+        assertEquals(SAMPLE_SUBCAT, context.subcat)
+
+        val settled = viewModel.state.value
+        assertEquals("Existing post body", settled.draft.text)
+        assertTrue(settled.draftHydratedFromForm)
+    }
+
+    @Test
+    fun `Edit submit calls EditPostRepository with the numreponse from the route`() = runTest {
+        editPostRepository.submitResult = ReplySubmitResult.Success(
+            refreshUrl = "/hfr/foo/bar-sujet_35395_20.htm#t100",
+            targetPage = 20,
+        )
+        val viewModel = newEditViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("rewritten body")))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1, editPostRepository.submitCalls)
+        assertEquals(0, replyRepository.submitCalls)
+        val context = editPostRepository.lastSubmittedContext
+        assertNotNull(context)
+        requireNotNull(context)
+        assertEquals(SAMPLE_EDITED_NUMREPONSE, context.numreponse)
+        assertEquals("rewritten body", editPostRepository.lastSubmittedBbcode)
+    }
+
+    @Test
+    fun `Edit success emits SubmitSucceeded with scrollTo equal to the edited numreponse`() = runTest {
+        editPostRepository.submitResult = ReplySubmitResult.Success(
+            refreshUrl = "/hfr/foo/bar-sujet_35395_20.htm#t100",
+            targetPage = 20,
+        )
+        val viewModel = newEditViewModel()
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("rewritten body")))
+
+        viewModel.effects.test {
+            viewModel.submit(PostEditorIntent.SubmitClicked)
+            val effect = awaitItem()
+            assertTrue("must be a SubmitSucceeded — got $effect", effect is PostEditorEffect.SubmitSucceeded)
+            val success = effect as PostEditorEffect.SubmitSucceeded
+            assertEquals(20, success.targetPage)
+            assertEquals(
+                "edit success must surface the edited numreponse as scrollTo",
+                SAMPLE_EDITED_NUMREPONSE,
+                success.scrollTo,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `Reply success leaves scrollTo null (only edit fills it)`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.submitResult = ReplySubmitResult.Success(
+            refreshUrl = "/hfr/foo/bar-sujet_35395_20.htm#bas",
+            targetPage = 20,
+        )
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("new reply")))
+
+        viewModel.effects.test {
+            viewModel.submit(PostEditorIntent.SubmitClicked)
+            val effect = awaitItem() as PostEditorEffect.SubmitSucceeded
+            assertEquals(20, effect.targetPage)
+            assertNull("Reply must keep scrollTo null — anchor is #bas", effect.scrollTo)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `submit with InvalidHashCheck silently refetches without clobbering quote draft`() = runTest {
         // `handleSubmitOutcome(InvalidHashCheck)` resets `loadedForm = null` and
         // re-invokes `loadReplyFormIfPossible()`. The `draftHydratedFromForm`
@@ -511,6 +606,26 @@ class PostEditorViewModelTest {
             ),
             previewParser = previewParser,
             replyRepository = replyRepository,
+            editPostRepository = editPostRepository,
+            diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
+        )
+
+    private fun newEditViewModel(
+        subcat: Int? = SAMPLE_SUBCAT,
+        numreponse: Int? = SAMPLE_EDITED_NUMREPONSE,
+    ): PostEditorViewModel =
+        PostEditorViewModel(
+            request = PostEditorRequest(
+                mode = PostEditorMode.Edit,
+                cat = SAMPLE_CAT,
+                topicId = SAMPLE_TOPIC_ID,
+                numreponse = numreponse,
+                page = SAMPLE_PAGE,
+                subcat = subcat,
+            ),
+            previewParser = previewParser,
+            replyRepository = replyRepository,
+            editPostRepository = editPostRepository,
             diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
         )
 
@@ -596,10 +711,70 @@ class PostEditorViewModelTest {
         }
     }
 
+    private class FakeEditPostRepository : fr.forumhfr.redface2.core.domain.write.EditPostRepository {
+        var formResult: Result<ReplyForm> = Result.success(
+            ReplyForm(
+                hashCheck = "FAKE_EDIT_HASH",
+                sujet = "Fake Topic",
+                hiddenFields = mapOf(
+                    "cat" to "23",
+                    "subcat" to "550",
+                    "post" to "35395",
+                    "page" to "20",
+                    "numreponse" to "100",
+                ),
+                isAnonymous = false,
+                initialContent = "existing post body",
+            ),
+        )
+        var submitResult: ReplySubmitResult? = null
+        var submitException: Throwable? = null
+        var formException: Throwable? = null
+        var formGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
+        var formFetches: Int = 0
+            private set
+        var submitCalls: Int = 0
+            private set
+        var lastFetchedContext: fr.forumhfr.redface2.core.model.write.EditPostContext? = null
+            private set
+        var lastSubmittedContext: fr.forumhfr.redface2.core.model.write.EditPostContext? = null
+            private set
+        var lastSubmittedBbcode: String? = null
+            private set
+        var lastSubmittedOptions: fr.forumhfr.redface2.core.model.write.ReplyFormOptions? = null
+            private set
+
+        override suspend fun fetchEditPostForm(
+            context: fr.forumhfr.redface2.core.model.write.EditPostContext,
+        ): ReplyForm {
+            formFetches += 1
+            lastFetchedContext = context
+            formGate?.await()
+            formException?.let { throw it }
+            return formResult.getOrThrow()
+        }
+
+        override suspend fun submitEditPost(
+            context: fr.forumhfr.redface2.core.model.write.EditPostContext,
+            form: ReplyForm,
+            bbcodeContent: String,
+            options: fr.forumhfr.redface2.core.model.write.ReplyFormOptions,
+        ): ReplySubmitResult {
+            submitCalls += 1
+            lastSubmittedContext = context
+            lastSubmittedBbcode = bbcodeContent
+            lastSubmittedOptions = options
+            submitException?.let { throw it }
+            return submitResult ?: error("submitResult not set")
+        }
+    }
+
     private companion object {
         const val SAMPLE_CAT = 23
         const val SAMPLE_TOPIC_ID = 35_395
         const val SAMPLE_PAGE = 20
         const val SAMPLE_SUBCAT = 550
+        const val SAMPLE_EDITED_NUMREPONSE = 100
     }
 }

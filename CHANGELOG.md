@@ -10,6 +10,34 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## v0.10.6 — 2026-05-20
+
+App patch 0.3.6 (build v46) — Phase 2D-A : édition d'un post existant appartenant au compte authentifié. Réutilise le socle Phase 2C (parser de formulaire, options par post, `SubmitSucceeded`) avec un `EditPostRepository` distinct du `ReplyRepository`. Edit FP (#148), suppression, création de topic (#149) restent en attente.
+
+### Added
+- `PostEditorMode.Edit` est désormais fonctionnel. `PostEditorViewModel` injecte `EditPostRepository` en plus de `ReplyRepository` et route `loadEditFormIfPossible` + `editPostRepository.submitEditPost` quand le mode est Edit.
+- Nouveau modèle `EditPostContext(cat, subcat, topicId, page, numreponse)` avec guards `subcat > 0`, `topicId > 0`, `numreponse > 0`.
+- Interface `:core:domain/write/EditPostRepository` + impl `:core:data/write/DefaultEditPostRepository`. Partage `ReplyForm`, `ReplyFormOptions`, `ReplySubmitResult` et les deux parsers avec `ReplyRepository`.
+- `HfrClient` ajoute `getEditPostForm(cat, subcat, post, page, numreponse)` (GET `message.php?…&numreponse={N}`) et `submitEditPost(formBody)` (POST `bdd.php?config=hfr.inc`).
+- `TopicPageParser` détecte `Post.isEditable` et `Post.isOwnPost` depuis la toolbar HFR (`<a href="…message.php?…&numreponse={N}">`). Scope strict à `POST_TOOLBAR_LEFT` — un lien `message.php?…&numreponse=…` dans le body d'un post ne promeut pas le post à éditable.
+- `ReplyFormParser` accepte désormais `action*=bdd.php` en plus de `action*=bddpost.php`. `ReplySubmitResponseParser` reconnaît le succès edit (« Votre message a été édité avec succès »).
+- `PostEditorScreen` : bouton « Modifier » sur chaque post éditable (à côté de « Citer »), masqué sinon. Callback `onEdit(subcat, page, numreponse)` propagé depuis `TopicScreen` → `RedfaceNavigation`.
+- `PostEditorEffect.SubmitSucceeded(targetPage, scrollTo)` étendu : edit shippe `scrollTo = numreponse` pour que la nav refresh la page topic et scrolle vers le post édité. Reply / quote restent à `scrollTo = null` (refresh ancré `#bas`).
+
+### Changed
+- `ReplyRepository.submitReply` et `EditPostRepository.submitEditPost` exposent `options: ReplyFormOptions = ReplyFormOptions()` avec valeur par défaut — compat ascendante préservée.
+- `DefaultEditPostRepository.buildEditFormBody` filtre explicitement le champ `delete=1` que HFR expose sur le formulaire edit. Suppression hors scope du MVP — un futur slice destructive devra l'activer explicitement.
+- `docs/specs/mvi.md`, `docs/specs/navigation.md`, `docs/specs/roadmap.md` : statut « Reply + Quote + Edit post MVP livrés ».
+
+### Tests
+- `ReplyFormParserTest` : nouveau test `accepts edit form whose action targets bdd_php` (extraction `numreponse`, `delete` absent).
+- `ReplySubmitResponseParserTest` : nouveau test `edit success uses the matching French sentence and surfaces the refresh URL`.
+- `TopicPageParserTest` : 2 nouveaux tests synthétiques (`isEditable` détecté depuis la toolbar, ignoré quand le lien `numreponse=…` vit dans le body).
+- `DefaultEditPostRepositoryTest` (nouveau fichier) : GET edit form URL, POST `bdd.php` body, options POST, `delete` jamais transmis.
+- `PostEditorViewModelTest` : 4 nouveaux tests Edit (init fetch + hydratation draft, submit appelle `EditPostRepository`, success surface `scrollTo = numreponse`, reply success conserve `scrollTo = null`).
+
+---
+
 ## v0.10.5 — 2026-05-19
 
 App patch 0.3.5 (build v45) — fix radio/checkbox parser + UI options post.

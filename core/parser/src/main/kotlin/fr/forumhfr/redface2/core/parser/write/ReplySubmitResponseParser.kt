@@ -5,13 +5,19 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import org.jsoup.Jsoup
 
 /**
- * Parses the response HFR returns after a POST to `bddpost.php`.
+ * Parses the response HFR returns after a POST to `bddpost.php` (reply / quote)
+ * or `bdd.php` (edit post — Phase 2D #147).
  *
  * Success and failure are surfaced by a literal French sentence in the body, plus
  * a `<meta http-equiv="Refresh" content="N; url=…">` header on success that
  * carries the URL HFR wants the client to land on. We match on substrings because
  * HFR wraps the message in styled `<div class="hop">` markup that varies between
  * deploys ; the underlying text doesn't.
+ *
+ * Reply and edit successes use different literal sentences («Votre réponse a été
+ * postée avec succès » vs. « Votre message a été édité avec succès ») but
+ * everything else — refresh URL shape, error variants — is identical, so a
+ * single parser covers both flows.
  *
  * Each match maps to a concrete fixture under
  * `core/parser/src/test/resources/fixtures/write_*` ; pinned by tests in
@@ -47,6 +53,11 @@ class ReplySubmitResponseParser {
 
             body.contains(SUCCESS_MARKER, ignoreCase = true) -> parseSuccess(html)
 
+            // Phase 2D (#147) : edit-post success uses its own sentence ; the
+            // refresh URL shape is identical (`sujet_{topic}_{page}.htm#t{numreponse}`)
+            // so `parseSuccess` reuses the same extraction.
+            body.contains(EDIT_SUCCESS_MARKER, ignoreCase = true) -> parseSuccess(html)
+
             else -> ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         }
     }
@@ -80,6 +91,10 @@ class ReplySubmitResponseParser {
             "consécutives dans un intervalle de 10 minutes"
         private const val TOPIC_LOCKED_MARKER: String = "sujet a été fermé"
         private const val SUCCESS_MARKER: String = "votre réponse a été postée avec succès"
+
+        // Phase 2D (#147) — captured 2026-05-17 on the test post 2784595 ;
+        // see `write_edit_success_response.html`.
+        private const val EDIT_SUCCESS_MARKER: String = "votre message a été édité avec succès"
 
         private val META_REFRESH_REGEX: Regex =
             Regex("""<meta[^>]*http-equiv="Refresh"[^>]*content="\d+\s*;\s*url=([^"]+)""", RegexOption.IGNORE_CASE)

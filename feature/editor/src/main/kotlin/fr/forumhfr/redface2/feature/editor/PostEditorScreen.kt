@@ -44,7 +44,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 @Composable
 fun PostEditorScreen(
     request: PostEditorRequest,
-    onSubmitSucceeded: (targetPage: Int?) -> Unit,
+    onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: PostEditorViewModel = hiltViewModel<PostEditorViewModel, PostEditorViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -54,7 +54,8 @@ fun PostEditorScreen(
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
-                is PostEditorEffect.SubmitSucceeded -> onSubmitSucceeded(effect.targetPage)
+                is PostEditorEffect.SubmitSucceeded ->
+                    onSubmitSucceeded(effect.targetPage, effect.scrollTo)
             }
         }
     }
@@ -127,11 +128,14 @@ private fun PostEditorContent(
                 }
             }
 
-            if (state.mode == PostEditorMode.Reply) {
+            if (state.mode == PostEditorMode.Reply || state.mode == PostEditorMode.Edit) {
                 // HFR per-post option toggles. Defaults come from `ReplyForm.options`
                 // (the `checked` attribute of each HTML checkbox HFR rendered for
                 // this user / topic). The repository only adds the matching POST
                 // field when the toggle is on — mirroring how a browser submits.
+                // Phase 2D (#147) — Edit shares the same options surface as Reply:
+                // both toggles live in `PostEditorState` and the matching
+                // repository reads them at submit time, so the UI stays identical.
                 PostEditorOptions(
                     signatureEnabled = state.signatureEnabled,
                     smileyDisabled = state.smileyDisabled,
@@ -164,10 +168,9 @@ private fun PostEditorContent(
                     }
                 }
             } else {
-                // Edit / Create flows arrive later (#147 / #149). Quote is already
-                // wired through `PostEditorMode.Reply` (it's the same submit path
-                // with a non-null `quotedNumreponse`), so the `else` branch only
-                // covers Edit today — keep the placeholder until #147 lands.
+                // Create-topic (#149) is the only mode that still falls back to
+                // the local-only placeholder. Reply (#145), Quote (#146) and
+                // Edit (#147) all go through the same branch above.
                 Text(
                     text = stringResource(R.string.editor_submit_disabled),
                     style = MaterialTheme.typography.labelMedium,

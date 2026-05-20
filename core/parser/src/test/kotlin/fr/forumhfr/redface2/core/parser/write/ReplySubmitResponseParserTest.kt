@@ -28,6 +28,22 @@ class ReplySubmitResponseParserTest {
     }
 
     @Test
+    fun `edit success uses the matching French sentence and surfaces the refresh URL`() {
+        // Phase 2D (#147) : the edit response carries `Votre message a été
+        // édité avec succès !` and a refresh URL whose anchor is `#t{numreponse}`
+        // (whereas reply's refresh anchors `#bas`). The shape of the refresh
+        // header is otherwise identical, so the existing `parseSuccess` path
+        // pulls `targetPage` from `sujet_{topic}_{page}`.
+        val html = readFixture("write_edit_success_response.html")
+        val result = parser.parse(html)
+        assertTrue("edit success must classify as Success — got $result", result is ReplySubmitResult.Success)
+        val success = result as ReplySubmitResult.Success
+        assertEquals(20, success.targetPage)
+        val refreshUrl = requireNotNull(success.refreshUrl) { "refreshUrl must be present" }
+        assertTrue("refresh URL must anchor on the edited post", refreshUrl.contains("#t2784595"))
+    }
+
+    @Test
     fun `empty message error is classified`() {
         val html = readFixture("write_empty_message_error.html")
         val result = parser.parse(html)

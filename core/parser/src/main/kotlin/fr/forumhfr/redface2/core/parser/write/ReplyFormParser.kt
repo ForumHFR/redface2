@@ -6,10 +6,13 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
 /**
- * Parses HFR's `message.php` reply form. The page returned by HFR contains many
- * `<form>` elements (search box, navigation widgets, …); the reply form is the
- * one whose `action` ends with `bddpost.php` — see fixture
- * `core/parser/src/test/resources/fixtures/write_reply_form_open_topic.html`.
+ * Parses HFR's `message.php` reply / edit form. The page returned by HFR
+ * contains many `<form>` elements (search box, navigation widgets, …) ; the
+ * write form is the one whose `action` ends with `bddpost.php` (reply / quote /
+ * create topic, Phase 2C #145+#146) **or** `bdd.php` (edit post, Phase 2D
+ * #147). See fixtures
+ * `core/parser/src/test/resources/fixtures/write_reply_form_open_topic.html`
+ * and `…/write_edit_form_test_post.html`.
  *
  * The parser captures every hidden input under that form. The list of fields HFR
  * sends is not fully stable, so we forward them all rather than allow-listing —
@@ -32,7 +35,14 @@ class ReplyFormParser {
     @Suppress("ReturnCount") // Two failure guards + the success return — splitting hurts readability.
     fun parse(html: String): Result<ReplyForm> {
         val document = Jsoup.parse(html)
+        // HFR ships the reply / quote / create-topic forms with `action="…
+        // bddpost.php"` and the edit-post form with `action="…bdd.php"`. The
+        // shapes of the two forms (hidden fields, options, MsgIcon, textarea)
+        // are otherwise identical, so a single parser handles both. We bias
+        // toward `bddpost.php` first because four out of five write flows use
+        // it ; the `bdd.php` fallback is only reached on an edit form.
         val replyForm = document.selectFirst("form[action*=bddpost.php]")
+            ?: document.selectFirst("form[action*=bdd.php]")
             ?: return Result.failure(IllegalStateException("Reply form not found"))
 
         val pseudoInput = replyForm.selectFirst("input[name=pseudo]")

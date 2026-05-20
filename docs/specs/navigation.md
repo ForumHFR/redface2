@@ -302,6 +302,21 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                             ),
                         )
                     },
+                    // Phase 2D (#147): edit uses `PostEditorMode.Edit` and routes
+                    // through `EditPostRepository` (bdd.php) ; success refreshes
+                    // the topic and scrolls to the edited post.
+                    onEdit = { subcat, page, numreponse ->
+                        backStack.add(
+                            PostEditorRoute(
+                                PostEditorMode.Edit,
+                                route.cat,
+                                topicId = route.post,
+                                numreponse = numreponse,
+                                page = page,
+                                subcat = subcat,
+                            ),
+                        )
+                    },
                     // Phase 2C (#146): quote shares the destination with reply ; the
                     // editor switches behavior based on `quotedNumreponse != null`.
                     onQuote = { subcat, page, quotedNumreponse, quoteRef ->
@@ -468,7 +483,7 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 > **Statut Phase 5+** — multi-pane n'est pas livré en Phase 1. Dans le snippet ci-dessous :
 >
 > - le **pattern de composition** (`NavDisplay` + `ListDetailPaneScaffold` sur le même back stack, switch `WindowSizeClass`) est **illustratif** — c'est ce qui sera implémenté Phase 5+ ;
-> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested)`, `MessagesScreen(versionName, versionCode, onLoginRequested, onOpenDiagnostics)`, `SearchScreen()`, `TopicScreen(request: TopicRequest, onReply: (subcat, page) -> Unit, onOpenPage)`, `PostEditorScreen(request: PostEditorRequest, onSubmitSucceeded: (targetPage?) -> Unit)`, `TopicFormScreen(mode, cat?, subcat?, topicId?)`) sont les signatures **réelles** livrées dans le repo (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../PostEditorScreen.kt`, `feature/editor/.../TopicFormScreen.kt`).
+> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested)`, `MessagesScreen(versionName, versionCode, onLoginRequested, onOpenDiagnostics)`, `SearchScreen()`, `TopicScreen(request: TopicRequest, onReply: (subcat, page) -> Unit, onQuote: (subcat, page, quotedNumreponse, quoteRef) -> Unit, onEdit: (subcat, page, numreponse) -> Unit, onOpenPage)`, `PostEditorScreen(request: PostEditorRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`, `TopicFormScreen(mode, cat?, subcat?, topicId?)`) sont les signatures **réelles** livrées dans le repo (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../PostEditorScreen.kt`, `feature/editor/.../TopicFormScreen.kt`).
 >
 > Le call-site `onOpenFlag = { flag -> backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = ...)) }` passe désormais le topic concerné — Phase 1B.4 a remplacé le placeholder mock par la liste réelle des drapeaux.
 

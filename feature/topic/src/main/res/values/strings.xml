@@ -20,4 +20,5 @@
     <string name="topic_page_jump_label">Aller à la page</string>
     <string name="topic_page_jump_action">Y aller</string>
     <string name="topic_post_quote">Citer</string>
+    <string name="topic_post_edit">Modifier</string>
 </resources>
