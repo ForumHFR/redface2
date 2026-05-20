@@ -8,7 +8,11 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-Phase 2D-A : édition d'un post existant appartenant au compte authentifié. Réutilise le socle Phase 2C (parser de formulaire, options par post, `SubmitSucceeded`) avec un `EditPostRepository` distinct du `ReplyRepository`. Edit FP (#148), suppression, création de topic (#149) restent en attente.
+---
+
+## v0.10.6 — 2026-05-20
+
+App patch 0.3.6 (build v46) — Phase 2D-A : édition d'un post existant appartenant au compte authentifié. Réutilise le socle Phase 2C (parser de formulaire, options par post, `SubmitSucceeded`) avec un `EditPostRepository` distinct du `ReplyRepository`. Edit FP (#148), suppression, création de topic (#149) restent en attente.
 
 ### Added
 - `PostEditorMode.Edit` est désormais fonctionnel. `PostEditorViewModel` injecte `EditPostRepository` en plus de `ReplyRepository` et route `loadEditFormIfPossible` + `editPostRepository.submitEditPost` quand le mode est Edit.
