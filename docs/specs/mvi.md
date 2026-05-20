@@ -246,7 +246,7 @@ data class PostEditorState(
     val isPreviewVisible: Boolean = false,
     val validation: BbcodeValidation = BbcodeValidation.Idle,
     val isLoadingForm: Boolean = false,   // GET message.php avant submit
-    val isSubmitting: Boolean = false,    // POST bddpost.php en cours
+    val isSubmitting: Boolean = false,    // POST bddpost.php (reply/quote) ou bdd.php (edit) en cours
     val submitError: SubmitError? = null,
     val draftHydratedFromForm: Boolean = false, // (Phase 2C #146) draft initialisé une fois depuis ReplyForm.initialContent
 )
@@ -255,7 +255,7 @@ sealed interface PostEditorIntent {
     data class ContentChanged(val value: TextFieldValue) : PostEditorIntent
     data class ToolbarActionClicked(val action: BbcodeAction) : PostEditorIntent
     data object TogglePreview : PostEditorIntent
-    data object SubmitClicked : PostEditorIntent       // (Phase 2C)
+    data object SubmitClicked : PostEditorIntent       // Phase 2C (Reply / Quote) + Phase 2D (Edit)
     data object ErrorDismissed : PostEditorIntent      // (Phase 2C)
 }
 

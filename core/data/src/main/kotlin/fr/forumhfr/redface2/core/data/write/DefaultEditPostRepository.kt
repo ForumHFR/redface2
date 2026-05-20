@@ -52,8 +52,10 @@ class DefaultEditPostRepository @Inject constructor(
 
     override suspend fun fetchEditPostForm(context: EditPostContext): ReplyForm {
         // `numreponse` identifies one of the user's own posts ; we keep it out
-        // of the INFO line to stay aligned with `DefaultReplyRepository`, which
-        // also omits the `numrep` / `quotedNumreponse` values from its log.
+        // of the INFO line. HFR's refresh URL on a successful edit also embeds
+        // the same id (`#t{numreponse}`), so the success-path log below
+        // collapses the URL to a presence boolean + the parsed page rather
+        // than dumping the raw value.
         diagnostics.record(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
@@ -137,10 +139,16 @@ class DefaultEditPostRepository @Inject constructor(
                 val outcome = replySubmitResponseParser.parse(responseHtml)
                 when (outcome) {
                     is ReplySubmitResult.Success ->
+                        // HFR's edit success refresh URL anchors the edited
+                        // post (`…sujet_{topic}_{page}.htm#t{numreponse}`).
+                        // Logging it verbatim would leak `numreponse` of the
+                        // user's own post into the alpha diagnostics panel —
+                        // we therefore collapse it to a presence boolean.
+                        // `targetPage` is parsed out and safe to expose.
                         diagnostics.record(
                             DiagnosticsLog.Level.INFO,
                             LOG_TAG,
-                            "POST edit Success refreshUrl=${outcome.refreshUrl} " +
+                            "POST edit Success hasRefreshUrl=${outcome.refreshUrl != null} " +
                                 "targetPage=${outcome.targetPage}",
                         )
                     is ReplySubmitResult.Failure ->

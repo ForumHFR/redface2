@@ -34,8 +34,6 @@ Phase 2D-A : édition d'un post existant appartenant au compte authentifié. Ré
 
 ---
 
----
-
 ## v0.10.5 — 2026-05-19
 
 App patch 0.3.5 (build v45) — fix radio/checkbox parser + UI options post.

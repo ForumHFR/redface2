@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.data.write
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
@@ -34,6 +35,7 @@ class DefaultEditPostRepositoryTest {
 
     private lateinit var server: MockWebServer
     private lateinit var client: HfrClient
+    private lateinit var diagnostics: DiagnosticsLog
     private lateinit var repository: DefaultEditPostRepository
 
     @Before
@@ -46,11 +48,15 @@ class DefaultEditPostRepositoryTest {
             baseUrl = server.url("/"),
             ioDispatcher = Dispatchers.Unconfined,
         )
+        // Keep a handle on the DiagnosticsLog so individual tests can inspect
+        // the buffer (anti-leak assertions in particular need to read every
+        // record after a submit, see `success log does not leak…`).
+        diagnostics = DiagnosticsLog()
         repository = DefaultEditPostRepository(
             hfrClient = client,
             replyFormParser = ReplyFormParser(),
             replySubmitResponseParser = ReplySubmitResponseParser(),
-            diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
+            diagnostics = diagnostics,
             ioDispatcher = Dispatchers.Unconfined,
         )
     }
@@ -156,6 +162,53 @@ class DefaultEditPostRepositoryTest {
         assertEquals("1", body["signature"])
         assertEquals("1", body["smiley"])
         assertFalse("emaill absent when toggle off", body.containsKey("emaill"))
+    }
+
+    @Test
+    fun `success log does not leak numreponse via refreshUrl or t-anchor`() = runTest {
+        // The HFR edit success refresh URL embeds the edited post via
+        // `#t{numreponse}` (cf. write_edit_success_response.html which
+        // anchors `#t2784595`). The diagnostics buffer is user-visible in
+        // the alpha panel — leaking `numreponse` there would defeat the
+        // « numreponse jamais en clair » contract from the round 1 review.
+        // We assert structurally : after a real submit-success against the
+        // fixture, no record carries the literal id nor the anchor / path.
+        server.enqueue(MockResponse().setBody(fixture("write_edit_form_test_post.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_edit_success_response.html")))
+        val context = EditPostContext(
+            cat = 23,
+            subcat = 550,
+            topicId = 35_395,
+            page = 20,
+            numreponse = 2_784_595,
+        )
+        val form = repository.fetchEditPostForm(context)
+        repository.submitEditPost(
+            context = context,
+            form = form,
+            bbcodeContent = "Edited body",
+            options = ReplyFormOptions(),
+        )
+
+        val records = diagnostics.entries.value
+        // Each forbidden token gets its own dedicated assertion so a regression
+        // points to the exact failure mode (raw id vs anchor vs URL path).
+        listOf(
+            "2784595",
+            "#t2784595",
+            "refreshUrl=/hfr/",
+        ).forEach { forbidden ->
+            assertFalse(
+                "Diagnostics buffer must not contain '$forbidden' — records: ${records.map { it.message }}",
+                records.any { it.message.contains(forbidden) },
+            )
+        }
+        // Sanity : the new INFO line must still tell us the submit succeeded
+        // (otherwise we'd be silently hiding all post-submit signal).
+        assertTrue(
+            "At least one record must surface the edit success",
+            records.any { it.message.contains("POST edit Success") },
+        )
     }
 
     private fun fixture(name: String): String {

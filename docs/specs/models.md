@@ -246,8 +246,8 @@ data class Post(
     val date: Instant,                   // parsé depuis "dd-MM-yyyy à HH:mm:ss"
     val content: PostContent,            // AST sémantique, rendu par PostRenderer (cf. ADR-011)
     val avatarUrl: String?,
-    val isEditable: Boolean,             // calculé client-side : post.author == currentUser && !isLocked
-    val isOwnPost: Boolean,              // calculé client-side : post.author == currentUser
+    val isEditable: Boolean,             // Phase 2D (#147) : `true` quand la toolbar HFR du post expose un lien `<a href="…message.php?…&numreponse={post.numreponse}…">`. HFR ne le rend que pour les posts du compte authentifié sur un topic non verrouillé — on ne compare pas l'auteur localement. Persisté en Room depuis v1.
+    val isOwnPost: Boolean,              // Phase 2D : équivalent à `isEditable` faute de signal HFR distinct au niveau topic page. Les deux champs restent séparés pour un futur raffinement (modo-can-edit, locked-but-own-post). Persisté en Room depuis v1.
     val quotedAuthors: List<String>,     // dérivé de PostContent pour recherche, filtres et décorateurs
     val postIndex: Int?,                 // (page-1) * postsPerPage + position — null quand le parser n'a pas le contexte page/postsPerPage (preview, fixtures isolées). postsPerPage vient des préférences HFR de l'utilisateur, PAS une constante (voir UserSettings)
     val quoteRef: Int? = null,           // Phase 2C (#146) : `ref` opaque parsé depuis le href du lien quote HFR (`message.php?…&numrep=…&ref=N`). Null = post sans lien quote (locked, anonyme). Persisté en Room v5 (`MIGRATION_4_5`) — un cache hit garde le bouton « Citer » disponible sans round-trip réseau.
