@@ -162,21 +162,14 @@ class TopicFormParser {
     }
 
     /**
-     * Parses the `<select name="subcat">` block. Returns `null` when no option
-     * is marked `selected` with a positive id (or when the « Aucune » option is
-     * the one selected) — guessing here would silently re-categorise the topic
-     * on the next submit. The caller surfaces this as a parse failure so the UI
-     * can refuse to render the form and the user is never tricked into moving
-     * a topic by accident.
-     */
-    /**
      * Returns the parsed `<select name=subcat>` block. The outer `Pair` carries
      * `(selectedSubcat?, choices)`. The function returns `null` only when the
      * caller is in strict mode (Edit FP) AND the `<select>` is missing or has
      * no `<option selected>` with `id > 0` — guessing would silently
-     * re-categorise the topic at submit. In permissive mode (create-topic) we
-     * tolerate a `<select>` without any pre-selection because that is exactly
-     * what HFR serves on a brand-new composer.
+     * re-categorise the topic at submit (cf. #166). In permissive mode
+     * (create-topic, Phase 2E) we tolerate a `<select>` without any
+     * pre-selection because that is exactly what HFR serves on a brand-new
+     * composer ; the UI's dropdown captures the user's choice.
      */
     @Suppress("ReturnCount")
     private fun parseSubcategories(

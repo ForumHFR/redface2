@@ -10,7 +10,6 @@
     <string name="editor_submit">Envoyer</string>
     <string name="editor_submit_disabled">L\'envoi HFR arrive avec les autres modes — éditeur local seulement pour l\'instant.</string>
     <string name="editor_validation_empty">Message vide</string>
-    <string name="editor_topic_form_placeholder">Le formulaire de création / édition de sujet arrive en Phase 2D-2E (#148, #149). Cette tranche 2B-A ne livre que l\'éditeur post-level.</string>
     <string name="editor_error_dismiss">Masquer</string>
     <string name="editor_error_empty">Message vide. HFR refuse les réponses sans contenu.</string>
     <string name="editor_error_invalid_hash">Session HFR expirée pendant la saisie. Réessayez ; le formulaire est rechargé en arrière-plan.</string>

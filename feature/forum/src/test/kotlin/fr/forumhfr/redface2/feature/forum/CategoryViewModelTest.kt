@@ -23,6 +23,7 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -39,6 +40,46 @@ class CategoryViewModelTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `canCreateTopic is true when the auth state is Authenticated`() = runTest {
+        // Phase 2E #149 — the « Nouveau topic » FAB is the only user-visible
+        // surface gated on the auth state. The other 16 tests in this class
+        // exercise the default `Anonymous` path ; this one pins the positive
+        // path so a future refactor cannot accidentally hide the FAB on a
+        // signed-in account.
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = null),
+            forumRepository = repo,
+            authRepository = FakeAuthRepository(initial = AuthState.Authenticated("xat")),
+        )
+        vm.uiState.test {
+            // Drain warm-up emissions until canCreateTopic flips on (the
+            // initial value is `false` because the StateFlow seed is computed
+            // before the auth flow has emitted).
+            val authenticated = awaitContent { it.canCreateTopic }
+            assertTrue("FAB must be visible on Authenticated", authenticated.canCreateTopic)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `canCreateTopic stays false on Anonymous auth state`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = null),
+            forumRepository = repo,
+            authRepository = FakeAuthRepository(initial = AuthState.Anonymous),
+        )
+        vm.uiState.test {
+            // The initial StateFlow seed is `canCreateTopic = false` already ;
+            // we still drain one item to make the assertion explicit on the
+            // post-warm-up value.
+            assertFalse("FAB must stay hidden on Anonymous", awaitItem().canCreateTopic)
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test
