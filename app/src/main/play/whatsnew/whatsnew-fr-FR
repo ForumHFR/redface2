@@ -1,9 +1,8 @@
-Build alpha Redface 2 — polish pré-Phase 2.
+Build alpha Redface 2 — stabilisation édition FP.
 
 Nouveautés :
-- Drapeaux recentrés sur la lecture.
-- Sujets participés déjà lus masqués par défaut, avec option pour les réafficher.
-- Onglets Recherche et Messages clarifiés en attendant les vraies features Phase 2/3.
-- Diagnostics, signalement et infos de compte déplacés dans Messages.
+- Édition du premier message durcie après review.
+- Hydratation sujet/contenu plus robuste sur réseau lent.
+- Sous-catégorie et champs sondage sécurisés pour éviter les changements implicites.
 
 Merci de remonter tout bug via le canal alpha ou le dépôt GitHub.
