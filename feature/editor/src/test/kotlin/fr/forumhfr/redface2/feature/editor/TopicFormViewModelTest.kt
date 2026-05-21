@@ -86,6 +86,15 @@ class TopicFormViewModelTest {
             val finalState = expectMostRecentItem()
             assertEquals("User-overridden subject", finalState.subject.text)
             assertEquals("user override", finalState.draft.text)
+            // The user-facing banner stays armed on InvalidHashCheck even though
+            // the refetch is silent — without this the user has no way to know
+            // their first submit was rejected.
+            val submitError = finalState.submitError
+            assertTrue(
+                "expected submitError to be SubmitError.Hfr(InvalidHashCheck), was $submitError",
+                submitError is SubmitError.Hfr &&
+                    submitError.reason == ReplyFailureReason.InvalidHashCheck,
+            )
             cancelAndIgnoreRemainingEvents()
         }
         // 2 fetches : initial + silent refetch after InvalidHashCheck.
