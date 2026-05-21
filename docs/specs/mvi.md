@@ -269,6 +269,8 @@ sealed interface PostEditorEffect {
 >
 > Les deux écrans partagent leurs **capacités** via composables `:core:ui` (`BbcodeTextField`, `BbcodeToolbar`, `BbcodePreview`, et plus tard `PollEditor`, `CatSubcatPicker`). `BbcodePreview` reçoit un `PostContent` déjà parsé — il **ne parse pas lui-même**, ce qui garde `:core:ui` libre de toute logique métier. Le parsing BBCode reste une responsabilité `:core:parser` (`parsePostContentFromBbcode`) exposée aux features via une interface `BbcodePreviewParser` (`:core:domain`) injectée par Hilt, afin de préserver la frontière `:feature:*` → `:core:domain` + `:core:ui` (les ViewModels appellent le use case et passent le `PostContent` résultant à `BbcodePreview`). Pas de duplication, juste deux contrats de formulaire distincts. Rationale : l'endpoint HFR n'est pas une bonne frontière UI (`Reply` et `NewTopic` passent tous deux par `bddpost.php` mais leurs formulaires diffèrent ; `EditFirstPost` et `NewTopic` partagent presque toute la structure malgré des endpoints différents). La frontière utile est **post-level** vs **topic-level**.
 
+> **Phase 2B-B (#144) — polish toolbar** : `BbcodeAction` est devenu un `sealed interface` (au lieu d'`enum class`) pour porter `Color(colorHex)`. La toolbar expose désormais une palette couleur Material 3 (chip + `DropdownMenu` 5 swatches). Contrat HFR : `[#RRGGBB]…[/#RRGGBB]`, la balise fermante reprend le hex — pas de `[/color]`. Preview locale toujours synchrone et non bloquante ; preview serveur `apercu.php` reportée tant qu'aucune divergence HFR n'apparaît. Listes BBCode (`[list]/[*]`) restent hors AST mais survivent en texte brut (`BbcodeContentParserTest::full list block survives`).
+
 ---
 
 ## Écran Messages

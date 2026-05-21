@@ -1,29 +1,89 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 /**
- * BBCode actions the Phase 2B toolbar can apply to the editor selection. Listed in
- * declaration order so the toolbar UI keeps a stable, deterministic button order.
+ * BBCode actions the Phase 2B toolbar can apply to the editor selection.
  *
- * Tags with a real `[/...]` close (Block-level fixed/code/cpp included) all share the
- * same wrap-the-selection logic — the formatter does not care whether HFR renders
- * them as inline or block-level on the receiving end. The renderer side
+ * Modelled as a `sealed interface` rather than an `enum class` so the colour
+ * action can carry the chosen hex value (`#RRGGBB`) without forcing one
+ * enum-per-shade. The fixed-tag actions stay as `data object`s so they
+ * compare by identity exactly like the old enum constants.
+ *
+ * Tags with a real `[/...]` close (block-level `[fixed]`, `[cpp]`, `[quote]`
+ * included) all share the same wrap-the-selection logic in
+ * [applyBbcodeAction] — the formatter does not care whether HFR renders them
+ * as inline or block-level on the receiving end. The renderer side
  * (`PostRenderer` + `BbcodePreview`) is what makes that distinction.
+ *
+ * HFR colour contract : `[#RRGGBB]…[/#RRGGBB]` (the closing tag echoes the
+ * hex code, not `[/color]`). Verified against `BbcodeContentParser.parseColor`.
  */
-enum class BbcodeAction(val openTag: String, val closeTag: String) {
-    Bold(openTag = "[b]", closeTag = "[/b]"),
-    Italic(openTag = "[i]", closeTag = "[/i]"),
-    Underline(openTag = "[u]", closeTag = "[/u]"),
-    Strike(openTag = "[strike]", closeTag = "[/strike]"),
-    Quote(openTag = "[quote]", closeTag = "[/quote]"),
+sealed interface BbcodeAction {
+    val openTag: String
+    val closeTag: String
+
+    data object Bold : BbcodeAction {
+        override val openTag: String = "[b]"
+        override val closeTag: String = "[/b]"
+    }
+    data object Italic : BbcodeAction {
+        override val openTag: String = "[i]"
+        override val closeTag: String = "[/i]"
+    }
+    data object Underline : BbcodeAction {
+        override val openTag: String = "[u]"
+        override val closeTag: String = "[/u]"
+    }
+    data object Strike : BbcodeAction {
+        override val openTag: String = "[strike]"
+        override val closeTag: String = "[/strike]"
+    }
+    data object Quote : BbcodeAction {
+        override val openTag: String = "[quote]"
+        override val closeTag: String = "[/quote]"
+    }
     // HFR's web toolbar only exposes [cpp] as the code button (verified against the
     // Phase 2A fixtures — `grep "TAinsert" write_*_form_*.html` finds [cpp] and [fixed]
     // but no [code]). We mirror that here and keep the parser tolerant to [code] so
     // pasted content keeps rendering — but the editor toolbar matches HFR.
-    Cpp(openTag = "[cpp]", closeTag = "[/cpp]"),
-    Fixed(openTag = "[fixed]", closeTag = "[/fixed]"),
-    Spoiler(openTag = "[spoiler]", closeTag = "[/spoiler]"),
-    Url(openTag = "[url]", closeTag = "[/url]"),
-    Image(openTag = "[img]", closeTag = "[/img]"),
+    data object Cpp : BbcodeAction {
+        override val openTag: String = "[cpp]"
+        override val closeTag: String = "[/cpp]"
+    }
+    data object Fixed : BbcodeAction {
+        override val openTag: String = "[fixed]"
+        override val closeTag: String = "[/fixed]"
+    }
+    data object Spoiler : BbcodeAction {
+        override val openTag: String = "[spoiler]"
+        override val closeTag: String = "[/spoiler]"
+    }
+    data object Url : BbcodeAction {
+        override val openTag: String = "[url]"
+        override val closeTag: String = "[/url]"
+    }
+    data object Image : BbcodeAction {
+        override val openTag: String = "[img]"
+        override val closeTag: String = "[/img]"
+    }
+
+    /**
+     * HFR colour wrap : `[#RRGGBB]…[/#RRGGBB]`. The closing tag echoes the
+     * same hex code (verified in `BbcodeContentParser.parseColor`). Hex must
+     * be the canonical 7-character form starting with `#`.
+     */
+    data class Color(val colorHex: String) : BbcodeAction {
+        init {
+            require(HEX_PATTERN.matches(colorHex)) {
+                "colorHex must match #RRGGBB (uppercase or lowercase), was '$colorHex'"
+            }
+        }
+        override val openTag: String get() = "[$colorHex]"
+        override val closeTag: String get() = "[/$colorHex]"
+
+        private companion object {
+            val HEX_PATTERN = Regex("^#[0-9A-Fa-f]{6}$")
+        }
+    }
 }
 
 /**
