@@ -44,13 +44,12 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 
 /**
- * Phase 2D #148 — topic-level form screen. Live for [TopicFormMode.EditFirstPost] ;
- * [TopicFormMode.New] still renders the legacy placeholder (Phase 2E #149).
+ * Topic-level form screen. Live for [TopicFormMode.EditFirstPost] (Phase 2D
+ * #148) and [TopicFormMode.New] (Phase 2E #149).
  *
- * Surface for EditFirstPost :
+ * Shared surface :
  * - Subject field (writable).
- * - Subcategory : current label + read-only note ; a future iteration may add
- *   a dropdown built from `state.subcategoryChoices`.
+ * - Subcategory : read-only current label for EditFirstPost, dropdown for New.
  * - BBCode toolbar + draft field + optional preview.
  * - Per-post options (signature / smileys / email) identical to the post-level editor.
  * - Poll : if `state.pollPresent`, a sober note that mutation is not in this version.

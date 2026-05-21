@@ -1,17 +1,20 @@
 package fr.forumhfr.redface2.core.model.write
 
 /**
- * Parsed view of HFR's topic-level form (Phase 2D #148 : edit first post).
+ * Parsed view of HFR's topic-level form (Phase 2D #148 edit first post,
+ * Phase 2E #149 create topic).
  *
  * Like [ReplyForm] for the post-level surface, but with two structural
  * differences :
  *
- * - HFR's first-post form carries a writable `<input name="sujet">` ; the
- *   editor must surface it as a real text field, not a hidden echo.
+ * - HFR's first-post and create-topic forms carry a writable
+ *   `<input name="sujet">` ; the editor must surface it as a real text field,
+ *   not a hidden echo.
  * - The form carries a `<select name="subcat">` instead of a single hidden
  *   `subcat` value. Subcategory choices are exposed to the UI so the user
- *   can re-categorise their topic, but the MVP only forwards whatever HFR
- *   pre-selected unless an explicit `SubcatSelected` intent flips it.
+ *   can re-categorise their topic or pick the category for a new topic. Edit FP
+ *   starts from HFR's pre-selection ; create-topic may start from the entry chip
+ *   because HFR often renders no selected `<option>`.
  *
  * Poll fields are captured separately into [TopicPollForm] so an UI that
  * does not edit polls can leave them alone while still preserving the

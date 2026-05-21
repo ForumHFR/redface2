@@ -8,9 +8,9 @@ import fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 
 /**
- * MVI state of the topic-level form. Phase 2D #148 only covers
- * [TopicFormMode.EditFirstPost] ; [TopicFormMode.New] still surfaces a
- * placeholder until #149 lands.
+ * MVI state of the topic-level form. [TopicFormMode.EditFirstPost] edits the
+ * first post of an existing topic (Phase 2D #148) ; [TopicFormMode.New] creates
+ * a brand-new topic (Phase 2E #149).
  *
  * Reuses [SubmitError] from `PostEditorState.kt` for the error envelope —
  * the failure variants HFR can return are identical for post-level and

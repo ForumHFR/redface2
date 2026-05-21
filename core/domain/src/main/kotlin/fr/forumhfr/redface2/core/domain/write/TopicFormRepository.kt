@@ -9,9 +9,9 @@ import fr.forumhfr.redface2.core.model.write.TopicForm
 
 /**
  * Repository surface for the topic-level write flows. Phase 2D #148 covers
- * « edit first post » only ; create-topic (#149) will land later as a second
- * operation on the same interface (same `bddpost.php` endpoint, different
- * context type).
+ * « edit first post » and Phase 2E #149 covers « create topic ». They live on
+ * the same interface because both expose the topic-level form shape (`sujet`,
+ * `subcat`, optional poll fields), even though the POST endpoint differs.
  *
  * The wire endpoints for FP edit are identical to a regular post edit
  * (`message.php?…&numreponse=N` GET, `bdd.php?config=hfr.inc` POST), but the

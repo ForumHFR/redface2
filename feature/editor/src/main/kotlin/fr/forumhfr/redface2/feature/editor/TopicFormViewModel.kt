@@ -35,20 +35,19 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * Phase 2D #148 — ViewModel for the topic-level form. Currently scoped to
- * [TopicFormMode.EditFirstPost] ; [TopicFormMode.New] (Phase 2E #149) still
- * lands on the placeholder. Architecture mirrors [PostEditorViewModel] :
+ * ViewModel for the topic-level form. [TopicFormMode.EditFirstPost] edits an
+ * existing first post (Phase 2D #148) and [TopicFormMode.New] creates a topic
+ * (Phase 2E #149). Architecture mirrors [PostEditorViewModel] :
  *
- * 1. On init, fetch the topic form via [TopicFormRepository.fetchEditFirstPostForm]
- *    using `(cat, subcat, topicId, page, numreponse)` from the request.
+ * 1. On init, fetch the topic form via [TopicFormRepository] using the
+ *    mode-specific request shape.
  * 2. Hydrate `subject`, `draft`, the three per-post options, and the parsed
  *    subcategory selection ONCE — subsequent silent refetches (e.g. after
  *    `InvalidHashCheck`) must never overwrite user edits.
- * 3. On [TopicFormIntent.SubmitClicked], POST via
- *    [TopicFormRepository.submitEditFirstPost] with the user's final values.
- * 4. On success, emit [TopicFormEffect.SubmitSucceeded] carrying `targetPage`
- *    and `scrollTo = numreponse` so the navigation host can refresh the
- *    topic and scroll to the edited FP.
+ * 3. On [TopicFormIntent.SubmitClicked], POST via the matching repository method
+ *    with the user's final values.
+ * 4. On success, emit [TopicFormEffect.SubmitSucceeded] for edit FP or
+ *    [TopicFormEffect.NewTopicCreated] for create-topic navigation.
  */
 @HiltViewModel(assistedFactory = TopicFormViewModel.Factory::class)
 class TopicFormViewModel @AssistedInject constructor(

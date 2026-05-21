@@ -15,6 +15,184 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v49 — `0.3.9` — 2026-05-21
+
+**Statut** : `closed`
+**Commit** : à venir (tag `app-v49` après merge de la PR #169)
+**Fichier** : `redface2-v49-<sha>.aab`
+
+Phase 2E — création de topic depuis l'app. Un compte authentifié peut ouvrir le composer depuis une liste de catégorie, saisir un titre + contenu BBCode, choisir la sous-catégorie et poster via `bddpost.php` sans navigateur.
+
+### Added
+- FAB « Nouveau topic » dans `ForumCategoryScreen`, visible uniquement quand `AuthState.Authenticated`.
+- `TopicFormMode.New` fonctionnel dans `TopicFormScreen` : titre, dropdown sous-catégorie obligatoire, toolbar BBCode, preview locale et options HFR.
+- `NewTopicContext` / `NewTopicSubmitResult`, `TopicFormParser.parseNewTopic`, `HfrClient.getNewTopicForm()` / `submitNewTopic()`, et `TopicFormRepository.fetchNewTopicForm()` / `submitNewTopic()`.
+- Fallback honnête après succès : navigation directe si un futur parser extrait `newTopicId`; sinon retour sur la sous-catégorie cible avec Toast.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 49`, `versionName = "0.3.9"`.
+- Notes Play Console mises à jour pour le track alpha.
+
+### Fixed
+- Documentation/KDoc nettoyées : `TopicFormMode.New` n'est plus décrit comme placeholder ou futur.
+- `protocol-hfr.md` aligne la limite restante : le POST création est livré, seule la fixture de réponse succès dédiée manque encore pour extraire les ids du nouveau topic.
+
+---
+
+## v48 — `0.3.8` — 2026-05-21
+
+**Statut** : `closed`
+**Commit** : `265877c`
+**Fichier** : artefact CD `app-v48`
+
+Stabilisation post-review de l'édition du premier post avant d'attaquer la création de topic.
+
+### Changed
+- Hydratation `subject` et `draft` indépendante dans `TopicFormViewModel`.
+- Parser FP durci : aucun fallback silencieux quand le `<select name=subcat>` n'a pas de sélection valide.
+- Champs sondage sortis de `hiddenFields`; `TopicPollForm.fields` devient la source unique de passthrough.
+
+---
+
+## v47 — `0.3.7` — 2026-05-21
+
+**Statut** : `closed`
+**Commit** : `9256298`
+**Fichier** : artefact CD `app-v47`
+
+Phase 2D-B — édition du premier post d'un topic owned.
+
+### Added
+- `TopicFormScreen` réel pour `TopicFormMode.EditFirstPost` : sujet, contenu BBCode, options HFR et sous-catégorie.
+- Parser topic-level `TopicFormParser` avec préservation des champs sondage et filtrage `password` / `delete`.
+- Bouton « Modifier le premier message » quand HFR expose l'action sur le premier post.
+
+---
+
+## v46 — `0.3.6` — 2026-05-20
+
+**Statut** : `closed`
+**Commit** : `11ae858`
+**Fichier** : artefact CD `app-v46`
+
+Phase 2D-A — édition d'un post existant appartenant au compte authentifié.
+
+### Added
+- `PostEditorMode.Edit` fonctionnel via `EditPostRepository`.
+- Détection `Post.isEditable` / `Post.isOwnPost` depuis la toolbar HFR.
+- Submit edit via `bdd.php`, avec refresh topic + scroll vers le post édité.
+
+---
+
+## v45 — `0.3.5` — 2026-05-19
+
+**Statut** : `closed`
+**Commit** : `3e2a350`
+**Fichier** : artefact CD `app-v45`
+
+Correctif options HFR et radios/checkboxes du formulaire d'écriture.
+
+### Fixed
+- `ReplyFormParser` respecte la sémantique browser : radio/checkbox non cochée absente du POST.
+- `MsgIcon` ne dérive plus vers la dernière radio du formulaire.
+
+### Added
+- Toggles signature, smilies et notification email dans `PostEditorScreen`.
+
+---
+
+## v44 — `0.3.4` — 2026-05-18
+
+**Statut** : `closed`
+**Commit** : `577c6b6`
+**Fichier** : artefact CD `app-v44`
+
+Phase 2C complète — reply + quote MVP.
+
+### Added
+- Bouton « Citer » par post quand HFR expose `numrep` + `ref`.
+- Hydratation du draft avec le `[quotemsg=…]` prérempli par HFR.
+- POST quote via le même `ReplyRepository` que la réponse simple.
+
+---
+
+## v43 — `0.3.3` — 2026-05-18
+
+**Statut** : `closed`
+**Commit** : `59667a3`
+**Fichier** : artefact CD `app-v43`
+
+Hotfix `NetworkOnMainThreadException` sur le flow reply.
+
+### Fixed
+- `DefaultReplyRepository.fetchReplyForm()` et `submitReply()` passent par le dispatcher IO injecté avant les appels OkHttp bloquants.
+
+---
+
+## v42 — `0.3.2` — 2026-05-18
+
+**Statut** : `closed`
+**Commit** : `7929ff8`
+**Fichier** : artefact CD `app-v42`
+
+Instrumentation alpha du flow reply.
+
+### Added
+- Diagnostics transport et mapping ViewModel autour du GET/POST reply.
+- Logs sans `hash_check`, utiles pour qualifier les échecs alpha sans `adb`.
+
+---
+
+## v41 — `0.3.1` — 2026-05-18
+
+**Statut** : `closed`
+**Commit** : `9edfc21`
+**Fichier** : artefact CD `app-v41`
+
+Première instrumentation diagnostics du flow reply.
+
+### Added
+- `DefaultReplyRepository` écrit dans `DiagnosticsLog` sur GET, parse, POST et erreurs classifiées.
+- Extraits HTML redacted sur échec parser.
+
+---
+
+## v40 — `0.3.0` — 2026-05-18
+
+**Statut** : `closed`
+**Commit** : `9679a51`
+**Fichier** : artefact CD `app-v40`
+
+Premier flux de mutation HFR réelle : réponse à un topic depuis l'app.
+
+### Added
+- `PostEditorMode.Reply` branché sur HFR : GET `message.php`, POST `bddpost.php`.
+- `ReplyRepository`, `ReplyFormParser`, `ReplySubmitResponseParser` et erreurs HFR typées.
+- Anti-double-submit et refresh de la page topic après succès.
+
+### Changed
+- `versionName` passe à `0.3.0` pour marquer la première mutation réelle.
+
+---
+
+## v39 — `0.2.0` — 2026-05-18
+
+**Statut** : `closed`
+**Commit** : `2ffdc39`
+**Fichier** : artefact CD `app-v39`
+
+Passage Phase 2 : protocole d'écriture HFR cartographié et socle éditeur local livré.
+
+### Added
+- Fixtures Phase 2A pour reply, quote, edit, création topic, anonyme, topic fermé, succès et erreurs HFR.
+- `PostEditorScreen` / `PostEditorViewModel` local-only avec toolbar BBCode, preview locale et sélection préservée.
+- `BbcodeContentParser` + `BbcodePreviewParser` pour la preview BBCode locale.
+
+### Changed
+- Convention app : `versionName` passe au semver pur (`0.2.0`), distinct de la version des specs/site.
+
+---
+
 ## v38 — `0.1.0-phase1.7` — 2026-05-11
 
 **Statut** : `closed`
