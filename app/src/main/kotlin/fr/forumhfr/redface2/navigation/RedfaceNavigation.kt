@@ -188,6 +188,8 @@ fun RedfaceApp(intent: Intent?) {
 }
 
 @Composable
+@Suppress("CyclomaticComplexMethod") // One entry per top-level route + per-screen navigation callbacks ;
+// splitting the host would just push the same `when` shape one level deeper without reducing complexity.
 private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
     NavDisplay(
         backStack = backStack,
@@ -291,6 +293,19 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                                 scrollTo = topic.lastPostReadId
                                     ?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }
                                     ?.toInt(),
+                            ),
+                        )
+                    },
+                    onCreateTopic = { cat, subcat ->
+                        // Phase 2E (#149) — push the topic form in `New` mode.
+                        // `subcat` here is the chip d'arrivée (nullable on the
+                        // « Toutes » view) ; the user picks the final
+                        // sub-category in the composer's dropdown.
+                        backStack.add(
+                            TopicFormRoute(
+                                mode = TopicFormMode.New,
+                                cat = cat,
+                                subcat = subcat,
                             ),
                         )
                     },
@@ -444,6 +459,43 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                                     page = targetPage ?: topicEntry.page,
                                     scrollTo = scrollTo ?: topicEntry.scrollTo,
                                 ),
+                            )
+                        }
+                    },
+                    onNewTopicCreated = { cat, subcat, newTopicId, newNumreponse ->
+                        // Phase 2E (#149). Two paths :
+                        //  - When the success URL parser eventually lands and
+                        //    `newTopicId` is non-null, jump straight to the
+                        //    fresh topic so the user sees their first post.
+                        //  - Until then (no success fixture captured yet),
+                        //    pop the composer and replace it with a
+                        //    [CategoryRoute] pointing at the d'arrivée
+                        //    sub-category. The screen-side Toast tells the
+                        //    user the POST went through.
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                        if (newTopicId != null) {
+                            backStack.add(
+                                TopicRoute(
+                                    cat = cat,
+                                    post = newTopicId,
+                                    page = 1,
+                                    scrollTo = newNumreponse,
+                                ),
+                            )
+                        } else {
+                            // Replace the current category entry with one keyed
+                            // on the targeted subcat (may differ from the entry
+                            // chip when the user picked another sub-category
+                            // in the dropdown) so the listing refresh lands on
+                            // the right rail.
+                            val categoryBelow = backStack.lastOrNull() as? CategoryRoute
+                            if (categoryBelow != null) {
+                                backStack.removeAt(backStack.lastIndex)
+                            }
+                            backStack.add(
+                                CategoryRoute(cat = cat, subcat = subcat, page = 1),
                             )
                         }
                     },

@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.parser.write
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -19,7 +20,7 @@ class TopicFormParserTest {
 
     @Test
     fun `parses the edit-first-post fixture verbatim`() {
-        val form = parser.parse(readFixture("write_edit_first_post_form.html")).getOrThrow()
+        val form = parser.parseEditFirstPost(readFixture("write_edit_first_post_form.html")).getOrThrow()
 
         assertFalse("Authenticated FP form must not flag as anonymous", form.isAnonymous)
         assertEquals("REDACTED_HASH_CHECK", form.hashCheck)
@@ -99,7 +100,7 @@ class TopicFormParserTest {
     @Test
     fun `fails fast when the form target is not bdd_php`() {
         val html = """<html><body><form action="/forum1.php"></form></body></html>"""
-        val result = parser.parse(html)
+        val result = parser.parseEditFirstPost(html)
         assertTrue(result.isFailure)
     }
 
@@ -108,7 +109,7 @@ class TopicFormParserTest {
         val html = """<html><body><form action="/bdd.php">
             <input name="cat" value="10" />
         </form></body></html>"""
-        val result = parser.parse(html)
+        val result = parser.parseEditFirstPost(html)
         assertTrue(result.isFailure)
     }
 
@@ -126,7 +127,7 @@ class TopicFormParserTest {
                 <option value="562">Android</option>
             </select>
         </form></body></html>"""
-        val result = parser.parse(html)
+        val result = parser.parseEditFirstPost(html)
         assertTrue("must fail when no subcat is selected", result.isFailure)
     }
 
@@ -144,7 +145,7 @@ class TopicFormParserTest {
                 <option value="388">Divers</option>
             </select>
         </form></body></html>"""
-        val result = parser.parse(html)
+        val result = parser.parseEditFirstPost(html)
         assertTrue("Aucune-selected must fail-fast at parse", result.isFailure)
     }
 
@@ -172,7 +173,7 @@ class TopicFormParserTest {
             <input type="text" name="heure" value="" />
             <input type="text" name="minute" value="" />
         </form></body></html>"""
-        val form = parser.parse(html).getOrThrow()
+        val form = parser.parseEditFirstPost(html).getOrThrow()
         assertTrue("have_sondage must be detected", form.poll.present)
         // [TopicPollForm.fields] is the single source of truth for the sondage
         // block — assert each expected key is in it.
@@ -197,6 +198,73 @@ class TopicFormParserTest {
                 form.hiddenFields.containsKey(name),
             )
         }
+    }
+
+    // ---- Phase 2E (#149) — parseNewTopic ----------------------------------
+
+    @Test
+    fun `parseNewTopic accepts the create-topic fixture with no preselected subcat`() {
+        val form = parser.parseNewTopic(readFixture("write_create_topic_form_android_cat.html")).getOrThrow()
+
+        assertFalse("Authenticated create-topic form must not be flagged anonymous", form.isAnonymous)
+        assertEquals("REDACTED_HASH_CHECK", form.hashCheck)
+        // Sujet + content are empty on a brand-new composer.
+        assertEquals("", form.subject)
+        assertEquals("", form.initialContent)
+        // HFR ships no `<option selected>` on the new-topic form ; the parser
+        // must report `null` rather than guess.
+        assertNull("New-topic form must not have a pre-selected subcat", form.selectedSubcat)
+        // Subcategory choices are exposed (Aucune + Android + others). We
+        // assert two specific ones to prove labels and id mapping survive.
+        val aucune = form.subcategoryChoices.first { it.label == "Aucune" }
+        assertNull(aucune.id)
+        assertFalse("Aucune must not be marked selected", aucune.selected)
+        val android = form.subcategoryChoices.first { it.id == 550 }
+        assertEquals("Android", android.label)
+        assertFalse("Android must not be marked selected", android.selected)
+        // MsgIcon=1 is pre-checked on the fixture.
+        assertEquals("1", form.msgIcon)
+        // Options are present but unchecked on the fixture.
+        assertFalse(form.options.signatureEnabled)
+        assertFalse(form.options.smileyDisabled)
+        assertFalse(form.options.emailNotificationEnabled)
+        // Hidden fields characteristic of the create flow.
+        assertEquals("23", form.hiddenFields["cat"])
+        assertEquals("550", form.hiddenFields["from_subcat"])
+        assertEquals("0", form.hiddenFields["new"])
+        assertEquals("1", form.hiddenFields["page"])
+        assertEquals("1100", form.hiddenFields["verifrequet"])
+        assertEquals("0", form.hiddenFields["sondage"])
+        assertEquals("0", form.hiddenFields["owntopic"])
+        // Deny rules : neither poll keys nor password / delete leak through.
+        listOf(
+            "password", "delete",
+            "have_sondage", "textreponse0", "textreponse1", "textreponse10",
+            "allowvisitor", "max_votes", "jour", "mois", "annee", "heure", "minute",
+        ).forEach { name ->
+            assertFalse(
+                "$name must never round-trip via hiddenFields on a new-topic form",
+                form.hiddenFields.containsKey(name),
+            )
+        }
+        // Poll : not present, no fields.
+        assertFalse(form.poll.present)
+        assertEquals(0, form.poll.fields.size)
+    }
+
+    @Test
+    fun `parseNewTopic flags the anonymous variant`() {
+        val form = parser.parseNewTopic(readFixture("write_create_topic_anonymous_form.html")).getOrThrow()
+        assertTrue("Anonymous form must surface isAnonymous = true", form.isAnonymous)
+    }
+
+    @Test
+    fun `parseEditFirstPost refuses the create-topic fixture (bddpost vs bdd)`() {
+        // Both parser entries share most of the plumbing — this test pins the
+        // action-anchor split so a future refactor cannot accidentally accept
+        // a create-topic page as an edit-FP form.
+        val result = parser.parseEditFirstPost(readFixture("write_create_topic_form_android_cat.html"))
+        assertTrue("Edit FP parser must reject the create-topic action", result.isFailure)
     }
 
     private fun readFixture(name: String): String =

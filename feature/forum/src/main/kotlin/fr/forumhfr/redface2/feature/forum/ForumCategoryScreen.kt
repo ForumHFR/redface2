@@ -20,12 +20,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -63,19 +65,30 @@ import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 fun ForumCategoryScreen(
     request: CategoryRequest,
     onOpenTopic: (TopicSummary) -> Unit,
+    onCreateTopic: (cat: Int, subcat: Int?) -> Unit,
 ) {
     val viewModel = hiltViewModel<CategoryViewModel, CategoryViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
     )
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-    Surface(
+    Scaffold(
         modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.surface,
-    ) {
+        containerColor = MaterialTheme.colorScheme.surface,
+        floatingActionButton = {
+            if (state.canCreateTopic) {
+                ExtendedFloatingActionButton(
+                    onClick = { onCreateTopic(state.cat, state.selectedSubcat) },
+                    text = { Text(text = stringResource(R.string.category_create_topic)) },
+                    icon = { Text(text = "+") },
+                )
+            }
+        },
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .padding(padding)
                 .statusBarsPadding()
                 .navigationBarsPadding(),
         ) {

@@ -33,15 +33,35 @@ import org.jsoup.nodes.Element
  */
 class TopicFormParser {
 
-    @Suppress("ReturnCount") // Three failure guards + the success return.
-    fun parse(html: String): Result<TopicForm> {
+    /**
+     * Parses HFR's edit-first-post form (`form[action*=bdd.php]`). Strict
+     * subcat fail-safe : the `<select name=subcat>` must expose exactly one
+     * `<option selected>` with `id > 0` — anything else returns
+     * `Result.failure`, which prevents the FP submit from silently
+     * re-categorising the topic.
+     */
+    fun parseEditFirstPost(html: String): Result<TopicForm> =
+        parseTopicForm(html = html, actionSelector = "form[action*=bdd.php]", requireSelectedSubcat = true)
+
+    /**
+     * Parses HFR's create-topic form (`form[action*=bddpost.php]`). HFR serves
+     * the `<select name=subcat>` without any `selected` attribute on the
+     * create flow, so we accept `selectedSubcat = null` here ; the UI uses the
+     * dropdown to capture the user's choice and refuses to submit while
+     * `selectedSubcat <= 0`.
+     */
+    fun parseNewTopic(html: String): Result<TopicForm> =
+        parseTopicForm(html = html, actionSelector = "form[action*=bddpost.php]", requireSelectedSubcat = false)
+
+    @Suppress("ReturnCount") // Two failure guards (form / hash_check) + the success return.
+    private fun parseTopicForm(
+        html: String,
+        actionSelector: String,
+        requireSelectedSubcat: Boolean,
+    ): Result<TopicForm> {
         val document = Jsoup.parse(html)
-        // HFR's topic-level form lives in the same `bdd.php` action as a
-        // regular post edit ; we anchor on the action attribute and let the
-        // caller decide (via the URL it hit) whether this is a FP edit or a
-        // regular edit.
-        val form = document.selectFirst("form[action*=bdd.php]")
-            ?: return Result.failure(IllegalStateException("Topic form not found"))
+        val form = document.selectFirst(actionSelector)
+            ?: return Result.failure(IllegalStateException("Topic form not found at '$actionSelector'"))
 
         val pseudoInput = form.selectFirst("input[name=pseudo]")
         val pseudoValue = pseudoInput?.attr("value").orEmpty()
@@ -58,7 +78,7 @@ class TopicFormParser {
         // would collapse whitespace and HTML-decode entities, breaking the round-trip.
         val initialContent = form.selectFirst("textarea[name=content_form]")?.wholeText().orEmpty()
 
-        val subcatOutcome = parseSubcategories(form)
+        val subcatOutcome = parseSubcategories(form, requireSelectedSubcat)
             ?: return Result.failure(
                 IllegalStateException(
                     "topic form has no <select name=subcat> with a `selected` option carrying id > 0 — " +
@@ -149,9 +169,20 @@ class TopicFormParser {
      * can refuse to render the form and the user is never tricked into moving
      * a topic by accident.
      */
-    @Suppress("ReturnCount") // Three null-returns mirror the three failure modes we explicitly refuse
-    // (missing <select>, no `selected` option, « Aucune » selected) ; merging them would conflate them.
-    private fun parseSubcategories(form: Element): Pair<Int, List<TopicFormSubcategoryChoice>>? {
+    /**
+     * Returns the parsed `<select name=subcat>` block. The outer `Pair` carries
+     * `(selectedSubcat?, choices)`. The function returns `null` only when the
+     * caller is in strict mode (Edit FP) AND the `<select>` is missing or has
+     * no `<option selected>` with `id > 0` — guessing would silently
+     * re-categorise the topic at submit. In permissive mode (create-topic) we
+     * tolerate a `<select>` without any pre-selection because that is exactly
+     * what HFR serves on a brand-new composer.
+     */
+    @Suppress("ReturnCount")
+    private fun parseSubcategories(
+        form: Element,
+        requireSelected: Boolean,
+    ): Pair<Int?, List<TopicFormSubcategoryChoice>>? {
         val select = form.selectFirst("select[name=subcat]") ?: return null
         val options = select.select("option")
         val choices = options.map { option ->
@@ -163,11 +194,11 @@ class TopicFormParser {
                 selected = option.hasAttr("selected"),
             )
         }
-        // We require an explicit `selected` attribute with id > 0. The
-        // « Aucune » option (id = null) is treated as not-selected for the
-        // edit-FP MVP because the domain requires `subcat > 0`.
+        // An explicit `selected` attribute with id > 0 is the only thing we
+        // accept as a pre-selection. The « Aucune » option (id = null) is
+        // treated as no-selection because the wire submit needs `subcat > 0`.
         val selectedSubcat = choices.firstOrNull { it.selected && it.id != null }?.id
-            ?: return null
+        if (selectedSubcat == null && requireSelected) return null
         return selectedSubcat to choices
     }
 

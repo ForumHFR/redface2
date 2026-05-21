@@ -11,8 +11,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import android.widget.Toast
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -20,6 +25,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,18 +60,32 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 fun TopicFormScreen(
     request: TopicFormRequest,
     onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?) -> Unit,
+    onNewTopicCreated: (cat: Int, subcat: Int, newTopicId: Int?, newNumreponse: Int?) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: TopicFormViewModel = hiltViewModel<TopicFormViewModel, TopicFormViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val newTopicCreatedFallback = stringResource(R.string.editor_new_topic_created)
 
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
                 is TopicFormEffect.SubmitSucceeded ->
                     onSubmitSucceeded(effect.targetPage, effect.scrollTo)
+                is TopicFormEffect.NewTopicCreated -> {
+                    if (effect.newTopicId == null) {
+                        // Until a `write_create_topic_success_response.html`
+                        // fixture lands, the repository cannot extract the new
+                        // topic id from HFR's refresh URL. Surface a sober
+                        // Toast so the user knows the POST succeeded before
+                        // navigating back to the category listing.
+                        Toast.makeText(context, newTopicCreatedFallback, Toast.LENGTH_LONG).show()
+                    }
+                    onNewTopicCreated(effect.cat, effect.subcat, effect.newTopicId, effect.newNumreponse)
+                }
             }
         }
     }
@@ -84,12 +107,6 @@ internal fun TopicFormContent(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
     ) {
-        if (state.mode != TopicFormMode.EditFirstPost) {
-            // Phase 2E #149 placeholder — same copy as before, the route still
-            // exists so navigation intent stays fixed.
-            TopicFormPlaceholder(state.mode)
-            return@Surface
-        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -100,7 +117,7 @@ internal fun TopicFormContent(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = stringResource(R.string.editor_topic_edit_first_post_title),
+                text = stringResource(state.mode.titleResId),
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -112,16 +129,29 @@ internal fun TopicFormContent(
                 enabled = !state.isSubmitting,
                 label = { Text(stringResource(R.string.editor_topic_subject_label)) },
             )
-            // Subcategory : show the currently selected label. The full dropdown
-            // is intentionally deferred — Phase 2D MVP forwards whatever HFR
-            // pre-selected, leaving the user the option to re-categorise later.
-            val selectedChoice = state.subcategoryChoices.firstOrNull { it.id == state.selectedSubcat }
-            if (selectedChoice != null) {
-                Text(
-                    text = stringResource(R.string.editor_topic_subcat_current, selectedChoice.label),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // Subcategory : the New mode exposes a real dropdown picker because
+            // HFR ships no pre-selection and the wire submit rejects an empty
+            // `subcat=`. Edit FP keeps a read-only label : the current dropdown
+            // UX is intentionally deferred there (Phase 2D MVP only forwards
+            // whatever HFR pre-selected).
+            when (state.mode) {
+                TopicFormMode.New -> SubcategoryDropdown(
+                    choices = state.subcategoryChoices,
+                    selectedSubcat = state.selectedSubcat,
+                    enabled = !state.isSubmitting && !state.isLoadingForm,
+                    onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
                 )
+                TopicFormMode.EditFirstPost -> {
+                    val selectedChoice =
+                        state.subcategoryChoices.firstOrNull { it.id == state.selectedSubcat }
+                    if (selectedChoice != null) {
+                        Text(
+                            text = stringResource(R.string.editor_topic_subcat_current, selectedChoice.label),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
             BbcodeToolbar(
                 onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
@@ -199,26 +229,57 @@ internal fun TopicFormContent(
     }
 }
 
+/**
+ * Material 3 dropdown picker over the [TopicFormSubcategoryChoice] list. The
+ * `Aucune` option (`id == null`) is filtered out — the wire submit refuses
+ * `subcat=""` and we don't want the user to see a choice that cannot be
+ * submitted. Placeholder shown until the user picks something.
+ *
+ * Implemented as `OutlinedTextField + DropdownMenu` rather than
+ * `ExposedDropdownMenuBox` to keep the dependency surface minimal and avoid
+ * the experimental annotations that the box variant still requires.
+ */
 @Composable
-private fun TopicFormPlaceholder(mode: TopicFormMode) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(horizontal = 24.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(
-            text = stringResource(mode.titleResId),
-            style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurface,
+private fun SubcategoryDropdown(
+    choices: List<fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice>,
+    selectedSubcat: Int?,
+    enabled: Boolean,
+    onSelect: (Int) -> Unit,
+) {
+    val pickable = remember(choices) { choices.filter { it.id != null } }
+    val placeholder = stringResource(R.string.editor_topic_subcat_picker_placeholder)
+    val selectedLabel = pickable.firstOrNull { it.id == selectedSubcat }?.label ?: placeholder
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = selectedLabel,
+            onValueChange = {},
+            readOnly = true,
+            enabled = enabled,
+            label = { Text(stringResource(R.string.editor_topic_subcat_picker_label)) },
+            // Plain text caret instead of an Icons import : keeps the
+            // dependency surface minimal (`material-icons-extended` is not on
+            // this module's classpath) and works fine for a single chevron.
+            trailingIcon = { Text(text = "▾") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = enabled) { expanded = true },
         )
-        Text(
-            text = stringResource(R.string.editor_topic_form_placeholder),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            pickable.forEach { choice ->
+                val id = choice.id ?: return@forEach
+                DropdownMenuItem(
+                    text = { Text(choice.label) },
+                    onClick = {
+                        expanded = false
+                        onSelect(id)
+                    },
+                )
+            }
+        }
     }
 }
 

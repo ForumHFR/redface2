@@ -233,6 +233,53 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * Phase 2E (#149) — GET the HFR new-topic form for [cat] / [entrySubcat].
+     * `entrySubcat` is nullable because the user can land on the create-topic
+     * composer either with a sub-category chip selected (`entrySubcat = 550`)
+     * or from the « Toutes » view (`entrySubcat = null` → `subcat=0` in the
+     * query, which is exactly how HFR serves the form when nothing is
+     * pre-selected). The composer is always opened in non-poll mode
+     * (`sondage=0`) — active poll creation lives outside #149.
+     *
+     * Always uses the authenticated client : a session that has just expired
+     * must raise [SessionExpiredException] rather than silently returning the
+     * anonymous composer HFR happens to serve in that case.
+     */
+    suspend fun getNewTopicForm(cat: Int, entrySubcat: Int?): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("message.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", cat.toString())
+            .addQueryParameter("subcat", (entrySubcat ?: 0).toString())
+            .addQueryParameter("sondage", "0")
+            .addQueryParameter("owntopic", "0")
+            .addQueryParameter("new", "0")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
+     * Phase 2E (#149) — POST the new-topic payload to `bddpost.php`. The wire
+     * endpoint is identical to reply/quote, but the body differs (no `post`,
+     * `numreponse=""`, `numrep=""`, writable `sujet` + `subcat`). The
+     * repository builds [formBody] and is responsible for filtering
+     * `password`, `delete` and any inadvertent poll keys.
+     *
+     * Same HTTP-200-on-failure classification as reply : success and the four
+     * documented error variants all come back with distinct body text, see
+     * `ReplySubmitResponseParser` for the dispatch.
+     */
+    suspend fun submitNewTopic(formBody: FormBody): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("bddpost.php")
+            .addQueryParameter("config", "hfr.inc")
+            .build()
+        val request = Request.Builder().url(url).post(formBody).build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Executes the call, returns the body as a UTF-8 string, and raises
      * [SessionExpiredException] if HFR redirected to the login page or returned the login form
      * inline. When [tracePrefix] is non-null, the OkHttp call up to headers is wrapped in

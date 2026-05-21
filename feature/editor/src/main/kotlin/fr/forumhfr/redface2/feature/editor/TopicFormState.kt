@@ -49,25 +49,43 @@ data class TopicFormState(
     val draftHydratedFromServer: Boolean = false,
     /** Mirror of [PostEditorState.optionsHydratedFromForm] for the same anti-clobber reason. */
     val optionsHydratedFromForm: Boolean = false,
+    /**
+     * `true` when the parsed form looked anonymous (`<input name=pseudo>` empty
+     * + `<input name=password>` visible). Phase 2E refuses to submit in that
+     * case — the auth state is the cookie jar, but HFR will reject an anonymous
+     * POST anyway and #154 explicitly forbids exposing the legacy anonymous flow.
+     */
+    val isAnonymous: Boolean = false,
 ) {
     /**
-     * Submit is allowed when : we know the full routing context (cat / subcat /
-     * topicId / page / numreponse, for FP edit), the user has typed a non-blank
-     * subject AND content, the form was successfully loaded, and we are not
+     * Submit is allowed when the mode-specific routing context is complete,
+     * the user has typed a non-blank subject AND content, the form was
+     * successfully loaded, the session is not anonymous, and we are not
      * already submitting.
      */
     val canSubmit: Boolean
-        get() = mode == TopicFormMode.EditFirstPost &&
-            cat != null &&
-            (subcat != null && subcat > 0) &&
-            topicId != null &&
-            numreponse != null &&
-            page != null &&
-            (selectedSubcat != null && selectedSubcat > 0) &&
-            subject.text.isNotBlank() &&
-            draft.text.isNotBlank() &&
-            !isLoadingForm &&
-            !isSubmitting
+        get() = when (mode) {
+            TopicFormMode.EditFirstPost ->
+                cat != null &&
+                    (subcat != null && subcat > 0) &&
+                    topicId != null &&
+                    numreponse != null &&
+                    page != null &&
+                    (selectedSubcat != null && selectedSubcat > 0) &&
+                    subject.text.isNotBlank() &&
+                    draft.text.isNotBlank() &&
+                    !isLoadingForm &&
+                    !isSubmitting &&
+                    !isAnonymous
+            TopicFormMode.New ->
+                cat != null &&
+                    (selectedSubcat != null && selectedSubcat > 0) &&
+                    subject.text.isNotBlank() &&
+                    draft.text.isNotBlank() &&
+                    !isLoadingForm &&
+                    !isSubmitting &&
+                    !isAnonymous
+        }
 }
 
 /**
@@ -97,6 +115,19 @@ sealed interface TopicFormEffect {
     data class SubmitSucceeded(
         val targetPage: Int?,
         val scrollTo: Int? = null,
+    ) : TopicFormEffect
+
+    /**
+     * Phase 2E (#149) — emitted on a successful create-topic POST. Until the
+     * success fixture is captured the repository forwards `(null, null)` for
+     * the brand-new ids ; the navigation host falls back to [CategoryRoute] in
+     * that case and surfaces a Toast.
+     */
+    data class NewTopicCreated(
+        val cat: Int,
+        val subcat: Int,
+        val newTopicId: Int?,
+        val newNumreponse: Int?,
     ) : TopicFormEffect
 }
 

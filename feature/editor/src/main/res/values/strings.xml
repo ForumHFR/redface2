@@ -27,5 +27,8 @@
     <string name="editor_option_email_notification">Activer la notification par email du sujet</string>
     <string name="editor_topic_subject_label">Titre du sujet</string>
     <string name="editor_topic_subcat_current">Sous-catégorie actuelle : %1$s</string>
+    <string name="editor_topic_subcat_picker_label">Sous-catégorie</string>
+    <string name="editor_topic_subcat_picker_placeholder">Choisir une sous-catégorie</string>
     <string name="editor_topic_poll_readonly_note">Ce sujet contient un sondage. Son édition n\'est pas encore disponible dans cette version ; vos réponses utilisateurs et options de vote restent inchangées.</string>
+    <string name="editor_new_topic_created">Sujet créé. Rafraîchis la liste si besoin pour le retrouver.</string>
 </resources>

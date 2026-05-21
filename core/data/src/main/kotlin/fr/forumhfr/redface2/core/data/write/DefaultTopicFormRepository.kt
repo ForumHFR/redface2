@@ -5,6 +5,8 @@ import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
+import fr.forumhfr.redface2.core.model.write.NewTopicContext
+import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
@@ -58,7 +60,7 @@ class DefaultTopicFormRepository @Inject constructor(
                     page = context.page,
                     numreponse = context.numreponse,
                 )
-                topicFormParser.parse(html).fold(
+                topicFormParser.parseEditFirstPost(html).fold(
                     onSuccess = { form ->
                         diagnostics.record(
                             DiagnosticsLog.Level.DEBUG,
@@ -229,6 +231,202 @@ class DefaultTopicFormRepository @Inject constructor(
             // Belt-and-braces : the parser already strips `password` / `delete`,
             // we keep the deny rules here so a future refactor cannot leak the
             // destructive « Effacer l'intégralité du sujet » checkbox.
+            if (key == "password" || key == "delete") return@forEach
+            builder.add(key, value)
+            emitted += key
+        }
+        return builder.build()
+    }
+
+    override suspend fun fetchNewTopicForm(context: NewTopicContext): TopicForm {
+        diagnostics.record(
+            DiagnosticsLog.Level.INFO,
+            LOG_TAG,
+            "GET new-topic form cat=${context.cat} entrySubcat=${context.entrySubcat ?: "(none)"}",
+        )
+        return try {
+            withContext(ioDispatcher) {
+                val html = hfrClient.getNewTopicForm(cat = context.cat, entrySubcat = context.entrySubcat)
+                topicFormParser.parseNewTopic(html).fold(
+                    onSuccess = { form ->
+                        diagnostics.record(
+                            DiagnosticsLog.Level.DEBUG,
+                            LOG_TAG,
+                            "new-topic form parsed: hiddenFields=${form.hiddenFields.size} " +
+                                "anonymous=${form.isAnonymous} " +
+                                "subcategoryChoices=${form.subcategoryChoices.size} " +
+                                "preSelectedSubcat=${form.selectedSubcat ?: "(none)"} " +
+                                "pollPresent=${form.poll.present}",
+                        )
+                        form
+                    },
+                    onFailure = { error ->
+                        diagnostics.record(
+                            DiagnosticsLog.Level.WARN,
+                            LOG_TAG,
+                            "new-topic form parse FAILED: ${error.message ?: error::class.simpleName}",
+                        )
+                        throw error
+                    },
+                )
+            }
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: SessionExpiredException) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "GET new-topic form SessionExpired: ${error.message ?: "(no message)"}",
+            )
+            throw error
+        } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "GET new-topic form FAILED: ${error::class.simpleName}: ${error.message ?: "(no message)"}",
+            )
+            throw error
+        }
+    }
+
+    override suspend fun submitNewTopic(
+        context: NewTopicContext,
+        form: TopicForm,
+        subject: String,
+        bbcodeContent: String,
+        selectedSubcat: Int,
+        options: ReplyFormOptions,
+    ): NewTopicSubmitResult {
+        guardAgainstInvalidSubmission(form, subject, bbcodeContent, selectedSubcat)?.let { early ->
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "new-topic POST short-circuited: ${early.reason::class.simpleName}",
+            )
+            return NewTopicSubmitResult.Failure(early.reason)
+        }
+
+        diagnostics.record(
+            DiagnosticsLog.Level.INFO,
+            LOG_TAG,
+            "POST new-topic cat=${context.cat} subcat=$selectedSubcat " +
+                "entrySubcat=${context.entrySubcat ?: "(none)"} bbcode.length=${bbcodeContent.length}",
+        )
+        val formBody = buildNewTopicBody(context, form, subject, bbcodeContent, selectedSubcat, options)
+        return try {
+            withContext(ioDispatcher) {
+                val responseHtml = hfrClient.submitNewTopic(formBody)
+                // The wire endpoint is shared with reply/quote ; the same
+                // classifier disambiguates Success vs the 4 failure variants.
+                // The success URL parsing (newTopicId / newNumreponse) is
+                // deferred until a real `write_create_topic_success_response.html`
+                // fixture is captured ; surfacing null on success is honest
+                // and lets the navigation host fall back to the category
+                // refresh path.
+                when (val outcome = replySubmitResponseParser.parse(responseHtml)) {
+                    is ReplySubmitResult.Success -> {
+                        diagnostics.record(
+                            DiagnosticsLog.Level.INFO,
+                            LOG_TAG,
+                            "POST new-topic Success hasRefreshUrl=${outcome.refreshUrl != null} " +
+                                "targetCat=${context.cat} targetSubcat=$selectedSubcat",
+                        )
+                        NewTopicSubmitResult.Success(
+                            newTopicId = null,
+                            newNumreponse = null,
+                            targetCat = context.cat,
+                            targetSubcat = selectedSubcat,
+                            refreshUrl = outcome.refreshUrl,
+                        )
+                    }
+                    is ReplySubmitResult.Failure -> {
+                        diagnostics.record(
+                            DiagnosticsLog.Level.WARN,
+                            LOG_TAG,
+                            "POST new-topic Failure reason=${outcome.reason::class.simpleName}",
+                        )
+                        NewTopicSubmitResult.Failure(outcome.reason)
+                    }
+                }
+            }
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: SessionExpiredException) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "POST new-topic SessionExpired: ${error.message ?: "(no message)"}",
+            )
+            throw error
+        } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "POST new-topic FAILED: ${error::class.simpleName}: ${error.message ?: "(no message)"}",
+            )
+            throw error
+        }
+    }
+
+    @Suppress("LongMethod", "LongParameterList") // Declarative POST body ; one place to read the whole contract.
+    private fun buildNewTopicBody(
+        context: NewTopicContext,
+        form: TopicForm,
+        subject: String,
+        bbcodeContent: String,
+        selectedSubcat: Int,
+        options: ReplyFormOptions,
+    ): FormBody {
+        val builder = FormBody.Builder(Charsets.UTF_8)
+        val overrides = buildMap {
+            put("hash_check", form.hashCheck)
+            put("verifrequet", HfrConstants.VERIF_REQUET)
+            put("content_form", bbcodeContent)
+            put("sujet", subject)
+            put("cat", context.cat.toString())
+            // User's dropdown choice — always > 0 thanks to guardAgainstInvalidSubmission.
+            put("subcat", selectedSubcat.toString())
+            // `from_subcat` is the d'arrivée chip the composer was opened from
+            // (the URL `subcat=` parameter at GET time), not the dropdown
+            // choice. Prefer the value HFR echoed back in the form ; fall back
+            // to the context's entrySubcat ; the empty string is acceptable
+            // when neither is present (« Toutes » view).
+            val fromSubcat = form.hiddenFields["from_subcat"]
+                ?: context.entrySubcat?.toString()
+                ?: ""
+            put("from_subcat", fromSubcat)
+            // Create-topic has no existing post : these three fields are always
+            // empty on the wire (HFR routes the form to the create path purely
+            // by the absence of `post`/`numreponse`).
+            put("post", "")
+            put("numreponse", "")
+            put("numrep", "")
+            put("page", "1")
+            form.msgIcon?.let { put("MsgIcon", it) }
+        }
+        val emitted = mutableSetOf<String>()
+        overrides.forEach { (key, value) ->
+            builder.add(key, value)
+            emitted += key
+        }
+        // Per-post options : browser-style submit (key absent when toggle off).
+        if (options.signatureEnabled) builder.add("signature", "1")
+        if (options.smileyDisabled) builder.add("smiley", "1")
+        if (options.emailNotificationEnabled) builder.add("emaill", "1")
+        emitted += setOf("signature", "smiley", "emaill")
+        // Poll fields are owned by TopicPollForm.fields. The create flow has
+        // no active poll in the Phase 2A capture, so this branch is dormant ;
+        // it is symmetric with Edit FP to keep the contract single-source.
+        form.poll.fields.forEach { (key, value) ->
+            if (key in emitted) return@forEach
+            builder.add(key, value)
+            emitted += key
+        }
+        form.hiddenFields.forEach { (key, value) ->
+            if (key in emitted) return@forEach
+            // Belt-and-braces : the parser already strips `password` / `delete`.
+            // We keep the deny rules here so a future refactor cannot leak the
+            // destructive checkbox or an inherited password.
             if (key == "password" || key == "delete") return@forEach
             builder.add(key, value)
             emitted += key

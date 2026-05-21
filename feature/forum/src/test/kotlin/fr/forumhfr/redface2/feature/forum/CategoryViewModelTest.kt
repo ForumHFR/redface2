@@ -1,8 +1,10 @@
 package fr.forumhfr.redface2.feature.forum
 
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
@@ -12,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -44,6 +47,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = null),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
 
         vm.uiState.test {
@@ -77,6 +81,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 4),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
 
         // Initial uiState carries the initialPage straight through (no warm-up needed —
@@ -90,6 +95,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 13, initialSubcat = 422),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
 
         vm.uiState.test {
@@ -116,6 +122,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = 550),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
 
         vm.uiState.test {
@@ -142,6 +149,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = null),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
 
         vm.uiState.test {
@@ -169,6 +177,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 999, initialSubcat = null),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
 
         vm.uiState.test {
@@ -196,6 +205,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = 550),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
 
         vm.refresh()
@@ -210,6 +220,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = null, initialPage = 1),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
 
         // Move state to (subcat=550, page=2) before the user pulls to refresh.
@@ -228,6 +239,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = 550),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
 
         // Force at least one collector on uiState so the underlying combine starts
@@ -265,6 +277,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = null),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
 
         vm.uiState.test {
@@ -297,6 +310,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = 550),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
 
         val topics = listOf(
@@ -358,6 +372,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = null),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
 
         vm.uiState.test {
@@ -390,6 +405,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = null),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
 
         vm.uiState.test {
@@ -412,6 +428,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 1),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
         // Listings: 130 topics @ 50 per page → 3 pages total. Prefetch should fire for page 2.
         val multiPage = EMPTY_PAGE.copy(totalTopics = 130, resultsPerPage = 50)
@@ -452,6 +469,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 1),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
         val multiPage = EMPTY_PAGE.copy(totalTopics = 130, resultsPerPage = 50)
 
@@ -490,6 +508,7 @@ class CategoryViewModelTest {
         val vm = CategoryViewModel(
             request = CategoryRequest(cat = 23, initialSubcat = 550, initialPage = 3),
             forumRepository = repo,
+            authRepository = FakeAuthRepository(),
         )
         val multiPage = EMPTY_PAGE.copy(totalTopics = 130, resultsPerPage = 50, page = 3)
 
@@ -640,6 +659,23 @@ class CategoryViewModelTest {
             page: Int,
         ): MutableSharedFlow<ForumResult<TopicListPage>> = topicLists.getOrPut(Triple(cat, subcat, page)) {
             MutableSharedFlow(replay = 1, extraBufferCapacity = 4)
+        }
+    }
+
+    /**
+     * Minimal fake. Phase 2E (#149) `CategoryViewModel` only reads
+     * `observeAuthState()` to drive `canCreateTopic`. Default `Anonymous` keeps
+     * the existing tests faithful to their pre-#149 behaviour (FAB hidden).
+     */
+    private class FakeAuthRepository(
+        initial: AuthState = AuthState.Anonymous,
+    ) : AuthRepository {
+        private val state = MutableStateFlow(initial)
+        override fun observeAuthState(): Flow<AuthState> = state
+        override suspend fun login(pseudo: String, password: String): Result<AuthState.Authenticated> =
+            error("FakeAuthRepository.login not implemented in this test")
+        override suspend fun logout() {
+            state.value = AuthState.Anonymous
         }
     }
 }

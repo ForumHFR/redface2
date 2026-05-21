@@ -29,7 +29,16 @@ data class TopicForm(
     val hashCheck: String,
     val subject: String,
     val initialContent: String,
-    val selectedSubcat: Int,
+    /**
+     * Pre-selected sub-category from the parsed `<select>`. `null` is a valid
+     * value in two cases : the « Aucune » option is the only `selected` (Edit FP
+     * fail-safe path returns a `Result.failure` before reaching here), or HFR
+     * served no `selected` attribute at all (the normal new-topic form shape —
+     * cf. `parseNewTopic`). The submit code refuses to send `subcat=` empty :
+     * the ViewModel must produce a real `Int > 0` from the dropdown choice
+     * before calling the repository.
+     */
+    val selectedSubcat: Int?,
     val subcategoryChoices: List<TopicFormSubcategoryChoice>,
     val hiddenFields: Map<String, String>,
     val options: ReplyFormOptions,

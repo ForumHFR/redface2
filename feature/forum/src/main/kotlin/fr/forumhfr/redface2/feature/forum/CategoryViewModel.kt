@@ -6,8 +6,10 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
@@ -56,7 +58,13 @@ import kotlinx.coroutines.launch
 class CategoryViewModel @AssistedInject constructor(
     @Assisted private val request: CategoryRequest,
     private val forumRepository: ForumRepository,
+    authRepository: AuthRepository,
 ) : ViewModel() {
+
+    private val isAuthenticated: StateFlow<Boolean> = authRepository.observeAuthState()
+        .map { it is AuthState.Authenticated }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), initialValue = false)
 
     private val selectedSubcat: MutableStateFlow<Int?> = MutableStateFlow(request.initialSubcat)
     private val page: MutableStateFlow<Int> = MutableStateFlow(request.initialPage.coerceAtLeast(1))
@@ -132,7 +140,8 @@ class CategoryViewModel @AssistedInject constructor(
         coreState,
         searchQuery,
         isRefreshing,
-    ) { core, query, refreshing ->
+        isAuthenticated,
+    ) { core, query, refreshing, authenticated ->
         CategoryUiState(
             cat = request.cat,
             categoryName = core.categoryName,
@@ -145,6 +154,7 @@ class CategoryViewModel @AssistedInject constructor(
             searchQuery = query,
             filteredTopics = core.topics.filterTopics(query),
             isRefreshing = refreshing,
+            canCreateTopic = authenticated,
         )
     }.stateIn(
         scope = viewModelScope,

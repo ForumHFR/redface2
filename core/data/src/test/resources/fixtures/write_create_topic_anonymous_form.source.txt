@@ -1,0 +1,6 @@
+Source: forum.hardware.fr
+Captured: 2026-05-17
+URL: https://forum.hardware.fr/message.php?config=hfr.inc&cat=23&subcat=550&sondage=0&owntopic=0&new=0
+Notes: Anonymous GET create-topic form: HFR serves the composer with pseudo/password fields instead of redirecting immediately.
+Sanitization: hash_check/codehex redacted; MP unread target id and MP count redacted when present; no cookies stored.
+Test context: Anonymous session, public Android subcategory cat=23 subcat=550.
