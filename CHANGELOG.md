@@ -8,6 +8,39 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
+(rien pour le moment)
+
+---
+
+## v0.10.7 — 2026-05-21
+
+App patch 0.3.7 (build v47) — Phase 2D-B : édition du premier post d'un topic owned (#148). Le `TopicFormScreen` placeholder devient un écran fonctionnel pour `TopicFormMode.EditFirstPost` ; `TopicFormMode.New` (Phase 2E #149) reste en attente. Édition active du sondage : reportée — Phase 2D #148 préserve les champs sondage verbatim sur le wire mais l'UI signale honnêtement qu'aucune mutation poll n'est implémentée tant qu'on n'a pas de fixture avec sondage existant.
+
+### Added
+- Nouveau modèle `EditFirstPostContext(cat, subcat, topicId, page, numreponse)` avec guards `page == 1`, `subcat > 0`, `topicId > 0`, `numreponse > 0`.
+- `TopicForm` topic-level (sujet + select subcat + poll + options) et `TopicFormSubcategoryChoice` / `TopicPollForm` companion classes.
+- Interface `:core:domain/write/TopicFormRepository` + impl `:core:data/write/DefaultTopicFormRepository` qui réutilise `HfrClient.getEditPostForm` + `submitEditPost` ; le contrat divergent (sujet, subcat changeable, poll préservé) justifie la séparation côté repository.
+- Nouveau parser `:core:parser/write/TopicFormParser` qui extrait `sujet`, `subcat` selected + choix complet du `<select>`, `MsgIcon` checked, options, et préserve les champs sondage (`textreponse0..10`, `allowvisitor`, `max_votes`, `jour`/`mois`/`annee`/`heure`/`minute`) sans les muter. Filtre dur : `password` et `delete` (le checkbox « Effacer l'intégralité du sujet ») ne sortent jamais.
+- `TopicPageParser` calcule maintenant `Topic.isFirstPostOwner = (page == 1 && firstPost.isEditable)` — le bouton FP ne s'affiche que là où HFR a réellement rendu le lien edit.
+- `TopicScreen.onEditFirstPost` callback propagé jusqu'à `RedfaceNavigation` ; bouton OutlinedButton « Modifier le premier message » sobre dans `TopicHeaderCard` quand l'action est autorisée.
+- `TopicFormRoute` étendu avec `page` + `numreponse` ; nouveau `TopicFormRequest` feature/editor.
+- `TopicFormViewModel` + `TopicFormScreen` Compose complet : sujet writable, subcat affichée (re-catégorisation in-place forwardée mais UI sans dropdown pour le MVP), draft BBCode avec toolbar + preview, 3 toggles signature/smileys/email comme `PostEditorScreen`, banner d'erreur, anti-clobber `formHydratedFromServer` + `optionsHydratedFromForm`.
+- `SubmitSucceeded(targetPage, scrollTo)` : edit FP émet `scrollTo = numreponse` pour que la navigation scrolle vers le post édité après refresh.
+
+### Changed
+- `docs/specs/models.md` documente `EditFirstPostContext` + `TopicForm` + `TopicFormSubcategoryChoice` + `TopicPollForm`.
+- `docs/specs/navigation.md` met à jour `TopicFormRoute` + signature `TopicScreen` (ajout `onEditFirstPost`) + `TopicFormScreen` (request + onSubmitSucceeded).
+- `docs/specs/mvi.md` statut Phase 2D devient « Reply + Quote + Edit post + Edit FP MVP livrés » ; `TopicFormScreen` n'est plus placeholder pour `EditFirstPost`.
+- `docs/specs/roadmap.md` coche Edit FP MVP (#148).
+
+### Tests
+- `TopicFormParserTest` : extraction sujet, subcat selected + 3 choix attendus (Android 562 non sel, Divers 388 sel), MsgIcon=1, signatureEnabled=true / smileyDisabled=false / emaill=false, `delete`+`password` absents, hash_check parsé.
+- `DefaultTopicFormRepositoryTest` : GET URL contient `numreponse`, POST sur `bdd.php` avec `sujet`/`subcat`/`content_form`/`numreponse`/`numrep=""`, `delete`/`password` jamais transmis, poll fields préservés.
+- `TopicPageParserTest` : `isFirstPostOwner = true` sur synthétique page=1 + premier post editable ; `false` sur page=2 même avec edit link.
+- `TopicFormViewModelTest` : init hydrate sujet + draft + options ; refetch silencieux ne clobber pas saisie utilisateur ; submit appelle repository avec valeurs courantes ; success émet `SubmitSucceeded(targetPage, scrollTo = numreponse)`.
+
+---
+
 ---
 
 ## v0.10.6 — 2026-05-20

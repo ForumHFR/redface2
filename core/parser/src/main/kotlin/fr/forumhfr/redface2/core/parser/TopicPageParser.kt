@@ -37,7 +37,16 @@ class TopicPageParser(
             posts = posts,
             page = pageInfo.current,
             totalPages = pageInfo.total,
-            isFirstPostOwner = false,
+            // Phase 2D #148 : the « Modifier le premier message » action only
+            // makes sense when the page actually contains the first post, i.e.
+            // on page 1. We additionally require HFR to have rendered the edit
+            // link on that post (`firstPost.isEditable`, parsed from the
+            // toolbar in `parseHasEditLink`). Page 2+ stays false even if a
+            // later post is editable — that one already has its own
+            // « Modifier » via the per-post button. Cache rows read from
+            // pre-#148 captures keep their stored value because Room ships the
+            // column since v1.
+            isFirstPostOwner = pageInfo.current == 1 && posts.firstOrNull()?.isEditable == true,
             poll = parsePoll(document),
         )
     }

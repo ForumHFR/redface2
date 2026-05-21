@@ -211,6 +211,93 @@ class TopicPageParserTest {
     }
 
     @Test
+    fun `isFirstPostOwner is true on page 1 when the first post toolbar exposes an edit link`() {
+        // Phase 2D #148 — the « Modifier le premier message » action only fires
+        // when (a) we are on page 1 (HFR's FP lives there by definition) and
+        // (b) HFR rendered an edit link on the first post toolbar. We don't
+        // peek at the topic author client-side ; the server is the source of
+        // truth. The same selector logic that drives `Post.isEditable` flips
+        // `Topic.isFirstPostOwner` on the parsed topic.
+        val html = """
+            <html><body>
+              <input name="cat" value="10" />
+              <input name="post" value="148749" />
+              <input name="subcat" value="388" />
+              <table><tbody>
+                <tr class="fondForum2Title">
+                  <th class="messCase1">Auteur</th>
+                  <th><h3>Owned FP topic</h3></th>
+                </tr>
+              </tbody></table>
+              <table class="messagetable"><tbody>
+                <tr class="message">
+                  <td class="messCase1"><a name="t2523829"></a><b class="s2">OwnerUser</b></td>
+                  <td class="messCase2">
+                    <div class="toolbar"><div class="left">
+                      Posté le 17-05-2026&nbsp;à&nbsp;14:00:00
+                      <a href="/message.php?config=hfr.inc&amp;cat=10&amp;post=148749&amp;page=1&amp;p=1&amp;subcat=388&amp;sondage=0&amp;owntopic=0&amp;new=0&amp;numreponse=2523829">edit</a>
+                    </div></div>
+                    <div id="para2523829"><p>FP body</p></div>
+                  </td>
+                </tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        assertEquals(1, topic.page)
+        assertTrue("FP edit link must promote isFirstPostOwner", topic.isFirstPostOwner)
+        assertTrue("First post must surface isEditable", topic.posts.single().isEditable)
+    }
+
+    @Test
+    fun `isFirstPostOwner is false on page 2 even when a post on that page is editable`() {
+        // We render page=2 explicitly (top pager `<b>2</b>`) — the parser
+        // resolves `pageInfo.current = 2` and must therefore refuse to promote
+        // a later editable post to first-post-ownership. The « Modifier le
+        // premier message » action only makes sense on page 1.
+        val html = """
+            <html><body>
+              <input name="cat" value="10" />
+              <input name="post" value="148749" />
+              <input name="subcat" value="388" />
+              <table>
+                <tbody>
+                  <tr class="cBackHeader fondForum2PagesHaut">
+                    <td class="padding">
+                      <div class="left">
+                        <b>Page&nbsp;:&nbsp;</b>
+                        <a href="?page=1" class="cHeader">1</a>
+                        <b>2</b>
+                      </div>
+                    </td>
+                  </tr>
+                  <tr class="fondForum2Title">
+                    <th class="messCase1">Auteur</th>
+                    <th><h3>Page 2 of an owned topic</h3></th>
+                  </tr>
+                </tbody>
+              </table>
+              <table class="messagetable"><tbody>
+                <tr class="message">
+                  <td class="messCase1"><a name="t77777"></a><b class="s2">OwnerUser</b></td>
+                  <td class="messCase2">
+                    <div class="toolbar"><div class="left">
+                      Posté le 18-05-2026&nbsp;à&nbsp;10:00:00
+                      <a href="/message.php?config=hfr.inc&amp;cat=10&amp;post=148749&amp;page=2&amp;p=1&amp;subcat=388&amp;sondage=0&amp;owntopic=0&amp;new=0&amp;numreponse=77777">edit</a>
+                    </div></div>
+                    <div id="para77777"><p>later editable post</p></div>
+                  </td>
+                </tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        assertEquals(2, topic.page)
+        assertTrue("editable post still surfaces isEditable", topic.posts.single().isEditable)
+        assertFalse("FP ownership must stay false on page 2", topic.isFirstPostOwner)
+    }
+
+    @Test
     fun `isEditable is true when the toolbar exposes a message_php numreponse link`() {
         // Phase 2D (#147) — HFR renders an edit link on the post's left toolbar
         // only when the current authenticated session owns the post and the
