@@ -76,6 +76,20 @@ class TopicFormParserTest {
             "Poll editing is not implemented in this version",
             form.poll.editableInThisVersion,
         )
+        // Poll names must not leak into hiddenFields — [TopicPollForm.fields]
+        // is the single source of truth. Without this guard, empty
+        // `textreponse0..10` and date inputs would have been POSTed even
+        // though no sondage is active.
+        listOf(
+            "have_sondage", "allowvisitor", "max_votes",
+            "jour", "mois", "annee", "heure", "minute",
+            "textreponse0", "textreponse1", "textreponse5", "textreponse10",
+        ).forEach { name ->
+            assertFalse(
+                "$name must never leak through hiddenFields — owned by TopicPollForm.fields",
+                form.hiddenFields.containsKey(name),
+            )
+        }
 
         // hash_check must be present, never empty (the repository submit
         // refuses an empty hash via guardAgainstInvalidSubmission).
@@ -96,6 +110,93 @@ class TopicFormParserTest {
         </form></body></html>"""
         val result = parser.parse(html)
         assertTrue(result.isFailure)
+    }
+
+    @Test
+    fun `refuses to guess subcat when no option is marked selected`() {
+        // No `selected` attribute on any option → HFR-side bug or unexpected
+        // markup. We refuse to silently re-categorise the topic on submit.
+        val html = """<html><body><form action="/bdd.php">
+            <input name="hash_check" value="HASH" />
+            <input name="sujet" value="x" />
+            <textarea name="content_form">x</textarea>
+            <select name="subcat">
+                <option value="">Aucune</option>
+                <option value="388">Divers</option>
+                <option value="562">Android</option>
+            </select>
+        </form></body></html>"""
+        val result = parser.parse(html)
+        assertTrue("must fail when no subcat is selected", result.isFailure)
+    }
+
+    @Test
+    fun `refuses to submit when Aucune is the selected subcat`() {
+        // `Aucune` has `value=""` → id is null. Treating that as a valid
+        // selection would let the user submit with `subcat=0`, which HFR
+        // rejects, and worse it would mask a malformed form to the user.
+        val html = """<html><body><form action="/bdd.php">
+            <input name="hash_check" value="HASH" />
+            <input name="sujet" value="x" />
+            <textarea name="content_form">x</textarea>
+            <select name="subcat">
+                <option value="" selected="selected">Aucune</option>
+                <option value="388">Divers</option>
+            </select>
+        </form></body></html>"""
+        val result = parser.parse(html)
+        assertTrue("Aucune-selected must fail-fast at parse", result.isFailure)
+    }
+
+    @Test
+    fun `forwards poll fields through TopicPollForm only when have_sondage is checked`() {
+        val html = """<html><body><form action="/bdd.php">
+            <input name="hash_check" value="HASH" />
+            <input name="sujet" value="x" />
+            <textarea name="content_form">x</textarea>
+            <select name="subcat">
+                <option value="388" selected="selected">Divers</option>
+            </select>
+            <input type="checkbox" name="have_sondage" value="1" checked="checked" />
+            <input name="textreponse0" value="Yes" />
+            <input name="textreponse1" value="No" />
+            <input name="textreponse2" value="" />
+            <input type="checkbox" name="allowvisitor" value="1" checked="checked" />
+            <select name="max_votes">
+                <option value="1">1</option>
+                <option value="3" selected="selected">3</option>
+            </select>
+            <input type="text" name="jour" value="31" />
+            <input type="text" name="mois" value="12" />
+            <input type="text" name="annee" value="2026" />
+            <input type="text" name="heure" value="" />
+            <input type="text" name="minute" value="" />
+        </form></body></html>"""
+        val form = parser.parse(html).getOrThrow()
+        assertTrue("have_sondage must be detected", form.poll.present)
+        // [TopicPollForm.fields] is the single source of truth for the sondage
+        // block — assert each expected key is in it.
+        assertEquals("1", form.poll.fields["have_sondage"])
+        assertEquals("Yes", form.poll.fields["textreponse0"])
+        assertEquals("No", form.poll.fields["textreponse1"])
+        assertFalse("Empty textreponse2 must not be in poll fields", form.poll.fields.containsKey("textreponse2"))
+        assertEquals("1", form.poll.fields["allowvisitor"])
+        assertEquals("3", form.poll.fields["max_votes"])
+        assertEquals("31", form.poll.fields["jour"])
+        assertEquals("12", form.poll.fields["mois"])
+        assertEquals("2026", form.poll.fields["annee"])
+        assertFalse("Empty heure must not be in poll fields", form.poll.fields.containsKey("heure"))
+        assertFalse("Empty minute must not be in poll fields", form.poll.fields.containsKey("minute"))
+        // And the same keys must NEVER appear in hiddenFields.
+        listOf(
+            "have_sondage", "textreponse0", "textreponse1", "textreponse2",
+            "allowvisitor", "max_votes", "jour", "mois", "annee", "heure", "minute",
+        ).forEach { name ->
+            assertFalse(
+                "$name must not double-emit through hiddenFields",
+                form.hiddenFields.containsKey(name),
+            )
+        }
     }
 
     private fun readFixture(name: String): String =
