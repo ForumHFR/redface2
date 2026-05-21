@@ -8,7 +8,13 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-Follow-up Codex review de #165 (Phase 2D-B Edit FP) — trois risques résiduels durcis, pas de bump version ni de release.
+(rien pour le moment)
+
+---
+
+## v0.10.8 — 2026-05-21
+
+App patch 0.3.8 (build v48) — follow-up Codex review de #165 (Phase 2D-B Edit FP) : trois risques résiduels durcis avant de poursuivre Phase 2E. Pas de nouvelle feature utilisateur ; build alpha de stabilisation.
 
 ### Changed
 - `TopicFormViewModel` hydrate désormais `subject` et `draft` indépendamment via `subjectHydratedFromServer` + `draftHydratedFromServer` (au lieu d'un unique `formHydratedFromServer` all-or-nothing). Sur un fetch lent, modifier un seul des deux champs avant la réponse n'empêche plus l'autre d'être hydraté depuis le form HFR. Anti-clobber `InvalidHashCheck` toujours préservé.
@@ -19,8 +25,6 @@ Follow-up Codex review de #165 (Phase 2D-B Edit FP) — trois risques résiduels
 - `TopicFormViewModelTest` : trois cas ajoutés via `formGate` — saisie sujet pré-fetch, saisie draft pré-fetch, et refetch silencieux après `InvalidHashCheck` qui ne clobber ni le sujet ni le draft.
 - `TopicFormParserTest` : pin l'absence des noms poll dans `hiddenFields` sur la fixture sans sondage ; deux cas synthétiques pour le subcat fail-safe (aucune option `selected`, « Aucune » sélectionnée) ; un cas synthétique pour le passthrough poll actif via `TopicPollForm.fields`.
 - `DefaultTopicFormRepositoryTest` : pin l'absence de tout champ poll sur le wire quand `have_sondage` est unchecked ; nouveau cas synthétique qui prouve qu'un sondage actif est forwardé exactement une fois (pas zéro, pas deux).
-
----
 
 ---
 
@@ -50,8 +54,6 @@ App patch 0.3.7 (build v47) — Phase 2D-B : édition du premier post d'un topic
 - `DefaultTopicFormRepositoryTest` : GET URL contient `numreponse`, POST sur `bdd.php` avec `sujet`/`subcat`/`content_form`/`numreponse`/`numrep=""`, `delete`/`password` jamais transmis, poll fields préservés.
 - `TopicPageParserTest` : `isFirstPostOwner = true` sur synthétique page=1 + premier post editable ; `false` sur page=2 même avec edit link.
 - `TopicFormViewModelTest` : init hydrate sujet + draft + options ; refetch silencieux ne clobber pas saisie utilisateur ; submit appelle repository avec valeurs courantes ; success émet `SubmitSucceeded(targetPage, scrollTo = numreponse)`.
-
----
 
 ---
 

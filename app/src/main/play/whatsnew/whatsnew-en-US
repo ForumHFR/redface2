@@ -1,9 +1,8 @@
-Alpha build Redface 2 — pre-Phase 2 polish.
+Redface 2 alpha build — first-post edit hardening.
 
 Changes:
-- Flags tab is now focused on reading.
-- Read participated topics are hidden by default, with a toggle to show them again.
-- Search and Messages tabs now explain the upcoming features instead of showing fake demo actions.
-- Diagnostics, reporting and account details moved to Messages.
+- First-post editing hardened after review.
+- More robust subject/content hydration on slow networks.
+- Safer subcategory and poll-field handling to avoid implicit changes.
 
 Please report bugs via the alpha channel or the GitHub repository.
