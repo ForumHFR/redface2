@@ -8,7 +8,13 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-Phase 2D-B : édition du premier post d'un topic owned (#148). Le `TopicFormScreen` placeholder devient un écran fonctionnel pour `TopicFormMode.EditFirstPost` ; `TopicFormMode.New` (Phase 2E #149) reste en attente. Édition active du sondage : reportée — Phase 2D #148 préserve les champs sondage verbatim sur le wire mais l'UI signale honnêtement qu'aucune mutation poll n'est implémentée tant qu'on n'a pas de fixture avec sondage existant.
+(rien pour le moment)
+
+---
+
+## v0.10.7 — 2026-05-21
+
+App patch 0.3.7 (build v47) — Phase 2D-B : édition du premier post d'un topic owned (#148). Le `TopicFormScreen` placeholder devient un écran fonctionnel pour `TopicFormMode.EditFirstPost` ; `TopicFormMode.New` (Phase 2E #149) reste en attente. Édition active du sondage : reportée — Phase 2D #148 préserve les champs sondage verbatim sur le wire mais l'UI signale honnêtement qu'aucune mutation poll n'est implémentée tant qu'on n'a pas de fixture avec sondage existant.
 
 ### Added
 - Nouveau modèle `EditFirstPostContext(cat, subcat, topicId, page, numreponse)` avec guards `page == 1`, `subcat > 0`, `topicId > 0`, `numreponse > 0`.
