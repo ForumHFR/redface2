@@ -131,6 +131,73 @@ class DefaultTopicFormRepositoryTest {
             "delete must never reach HFR on an FP edit — destructive flow is out of scope",
             body.containsKey("delete"),
         )
+        // Poll fields : the fixture has no active sondage, so nothing poll-
+        // related should be on the wire. Before the poll-source-of-truth fix,
+        // empty `textreponse0..10` and date inputs were leaking through
+        // `hiddenFields` even though no sondage was active.
+        listOf(
+            "have_sondage", "textreponse0", "textreponse1", "textreponse5", "textreponse10",
+            "allowvisitor", "max_votes", "jour", "mois", "annee", "heure", "minute",
+        ).forEach { name ->
+            assertFalse(
+                "$name must not be POSTed when no sondage is active — got body=$body",
+                body.containsKey(name),
+            )
+        }
+    }
+
+    @Test
+    fun `synthetic poll fields are forwarded exactly once through TopicPollForm`() = runTest {
+        // Build a tiny synthetic form whose only purpose is to exercise the
+        // poll-passthrough branch (the real fixture has have_sondage unchecked).
+        // The point of this test is to prove that when TopicPollForm.fields
+        // carries poll keys, the wire body contains them once — not twice and
+        // not zero times.
+        val syntheticForm = """<html><body><form action="bdd.php?config=hfr.inc">
+            <input type="hidden" name="hash_check" value="HASH" />
+            <input type="hidden" name="pseudo" value="me" />
+            <input type="text" name="sujet" value="Topic with poll" />
+            <textarea name="content_form">Body</textarea>
+            <select name="subcat"><option value="388" selected="selected">Divers</option></select>
+            <input type="checkbox" name="have_sondage" value="1" checked="checked" />
+            <input name="textreponse0" value="Yes" />
+            <input name="textreponse1" value="No" />
+            <select name="max_votes"><option value="2" selected="selected">2</option></select>
+            <input type="text" name="jour" value="31" />
+            <input type="text" name="mois" value="12" />
+            <input type="text" name="annee" value="2026" />
+        </form></body></html>"""
+
+        server.enqueue(MockResponse().setBody(syntheticForm))
+        server.enqueue(MockResponse().setBody(fixture("write_edit_first_post_success_response.html")))
+
+        val context = EditFirstPostContext(
+            cat = 10, subcat = 388, topicId = 148_749, page = 1, numreponse = 2_523_829,
+        )
+        val form = repository.fetchEditFirstPostForm(context)
+        assertTrue("Synthetic form must surface an active poll", form.poll.present)
+        repository.submitEditFirstPost(
+            context = context,
+            form = form,
+            subject = "Topic with poll",
+            bbcodeContent = "Body",
+            selectedSubcat = 388,
+        )
+
+        server.takeRequest() // GET
+        val recorded = server.takeRequest()
+        val rawBody = recorded.body.readUtf8()
+        val pairs = rawBody.split('&')
+
+        // Each poll key must appear exactly once on the wire.
+        listOf("have_sondage=1", "textreponse0=Yes", "textreponse1=No", "max_votes=2",
+            "jour=31", "mois=12", "annee=2026").forEach { pair ->
+            assertEquals(
+                "Poll pair '$pair' must appear exactly once — body=$rawBody",
+                1,
+                pairs.count { it == pair },
+            )
+        }
     }
 
     @Test

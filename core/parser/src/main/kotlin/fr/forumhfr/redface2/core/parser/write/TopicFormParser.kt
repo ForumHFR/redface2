@@ -33,7 +33,7 @@ import org.jsoup.nodes.Element
  */
 class TopicFormParser {
 
-    @Suppress("ReturnCount") // Two failure guards + the success return.
+    @Suppress("ReturnCount") // Three failure guards + the success return.
     fun parse(html: String): Result<TopicForm> {
         val document = Jsoup.parse(html)
         // HFR's topic-level form lives in the same `bdd.php` action as a
@@ -58,7 +58,14 @@ class TopicFormParser {
         // would collapse whitespace and HTML-decode entities, breaking the round-trip.
         val initialContent = form.selectFirst("textarea[name=content_form]")?.wholeText().orEmpty()
 
-        val (selectedSubcat, subcategoryChoices) = parseSubcategories(form)
+        val subcatOutcome = parseSubcategories(form)
+            ?: return Result.failure(
+                IllegalStateException(
+                    "topic form has no <select name=subcat> with a `selected` option carrying id > 0 — " +
+                        "refusing to guess to avoid silent re-categorisation on submit",
+                ),
+            )
+        val (selectedSubcat, subcategoryChoices) = subcatOutcome
         val options = ReplyFormOptions(
             signatureEnabled = form.optionCheckbox("signature"),
             smileyDisabled = form.optionCheckbox("smiley"),
@@ -110,6 +117,12 @@ class TopicFormParser {
             // accidental refetch with the checkbox already checked server-side
             // would propagate « Effacer l'intégralité du sujet ».
             if (type == "password" || name == "password" || name == "delete") return@forEach
+            // Poll fields are owned by [TopicPollForm.fields] — a single source
+            // of truth that we forward verbatim on submit, and only when the
+            // sondage block is active. Without this filter, empty
+            // `textreponse0..10` and date inputs would silently leak into
+            // `hiddenFields` and be POSTed even when no poll is present.
+            if (name in POLL_FIELD_NAMES) return@forEach
             // Browser submit semantics for radios / checkboxes.
             if ((type == "radio" || type == "checkbox") && !input.hasAttr("checked")) {
                 return@forEach
@@ -129,14 +142,17 @@ class TopicFormParser {
     }
 
     /**
-     * Parses the `<select name="subcat">` block : returns the currently
-     * selected id and every available choice. The « Aucune » option (no
-     * `value=""`) is rendered as `id = null` and we never submit it — the
-     * domain requires `subcat > 0`.
+     * Parses the `<select name="subcat">` block. Returns `null` when no option
+     * is marked `selected` with a positive id (or when the « Aucune » option is
+     * the one selected) — guessing here would silently re-categorise the topic
+     * on the next submit. The caller surfaces this as a parse failure so the UI
+     * can refuse to render the form and the user is never tricked into moving
+     * a topic by accident.
      */
-    private fun parseSubcategories(form: Element): Pair<Int, List<TopicFormSubcategoryChoice>> {
-        val select = form.selectFirst("select[name=subcat]")
-            ?: return 0 to emptyList()
+    @Suppress("ReturnCount") // Three null-returns mirror the three failure modes we explicitly refuse
+    // (missing <select>, no `selected` option, « Aucune » selected) ; merging them would conflate them.
+    private fun parseSubcategories(form: Element): Pair<Int, List<TopicFormSubcategoryChoice>>? {
+        val select = form.selectFirst("select[name=subcat]") ?: return null
         val options = select.select("option")
         val choices = options.map { option ->
             val raw = option.attr("value")
@@ -147,9 +163,11 @@ class TopicFormParser {
                 selected = option.hasAttr("selected"),
             )
         }
-        val selectedSubcat = choices.firstOrNull { it.selected }?.id
-            ?: choices.firstOrNull { it.id != null }?.id
-            ?: 0
+        // We require an explicit `selected` attribute with id > 0. The
+        // « Aucune » option (id = null) is treated as not-selected for the
+        // edit-FP MVP because the domain requires `subcat > 0`.
+        val selectedSubcat = choices.firstOrNull { it.selected && it.id != null }?.id
+            ?: return null
         return selectedSubcat to choices
     }
 
@@ -163,7 +181,19 @@ class TopicFormParser {
     private fun parsePoll(form: Element): TopicPollForm {
         val haveSondage = form.selectFirst("input[type=checkbox][name=have_sondage]")
             ?.hasAttr("checked") == true
+        // No poll : we forward nothing, so [hiddenFields] is the only thing the
+        // repository emits. The single-source-of-truth contract holds.
+        if (!haveSondage) {
+            return TopicPollForm(present = false, fields = emptyMap(), editableInThisVersion = false)
+        }
         val fields = mutableMapOf<String, String>()
+        // Emit `have_sondage=1` ourselves : we now own the poll keys, so the
+        // checkbox value must be re-emitted from [TopicPollForm.fields] rather
+        // than via [collectInputs] (which deliberately filters poll names).
+        fields["have_sondage"] = form.selectFirst("input[type=checkbox][name=have_sondage]")
+            ?.attr("value")
+            ?.takeIf { it.isNotEmpty() }
+            ?: "1"
         // textreponse0..10 — captured verbatim with their current value (which
         // may be empty). We only forward non-empty values so an empty fixture
         // does not pollute the POST body.
@@ -191,7 +221,7 @@ class TopicFormParser {
             if (value.isNotEmpty()) fields[name] = value
         }
         return TopicPollForm(
-            present = haveSondage,
+            present = true,
             fields = fields.toMap(),
             editableInThisVersion = false,
         )
@@ -207,5 +237,19 @@ class TopicFormParser {
 
     private companion object {
         private const val MAX_POLL_OPTION = 10
+        // Names of inputs that belong to the sondage block. Owned by
+        // [TopicPollForm.fields] so that there is exactly one place that
+        // decides whether each key is forwarded on submit.
+        private val POLL_FIELD_NAMES: Set<String> = buildSet {
+            add("have_sondage")
+            add("allowvisitor")
+            add("max_votes")
+            add("jour")
+            add("mois")
+            add("annee")
+            add("heure")
+            add("minute")
+            for (idx in 0..MAX_POLL_OPTION) add("textreponse$idx")
+        }
     }
 }

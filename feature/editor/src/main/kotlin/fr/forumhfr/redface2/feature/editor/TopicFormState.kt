@@ -39,10 +39,14 @@ data class TopicFormState(
     val isSubmitting: Boolean = false,
     val submitError: SubmitError? = null,
     /**
-     * True once we hydrated subject + draft from the parsed form ; prevents
-     * `InvalidHashCheck` refetch from clobbering edits.
+     * True once we have hydrated `subject` from the parsed form. Kept independent
+     * from [draftHydratedFromServer] so a slow fetch that lands while the user
+     * was already editing the subject still hydrates the draft (and vice versa),
+     * but never clobbers the field the user had touched.
      */
-    val formHydratedFromServer: Boolean = false,
+    val subjectHydratedFromServer: Boolean = false,
+    /** Mirror of [subjectHydratedFromServer] for the BBCode draft. */
+    val draftHydratedFromServer: Boolean = false,
     /** Mirror of [PostEditorState.optionsHydratedFromForm] for the same anti-clobber reason. */
     val optionsHydratedFromForm: Boolean = false,
 ) {

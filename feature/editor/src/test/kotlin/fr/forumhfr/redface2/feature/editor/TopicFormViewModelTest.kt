@@ -59,7 +59,8 @@ class TopicFormViewModelTest {
             assertTrue(hydrated.signatureEnabled)
             assertFalse(hydrated.smileyDisabled)
             assertFalse(hydrated.emailNotificationEnabled)
-            assertTrue(hydrated.formHydratedFromServer)
+            assertTrue(hydrated.subjectHydratedFromServer)
+            assertTrue(hydrated.draftHydratedFromServer)
             assertTrue(hydrated.optionsHydratedFromForm)
             cancelAndIgnoreRemainingEvents()
         }
@@ -144,6 +145,73 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `slow fetch preserves user-edited subject but still hydrates draft`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = gate
+        val viewModel = newViewModel()
+        viewModel.state.test {
+            // First emission is the initial blank state (the fetch is gated).
+            val blank = awaitItem()
+            assertFalse(blank.subjectHydratedFromServer)
+            assertFalse(blank.draftHydratedFromServer)
+            // User types into the subject while the fetch is still in flight.
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("My pre-fetch subject")))
+            skipItems(1)
+            // Form arrives.
+            gate.complete(Unit)
+            val hydrated = expectMostRecentItem()
+            assertEquals("My pre-fetch subject", hydrated.subject.text)
+            assertEquals("Body BBCode goes here.", hydrated.draft.text)
+            // Subject is not flagged as server-hydrated (user edited it first),
+            // but draft is. The two flags are independent now.
+            assertFalse(hydrated.subjectHydratedFromServer)
+            assertTrue(hydrated.draftHydratedFromServer)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `slow fetch preserves user-edited draft but still hydrates subject`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = gate
+        val viewModel = newViewModel()
+        viewModel.state.test {
+            val blank = awaitItem()
+            assertFalse(blank.subjectHydratedFromServer)
+            assertFalse(blank.draftHydratedFromServer)
+            // User types into the content while the fetch is still in flight.
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("pre-fetch draft", TextRange(15))))
+            skipItems(1)
+            gate.complete(Unit)
+            val hydrated = expectMostRecentItem()
+            assertEquals("Sample first post title", hydrated.subject.text)
+            assertEquals("pre-fetch draft", hydrated.draft.text)
+            assertTrue(hydrated.subjectHydratedFromServer)
+            assertFalse(hydrated.draftHydratedFromServer)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `refetch after InvalidHashCheck never clobbers either subject or draft`() = runTest {
+        topicFormRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+        val viewModel = newViewModel()
+        viewModel.state.test {
+            awaitHydratedState()
+            // User overwrites both fields after the initial hydration.
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("user subject after hydrate")))
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("user draft after hydrate", TextRange(24))))
+            // Submit → InvalidHashCheck → silent refetch.
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            val finalState = expectMostRecentItem()
+            assertEquals("user subject after hydrate", finalState.subject.text)
+            assertEquals("user draft after hydrate", finalState.draft.text)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(2, topicFormRepository.formFetches)
+    }
+
+    @Test
     fun `New mode surfaces the placeholder and never fetches the form`() = runTest {
         val viewModel = TopicFormViewModel(
             request = TopicFormRequest(
@@ -173,7 +241,7 @@ class TopicFormViewModelTest {
         // before the subscription is established, so the first emission is
         // already the hydrated state. We assert this rather than skipping.
         val hydrated = awaitItem()
-        check(hydrated.formHydratedFromServer) {
+        check(hydrated.subjectHydratedFromServer && hydrated.draftHydratedFromServer) {
             "expected first emission to be hydrated, was $hydrated"
         }
         return hydrated

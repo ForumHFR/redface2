@@ -164,10 +164,11 @@ class TopicFormViewModel @AssistedInject constructor(
                 onSuccess = { form ->
                     loadedForm = form
                     val snapshot = _state.value
-                    val shouldHydrate = snapshot.shouldHydrateFrom(form)
                     // Pre-compute the preview off the state lambda — same
-                    // dispatcher rationale as `PostEditorViewModel`.
-                    val nextPreview = if (shouldHydrate && snapshot.isPreviewVisible) {
+                    // dispatcher rationale as `PostEditorViewModel`. Only matters
+                    // if the draft is going to be hydrated AND the preview pane
+                    // is open ; otherwise we keep the current preview.
+                    val nextPreview = if (snapshot.shouldHydrateDraftFrom(form) && snapshot.isPreviewVisible) {
                         previewParser.parsePreview(form.initialContent)
                     } else {
                         snapshot.preview
@@ -308,18 +309,22 @@ class TopicFormViewModel @AssistedInject constructor(
         )
     }
 
-    private fun TopicFormState.shouldHydrateFrom(form: TopicForm): Boolean =
-        !formHydratedFromServer &&
-            subject.text.isBlank() &&
-            draft.text.isBlank() &&
-            (form.subject.isNotBlank() || form.initialContent.isNotBlank())
+    private fun TopicFormState.shouldHydrateSubjectFrom(form: TopicForm): Boolean =
+        !subjectHydratedFromServer && subject.text.isBlank() && form.subject.isNotBlank()
+
+    private fun TopicFormState.shouldHydrateDraftFrom(form: TopicForm): Boolean =
+        !draftHydratedFromServer && draft.text.isBlank() && form.initialContent.isNotBlank()
 
     private fun TopicFormState.withFormHydration(
         form: TopicForm,
         nextPreview: PostContent,
     ): TopicFormState {
-        val shouldHydrate = shouldHydrateFrom(form)
-        val nextSubject = if (shouldHydrate) {
+        // Hydrate each field independently : a slow fetch that lands after the
+        // user started typing in only one of the two fields must still hydrate
+        // the other one without clobbering the user's edit.
+        val hydrateSubject = shouldHydrateSubjectFrom(form)
+        val hydrateDraft = shouldHydrateDraftFrom(form)
+        val nextSubject = if (hydrateSubject) {
             TextFieldValue(
                 text = form.subject,
                 selection = TextRange(form.subject.length),
@@ -327,7 +332,7 @@ class TopicFormViewModel @AssistedInject constructor(
         } else {
             subject
         }
-        val nextDraft = if (shouldHydrate) {
+        val nextDraft = if (hydrateDraft) {
             TextFieldValue(
                 text = form.initialContent,
                 selection = TextRange(form.initialContent.length),
@@ -340,8 +345,9 @@ class TopicFormViewModel @AssistedInject constructor(
             isLoadingForm = false,
             subject = nextSubject,
             draft = nextDraft,
-            preview = if (shouldHydrate && isPreviewVisible) nextPreview else preview,
-            formHydratedFromServer = formHydratedFromServer || shouldHydrate,
+            preview = if (hydrateDraft && isPreviewVisible) nextPreview else preview,
+            subjectHydratedFromServer = subjectHydratedFromServer || hydrateSubject,
+            draftHydratedFromServer = draftHydratedFromServer || hydrateDraft,
             selectedSubcat = if (hydrateOptions) form.selectedSubcat else selectedSubcat,
             subcategoryChoices = form.subcategoryChoices,
             pollPresent = form.poll.present,

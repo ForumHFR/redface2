@@ -8,7 +8,19 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-(rien pour le moment)
+Follow-up Codex review de #165 (Phase 2D-B Edit FP) — trois risques résiduels durcis, pas de bump version ni de release.
+
+### Changed
+- `TopicFormViewModel` hydrate désormais `subject` et `draft` indépendamment via `subjectHydratedFromServer` + `draftHydratedFromServer` (au lieu d'un unique `formHydratedFromServer` all-or-nothing). Sur un fetch lent, modifier un seul des deux champs avant la réponse n'empêche plus l'autre d'être hydraté depuis le form HFR. Anti-clobber `InvalidHashCheck` toujours préservé.
+- `TopicFormParser` refuse désormais le parse quand aucune option `<option selected …>` du `<select name=subcat>` n'a un id > 0 — y compris quand l'option « Aucune » est l'unique `selected`. Auparavant le parser tombait sur la première option valide, ce qui pouvait re-catégoriser silencieusement le topic au submit.
+- `TopicFormParser.collectInputs` exclut désormais les noms du bloc sondage (`have_sondage`, `textreponse0..10`, `allowvisitor`, `max_votes`, `jour`/`mois`/`annee`/`heure`/`minute`) : `TopicPollForm.fields` devient l'unique source de vérité, et quand `have_sondage` est absent ou non coché aucun champ poll ne sort vers le wire. Quand le sondage est actif, `parsePoll` réémet lui-même `have_sondage=1` dans `fields`.
+
+### Tests
+- `TopicFormViewModelTest` : trois cas ajoutés via `formGate` — saisie sujet pré-fetch, saisie draft pré-fetch, et refetch silencieux après `InvalidHashCheck` qui ne clobber ni le sujet ni le draft.
+- `TopicFormParserTest` : pin l'absence des noms poll dans `hiddenFields` sur la fixture sans sondage ; deux cas synthétiques pour le subcat fail-safe (aucune option `selected`, « Aucune » sélectionnée) ; un cas synthétique pour le passthrough poll actif via `TopicPollForm.fields`.
+- `DefaultTopicFormRepositoryTest` : pin l'absence de tout champ poll sur le wire quand `have_sondage` est unchecked ; nouveau cas synthétique qui prouve qu'un sondage actif est forwardé exactement une fois (pas zéro, pas deux).
+
+---
 
 ---
 
