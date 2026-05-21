@@ -29,6 +29,7 @@ import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.feature.auth.LoginScreen
 import fr.forumhfr.redface2.feature.editor.PostEditorMode
 import fr.forumhfr.redface2.feature.editor.PostEditorRequest
+import fr.forumhfr.redface2.feature.editor.TopicFormRequest
 import fr.forumhfr.redface2.feature.editor.PostEditorScreen
 import fr.forumhfr.redface2.feature.editor.TopicFormMode
 import fr.forumhfr.redface2.feature.editor.TopicFormScreen
@@ -110,6 +111,10 @@ data class TopicFormRoute(
     val cat: Int? = null,
     val subcat: Int? = null,
     val topicId: Int? = null,
+    /** Phase 2D #148 — `page` of the topic the user opened the FP editor from. Always 1 for EditFirstPost. */
+    val page: Int? = null,
+    /** Phase 2D #148 — `numreponse` of the first post being edited. Required for [TopicFormMode.EditFirstPost]. */
+    val numreponse: Int? = null,
 ) : RedfaceNavKey
 
 @Serializable
@@ -343,6 +348,24 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                             ),
                         )
                     },
+                    onEditFirstPost = { subcat, page, numreponse ->
+                        // Phase 2D (#148) — topic-level form for first-post
+                        // editing. `numreponse` here is the FIRST post of the
+                        // topic, not the topic id ; `topicId` (route.post) stays
+                        // separate. The `TopicFormScreen` reads the request and
+                        // routes through `TopicFormRepository` rather than
+                        // `EditPostRepository`.
+                        backStack.add(
+                            TopicFormRoute(
+                                mode = TopicFormMode.EditFirstPost,
+                                cat = route.cat,
+                                subcat = subcat,
+                                topicId = route.post,
+                                page = page,
+                                numreponse = numreponse,
+                            ),
+                        )
+                    },
                     onOpenPage = { targetPage ->
                         backStack.removeAt(backStack.lastIndex)
                         backStack.add(
@@ -395,10 +418,35 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
             }
             entry<TopicFormRoute> { route ->
                 TopicFormScreen(
-                    mode = route.mode,
-                    cat = route.cat,
-                    subcat = route.subcat,
-                    topicId = route.topicId,
+                    request = TopicFormRequest(
+                        mode = route.mode,
+                        cat = route.cat,
+                        subcat = route.subcat,
+                        topicId = route.topicId,
+                        page = route.page,
+                        numreponse = route.numreponse,
+                    ),
+                    onSubmitSucceeded = { targetPage, scrollTo ->
+                        // Phase 2D (#148) — pop the FP form, replace the topic
+                        // route below with one that refreshes the target page
+                        // and scrolls to the edited first post. Same pattern
+                        // as `PostEditorRoute.onSubmitSucceeded` ; the only
+                        // difference is the source route type (`TopicFormRoute`
+                        // vs `PostEditorRoute`).
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                        val topicEntry = backStack.lastOrNull() as? TopicRoute
+                        if (topicEntry != null) {
+                            backStack.removeAt(backStack.lastIndex)
+                            backStack.add(
+                                topicEntry.copy(
+                                    page = targetPage ?: topicEntry.page,
+                                    scrollTo = scrollTo ?: topicEntry.scrollTo,
+                                ),
+                            )
+                        }
+                    },
                 )
             }
         },

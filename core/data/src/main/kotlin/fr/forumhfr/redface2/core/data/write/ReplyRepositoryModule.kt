@@ -7,8 +7,10 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
+import fr.forumhfr.redface2.core.parser.write.TopicFormParser
 import javax.inject.Singleton
 
 /**
@@ -30,6 +32,10 @@ abstract class ReplyRepositoryModule {
     @Singleton
     abstract fun bindEditPostRepository(impl: DefaultEditPostRepository): EditPostRepository
 
+    @Binds
+    @Singleton
+    abstract fun bindTopicFormRepository(impl: DefaultTopicFormRepository): TopicFormRepository
+
     companion object {
         @Provides
         @Singleton
@@ -39,5 +45,9 @@ abstract class ReplyRepositoryModule {
         @Singleton
         fun provideReplySubmitResponseParser(): ReplySubmitResponseParser =
             ReplySubmitResponseParser()
+
+        @Provides
+        @Singleton
+        fun provideTopicFormParser(): TopicFormParser = TopicFormParser()
     }
 }

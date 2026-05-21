@@ -25,4 +25,7 @@
     <string name="editor_option_signature">Activer votre signature</string>
     <string name="editor_option_smiley_disabled">Désactiver les smilies</string>
     <string name="editor_option_email_notification">Activer la notification par email du sujet</string>
+    <string name="editor_topic_subject_label">Titre du sujet</string>
+    <string name="editor_topic_subcat_current">Sous-catégorie actuelle : %1$s</string>
+    <string name="editor_topic_poll_readonly_note">Ce sujet contient un sondage. Son édition n\'est pas encore disponible dans cette version ; vos réponses utilisateurs et options de vote restent inchangées.</string>
 </resources>

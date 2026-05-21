@@ -54,6 +54,9 @@ import java.util.Locale
 import kotlinx.coroutines.flow.first
 
 @Composable
+@Suppress("LongParameterList") // state-hoisted Composable : each callback has a distinct call-site
+// (reply / quote / edit-post / edit-FP / openPage) and bundling them in a callbacks holder would
+// hide the navigation surface rather than simplify it.
 fun TopicScreen(
     request: TopicRequest,
     /**
@@ -84,6 +87,14 @@ fun TopicScreen(
      * callback for those.
      */
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
+    /**
+     * Open the topic-level editor for the first post (Phase 2D #148). Only
+     * invoked when (a) we are on page 1, (b) `Topic.isFirstPostOwner == true`
+     * (parsed from the FP toolbar's edit link), (c) the topic carries a valid
+     * `subcat`. Receives `(subcat, page, numreponse)` of the FIRST post — never
+     * the topic id.
+     */
+    onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
 ) {
     val viewModel = hiltViewModel<TopicViewModel, TopicViewModel.Factory>(
@@ -127,6 +138,7 @@ fun TopicScreen(
         onReply = onReply,
         onQuote = onQuote,
         onEdit = onEdit,
+        onEditFirstPost = onEditFirstPost,
         onOpenPage = onOpenPage,
     )
 }
@@ -140,6 +152,7 @@ internal fun TopicContent(
     onReply: (subcat: Int, page: Int) -> Unit,
     onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
+    onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
 ) {
     Surface(
@@ -189,6 +202,7 @@ internal fun TopicContent(
                     onReply = onReply,
                     onQuote = onQuote,
                     onEdit = onEdit,
+                    onEditFirstPost = onEditFirstPost,
                     onOpenPage = onOpenPage,
                     listState = listState,
                 )
@@ -205,6 +219,7 @@ private fun TopicLoadedContent(
     onReply: (subcat: Int, page: Int) -> Unit,
     onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
+    onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
     listState: LazyListState,
 ) {
@@ -219,10 +234,31 @@ private fun TopicLoadedContent(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
+            // Phase 2D #148 — the « Modifier le premier message » action is
+            // exposed only when (a) we are on page 1 (FP lives there by
+            // definition), (b) HFR rendered the FP edit link in the toolbar
+            // (`Topic.isFirstPostOwner`, parsed from the first post on the
+            // page) and (c) the topic has a usable `subcat`. `numreponse` of
+            // the FP comes from the first post, not from `topic.post` (which
+            // is the topic id, a different scope).
+            @Suppress("ComplexCondition") // FP visibility = 4-way conjunction by design : ownership,
+            // valid subcat, page 1, non-empty posts. Extracting is unhelpful — each clause guards a
+            // different invariant (HFR permission, write contract, page scope, fixture safety).
+            val editFirstPostAction: (() -> Unit)? = if (
+                topic.isFirstPostOwner &&
+                topic.hasSubcat &&
+                topic.page == 1 &&
+                topic.posts.isNotEmpty()
+            ) {
+                { onEditFirstPost(topic.subcat, topic.page, topic.posts.first().numreponse) }
+            } else {
+                null
+            }
             TopicHeaderCard(
                 topic = topic,
                 state = state,
                 onReply = onReply,
+                onEditFirstPost = editFirstPostAction,
                 onOpenPage = onOpenPage,
             )
         }
@@ -259,6 +295,7 @@ private fun TopicHeaderCard(
     topic: Topic,
     state: TopicUiState,
     onReply: (subcat: Int, page: Int) -> Unit,
+    onEditFirstPost: (() -> Unit)?,
     onOpenPage: (Int) -> Unit,
 ) {
     Card {
@@ -308,6 +345,15 @@ private fun TopicHeaderCard(
                 enabled = topic.hasSubcat,
             ) {
                 Text(text = stringResource(R.string.topic_reply))
+            }
+            // Phase 2D #148 — « Modifier le premier message » lives in the header
+            // card because it acts on the topic, not on a single post. We render
+            // it as an OutlinedButton to stay visually subordinate to the primary
+            // « Répondre » action above.
+            if (onEditFirstPost != null) {
+                OutlinedButton(onClick = onEditFirstPost) {
+                    Text(text = stringResource(R.string.topic_edit_first_post))
+                }
             }
         }
     }

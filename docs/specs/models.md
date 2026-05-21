@@ -425,6 +425,39 @@ data class ReplyForm(
     val initialContent: String = "",  // Phase 2C (#146) : reply → "" ; quote → bloc `[quotemsg=…]` prérempli par HFR (verbatim, jamais reconstruit côté app)
 )
 
+data class EditFirstPostContext(            // Phase 2D (#148) : édition du premier post d'un topic
+    val cat: Int,
+    val subcat: Int,                         // requis > 0
+    val topicId: Int,                        // requis > 0
+    val page: Int,                           // require page == 1 ; le FP vit toujours page 1 par définition
+    val numreponse: Int,                     // requis > 0 ; numreponse du premier post (≠ topicId)
+)
+
+data class TopicForm(                        // Phase 2D (#148) : forme topic-level du formulaire HFR
+    val hashCheck: String,                   // jamais loggué, jamais persisté Compose
+    val subject: String,                     // pré-rempli depuis `<input name="sujet">`
+    val initialContent: String,              // BBCode existant via wholeText() de la textarea
+    val selectedSubcat: Int,                 // option HFR currently selected du `<select name="subcat">`
+    val subcategoryChoices: List<TopicFormSubcategoryChoice>,
+    val hiddenFields: Map<String, String>,   // password + delete filtrés ; checkboxes/radios suivent `checked`
+    val options: ReplyFormOptions,           // signature / smileyDisabled / emailNotification
+    val msgIcon: String?,                    // icône `checked` (defense-in-depth source-of-truth)
+    val poll: TopicPollForm,                 // read-only en Phase 2D #148 ; champs sondage préservés verbatim
+    val isAnonymous: Boolean,
+)
+
+data class TopicFormSubcategoryChoice(
+    val id: Int?,                            // null pour « Aucune » — jamais soumis
+    val label: String,
+    val selected: Boolean,
+)
+
+data class TopicPollForm(
+    val present: Boolean,                    // `have_sondage` coché côté HFR
+    val fields: Map<String, String>,         // textreponse0..10, allowvisitor, max_votes, jour/mois/annee/heure/minute
+    val editableInThisVersion: Boolean = false, // false en Phase 2D #148 — UI affiche note read-only
+)
+
 sealed interface ReplySubmitResult {
     data class Success(
         val refreshUrl: String?,     // <meta http-equiv="Refresh" content="N; url=…">

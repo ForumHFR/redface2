@@ -1,0 +1,242 @@
+package fr.forumhfr.redface2.core.data.write
+
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
+import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
+import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
+import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import fr.forumhfr.redface2.core.model.write.TopicForm
+import fr.forumhfr.redface2.core.network.HfrClient
+import fr.forumhfr.redface2.core.network.HfrConstants
+import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
+import fr.forumhfr.redface2.core.parser.write.TopicFormParser
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.withContext
+import okhttp3.FormBody
+
+/**
+ * Default [TopicFormRepository] implementation for Phase 2D #148 (edit first
+ * post). Wire endpoints are the same as a regular post edit (`message.php`
+ * GET, `bdd.php` POST) and the response classifier is shared with
+ * [DefaultEditPostRepository] / [DefaultReplyRepository] ; the topic-level
+ * shape only diverges on the form contract (`sujet`, `subcat`, poll).
+ *
+ * Diagnostics never carry `hash_check`, the BBCode content, the raw
+ * `numreponse` of the edited post, or HFR's refresh URL (which anchors
+ * `#t{numreponse}`). The success log collapses the URL to a presence boolean.
+ */
+@Singleton
+class DefaultTopicFormRepository @Inject constructor(
+    private val hfrClient: HfrClient,
+    private val topicFormParser: TopicFormParser,
+    private val replySubmitResponseParser: ReplySubmitResponseParser,
+    private val diagnostics: DiagnosticsLog,
+    @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+) : TopicFormRepository {
+
+    override suspend fun fetchEditFirstPostForm(context: EditFirstPostContext): TopicForm {
+        // `numreponse` identifies the user's own first post ; kept out of the
+        // INFO line, same rule as the post-level edit repository.
+        diagnostics.record(
+            DiagnosticsLog.Level.INFO,
+            LOG_TAG,
+            "GET FP edit form cat=${context.cat} subcat=${context.subcat} " +
+                "post=${context.topicId} page=${context.page}",
+        )
+        return try {
+            withContext(ioDispatcher) {
+                val html = hfrClient.getEditPostForm(
+                    cat = context.cat,
+                    subcat = context.subcat,
+                    post = context.topicId,
+                    page = context.page,
+                    numreponse = context.numreponse,
+                )
+                topicFormParser.parse(html).fold(
+                    onSuccess = { form ->
+                        diagnostics.record(
+                            DiagnosticsLog.Level.DEBUG,
+                            LOG_TAG,
+                            "FP form parsed: hiddenFields=${form.hiddenFields.size} " +
+                                "anonymous=${form.isAnonymous} " +
+                                "selectedSubcat=${form.selectedSubcat} " +
+                                "subcategoryChoices=${form.subcategoryChoices.size} " +
+                                "pollPresent=${form.poll.present}",
+                        )
+                        form
+                    },
+                    onFailure = { error ->
+                        diagnostics.record(
+                            DiagnosticsLog.Level.WARN,
+                            LOG_TAG,
+                            "FP form parse FAILED: ${error.message ?: error::class.simpleName}",
+                        )
+                        throw error
+                    },
+                )
+            }
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: SessionExpiredException) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "GET FP edit form SessionExpired: ${error.message ?: "(no message)"}",
+            )
+            throw error
+        } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "GET FP edit form FAILED: ${error::class.simpleName}: ${error.message ?: "(no message)"}",
+            )
+            throw error
+        }
+    }
+
+    override suspend fun submitEditFirstPost(
+        context: EditFirstPostContext,
+        form: TopicForm,
+        subject: String,
+        bbcodeContent: String,
+        selectedSubcat: Int,
+        options: ReplyFormOptions,
+    ): ReplySubmitResult {
+        guardAgainstInvalidSubmission(form, subject, bbcodeContent, selectedSubcat)?.let { early ->
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "FP POST short-circuited: ${early.reason::class.simpleName}",
+            )
+            return early
+        }
+
+        diagnostics.record(
+            DiagnosticsLog.Level.INFO,
+            LOG_TAG,
+            "POST FP edit cat=${context.cat} subcat=$selectedSubcat " +
+                "post=${context.topicId} page=${context.page} bbcode.length=${bbcodeContent.length}",
+        )
+        val formBody = buildEditFirstPostBody(context, form, subject, bbcodeContent, selectedSubcat, options)
+        return try {
+            withContext(ioDispatcher) {
+                val responseHtml = hfrClient.submitEditPost(formBody)
+                val outcome = replySubmitResponseParser.parse(responseHtml)
+                when (outcome) {
+                    is ReplySubmitResult.Success ->
+                        // HFR anchors the FP edit success refresh on
+                        // `#t{numreponse}` ; logging it would leak the FP
+                        // numreponse into the diagnostics buffer. Collapse to
+                        // a presence boolean + the parsed page (safe).
+                        diagnostics.record(
+                            DiagnosticsLog.Level.INFO,
+                            LOG_TAG,
+                            "POST FP edit Success hasRefreshUrl=${outcome.refreshUrl != null} " +
+                                "targetPage=${outcome.targetPage}",
+                        )
+                    is ReplySubmitResult.Failure ->
+                        diagnostics.record(
+                            DiagnosticsLog.Level.WARN,
+                            LOG_TAG,
+                            "POST FP edit Failure reason=${outcome.reason::class.simpleName}",
+                        )
+                }
+                outcome
+            }
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: SessionExpiredException) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "POST FP edit SessionExpired: ${error.message ?: "(no message)"}",
+            )
+            throw error
+        } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "POST FP edit FAILED: ${error::class.simpleName}: ${error.message ?: "(no message)"}",
+            )
+            throw error
+        }
+    }
+
+    private fun guardAgainstInvalidSubmission(
+        form: TopicForm,
+        subject: String,
+        bbcodeContent: String,
+        selectedSubcat: Int,
+    ): ReplySubmitResult.Failure? = when {
+        form.isAnonymous -> ReplySubmitResult.Failure(ReplyFailureReason.LoginRequired)
+        form.hashCheck.isBlank() -> ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+        bbcodeContent.isBlank() -> ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
+        subject.isBlank() -> ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
+        selectedSubcat <= 0 -> ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        else -> null
+    }
+
+    @Suppress("LongMethod", "LongParameterList") // Declarative POST body ; one place to read the whole contract.
+    private fun buildEditFirstPostBody(
+        context: EditFirstPostContext,
+        form: TopicForm,
+        subject: String,
+        bbcodeContent: String,
+        selectedSubcat: Int,
+        options: ReplyFormOptions,
+    ): FormBody {
+        val builder = FormBody.Builder(Charsets.UTF_8)
+        val overrides = buildMap {
+            put("hash_check", form.hashCheck)
+            put("verifrequet", HfrConstants.VERIF_REQUET)
+            put("content_form", bbcodeContent)
+            put("sujet", subject)
+            put("numreponse", context.numreponse.toString())
+            put("numrep", "")
+            put("cat", context.cat.toString())
+            // Allow the user to re-categorise (FP form ships a writable <select>),
+            // overriding the original context.subcat with whatever the UI picked.
+            put("subcat", selectedSubcat.toString())
+            put("post", context.topicId.toString())
+            put("page", context.page.toString())
+            form.msgIcon?.let { put("MsgIcon", it) }
+        }
+        val emitted = mutableSetOf<String>()
+        overrides.forEach { (key, value) ->
+            builder.add(key, value)
+            emitted += key
+        }
+        // Per-post options : browser-style submit (key absent when toggle off).
+        if (options.signatureEnabled) builder.add("signature", "1")
+        if (options.smileyDisabled) builder.add("smiley", "1")
+        if (options.emailNotificationEnabled) builder.add("emaill", "1")
+        emitted += setOf("signature", "smiley", "emaill")
+        // Poll fields are preserved verbatim (read-only in this version) ; the
+        // map already only contains values HFR would have sent on submit.
+        form.poll.fields.forEach { (key, value) ->
+            if (key in emitted) return@forEach
+            builder.add(key, value)
+            emitted += key
+        }
+        form.hiddenFields.forEach { (key, value) ->
+            if (key in emitted) return@forEach
+            // Belt-and-braces : the parser already strips `password` / `delete`,
+            // we keep the deny rules here so a future refactor cannot leak the
+            // destructive « Effacer l'intégralité du sujet » checkbox.
+            if (key == "password" || key == "delete") return@forEach
+            builder.add(key, value)
+            emitted += key
+        }
+        return builder.build()
+    }
+
+    private companion object {
+        private const val LOG_TAG = "TopicFormRepository"
+    }
+}
