@@ -124,4 +124,70 @@ class BbcodeFormatterTest {
         assertEquals(3, result.selectionStart)
         assertEquals(6, result.selectionEnd)
     }
+
+    @Test
+    fun `color action wraps the selection with HFR-real hex tags`() {
+        val result = applyBbcodeAction(
+            action = BbcodeAction.Color("#FF0000"),
+            text = "texte",
+            selectionStart = 0,
+            selectionEnd = 5,
+        )
+        // HFR contract : closing tag echoes the same hex, not [/color].
+        assertEquals("[#FF0000]texte[/#FF0000]", result.text)
+        // Selection stays around the wrapped content : 9 chars of opening tag,
+        // then 5 chars of "texte".
+        assertEquals(9, result.selectionStart)
+        assertEquals(14, result.selectionEnd)
+    }
+
+    @Test
+    fun `color action with empty selection places the caret between tags`() {
+        val result = applyBbcodeAction(
+            action = BbcodeAction.Color("#0000FF"),
+            text = "",
+            selectionStart = 0,
+            selectionEnd = 0,
+        )
+        assertEquals("[#0000FF][/#0000FF]", result.text)
+        assertEquals(9, result.selectionStart)
+        assertEquals(9, result.selectionEnd)
+    }
+
+    @Test
+    fun `color action preserves surrounding text and selects only the wrapped portion`() {
+        val result = applyBbcodeAction(
+            action = BbcodeAction.Color("#008000"),
+            text = "alpha beta gamma",
+            selectionStart = 6,
+            selectionEnd = 10,
+        )
+        assertEquals("alpha [#008000]beta[/#008000] gamma", result.text)
+        assertEquals(15, result.selectionStart)
+        assertEquals(19, result.selectionEnd)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `color action rejects a malformed hex value`() {
+        BbcodeAction.Color("red")
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `color action rejects a hex value without the leading hash`() {
+        BbcodeAction.Color("FF0000")
+    }
+
+    @Test
+    fun `color action accepts lowercase hex digits`() {
+        // HFR is case-insensitive on the hex itself ; we accept lowercase so
+        // a palette swatch like "#ff6600" works without forcing the caller to
+        // upper-case it.
+        val result = applyBbcodeAction(
+            action = BbcodeAction.Color("#ff6600"),
+            text = "x",
+            selectionStart = 0,
+            selectionEnd = 1,
+        )
+        assertEquals("[#ff6600]x[/#ff6600]", result.text)
+    }
 }

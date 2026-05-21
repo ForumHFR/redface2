@@ -22,5 +22,12 @@
     <string name="bbcode_action_spoiler">Spoiler</string>
     <string name="bbcode_action_url">Lien</string>
     <string name="bbcode_action_image">Image</string>
+    <string name="bbcode_action_color">Couleur</string>
+    <string name="bbcode_action_color_menu_description">Sélectionner une couleur de texte</string>
+    <string name="bbcode_color_red">Rouge</string>
+    <string name="bbcode_color_blue">Bleu</string>
+    <string name="bbcode_color_green">Vert</string>
+    <string name="bbcode_color_orange">Orange</string>
+    <string name="bbcode_color_grey">Gris</string>
     <string name="bbcode_preview_empty">La prévisualisation s\'affiche ici dès que vous saisissez du texte.</string>
 </resources>

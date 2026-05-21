@@ -325,6 +325,26 @@ class BbcodeContentParserTest {
     }
 
     @Test
+    fun `full list block survives the parser without crashing and stays readable`() {
+        // Phase 2B-B explicitly defers BBCode lists from the AST (cf. roadmap.md).
+        // The contract is : `[list]…[*]…[/list]` is forwarded verbatim into the
+        // output so the user reads what they typed instead of an empty paragraph.
+        val ast = parser.parse("[list][*]a[*]b[/list]")
+        assertNotNull(ast)
+        val rendered = ast.blocks
+            .filterIsInstance<PostBlock.Paragraph>()
+            .flatMap { it.inlines }
+            .filterIsInstance<PostInline.Text>()
+            .joinToString(separator = "") { it.value }
+        // Both items + their bullet markers must still be visible in the output.
+        assertTrue("expected '[list]' to survive — rendered=$rendered", rendered.contains("[list]"))
+        assertTrue("expected '[*]a' to survive — rendered=$rendered", rendered.contains("[*]"))
+        assertTrue("expected 'a' content to survive — rendered=$rendered", rendered.contains("a"))
+        assertTrue("expected 'b' content to survive — rendered=$rendered", rendered.contains("b"))
+        assertTrue("expected '[/list]' to survive — rendered=$rendered", rendered.contains("[/list]"))
+    }
+
+    @Test
     fun `stray close tag does not crash`() {
         val ast = parser.parse("hello [/b] world")
         // No crash, no infinite loop; text survives.

@@ -124,4 +124,9 @@ dependencies {
     testImplementation(libs.konsist)
     testImplementation(libs.robolectric)
     testImplementation(libs.turbine)
+    // :core:parser is reachable transitively but explicit here for the cross-
+    // module round-trip tests that prove toolbar emission parses back into the
+    // expected AST (`:app` is the only place Konsist allows feature/parser
+    // crossover in tests).
+    testImplementation(project(":core:parser"))
 }

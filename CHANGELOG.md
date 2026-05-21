@@ -8,7 +8,28 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-(rien pour le moment)
+Phase 2B-B (#144) — polish toolbar BBCode : action couleur livrée, listes documentées hors scope, preview locale gardée non bloquante.
+
+### Added
+- `BbcodeAction.Color(colorHex)` (sealed interface, remplace l'ancien `enum class BbcodeAction`). Contrat HFR `[#RRGGBB]…[/#RRGGBB]` — la balise fermante échoue le hex, jamais `[/color]`.
+- Palette couleur dans `BbcodeToolbar` (chip Couleur + `DropdownMenu` Material 3, swatches MVP : rouge / bleu / vert / orange / gris). Pas de picker hex libre (différé pour limiter la validation côté UI).
+- Labels localisés dans `core/ui/src/main/res/values/strings.xml` (`bbcode_action_color`, `bbcode_action_color_menu_description`, `bbcode_color_{red,blue,green,orange,grey}`).
+
+### Tests
+- `BbcodeFormatterTest` : Color wrap sur sélection non vide / sélection vide / texte au milieu, validation hex (reject malformé + reject sans `#`), accept lowercase hex.
+- `BbcodeContentParserTest` : `[list][*]a[*]b[/list]` survit verbatim sans crash (les listes ne sont pas modélisées dans l'AST en Phase 2B-B).
+- `BbcodeColorRoundTripTest` (`:app/test`, seul module autorisé par Konsist à croiser feature/parser dans les tests) : la palette toolbar émet du BBCode que `BbcodeContentParser` reparse en `PostInline.Color` avec le hex normalisé.
+
+### Changed
+- `BbcodeAction` : `enum class` → `sealed interface` avec `data object` pour chaque action fixe et `data class Color(colorHex)` pour la couleur. Les call-sites `BbcodeAction.Bold`, etc., restent source-compatibles.
+- `docs/specs/mvi.md` : précise que la preview locale reste synchrone et non bloquante en Phase 2B-B ; preview serveur `apercu.php` reportée tant qu'aucune divergence HFR n'apparaît.
+- `docs/specs/roadmap.md` : Phase 2 toolbar — couleur cochée ; listes reportées (parser ne modélise pas `[list]/[*]` mais les garde lisibles).
+
+### Hors scope (différé)
+- Listes BBCode dans l'AST + bouton liste : nécessite parser + renderer + fixtures coordonnés (re-évalué en Phase 4).
+- Picker smileys / smileys perso / upload images : #11.
+- Preview serveur `apercu.php` : reportée tant qu'aucune divergence HFR ne le justifie.
+- Tests Compose UI instrumentés : `ui-test-junit4` non câblé en CI ; couverture comportementale assurée par JVM purs (formatter + parser + round-trip).
 
 ---
 
