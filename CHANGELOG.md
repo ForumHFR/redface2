@@ -11,7 +11,7 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 Phase 2B-B (#144) — polish toolbar BBCode : action couleur livrée, listes documentées hors scope, preview locale gardée non bloquante.
 
 ### Added
-- `BbcodeAction.Color(colorHex)` (sealed interface, remplace l'ancien `enum class BbcodeAction`). Contrat HFR `[#RRGGBB]…[/#RRGGBB]` — la balise fermante échoue le hex, jamais `[/color]`.
+- `BbcodeAction.Color(colorHex)` (sealed interface, remplace l'ancien `enum class BbcodeAction`). Contrat HFR `[#RRGGBB]…[/#RRGGBB]` — la balise fermante reprend le hex, jamais `[/color]`.
 - Palette couleur dans `BbcodeToolbar` (chip Couleur + `DropdownMenu` Material 3, swatches MVP : rouge / bleu / vert / orange / gris). Pas de picker hex libre (différé pour limiter la validation côté UI).
 - Labels localisés dans `core/ui/src/main/res/values/strings.xml` (`bbcode_action_color`, `bbcode_action_color_menu_description`, `bbcode_color_{red,blue,green,orange,grey}`).
 
