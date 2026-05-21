@@ -12,9 +12,10 @@ import org.junit.Test
  * Phase 2B-B end-to-end check : what the colour palette emits via
  * [applyBbcodeAction] is what the local preview parses back into
  * [PostInline.Color]. The HFR colour contract `[#RRGGBB]…[/#RRGGBB]` lives in
- * two modules (`:core:ui` toolbar + `:core:parser` AST) so a JVM round-trip in
- * `:app` (the only module Konsist allows to cross feature/parser in tests)
- * pins the assumption that they stay aligned.
+ * two modules (`:core:ui` toolbar + `:core:parser` AST) ; the Gradle graph only
+ * gives `:app` access to both at once (`:core:ui` does not depend on
+ * `:core:parser` and vice-versa), so we place the round-trip here rather than
+ * duplicating sources or relaxing the Konsist boundary on `:feature:*`.
  */
 class BbcodeColorRoundTripTest {
 

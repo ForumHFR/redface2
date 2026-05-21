@@ -18,7 +18,7 @@ Phase 2B-B (#144) — polish toolbar BBCode : action couleur livrée, listes doc
 ### Tests
 - `BbcodeFormatterTest` : Color wrap sur sélection non vide / sélection vide / texte au milieu, validation hex (reject malformé + reject sans `#`), accept lowercase hex.
 - `BbcodeContentParserTest` : `[list][*]a[*]b[/list]` survit verbatim sans crash (les listes ne sont pas modélisées dans l'AST en Phase 2B-B).
-- `BbcodeColorRoundTripTest` (`:app/test`, seul module autorisé par Konsist à croiser feature/parser dans les tests) : la palette toolbar émet du BBCode que `BbcodeContentParser` reparse en `PostInline.Color` avec le hex normalisé.
+- `BbcodeColorRoundTripTest` (placé dans `:app/test` parce que c'est le seul module dont le graphe Gradle réunit `:core:ui` et `:core:parser` — `:core:ui` ne dépend pas de `:core:parser` et vice-versa) : la palette toolbar émet du BBCode que `BbcodeContentParser` reparse en `PostInline.Color` avec le hex normalisé.
 
 ### Changed
 - `BbcodeAction` : `enum class` → `sealed interface` avec `data object` pour chaque action fixe et `data class Color(colorHex)` pour la couleur. Les call-sites `BbcodeAction.Bold`, etc., restent source-compatibles.

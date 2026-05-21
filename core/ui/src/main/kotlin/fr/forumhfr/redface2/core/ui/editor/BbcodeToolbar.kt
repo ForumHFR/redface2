@@ -93,17 +93,19 @@ private fun ColorChip(
     onAction: (BbcodeAction) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val menuDescription = stringResource(R.string.bbcode_action_color_menu_description)
+    // Attached to the trigger chip (not the menu container) so TalkBack reads
+    // the « opens the colour picker » hint on focus, before the user opens it.
+    val triggerDescription = stringResource(R.string.bbcode_action_color_menu_description)
     Box {
         AssistChip(
             onClick = { expanded = true },
             label = { Text(stringResource(R.string.bbcode_action_color)) },
             border = AssistChipDefaults.assistChipBorder(enabled = true),
+            modifier = Modifier.semantics { contentDescription = triggerDescription },
         )
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            modifier = Modifier.semantics { contentDescription = menuDescription },
         ) {
             ColorPalette.forEach { swatch ->
                 DropdownMenuItem(
@@ -159,7 +161,8 @@ private val BbcodeAction.labelResId: Int
         BbcodeAction.Url -> R.string.bbcode_action_url
         BbcodeAction.Image -> R.string.bbcode_action_image
         // Color is rendered via [ColorChip], never the [ActionChip] path —
-        // dead branch but required for `when` exhaustiveness on the sealed
-        // interface.
-        is BbcodeAction.Color -> R.string.bbcode_action_color
+        // fail-fast rather than silently return a label, so a future refactor
+        // that routes a Color through ActionChip surfaces the contract break
+        // immediately instead of shipping the wrong label.
+        is BbcodeAction.Color -> error("BbcodeAction.Color is rendered via ColorChip, not ActionChip")
     }
