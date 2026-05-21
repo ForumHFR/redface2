@@ -439,7 +439,7 @@ data class TopicForm(                        // Phase 2D (#148) : forme topic-le
     val initialContent: String,              // BBCode existant via wholeText() de la textarea
     val selectedSubcat: Int,                 // option HFR currently selected du `<select name="subcat">`
     val subcategoryChoices: List<TopicFormSubcategoryChoice>,
-    val hiddenFields: Map<String, String>,   // password + delete filtrés ; checkboxes/radios suivent `checked`
+    val hiddenFields: Map<String, String>,   // password + delete + champs poll filtrés ; checkboxes/radios suivent `checked`
     val options: ReplyFormOptions,           // signature / smileyDisabled / emailNotification
     val msgIcon: String?,                    // icône `checked` (defense-in-depth source-of-truth)
     val poll: TopicPollForm,                 // read-only en Phase 2D #148 ; champs sondage préservés verbatim
@@ -454,7 +454,7 @@ data class TopicFormSubcategoryChoice(
 
 data class TopicPollForm(
     val present: Boolean,                    // `have_sondage` coché côté HFR
-    val fields: Map<String, String>,         // textreponse0..10, allowvisitor, max_votes, jour/mois/annee/heure/minute
+    val fields: Map<String, String>,         // have_sondage, textreponse0..10, allowvisitor, max_votes, jour/mois/annee/heure/minute
     val editableInThisVersion: Boolean = false, // false en Phase 2D #148 — UI affiche note read-only
 )
 

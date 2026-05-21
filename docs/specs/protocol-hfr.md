@@ -170,7 +170,7 @@ Contrat recapturé sur HFR réel le 2026-05-17 avec le post de test `numreponse=
 | `subcat` | ID sous-catégorie | Observé `550`. |
 | `sujet` | titre topic | Champ réel observé. Pas `subject`. |
 | `content_form` | nouveau contenu BBCode | |
-| `have_sondage`, `textreponse1..10`, `allowvisitor`, `max_votes`, `jour`, `mois`, `annee`, `heure`, `minute` | données sondage | Champs observés sur le formulaire FP ; POST sondage non validé dans cette campagne. |
+| `have_sondage`, `textreponse0..10`, `allowvisitor`, `max_votes`, `jour`, `mois`, `annee`, `heure`, `minute` | données sondage | Champs observés sur le formulaire FP ; édition active de sondage non validée dans cette campagne. Côté MVP, ces champs sont isolés dans `TopicPollForm.fields`, exclus de `hiddenFields`, et forwardés seulement si `have_sondage` est coché. |
 | `delete` | `"1"` | Présent uniquement si l'utilisateur coche la suppression dans le formulaire d'édition. |
 
 Le fait qu'une édition concerne le **premier post** (FP) vs un post normal est déduit côté client (`isFirstPostOwner`) puis pris en compte dans la construction du form. HFR expose aussi des champs supplémentaires sur le FP : `sujet` éditable en input texte, `subcat` en `<select>`, options sondage, et champs `toread1..5`.
