@@ -10,8 +10,8 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
  * MVI state of the post-level editor. Local draft + parsed preview AST + the
  * write submit lifecycle. Reply (#145) and quote (#146) reach HFR through
  * `ReplyRepository` (POST `bddpost.php`) ; edit (#147) goes through
- * `EditPostRepository` (POST `bdd.php`). All three share this state. Edit FP
- * (#148) and create topic (#149) still come later.
+ * `EditPostRepository` (POST `bdd.php`). All three share this state. Topic-level
+ * writes (edit FP #148 and create topic #149) live in [TopicFormState].
  */
 data class PostEditorState(
     val mode: PostEditorMode,

@@ -9,7 +9,8 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 /**
  * Repository surface for posting a reply to an HFR topic. Phase 2C-A (#145) only
  * covers the simple-reply path (no quote pre-fill, no edit, no FP); the same shape
- * will be reused later for `:feature:editor`'s edit and create-topic flows.
+ * is also reused by `:feature:editor`'s write flows when the HFR response
+ * grammar is shared.
  *
  * Implementations live in `:core:data` and chain a GET on `message.php` (to grab
  * the per-session `hash_check`) followed by a POST on `bddpost.php`. The contract

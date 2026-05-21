@@ -10,6 +10,8 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
+import fr.forumhfr.redface2.core.model.write.NewTopicContext
+import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
@@ -211,30 +213,181 @@ class TopicFormViewModelTest {
         assertEquals(2, topicFormRepository.formFetches)
     }
 
+    // ---- Phase 2E (#149) — New mode ---------------------------------------
+
     @Test
-    fun `New mode surfaces the placeholder and never fetches the form`() = runTest {
-        val viewModel = TopicFormViewModel(
-            request = TopicFormRequest(
-                mode = TopicFormMode.New,
-                cat = SAMPLE_CAT,
-                subcat = SAMPLE_SUBCAT,
-                topicId = null,
-                page = null,
-                numreponse = null,
-            ),
-            previewParser = previewParser,
-            topicFormRepository = topicFormRepository,
-            diagnostics = DiagnosticsLog(),
-        )
+    fun `New mode loads the form and hydrates subcategories without touching subject or draft`() = runTest {
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
         viewModel.state.test {
-            val initial = awaitItem()
-            assertEquals(TopicFormMode.New, initial.mode)
-            assertFalse(initial.isLoadingForm)
-            assertNull(initial.submitError)
+            val final = expectMostRecentItem()
+            assertEquals(TopicFormMode.New, final.mode)
+            // subject / draft stay empty — the create-topic flow has nothing
+            // to hydrate from the server.
+            assertEquals("", final.subject.text)
+            assertEquals("", final.draft.text)
+            // Hydration flags are locked to `true` from the start so a silent
+            // refetch can't clobber the user's saisie.
+            assertTrue(final.subjectHydratedFromServer)
+            assertTrue(final.draftHydratedFromServer)
+            // Options + choices arrived.
+            assertEquals(3, final.subcategoryChoices.size)
+            assertFalse(final.isLoadingForm)
             cancelAndIgnoreRemainingEvents()
         }
-        assertEquals(0, topicFormRepository.formFetches)
+        assertEquals(1, topicFormRepository.newTopicFormFetches)
+        val context = requireNotNull(topicFormRepository.lastNewTopicContext)
+        assertEquals(SAMPLE_CAT, context.cat)
+        assertEquals(SAMPLE_SUBCAT, context.entrySubcat)
     }
+
+    @Test
+    fun `New mode honours subcat passed via TopicFormRequest when HFR pre-selects nothing`() = runTest {
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        viewModel.state.test {
+            val final = expectMostRecentItem()
+            // Even though `form.selectedSubcat == null`, the state should fall
+            // back to the entry chip (`request.subcat`) for the dropdown
+            // default value. Otherwise the user would have to re-pick the
+            // same subcat they just came from.
+            assertEquals(SAMPLE_SUBCAT, final.selectedSubcat)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `New mode without selectedSubcat keeps submit disabled`() = runTest {
+        val viewModel = newTopicViewModel(entrySubcat = null)
+        viewModel.state.test {
+            val final = expectMostRecentItem()
+            // No entry chip, no HFR pre-selection : `selectedSubcat` stays null.
+            assertNull(final.selectedSubcat)
+            // Even with non-blank subject / draft, canSubmit must stay false.
+            cancelAndIgnoreRemainingEvents()
+        }
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+        viewModel.submit(TopicFormIntent.SubmitClicked)
+        // No POST happened because canSubmit returned false.
+        assertEquals(0, topicFormRepository.newTopicSubmitCalls)
+    }
+
+    @Test
+    fun `New mode submit forwards subject draft subcat and options to submitNewTopic`() = runTest {
+        topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Success(
+            newTopicId = null,
+            newNumreponse = null,
+            targetCat = SAMPLE_CAT,
+            targetSubcat = SAMPLE_OTHER_SUBCAT,
+            refreshUrl = null,
+        )
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        viewModel.state.test {
+            expectMostRecentItem() // drain hydration
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic 2E")))
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body 2E", TextRange(7))))
+            // User overrides the entry chip to a different sub-category.
+            viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
+            viewModel.submit(TopicFormIntent.ToggleSignature(enabled = true))
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(1, topicFormRepository.newTopicSubmitCalls)
+        assertEquals("Topic 2E", topicFormRepository.lastSubmittedSubject)
+        assertEquals("Body 2E", topicFormRepository.lastSubmittedBbcode)
+        assertEquals(SAMPLE_OTHER_SUBCAT, topicFormRepository.lastSubmittedSubcat)
+        val options = requireNotNull(topicFormRepository.lastSubmittedOptions)
+        assertTrue(options.signatureEnabled)
+    }
+
+    @Test
+    fun `New mode success emits NewTopicCreated with the parsed ids`() = runTest {
+        topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Success(
+            newTopicId = 148_750,
+            newNumreponse = 2_523_830,
+            targetCat = SAMPLE_CAT,
+            targetSubcat = SAMPLE_OTHER_SUBCAT,
+            refreshUrl = null,
+        )
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        viewModel.state.test {
+            expectMostRecentItem()
+            cancelAndIgnoreRemainingEvents()
+        }
+        viewModel.effects.test {
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            val effect = awaitItem() as TopicFormEffect.NewTopicCreated
+            assertEquals(SAMPLE_CAT, effect.cat)
+            assertEquals(SAMPLE_OTHER_SUBCAT, effect.subcat)
+            assertEquals(148_750, effect.newTopicId)
+            assertEquals(2_523_830, effect.newNumreponse)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `New mode refetch after InvalidHashCheck does not clobber subject or draft`() = runTest {
+        topicFormRepository.newTopicSubmitResult =
+            NewTopicSubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        viewModel.state.test {
+            expectMostRecentItem() // drain initial hydration
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("user subject after hydrate")))
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("user draft after hydrate", TextRange(24))))
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            val finalState = expectMostRecentItem()
+            assertEquals("user subject after hydrate", finalState.subject.text)
+            assertEquals("user draft after hydrate", finalState.draft.text)
+            val submitError = finalState.submitError
+            assertTrue(
+                "expected submitError to be Hfr(InvalidHashCheck), was $submitError",
+                submitError is SubmitError.Hfr &&
+                    submitError.reason == ReplyFailureReason.InvalidHashCheck,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+        // 2 fetches : initial + silent refetch after InvalidHashCheck.
+        assertEquals(2, topicFormRepository.newTopicFormFetches)
+    }
+
+    @Test
+    fun `New mode rejects an anonymous form with LoginRequired`() = runTest {
+        topicFormRepository.newTopicFormResult = topicFormRepository.newTopicFormResult
+            .copy(isAnonymous = true)
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        viewModel.state.test {
+            val final = expectMostRecentItem()
+            assertTrue(final.isAnonymous)
+            val error = final.submitError
+            assertTrue(
+                "expected SubmitError.Hfr(LoginRequired), was $error",
+                error is SubmitError.Hfr && error.reason == ReplyFailureReason.LoginRequired,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+        // User still tries to submit — the VM short-circuits without calling the repo.
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+        viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_SUBCAT))
+        viewModel.submit(TopicFormIntent.SubmitClicked)
+        assertEquals(0, topicFormRepository.newTopicSubmitCalls)
+    }
+
+    private fun newTopicViewModel(entrySubcat: Int?): TopicFormViewModel = TopicFormViewModel(
+        request = TopicFormRequest(
+            mode = TopicFormMode.New,
+            cat = SAMPLE_CAT,
+            subcat = entrySubcat,
+            topicId = null,
+            page = null,
+            numreponse = null,
+        ),
+        previewParser = previewParser,
+        topicFormRepository = topicFormRepository,
+        diagnostics = DiagnosticsLog(),
+    )
 
     private suspend fun app.cash.turbine.ReceiveTurbine<TopicFormState>.awaitHydratedState(): TopicFormState {
         // Under `UnconfinedTestDispatcher`, the init coroutine fetches the form
@@ -287,19 +440,58 @@ class TopicFormViewModelTest {
             poll = TopicPollForm(present = false, fields = emptyMap(), editableInThisVersion = false),
             isAnonymous = false,
         )
+
+        // Mirror used by `fetchNewTopicForm` : the create-topic form has no
+        // pre-selected subcat (HFR omits `selected`), so `selectedSubcat = null`.
+        var newTopicFormResult: TopicForm = TopicForm(
+            hashCheck = "FAKE_HASH",
+            subject = "",
+            initialContent = "",
+            selectedSubcat = null,
+            subcategoryChoices = listOf(
+                TopicFormSubcategoryChoice(id = null, label = "Aucune", selected = false),
+                TopicFormSubcategoryChoice(id = SAMPLE_SUBCAT, label = "Divers", selected = false),
+                TopicFormSubcategoryChoice(id = SAMPLE_OTHER_SUBCAT, label = "Autre", selected = false),
+            ),
+            hiddenFields = mapOf("cat" to "23", "from_subcat" to "$SAMPLE_SUBCAT"),
+            options = ReplyFormOptions(
+                signatureEnabled = false,
+                smileyDisabled = false,
+                emailNotificationEnabled = false,
+            ),
+            msgIcon = "1",
+            poll = TopicPollForm(present = false, fields = emptyMap(), editableInThisVersion = false),
+            isAnonymous = false,
+        )
+
         var submitResult: ReplySubmitResult? = ReplySubmitResult.Success(
             targetPage = 1,
             refreshUrl = "/hfr/",
         )
+
+        var newTopicSubmitResult: NewTopicSubmitResult? = NewTopicSubmitResult.Success(
+            newTopicId = null,
+            newNumreponse = null,
+            targetCat = SAMPLE_CAT,
+            targetSubcat = SAMPLE_SUBCAT,
+            refreshUrl = null,
+        )
+
         var formGate: CompletableDeferred<Unit>? = null
 
         var formFetches: Int = 0
             private set
+        var newTopicFormFetches: Int = 0
+            private set
         var submitCalls: Int = 0
+            private set
+        var newTopicSubmitCalls: Int = 0
             private set
         var lastFetchedContext: EditFirstPostContext? = null
             private set
         var lastSubmittedContext: EditFirstPostContext? = null
+            private set
+        var lastNewTopicContext: NewTopicContext? = null
             private set
         var lastSubmittedSubject: String? = null
             private set
@@ -332,6 +524,30 @@ class TopicFormViewModelTest {
             lastSubmittedSubcat = selectedSubcat
             lastSubmittedOptions = options
             return submitResult ?: error("submitResult not set")
+        }
+
+        override suspend fun fetchNewTopicForm(context: NewTopicContext): TopicForm {
+            newTopicFormFetches += 1
+            lastNewTopicContext = context
+            formGate?.await()
+            return newTopicFormResult
+        }
+
+        override suspend fun submitNewTopic(
+            context: NewTopicContext,
+            form: TopicForm,
+            subject: String,
+            bbcodeContent: String,
+            selectedSubcat: Int,
+            options: ReplyFormOptions,
+        ): NewTopicSubmitResult {
+            newTopicSubmitCalls += 1
+            lastNewTopicContext = context
+            lastSubmittedSubject = subject
+            lastSubmittedBbcode = bbcodeContent
+            lastSubmittedSubcat = selectedSubcat
+            lastSubmittedOptions = options
+            return newTopicSubmitResult ?: error("newTopicSubmitResult not set")
         }
     }
 

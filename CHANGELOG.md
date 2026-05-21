@@ -8,7 +8,36 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-Phase 2B-B (#144) — polish toolbar BBCode : action couleur livrée, listes documentées hors scope, preview locale gardée non bloquante.
+Phase 2E (#149) — création de topic : un compte authentifié peut créer un sujet depuis Redface 2 sans navigateur. Et follow-up Phase 2B-B (#144) déjà mergé décrit plus bas.
+
+### Added (Phase 2E #149)
+- Nouveau contexte topic-level `NewTopicContext(cat: Int, entrySubcat: Int?)` (`:core:model/write/`). `entrySubcat` = chip d'arrivée (`null` sur « Toutes ») ; le subcat final part au submit via un paramètre distinct (dropdown).
+- Nouveau résultat `NewTopicSubmitResult.Success/Failure` distinct de `ReplySubmitResult` (la création renvoie `newTopicId`/`newNumreponse` plutôt qu'un `targetPage`). Les deux ids restent `null` tant que la fixture succès dédiée n'est pas capturée — le classifier reply est réutilisé sans inventer un parser d'URL hypothétique.
+- `TopicFormParser` expose désormais `parseEditFirstPost(html)` (contrat strict #166 préservé) ET `parseNewTopic(html)` (accepte un `<select>` sans option `selected`, ce que HFR sert pour un nouveau topic). Le cœur `parseTopicForm(html, actionSelector, requireSelectedSubcat)` est factorisé. `TopicForm.selectedSubcat` devient nullable.
+- `HfrClient.getNewTopicForm(cat, entrySubcat)` GET `message.php?...&sondage=0&owntopic=0&new=0` ; `HfrClient.submitNewTopic(formBody)` POST `bddpost.php?config=hfr.inc`.
+- `TopicFormRepository` enrichi de `fetchNewTopicForm` + `submitNewTopic`. Body POST : `sujet`, `subcat=<selectedSubcat>`, `content_form`, `cat`, `from_subcat=<hiddenFields["from_subcat"] ?: context.entrySubcat>`, `post=""`, `numreponse=""`, `numrep=""`, `page=1`, `verifrequet=1100`, `hash_check`. Filtres `password`, `delete`, poll keys (single source of truth `TopicPollForm.fields`, contrat #166). Diagnostics anti-leak : pas de `hash_check`, pas de contenu, pas de sujet complet, pas de `refreshUrl` complet.
+- `TopicFormViewModel` mode-aware : `init` route vers `loadNewTopicFormIfPossible()` en mode New ; `canSubmit` mode-aware (FP / New) ; `subjectHydratedFromServer` et `draftHydratedFromServer` initialisés à `true` dès l'init en mode New (l'utilisateur écrit du neuf — un refetch silencieux ne doit jamais clobber sa saisie) ; override `selectedSubcat = request.subcat` quand `form.selectedSubcat == null` (cas New) ; nouvel effect `TopicFormEffect.NewTopicCreated`.
+- `TopicFormScreen` mode New fonctionnel : sujet writable, dropdown sous-catégorie Material 3 (l'option « Aucune » est filtrée — la wire submit refuse `subcat=""`), draft BBCode + toolbar #144, options signature/smileys/email, bannière d'erreur. Toast `editor_new_topic_created` quand la création réussit sans `newTopicId` extractible.
+- `ForumCategoryScreen` reçoit un nouveau paramètre `onCreateTopic: (cat, subcat?) -> Unit` et expose un FAB Material 3 « Nouveau topic » uniquement en `AuthState.Authenticated` (observé via `AuthRepository.observeAuthState()` injectée dans `CategoryViewModel`).
+- Navigation : `CategoryRoute` pousse `TopicFormRoute(mode = New, cat, subcat)`. Sur `NewTopicCreated` avec `newTopicId != null`, navigation directe vers `TopicRoute(cat, post = newTopicId, page = 1, scrollTo = newNumreponse)`. Sans ids, pop du composer et replace par `CategoryRoute(cat, subcat = subcat-final, page = 1)`.
+
+### Tests (Phase 2E)
+- `TopicFormParserTest` (+3 cas) : `parseNewTopic` happy path sur `write_create_topic_form_android_cat.html`, `parseNewTopic` accepte la variante anonyme (`isAnonymous = true`), `parseEditFirstPost` refuse la fixture create (split d'action `bddpost.php` vs `bdd.php` pinné).
+- `DefaultTopicFormRepositoryTest` (+5 cas) : GET URL avec / sans `entrySubcat`, POST body complet (sujet/subcat/from_subcat/post=""/numreponse=""/numrep=""/options), options absentes quand toggle off, refus form anonyme avec `LoginRequired`, diagnostics anti-leak hash_check/sujet/contenu/refreshUrl.
+- `TopicFormViewModelTest` (+7 cas New) : hydratation choices sans toucher sujet/draft, fallback `selectedSubcat = request.subcat`, submit désactivé sans subcat, forwarding subject/draft/subcat/options, `NewTopicCreated` avec ids, refetch `InvalidHashCheck` sans clobber, refus form anonyme.
+- `CategoryViewModelTest` : injection `AuthRepository` ajoutée à 16 tests existants (fake retournant `Anonymous` par défaut — `canCreateTopic = false`).
+- Fixtures `write_create_topic_form_android_cat.html` + `write_create_topic_anonymous_form.html` + `write_reply_success_response.html` dupliquées dans `core/data/src/test/resources/fixtures/` avec leur `.source.txt` (les tests `:core:data` ne lisent pas `:core:parser/test/resources`).
+
+### Hors scope (différé)
+- Sondage actif à la création (`have_sondage` + answers + dates).
+- Upload images / médias / picker smileys (#11).
+- Capture d'une fixture succès Create dédiée : tant qu'elle manque, `Success.newTopicId / newNumreponse` restent `null` et la navigation tombe sur le rafraîchissement de catégorie + Toast.
+
+---
+
+## Phase 2B-B (#144) — polish toolbar BBCode (déjà mergé via PR #168, gardé ici pour le prochain bump)
+
+Action couleur livrée, listes documentées hors scope, preview locale gardée non bloquante.
 
 ### Added
 - `BbcodeAction.Color(colorHex)` (sealed interface, remplace l'ancien `enum class BbcodeAction`). Contrat HFR `[#RRGGBB]…[/#RRGGBB]` — la balise fermante reprend le hex, jamais `[/color]`.

@@ -168,9 +168,9 @@ private fun PostEditorContent(
                     }
                 }
             } else {
-                // Create-topic (#149) is the only mode that still falls back to
-                // the local-only placeholder. Reply (#145), Quote (#146) and
-                // Edit (#147) all go through the same branch above.
+                // Defensive fallback for future post-level modes. Reply (#145),
+                // Quote (#146) and Edit (#147) all go through the branch above ;
+                // topic-level create/edit flows are handled by TopicFormScreen.
                 Text(
                     text = stringResource(R.string.editor_submit_disabled),
                     style = MaterialTheme.typography.labelMedium,

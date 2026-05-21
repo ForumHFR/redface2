@@ -1,8 +1,8 @@
-Build alpha Redface 2 — stabilisation édition FP.
+Build alpha Redface 2 — création de topic.
 
 Nouveautés :
-- Édition du premier message durcie après review.
-- Hydratation sujet/contenu plus robuste sur réseau lent.
-- Sous-catégorie et champs sondage sécurisés pour éviter les changements implicites.
+- Nouveau bouton "Nouveau topic" sur les listes de catégorie quand vous êtes connecté.
+- Composer dédié : titre, sous-catégorie, contenu BBCode et options HFR.
+- En cas de succès sans lien direct récupérable, retour sobre vers la sous-catégorie cible.
 
 Merci de remonter tout bug via le canal alpha ou le dépôt GitHub.

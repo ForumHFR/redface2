@@ -8,6 +8,7 @@
     <string name="forum_category_accessibility">%1$s, %2$d sous-catégories</string>
 
     <string name="category_title_fallback">Catégorie %1$d</string>
+    <string name="category_create_topic">Nouveau topic</string>
     <string name="category_filter_all">Toutes</string>
     <string name="category_subcategories_error">Sous-catégories indisponibles</string>
     <string name="category_topics_error">Topics indisponibles</string>

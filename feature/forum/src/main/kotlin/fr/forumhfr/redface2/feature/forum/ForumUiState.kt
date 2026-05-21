@@ -64,6 +64,14 @@ data class CategoryUiState(
      * window.
      */
     val isRefreshing: Boolean,
+    /**
+     * `true` when the active session is `AuthState.Authenticated`. Drives the
+     * « Nouveau topic » FAB visibility (Phase 2E #149) — HFR refuses the wire
+     * POST in anonymous mode and Redface 2 has decided not to surface the
+     * legacy anonymous composer (cf. `docs/specs/protocol-hfr.md` § Note
+     * anonyme).
+     */
+    val canCreateTopic: Boolean = false,
 )
 
 /**

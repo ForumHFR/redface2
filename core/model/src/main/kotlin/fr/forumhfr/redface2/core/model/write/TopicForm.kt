@@ -1,17 +1,20 @@
 package fr.forumhfr.redface2.core.model.write
 
 /**
- * Parsed view of HFR's topic-level form (Phase 2D #148 : edit first post).
+ * Parsed view of HFR's topic-level form (Phase 2D #148 edit first post,
+ * Phase 2E #149 create topic).
  *
  * Like [ReplyForm] for the post-level surface, but with two structural
  * differences :
  *
- * - HFR's first-post form carries a writable `<input name="sujet">` ; the
- *   editor must surface it as a real text field, not a hidden echo.
+ * - HFR's first-post and create-topic forms carry a writable
+ *   `<input name="sujet">` ; the editor must surface it as a real text field,
+ *   not a hidden echo.
  * - The form carries a `<select name="subcat">` instead of a single hidden
  *   `subcat` value. Subcategory choices are exposed to the UI so the user
- *   can re-categorise their topic, but the MVP only forwards whatever HFR
- *   pre-selected unless an explicit `SubcatSelected` intent flips it.
+ *   can re-categorise their topic or pick the category for a new topic. Edit FP
+ *   starts from HFR's pre-selection ; create-topic may start from the entry chip
+ *   because HFR often renders no selected `<option>`.
  *
  * Poll fields are captured separately into [TopicPollForm] so an UI that
  * does not edit polls can leave them alone while still preserving the
@@ -29,7 +32,16 @@ data class TopicForm(
     val hashCheck: String,
     val subject: String,
     val initialContent: String,
-    val selectedSubcat: Int,
+    /**
+     * Pre-selected sub-category from the parsed `<select>`. `null` is a valid
+     * value in two cases : the « Aucune » option is the only `selected` (Edit FP
+     * fail-safe path returns a `Result.failure` before reaching here), or HFR
+     * served no `selected` attribute at all (the normal new-topic form shape —
+     * cf. `parseNewTopic`). The submit code refuses to send `subcat=` empty :
+     * the ViewModel must produce a real `Int > 0` from the dropdown choice
+     * before calling the repository.
+     */
+    val selectedSubcat: Int?,
     val subcategoryChoices: List<TopicFormSubcategoryChoice>,
     val hiddenFields: Map<String, String>,
     val options: ReplyFormOptions,

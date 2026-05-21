@@ -8,8 +8,9 @@ package fr.forumhfr.redface2.feature.editor
  * Phase 2D #148 ([TopicFormMode.EditFirstPost]) requires the full
  * `(cat, subcat, topicId, page, numreponse)` tuple : `numreponse` identifies
  * the first post HFR is going to rewrite, and the GET URL needs every other id
- * to build a valid `message.php?…` link. [TopicFormMode.New] (Phase 2E #149)
- * will rely on a subset (`cat`, optional `subcat`, no `topicId` / `numreponse`).
+ * to build a valid `message.php?…` link. Phase 2E #149 ([TopicFormMode.New])
+ * relies on a subset (`cat`, optional entry `subcat`, no `topicId` /
+ * `numreponse`) to open the create-topic composer.
  */
 data class TopicFormRequest(
     val mode: TopicFormMode,

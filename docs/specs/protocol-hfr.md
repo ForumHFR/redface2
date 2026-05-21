@@ -206,7 +206,7 @@ Pour un post normal, la réponse succès contient un refresh vers la page du top
 
 Les inconnues restantes sont explicitement limitées aux points suivants :
 
-- succès de création topic : formulaire GET capturé (`write_create_topic_form_android_cat.html`), mais pas de fixture `write_create_topic_success_response.html`. Impact : Phase 2C devra valider le POST création sur un topic temporaire supprimé ensuite, ou traiter la réponse succès comme non garantie ;
+- succès de création topic : formulaire GET capturé (`write_create_topic_form_android_cat.html`) et POST MVP livré en Phase 2E (#149), mais toujours pas de fixture `write_create_topic_success_response.html`. Impact : le submit classe le succès via `ReplySubmitResponseParser` sans extraire `newTopicId` / `newNumreponse` ; la navigation retombe sur la liste de la sous-catégorie cible + Toast tant qu'une capture succès réelle ne prouve pas le format du refresh ;
 - sondage : les champs de formulaire FP sont observés, mais aucun POST avec sondage n'a été envoyé. Impact : création/édition de sondage hors MVP écriture ;
 - `verifrequet=1100` : valeur observée dans tous les formulaires, pas de variant négatif testé. Impact : envoyer la valeur observée telle quelle ;
 - second paramètre de `[quotemsg=numreponse,X,user_id]` : valeurs observées `768`, `640`, `1`; le sens exact reste opaque. Impact : ne pas reconstruire localement les quotes, réutiliser le `content_form` prérempli par HFR ;

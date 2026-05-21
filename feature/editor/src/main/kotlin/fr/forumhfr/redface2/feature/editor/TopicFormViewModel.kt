@@ -14,6 +14,8 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
+import fr.forumhfr.redface2.core.model.write.NewTopicContext
+import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
@@ -33,20 +35,19 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * Phase 2D #148 — ViewModel for the topic-level form. Currently scoped to
- * [TopicFormMode.EditFirstPost] ; [TopicFormMode.New] (Phase 2E #149) still
- * lands on the placeholder. Architecture mirrors [PostEditorViewModel] :
+ * ViewModel for the topic-level form. [TopicFormMode.EditFirstPost] edits an
+ * existing first post (Phase 2D #148) and [TopicFormMode.New] creates a topic
+ * (Phase 2E #149). Architecture mirrors [PostEditorViewModel] :
  *
- * 1. On init, fetch the topic form via [TopicFormRepository.fetchEditFirstPostForm]
- *    using `(cat, subcat, topicId, page, numreponse)` from the request.
+ * 1. On init, fetch the topic form via [TopicFormRepository] using the
+ *    mode-specific request shape.
  * 2. Hydrate `subject`, `draft`, the three per-post options, and the parsed
  *    subcategory selection ONCE — subsequent silent refetches (e.g. after
  *    `InvalidHashCheck`) must never overwrite user edits.
- * 3. On [TopicFormIntent.SubmitClicked], POST via
- *    [TopicFormRepository.submitEditFirstPost] with the user's final values.
- * 4. On success, emit [TopicFormEffect.SubmitSucceeded] carrying `targetPage`
- *    and `scrollTo = numreponse` so the navigation host can refresh the
- *    topic and scroll to the edited FP.
+ * 3. On [TopicFormIntent.SubmitClicked], POST via the matching repository method
+ *    with the user's final values.
+ * 4. On success, emit [TopicFormEffect.SubmitSucceeded] for edit FP or
+ *    [TopicFormEffect.NewTopicCreated] for create-topic navigation.
  */
 @HiltViewModel(assistedFactory = TopicFormViewModel.Factory::class)
 class TopicFormViewModel @AssistedInject constructor(
@@ -64,6 +65,14 @@ class TopicFormViewModel @AssistedInject constructor(
             topicId = request.topicId,
             page = request.page,
             numreponse = request.numreponse,
+            // New-topic has nothing useful to hydrate into `subject` / `draft`
+            // from the server (the user is writing from scratch). Lock both
+            // hydration flags to `true` from the start so a silent
+            // `InvalidHashCheck` refetch can never clobber what the user
+            // already typed. Edit FP keeps the default `false` until the
+            // fetched form actually carries content.
+            subjectHydratedFromServer = request.mode == TopicFormMode.New,
+            draftHydratedFromServer = request.mode == TopicFormMode.New,
         ),
     )
     val state: StateFlow<TopicFormState> = _state.asStateFlow()
@@ -75,8 +84,9 @@ class TopicFormViewModel @AssistedInject constructor(
     private var submitJob: Job? = null
 
     init {
-        if (request.mode == TopicFormMode.EditFirstPost) {
-            loadEditFirstPostFormIfPossible()
+        when (request.mode) {
+            TopicFormMode.EditFirstPost -> loadEditFirstPostFormIfPossible()
+            TopicFormMode.New -> loadNewTopicFormIfPossible()
         }
     }
 
@@ -199,8 +209,15 @@ class TopicFormViewModel @AssistedInject constructor(
         _state.update { it.copy(isLoadingForm = false, submitError = mapped) }
     }
 
-    @Suppress("ReturnCount") // Guard clauses
     private fun onSubmitClicked() {
+        when (_state.value.mode) {
+            TopicFormMode.EditFirstPost -> onSubmitEditFirstPostClicked()
+            TopicFormMode.New -> onSubmitNewTopicClicked()
+        }
+    }
+
+    @Suppress("ReturnCount") // Guard clauses
+    private fun onSubmitEditFirstPostClicked() {
         val snapshot = _state.value
         if (!snapshot.canSubmit) return
         val context = buildEditFirstPostContext() ?: run {
@@ -239,6 +256,100 @@ class TopicFormViewModel @AssistedInject constructor(
                 onSuccess = { result -> handleSubmitOutcome(snapshot.numreponse, result) },
                 onFailure = ::handleSubmitFailure,
             )
+        }
+    }
+
+    @Suppress("ReturnCount") // Guard clauses
+    private fun onSubmitNewTopicClicked() {
+        val snapshot = _state.value
+        if (!snapshot.canSubmit) return
+        val context = buildNewTopicContext() ?: run {
+            _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
+            return
+        }
+        val form = loadedForm ?: run {
+            loadNewTopicFormIfPossible()
+            return
+        }
+        if (form.isAnonymous) {
+            _state.update { it.copy(submitError = SubmitError.Hfr(ReplyFailureReason.LoginRequired)) }
+            return
+        }
+        if (submitJob?.isActive == true) return
+
+        val options = ReplyFormOptions(
+            signatureEnabled = snapshot.signatureEnabled,
+            smileyDisabled = snapshot.smileyDisabled,
+            emailNotificationEnabled = snapshot.emailNotificationEnabled,
+        )
+        val selectedSubcat = snapshot.selectedSubcat ?: error("canSubmit lied about selectedSubcat")
+        _state.update { it.copy(isSubmitting = true, submitError = null) }
+        submitJob = viewModelScope.launch {
+            val outcome = runCatching {
+                topicFormRepository.submitNewTopic(
+                    context = context,
+                    form = form,
+                    subject = snapshot.subject.text,
+                    bbcodeContent = snapshot.draft.text,
+                    selectedSubcat = selectedSubcat,
+                    options = options,
+                )
+            }
+            outcome.fold(
+                onSuccess = { result -> handleNewTopicOutcome(context, selectedSubcat, result) },
+                onFailure = ::handleSubmitFailure,
+            )
+        }
+    }
+
+    private fun loadNewTopicFormIfPossible() {
+        val context = buildNewTopicContext() ?: run {
+            _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
+            return
+        }
+        _state.update { it.copy(isLoadingForm = true, submitError = null) }
+        viewModelScope.launch {
+            val outcome = runCatching { topicFormRepository.fetchNewTopicForm(context) }
+            outcome.fold(
+                onSuccess = { form ->
+                    loadedForm = form
+                    // The new-topic flow never hydrates subject/draft from the
+                    // server (init already locked both flags to `true`), so we
+                    // don't need to recompute the preview here. We do still
+                    // need to land options + subcategory choices in state.
+                    _state.update { current -> current.withFormHydration(form, current.preview) }
+                },
+                onFailure = { error -> handleFetchFailure(error) },
+            )
+        }
+    }
+
+    private fun handleNewTopicOutcome(
+        context: NewTopicContext,
+        selectedSubcat: Int,
+        result: NewTopicSubmitResult,
+    ) {
+        when (result) {
+            is NewTopicSubmitResult.Success -> {
+                _effects.trySend(
+                    TopicFormEffect.NewTopicCreated(
+                        cat = context.cat,
+                        subcat = selectedSubcat,
+                        newTopicId = result.newTopicId,
+                        newNumreponse = result.newNumreponse,
+                    ),
+                )
+                _state.update { it.copy(isSubmitting = false, submitError = null) }
+            }
+            is NewTopicSubmitResult.Failure -> {
+                if (result.reason == ReplyFailureReason.InvalidHashCheck) {
+                    loadedForm = null
+                    loadNewTopicFormIfPossible()
+                }
+                _state.update {
+                    it.copy(isSubmitting = false, submitError = SubmitError.Hfr(result.reason))
+                }
+            }
         }
     }
 
@@ -288,6 +399,20 @@ class TopicFormViewModel @AssistedInject constructor(
                 "→ ${mapped::class.simpleName}",
         )
         _state.update { it.copy(isSubmitting = false, submitError = mapped) }
+    }
+
+    /**
+     * Builds the [NewTopicContext] when the routing state has enough data to
+     * fetch the create-topic form. `entrySubcat` is the chip the user came
+     * from (nullable on the « Toutes » view) ; the final subcat lands at
+     * submit time via `selectedSubcat` from the dropdown, never through this
+     * context.
+     */
+    private fun buildNewTopicContext(): NewTopicContext? {
+        val snapshot = _state.value
+        val cat = snapshot.cat?.takeIf { it > 0 } ?: return null
+        val entrySubcat = snapshot.subcat?.takeIf { it > 0 }
+        return NewTopicContext(cat = cat, entrySubcat = entrySubcat)
     }
 
     @Suppress("ReturnCount", "ComplexCondition") // Each guard returns null with a distinct reason ; the
@@ -348,7 +473,12 @@ class TopicFormViewModel @AssistedInject constructor(
             preview = if (hydrateDraft && isPreviewVisible) nextPreview else preview,
             subjectHydratedFromServer = subjectHydratedFromServer || hydrateSubject,
             draftHydratedFromServer = draftHydratedFromServer || hydrateDraft,
-            selectedSubcat = if (hydrateOptions) form.selectedSubcat else selectedSubcat,
+            // The form's `selectedSubcat` is `Int?` post-#149 :
+            //  - Edit FP : non-null by `parseEditFirstPost` contract, kept as-is.
+            //  - New : HFR serves no pre-selection, so `form.selectedSubcat` is
+            //    null. We fall back to `subcat` (the entry chip from the
+            //    request), letting the user override via the dropdown later.
+            selectedSubcat = if (hydrateOptions) form.selectedSubcat ?: subcat else selectedSubcat,
             subcategoryChoices = form.subcategoryChoices,
             pollPresent = form.poll.present,
             pollEditable = form.poll.editableInThisVersion,
@@ -360,6 +490,10 @@ class TopicFormViewModel @AssistedInject constructor(
                 emailNotificationEnabled
             },
             optionsHydratedFromForm = true,
+            // Propagate the parsed anonymous flag so `canSubmit` can refuse
+            // the POST locally (the wire would refuse too, but we don't want
+            // to leak attempt artefacts in the diagnostics buffer either).
+            isAnonymous = form.isAnonymous,
             submitError = if (form.isAnonymous) {
                 SubmitError.Hfr(ReplyFailureReason.LoginRequired)
             } else {

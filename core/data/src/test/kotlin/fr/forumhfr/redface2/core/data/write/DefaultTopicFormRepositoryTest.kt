@@ -2,6 +2,9 @@ package fr.forumhfr.redface2.core.data.write
 
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
+import fr.forumhfr.redface2.core.model.write.NewTopicContext
+import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
+import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.network.HfrClient
@@ -234,6 +237,179 @@ class DefaultTopicFormRepositoryTest {
         assertTrue(
             "At least one record must surface FP submit success",
             records.any { it.message.contains("POST FP edit Success") },
+        )
+    }
+
+    // ---- Phase 2E (#149) — create-topic --------------------------------------
+
+    @Test
+    fun `GET new-topic hits message_php with cat, subcat, sondage, owntopic, new params`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("write_create_topic_form_android_cat.html")))
+        repository.fetchNewTopicForm(NewTopicContext(cat = 23, entrySubcat = 550))
+
+        val recorded = server.takeRequest()
+        assertEquals("GET", recorded.method)
+        val url = recorded.requestUrl!!
+        assertEquals("message.php", url.pathSegments.first())
+        assertEquals("hfr.inc", url.queryParameter("config"))
+        assertEquals("23", url.queryParameter("cat"))
+        assertEquals("550", url.queryParameter("subcat"))
+        assertEquals("0", url.queryParameter("sondage"))
+        assertEquals("0", url.queryParameter("owntopic"))
+        assertEquals("0", url.queryParameter("new"))
+    }
+
+    @Test
+    fun `GET new-topic with null entrySubcat passes subcat=0`() = runTest {
+        // « Toutes les sous-catégories » view : HFR is fine with subcat=0 and
+        // serves the same composer (sub-category dropdown left fully empty).
+        server.enqueue(MockResponse().setBody(fixture("write_create_topic_form_android_cat.html")))
+        repository.fetchNewTopicForm(NewTopicContext(cat = 23, entrySubcat = null))
+
+        val recorded = server.takeRequest()
+        assertEquals("0", recorded.requestUrl!!.queryParameter("subcat"))
+    }
+
+    @Test
+    fun `POST new-topic hits bddpost_php with sujet subcat content from_subcat empty post numreponse`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("write_create_topic_form_android_cat.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+
+        val context = NewTopicContext(cat = 23, entrySubcat = 550)
+        val form = repository.fetchNewTopicForm(context)
+        val result = repository.submitNewTopic(
+            context = context,
+            form = form,
+            subject = "Topic test Redface 2 v49",
+            bbcodeContent = "Contenu du nouveau topic.",
+            selectedSubcat = 562, // user picked « Téléphone » instead of the entry chip
+            options = ReplyFormOptions(signatureEnabled = true),
+        )
+        assertTrue("Create-topic must classify Success — got $result", result is NewTopicSubmitResult.Success)
+
+        server.takeRequest() // drop GET
+        val recorded = server.takeRequest()
+        assertEquals("POST", recorded.method)
+        assertEquals("bddpost.php", recorded.requestUrl!!.pathSegments.first())
+
+        val body = parseFormBody(recorded.body.readUtf8())
+        assertEquals("Topic test Redface 2 v49", body["sujet"])
+        assertEquals("Contenu du nouveau topic.", body["content_form"])
+        assertEquals("23", body["cat"])
+        // Dropdown choice — distinct from the entry chip below.
+        assertEquals("562", body["subcat"])
+        // d'arrivée chip — sourced from `form.hiddenFields["from_subcat"]`,
+        // NOT from `selectedSubcat`. The two are deliberately decoupled.
+        assertEquals("550", body["from_subcat"])
+        // Brand-new topic : these three identifiers are always blank.
+        assertEquals("", body["post"])
+        assertEquals("", body["numreponse"])
+        assertEquals("", body["numrep"])
+        assertEquals("1", body["page"])
+        assertEquals("1100", body["verifrequet"])
+        assertTrue("hash_check must reach the wire", body["hash_check"].orEmpty().isNotEmpty())
+        assertEquals("1", body["signature"])
+        // Deny rules — wire never sees these.
+        assertFalse("password must never reach HFR", body.containsKey("password"))
+        assertFalse("delete must never reach HFR on create-topic", body.containsKey("delete"))
+        // Poll fields must not leak on a no-poll fixture.
+        listOf(
+            "have_sondage", "textreponse0", "textreponse5", "textreponse10",
+            "allowvisitor", "max_votes", "jour", "mois", "annee", "heure", "minute",
+        ).forEach { name ->
+            assertFalse(
+                "$name must not be POSTed when no sondage is active — body=$body",
+                body.containsKey(name),
+            )
+        }
+    }
+
+    @Test
+    fun `POST new-topic with signature off omits the wire key`() = runTest {
+        // Browser-style submit : an unchecked option is absent from the POST,
+        // not present-and-false. We pin this contract for the three toggles
+        // shared with Edit FP / Reply.
+        server.enqueue(MockResponse().setBody(fixture("write_create_topic_form_android_cat.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+
+        val context = NewTopicContext(cat = 23, entrySubcat = 550)
+        val form = repository.fetchNewTopicForm(context)
+        repository.submitNewTopic(
+            context = context,
+            form = form,
+            subject = "Topic",
+            bbcodeContent = "Body",
+            selectedSubcat = 550,
+            options = ReplyFormOptions(
+                signatureEnabled = false,
+                smileyDisabled = false,
+                emailNotificationEnabled = false,
+            ),
+        )
+
+        server.takeRequest()
+        val recorded = server.takeRequest()
+        val body = parseFormBody(recorded.body.readUtf8())
+        assertFalse("signature must be absent when toggle off", body.containsKey("signature"))
+        assertFalse("smiley must be absent when toggle off", body.containsKey("smiley"))
+        assertFalse("emaill must be absent when toggle off", body.containsKey("emaill"))
+    }
+
+    @Test
+    fun `POST new-topic on an anonymous form short-circuits as LoginRequired`() = runTest {
+        // The anonymous fixture has `pseudo` empty + `password` visible. The
+        // wire would refuse the POST anyway ; we refuse it locally so the
+        // diagnostics buffer never carries the attempt details.
+        server.enqueue(MockResponse().setBody(fixture("write_create_topic_anonymous_form.html")))
+
+        val context = NewTopicContext(cat = 23, entrySubcat = 550)
+        val form = repository.fetchNewTopicForm(context)
+        val result = repository.submitNewTopic(
+            context = context,
+            form = form,
+            subject = "Topic",
+            bbcodeContent = "Body",
+            selectedSubcat = 550,
+        )
+        assertTrue(result is NewTopicSubmitResult.Failure)
+        assertEquals(
+            ReplyFailureReason.LoginRequired,
+            (result as NewTopicSubmitResult.Failure).reason,
+        )
+        // Only the GET went on the wire ; no POST attempt.
+        server.takeRequest()
+        assertEquals(0, server.requestCount - 1)
+    }
+
+    @Test
+    fun `new-topic diagnostics do not leak hash_check, subject, content or refreshUrl`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("write_create_topic_form_android_cat.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+
+        val context = NewTopicContext(cat = 23, entrySubcat = 550)
+        val form = repository.fetchNewTopicForm(context)
+        val secretSubject = "TRES-CONFIDENTIEL-SUJET"
+        val secretContent = "TRES-CONFIDENTIEL-CONTENU"
+        repository.submitNewTopic(
+            context = context,
+            form = form,
+            subject = secretSubject,
+            bbcodeContent = secretContent,
+            selectedSubcat = 550,
+        )
+
+        val records = diagnostics.entries.value
+        // Token must never appear in any log line.
+        assertTrue(records.none { it.message.contains("REDACTED_HASH_CHECK") })
+        // Subject + content are not surfaced in the log either.
+        assertTrue(records.none { it.message.contains(secretSubject) })
+        assertTrue(records.none { it.message.contains(secretContent) })
+        // Refresh URL parsed from the reply success fixture must be collapsed.
+        assertTrue(records.none { it.message.contains("refreshUrl=/hfr/") })
+        // A success log line exists.
+        assertTrue(
+            "Expected at least one Success record",
+            records.any { it.message.contains("POST new-topic Success") },
         )
     }
 
