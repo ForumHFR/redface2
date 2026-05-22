@@ -1,0 +1,39 @@
+Source : https://forum.hardware.fr/forum1.php?recherches=1&cat=10*hfr.inc&orderSearch=1&config=hfr.inc&pseud=&search=kotlin&titre=1&jour=22&mois=5&annee=2026&resSearch=20&daterange=2&subcat=0&searchtype=1&trash=0&trash_post=0&moderation=0
+
+Captured : 2026-05-22 via curl, anonymous (no session cookies).
+
+Query : `search=kotlin`, `cat=10*hfr.inc` (Programmation, explicit scope), `titre=1`.
+
+Shape : « explicit cat » — when the request scopes the search to a specific category
+upfront (instead of `cat=`), HFR returns the result listing WITHOUT the
+« moteur de recherche » banner and WITHOUT the pivot dropdown. The response is
+indistinguishable from a regular `forum1.php` topic listing — same markup, same
+pagination, just filtered by the (server-side) search query.
+
+This shape is one of the four result shapes ; see `search_kotlin_pivot_single.source.txt`
+for the full matrix and the parser's detection rules.
+
+Implication for the parser : when the caller has decided to scope the search
+upfront (e.g. user searches from within a category screen), the response can be
+parsed by the existing `forum1.php` listing parser without any search-specific
+preamble handling. Only the « toutes catégories » entry point needs the multi-cat
+branch.
+
+Difference vs `search_kotlin_pivot_single.html` (same query, different cat param) :
+- pivot_single uses `cat=` → HFR's server still performs a multi-cat search internally,
+  finds matches only in Programmation, and renders the banner + pivot box with that
+  single option selected.
+- explicit_cat uses `cat=10*hfr.inc` → HFR's server constrains the search to cat=10
+  from the start, skips the multi-cat banner, and renders a plain listing.
+
+The result row content is identical between the two fixtures for this query (3 topics in
+Programmation). The diff is purely the wrapper markup around the rows.
+
+Trailing standard-listing dropdown : at line ~128, there is `<select name="cat" onchange=...>`
+inside the « Goto category » footer that is present on ALL `forum1.php` pages (not specific
+to search). Do not confuse it with the search pivot — the search pivot is inside the
+`<div class="search">` block at line ~104, with its `<option value="10*hfr.inc">` format.
+The footer dropdown uses plain integer values (`<option value="10">`) and has a
+`document.getElementById('goto').submit()` onchange handler.
+
+Sanitization : none required (anonymous capture, public listing).

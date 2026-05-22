@@ -1,0 +1,46 @@
+Source : https://forum.hardware.fr/forum1.php?recherches=1&cat=&orderSearch=1&config=hfr.inc&pseud=&search=android&titre=1&jour=22&mois=5&annee=2026&resSearch=20&daterange=2&subcat=0&searchtype=1&trash=0&trash_post=0&moderation=0
+
+Captured : 2026-05-22 via curl, anonymous (no session cookies).
+
+Query : `search=android`, `cat=` (all categories), `titre=1` (search in topic titles).
+
+Shape : « pivot multi » — the query matched 18 categories (basically every public cat on
+HFR). The page therefore carries the « moteur de recherche » banner + a `<select name="cat">`
+pivot dropdown with 18 `<option>` entries, the first one (Hardware, cat=1) marked
+`selected`. The result listing below the pivot is HFR's standard `forum1.php` topic-listing
+markup constrained to cat=1 — switching to another category in the dropdown re-issues the
+search scoped to that cat.
+
+This fixture is the companion to `search_kotlin_pivot_single.html` and exercises the
+N>1 branch of the multi-cat parser. See `search_kotlin_pivot_single.source.txt` for the
+overall 4-shape matrix and detection rules.
+
+Contract observed in this shape :
+- Banner : `<b>Le moteur de recherche a trouvé des résultats dans les catégories suivantes :</b>`
+- Pivot dropdown : 18 `<option>` entries inside a single `<optgroup label="FORUM HardWare.fr">`.
+  Each option uses the same `value="<catId>*hfr.inc"` format ; only the first is `selected`.
+  Categories observed : Hardware (1), Hardware - Périphériques (16), Ordinateurs portables (15),
+  Electronique/domotique/DIY (30), Technologies Mobiles (23), Apple (25), Video & Son (3),
+  Photo numérique (14), Jeux Video (5), Windows & Software (4), Réseaux grand public/SoHo (22),
+  Systèmes & Réseaux Pro (21), Linux et OS Alternatifs (11), Programmation (10), Graphisme (12),
+  Achats & Ventes (6), Emploi & Etudes (8), Discussions (13).
+- Hidden post_cat_list :
+  `<input type="hidden" value="|1*hfr|16*hfr|15*hfr|30*hfr|23*hfr|25*hfr|3*hfr|14*hfr|5*hfr|4*hfr|22*hfr|21*hfr|11*hfr|10*hfr|12*hfr|6*hfr|8*hfr|13*hfr|" name="post_cat_list">`
+  Same order as the dropdown options. The trailing pipe `|` after the last entry is present
+  on both `|0|...|13*hfr|` ; the parser must tolerate it (don't crash on empty tokens when
+  splitting by `|`).
+- The pivot dropdown lists ONLY the « FORUM HardWare.fr » optgroup. If HFR ever adds another
+  community (e.g. « FORUM hardware-tomshardware.fr »), expect additional `<optgroup>` blocks ;
+  the parser must walk them all rather than assuming a single optgroup.
+- Echoed query : `<input type="hidden" value="ANDROID" name="search" />`.
+- Listing : `forum1.php` standard markup, scoped to cat=1 (Hardware) — the first matching
+  category. To see Programmation's results the user re-submits the form with the dropdown
+  set to Programmation.
+
+Pagination : not exercised by this capture (3 first results visible, query has many more
+matches but resSearch=20 caps the first page). A « page=2 » follow-up capture would be
+needed to verify the standard `forum1.php` pagination markup applies verbatim here, but
+based on the visible « Page : 1 » header at top there is no reason to expect divergence
+from the regular cat listing pagination.
+
+Sanitization : none required (same reasoning as the single-pivot variant).

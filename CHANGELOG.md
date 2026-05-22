@@ -8,7 +8,20 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-Phase 2F-C (#11 partiel) — picker smileys symétrique sur `TopicFormScreen` (Edit FP + New topic). Phase 2F-B (#11 partiel) — picker smileys dans l'éditeur (bottom-sheet Material 3, onglet Standard 25 builtins HFR + onglet Wiki live via `message-smi-mp-aj.php`). Phase 2E (#149) création de topic + follow-up Phase 2B-B (#144) déjà mergés décrits plus bas.
+Phase 2G-A (#150 partiel) — recherche HFR réelle dans les titres de topics (`forum1.php?recherches=1&...`), parser pivot/single/multi/no-results, écran Recherche fonctionnel avec navigation vers le topic. Phase 2F-C (#11 partiel) — picker smileys symétrique sur `TopicFormScreen` (Edit FP + New topic). Phase 2F-B (#11 partiel) — picker smileys dans l'éditeur (bottom-sheet Material 3, onglet Standard 25 builtins HFR + onglet Wiki live via `message-smi-mp-aj.php`). Phase 2E (#149) création de topic + follow-up Phase 2B-B (#144) déjà mergés décrits plus bas.
+
+### Added (Phase 2G-A #150 partiel)
+- Modèles `:core:model/search/` : `SearchRequest`, `SearchCategoryScope` (sealed All|Category), `SearchResultPage`, `SearchPivotCategory`, `SearchTopicResult`. Honest schema : `numreponse`/`page` `null` car le résultat « titres » HFR ne porte pas le post précis, contrairement à la recherche contenu (hors scope 2G-A).
+- `SearchResultParser` (`:core:parser/search/`) : 4 shapes supportées (no-results `.hop`, pivot single, pivot multi, explicit cat), strip NBSP du `lastReplyAt`, regex `\d+\*hfr.inc` pour les options pivot (forward-compat), détection lock via `td.sujetCase3 img[src$=lock.gif]`, fallback `topicId` via `title="Sujet n°…"`.
+- `HfrClient.searchTopics(...)` : endpoint **anonymous** vers `/forum1.php?recherches=1&...`, paramètres exhaustifs (titre=1, daterange=2, etc.) avec date injectée pour testabilité, pas de cookies auth.
+- `SearchRepository` (`:core:domain`) + `DefaultSearchRepository` (`:core:data`) + module Hilt. `Clock` injecté pour le `LocalDate.now(clock)`. `withContext(ioDispatcher)` autour de l'IO + parse. Catch `IOException` qui rebrande l'erreur pour stripper l'URL HFR (qui contiendrait `search=<query>` en clair).
+- `:feature:search` devient un vrai écran MVI : `SearchUiState`, `SearchIntent` (QueryChanged/Submit/Retry/CategorySelected), `SearchViewModel` (cancel-previous-job, retry avec dernière query soumise, pas la valeur courante du champ), `SearchScreen` Compose (champ + bouton + IME Search + AssistChip pivot + Card résultats + loading/error/empty/idle).
+- Navigation : `SearchRoute` câblé sur `TopicRoute(cat, post, page=1, scrollTo=null)` puisque la recherche titre ne porte pas de `numreponse`.
+
+### Tests (Phase 2G-A)
+- `SearchResultParserTest` : 7 cas sur les 4 fixtures (no-results, pivot single, pivot multi, explicit cat) + NBSP normalisation + ParseException quand aucun cat exploitable + `requestedPage` ignorée si pager présent.
+- `DefaultSearchRepositoryTest` : 5 cas sur MockK — cat=null encode vide, `Category(10)` passe 10, date du `Clock`, no-results sans throw, `IOException` rebrandée sans leak query.
+- `SearchViewModelTest` : 8 cas — QueryChanged, Submit blank no-op, Submit success, no-results sans erreur, IOException → Network kind, Retry réutilise la dernière soumission (pas la field value), CategorySelected re-scope, cancel-previous-job sur submit concurrent.
 
 ### Added (Phase 2F-C #11 partiel)
 - `TopicFormState` reçoit `smileyPicker: SmileyPickerState` et `userId: Int?` (mêmes types sealed que `PostEditorState`, pas de fork).
