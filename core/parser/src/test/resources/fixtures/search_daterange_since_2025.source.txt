@@ -1,0 +1,36 @@
+Source : https://forum.hardware.fr/forum1.php?recherches=1&cat=10*hfr.inc&orderSearch=0&config=hfr.inc&pseud=&search=android&titre=0&jour=1&mois=1&annee=2025&resSearch=20&daterange=1&subcat=0&searchtype=1&trash=0&trash_post=0&moderation=0
+
+Captured : 2026-05-22 via curl, anonymous (no session cookies).
+
+Query : `search=android`, `cat=10*hfr.inc` (Programmation), `titre=0` (content of messages), `daterange=1` (à partir du), `jour=1 mois=1 annee=2025` (cutoff date).
+
+Shape : « daterange filter, explicit cat, content search » — exercises `daterange=1` (« à partir du <date> ») with a cutoff in early 2025. The response is, again, **identical in shape** to the default `daterange=2` variant — the date filter is applied server-side and does not modify the listing markup.
+
+`daterange` value space (decoded from `/search.php?config=hfr.inc`) :
+
+| value | label | semantics |
+|-------|-------|-----------|
+| `0` | postés le | exact date — single day |
+| `1` | à partir du | from <date> onwards |
+| `2` | depuis le début | no date filter (default) |
+
+So the « to » bound is implicit : `daterange=0` is a single day, `daterange=1` is open-ended forward, `daterange=2` is the whole archive. There is **no « between dates » bracket** — HFR's UI doesn't surface a two-bound date range.
+
+10 topic rows in the listing for this query (smaller than the 14 of the equivalent unfiltered content search — confirms the date filter is applied).
+
+Implications for 2G-B :
+- The UI exposes the 3 daterange modes via a `RadioGroup` or `Dropdown` in « filtres avancés ».
+- When `daterange=0/1`, the UI must surface a `DatePicker` to capture the cutoff. When `daterange=2`, the date inputs are hidden but the form still serialises them (form quirk — they're sent as today's date).
+- `searchRequest` extends with a sealed `DateFilter` :
+  ```kotlin
+  sealed interface DateFilter {
+      data object All : DateFilter
+      data class From(val date: LocalDate) : DateFilter
+      data class On(val date: LocalDate) : DateFilter
+  }
+  ```
+  The repository maps each to the appropriate `daterange` + `jour/mois/annee` wire values.
+
+Sanitization : none required.
+- `hash_check` empty (anonymous).
+- No cookies, no PII.

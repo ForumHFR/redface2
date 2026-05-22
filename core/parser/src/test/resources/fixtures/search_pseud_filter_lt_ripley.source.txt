@@ -1,0 +1,25 @@
+Source : https://forum.hardware.fr/forum1.php?recherches=1&cat=10*hfr.inc&orderSearch=1&config=hfr.inc&pseud=Lt+Ripley&search=&titre=1&jour=22&mois=5&annee=2026&resSearch=20&daterange=2&subcat=0&searchtype=1&trash=0&trash_post=0&moderation=0
+
+Captured : 2026-05-22 via curl, anonymous (no session cookies).
+
+Query : `search=` (empty), `pseud=Lt+Ripley` (author filter), `cat=10*hfr.inc` (Programmation), `titre=1`.
+
+Shape : « pseud filter, explicit cat, no search term » — HFR supports searching by author alone (empty `search=`), returning every topic in the scope that the named user has authored OR participated in. The row shape is **identical** to a regular title/content search — no per-row hint that says « this user matched » beyond the implicit understanding of the query semantics.
+
+Picked « Lt Ripley » as the test author because :
+- His pseudo already appears in the 2G-A fixtures (`search_kotlin_pivot_single.html` lists him as the author of « Mes débuts en kotlin (android) »).
+- He is a public, active HFR contributor — no PII concern beyond the standard exposure of any forum username.
+
+20 topic rows in the listing (capped by `resSearch=20`). All rows have `sujetCase6` = author of the topic, which is « Lt Ripley » for some and the actual topic author for others (Lt Ripley participated but didn't open). HFR does **not** distinguish « authored » vs « participated » in this view — it's a flat « topics where this user posted » list.
+
+Implications for 2G-B :
+- The UI exposes a separate « auteur » field (probably in a « filtres avancés » expandable panel) and the ViewModel plumbs it as a `pseud` parameter on `SearchRequest`.
+- The parser doesn't need to know about the filter — it parses the listing the same way. The filter lives in the request layer.
+- The result rows include topics where the author is NOT the searched user (because the user posted INSIDE them) — the UI should clarify this with a header like « Sujets auxquels Lt Ripley a participé » rather than « Sujets de Lt Ripley ».
+
+Edge case : `pseud=...&search=...` with both set narrows the search further. Not captured separately because it's just an AND of two filters at the wire layer ; the response shape doesn't differ.
+
+Sanitization : none required.
+- `hash_check` empty (anonymous capture, no auth token).
+- No cookies, no PII beyond the public username that the search filter explicitly required.
+- The 20 topic titles in the listing are all public Programmation topics where Lt Ripley participated — same exposure level as the 2G-A title-search fixture.
