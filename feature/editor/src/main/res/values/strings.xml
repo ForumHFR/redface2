@@ -30,4 +30,15 @@
     <string name="editor_topic_subcat_picker_placeholder">Choisir une sous-catégorie</string>
     <string name="editor_topic_poll_readonly_note">Ce sujet contient un sondage. Son édition n\'est pas encore disponible dans cette version ; vos réponses utilisateurs et options de vote restent inchangées.</string>
     <string name="editor_new_topic_created">Sujet créé. Rafraîchis la liste si besoin pour le retrouver.</string>
+    <string name="editor_smiley_open">Smileys</string>
+    <string name="editor_smiley_open_description">Ouvrir le sélecteur de smileys</string>
+    <string name="editor_smiley_title">Smileys</string>
+    <string name="editor_smiley_tab_standard">Standard</string>
+    <string name="editor_smiley_tab_wiki">Wiki</string>
+    <string name="editor_smiley_search_label">Rechercher un smiley perso</string>
+    <string name="editor_smiley_search_hint">Tape au moins 3 caractères pour interroger le wiki HFR.</string>
+    <string name="editor_smiley_search_loading">Recherche…</string>
+    <string name="editor_smiley_search_empty">Aucun smiley trouvé.</string>
+    <string name="editor_smiley_search_error">Erreur réseau. Réessaie dans un instant.</string>
+    <string name="editor_smiley_insert_description">Insérer %1$s</string>
 </resources>

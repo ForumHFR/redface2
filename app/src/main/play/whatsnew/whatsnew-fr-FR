@@ -1,8 +1,9 @@
-Build alpha Redface 2 — hotfix connexion.
+Build alpha Redface 2 — picker smileys éditeur.
 
-Correctif :
-- Les gestionnaires de mots de passe reconnaissent mieux les champs pseudo et mot de passe.
-- Correction ciblée pour éviter que Proton Pass colle le mot de passe dans le champ pseudo.
-- Aucun changement fonctionnel sur le flux de lecture/écriture.
+Nouveautés :
+- Bouton Smileys dans l'éditeur Reply / Quote / Edit.
+- Onglet Standard avec les smileys HFR intégrés.
+- Onglet Wiki avec recherche live des smileys perso.
+- Insertion BBCode brute avec la convention d'espaces HFR.
 
 Merci de remonter tout bug via le canal alpha ou le dépôt GitHub.

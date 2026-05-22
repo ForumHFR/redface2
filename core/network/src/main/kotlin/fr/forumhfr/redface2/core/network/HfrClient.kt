@@ -280,6 +280,29 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * Phase 2F-B (#11 partial) — GET HFR's wiki smiley search endpoint. The endpoint accepts
+     * `user_id=0` for anonymous probes (cf. `message-smi-mp-aj.php` capture 2026-05-22) but a
+     * logged-in form provides the user's own id so HFR pages favourites first.
+     *
+     * URL : `/message-smi-mp-aj.php?config=hfr.inc&user_id={userId}&findsmilies={query}`.
+     * Returns an HTML fragment (no `<html>/<body>` wrapper) consumed by `SmileySearchParser`.
+     *
+     * Uses the **anonymous** client : the endpoint does not gate on session, and routing through
+     * the anonymous jar avoids any chance of leaking the user's cookies into a debug log of the
+     * search query (the URL itself contains the `findsmilies=` payload, which is fine).
+     */
+    suspend fun getSmileySearch(userId: Int, query: String): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("message-smi-mp-aj.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("user_id", userId.toString())
+            .addQueryParameter("findsmilies", query)
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return anonymous.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Executes the call, returns the body as a UTF-8 string, and raises
      * [SessionExpiredException] if HFR redirected to the login page or returned the login form
      * inline. When [tracePrefix] is non-null, the OkHttp call up to headers is wrapped in

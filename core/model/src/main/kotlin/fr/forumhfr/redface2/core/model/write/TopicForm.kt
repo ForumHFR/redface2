@@ -33,6 +33,13 @@ data class TopicForm(
     val subject: String,
     val initialContent: String,
     /**
+     * HFR user id parsed from the JS bootstrap call `find_smilies_timer('hfr.inc', N)`.
+     * Used by the Phase 2F-B (#11 partial) wiki smiley picker to call the search endpoint
+     * with the logged-in id. `null` for anonymous / unparseable forms (the repository falls
+     * back to `user_id=0`).
+     */
+    val userId: Int? = null,
+    /**
      * Pre-selected sub-category from the parsed `<select>`. `null` is a valid
      * value in two cases : the « Aucune » option is the only `selected` (Edit FP
      * fail-safe path returns a `Result.failure` before reaching here), or HFR

@@ -15,6 +15,30 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v51 — `0.3.11` — 2026-05-22
+
+**Statut** : `closed`
+**Commit** : à venir (build de test avant merge PR #174)
+**Fichier** : artefact CD `app-v51`
+
+Phase 2F-B — premier picker de smileys dans l'éditeur BBCode.
+
+### Added
+- Bouton « Smileys » dans l'éditeur Reply / Quote / Edit.
+- Bottom sheet Material 3 avec onglet Standard (25 smileys HFR intégrés) et onglet Wiki.
+- Recherche live des smileys perso via l'endpoint HFR `message-smi-mp-aj.php`, avec debounce 300 ms et seuil de 3 caractères comme le composer web HFR.
+- Insertion du token BBCode brut dans le texte (`:jap:`, `;)`, `[:haha jap]`, variantes `[:name:N]`) en conservant la convention HFR d'espaces autour.
+
+### Fixed
+- Les diagnostics du picker ne loggent plus la query complète ni l'identifiant numérique HFR.
+- La recherche wiki en vol est annulée quand un smiley est sélectionné ou quand le picker est fermé.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 51`, `versionName = "0.3.11"`.
+- Notes Play Console mises à jour pour le track alpha.
+
+---
+
 ## v50 — `0.3.10` — 2026-05-22
 
 **Statut** : `closed`

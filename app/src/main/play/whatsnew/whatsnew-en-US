@@ -1,8 +1,9 @@
-Redface 2 alpha build — login hotfix.
+Redface 2 alpha build — editor smiley picker.
 
-Fixes:
-- Password managers now get explicit username/password Autofill hints.
-- Targeted fix for Proton Pass filling the password into the username field.
-- No functional change to reading or posting flows.
+New:
+- Smileys button in the Reply / Quote / Edit editor.
+- Standard tab with bundled HFR smileys.
+- Wiki tab with live search for custom smileys.
+- Raw BBCode insertion with HFR-style surrounding spaces.
 
 Please report bugs via the alpha channel or the GitHub repository.

@@ -11,6 +11,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.model.PostContent
@@ -22,9 +23,11 @@ import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -55,6 +58,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private val previewParser: BbcodePreviewParser,
     private val replyRepository: ReplyRepository,
     private val editPostRepository: EditPostRepository,
+    private val smileyRepository: SmileyRepository,
     private val diagnostics: DiagnosticsLog,
 ) : ViewModel() {
 
@@ -82,6 +86,8 @@ class PostEditorViewModel @AssistedInject constructor(
      */
     private var loadedForm: ReplyForm? = null
     private var submitJob: Job? = null
+    /** In-flight wiki smiley search ; cancelled on next query change / picker close. */
+    private var smileySearchJob: Job? = null
 
     init {
         when (request.mode) {
@@ -103,6 +109,123 @@ class PostEditorViewModel @AssistedInject constructor(
                 _state.update { it.copy(smileyDisabled = intent.disabled) }
             is PostEditorIntent.ToggleEmailNotification ->
                 _state.update { it.copy(emailNotificationEnabled = intent.enabled) }
+            PostEditorIntent.SmileyPickerOpened -> onSmileyPickerOpened()
+            PostEditorIntent.SmileyPickerDismissed -> onSmileyPickerDismissed()
+            is PostEditorIntent.SmileySearchQueryChanged -> onSmileySearchQueryChanged(intent.query)
+            is PostEditorIntent.SmileySelected -> onSmileySelected(intent.token)
+        }
+    }
+
+    private fun onSmileyPickerOpened() {
+        _state.update { current ->
+            if (current.smileyPicker is SmileyPickerState.Open) current
+            else current.copy(smileyPicker = SmileyPickerState.Open())
+        }
+    }
+
+    private fun onSmileyPickerDismissed() {
+        smileySearchJob?.cancel()
+        smileySearchJob = null
+        _state.update { it.copy(smileyPicker = SmileyPickerState.Hidden) }
+    }
+
+    private fun onSmileySearchQueryChanged(query: String) {
+        _state.update { current ->
+            val open = current.smileyPicker as? SmileyPickerState.Open ?: return@update current
+            current.copy(smileyPicker = open.copy(query = query))
+        }
+        // Cancel in-flight searches so an older response can't overwrite a newer query.
+        smileySearchJob?.cancel()
+        if (query.length <= 2) {
+            // Mirrors the HFR web composer's `query.length > 2` gate. Below threshold we
+            // reset the wiki branch to Idle so the picker can render the Standard tab.
+            _state.update { current ->
+                val open = current.smileyPicker as? SmileyPickerState.Open ?: return@update current
+                current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Idle))
+            }
+            return
+        }
+        smileySearchJob = viewModelScope.launch {
+            // 300 ms matches the JS `find_smilies_timer` debounce embedded in HFR's
+            // /compressed/message.js — keeping it identical avoids surprising spikes if
+            // the user types fast. We deliberately flip to `Loading` AFTER the debounce
+            // so a user typing « jap » in one burst never sees a Loading flash before
+            // the actual network call (the previous job is cancelled before its delay
+            // resolves, so the state stays on the previous wiki snapshot until the
+            // last keystroke survives the 300 ms idle window).
+            delay(SMILEY_SEARCH_DEBOUNCE_MS)
+            // Identity guard against the « same query typed twice in a 300 ms window »
+            // race : if the user types « jap » → backspaces → re-types « jap » before
+            // the first delay resolves, both jobs would pass the `open.query == query`
+            // check (the query string is identical) and launch two parallel requests.
+            // We compare the current job identity to the ViewModel's `smileySearchJob`
+            // — the second `launchSmileySearch` call replaced the reference, so the
+            // first job's `coroutineContext.job` is not the active one anymore. Abort.
+            if (coroutineContext[Job] !== smileySearchJob) return@launch
+            _state.update { current ->
+                val open = current.smileyPicker as? SmileyPickerState.Open ?: return@update current
+                if (open.query != query) return@update current
+                current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Loading))
+            }
+            val effectiveUserId = _state.value.userId ?: 0
+            val outcome = runCatching { smileyRepository.searchWiki(effectiveUserId, query) }
+            outcome.fold(
+                onSuccess = { items ->
+                    _state.update { current ->
+                        val open = current.smileyPicker as? SmileyPickerState.Open
+                            ?: return@update current
+                        // Drop the result if the user closed the picker or typed a different
+                        // query while we were waiting on the network.
+                        if (open.query != query) return@update current
+                        current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Results(items)))
+                    }
+                },
+                onFailure = { error ->
+                    if (error is CancellationException) throw error
+                    diagnostics.record(
+                        DiagnosticsLog.Level.WARN,
+                        LOG_TAG_VM,
+                        "wiki smiley search failed: ${error::class.simpleName}: ${error.message ?: "(no message)"}",
+                    )
+                    _state.update { current ->
+                        val open = current.smileyPicker as? SmileyPickerState.Open
+                            ?: return@update current
+                        if (open.query != query) return@update current
+                        current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Error))
+                    }
+                },
+            )
+        }
+    }
+
+    private fun onSmileySelected(token: String) {
+        smileySearchJob?.cancel()
+        smileySearchJob = null
+        // Reuse the formatter helper so the surrounding-spaces convention from HFR's web
+        // composer is honoured uniformly (cf. `BbcodeFormatter.insertBbcodeToken`).
+        _state.update { current ->
+            val draft = current.draft
+            val selection = draft.selection
+            val outcome = insertBbcodeToken(
+                token = token,
+                text = draft.text,
+                selectionStart = selection.start,
+                selectionEnd = selection.end,
+            )
+            val updatedDraft = TextFieldValue(
+                text = outcome.text,
+                selection = TextRange(outcome.selectionStart, outcome.selectionEnd),
+            )
+            val withDraft = current.withDraft(updatedDraft)
+            val withPreview = if (withDraft.isPreviewVisible) {
+                withDraft.copy(preview = previewParser.parsePreview(withDraft.draft.text))
+            } else {
+                withDraft
+            }
+            // Close the picker on successful insertion ; the user can re-open it for another
+            // smiley if they want to chain. This matches HFR web behaviour and keeps the
+            // sheet from squatting the screen between two distant insertions.
+            withPreview.copy(smileyPicker = SmileyPickerState.Hidden)
         }
     }
 
@@ -266,6 +389,10 @@ class PostEditorViewModel @AssistedInject constructor(
                 emailNotificationEnabled
             },
             optionsHydratedFromForm = true,
+            // Phase 2F-B (#11) — keep the parsed userId around for the wiki smiley search.
+            // Anti-clobber : do not overwrite once set, so a silent `InvalidHashCheck`
+            // refetch on an anonymous fallback does not erase a previously known id.
+            userId = userId ?: form.userId,
             submitError = if (form.isAnonymous) {
                 SubmitError.Hfr(ReplyFailureReason.LoginRequired)
             } else {
@@ -457,5 +584,10 @@ class PostEditorViewModel @AssistedInject constructor(
         // Distinct from the repository's "ReplyRepository" tag so the diagnostics
         // panel makes it obvious which layer recorded an entry.
         private const val LOG_TAG_VM = "PostEditorVM"
+
+        // HFR's web composer waits 300 ms after the last keystroke before calling
+        // `find_smilies`, cf. `/compressed/message.js`. Mirror it so the wiki endpoint
+        // sees roughly the same query rate as the web client.
+        private const val SMILEY_SEARCH_DEBOUNCE_MS = 300L
     }
 }

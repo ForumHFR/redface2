@@ -67,6 +67,14 @@ data class ReplyForm(
      * checked icon (typically `1`).
      */
     val msgIcon: String? = null,
+    /**
+     * HFR user id parsed from the JS bootstrap call `find_smilies_timer('hfr.inc', N)`
+     * embedded in the form HTML. Used by the Phase 2F-B (#11 partial) wiki smiley picker
+     * to call `GET /message-smi-mp-aj.php?config=hfr.inc&user_id=N&findsmilies=…` with the
+     * logged-in id, so HFR pages the user's favourite perso first. `null` on anonymous /
+     * unparseable forms — the repository falls back to `user_id=0`.
+     */
+    val userId: Int? = null,
 )
 
 /**
