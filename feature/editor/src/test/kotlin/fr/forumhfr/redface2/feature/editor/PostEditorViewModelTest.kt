@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -738,6 +739,26 @@ class PostEditorViewModelTest {
         }
     }
 
+    @Test
+    fun `SmileySelected cancels the in-flight wiki search`() = runTest {
+        val viewModel = newReplyViewModel()
+        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
+        viewModel.submit(PostEditorIntent.SmileySearchQueryChanged("jap"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+        assertEquals(1, smileyRepository.callCount)
+
+        viewModel.submit(PostEditorIntent.SmileySelected(":jap:"))
+        testScheduler.runCurrent()
+
+        assertEquals(1, smileyRepository.cancellationCount)
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            assertEquals(SmileyPickerState.Hidden, state.smileyPicker)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun newEditViewModel(
         subcat: Int? = SAMPLE_SUBCAT,
         numreponse: Int? = SAMPLE_EDITED_NUMREPONSE,
@@ -914,6 +935,8 @@ class PostEditorViewModelTest {
             private set
         var callCount: Int = 0
             private set
+        var cancellationCount: Int = 0
+            private set
 
         override suspend fun searchWiki(userId: Int, query: String): List<EditorSmiley> {
             callCount += 1
@@ -921,7 +944,12 @@ class PostEditorViewModelTest {
             lastQuery = query
             val deferred = kotlinx.coroutines.CompletableDeferred<List<EditorSmiley>>()
             pending = deferred
-            return deferred.await()
+            return try {
+                deferred.await()
+            } catch (error: CancellationException) {
+                cancellationCount += 1
+                throw error
+            }
         }
 
         fun completeNext(items: List<EditorSmiley>) {

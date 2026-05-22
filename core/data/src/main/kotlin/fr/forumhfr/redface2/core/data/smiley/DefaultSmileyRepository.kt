@@ -32,7 +32,7 @@ class DefaultSmileyRepository @Inject constructor(
         diagnostics.record(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
-            "GET wiki smiley search userId=$userId queryLength=${query.length}",
+            "GET wiki smiley search hasUserId=${userId > 0} queryLength=${query.length}",
         )
         // No catch-all WARN here — the ViewModel already logs the failure via its own tag,
         // and a double log produced two near-identical entries in the diagnostics panel on

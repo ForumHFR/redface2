@@ -145,7 +145,6 @@ class PostEditorViewModel @AssistedInject constructor(
             }
             return
         }
-        val effectiveUserId = _state.value.userId ?: 0
         smileySearchJob = viewModelScope.launch {
             // 300 ms matches the JS `find_smilies_timer` debounce embedded in HFR's
             // /compressed/message.js — keeping it identical avoids surprising spikes if
@@ -168,6 +167,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 if (open.query != query) return@update current
                 current.copy(smileyPicker = open.copy(wiki = WikiSearchState.Loading))
             }
+            val effectiveUserId = _state.value.userId ?: 0
             val outcome = runCatching { smileyRepository.searchWiki(effectiveUserId, query) }
             outcome.fold(
                 onSuccess = { items ->
@@ -199,6 +199,8 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun onSmileySelected(token: String) {
+        smileySearchJob?.cancel()
+        smileySearchJob = null
         // Reuse the formatter helper so the surrounding-spaces convention from HFR's web
         // composer is honoured uniformly (cf. `BbcodeFormatter.insertBbcodeToken`).
         _state.update { current ->
