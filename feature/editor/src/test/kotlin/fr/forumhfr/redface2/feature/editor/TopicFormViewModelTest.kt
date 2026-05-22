@@ -545,6 +545,34 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `same query typed twice within debounce window fires only one request`() = runTest {
+        // Covers the identity guard `coroutineContext[Job] !== smileySearchJob` : when the
+        // SAME query is sent twice before the first 300 ms debounce resolves, the second
+        // QueryChanged cancels the first job ; the second job survives the debounce and
+        // is the only one to land a request.
+        val viewModel = newViewModel()
+        viewModel.submit(TopicFormIntent.SmileyPickerOpened)
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("jap"))
+        // Inside the debounce window — no fire yet.
+        testScheduler.advanceTimeBy(100L)
+        testScheduler.runCurrent()
+        assertEquals(0, smileyRepository.callCount)
+
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("jap"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+
+        // Exactly one network call : the first job was cancelled at ~100 ms by the second
+        // QueryChanged, and the second job's identity guard saw itself as the live one.
+        assertEquals(1, smileyRepository.callCount)
+        assertEquals("jap", smileyRepository.lastQuery)
+        // The first job never reached `searchWiki` (it was cancelled during its delay), so
+        // no `cancellationCount` increment is expected here — the cancellation tally only
+        // tracks cancellations that happen inside `searchWiki.await()`.
+        assertEquals(0, smileyRepository.cancellationCount)
+    }
+
+    @Test
     fun `New mode also opens the smiley picker and uses the hydrated userId`() = runTest {
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
         viewModel.state.test {
