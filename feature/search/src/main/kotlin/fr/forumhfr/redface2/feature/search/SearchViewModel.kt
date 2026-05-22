@@ -117,37 +117,42 @@ class SearchViewModel @Inject constructor(
             )
         }
         searchJob = viewModelScope.launch {
-            val page = try {
+            val outcome = runCatching {
                 searchRepository.search(SearchRequest(query = query, category = scope))
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Throwable) {
-                if (generation != searchGeneration) return@launch
-                val kind = when (error) {
-                    is IOException -> SearchErrorKind.Network
-                    else -> SearchErrorKind.Unknown
-                }
-                _state.update {
-                    it.copy(
-                        isLoading = false,
-                        errorMessage = kind,
-                        // Keep the previous results untouched on retry-friendly errors —
-                        // wiping the list on a transient network blip is more disruptive
-                        // than helpful.
-                    )
-                }
-                return@launch
+            }
+            val cancellation = outcome.exceptionOrNull() as? CancellationException
+            if (cancellation != null) {
+                throw cancellation
             }
             if (generation != searchGeneration) return@launch
-            _state.update {
-                it.copy(
-                    isLoading = false,
-                    results = page.topics,
-                    pivotCategories = page.pivotCategories,
-                    selectedCategory = page.selectedCategory,
-                    errorMessage = null,
-                )
-            }
+            outcome.fold(
+                onSuccess = { page ->
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            results = page.topics,
+                            pivotCategories = page.pivotCategories,
+                            selectedCategory = page.selectedCategory,
+                            errorMessage = null,
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    val kind = when (error) {
+                        is IOException -> SearchErrorKind.Network
+                        else -> SearchErrorKind.Unknown
+                    }
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = kind,
+                            // Keep the previous results untouched on retry-friendly errors —
+                            // wiping the list on a transient network blip is more disruptive
+                            // than helpful.
+                        )
+                    }
+                },
+            )
         }
     }
 }

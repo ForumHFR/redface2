@@ -123,14 +123,9 @@ class SearchResultParser {
     }
 
     private fun parseTopicRow(row: Element, cat: Int, index: Int): SearchTopicResult {
-        val titleAnchor = row.selectFirst("td.sujetCase3 a.cCatTopic")
-            ?: throw ParseException("Search topic row #$index is missing td.sujetCase3 a.cCatTopic.")
-        val href = titleAnchor.attr("href")
-        if (href.isBlank()) {
-            throw ParseException("Search topic row #$index has an empty topic href.")
-        }
-        val topicId = extractTopicId(href, titleAnchor.attr("title"))
-            ?: throw ParseException("Search topic row #$index has no topic id in href/title.")
+        val titleAnchor = requireTopicAnchor(row, index)
+        val href = requireTopicHref(titleAnchor, index)
+        val topicId = requireTopicId(href, titleAnchor.attr("title"), index)
         val (categorySlug, subcategorySlug) = extractSlugs(href)
         // Lock indicator : `<img src="…/lock.gif" title="Sujet fermé" />` placed
         // INSIDE `td.sujetCase3`, BEFORE the anchor. Historical bug from the
@@ -164,6 +159,18 @@ class SearchResultParser {
             numreponse = null,
         )
     }
+
+    private fun requireTopicAnchor(row: Element, index: Int): Element =
+        row.selectFirst("td.sujetCase3 a.cCatTopic")
+            ?: throw ParseException("Search topic row #$index is missing td.sujetCase3 a.cCatTopic.")
+
+    private fun requireTopicHref(titleAnchor: Element, index: Int): String =
+        titleAnchor.attr("href").takeIf { it.isNotBlank() }
+            ?: throw ParseException("Search topic row #$index has an empty topic href.")
+
+    private fun requireTopicId(href: String, title: String, index: Int): Int =
+        extractTopicId(href, title)
+            ?: throw ParseException("Search topic row #$index has no topic id in href/title.")
 
     /**
      * `<a class="Tableau" href="…#bas">22-05-2026&nbsp;à&nbsp;06:48<br /><b>Lt Ripley</b></a>`
