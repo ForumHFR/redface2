@@ -27,9 +27,11 @@ import kotlin.math.abs
  *
  * What we pin :
  *  - at `density = 1f, fontScale = 1f`, the placeholder rect is **exactly** the bucket size
- *    declared in [PostMediaDisplayPolicy] (`70 × 50` for perso, `240 × 180` for inline image) ;
- *  - the bucket **ratio** is preserved at the baseline so a future refactor that swapped a bucket
- *    to a square would surface here (the regression #109 was specifically a ratio drift) ;
+ *    declared in [PostMediaDisplayPolicy] for the three kinds we render inline (`18 × 18` for
+ *    builtin smileys, `70 × 50` for perso smileys, `240 × 180` for inline images) ;
+ *  - the bucket **ratio** is preserved at the baseline so a future refactor that swapped a
+ *    rectangular bucket to a square would surface here (the regression #109 was specifically a
+ *    ratio drift) — only checked for the non-square buckets, the builtin 18×18 is tautological ;
  *  - placeholder sizes are **monotonic** with `fontScale` — a larger fontScale yields a strictly
  *    larger placeholder (width and height both), and a smaller fontScale yields a strictly smaller
  *    one. We deliberately do **not** assert a linear `value × fontScale` ratio because Android 14+
@@ -43,18 +45,18 @@ import kotlin.math.abs
  *    enforced by code review + the `PostRendererInlineTest` JVM map-vs-placeholder check.
  *  - absolute pixel values at `fontScale != 1` : the non-linear scaling curve makes them platform-
  *    and SDK-dependent, not a stable test contract.
- */
-/**
- * `@OptIn(ExperimentalTestApi::class)` covers `createComposeRule` v2 — the compiler-recommended
- * replacement for the v1 entry that's flagged deprecated since BOM 2026.04. The v2 API uses
- * `StandardTestDispatcher` (cf. the v1 → v2 migration note Compose emits at compile time) ;
- * the opt-in is defensive even when the call-site does not surface a warning.
  *
- * `@Config(sdk = [34])` pins Android 14 (NonLinearFontScaling-enabled) which is exactly what
- * this test exercises. Adding SDK 35+ would re-run the same fontScale curve with the FontScale
- * tables updated for Android 15 ; we keep one SDK on purpose to keep the runtime small and to
- * isolate any future SDK-specific drift to a clear single config switch (cf. Phase 2H bench
- * suite which will likely sweep more SDKs).
+ * Runtime annotations :
+ *  - `@OptIn(ExperimentalTestApi::class)` covers `createComposeRule` v2 — the compiler-recommended
+ *    replacement for the v1 entry that's flagged `@Deprecated` since BOM 2026.04 (the migration
+ *    warning is emitted by the Kotlin compiler at first build of this file). The v2 API uses
+ *    `StandardTestDispatcher` (cf. the v1 → v2 migration note Compose emits at compile time) ;
+ *    the opt-in is defensive even when the call-site does not surface a warning.
+ *  - `@Config(sdk = [34])` pins Android 14 (NonLinearFontScaling-enabled) which is exactly what
+ *    this test exercises. Adding SDK 35+ would re-run the same fontScale curve with the
+ *    FontScale tables updated for Android 15 ; we keep one SDK on purpose to keep the runtime
+ *    small and to isolate any future SDK-specific drift to a clear single config switch
+ *    (cf. Phase 2H bench suite which will likely sweep more SDKs).
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
