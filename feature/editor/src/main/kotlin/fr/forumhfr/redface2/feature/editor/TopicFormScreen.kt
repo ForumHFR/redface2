@@ -35,6 +35,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -94,6 +96,19 @@ fun TopicFormScreen(
         onIntent = viewModel::submit,
         modifier = modifier,
     )
+
+    // Sheet hoisted as a sibling of the scrollable content : if it lived inside
+    // the `Column.verticalScroll`, the bottom sheet would get squashed by the
+    // scroll container's measurement. Same rationale as `PostEditorScreen`.
+    val pickerState = state.smileyPicker
+    if (pickerState is SmileyPickerState.Open) {
+        SmileyPickerSheet(
+            state = pickerState,
+            onDismiss = { viewModel.submit(TopicFormIntent.SmileyPickerDismissed) },
+            onQueryChange = { viewModel.submit(TopicFormIntent.SmileySearchQueryChanged(it)) },
+            onSmileyClicked = { viewModel.submit(TopicFormIntent.SmileySelected(it)) },
+        )
+    }
 }
 
 @Composable
@@ -102,6 +117,7 @@ internal fun TopicFormContent(
     onIntent: (TopicFormIntent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val openSmileyPickerDescription = stringResource(R.string.editor_smiley_open_description)
     Surface(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
@@ -155,6 +171,17 @@ internal fun TopicFormContent(
             BbcodeToolbar(
                 onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
             )
+            // Phase 2F-C (#11 partial) — quick access to the smiley picker. Same placement
+            // and rationale as `PostEditorScreen` : smileys are point-insertions, not
+            // wrappers, so they don't fit the wrap-only `BbcodeAction` toolbar model.
+            TextButton(
+                onClick = { onIntent(TopicFormIntent.SmileyPickerOpened) },
+                modifier = Modifier.semantics {
+                    contentDescription = openSmileyPickerDescription
+                },
+            ) {
+                Text(text = stringResource(R.string.editor_smiley_open))
+            }
             BbcodeTextField(
                 value = state.draft,
                 onValueChange = { onIntent(TopicFormIntent.ContentChanged(it)) },

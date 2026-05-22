@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.editor
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
@@ -599,6 +600,7 @@ class PostEditorViewModelTest {
         subcat: Int? = SAMPLE_SUBCAT,
         quotedNumreponse: Int? = null,
         quoteRef: Int? = null,
+        diagnostics: DiagnosticsLog = DiagnosticsLog(),
     ): PostEditorViewModel =
         PostEditorViewModel(
             request = PostEditorRequest(
@@ -615,7 +617,7 @@ class PostEditorViewModelTest {
             replyRepository = replyRepository,
             editPostRepository = editPostRepository,
             smileyRepository = smileyRepository,
-            diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
+            diagnostics = diagnostics,
         )
 
     // ----- Phase 2F-B (#11) : smiley picker ----------------------------------
@@ -721,6 +723,27 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `failed wiki search does not leak user id or query through diagnostics`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val viewModel = newReplyViewModel(diagnostics = diagnostics)
+        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
+        viewModel.submit(PostEditorIntent.SmileySearchQueryChanged("secret"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+
+        smileyRepository.failNext(
+            IOException("https://forum.hardware.fr/message-smi-mp-aj.php?user_id=12345&findsmilies=secret"),
+        )
+        testScheduler.runCurrent()
+
+        val messages = diagnostics.entries.value.joinToString(separator = "\n") { it.message }
+        assertTrue(messages.contains("wiki smiley search failed: IOException"))
+        assertFalse(messages.contains("12345"))
+        assertFalse(messages.contains("secret"))
+        assertFalse(messages.contains("findsmilies"))
+    }
+
+    @Test
     fun `SmileySelected inserts the token at the caret and closes the picker`() = runTest {
         val viewModel = newReplyViewModel()
         viewModel.submit(PostEditorIntent.ContentChanged(
@@ -762,6 +785,7 @@ class PostEditorViewModelTest {
     private fun newEditViewModel(
         subcat: Int? = SAMPLE_SUBCAT,
         numreponse: Int? = SAMPLE_EDITED_NUMREPONSE,
+        diagnostics: DiagnosticsLog = DiagnosticsLog(),
     ): PostEditorViewModel =
         PostEditorViewModel(
             request = PostEditorRequest(
@@ -776,7 +800,7 @@ class PostEditorViewModelTest {
             replyRepository = replyRepository,
             editPostRepository = editPostRepository,
             smileyRepository = smileyRepository,
-            diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
+            diagnostics = diagnostics,
         )
 
     private fun authenticatedForm(initialContent: String = ""): ReplyForm = ReplyForm(

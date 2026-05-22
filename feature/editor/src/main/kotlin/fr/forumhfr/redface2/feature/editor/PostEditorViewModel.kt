@@ -185,7 +185,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     diagnostics.record(
                         DiagnosticsLog.Level.WARN,
                         LOG_TAG_VM,
-                        "wiki smiley search failed: ${error::class.simpleName}: ${error.message ?: "(no message)"}",
+                        "wiki smiley search failed: ${error::class.simpleName}",
                     )
                     _state.update { current ->
                         val open = current.smileyPicker as? SmileyPickerState.Open

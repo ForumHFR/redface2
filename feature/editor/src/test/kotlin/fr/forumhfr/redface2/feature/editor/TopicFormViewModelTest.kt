@@ -5,7 +5,10 @@ import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
+import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
@@ -38,6 +41,7 @@ class TopicFormViewModelTest {
 
     private val previewParser = FakePreviewParser()
     private val topicFormRepository = FakeTopicFormRepository()
+    private val smileyRepository = FakeSmileyRepository()
 
     @Before
     fun setUp() {
@@ -375,7 +379,240 @@ class TopicFormViewModelTest {
         assertEquals(0, topicFormRepository.newTopicSubmitCalls)
     }
 
-    private fun newTopicViewModel(entrySubcat: Int?): TopicFormViewModel = TopicFormViewModel(
+    // ----- Phase 2F-C (#11) : smiley picker ----------------------------------
+
+    @Test
+    fun `SmileyPickerOpened transitions the picker to Open`() = runTest {
+        val viewModel = newViewModel()
+        viewModel.submit(TopicFormIntent.SmileyPickerOpened)
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            val picker = state.smileyPicker
+            assertTrue("expected Open, got $picker", picker is SmileyPickerState.Open)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `SmileyPickerDismissed closes the sheet and cancels the in-flight search`() = runTest {
+        val viewModel = newViewModel()
+        viewModel.submit(TopicFormIntent.SmileyPickerOpened)
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("jap"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+        assertEquals(1, smileyRepository.callCount)
+
+        viewModel.submit(TopicFormIntent.SmileyPickerDismissed)
+        testScheduler.runCurrent()
+
+        assertEquals(1, smileyRepository.cancellationCount)
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            assertEquals(SmileyPickerState.Hidden, state.smileyPicker)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `short queries stay below the 2-char threshold and do not hit the repository`() = runTest {
+        val viewModel = newViewModel()
+        viewModel.submit(TopicFormIntent.SmileyPickerOpened)
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("ja"))
+        // Below threshold : the gate is synchronous, no debounce kicks in.
+        assertEquals(0, smileyRepository.callCount)
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            val picker = state.smileyPicker as SmileyPickerState.Open
+            assertEquals(WikiSearchState.Idle, picker.wiki)
+            assertEquals("ja", picker.query)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `queries above the threshold hit the repository with the hydrated userId after debounce`() = runTest {
+        val viewModel = newViewModel()
+        // Wait for the form to be hydrated so userId lands in state.
+        viewModel.state.test {
+            awaitHydratedState()
+            cancelAndIgnoreRemainingEvents()
+        }
+        viewModel.submit(TopicFormIntent.SmileyPickerOpened)
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("jap"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+        assertEquals(1, smileyRepository.callCount)
+        assertEquals("jap", smileyRepository.lastQuery)
+        // The form's parsed userId is plumbed through to the search call — the
+        // repository falls back to 0 only when `state.userId` is `null`.
+        assertEquals(SAMPLE_USER_ID, smileyRepository.lastUserId)
+    }
+
+    @Test
+    fun `wiki search falls back to user id 0 when the form did not expose a userId`() = runTest {
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(userId = null)
+        val viewModel = newViewModel()
+        viewModel.state.test {
+            awaitHydratedState()
+            cancelAndIgnoreRemainingEvents()
+        }
+        viewModel.submit(TopicFormIntent.SmileyPickerOpened)
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("jap"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+        assertEquals(0, smileyRepository.lastUserId)
+    }
+
+    @Test
+    fun `failed wiki search lands as Error and keeps the picker open`() = runTest {
+        val viewModel = newViewModel()
+        viewModel.submit(TopicFormIntent.SmileyPickerOpened)
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("jap"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+        smileyRepository.failNext(java.io.IOException("offline"))
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            val picker = state.smileyPicker as SmileyPickerState.Open
+            assertEquals(WikiSearchState.Error, picker.wiki)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `failed wiki search does not leak user id or query through diagnostics`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val viewModel = newViewModel(diagnostics = diagnostics)
+        viewModel.submit(TopicFormIntent.SmileyPickerOpened)
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("secret"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+
+        smileyRepository.failNext(
+            java.io.IOException("https://forum.hardware.fr/message-smi-mp-aj.php?user_id=12345&findsmilies=secret"),
+        )
+        testScheduler.runCurrent()
+
+        val messages = diagnostics.entries.value.joinToString(separator = "\n") { it.message }
+        assertTrue(messages.contains("wiki smiley search failed: IOException"))
+        assertFalse(messages.contains("12345"))
+        assertFalse(messages.contains("secret"))
+        assertFalse(messages.contains("findsmilies"))
+    }
+
+    @Test
+    fun `SmileySelected inserts the token at the caret closes the picker and refreshes the preview`() = runTest {
+        val viewModel = newViewModel()
+        viewModel.state.test {
+            awaitHydratedState()
+            cancelAndIgnoreRemainingEvents()
+        }
+        // Move caret to start of draft, open preview, then pick a smiley.
+        viewModel.submit(
+            TopicFormIntent.ContentChanged(TextFieldValue("hello", TextRange(5))),
+        )
+        viewModel.submit(TopicFormIntent.TogglePreview)
+        viewModel.submit(TopicFormIntent.SmileyPickerOpened)
+        viewModel.submit(TopicFormIntent.SmileySelected(":jap:"))
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            // Surrounding-spaces convention from `insertBbcodeToken` is honoured.
+            assertEquals("hello :jap: ", state.draft.text)
+            assertEquals(12, state.draft.selection.start)
+            assertEquals(SmileyPickerState.Hidden, state.smileyPicker)
+            // Preview was visible : the new draft text must be re-parsed.
+            val firstBlock = state.preview.blocks.first() as PostBlock.Paragraph
+            val firstInline = firstBlock.inlines.first() as PostInline.Text
+            assertEquals("hello :jap: ", firstInline.value)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `two successive queries do not allow the first response to clobber the second`() = runTest {
+        val viewModel = newViewModel()
+        viewModel.submit(TopicFormIntent.SmileyPickerOpened)
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("jap"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+        // Second keystroke arrives BEFORE the first response lands.
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("jap "))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+        // The repo recorded the second call ; the first was cancelled.
+        assertEquals(2, smileyRepository.callCount)
+        assertEquals(1, smileyRepository.cancellationCount)
+        assertEquals("jap ", smileyRepository.lastQuery)
+
+        // The latest response (for "jap ") lands ; the earlier "jap" job was cancelled
+        // so its result cannot overwrite the current state.
+        smileyRepository.completeNext(
+            listOf(
+                EditorSmiley(
+                    token = "[:haha jap]",
+                    imageUrl = "https://forum-images.hardware.fr/images/perso/haha%20jap.gif",
+                    source = EditorSmileySource.WIKI,
+                ),
+            ),
+        )
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            val picker = state.smileyPicker as SmileyPickerState.Open
+            val wiki = picker.wiki as WikiSearchState.Results
+            assertEquals(1, wiki.items.size)
+            assertEquals("[:haha jap]", wiki.items[0].token)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `same query typed twice within debounce window fires only one request`() = runTest {
+        // Covers the identity guard `coroutineContext[Job] !== smileySearchJob` : when the
+        // SAME query is sent twice before the first 300 ms debounce resolves, the second
+        // QueryChanged cancels the first job ; the second job survives the debounce and
+        // is the only one to land a request.
+        val viewModel = newViewModel()
+        viewModel.submit(TopicFormIntent.SmileyPickerOpened)
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("jap"))
+        // Inside the debounce window — no fire yet.
+        testScheduler.advanceTimeBy(100L)
+        testScheduler.runCurrent()
+        assertEquals(0, smileyRepository.callCount)
+
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("jap"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+
+        // Exactly one network call : the first job was cancelled at ~100 ms by the second
+        // QueryChanged, and the second job's identity guard saw itself as the live one.
+        assertEquals(1, smileyRepository.callCount)
+        assertEquals("jap", smileyRepository.lastQuery)
+        // The first job never reached `searchWiki` (it was cancelled during its delay), so
+        // no `cancellationCount` increment is expected here — the cancellation tally only
+        // tracks cancellations that happen inside `searchWiki.await()`.
+        assertEquals(0, smileyRepository.cancellationCount)
+    }
+
+    @Test
+    fun `New mode also opens the smiley picker and uses the hydrated userId`() = runTest {
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        viewModel.state.test {
+            // Wait for the form fetch to land.
+            val hydrated = expectMostRecentItem()
+            assertEquals(SAMPLE_USER_ID, hydrated.userId)
+            cancelAndIgnoreRemainingEvents()
+        }
+        viewModel.submit(TopicFormIntent.SmileyPickerOpened)
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("jap"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+        assertEquals(SAMPLE_USER_ID, smileyRepository.lastUserId)
+    }
+
+    private fun newTopicViewModel(
+        entrySubcat: Int?,
+        diagnostics: DiagnosticsLog = DiagnosticsLog(),
+    ): TopicFormViewModel = TopicFormViewModel(
         request = TopicFormRequest(
             mode = TopicFormMode.New,
             cat = SAMPLE_CAT,
@@ -386,7 +623,8 @@ class TopicFormViewModelTest {
         ),
         previewParser = previewParser,
         topicFormRepository = topicFormRepository,
-        diagnostics = DiagnosticsLog(),
+        smileyRepository = smileyRepository,
+        diagnostics = diagnostics,
     )
 
     private suspend fun app.cash.turbine.ReceiveTurbine<TopicFormState>.awaitHydratedState(): TopicFormState {
@@ -400,7 +638,9 @@ class TopicFormViewModelTest {
         return hydrated
     }
 
-    private fun newViewModel(): TopicFormViewModel = TopicFormViewModel(
+    private fun newViewModel(
+        diagnostics: DiagnosticsLog = DiagnosticsLog(),
+    ): TopicFormViewModel = TopicFormViewModel(
         request = TopicFormRequest(
             mode = TopicFormMode.EditFirstPost,
             cat = SAMPLE_CAT,
@@ -411,7 +651,8 @@ class TopicFormViewModelTest {
         ),
         previewParser = previewParser,
         topicFormRepository = topicFormRepository,
-        diagnostics = DiagnosticsLog(),
+        smileyRepository = smileyRepository,
+        diagnostics = diagnostics,
     )
 
     private class FakePreviewParser : BbcodePreviewParser {
@@ -425,6 +666,7 @@ class TopicFormViewModelTest {
             hashCheck = "FAKE_HASH",
             subject = "Sample first post title",
             initialContent = "Body BBCode goes here.",
+            userId = SAMPLE_USER_ID,
             selectedSubcat = SAMPLE_SUBCAT,
             subcategoryChoices = listOf(
                 TopicFormSubcategoryChoice(id = SAMPLE_SUBCAT, label = "Divers", selected = true),
@@ -447,6 +689,7 @@ class TopicFormViewModelTest {
             hashCheck = "FAKE_HASH",
             subject = "",
             initialContent = "",
+            userId = SAMPLE_USER_ID,
             selectedSubcat = null,
             subcategoryChoices = listOf(
                 TopicFormSubcategoryChoice(id = null, label = "Aucune", selected = false),
@@ -551,11 +794,53 @@ class TopicFormViewModelTest {
         }
     }
 
+    /**
+     * Phase 2F-C (#11 partial) — fake smiley repository. Same shape as the one in
+     * `PostEditorViewModelTest` ; holds a single pending deferred so tests can drive
+     * loading / success / error transitions of the wiki search without touching the network.
+     */
+    private class FakeSmileyRepository : SmileyRepository {
+        private var pending: CompletableDeferred<List<EditorSmiley>>? = null
+        var lastUserId: Int? = null
+            private set
+        var lastQuery: String? = null
+            private set
+        var callCount: Int = 0
+            private set
+        var cancellationCount: Int = 0
+            private set
+
+        override suspend fun searchWiki(userId: Int, query: String): List<EditorSmiley> {
+            callCount += 1
+            lastUserId = userId
+            lastQuery = query
+            val deferred = CompletableDeferred<List<EditorSmiley>>()
+            pending = deferred
+            return try {
+                deferred.await()
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                cancellationCount += 1
+                throw error
+            }
+        }
+
+        fun completeNext(items: List<EditorSmiley>) {
+            requireNotNull(pending) { "no pending searchWiki to complete" }.complete(items)
+            pending = null
+        }
+
+        fun failNext(error: Throwable) {
+            requireNotNull(pending) { "no pending searchWiki to fail" }.completeExceptionally(error)
+            pending = null
+        }
+    }
+
     private companion object {
         const val SAMPLE_CAT = 23
         const val SAMPLE_TOPIC_ID = 35_395
         const val SAMPLE_SUBCAT = 550
         const val SAMPLE_OTHER_SUBCAT = 388
         const val SAMPLE_NUMREPONSE = 100
+        const val SAMPLE_USER_ID = 1_234_567
     }
 }
