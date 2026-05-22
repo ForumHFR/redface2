@@ -104,10 +104,16 @@ internal fun SearchContent(
                 )
             }
             HorizontalDivider()
+            // `Modifier.weight(1f)` is required so the inner `LazyColumn` (in
+            // `ResultsList`) gets a bounded vertical constraint. Without it, the
+            // child `LazyColumn` measures with `Constraints.Infinity` and Compose
+            // throws `IllegalStateException: Vertically scrollable component was
+            // measured with an infinite max constraints`.
             SearchBody(
                 state = state,
                 onRetry = { onIntent(SearchIntent.Retry) },
                 onOpenTopic = onOpenTopic,
+                modifier = Modifier.weight(1f),
             )
         }
     }
@@ -147,29 +153,32 @@ private fun PivotChips(
     selected: SearchPivotCategory?,
     onSelect: (SearchPivotCategory) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    // Non-Lazy `Column`-of-`Row`s chunked 3-by-3 : the pivot tops out at ~18 entries
+    // (one per public HFR category) so virtualization is unnecessary. Using a
+    // `LazyColumn` here would also conflict with the outer non-Lazy `Column` parent
+    // and crash at measurement time (two unbounded vertical scrollers can't coexist
+    // without an explicit weight/height constraint).
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
         Text(
             text = stringResource(R.string.search_pivot_label),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-            items(pivot.chunked(3)) { line ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    line.forEach { entry ->
-                        AssistChip(
-                            onClick = { onSelect(entry) },
-                            label = { Text(entry.label) },
-                            colors = if (entry.id == selected?.id) {
-                                AssistChipDefaults.assistChipColors(
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                )
-                            } else {
-                                AssistChipDefaults.assistChipColors()
-                            },
-                        )
-                    }
+        pivot.chunked(3).forEach { line ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                line.forEach { entry ->
+                    AssistChip(
+                        onClick = { onSelect(entry) },
+                        label = { Text(entry.label) },
+                        colors = if (entry.id == selected?.id) {
+                            AssistChipDefaults.assistChipColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            )
+                        } else {
+                            AssistChipDefaults.assistChipColors()
+                        },
+                    )
                 }
             }
         }
@@ -181,29 +190,31 @@ private fun SearchBody(
     state: SearchUiState,
     onRetry: () -> Unit,
     onOpenTopic: (SearchTopicResult) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     when {
-        state.isLoading -> LoadingState()
-        state.errorMessage != null -> ErrorState(kind = state.errorMessage, onRetry = onRetry)
-        !state.hasSearched -> IdleState()
-        state.results.isEmpty() -> EmptyState()
-        else -> ResultsList(results = state.results, onOpenTopic = onOpenTopic)
+        state.isLoading -> LoadingState(modifier = modifier)
+        state.errorMessage != null -> ErrorState(kind = state.errorMessage, onRetry = onRetry, modifier = modifier)
+        !state.hasSearched -> IdleState(modifier = modifier)
+        state.results.isEmpty() -> EmptyState(modifier = modifier)
+        else -> ResultsList(results = state.results, onOpenTopic = onOpenTopic, modifier = modifier)
     }
 }
 
 @Composable
-private fun IdleState() {
+private fun IdleState(modifier: Modifier = Modifier) {
     Text(
         text = stringResource(R.string.search_idle_hint),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier,
     )
 }
 
 @Composable
-private fun LoadingState() {
+private fun LoadingState(modifier: Modifier = Modifier) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 24.dp),
         contentAlignment = Alignment.Center,
@@ -222,21 +233,22 @@ private fun LoadingState() {
 }
 
 @Composable
-private fun EmptyState() {
+private fun EmptyState(modifier: Modifier = Modifier) {
     Text(
         text = stringResource(R.string.search_empty),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier,
     )
 }
 
 @Composable
-private fun ErrorState(kind: SearchErrorKind, onRetry: () -> Unit) {
+private fun ErrorState(kind: SearchErrorKind, onRetry: () -> Unit, modifier: Modifier = Modifier) {
     val messageResId = when (kind) {
         SearchErrorKind.Network -> R.string.search_error_network
         SearchErrorKind.Unknown -> R.string.search_error_unknown
     }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = modifier) {
         Text(
             text = stringResource(messageResId),
             style = MaterialTheme.typography.bodyMedium,
@@ -252,12 +264,17 @@ private fun ErrorState(kind: SearchErrorKind, onRetry: () -> Unit) {
 private fun ResultsList(
     results: List<SearchTopicResult>,
     onOpenTopic: (SearchTopicResult) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(vertical = 4.dp),
+        // Composite key (cat, topicId) — `topicId` alone is unique per HFR cat, so
+        // two pivot categories COULD theoretically expose the same id (extremely
+        // rare in practice but the parser doesn't guarantee uniqueness across cats).
+        modifier = modifier,
     ) {
-        items(items = results, key = { it.topicId }) { result ->
+        items(items = results, key = { "${it.cat}_${it.topicId}" }) { result ->
             SearchResultCard(result = result, onClick = { onOpenTopic(result) })
         }
     }

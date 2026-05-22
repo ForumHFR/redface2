@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.data.search
 
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.search.SearchRepository
@@ -70,6 +71,13 @@ class DefaultSearchRepository @Inject constructor(
                     page = request.page,
                     date = today,
                 )
+            } catch (error: SessionExpiredException) {
+                // `SessionExpiredException` extends `IOException` (so it's caught by the
+                // generic branch too if we let it through) ; its message embeds the final
+                // URL via "final URL was <url>" — which carries `search=<query>` — and the
+                // generic `substringBefore(" for ")` strip wouldn't catch this prefix.
+                // Handle it explicitly so neither variant leaks the query.
+                throw IOException("HFR search request failed: session expired")
             } catch (error: IOException) {
                 throw IOException("HFR search request failed: ${error.message?.substringBefore(" for ")}")
             }

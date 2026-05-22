@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.data.search
 
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.search.SearchCategoryScope
 import fr.forumhfr.redface2.core.model.search.SearchRequest
@@ -148,6 +149,38 @@ class DefaultSearchRepositoryTest {
         )
         // Still informative : status code + the HFR prefix survive.
         assertTrue(thrown.message!!.contains("500"))
+    }
+
+    @Test
+    fun `SessionExpiredException is rebranded without leaking the URL or query`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        // `SessionExpiredException` extends IOException and its message embeds the
+        // final URL via the « final URL was » prefix (not « for »), so the generic
+        // substringBefore(" for ") would let the URL through. Make sure the explicit
+        // SessionExpiredException branch redacts it.
+        coEvery {
+            hfrClient.searchTopics(any(), any(), any(), any())
+        } throws SessionExpiredException(
+            "https://forum.hardware.fr/forum1.php?recherches=1&cat=&search=secret_term&...",
+        )
+
+        val repo = buildRepository(hfrClient = hfrClient)
+        val thrown = assertThrows(IOException::class.java) {
+            kotlinx.coroutines.runBlocking { repo.search(SearchRequest(query = "secret_term")) }
+        }
+
+        assertFalse(
+            "expected the URL portion to be stripped from the SessionExpired path, got <${thrown.message}>",
+            thrown.message!!.contains("forum1.php"),
+        )
+        assertFalse(
+            "expected the user query to NOT survive the SessionExpired rebrand, got <${thrown.message}>",
+            thrown.message!!.contains("secret_term"),
+        )
+        assertTrue(
+            "expected the message to mention « session expired », got <${thrown.message}>",
+            thrown.message!!.contains("session expired"),
+        )
     }
 
     private fun buildRepository(
