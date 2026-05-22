@@ -4,6 +4,17 @@ plugins {
 
 android {
     namespace = "fr.forumhfr.redface2.core.ui"
+
+    // Compose UI test (#130 / Phase 2F-A) needs Android resources at JVM unit-test time : the
+    // `createComposeRule()` host activity reads them on inflation. Same convention as :core:data.
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            // Stubs `android.util.Log.*` to no-op so production code paths exercised by Compose
+            // (PostRenderer, Coil) do not crash with "not mocked" on JVM. Matches :core:data.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
@@ -19,4 +30,12 @@ dependencies {
     implementation(libs.coil.network.okhttp)
 
     testImplementation(libs.junit4)
+    // #130 — Robolectric runtime hosts `createComposeRule()` on JVM ; the manifest is debug-only
+    // and pulls the Activity surrogate the rule mounts internally ; the BOM platform aligns the
+    // ui-test artifacts with the production Compose versions.
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
