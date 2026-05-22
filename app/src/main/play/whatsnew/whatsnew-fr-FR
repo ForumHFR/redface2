@@ -1,8 +1,8 @@
-Build alpha Redface 2 — création de topic.
+Build alpha Redface 2 — hotfix connexion.
 
-Nouveautés :
-- Nouveau bouton "Nouveau topic" sur les listes de catégorie quand vous êtes connecté.
-- Composer dédié : titre, sous-catégorie, contenu BBCode et options HFR.
-- En cas de succès sans lien direct récupérable, retour sobre vers la sous-catégorie cible.
+Correctif :
+- Les gestionnaires de mots de passe reconnaissent mieux les champs pseudo et mot de passe.
+- Correction ciblée pour éviter que Proton Pass colle le mot de passe dans le champ pseudo.
+- Aucun changement fonctionnel sur le flux de lecture/écriture.
 
 Merci de remonter tout bug via le canal alpha ou le dépôt GitHub.
