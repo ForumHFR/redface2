@@ -1,9 +1,9 @@
-Redface 2 alpha build — editor smiley picker.
+Redface 2 alpha build — real HFR search.
 
 New:
-- Smileys button in the Reply / Quote / Edit editor.
-- Standard tab with bundled HFR smileys.
-- Wiki tab with live search for custom smileys.
-- Raw BBCode insertion with HFR-style surrounding spaces.
+- Search tab now uses HFR's real title-search endpoint.
+- Real results with author, counters, latest reply and category.
+- Category pivots when HFR returns several result families.
+- Hardened stale-result races and unexpected HTML responses.
 
 Please report bugs via the alpha channel or the GitHub repository.

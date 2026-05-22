@@ -1,9 +1,9 @@
-Build alpha Redface 2 — picker smileys éditeur.
+Build alpha Redface 2 — recherche HFR réelle.
 
 Nouveautés :
-- Bouton Smileys dans l'éditeur Reply / Quote / Edit.
-- Onglet Standard avec les smileys HFR intégrés.
-- Onglet Wiki avec recherche live des smileys perso.
-- Insertion BBCode brute avec la convention d'espaces HFR.
+- Onglet Recherche branché sur la recherche HFR par titre.
+- Résultats réels avec auteur, compteur, dernier message et catégorie.
+- Pivots de catégories quand HFR renvoie plusieurs familles de résultats.
+- Durcissement des cas de course et des réponses HTML inattendues.
 
 Merci de remonter tout bug via le canal alpha ou le dépôt GitHub.

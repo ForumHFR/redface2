@@ -15,6 +15,31 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v52 — `0.3.12` — 2026-05-22
+
+**Statut** : `closed`
+**Commit** : à venir (tag `app-v52` après merge de la PR de release)
+**Fichier** : artefact CD `app-v52`
+
+Phase 2G-A — recherche réelle de topics HFR par titre.
+
+### Added
+- Onglet Recherche branché sur l'endpoint HFR réel `forum1.php?recherches=1`.
+- Recherche par titre en mode toutes catégories, avec pivots de catégories quand HFR renvoie plusieurs familles de résultats.
+- Recherche scoped par catégorie depuis les pivots HFR.
+- Fixtures réelles et tests parser / repository / ViewModel pour les quatre formes observées : aucun résultat, pivot unique, pivot multiple, catégorie explicite.
+
+### Fixed
+- Les résultats d'une recherche en vol ne peuvent plus remplacer l'état après saisie d'une nouvelle query.
+- Les lignes de résultats malformées échouent explicitement au parser au lieu d'être silencieusement ignorées.
+- La construction de l'URL `searchTopics()` est maintenant couverte par MockWebServer, y compris le mode anonyme.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 52`, `versionName = "0.3.12"`.
+- Notes Play Console mises à jour pour le track alpha.
+
+---
+
 ## v51 — `0.3.11` — 2026-05-22
 
 **Statut** : `closed`
