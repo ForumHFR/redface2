@@ -1,5 +1,17 @@
 <resources>
     <string name="search_title">Recherche</string>
-    <string name="search_phase2_notice">La recherche HFR arrivera ici en Phase 2.</string>
-    <string name="search_scope_notice">Prévu : recherche dans les titres de topics et le contenu des posts, avec filtres catégorie, auteur et date selon ce que la capture HFR confirme.</string>
+    <string name="search_field_label">Mot-clé recherché</string>
+    <string name="search_field_placeholder">Sujet, mot dans le titre…</string>
+    <string name="search_submit">Rechercher</string>
+    <string name="search_retry">Réessayer</string>
+    <string name="search_idle_hint">Saisissez un mot-clé et lancez la recherche pour parcourir les sujets HFR.</string>
+    <string name="search_loading">Recherche en cours…</string>
+    <string name="search_empty">Aucun résultat pour cette recherche.</string>
+    <string name="search_error_network">Erreur réseau. Vérifiez votre connexion puis réessayez.</string>
+    <string name="search_error_unknown">HFR a renvoyé une réponse inattendue. Réessayez.</string>
+    <string name="search_pivot_label">Catégories trouvées</string>
+    <string name="search_result_replies">%1$d réponses · %2$d vues</string>
+    <string name="search_result_author">par %1$s</string>
+    <string name="search_result_last_reply">Dernier message %1$s par %2$s</string>
+    <string name="search_result_locked">Verrouillé</string>
 </resources>

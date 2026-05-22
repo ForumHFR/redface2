@@ -262,7 +262,22 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                 )
             }
             entry<SearchRoute> {
-                SearchScreen()
+                SearchScreen(
+                    onOpenTopic = { result ->
+                        // Phase 2G-A : title-search responses don't carry a `numreponse`,
+                        // so we open at the first page without scrolling to a specific post.
+                        // Post-content search (post-2G-A) will populate `page` + `numreponse`
+                        // and this branch should consume them then.
+                        backStack.add(
+                            TopicRoute(
+                                cat = result.cat,
+                                post = result.topicId,
+                                page = result.page ?: 1,
+                                scrollTo = result.numreponse,
+                            ),
+                        )
+                    },
+                )
             }
             entry<MessagesRoute> {
                 MessagesScreen(

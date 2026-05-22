@@ -303,6 +303,61 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * Phase 2G-A (#150 partiel) — fetches HFR's search result page for topic title search.
+     *
+     * Wire shape (cf. fixtures `search_*.html` captured 2026-05-22) : HFR's search form lives
+     * at `POST /search.php` but renders a 1-second meta-refresh wait page that redirects to
+     * `GET /forum1.php?recherches=1&...` carrying every form parameter in the query string.
+     * Skipping the wait page and hitting `forum1.php` directly is the canonical fetch path.
+     *
+     * - [query] : the user's term, forwarded as-is. Echoed back in upper-case by HFR.
+     * - [cat]   : the HFR cat id, encoded as `<id>*hfr.inc` (the form's expected shape).
+     *             Pass `null` for an all-categories search (encoded as an empty `cat=`).
+     * - [page]  : 1-based pagination ; currently always 1 for the 2G-A UI but plumbed
+     *             through for the multi-page follow-up.
+     * - [date]  : the « date d'aujourd'hui » HFR's form serialises even when `daterange=2`
+     *             (depuis le début) makes them functionally irrelevant. The repository
+     *             computes it from an injectable [java.time.Clock] so tests are
+     *             reproducible.
+     *
+     * Uses the **anonymous** client : the search endpoint is public and we don't want the
+     * user's session cookies attached to a request whose URL contains the search payload
+     * (logged in proxies / debug captures). The repository layer translates network
+     * failures to typed errors and is responsible for stripping the `search=` parameter
+     * before logging.
+     */
+    suspend fun searchTopics(
+        query: String,
+        cat: Int?,
+        page: Int,
+        date: java.time.LocalDate,
+    ): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("forum1.php")
+            .addQueryParameter("recherches", "1")
+            .addQueryParameter("cat", cat?.let { "$it*hfr.inc" } ?: "")
+            .addQueryParameter("orderSearch", "1")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("pseud", "")
+            .addQueryParameter("search", query)
+            .addQueryParameter("titre", "1")
+            .addQueryParameter("jour", date.dayOfMonth.toString())
+            .addQueryParameter("mois", date.monthValue.toString())
+            .addQueryParameter("annee", date.year.toString())
+            .addQueryParameter("resSearch", "20")
+            .addQueryParameter("daterange", "2")
+            .addQueryParameter("subcat", "0")
+            .addQueryParameter("searchtype", "1")
+            .addQueryParameter("trash", "0")
+            .addQueryParameter("trash_post", "0")
+            .addQueryParameter("moderation", "0")
+            .also { if (page > 1) it.addQueryParameter("page", page.toString()) }
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return anonymous.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Executes the call, returns the body as a UTF-8 string, and raises
      * [SessionExpiredException] if HFR redirected to the login page or returned the login form
      * inline. When [tracePrefix] is non-null, the OkHttp call up to headers is wrapped in
