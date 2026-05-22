@@ -1,0 +1,36 @@
+Source : https://forum.hardware.fr/forum1.php?recherches=1&cat=&orderSearch=1&config=hfr.inc&pseud=&search=xqzkbm9wj4abc&titre=1&jour=22&mois=5&annee=2026&resSearch=20&daterange=2&subcat=0&searchtype=1&trash=0&trash_post=0&moderation=0
+
+Captured : 2026-05-22 via curl, anonymous (no session cookies).
+
+Query : `search=xqzkbm9wj4abc` — random string deliberately picked to guarantee no match.
+
+Shape : « no results » — when no topic matches the query (regardless of whether the search
+was scoped to a specific category or to all categories), HFR returns a minimal `.hop`
+page with the message « Désolé, aucune réponse n'a été trouvée ! » and a JavaScript
+history.back() link. No banner, no pivot, no listing markup at all.
+
+This shape is observed identically for `cat=` and for `cat=10*hfr.inc` — captured the
+explicit-cat variant locally and confirmed it is byte-identical (same template). Only
+this one fixture is committed since the two are redundant on the parser side.
+
+Detection rule for the parser :
+- Presence of the literal string « Désolé, aucune réponse n'a été trouvée » in the body
+  is the canonical no-result marker. The `<div class="hop">` CSS class is also a
+  reliable secondary signal (it does not appear on success pages).
+- The page does NOT contain the standard `<div class="mesdiscussions" id="mesdiscussions">`
+  wrapper followed by listing markup — so a parser that requires that block will already
+  bail out before reaching the row parser.
+
+The parser should map this shape to a typed `SearchResults.Empty` value, NOT to a
+domain-level exception. An empty result set is the user's normal happy path on a misspelled
+query ; it must not be surfaced as an error in the UI.
+
+Page structure observed (30 lines total) :
+- Standard HTML head with the cookie/meta block (same as success responses).
+- `<body>` wraps a single `<div class="container">` containing :
+  - `<div class="mesdiscussions" id="mesdiscussions">` — note the wrapper IS present
+    despite the page being « minimal », so the absence-of-mesdiscussions check is NOT a
+    safe no-result detector.
+  - `<div class="hop">` with the message and the history.back() link.
+
+Sanitization : none required (anonymous capture, generic system error template).

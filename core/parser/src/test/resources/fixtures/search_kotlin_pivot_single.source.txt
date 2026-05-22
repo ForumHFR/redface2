@@ -1,0 +1,58 @@
+Source : https://forum.hardware.fr/forum1.php?recherches=1&cat=&orderSearch=1&config=hfr.inc&pseud=&search=kotlin&titre=1&jour=18&mois=2&annee=2026&resSearch=20&daterange=2&subcat=0&searchtype=1&trash=0&trash_post=0&moderation=0
+
+Captured : 2026-05-22 via curl, anonymous (no session cookies).
+
+Query : `search=kotlin`, `cat=` (all categories), `titre=1` (search in topic titles).
+
+Shape : « pivot single » — the query matched exactly ONE category (Programmation, cat=10).
+The page therefore carries the « moteur de recherche » banner + a `<select name="cat">`
+pivot dropdown with a SINGLE `<option>` (Programmation) marked `selected`. The result
+listing below the pivot is HFR's standard `forum1.php` topic-listing markup constrained
+to cat=10.
+
+This is one of FOUR result shapes the search endpoint can return. The other three are
+captured in companion fixtures :
+
+  - search_android_pivot_multi.html : pivot dropdown with N>1 options (multi-cat hit).
+  - search_kotlin_explicit_cat.html : no banner, no pivot — standard listing only
+    (triggered by passing an explicit `cat=10*hfr.inc` in the request).
+  - search_no_results.html : minimal `.hop` page (« aucune réponse n'a été trouvée »).
+
+The parser must detect which shape it is looking at BEFORE picking a strategy :
+
+  1. If body contains `.hop` div + the exact string « aucune réponse n'a été trouvée »
+     → return `SearchResults.Empty`.
+  2. Else if body contains the banner « Le moteur de recherche a trouvé des résultats
+     dans les catégories suivantes » → multi-cat mode. Parse the pivot dropdown
+     (`<select name="cat">` + the hidden `<input name="post_cat_list">`) AND the listing.
+  3. Else → single-cat mode (explicit `cat=X`). Parse the listing only ; no pivot box.
+
+Capture procedure :
+- HFR's search form (`/search.php?config=hfr.inc`) is POST. Submitting it returns a 1-second
+  meta-refresh wait page that redirects to `/forum1.php?recherches=1&...` (GET). Capturing
+  the GET on `forum1.php` directly is the canonical way to reach the result listing.
+- Default form values used : searchtype=1 (Tous les mots), titre=1 (les titres de sujets),
+  daterange=2 (depuis le début), resSearch=20, orderSearch=1, cat= (toutes catégories),
+  pseud= (no author filter), subcat=0.
+
+Contract observed in this shape :
+- Banner : `<b>Le moteur de recherche a trouvé des résultats dans les catégories suivantes :</b>`
+- Pivot dropdown : `<select name="cat"><optgroup label="FORUM HardWare.fr"><option value="10*hfr.inc" selected="selected">Programmation</option></optgroup></select>`
+  Option value format = `"<catId>*<config>"` (e.g. `"10*hfr.inc"`).
+- Hidden post_cat_list : `<input type="hidden" value="|10*hfr|" name="post_cat_list">` —
+  pipe-delimited list of `(catId, configShort)` tuples HFR matched. Here a single entry
+  because only Programmation had hits. The trailing `*hfr` lacks the `.inc` suffix that
+  appears in the dropdown — these two encodings are inconsistent on the wire.
+- Echoed query : `<input type="hidden" value="KOTLIN" name="search" />` — HFR upper-cases
+  the term for the echo (case irrelevant to the underlying match).
+- Listing : standard `forum1.php` markup the existing parser already consumes
+  (`sujet`, `sujetCase2..9`, `cCatTopic`, `cBackCouleurTab2/3/4`).
+- Topic URLs use the legacy slug pattern :
+  `/hfr/<CategorieName>/<SubcatName>/<slug>-sujet_<topicId>_<page>.htm`
+- No deep pagination on this query (3 results well under `resSearch=20`).
+
+Sanitization : none required.
+- `hash_check` is empty (anonymous capture).
+- No cookies, no session ID, no PII.
+- Public pseudos in the listing (Lt Ripley, theBattous​ai, matheo265) appear in every
+  public listing of those topics — same exposure level as existing topic listing fixtures.
