@@ -56,6 +56,20 @@ data class TopicFormState(
      * POST anyway and #154 explicitly forbids exposing the legacy anonymous flow.
      */
     val isAnonymous: Boolean = false,
+    /**
+     * Phase 2F-C (#11 partial) — smiley picker visibility + wiki search state, mirrored
+     * from [PostEditorState.smileyPicker]. Reusing the same sealed types
+     * ([SmileyPickerState] / [WikiSearchState]) defined in `PostEditorState.kt` keeps the
+     * two surfaces consistent and avoids forking a parallel sheet UI.
+     */
+    val smileyPicker: SmileyPickerState = SmileyPickerState.Hidden,
+    /**
+     * HFR user id parsed from the form HTML (cf. [TopicForm.userId]). Used by the wiki
+     * smiley search call. `null` when the form is anonymous or unparseable — the
+     * repository falls back to `user_id=0`. Same anti-clobber rule as the other hydrated
+     * fields : a silent `InvalidHashCheck` refetch must never erase a previously known id.
+     */
+    val userId: Int? = null,
 ) {
     /**
      * Submit is allowed when the mode-specific routing context is complete,
@@ -104,6 +118,10 @@ sealed interface TopicFormIntent {
     data class ToggleSignature(val enabled: Boolean) : TopicFormIntent
     data class ToggleSmileyDisabled(val disabled: Boolean) : TopicFormIntent
     data class ToggleEmailNotification(val enabled: Boolean) : TopicFormIntent
+    data object SmileyPickerOpened : TopicFormIntent
+    data object SmileyPickerDismissed : TopicFormIntent
+    data class SmileySearchQueryChanged(val query: String) : TopicFormIntent
+    data class SmileySelected(val token: String) : TopicFormIntent
 }
 
 /**
