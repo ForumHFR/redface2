@@ -160,6 +160,36 @@ class SearchResultParserTest {
     }
 
     @Test
+    fun `a malformed topic row with a known cat raises ParseException`() {
+        // Once a cat context is known, topic rows are no longer optional :
+        // silently dropping a malformed row would turn a broken HFR response
+        // into a false "no result" page.
+        val syntheticHtml = """
+            <html><body>
+              <div class="mesdiscussions" id="mesdiscussions">
+                <table class="main">
+                  <tr class="cBackHeader fondForum1Description"><th>Sujet</th></tr>
+                  <tr class="sujet">
+                    <td class="sujetCase3">missing topic anchor</td>
+                  </tr>
+                </table>
+              </div>
+            </body></html>
+        """.trimIndent()
+        val ex = assertThrows(SearchResultParser.ParseException::class.java) {
+            parser.parse(
+                syntheticHtml,
+                query = "x",
+                requestedCategory = SearchCategoryScope.Category(id = 10, name = "Programmation"),
+            )
+        }
+        assertTrue(
+            "expected ParseException to mention the missing topic anchor, got <${ex.message}>",
+            ex.message!!.contains("a.cCatTopic"),
+        )
+    }
+
+    @Test
     fun `pivot fixture exposes a pivot independently of the requested page`() {
         // Sanity check : the requestedPage parameter influences the fallback
         // pagination but does not affect pivot / row parsing.

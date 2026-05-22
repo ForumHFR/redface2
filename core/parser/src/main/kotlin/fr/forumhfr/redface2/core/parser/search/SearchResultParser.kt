@@ -16,8 +16,9 @@ import org.jsoup.nodes.Element
  *
  * The parser maps all four onto a single [SearchResultPage]. The empty result
  * variant is NOT raised as an exception — it's a normal happy path with
- * empty `topics` and empty `pivotCategories`. Only structurally broken pages
- * (no rows AND no `cat` context to attach them to) raise [ParseException].
+ * empty `topics` and empty `pivotCategories`. Structurally broken pages
+ * (missing `cat` context, or malformed topic rows once a `cat` is known) raise
+ * [ParseException] instead of silently dropping rows.
  */
 class SearchResultParser {
 
@@ -28,7 +29,8 @@ class SearchResultParser {
      * is used as the fallback when the pagination row is absent.
      *
      * @throws ParseException when the HTML carries topic rows but no detectable
-     * cat context (no pivot AND no explicit cat in the request).
+     * cat context (no pivot AND no explicit cat in the request), or when a row
+     * misses a field required for navigation.
      */
     fun parse(
         html: String,
@@ -81,7 +83,7 @@ class SearchResultParser {
             )
         }
         val topics = if (effectiveCatId != null) {
-            rowElements.mapNotNull { row -> parseTopicRow(row, effectiveCatId) }
+            rowElements.mapIndexed { index, row -> parseTopicRow(row, effectiveCatId, index) }
         } else {
             emptyList()
         }
@@ -120,14 +122,15 @@ class SearchResultParser {
         }
     }
 
-    // Guard clauses for each missing field are the natural shape of an HTML parser ;
-    // chaining them into a single nullable `let` block would hide which selector
-    // failed and make the parse error harder to diagnose.
-    @Suppress("ReturnCount")
-    private fun parseTopicRow(row: Element, cat: Int): SearchTopicResult? {
-        val titleAnchor = row.selectFirst("td.sujetCase3 a.cCatTopic") ?: return null
+    private fun parseTopicRow(row: Element, cat: Int, index: Int): SearchTopicResult {
+        val titleAnchor = row.selectFirst("td.sujetCase3 a.cCatTopic")
+            ?: throw ParseException("Search topic row #$index is missing td.sujetCase3 a.cCatTopic.")
         val href = titleAnchor.attr("href")
-        val topicId = extractTopicId(href, titleAnchor.attr("title")) ?: return null
+        if (href.isBlank()) {
+            throw ParseException("Search topic row #$index has an empty topic href.")
+        }
+        val topicId = extractTopicId(href, titleAnchor.attr("title"))
+            ?: throw ParseException("Search topic row #$index has no topic id in href/title.")
         val (categorySlug, subcategorySlug) = extractSlugs(href)
         // Lock indicator : `<img src="…/lock.gif" title="Sujet fermé" />` placed
         // INSIDE `td.sujetCase3`, BEFORE the anchor. Historical bug from the

@@ -130,6 +130,7 @@ class SearchViewModelTest {
         vm.submit(SearchIntent.Retry)
 
         coVerify(exactly = 2) { repo.search(SearchRequest(query = "kotlin", category = SearchCategoryScope.All)) }
+        assertEquals("kotlin", vm.state.value.query)
         assertEquals(1, vm.state.value.results.size)
         assertEquals("Recovered", vm.state.value.results.first().title)
     }
@@ -207,6 +208,34 @@ class SearchViewModelTest {
             )
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `typing a new query cancels an in-flight search and clears stale results`() = runTest {
+        val gate = CompletableDeferred<SearchResultPage>()
+        coEvery { repo.search(SearchRequest(query = "android", category = SearchCategoryScope.All)) } coAnswers {
+            gate.await()
+        }
+
+        val vm = SearchViewModel(repo)
+        vm.submit(SearchIntent.QueryChanged("android"))
+        vm.submit(SearchIntent.Submit)
+        assertTrue(vm.state.value.isLoading)
+
+        vm.submit(SearchIntent.QueryChanged("kotlin"))
+
+        val typedState = vm.state.value
+        assertEquals("kotlin", typedState.query)
+        assertFalse("typing a new query should stop the loading state", typedState.isLoading)
+        assertFalse("typing a new query returns to the idle state", typedState.hasSearched)
+        assertEquals(emptyList<SearchTopicResult>(), typedState.results)
+        assertEquals(emptyList<SearchPivotCategory>(), typedState.pivotCategories)
+
+        // Completing the cancelled call must not repopulate results under the
+        // new, not-yet-submitted query.
+        gate.complete(fakePage(topics = listOf(fakeTopic(99, "stale android hit")), pivot = emptyList()))
+        assertEquals("kotlin", vm.state.value.query)
+        assertEquals(emptyList<SearchTopicResult>(), vm.state.value.results)
     }
 
     private fun fakeTopic(

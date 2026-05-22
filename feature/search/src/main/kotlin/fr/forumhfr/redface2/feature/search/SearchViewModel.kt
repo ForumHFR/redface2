@@ -50,6 +50,13 @@ class SearchViewModel @Inject constructor(
 
     private var searchJob: Job? = null
 
+    /**
+     * Monotonic guard against stale completions. Cancelling a coroutine is the
+     * normal path, but the generation also protects us if a fake/test repository
+     * or a future dispatcher resumes after cancellation.
+     */
+    private var searchGeneration = 0L
+
     fun submit(intent: SearchIntent) {
         when (intent) {
             is SearchIntent.QueryChanged -> onQueryChanged(intent.query)
@@ -60,9 +67,22 @@ class SearchViewModel @Inject constructor(
     }
 
     private fun onQueryChanged(query: String) {
-        // Just track the field's value ; clear the error banner so the user isn't
-        // left staring at a stale failure while typing a new query.
-        _state.update { it.copy(query = query, errorMessage = null) }
+        // A typed-but-not-submitted query invalidates the currently displayed
+        // search. Keeping the old list under the new field value is misleading
+        // and can let an in-flight response land as stale results.
+        searchGeneration += 1
+        searchJob?.cancel()
+        _state.update {
+            it.copy(
+                query = query,
+                selectedCategory = null,
+                pivotCategories = emptyList(),
+                results = emptyList(),
+                isLoading = false,
+                errorMessage = null,
+                hasSearched = false,
+            )
+        }
     }
 
     private fun onSubmit() {
@@ -84,48 +104,50 @@ class SearchViewModel @Inject constructor(
     private fun launchSearch(query: String, scope: SearchCategoryScope) {
         // Cancel any in-flight search ; a newer query must take precedence.
         searchJob?.cancel()
+        val generation = searchGeneration + 1
+        searchGeneration = generation
         lastSubmittedQuery = query
         lastSubmittedCategory = scope
         _state.update {
             it.copy(
+                query = query,
                 isLoading = true,
                 errorMessage = null,
                 hasSearched = true,
             )
         }
         searchJob = viewModelScope.launch {
-            val outcome = runCatching {
+            val page = try {
                 searchRepository.search(SearchRequest(query = query, category = scope))
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (generation != searchGeneration) return@launch
+                val kind = when (error) {
+                    is IOException -> SearchErrorKind.Network
+                    else -> SearchErrorKind.Unknown
+                }
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = kind,
+                        // Keep the previous results untouched on retry-friendly errors —
+                        // wiping the list on a transient network blip is more disruptive
+                        // than helpful.
+                    )
+                }
+                return@launch
             }
-            outcome.fold(
-                onSuccess = { page ->
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            results = page.topics,
-                            pivotCategories = page.pivotCategories,
-                            selectedCategory = page.selectedCategory,
-                            errorMessage = null,
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    if (error is CancellationException) throw error
-                    val kind = when (error) {
-                        is IOException -> SearchErrorKind.Network
-                        else -> SearchErrorKind.Unknown
-                    }
-                    _state.update {
-                        it.copy(
-                            isLoading = false,
-                            errorMessage = kind,
-                            // Keep the previous results untouched on retry-friendly errors —
-                            // wiping the list on a transient network blip is more disruptive
-                            // than helpful.
-                        )
-                    }
-                },
-            )
+            if (generation != searchGeneration) return@launch
+            _state.update {
+                it.copy(
+                    isLoading = false,
+                    results = page.topics,
+                    pivotCategories = page.pivotCategories,
+                    selectedCategory = page.selectedCategory,
+                    errorMessage = null,
+                )
+            }
         }
     }
 }
