@@ -56,6 +56,12 @@ androidx-test-core = { module = "androidx.test:core", version.ref = "androidx-te
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
+# Compose UI test artifacts — versions managed by the Compose BOM. Used Phase 2F-A (#130) for the
+# JVM/Robolectric `createComposeRule()` test that pins the `InlineTextContent` placeholder rects
+# under varying `fontScale` values. `ui-test-junit4` brings the test rule + `onNodeWithTag` API ;
+# `ui-test-manifest` is a debug-only resource needed by the rule to host the Activity surrogate.
+androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
+androidx-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
 androidx-navigation3-runtime = { module = "androidx.navigation3:navigation3-runtime", version.ref = "navigation3" }
 androidx-navigation3-ui = { module = "androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
 androidx-lifecycle-viewmodel-navigation3 = { module = "androidx.lifecycle:lifecycle-viewmodel-navigation3", version.ref = "androidx-lifecycle" }
