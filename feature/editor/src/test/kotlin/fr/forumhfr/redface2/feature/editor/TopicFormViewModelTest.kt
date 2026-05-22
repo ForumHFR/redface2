@@ -536,21 +536,21 @@ class TopicFormViewModelTest {
         testScheduler.advanceTimeBy(400L)
         testScheduler.runCurrent()
         // Second keystroke arrives BEFORE the first response lands.
-        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("jape"))
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("jap "))
         testScheduler.advanceTimeBy(400L)
         testScheduler.runCurrent()
         // The repo recorded the second call ; the first was cancelled.
         assertEquals(2, smileyRepository.callCount)
         assertEquals(1, smileyRepository.cancellationCount)
-        assertEquals("jape", smileyRepository.lastQuery)
+        assertEquals("jap ", smileyRepository.lastQuery)
 
-        // The latest response (for "jape") lands ; the earlier "jap" job was cancelled
+        // The latest response (for "jap ") lands ; the earlier "jap" job was cancelled
         // so its result cannot overwrite the current state.
         smileyRepository.completeNext(
             listOf(
                 EditorSmiley(
-                    token = "[:jape]",
-                    imageUrl = "https://forum-images.hardware.fr/images/perso/jape.gif",
+                    token = "[:haha jap]",
+                    imageUrl = "https://forum-images.hardware.fr/images/perso/haha%20jap.gif",
                     source = EditorSmileySource.WIKI,
                 ),
             ),
@@ -560,7 +560,7 @@ class TopicFormViewModelTest {
             val picker = state.smileyPicker as SmileyPickerState.Open
             val wiki = picker.wiki as WikiSearchState.Results
             assertEquals(1, wiki.items.size)
-            assertEquals("[:jape]", wiki.items[0].token)
+            assertEquals("[:haha jap]", wiki.items[0].token)
             cancelAndIgnoreRemainingEvents()
         }
     }
