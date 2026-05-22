@@ -18,7 +18,7 @@ Phase 2F-C (#11 partiel) — picker smileys symétrique sur `TopicFormScreen` (E
 - Insertion via `insertBbcodeToken(...)` partagé avec le post-level editor ; preview re-parse si visible ; sheet se ferme automatiquement.
 
 ### Tests (Phase 2F-C)
-- `TopicFormViewModelTest` : 8 nouveaux cas pour le picker — open transition, dismiss + cancel in-flight, threshold gate (≤ 2 → no call), debounce + userId hydraté, fallback `user_id=0`, Error path, insertion + preview refresh + fermeture, race-condition guard sur deux queries successives, couverture mode `New` pour vérifier le câblage symétrique.
+- `TopicFormViewModelTest` : 9 nouveaux cas pour le picker — open transition, dismiss + cancel in-flight, threshold gate (≤ 2 → no call), debounce + userId hydraté, fallback `user_id=0`, Error path, insertion + preview refresh + fermeture, race-condition guard sur deux queries successives, same-query identity guard, couverture mode `New` pour vérifier le câblage symétrique.
 
 ### Added (Phase 2F-B #11 partiel)
 - Nouveau modèle `EditorSmiley(token, imageUrl, source)` + enum `EditorSmileySource.BUILTIN/WIKI` dans `:core:model`. Traverse parser → repository → ViewModel → UI sans transformation.

@@ -480,6 +480,27 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `failed wiki search does not leak user id or query through diagnostics`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val viewModel = newViewModel(diagnostics = diagnostics)
+        viewModel.submit(TopicFormIntent.SmileyPickerOpened)
+        viewModel.submit(TopicFormIntent.SmileySearchQueryChanged("secret"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+
+        smileyRepository.failNext(
+            java.io.IOException("https://forum.hardware.fr/message-smi-mp-aj.php?user_id=12345&findsmilies=secret"),
+        )
+        testScheduler.runCurrent()
+
+        val messages = diagnostics.entries.value.joinToString(separator = "\n") { it.message }
+        assertTrue(messages.contains("wiki smiley search failed: IOException"))
+        assertFalse(messages.contains("12345"))
+        assertFalse(messages.contains("secret"))
+        assertFalse(messages.contains("findsmilies"))
+    }
+
+    @Test
     fun `SmileySelected inserts the token at the caret closes the picker and refreshes the preview`() = runTest {
         val viewModel = newViewModel()
         viewModel.state.test {
@@ -588,7 +609,10 @@ class TopicFormViewModelTest {
         assertEquals(SAMPLE_USER_ID, smileyRepository.lastUserId)
     }
 
-    private fun newTopicViewModel(entrySubcat: Int?): TopicFormViewModel = TopicFormViewModel(
+    private fun newTopicViewModel(
+        entrySubcat: Int?,
+        diagnostics: DiagnosticsLog = DiagnosticsLog(),
+    ): TopicFormViewModel = TopicFormViewModel(
         request = TopicFormRequest(
             mode = TopicFormMode.New,
             cat = SAMPLE_CAT,
@@ -600,7 +624,7 @@ class TopicFormViewModelTest {
         previewParser = previewParser,
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
-        diagnostics = DiagnosticsLog(),
+        diagnostics = diagnostics,
     )
 
     private suspend fun app.cash.turbine.ReceiveTurbine<TopicFormState>.awaitHydratedState(): TopicFormState {
@@ -614,7 +638,9 @@ class TopicFormViewModelTest {
         return hydrated
     }
 
-    private fun newViewModel(): TopicFormViewModel = TopicFormViewModel(
+    private fun newViewModel(
+        diagnostics: DiagnosticsLog = DiagnosticsLog(),
+    ): TopicFormViewModel = TopicFormViewModel(
         request = TopicFormRequest(
             mode = TopicFormMode.EditFirstPost,
             cat = SAMPLE_CAT,
@@ -626,7 +652,7 @@ class TopicFormViewModelTest {
         previewParser = previewParser,
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
-        diagnostics = DiagnosticsLog(),
+        diagnostics = diagnostics,
     )
 
     private class FakePreviewParser : BbcodePreviewParser {
