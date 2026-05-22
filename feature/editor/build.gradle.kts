@@ -17,6 +17,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
+    // Phase 2F-B (#11) — the smiley picker renders perso smileys served from the HFR CDN ;
+    // Coil's AsyncImage is the same code path :core:ui already uses for post rendering.
+    implementation(libs.coil.compose)
 
     testImplementation(libs.junit4)
     testImplementation(libs.mockk)

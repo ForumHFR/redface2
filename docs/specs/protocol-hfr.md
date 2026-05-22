@@ -366,7 +366,25 @@ Deux sources distinctes :
 - **Tailles différentes** : les smileys ne sont pas tous 16×16. Le crawl exhaustif `wikismilies.php` réalisé pendant le dogfood a trouvé **34 139** smileys perso, avec une distribution très concentrée sur une ligne HFR de **50 px** : `70×50` (8047), `50×50` (2811), `67×50` (1142), puis beaucoup de variantes `W×50`; les micro-smileys existent aussi (`15×15` 701, `19×19` 399, `16×16` 206). Phase 1 utilise une politique de buckets (`:core:ui` `PostMediaDisplayPolicy`) : builtin **bucket fixe 18×18**, perso **bucket fixe 70×50**. Les smileys utilisent `ContentScale.Fit` pour rester lisibles sur smartphone et préserver le ratio : un sprite `15×15` devient `50×50`, un `39×15` devient `70×27`, un `50×50` reste `50×50`, un `70×50` reste `70×50`, un `200×150` descend à `67×50` (à density/fontScale = 1). Les images inline `[img]` gardent `ContentScale.Inside` pour éviter d'agrandir une petite image arbitraire dans le bucket `240×180`. L'enfant `AsyncImage` du `Placeholder` utilise `Modifier.fillMaxSize()` au lieu d'un `Modifier.size(.dp)` figé — l'image suit ainsi le placeholder en `sp` même quand `fontScale ≠ 1` (accessibility). `PlaceholderVerticalAlign.Center`. Invariant pinned dans les tests : `persoSmiley.placeholderHeight ≤ 2.5 × bodyMedium.lineHeight` (lecture dynamique sur `RedfaceTypography`, `20.sp` aujourd'hui). Mesure intrinsèque via `ImageLoader.execute()` ou catalogue embarqué complet reportés Phase 2/4 si le bucket fixe reste insuffisant.
 - Extraire le code smiley (`:jap:`, `:bounce:`) depuis l'attribut `alt`/`title` de l'`<img>` pour pouvoir le re-saisir côté éditeur — c'est un sujet **éditeur Phase 2**, pas le chemin principal de lecture.
 - Les smileys custom d'un utilisateur sont exposés dans son profil (section `perso`).
-- Un catalogue "wiki smileys" est disponible via `message-smi-mp-aj.php` (recherche de smileys) — utile pour l'éditeur Phase 2, pas en lecture.
+- Un catalogue "wiki smileys" est disponible via `message-smi-mp-aj.php` (recherche de smileys) — utilisé par l'éditeur Phase 2F-B (#11 partiel), pas en lecture.
+
+### Endpoint wiki search (Phase 2F-B)
+
+Contrat live capturé le 2026-05-22 (cf. `core/parser/src/test/resources/fixtures/smiley_search_jap.html` + `.source.txt`) :
+
+```text
+GET /message-smi-mp-aj.php?config=hfr.inc&user_id={user_id}&findsmilies={query}
+```
+
+| Paramètre | Source | Notes |
+|---|---|---|
+| `config` | constante `"hfr.inc"` | Idem reste du protocole. |
+| `user_id` | parsé depuis `find_smilies_timer('hfr.inc', N)` du form HTML (cf. `SmileyUserIdExtractor`) | Plumbé via `ReplyForm.userId` / `TopicForm.userId`. `0` accepté pour les probes anonymes (le endpoint ne refuse pas), mais un user id authentifié laisse HFR pager les favoris en premier. |
+| `findsmilies` | la query utilisateur, **URL-encodée** | HFR gate sur `query.length > 2` dans `find_smilies_timer` ; le client reproduit ce seuil + le debounce 300 ms du JS web. |
+
+Réponse : fragment HTML (pas de `<html>/<body>` wrapper), une `<img src="…" alt="[:token]" title="[:token]" onclick="putSmiley(this.alt,this.src)" />` par smiley match. HFR peut émettre le même `(alt, src)` deux fois — le parser dédup. Tokens préservés verbatim : variantes avec espaces (`[:haha jap]`), underscores (`[:menkahoure_4]`), tirets (`[:55-]`), `:N` variants (`[:eneytihi:5]`).
+
+L'endpoint accepte session anonyme (`user_id=0`) ; côté client, l'appel passe par le client OkHttp **anonymous** pour ne pas exposer la query dans les diagnostics authentifiés.
 
 ---
 

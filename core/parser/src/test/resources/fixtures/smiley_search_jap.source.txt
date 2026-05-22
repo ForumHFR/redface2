@@ -1,0 +1,27 @@
+Source : https://forum.hardware.fr/message-smi-mp-aj.php?config=hfr.inc&user_id=0&findsmilies=jap
+
+Captured : 2026-05-22 via curl, anonymous (no session cookies).
+
+Tool : curl -sS 'https://forum.hardware.fr/message-smi-mp-aj.php?config=hfr.inc&user_id=0&findsmilies=jap'
+
+Mode : anonymous session ; the wiki search endpoint accepts `user_id=0` without authentication.
+The HFR JS hint `find_smilies_timer('hfr.inc', <user_id>)` from a logged-in form passes the
+logged-in user's own id so HFR can page that user's favourites first, but the endpoint
+itself does not refuse a `0` id — it just returns the global match list. Phase 2F-B uses the
+parsed value when available, falls back to `0` otherwise.
+
+Contract observed :
+- response is an HTML fragment (no <html>/<head>/<body>) ;
+- one `<img src="…" alt="[:token]" title="[:token]" onclick="putSmiley(this.alt,this.src)" />`
+  per matching smiley ;
+- tokens cover the four shape variants the parser must support :
+  - simple `[:axellay]`
+  - underscored `[:menkahoure_4]`, `[:dd_005]`
+  - dashed `[:55-]`
+  - whitespaced `[:haha jap]`, `[:swedish chef]`, `[:cerveau jap]`, `[:double clic]`
+  - perso variants `[:aioka:4]`, `[:eneytihi:5]`, `[:cliowilliams:8]`
+- the fragment includes occasional duplicates (same token+url appears twice in a row) which
+  the parser must dedupe.
+
+Sanitization : none required. The fragment carries no `hash_check`, no cookies, no PII —
+only public image URLs and bbcode tokens already public on the HFR wiki.

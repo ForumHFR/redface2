@@ -190,4 +190,113 @@ class BbcodeFormatterTest {
         )
         assertEquals("[#ff6600]x[/#ff6600]", result.text)
     }
+
+    // ----- Phase 2F-B (#11 partial) : insertBbcodeToken ----------------------
+
+    @Test
+    fun `inserts a builtin smiley token at the caret with surrounding spaces`() {
+        val result = insertBbcodeToken(
+            token = ":jap:",
+            text = "hello",
+            selectionStart = 5,
+            selectionEnd = 5,
+        )
+        assertEquals("hello :jap: ", result.text)
+        // Caret lands after the trailing space so the user can keep typing.
+        assertEquals(12, result.selectionStart)
+        assertEquals(12, result.selectionEnd)
+    }
+
+    @Test
+    fun `inserts a two-char smiley token like winking face`() {
+        // The pre-#144 toolbar already supported `;)` ; the helper must accept any opaque
+        // string, including non-alphabetic codes that look syntactically unusual.
+        val result = insertBbcodeToken(
+            token = ";)",
+            text = "wink",
+            selectionStart = 4,
+            selectionEnd = 4,
+        )
+        assertEquals("wink ;) ", result.text)
+        assertEquals(8, result.selectionStart)
+        assertEquals(8, result.selectionEnd)
+    }
+
+    @Test
+    fun `inserts a perso smiley token verbatim including internal spaces`() {
+        // `[:haha jap]` carries an inline whitespace ; the helper must not split it nor
+        // collapse the space. The surrounding-space fragment becomes ` [:haha jap] `.
+        val result = insertBbcodeToken(
+            token = "[:haha jap]",
+            text = "rofl",
+            selectionStart = 4,
+            selectionEnd = 4,
+        )
+        assertEquals("rofl [:haha jap] ", result.text)
+        assertEquals(17, result.selectionStart)
+        assertEquals(17, result.selectionEnd)
+    }
+
+    @Test
+    fun `inserts a perso smiley variant with a numeric suffix without splitting on colon`() {
+        // `[:eneytihi:5]` looks like a `:code:` pair to a naive tokenizer ; the helper just
+        // forwards the string opaquely so the variant index `5` survives.
+        val result = insertBbcodeToken(
+            token = "[:eneytihi:5]",
+            text = "",
+            selectionStart = 0,
+            selectionEnd = 0,
+        )
+        assertEquals(" [:eneytihi:5] ", result.text)
+        assertEquals(15, result.selectionStart)
+        assertEquals(15, result.selectionEnd)
+    }
+
+    @Test
+    fun `inserting around a selection replaces the selected text by the token fragment`() {
+        // Compose TextFieldValue semantics : a non-empty selection at insertion time is
+        // replaced. Matches the HFR web composer's behaviour with `putSmiley`.
+        val result = insertBbcodeToken(
+            token = ":jap:",
+            text = "hello world",
+            selectionStart = 6,
+            selectionEnd = 11,
+        )
+        assertEquals("hello  :jap: ", result.text)
+        assertEquals(13, result.selectionStart)
+        assertEquals(13, result.selectionEnd)
+    }
+
+    @Test
+    fun `inserts without surrounding spaces when the caller opts out`() {
+        // Pinning the parameter contract : `surroundWithSpaces = false` emits the raw token
+        // (no leading or trailing whitespace). Future callers that need a different padding
+        // policy (e.g. only space before) can compose their own fragment ; the helper stays
+        // contract-pure.
+        val result = insertBbcodeToken(
+            token = ":jap:",
+            text = "ab",
+            selectionStart = 1,
+            selectionEnd = 1,
+            surroundWithSpaces = false,
+        )
+        assertEquals("a:jap:b", result.text)
+        assertEquals(6, result.selectionStart)
+        assertEquals(6, result.selectionEnd)
+    }
+
+    @Test
+    fun `clamps out-of-range and inverted selections before inserting`() {
+        // Same defensive normalisation as applyBbcodeAction : the helper must never crash on
+        // values that Compose can legitimately emit during IME/paste/undo races.
+        val result = insertBbcodeToken(
+            token = ":jap:",
+            text = "abc",
+            selectionStart = -2,
+            selectionEnd = 100,
+        )
+        assertEquals(" :jap: ", result.text)
+        assertEquals(7, result.selectionStart)
+        assertEquals(7, result.selectionEnd)
+    }
 }

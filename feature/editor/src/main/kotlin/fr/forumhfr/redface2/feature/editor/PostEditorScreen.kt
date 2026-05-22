@@ -27,6 +27,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -72,6 +74,7 @@ private fun PostEditorContent(
     onIntent: (PostEditorIntent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val openSmileyPickerDescription = stringResource(R.string.editor_smiley_open_description)
     Surface(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
@@ -94,6 +97,18 @@ private fun PostEditorContent(
             BbcodeToolbar(
                 onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
             )
+
+            // Phase 2F-B (#11) — quick access to the smiley picker. Lives next to the BBCode
+            // toolbar rather than inside it because smileys are point-insertions, not wrappers,
+            // and the underlying `BbcodeAction` model is wrap-only.
+            TextButton(
+                onClick = { onIntent(PostEditorIntent.SmileyPickerOpened) },
+                modifier = Modifier.semantics {
+                    contentDescription = openSmileyPickerDescription
+                },
+            ) {
+                Text(text = stringResource(R.string.editor_smiley_open))
+            }
 
             BbcodeTextField(
                 value = state.draft,
@@ -177,6 +192,20 @@ private fun PostEditorContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+        // Phase 2F-B (#11) — bottom-sheet smiley picker. Rendered as a sibling of the
+        // Column so the sheet can scrim the editor without being constrained by the
+        // verticalScroll above. Visibility is owned by the ViewModel via
+        // `SmileyPickerState` ; dismissal goes through the dedicated intent so the
+        // ViewModel can cancel any in-flight wiki search at the same time.
+        val picker = state.smileyPicker
+        if (picker is SmileyPickerState.Open) {
+            SmileyPickerSheet(
+                state = picker,
+                onDismiss = { onIntent(PostEditorIntent.SmileyPickerDismissed) },
+                onQueryChange = { query -> onIntent(PostEditorIntent.SmileySearchQueryChanged(query)) },
+                onSmileyClicked = { token -> onIntent(PostEditorIntent.SmileySelected(token)) },
+            )
         }
     }
 }

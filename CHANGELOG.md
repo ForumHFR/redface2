@@ -8,6 +8,39 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
+Phase 2F-B (#11 partiel) — picker smileys dans l'éditeur (bottom-sheet Material 3, onglet Standard 25 builtins HFR + onglet Wiki live via `message-smi-mp-aj.php`). Phase 2E (#149) création de topic + follow-up Phase 2B-B (#144) déjà mergés décrits plus bas.
+
+### Added (Phase 2F-B #11 partiel)
+- Nouveau modèle `EditorSmiley(token, imageUrl, source)` + enum `EditorSmileySource.BUILTIN/WIKI` dans `:core:model`. Traverse parser → repository → ViewModel → UI sans transformation.
+- Constante `BUILTIN_HFR_SMILEYS` (25 entrées dérivées de la fixture `write_reply_form_open_topic.html`) pour l'onglet Standard. Pas d'invention de codes, source = capture HFR réelle.
+- `SmileySearchParser` (`:core:parser/smiley/`) qui parse le fragment HTML retourné par `GET /message-smi-mp-aj.php`. Dédup par `(token, url)`, accepte fragment, tolère `title` fallback quand `alt` absent. Fixture `smiley_search_jap.html` capturée 2026-05-22 (anonyme, `user_id=0`) — couvre les variants critiques : tokens avec espaces (`[:haha jap]`), underscores (`[:menkahoure_4]`), tirets (`[:55-]`), variantes `:N` (`[:eneytihi:5]`).
+- `SmileyUserIdExtractor` regex sur `find_smilies_timer('hfr.inc', N)` côté `ReplyFormParser` + `TopicFormParser`. Plumb dans `ReplyForm.userId: Int?` et `TopicForm.userId: Int?` (default `null` = anonyme, fallback `0` côté repo).
+- `HfrClient.getSmileySearch(userId, query)` GET sur l'endpoint wiki — route via le client **anonymous** (l'endpoint accepte `user_id=0` et le query du user n'a pas à fuir dans les cookies authentifiés).
+- `SmileyRepository` (`:core:domain`) + `DefaultSmileyRepository` (`:core:data`) + module Hilt `SmileyRepositoryModule`. `withContext(ioDispatcher)` autour de l'appel HFR + parsing. Diagnostics anti-leak : pas de `query` complet en clair, seulement la longueur.
+- `insertBbcodeToken(token, text, selectionStart, selectionEnd, surroundWithSpaces = true)` helper pur dans `BbcodeFormatter.kt`. Reproduit la convention `putSmiley` JS du composer HFR (`" $token "`). Caret après le fragment inséré. Cas testés : insertion simple `:jap:`, `;)`, perso avec espace `[:haha jap]`, variante `[:eneytihi:5]`, autour d'une sélection (remplacement), `surroundWithSpaces = false`, hors-range clamp.
+- `PostEditorState.smileyPicker: SmileyPickerState` (Hidden / Open(query, WikiSearchState.Idle|Loading|Results|Error)) + `userId: Int?` propagé depuis `ReplyForm.userId`. Anti-clobber sur `userId` (non écrasé par un refetch).
+- `PostEditorIntent` ajoute `SmileyPickerOpened`, `SmileyPickerDismissed`, `SmileySearchQueryChanged(query)`, `SmileySelected(token)`. `PostEditorViewModel` debounce 300 ms aligné sur `find_smilies_timer` (`/compressed/message.js`), cancel-on-next-query, gate `query.length > 2`.
+- `SmileyPickerSheet` (`ModalBottomSheet` Material 3) : onglet Standard via `LazyVerticalGrid` sur `BUILTIN_HFR_SMILEYS`, onglet Wiki avec champ recherche + lifecycle `Idle/Loading/Results/Error/Empty`. `AsyncImage` Coil pour le rendu. Tap smiley → `insertBbcodeToken` → fermeture du sheet. `contentDescription` localisée par smiley (« Insérer :jap: »).
+- Bouton « Smileys » à côté de la toolbar BBCode dans `PostEditorScreen` (Reply/Quote/Edit). Le `TopicFormScreen` (Edit FP / New topic) reste sans picker pour cette PR — câblage symétrique à faire dans une PR suivante.
+- Strings localisées FR (`feature/editor/src/main/res/values/strings.xml`) : `editor_smiley_*` (open / title / tab_standard / tab_wiki / search_label / search_hint / search_loading / search_empty / search_error / insert_description).
+
+### Tests (Phase 2F-B)
+- `SmileySearchParserTest` : 8 cas sur la fixture réelle + 2 cas synthétiques (drop entries sans alt/src, fallback title, fragment vide).
+- `BbcodeFormatterTest::insertBbcodeToken` : 7 cas (builtin, perso espacé, variant `:N`, autour de sélection, sans surround, clamp hors-range).
+- `PostEditorViewModelTest` : 7 cas pour le picker (open transition, dismiss, threshold court-circuit, debounce + appel repo, Results, Error, SmileySelected insertion + close).
+- Acquis cumulés intacts : `withContext(ioDispatcher)`, redaction `hash_check`, anti-clobber draft.
+
+### Hors scope (différé)
+- Favoris / récents / sync MPStorage.
+- Upload nouveau smiley perso.
+- GIFs externes / providers.
+- Catalogue offline 34k.
+- WebView contournement.
+- Smiley picker dans `TopicFormScreen` (Edit FP / New topic) — symétrique mais non livré ici pour limiter le scope.
+- Bump version, tag, release.
+
+---
+
 Phase 2E (#149) — création de topic : un compte authentifié peut créer un sujet depuis Redface 2 sans navigateur. Et follow-up Phase 2B-B (#144) déjà mergé décrit plus bas.
 
 ### Added (Phase 2E #149)

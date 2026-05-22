@@ -30,13 +30,19 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.EditorSmileySource
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("LargeClass") // One class per ViewModel keeps every code path co-located with its
+// dispatcher / fake repositories — splitting per phase (#145 reply / #146 quote / #147 edit /
+// #11 smiley) would shred the shared `Fake*Repository` test doubles into duplicated copies.
 class PostEditorViewModelTest {
 
     private val previewParser = FakePreviewParser()
     private val replyRepository = FakeReplyRepository()
     private val editPostRepository = FakeEditPostRepository()
+    private val smileyRepository = FakeSmileyRepository()
 
     @Before
     fun setUp() {
@@ -607,8 +613,130 @@ class PostEditorViewModelTest {
             previewParser = previewParser,
             replyRepository = replyRepository,
             editPostRepository = editPostRepository,
+            smileyRepository = smileyRepository,
             diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
         )
+
+    // ----- Phase 2F-B (#11) : smiley picker ----------------------------------
+
+    @Test
+    fun `SmileyPickerOpened transitions the state to Open`() = runTest {
+        val viewModel = newReplyViewModel()
+        viewModel.state.test {
+            skipItems(1) // initial idle state
+            viewModel.submit(PostEditorIntent.SmileyPickerOpened)
+            val opened = expectMostRecentItem()
+            val picker = opened.smileyPicker
+            assert(picker is SmileyPickerState.Open) {
+                "expected Open, got $picker"
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `SmileyPickerDismissed sets the state back to Hidden`() = runTest {
+        val viewModel = newReplyViewModel()
+        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
+        viewModel.submit(PostEditorIntent.SmileyPickerDismissed)
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            assert(state.smileyPicker == SmileyPickerState.Hidden) {
+                "expected Hidden after dismiss, got ${state.smileyPicker}"
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `short queries stay below the 2-char threshold and do not hit the repository`() = runTest {
+        val viewModel = newReplyViewModel()
+        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
+        viewModel.submit(PostEditorIntent.SmileySearchQueryChanged("ja"))
+        // The 2-char query is below threshold, so no debounce kicks in either ; assert by
+        // call-count rather than racing the dispatcher.
+        assertEquals(0, smileyRepository.callCount)
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            val picker = state.smileyPicker as SmileyPickerState.Open
+            assertEquals(WikiSearchState.Idle, picker.wiki)
+            assertEquals("ja", picker.query)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `queries above the threshold hit the repository after the debounce`() = runTest {
+        val viewModel = newReplyViewModel()
+        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
+        viewModel.submit(PostEditorIntent.SmileySearchQueryChanged("jap"))
+        // Advance through the 300 ms debounce.
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+        assertEquals(1, smileyRepository.callCount)
+        assertEquals("jap", smileyRepository.lastQuery)
+    }
+
+    @Test
+    fun `successful wiki search lands as Results in the picker`() = runTest {
+        val viewModel = newReplyViewModel()
+        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
+        viewModel.submit(PostEditorIntent.SmileySearchQueryChanged("jap"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+        smileyRepository.completeNext(
+            listOf(
+                EditorSmiley(
+                    token = "[:haha jap]",
+                    imageUrl = "https://forum-images.hardware.fr/images/perso/haha%20jap.gif",
+                    source = EditorSmileySource.WIKI,
+                ),
+            ),
+        )
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            val picker = state.smileyPicker as SmileyPickerState.Open
+            val wiki = picker.wiki as WikiSearchState.Results
+            assertEquals(1, wiki.items.size)
+            assertEquals("[:haha jap]", wiki.items[0].token)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `failed wiki search lands as Error and keeps the picker open`() = runTest {
+        val viewModel = newReplyViewModel()
+        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
+        viewModel.submit(PostEditorIntent.SmileySearchQueryChanged("jap"))
+        testScheduler.advanceTimeBy(400L)
+        testScheduler.runCurrent()
+        smileyRepository.failNext(java.io.IOException("offline"))
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            val picker = state.smileyPicker as SmileyPickerState.Open
+            assertEquals(WikiSearchState.Error, picker.wiki)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `SmileySelected inserts the token at the caret and closes the picker`() = runTest {
+        val viewModel = newReplyViewModel()
+        viewModel.submit(PostEditorIntent.ContentChanged(
+            androidx.compose.ui.text.input.TextFieldValue("hello", androidx.compose.ui.text.TextRange(5)),
+        ))
+        viewModel.submit(PostEditorIntent.SmileyPickerOpened)
+        viewModel.submit(PostEditorIntent.SmileySelected(":jap:"))
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            // Surrounding spaces convention from `putSmiley` is honoured.
+            assertEquals("hello :jap: ", state.draft.text)
+            assertEquals(12, state.draft.selection.start)
+            // Picker auto-closes so the user can keep typing.
+            assertEquals(SmileyPickerState.Hidden, state.smileyPicker)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
 
     private fun newEditViewModel(
         subcat: Int? = SAMPLE_SUBCAT,
@@ -626,6 +754,7 @@ class PostEditorViewModelTest {
             previewParser = previewParser,
             replyRepository = replyRepository,
             editPostRepository = editPostRepository,
+            smileyRepository = smileyRepository,
             diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
         )
 
@@ -767,6 +896,42 @@ class PostEditorViewModelTest {
             lastSubmittedOptions = options
             submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")
+        }
+    }
+
+    /**
+     * Phase 2F-B (#11) — fake smiley repository. Holds a single deferred result so tests can
+     * drive the loading / success / error transitions on the wiki search lifecycle without
+     * touching the network. By default the search hangs forever ; tests that need a result
+     * call `completeNext(...)` or `failNext(...)`.
+     */
+    private class FakeSmileyRepository :
+        fr.forumhfr.redface2.core.domain.smiley.SmileyRepository {
+        private var pending: kotlinx.coroutines.CompletableDeferred<List<EditorSmiley>>? = null
+        var lastUserId: Int? = null
+            private set
+        var lastQuery: String? = null
+            private set
+        var callCount: Int = 0
+            private set
+
+        override suspend fun searchWiki(userId: Int, query: String): List<EditorSmiley> {
+            callCount += 1
+            lastUserId = userId
+            lastQuery = query
+            val deferred = kotlinx.coroutines.CompletableDeferred<List<EditorSmiley>>()
+            pending = deferred
+            return deferred.await()
+        }
+
+        fun completeNext(items: List<EditorSmiley>) {
+            requireNotNull(pending) { "no pending searchWiki to complete" }.complete(items)
+            pending = null
+        }
+
+        fun failNext(error: Throwable) {
+            requireNotNull(pending) { "no pending searchWiki to fail" }.completeExceptionally(error)
+            pending = null
         }
     }
 

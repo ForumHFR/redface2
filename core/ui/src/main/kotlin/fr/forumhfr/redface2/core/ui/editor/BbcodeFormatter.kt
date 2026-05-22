@@ -149,3 +149,55 @@ fun applyBbcodeAction(
         selectionEnd = newSelectionEnd,
     )
 }
+
+/**
+ * Phase 2F-B (#11 partial) — inserts a raw BBCode [token] at the editor caret.
+ *
+ * Distinct from [applyBbcodeAction] because smileys do **not** wrap a selection : they are
+ * point-insertions of an opaque token like `:jap:` or `[:haha jap]`. Modelling them as a
+ * [BbcodeAction] would force a degenerate empty `closeTag` — instead we expose a dedicated
+ * pure helper.
+ *
+ * Mirrors HFR's `putSmiley(tt, src)` JS, which inserts ` $token ` (with surrounding spaces)
+ * — see `/compressed/message.js`. Without the surrounding spaces, two adjacent smileys would
+ * fuse into an unparseable token (`:jap::cry:` is not `:jap: :cry:`). [surroundWithSpaces]
+ * defaults to `true` to match the web behaviour ; tests can flip it off to assert the raw
+ * insertion contract independently.
+ *
+ * The caret lands **after** the inserted fragment, collapsed (no selection) so the user can
+ * keep typing. If a selection existed at insertion time, it is replaced — this matches
+ * Compose `TextFieldValue` semantics and the behaviour of HFR's web composer.
+ *
+ * Defensive against the same `TextFieldValue` corner cases as [applyBbcodeAction] : out-of-
+ * range or inverted selections are clamped + normalised rather than throwing.
+ */
+fun insertBbcodeToken(
+    token: String,
+    text: String,
+    selectionStart: Int,
+    selectionEnd: Int,
+    surroundWithSpaces: Boolean = true,
+): BbcodeFormatResult {
+    val length = text.length
+    val rawStart = selectionStart.coerceIn(0, length)
+    val rawEnd = selectionEnd.coerceIn(0, length)
+    val start = minOf(rawStart, rawEnd)
+    val end = maxOf(rawStart, rawEnd)
+
+    val fragment = if (surroundWithSpaces) " $token " else token
+    val before = text.substring(0, start)
+    val after = text.substring(end)
+
+    val newText = buildString(length + fragment.length) {
+        append(before)
+        append(fragment)
+        append(after)
+    }
+    val caret = before.length + fragment.length
+
+    return BbcodeFormatResult(
+        text = newText,
+        selectionStart = caret,
+        selectionEnd = caret,
+    )
+}
