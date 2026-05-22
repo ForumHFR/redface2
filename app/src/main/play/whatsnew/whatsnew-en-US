@@ -1,8 +1,8 @@
-Redface 2 alpha build — topic creation.
+Redface 2 alpha build — login hotfix.
 
-Changes:
-- New "New topic" button on category lists when signed in.
-- Dedicated composer: title, subcategory, BBCode content and HFR options.
-- If HFR does not expose the new topic link yet, the app falls back to the target category.
+Fixes:
+- Password managers now get explicit username/password Autofill hints.
+- Targeted fix for Proton Pass filling the password into the username field.
+- No functional change to reading or posting flows.
 
 Please report bugs via the alpha channel or the GitHub repository.

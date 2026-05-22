@@ -15,11 +15,29 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v50 — `0.3.10` — 2026-05-22
+
+**Statut** : `closed`
+**Commit** : à venir (tag `app-v50` après merge de la PR de release)
+**Fichier** : `redface2-v50-<sha>.aab`
+
+Hotfix alpha — amélioration du remplissage automatique sur l'écran de connexion.
+
+### Fixed
+- `LoginScreen` expose les hints Android Autofill corrects : pseudo en `ContentType.Username`, mot de passe en `ContentType.Password`.
+- Proton Pass, Bitwarden, Google Password Manager et les autres services Autofill ont maintenant un contrat explicite pour distinguer les deux champs.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 50`, `versionName = "0.3.10"`.
+- Notes Play Console mises à jour pour le track alpha.
+
+---
+
 ## v49 — `0.3.9` — 2026-05-21
 
 **Statut** : `closed`
-**Commit** : à venir (tag `app-v49` après merge de la PR #169)
-**Fichier** : `redface2-v49-<sha>.aab`
+**Commit** : `c79789b`
+**Fichier** : artefact CD `app-v49`
 
 Phase 2E — création de topic depuis l'app. Un compte authentifié peut ouvrir le composer depuis une liste de catégorie, saisir un titre + contenu BBCode, choisir la sous-catégorie et poster via `bddpost.php` sans navigateur.
 
