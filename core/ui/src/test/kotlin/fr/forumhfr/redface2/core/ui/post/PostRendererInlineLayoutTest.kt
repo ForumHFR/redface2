@@ -6,6 +6,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextLinkStyles
@@ -13,7 +14,6 @@ import androidx.compose.ui.unit.Density
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -44,6 +44,19 @@ import kotlin.math.abs
  *  - absolute pixel values at `fontScale != 1` : the non-linear scaling curve makes them platform-
  *    and SDK-dependent, not a stable test contract.
  */
+/**
+ * `@OptIn(ExperimentalTestApi::class)` covers `createComposeRule` v2 — the compiler-recommended
+ * replacement for the v1 entry that's flagged deprecated since BOM 2026.04. The v2 API uses
+ * `StandardTestDispatcher` (cf. the v1 → v2 migration note Compose emits at compile time) ;
+ * the opt-in is defensive even when the call-site does not surface a warning.
+ *
+ * `@Config(sdk = [34])` pins Android 14 (NonLinearFontScaling-enabled) which is exactly what
+ * this test exercises. Adding SDK 35+ would re-run the same fontScale curve with the FontScale
+ * tables updated for Android 15 ; we keep one SDK on purpose to keep the runtime small and to
+ * isolate any future SDK-specific drift to a clear single config switch (cf. Phase 2H bench
+ * suite which will likely sweep more SDKs).
+ */
+@OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class PostRendererInlineLayoutTest {
@@ -54,6 +67,31 @@ class PostRendererInlineLayoutTest {
     private val emptyLinkStyles = TextLinkStyles()
 
     @Test
+    fun `builtin smiley placeholder lands on the 18x18 sp bucket at fontScale 1`() {
+        // The builtin bucket (`SmileyKind.Builtin`) is the most common smiley path on HFR — the
+        // ~25 `:o`/`:jap:`/`:D` etc. served from `/icones/smilies/*.gif`. A regression that
+        // collapsed it onto the 70 × 50 perso bucket would break every post line height ; the
+        // perso + inline-image baselines below would not catch it.
+        val capture = LayoutCapture()
+        mountInlineContent(capture, builtinSmileyInlines())
+        capture.fontScale.value = 1f
+        composeTestRule.waitForIdle()
+        val rect = requireSingleRect(capture, "builtin smiley")
+        assertCloseEnough(
+            label = "builtin smiley width @ fontScale=1",
+            expected = PostMediaDisplayPolicy.builtinSmiley.placeholderWidth.value,
+            actual = rect.width,
+            tolerance = SIZE_TOLERANCE_PX,
+        )
+        assertCloseEnough(
+            label = "builtin smiley height @ fontScale=1",
+            expected = PostMediaDisplayPolicy.builtinSmiley.placeholderHeight.value,
+            actual = rect.height,
+            tolerance = SIZE_TOLERANCE_PX,
+        )
+    }
+
+    @Test
     fun `perso smiley placeholder lands on the policy bucket at fontScale 1`() {
         // Baseline absolute size : density = 1, fontScale = 1 ⇒ `sp == px`, so the rect must
         // match the policy values byte-for-byte. Any drift here means the bucket itself has
@@ -62,7 +100,7 @@ class PostRendererInlineLayoutTest {
         mountInlineContent(capture, persoSmileyInlines())
         capture.fontScale.value = 1f
         composeTestRule.waitForIdle()
-        val rect = requireNotNull(capture.firstRect()) { "perso smiley rect missing at fontScale=1" }
+        val rect = requireSingleRect(capture, "perso smiley")
         assertCloseEnough(
             label = "perso smiley width @ fontScale=1",
             expected = PostMediaDisplayPolicy.persoSmiley.placeholderWidth.value,
@@ -83,7 +121,7 @@ class PostRendererInlineLayoutTest {
         mountInlineContent(capture, inlineImageInlines())
         capture.fontScale.value = 1f
         composeTestRule.waitForIdle()
-        val rect = requireNotNull(capture.firstRect()) { "inline image rect missing at fontScale=1" }
+        val rect = requireSingleRect(capture, "inline image")
         assertCloseEnough(
             label = "inline image width @ fontScale=1",
             expected = PostMediaDisplayPolicy.inlineImage.placeholderWidth.value,
@@ -216,6 +254,13 @@ class PostRendererInlineLayoutTest {
         )
     }
 
+    private fun builtinSmileyInlines(): List<PostInline> = listOf(
+        PostInline.Smiley(
+            kind = SmileyKind.Builtin(":jap:"),
+            imageUrl = "https://forum-images.hardware.fr/icones/smilies/jap.gif",
+        ),
+    )
+
     private fun persoSmileyInlines(): List<PostInline> = listOf(
         PostInline.Smiley(
             kind = SmileyKind.Perso("cosmoschtroumpf"),
@@ -270,16 +315,22 @@ class PostRendererInlineLayoutTest {
         tolerance: Float,
     ) {
         val delta = abs(expected - actual)
-        assertEquals(
+        assertTrue(
             "$label : expected=$expected actual=$actual delta=$delta tolerance=$tolerance",
-            true,
             delta <= tolerance,
         )
     }
 
-    @Suppress("unused")
-    private fun assertNonNull(rect: androidx.compose.ui.geometry.Rect?, label: String) {
-        assertNotNull(label, rect)
+    /**
+     * Asserts the [Text] mounted by [mountInlineContent] produced exactly one placeholder
+     * (defensive against a future change that would emit zero — `firstOrNull` would silently
+     * skip the test — or more than one — index 0 would be ambiguous). Returns the rect.
+     */
+    private fun requireSingleRect(capture: LayoutCapture, label: String): androidx.compose.ui.geometry.Rect {
+        val rects = capture.layout.value?.placeholderRects
+            ?: error("$label : no TextLayoutResult captured")
+        assertEquals("$label : expected exactly one placeholder rect", 1, rects.size)
+        return requireNotNull(rects[0]) { "$label : placeholder rect was null (text ellipsised ?)" }
     }
 
     private companion object {
