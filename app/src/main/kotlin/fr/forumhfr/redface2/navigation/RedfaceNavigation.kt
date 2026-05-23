@@ -39,6 +39,7 @@ import fr.forumhfr.redface2.feature.forum.ForumCategoryScreen
 import fr.forumhfr.redface2.feature.forum.ForumScreen
 import fr.forumhfr.redface2.feature.messages.MessagesScreen
 import fr.forumhfr.redface2.feature.search.SearchScreen
+import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import kotlinx.serialization.Serializable
@@ -122,6 +123,9 @@ data object LoginRoute : RedfaceNavKey
 
 @Serializable
 data object DiagnosticsRoute : RedfaceNavKey
+
+@Serializable
+data object SettingsRoute : RedfaceNavKey
 
 internal enum class TopLevelDestination(
     val labelRes: Int,
@@ -283,7 +287,11 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     versionCode = BuildConfig.VERSION_CODE,
                     onLoginRequested = { backStack.add(LoginRoute) },
                     onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
+                    onOpenSettings = { backStack.add(SettingsRoute) },
                 )
+            }
+            entry<SettingsRoute> {
+                SettingsScreen()
             }
             entry<CategoryRoute> { route ->
                 ForumCategoryScreen(

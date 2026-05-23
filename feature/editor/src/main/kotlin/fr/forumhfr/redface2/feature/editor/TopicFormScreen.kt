@@ -51,7 +51,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
  *
  * Shared surface :
  * - Subject field (writable).
- * - Subcategory : read-only current label for EditFirstPost, dropdown for New.
+ * - Subcategory dropdown for both EditFirstPost and New.
  * - BBCode toolbar + draft field + optional preview.
  * - Per-post options (signature / smileys / email) identical to the post-level editor.
  * - Poll : if `state.pollPresent`, a sober note that mutation is not in this version.
@@ -118,6 +118,7 @@ internal fun TopicFormContent(
     modifier: Modifier = Modifier,
 ) {
     val openSmileyPickerDescription = stringResource(R.string.editor_smiley_open_description)
+    var imageUrlDialogOpen by remember { mutableStateOf(false) }
     Surface(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
@@ -144,32 +145,15 @@ internal fun TopicFormContent(
                 enabled = !state.isSubmitting,
                 label = { Text(stringResource(R.string.editor_topic_subject_label)) },
             )
-            // Subcategory : the New mode exposes a real dropdown picker because
-            // HFR ships no pre-selection and the wire submit rejects an empty
-            // `subcat=`. Edit FP keeps a read-only label : the current dropdown
-            // UX is intentionally deferred there (Phase 2D MVP only forwards
-            // whatever HFR pre-selected).
-            when (state.mode) {
-                TopicFormMode.New -> SubcategoryDropdown(
-                    choices = state.subcategoryChoices,
-                    selectedSubcat = state.selectedSubcat,
-                    enabled = !state.isSubmitting && !state.isLoadingForm,
-                    onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
-                )
-                TopicFormMode.EditFirstPost -> {
-                    val selectedChoice =
-                        state.subcategoryChoices.firstOrNull { it.id == state.selectedSubcat }
-                    if (selectedChoice != null) {
-                        Text(
-                            text = stringResource(R.string.editor_topic_subcat_current, selectedChoice.label),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
+            SubcategoryDropdown(
+                choices = state.subcategoryChoices,
+                selectedSubcat = state.selectedSubcat,
+                enabled = !state.isSubmitting && !state.isLoadingForm,
+                onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
+            )
             BbcodeToolbar(
                 onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
+                onImageUrlRequested = { imageUrlDialogOpen = true },
             )
             // Phase 2F-C (#11 partial) — quick access to the smiley picker. Same placement
             // and rationale as `PostEditorScreen` : smileys are point-insertions, not
@@ -252,6 +236,12 @@ internal fun TopicFormContent(
                 }
             }
         }
+    }
+    if (imageUrlDialogOpen) {
+        ImageUrlDialog(
+            onDismiss = { imageUrlDialogOpen = false },
+            onInsert = { url -> onIntent(TopicFormIntent.ImageUrlInserted(url)) },
+        )
     }
 }
 

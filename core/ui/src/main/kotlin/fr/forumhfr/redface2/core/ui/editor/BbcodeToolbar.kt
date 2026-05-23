@@ -44,6 +44,7 @@ import fr.forumhfr.redface2.core.ui.R
 fun BbcodeToolbar(
     onAction: (BbcodeAction) -> Unit,
     modifier: Modifier = Modifier,
+    onImageUrlRequested: (() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
@@ -53,7 +54,11 @@ fun BbcodeToolbar(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         ToolbarOrder.forEach { action ->
-            ActionChip(action = action, onAction = onAction)
+            ActionChip(
+                action = action,
+                onAction = onAction,
+                onImageUrlRequested = onImageUrlRequested,
+            )
         }
         ColorChip(onAction = onAction)
     }
@@ -80,9 +85,16 @@ private val ToolbarOrder: List<BbcodeAction> = listOf(
 private fun ActionChip(
     action: BbcodeAction,
     onAction: (BbcodeAction) -> Unit,
+    onImageUrlRequested: (() -> Unit)?,
 ) {
     AssistChip(
-        onClick = { onAction(action) },
+        onClick = {
+            if (action == BbcodeAction.Image && onImageUrlRequested != null) {
+                onImageUrlRequested()
+            } else {
+                onAction(action)
+            }
+        },
         label = { Text(stringResource(action.labelResId)) },
         border = AssistChipDefaults.assistChipBorder(enabled = true),
     )

@@ -17,6 +17,17 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
+Phase 2 close-out — réglage proxy alpha, polish recherche / Edit FP et helper image URL éditeur.
+
+### Added
+- Paramètres alpha accessibles depuis l’onglet Messages, avec proxy HTTP utilisateur : hôte, port, auth Basic optionnelle, persistance DataStore et application au réseau OkHttp + images Coil après redémarrage.
+- Guide utilisateur `docs/guides/proxy.md` pour configurer et dépanner le proxy.
+- Dialog d’insertion d’image par URL dans la toolbar BBCode partagée : génère `[img]https://...[/img]` depuis Reply / Quote / Edit / Edit FP / New topic.
+
+### Fixed
+- Recherche : les pivots de catégories restent sur une seule ligne horizontale avec ellipsis, évitant les libellés verticaux sur mobile.
+- Edit FP : la sous-catégorie est modifiable via le même dropdown que la création de topic.
+
 ---
 
 ## v55 — `0.3.15` — 2026-05-23

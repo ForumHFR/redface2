@@ -4,6 +4,7 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.network.HfrConstants
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
@@ -24,12 +25,14 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideBaseClient(): OkHttpClient = OkHttpClient.Builder()
+    fun provideBaseClient(userPreferencesRepository: UserPreferencesRepository): OkHttpClient =
+        OkHttpClient.Builder()
         .connectTimeout(HfrConstants.ConnectTimeout)
         .readTimeout(HfrConstants.ReadTimeout)
         .writeTimeout(HfrConstants.WriteTimeout)
         .callTimeout(HfrConstants.CallTimeout)
         .addInterceptor(UserAgentInterceptor(HfrConstants.USER_AGENT))
+        .applyProxyConfig(userPreferencesRepository.readProxyConfigForNetworkBootstrap())
         .build()
 
     @Provides

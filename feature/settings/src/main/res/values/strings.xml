@@ -1,0 +1,14 @@
+<resources>
+    <string name="settings_title">Paramètres</string>
+    <string name="settings_proxy_title">Proxy utilisateur</string>
+    <string name="settings_proxy_intro">Route les requêtes HFR via votre proxy. Le changement peut nécessiter un redémarrage de l’app.</string>
+    <string name="settings_proxy_enabled">Activer le proxy</string>
+    <string name="settings_proxy_host">Hôte</string>
+    <string name="settings_proxy_port">Port</string>
+    <string name="settings_proxy_username">Utilisateur (optionnel)</string>
+    <string name="settings_proxy_password">Mot de passe (optionnel)</string>
+    <string name="settings_proxy_save">Enregistrer</string>
+    <string name="settings_proxy_saved">Proxy enregistré. Redémarrez l’app pour appliquer le changement aux clients réseau déjà créés.</string>
+    <string name="settings_proxy_invalid">Renseignez un hôte et un port entre 1 et 65535, ou désactivez le proxy.</string>
+    <string name="settings_proxy_scope">MVP Phase 2H : proxy HTTP classique, utilisé aussi pour HTTPS via CONNECT. Pas de proxy embarqué, PAC, bypass list ou SOCKS dans cette version.</string>
+</resources>

@@ -45,6 +45,9 @@ sealed interface PostEditorIntent {
      * token at the current caret position via the formatter helper and closes the sheet.
      */
     data class SmileySelected(val token: String) : PostEditorIntent
+
+    /** Phase 2F-E (#189) — insert `[img]url[/img]` for a validated remote image URL. */
+    data class ImageUrlInserted(val url: String) : PostEditorIntent
 }
 
 /**

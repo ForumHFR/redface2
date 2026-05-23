@@ -201,3 +201,22 @@ fun insertBbcodeToken(
         selectionEnd = caret,
     )
 }
+
+/**
+ * Phase 2F-E (#189) — validates a user-pasted image URL and returns the exact
+ * BBCode fragment to insert. HFR accepts arbitrary remote image URLs, but RF2
+ * only generates `[img]` for http(s) schemes so dangerous local/app schemes
+ * (`file:`, `content:`, `data:`, `javascript:`) never leave the editor helper.
+ */
+fun imageBbcodeTokenOrNull(rawUrl: String): String? {
+    val trimmed = rawUrl.trim()
+    val parsed = runCatching { java.net.URI(trimmed) }.getOrNull()
+    val scheme = parsed?.scheme?.lowercase()
+    val host = parsed?.host
+    val isWebImageUrl =
+        trimmed.isNotEmpty() &&
+            (scheme == "http" || scheme == "https") &&
+            !host.isNullOrBlank()
+
+    return if (isWebImageUrl) "[img]$trimmed[/img]" else null
+}

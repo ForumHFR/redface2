@@ -16,5 +16,6 @@ Cette section regroupe :
 - le contexte et les raisons du rewrite
 - les notes de nommage
 - l'inventaire des références écosystème HFR (clients tiers, docs MesDiscussions, outillage compagnon)
+- le réglage proxy utilisateur pour les réseaux contraints
 
 Pour les sources canoniques qui décrivent le projet lui-même, voir la section [Spécifications]({{ site.baseurl }}/specs).
