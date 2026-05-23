@@ -1,12 +1,11 @@
-Build alpha Redface 2 — recherche HFR étendue.
+Alpha Redface 2 — recherche HFR étendue.
 
 Nouveautés :
-- Recherche par défaut dans les titres et les messages.
-- Choix Titres + messages / Titres seuls / Messages seuls.
-- Extrait « Dernier message correspondant » quand HFR le fournit.
-- Ouverture du post exact depuis les résultats contenu quand possible.
-- Pivot catégories clarifié en sélecteur horizontal.
-- Libellés Recherche réalignés avec le comportement réel.
-- Changer le champ recherché conserve la catégorie sélectionnée.
+- Recherche titres + contenu par défaut.
+- Scope : titres + messages, titres seuls, messages seuls.
+- Extrait HFR du message correspondant quand disponible.
+- Ouverture du post exact si HFR donne le numreponse.
+- Sélecteur horizontal de catégorie plus clair.
+- Changer le champ recherché conserve la catégorie.
 
-Merci de remonter tout bug via le canal alpha ou le dépôt GitHub.
+Bugs : alpha ou GitHub.
