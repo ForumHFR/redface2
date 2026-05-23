@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.model.search.SearchCategoryScope
 import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
 import fr.forumhfr.redface2.core.model.search.SearchRequest
 import fr.forumhfr.redface2.core.model.search.SearchResultPage
+import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.search.SearchTopicResult
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -28,7 +29,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Phase 2G-A (#150 partiel) — tests for [SearchViewModel].
+ * Phase 2G-A/B (#150 partiel) — tests for [SearchViewModel].
  *
  * Repository is mocked with MockK ; the VM's contract is exercised via its
  * StateFlow + the `submit(intent)` surface.
@@ -176,6 +177,163 @@ class SearchViewModelTest {
     }
 
     @Test
+    fun `TextScopeSelected re-runs an existing search across all categories`() = runTest {
+        coEvery {
+            repo.search(
+                SearchRequest(
+                    query = "android",
+                    category = SearchCategoryScope.All,
+                    textScope = SearchTextScope.TitlesAndPosts,
+                ),
+            )
+        } returns fakePage(
+            topics = listOf(fakeTopic(1, "mixed hit", cat = 1)),
+            pivot = emptyList(),
+        )
+        coEvery {
+            repo.search(
+                SearchRequest(
+                    query = "android",
+                    category = SearchCategoryScope.All,
+                    textScope = SearchTextScope.TitlesOnly,
+                ),
+            )
+        } returns fakePage(
+            topics = listOf(fakeTopic(2, "title hit", cat = 1)),
+            pivot = emptyList(),
+        )
+
+        val vm = SearchViewModel(repo)
+        vm.submit(SearchIntent.QueryChanged("android"))
+        vm.submit(SearchIntent.Submit)
+        vm.submit(SearchIntent.TextScopeSelected(SearchTextScope.TitlesOnly))
+
+        val final = vm.state.value
+        assertEquals(SearchTextScope.TitlesOnly, final.textScope)
+        assertEquals("title hit", final.results.first().title)
+        coVerify(exactly = 1) {
+            repo.search(
+                SearchRequest(
+                    query = "android",
+                    category = SearchCategoryScope.All,
+                    textScope = SearchTextScope.TitlesOnly,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `TextScopeSelected preserves the last submitted category`() = runTest {
+        coEvery {
+            repo.search(
+                SearchRequest(
+                    query = "android",
+                    category = SearchCategoryScope.All,
+                    textScope = SearchTextScope.TitlesAndPosts,
+                ),
+            )
+        } returns fakePage(
+            topics = listOf(fakeTopic(1, "global hit", cat = 1)),
+            pivot = listOf(
+                SearchPivotCategory(id = 1, label = "Hardware", isSelected = true),
+                SearchPivotCategory(id = 10, label = "Programmation", isSelected = false),
+            ),
+        )
+        coEvery {
+            repo.search(
+                SearchRequest(
+                    query = "android",
+                    category = SearchCategoryScope.Category(id = 10, name = "Programmation"),
+                    textScope = SearchTextScope.TitlesAndPosts,
+                ),
+            )
+        } returns fakePage(
+            topics = listOf(fakeTopic(2, "scoped mixed hit", cat = 10)),
+            pivot = emptyList(),
+        )
+        coEvery {
+            repo.search(
+                SearchRequest(
+                    query = "android",
+                    category = SearchCategoryScope.Category(id = 10, name = "Programmation"),
+                    textScope = SearchTextScope.PostsOnly,
+                ),
+            )
+        } returns fakePage(
+            topics = listOf(fakeTopic(3, "scoped post hit", cat = 10)),
+            pivot = emptyList(),
+        )
+
+        val vm = SearchViewModel(repo)
+        vm.submit(SearchIntent.QueryChanged("android"))
+        vm.submit(SearchIntent.Submit)
+        vm.submit(
+            SearchIntent.CategorySelected(
+                SearchPivotCategory(id = 10, label = "Programmation", isSelected = false),
+            ),
+        )
+        vm.submit(SearchIntent.TextScopeSelected(SearchTextScope.PostsOnly))
+
+        val final = vm.state.value
+        assertEquals(SearchTextScope.PostsOnly, final.textScope)
+        assertEquals("scoped post hit", final.results.first().title)
+        coVerify(exactly = 1) {
+            repo.search(
+                SearchRequest(
+                    query = "android",
+                    category = SearchCategoryScope.Category(id = 10, name = "Programmation"),
+                    textScope = SearchTextScope.PostsOnly,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `CategorySelected preserves the last submitted text scope`() = runTest {
+        coEvery {
+            repo.search(
+                SearchRequest(
+                    query = "android",
+                    category = SearchCategoryScope.All,
+                    textScope = SearchTextScope.PostsOnly,
+                ),
+            )
+        } returns fakePage(
+            topics = listOf(fakeTopic(1, "global post hit", cat = 1)),
+            pivot = listOf(
+                SearchPivotCategory(id = 1, label = "Hardware", isSelected = true),
+                SearchPivotCategory(id = 10, label = "Programmation", isSelected = false),
+            ),
+        )
+        coEvery {
+            repo.search(
+                SearchRequest(
+                    query = "android",
+                    category = SearchCategoryScope.Category(id = 10, name = "Programmation"),
+                    textScope = SearchTextScope.PostsOnly,
+                ),
+            )
+        } returns fakePage(
+            topics = listOf(fakeTopic(99, "scoped post hit", cat = 10)),
+            pivot = emptyList(),
+        )
+
+        val vm = SearchViewModel(repo)
+        vm.submit(SearchIntent.QueryChanged("android"))
+        vm.submit(SearchIntent.TextScopeSelected(SearchTextScope.PostsOnly))
+        vm.submit(SearchIntent.Submit)
+        vm.submit(
+            SearchIntent.CategorySelected(
+                SearchPivotCategory(id = 10, label = "Programmation", isSelected = false),
+            ),
+        )
+
+        val final = vm.state.value
+        assertEquals(SearchTextScope.PostsOnly, final.textScope)
+        assertEquals("scoped post hit", final.results.first().title)
+    }
+
+    @Test
     fun `a newer submit cancels the in-flight previous one`() = runTest {
         val gate = CompletableDeferred<SearchResultPage>()
         coEvery { repo.search(SearchRequest(query = "kot", category = SearchCategoryScope.All)) } coAnswers {
@@ -257,6 +415,7 @@ class SearchViewModelTest {
         isLocked = false,
         page = null,
         numreponse = null,
+        matchedExcerpt = null,
     )
 
     private fun fakePage(

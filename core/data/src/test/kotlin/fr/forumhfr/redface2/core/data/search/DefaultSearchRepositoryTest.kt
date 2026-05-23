@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.search.SearchCategoryScope
 import fr.forumhfr.redface2.core.model.search.SearchRequest
+import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.search.SearchResultParser
 import io.mockk.coEvery
@@ -46,6 +47,7 @@ class DefaultSearchRepositoryTest {
                 cat = null,
                 page = 1,
                 date = any(),
+                textScope = SearchTextScope.TitlesAndPosts,
             )
         } returns NO_RESULTS_HTML
 
@@ -58,6 +60,7 @@ class DefaultSearchRepositoryTest {
                 cat = null,
                 page = 1,
                 date = any(),
+                textScope = SearchTextScope.TitlesAndPosts,
             )
         }
     }
@@ -66,7 +69,13 @@ class DefaultSearchRepositoryTest {
     fun `category-scoped search forwards the bare integer id to the HfrClient`() = runTest {
         val hfrClient = mockk<HfrClient>()
         coEvery {
-            hfrClient.searchTopics(query = any(), cat = any(), page = any(), date = any())
+            hfrClient.searchTopics(
+                query = any(),
+                cat = any(),
+                page = any(),
+                date = any(),
+                textScope = any(),
+            )
         } returns NO_RESULTS_HTML
 
         val repo = buildRepository(hfrClient = hfrClient)
@@ -80,7 +89,40 @@ class DefaultSearchRepositoryTest {
         // The repository passes the bare integer ; the HfrClient is responsible for the
         // `10*hfr.inc` wire encoding (covered by its own tests).
         coVerify(exactly = 1) {
-            hfrClient.searchTopics(query = any(), cat = 10, page = any(), date = any())
+            hfrClient.searchTopics(
+                query = any(),
+                cat = 10,
+                page = any(),
+                date = any(),
+                textScope = any(),
+            )
+        }
+    }
+
+    @Test
+    fun `text scope is forwarded to the HfrClient`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery {
+            hfrClient.searchTopics(
+                query = "kotlin",
+                cat = null,
+                page = 1,
+                date = any(),
+                textScope = SearchTextScope.PostsOnly,
+            )
+        } returns NO_RESULTS_HTML
+
+        val repo = buildRepository(hfrClient = hfrClient)
+        repo.search(SearchRequest(query = "kotlin", textScope = SearchTextScope.PostsOnly))
+
+        coVerify(exactly = 1) {
+            hfrClient.searchTopics(
+                query = "kotlin",
+                cat = null,
+                page = 1,
+                date = any(),
+                textScope = SearchTextScope.PostsOnly,
+            )
         }
     }
 
@@ -94,6 +136,7 @@ class DefaultSearchRepositoryTest {
                 cat = any(),
                 page = any(),
                 date = capture(dateSlot),
+                textScope = any(),
             )
         } returns NO_RESULTS_HTML
 
@@ -109,7 +152,7 @@ class DefaultSearchRepositoryTest {
     fun `no-results HTML maps to an empty SearchResultPage`() = runTest {
         val hfrClient = mockk<HfrClient>()
         coEvery {
-            hfrClient.searchTopics(any(), any(), any(), any())
+            hfrClient.searchTopics(any(), any(), any(), any(), any())
         } returns NO_RESULTS_HTML
 
         val repo = buildRepository(hfrClient = hfrClient)
@@ -125,7 +168,7 @@ class DefaultSearchRepositoryTest {
         val hfrClient = mockk<HfrClient>()
         // Mimic the exact message shape that `executeAuthenticatedHtml` produces.
         coEvery {
-            hfrClient.searchTopics(any(), any(), any(), any())
+            hfrClient.searchTopics(any(), any(), any(), any(), any())
         } throws IOException(
             "HFR returned 500 for https://forum.hardware.fr/forum1.php?recherches=1&cat=&search=secret_term&...",
         )
@@ -159,7 +202,7 @@ class DefaultSearchRepositoryTest {
         // substringBefore(" for ") would let the URL through. Make sure the explicit
         // SessionExpiredException branch redacts it.
         coEvery {
-            hfrClient.searchTopics(any(), any(), any(), any())
+            hfrClient.searchTopics(any(), any(), any(), any(), any())
         } throws SessionExpiredException(
             "https://forum.hardware.fr/forum1.php?recherches=1&cat=&search=secret_term&...",
         )
@@ -209,4 +252,3 @@ class DefaultSearchRepositoryTest {
         """
     }
 }
-

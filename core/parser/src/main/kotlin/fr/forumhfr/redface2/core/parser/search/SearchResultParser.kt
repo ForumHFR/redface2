@@ -8,7 +8,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
 /**
- * Phase 2G-A (#150 partiel) — Jsoup parser for HFR's search result page.
+ * Phase 2G-A/B (#150 partiel) — Jsoup parser for HFR's search result page.
  *
  * Input HTML comes from `GET /forum1.php?recherches=1&...` (anonymous). The
  * page can take four structurally distinct shapes — see [SearchResultPage]
@@ -138,6 +138,7 @@ class SearchResultParser {
         val viewCount = row.selectFirst("td.sujetCase8")?.text()?.trim()?.toIntOrNull() ?: 0
         val lastReplyCell = row.selectFirst("td.sujetCase9 a.Tableau")
         val (lastReplyAt, lastReplyAuthor) = parseLastReply(lastReplyCell)
+        val matchedPost = parseMatchedPost(row)
 
         return SearchTopicResult(
             cat = cat,
@@ -152,11 +153,11 @@ class SearchResultParser {
             categorySlug = categorySlug,
             subcategorySlug = subcategorySlug,
             isLocked = isLocked,
-            // Title-search responses don't carry a numreponse anchor on the
-            // result rows. Leave both `page` and `numreponse` null until a
-            // post-content-search fixture proves the opposite shape.
-            page = null,
-            numreponse = null,
+            // Title-only rows don't carry this second anchor. Content-search
+            // rows can expose the matching post via `forum2.php?...numreponse=`.
+            page = matchedPost?.page,
+            numreponse = matchedPost?.numreponse,
+            matchedExcerpt = matchedPost?.excerpt,
         )
     }
 
@@ -184,6 +185,24 @@ class SearchResultParser {
         val rawDate = anchor.html().substringBefore("<b>").substringBefore("<br")
         val date = Jsoup.parse(rawDate).text().replace(NBSP, ' ').trim()
         return date to author
+    }
+
+    /**
+     * Content-search rows add a second link below the title:
+     * `forum2.php?...page=N&numreponse=M` wrapping a `.citation` snippet.
+     * Plain title-search rows do not have this block, so absence is expected.
+     */
+    private fun parseMatchedPost(row: Element): MatchedPost? {
+        val matchAnchor: Element? = row.selectFirst("td.sujetCase3 a[href*=numreponse]")
+        return matchAnchor?.let { anchor ->
+            val href = anchor.attr("href")
+            val numreponse = QUERY_NUMREPONSE_REGEX.find(href)?.groupValues?.get(1)?.toIntOrNull()
+                ?.takeIf { it > 0 }
+            val page = QUERY_PAGE_REGEX.find(href)?.groupValues?.get(1)?.toIntOrNull()
+                ?.takeIf { it > 0 }
+            val excerpt = anchor.selectFirst("div.citation span.s1")?.text()?.trim()?.ifBlank { null }
+            numreponse?.let { MatchedPost(page = page, numreponse = it, excerpt = excerpt) }
+        }
     }
 
     /**
@@ -228,6 +247,12 @@ class SearchResultParser {
 
     class ParseException(message: String) : RuntimeException(message)
 
+    private data class MatchedPost(
+        val page: Int?,
+        val numreponse: Int,
+        val excerpt: String?,
+    )
+
     private companion object {
         const val NO_RESULTS_MARKER = "Désolé, aucune réponse n'a été trouvée"
         const val NBSP = ' '
@@ -241,5 +266,7 @@ class SearchResultParser {
         val TOPIC_ID_TITLE_REGEX = Regex("""Sujet\s*n.?\s*(\d+)""")
         // `/hfr/<cat>/<subcat>/<slug>-sujet_<id>_<page>.htm`.
         val SLUG_REGEX = Regex("""^/hfr/([^/]+)/([^/]+)/[^/]+\.htm""")
+        val QUERY_PAGE_REGEX = Regex("""[?&]page=(\d+)""")
+        val QUERY_NUMREPONSE_REGEX = Regex("""[?&]numreponse=(\d+)""")
     }
 }

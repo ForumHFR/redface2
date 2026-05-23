@@ -15,6 +15,70 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## Unreleased
+
+---
+
+## v55 — `0.3.15` — 2026-05-23
+
+**Statut** : `closed`
+**Commit** : à venir (tag `app-v55` après merge PR #183)
+**Fichier** : artefact CD `app-v55`
+
+Phase 2G-B — release finale recherche après rebase sur `main`.
+
+### Fixed
+- Le changement de mode Titres + messages / Titres / Messages conserve maintenant la catégorie HFR déjà sélectionnée via le pivot au lieu de repartir silencieusement sur toutes les catégories.
+- KDoc restante `SearchUiState` alignée sur Phase 2G-A/B.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 55`, `versionName = "0.3.15"`.
+- Release prévue via tag `app-v55` depuis `main` après merge de #183, pour éviter de réutiliser le `versionCode=54` déjà consommé par la build Alpha de test.
+
+---
+
+## v54 — `0.3.14` — 2026-05-23
+
+**Statut** : `closed`
+**Commit** : `04d8944` (build de test avant rebase/sync PR #183)
+**Fichier** : artefact CD `dispatch-v54`
+
+Phase 2G-B — polish final recherche avant test Alpha.
+
+### Fixed
+- Le texte d'accueil de la recherche reflète maintenant le comportement réel : ouverture du message correspondant quand HFR fournit un `numreponse`, sinon ouverture du topic.
+- Les libellés Phase 2G-A/B et la roadmap sont réalignés après l'ajout des modes Titres + messages / Titres / Messages.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 54`, `versionName = "0.3.14"`.
+- Notes Play Console conservées sur le périmètre recherche 2G-B.
+
+---
+
+## v53 — `0.3.13` — 2026-05-23
+
+**Statut** : `closed`
+**Commit** : `0ae8d75` (build de test avant merge PR #183)
+**Fichier** : artefact CD `dispatch-v53`
+
+Phase 2G-B — polish recherche avant nouvelle alpha.
+
+### Added
+- Recherche par défaut en mode « Titres + messages » (`titre=3`), avec choix explicite Titres + messages / Titres seuls / Messages seuls.
+- Affichage de l'extrait « Dernier message correspondant » quand HFR le fournit pour une recherche dans le contenu.
+- Navigation vers le post exact depuis un résultat de recherche contenu quand le lien HFR porte `numreponse`.
+- Indication sobre des filtres auteur/date/pagination à venir.
+
+### Fixed
+- Le pivot catégories HFR est affiché comme un sélecteur horizontal de périmètre, pas comme une liste de résultats à ouvrir.
+- Les cartes de résultats affichent leur catégorie/sous-catégorie pour clarifier le contexte.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 53`, `versionName = "0.3.13"`.
+- Notes Play Console mises à jour pour le track alpha.
+
+---
+
 ## v52 — `0.3.12` — 2026-05-22
 
 **Statut** : `closed`

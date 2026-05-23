@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.domain.search.SearchRepository
 import fr.forumhfr.redface2.core.model.search.SearchCategoryScope
 import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
 import fr.forumhfr.redface2.core.model.search.SearchRequest
+import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import java.io.IOException
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -18,7 +19,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * Phase 2G-A (#150 partiel) — ViewModel for [SearchScreen].
+ * Phase 2G-A/B (#150 partiel) — ViewModel for [SearchScreen].
  *
  * One [searchJob] is in flight at a time : a new submit/retry/category-change
  * cancels the previous one so an older response cannot overwrite a newer
@@ -48,6 +49,9 @@ class SearchViewModel @Inject constructor(
     /** The category that was last actually submitted, used by [retry]. */
     private var lastSubmittedCategory: SearchCategoryScope = SearchCategoryScope.All
 
+    /** The text scope that was last actually submitted, used by [retry] and pivot changes. */
+    private var lastSubmittedTextScope: SearchTextScope = SearchTextScope.TitlesAndPosts
+
     private var searchJob: Job? = null
 
     /**
@@ -60,6 +64,7 @@ class SearchViewModel @Inject constructor(
     fun submit(intent: SearchIntent) {
         when (intent) {
             is SearchIntent.QueryChanged -> onQueryChanged(intent.query)
+            is SearchIntent.TextScopeSelected -> onTextScopeSelected(intent.scope)
             SearchIntent.Submit -> onSubmit()
             SearchIntent.Retry -> onRetry()
             is SearchIntent.CategorySelected -> onCategorySelected(intent.category)
@@ -88,29 +93,45 @@ class SearchViewModel @Inject constructor(
     private fun onSubmit() {
         val trimmed = _state.value.query.trim()
         if (trimmed.isEmpty()) return
-        launchSearch(trimmed, SearchCategoryScope.All)
+        launchSearch(trimmed, SearchCategoryScope.All, _state.value.textScope)
+    }
+
+    private fun onTextScopeSelected(scope: SearchTextScope) {
+        val current = _state.value
+        if (current.textScope == scope) return
+        _state.update { it.copy(textScope = scope) }
+        val query = current.query.trim()
+        if (current.hasSearched && query.isNotEmpty()) {
+            launchSearch(query, lastSubmittedCategory, scope)
+        }
     }
 
     private fun onRetry() {
         val query = lastSubmittedQuery ?: return
-        launchSearch(query, lastSubmittedCategory)
+        launchSearch(query, lastSubmittedCategory, lastSubmittedTextScope)
     }
 
     private fun onCategorySelected(category: SearchPivotCategory) {
         val query = lastSubmittedQuery ?: _state.value.query.trim().takeIf { it.isNotEmpty() } ?: return
-        launchSearch(query, SearchCategoryScope.Category(id = category.id, name = category.label))
+        launchSearch(
+            query = query,
+            scope = SearchCategoryScope.Category(id = category.id, name = category.label),
+            textScope = lastSubmittedTextScope,
+        )
     }
 
-    private fun launchSearch(query: String, scope: SearchCategoryScope) {
+    private fun launchSearch(query: String, scope: SearchCategoryScope, textScope: SearchTextScope) {
         // Cancel any in-flight search ; a newer query must take precedence.
         searchJob?.cancel()
         val generation = searchGeneration + 1
         searchGeneration = generation
         lastSubmittedQuery = query
         lastSubmittedCategory = scope
+        lastSubmittedTextScope = textScope
         _state.update {
             it.copy(
                 query = query,
+                textScope = textScope,
                 isLoading = true,
                 errorMessage = null,
                 hasSearched = true,
@@ -118,7 +139,7 @@ class SearchViewModel @Inject constructor(
         }
         searchJob = viewModelScope.launch {
             val outcome = runCatching {
-                searchRepository.search(SearchRequest(query = query, category = scope))
+                searchRepository.search(SearchRequest(query = query, category = scope, textScope = textScope))
             }
             val cancellation = outcome.exceptionOrNull() as? CancellationException
             if (cancellation != null) {

@@ -1,10 +1,11 @@
 package fr.forumhfr.redface2.feature.search
 
 import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
+import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.search.SearchTopicResult
 
 /**
- * Phase 2G-A (#150 partiel) — MVI state for [SearchScreen].
+ * Phase 2G-A/B (#150 partiel) — MVI state for [SearchScreen].
  *
  * `hasSearched` flips to `true` after the first non-blank submit so the screen can
  * distinguish the « initial idle state » from a no-result outcome. Without it the
@@ -15,6 +16,7 @@ import fr.forumhfr.redface2.core.model.search.SearchTopicResult
  */
 data class SearchUiState(
     val query: String = "",
+    val textScope: SearchTextScope = SearchTextScope.TitlesAndPosts,
     val selectedCategory: SearchPivotCategory? = null,
     val pivotCategories: List<SearchPivotCategory> = emptyList(),
     val results: List<SearchTopicResult> = emptyList(),
@@ -42,6 +44,7 @@ sealed interface SearchErrorKind {
  */
 sealed interface SearchIntent {
     data class QueryChanged(val query: String) : SearchIntent
+    data class TextScopeSelected(val scope: SearchTextScope) : SearchIntent
     data object Submit : SearchIntent
     data object Retry : SearchIntent
     data class CategorySelected(val category: SearchPivotCategory) : SearchIntent

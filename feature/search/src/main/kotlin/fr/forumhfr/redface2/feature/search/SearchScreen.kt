@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.search
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -7,10 +8,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
@@ -21,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -34,14 +38,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
+import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.search.SearchTopicResult
 
 /**
- * Phase 2G-A (#150 partiel) — search tab screen.
+ * Phase 2G-A/B (#150 partiel) — search tab screen.
  *
  * Sober single-field UX : type a query, tap « Rechercher » (or press IME action),
  * scroll the result cards, tap one to open the topic. When the query matched
@@ -96,6 +102,10 @@ internal fun SearchContent(
                 onQueryChange = { onIntent(SearchIntent.QueryChanged(it)) },
                 onSubmit = { onIntent(SearchIntent.Submit) },
             )
+            SearchOptions(
+                textScope = state.textScope,
+                onTextScopeSelected = { onIntent(SearchIntent.TextScopeSelected(it)) },
+            )
             if (state.pivotCategories.isNotEmpty()) {
                 PivotChips(
                     pivot = state.pivotCategories,
@@ -116,6 +126,43 @@ internal fun SearchContent(
                 modifier = Modifier.weight(1f),
             )
         }
+    }
+}
+
+@Composable
+private fun SearchOptions(
+    textScope: SearchTextScope,
+    onTextScopeSelected: (SearchTextScope) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.search_scope_label),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+        ) {
+            listOf(
+                SearchTextScope.TitlesAndPosts,
+                SearchTextScope.TitlesOnly,
+                SearchTextScope.PostsOnly,
+            ).forEach { scope ->
+                FilterChip(
+                    selected = scope == textScope,
+                    onClick = { onTextScopeSelected(scope) },
+                    label = { Text(text = stringResource(scope.labelResId())) },
+                )
+            }
+        }
+        Text(
+            text = stringResource(R.string.search_future_filters_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -153,33 +200,37 @@ private fun PivotChips(
     selected: SearchPivotCategory?,
     onSelect: (SearchPivotCategory) -> Unit,
 ) {
-    // Non-Lazy `Column`-of-`Row`s chunked 3-by-3 : the pivot tops out at ~18 entries
-    // (one per public HFR category) so virtualization is unnecessary. Using a
-    // `LazyColumn` here would also conflict with the outer non-Lazy `Column` parent
-    // and crash at measurement time (two unbounded vertical scrollers can't coexist
-    // without an explicit weight/height constraint).
     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
         Text(
             text = stringResource(R.string.search_pivot_label),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        pivot.chunked(3).forEach { line ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                line.forEach { entry ->
-                    AssistChip(
-                        onClick = { onSelect(entry) },
-                        label = { Text(entry.label) },
-                        colors = if (entry.id == selected?.id) {
-                            AssistChipDefaults.assistChipColors(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            )
-                        } else {
-                            AssistChipDefaults.assistChipColors()
-                        },
-                    )
-                }
+        Text(
+            text = stringResource(R.string.search_pivot_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 40.dp)
+                .horizontalScroll(rememberScrollState()),
+        ) {
+            pivot.forEach { entry ->
+                AssistChip(
+                    onClick = { onSelect(entry) },
+                    label = { Text(entry.label) },
+                    colors = if (entry.id == selected?.id) {
+                        AssistChipDefaults.assistChipColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    } else {
+                        AssistChipDefaults.assistChipColors()
+                    },
+                )
             }
         }
     }
@@ -309,6 +360,20 @@ private fun SearchResultCard(result: SearchTopicResult, onClick: () -> Unit) {
                 )
             }
             Text(
+                text = stringResource(R.string.search_result_location, result.locationLabel()),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            result.matchedExcerpt?.let { excerpt ->
+                Text(
+                    text = stringResource(R.string.search_result_excerpt, excerpt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
                 text = stringResource(R.string.search_result_author, result.author),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -330,3 +395,14 @@ private fun SearchResultCard(result: SearchTopicResult, onClick: () -> Unit) {
         }
     }
 }
+
+private fun SearchTextScope.labelResId(): Int = when (this) {
+    SearchTextScope.TitlesAndPosts -> R.string.search_scope_titles_and_posts
+    SearchTextScope.TitlesOnly -> R.string.search_scope_titles_only
+    SearchTextScope.PostsOnly -> R.string.search_scope_posts_only
+}
+
+private fun SearchTopicResult.locationLabel(): String =
+    listOfNotNull(categorySlug, subcategorySlug)
+        .joinToString(separator = " / ")
+        .ifBlank { "cat=$cat" }

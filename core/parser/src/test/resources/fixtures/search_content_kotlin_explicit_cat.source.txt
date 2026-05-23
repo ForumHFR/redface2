@@ -1,0 +1,38 @@
+Source : https://forum.hardware.fr/forum1.php?recherches=1&cat=10*hfr.inc&orderSearch=0&config=hfr.inc&pseud=&search=kotlin&titre=0&jour=22&mois=5&annee=2026&resSearch=20&daterange=2&subcat=0&searchtype=1&trash=0&trash_post=0&moderation=0
+
+Captured : 2026-05-22 via curl, anonymous (no session cookies).
+
+Query : `search=kotlin`, `cat=10*hfr.inc` (Programmation), `titre=0` (content of messages only), `orderSearch=0` (date of matched messages).
+
+Shape : « content-only search, explicit cat » — HFR reuses the standard `forum1.php`
+listing row (`sujetCase1..9`) but adds, under the title anchor, a second
+`forum2.php?...page=N&numreponse=M` link wrapping a `.citation` block labelled
+« Dernier message correspondant ».
+
+This fixture proves that content search can expose :
+
+  - an excerpt / snippet showing where the term hit inside the post ;
+  - the matching post `numreponse` ;
+  - the page carrying the matching post.
+
+The title anchor still points at `sujet_<id>_1.htm`; consumers must use the
+second `forum2.php` anchor when present.
+
+Implications for 2G-B :
+- Adding « content search » to the UI is a **filter knob** (a `searchScope` enum with values `Titles / Mixed / Content`) plus optional matched-post metadata. The parser receives the same listing shell but should parse the `.citation` block when present.
+- The `numreponse` field on `SearchTopicResult` stays nullable : title rows do not provide it, content rows usually do.
+- The model name `SearchTopicResult` remains accurate : results are scoped at the topic level even when the match is inside a post.
+
+Why this matters : a previous reading of this fixture missed the second anchor and
+incorrectly documented the shape as topic-only. The fixture itself is good ; this
+`.source.txt` is the corrected contract note.
+
+Contract observed in this fixture :
+- Explicit cat → no banner, no pivot box (« content explicit_cat » mirrors « title explicit_cat » exactly).
+- The first hit row's date « 22-05-2026 à 21:20 by XaTriX » in the listing is **the post I made on the umbrella thread #148747 mentioning Redface 2 / kotlin** — confirms the content-search index is live and updates in near-real-time for anonymous queries.
+- 14 topic rows in the response. `resSearch=20` capped the listing ; there are no « page 2 » links.
+
+Sanitization : none required.
+- `hash_check` empty (anonymous).
+- No cookies, no PII.
+- Public usernames in the listing only.

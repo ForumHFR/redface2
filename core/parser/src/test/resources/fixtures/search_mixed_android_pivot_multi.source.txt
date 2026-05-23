@@ -1,0 +1,27 @@
+Source : https://forum.hardware.fr/forum1.php?recherches=1&cat=&orderSearch=0&config=hfr.inc&pseud=&search=android&titre=3&jour=22&mois=5&annee=2026&resSearch=20&daterange=2&subcat=0&searchtype=1&trash=0&trash_post=0&moderation=0
+
+Captured : 2026-05-22 via curl, anonymous (no session cookies).
+
+Query : `search=android`, `cat=` (all), `titre=3` (titles AND content of messages), `orderSearch=0` (date of matched messages).
+
+Shape : « mixed search, pivot multi » — the « titres + contenu » mode (HFR's `titre=3`) returns **19 pivot categories** for "android" (one more than the title-only equivalent in 2G-A `search_android_pivot_multi.html` which had 18), confirming that the mixed mode searches a wider corpus. The 19th category is `2*hfr.inc` (Overclocking / Cooling / Modding), absent from the title-only pivot — there are android-related POSTS in that cat but no topic with « android » in the title.
+
+This fixture exercises :
+- The largest pivot dropdown captured to date (19 options across a single `<optgroup>`).
+- `titre=3` + `cat=` — the « broadest possible search » UX.
+- `orderSearch=0` (matched-message date) instead of `orderSearch=1` (last-topic-reply date) used in the title-search fixtures — the listing order differs slightly but the row shape is identical.
+
+In this specific capture, the first displayed category (Hardware) contains title-like
+rows without `.citation` blocks. Mixed mode can still return content-hit snippets
+when the row match comes from a post body, so parser consumers must treat the
+matched-post anchor as optional.
+
+Mixed mode is the most natural UX default for a « simple search » UI : the user types a term and HFR returns hits whether the term appears in a topic title OR in a post body. `titre=1` (title-only) becomes the « strict » mode, `titre=0` (content-only) the « niche » mode for searching inside post bodies.
+
+Contract observed in this fixture :
+- Banner present (pivot multi).
+- 19 categories in the `<select name="cat">` and the `post_cat_list` hidden input.
+- 18 topic rows in the listing for Hardware (cat=1, auto-pivoted first).
+- The same lock-icon detection (`td.sujetCase3 img[src$=lock.gif]`) applies — at least one row in this fixture is locked, useful for cross-validation against the 2G-A multi fixture.
+
+Sanitization : none required (same reasoning as 2G-A).
