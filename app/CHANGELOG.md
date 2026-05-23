@@ -19,10 +19,28 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
-## v53 — `0.3.13` — 2026-05-23
+## v54 — `0.3.14` — 2026-05-23
 
 **Statut** : `closed`
 **Commit** : à venir (build de test avant merge PR #183)
+**Fichier** : artefact CD `dispatch-v54`
+
+Phase 2G-B — polish final recherche avant test Alpha.
+
+### Fixed
+- Le texte d'accueil de la recherche reflète maintenant le comportement réel : ouverture du message correspondant quand HFR fournit un `numreponse`, sinon ouverture du topic.
+- Les libellés Phase 2G-A/B et la roadmap sont réalignés après l'ajout des modes Titres + messages / Titres / Messages.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 54`, `versionName = "0.3.14"`.
+- Notes Play Console conservées sur le périmètre recherche 2G-B.
+
+---
+
+## v53 — `0.3.13` — 2026-05-23
+
+**Statut** : `closed`
+**Commit** : `0ae8d75` (build de test avant merge PR #183)
 **Fichier** : artefact CD `dispatch-v53`
 
 Phase 2G-B — polish recherche avant nouvelle alpha.
