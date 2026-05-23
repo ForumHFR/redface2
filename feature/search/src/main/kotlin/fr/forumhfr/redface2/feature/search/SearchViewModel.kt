@@ -102,7 +102,7 @@ class SearchViewModel @Inject constructor(
         _state.update { it.copy(textScope = scope) }
         val query = current.query.trim()
         if (current.hasSearched && query.isNotEmpty()) {
-            launchSearch(query, SearchCategoryScope.All, scope)
+            launchSearch(query, lastSubmittedCategory, scope)
         }
     }
 

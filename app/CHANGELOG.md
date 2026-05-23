@@ -19,10 +19,28 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v55 — `0.3.15` — 2026-05-23
+
+**Statut** : `closed`
+**Commit** : à venir (tag `app-v55` après merge PR #183)
+**Fichier** : artefact CD `app-v55`
+
+Phase 2G-B — release finale recherche après rebase sur `main`.
+
+### Fixed
+- Le changement de mode Titres + messages / Titres / Messages conserve maintenant la catégorie HFR déjà sélectionnée via le pivot au lieu de repartir silencieusement sur toutes les catégories.
+- KDoc restante `SearchUiState` alignée sur Phase 2G-A/B.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 55`, `versionName = "0.3.15"`.
+- Release prévue via tag `app-v55` depuis `main` après merge de #183, pour éviter de réutiliser le `versionCode=54` déjà consommé par la build Alpha de test.
+
+---
+
 ## v54 — `0.3.14` — 2026-05-23
 
 **Statut** : `closed`
-**Commit** : à venir (build de test avant merge PR #183)
+**Commit** : `04d8944` (build de test avant rebase/sync PR #183)
 **Fichier** : artefact CD `dispatch-v54`
 
 Phase 2G-B — polish final recherche avant test Alpha.

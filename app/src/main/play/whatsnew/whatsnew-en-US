@@ -7,5 +7,6 @@ New:
 - Opens the exact matching post from content-search results when possible.
 - Category pivot is now a clearer horizontal scope selector.
 - Search screen wording now matches the actual behavior.
+- Changing the text scope keeps the selected HFR category.
 
 Please report bugs via the alpha channel or the GitHub repository.

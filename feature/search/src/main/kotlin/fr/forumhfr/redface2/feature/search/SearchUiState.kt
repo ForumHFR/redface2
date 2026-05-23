@@ -5,7 +5,7 @@ import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.search.SearchTopicResult
 
 /**
- * Phase 2G-A (#150 partiel) — MVI state for [SearchScreen].
+ * Phase 2G-A/B (#150 partiel) — MVI state for [SearchScreen].
  *
  * `hasSearched` flips to `true` after the first non-blank submit so the screen can
  * distinguish the « initial idle state » from a no-result outcome. Without it the

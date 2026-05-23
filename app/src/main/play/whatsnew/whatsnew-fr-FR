@@ -7,5 +7,6 @@ Nouveautés :
 - Ouverture du post exact depuis les résultats contenu quand possible.
 - Pivot catégories clarifié en sélecteur horizontal.
 - Libellés Recherche réalignés avec le comportement réel.
+- Changer le champ recherché conserve la catégorie sélectionnée.
 
 Merci de remonter tout bug via le canal alpha ou le dépôt GitHub.
