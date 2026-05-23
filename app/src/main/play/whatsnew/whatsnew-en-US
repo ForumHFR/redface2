@@ -1,12 +1,11 @@
-Redface 2 alpha build — expanded HFR search.
+Redface 2 alpha — expanded HFR search.
 
 New:
-- Default search now covers titles and message content.
-- Scope selector: titles + messages, titles only, messages only.
-- “Matching message” excerpt when HFR provides it.
-- Opens the exact matching post from content-search results when possible.
-- Category pivot is now a clearer horizontal scope selector.
-- Search screen wording now matches the actual behavior.
-- Changing the text scope keeps the selected HFR category.
+- Search titles and message content by default.
+- Scope: titles + messages, titles only, messages only.
+- Show HFR matching-message excerpts when available.
+- Open the exact post when HFR gives a reply id.
+- Clearer horizontal category selector.
+- Changing text scope keeps the selected category.
 
-Please report bugs via the alpha channel or the GitHub repository.
+Report bugs via alpha or GitHub.
