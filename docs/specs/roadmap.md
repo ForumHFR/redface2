@@ -138,7 +138,7 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 - [x] **Recherche HFR bugfix (#188, Phase 2G-B)** — les catégories de pivot de recherche sont rendues en rail horizontal borné (single-line + ellipsis), ce qui évite les libellés verticaux du style « Linux et OS Alternatifs » sur écran étroit.
 - [ ] Recherche HFR filtres avancés auteur/date + pagination — backlog non bloquant après stabilisation du MVP, à ouvrir en issue dédiée si le besoin reste confirmé après #188.
 - [ ] Retirer un drapeau (delflag) — swipe + undo (#99, Phase 2G-C)
-- [x] **Réglage proxy utilisateur (#187, Phase 2H)** — écran Settings alpha, persistance DataStore, branchement OkHttp + Coil sur proxy HTTP avec authentification optionnelle, et guide utilisateur. Le MVP demande un redémarrage de l'app après changement ; pas de proxy embarqué, PAC, SOCKS ou bypass list.
+- [x] **Réglage proxy utilisateur (#187, Phase 2H)** — écran Settings alpha, persistance DataStore, branchement HFR-only pour OkHttp + Coil (seuls `hardware.fr` / `*.hardware.fr` passent par le proxy ; les images externes restent en direct), proxy HTTP avec authentification optionnelle, et guide utilisateur. Le MVP demande un redémarrage de l'app après changement ; pas de proxy embarqué, PAC, SOCKS ou bypass list.
 
 **Livrable :** une app complète pour lire ET écrire sur le forum.
 

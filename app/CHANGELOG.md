@@ -23,6 +23,7 @@ Post-v56 review hardening PR #194 — non distribué tant qu'un nouveau `version
 - Paramètres proxy : un échec DataStore ne laisse plus le bouton Enregistrer bloqué en chargement.
 - Edit FP : le dropdown sous-catégorie utilise le composant Material 3 `ExposedDropdownMenuBox` pour fiabiliser le tap sur champ read-only.
 - Proxy : retrait du champ `scheme` non livré pour éviter de promettre un proxy HTTPS natif alors que le MVP supporte le proxy HTTP classique avec `CONNECT`.
+- Proxy : le proxy utilisateur est désormais limité aux domaines HFR (`hardware.fr` / `*.hardware.fr`) pour éviter de casser les images externes lorsque le proxy ne route que HFR.
 
 ### Docs
 - ADR-012 ajoutée pour cadrer le stockage local des credentials proxy.

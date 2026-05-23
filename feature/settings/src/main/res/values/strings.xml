@@ -11,5 +11,5 @@
     <string name="settings_proxy_saved">Proxy enregistré. Redémarrez l’app pour appliquer le changement aux clients réseau déjà créés.</string>
     <string name="settings_proxy_invalid">Renseignez un hôte et un port entre 1 et 65535, ou désactivez le proxy.</string>
     <string name="settings_proxy_persist_failed">Impossible d’enregistrer le proxy. Vérifiez le stockage de l’app puis réessayez.</string>
-    <string name="settings_proxy_scope">MVP Phase 2H : proxy HTTP classique, utilisé aussi pour HTTPS via CONNECT. Pas de proxy embarqué, PAC, bypass list ou SOCKS dans cette version.</string>
+    <string name="settings_proxy_scope">MVP Phase 2H : proxy HTTP classique appliqué uniquement aux domaines HFR (hardware.fr / *.hardware.fr) ; HTTPS via CONNECT. Les images externes restent en direct. Pas de proxy embarqué, PAC, bypass list ou SOCKS dans cette version.</string>
 </resources>

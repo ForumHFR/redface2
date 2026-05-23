@@ -20,7 +20,11 @@ import okhttp3.OkHttpClient
  * (cf. issue #109). Decoders are cheap and global; per-call-site override would defeat the point.
  *
  * `coil-network-okhttp` is registered with the anonymous OkHttp client so image loads share the
- * same user proxy / timeout / user-agent configuration as the rest of the HFR traffic.
+ * same timeout / user-agent configuration as the rest of the HFR traffic. The user proxy is
+ * installed via a host-scoped `ProxySelector` ([HfrOnlyProxySelector]) that routes only
+ * `hardware.fr` / `*.hardware.fr` through the configured proxy ; external `[img]` hosts
+ * (rehost.diberie.com, super-h.fr, imgur, etc.) stay direct so a proxy that only authorises
+ * HFR does not break external image loads.
  *
  * `minSdk = 29`, so [AnimatedImageDecoder] (API 28+) is always available — no GIF-decoder fallback
  * for older devices to maintain.
@@ -37,8 +41,9 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
     override fun newImageLoader(context: PlatformContext): ImageLoader =
         ImageLoader.Builder(context)
             .components {
-                // Use the shared anonymous client so Coil follows the user proxy without leaking
-                // HFR auth cookies to arbitrary external [img] hosts.
+                // Share the anonymous client with the rest of HFR traffic: same timeouts / UA, no
+                // auth cookies leaked to external [img] hosts. The ProxySelector inside the client
+                // routes only HFR through the user proxy ; external hosts stay direct.
                 add(OkHttpNetworkFetcherFactory(callFactory = { imageClient }))
                 add(AnimatedImageDecoder.Factory())
             }
