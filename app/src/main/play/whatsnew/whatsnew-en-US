@@ -1,11 +1,9 @@
-Redface 2 alpha — expanded HFR search.
+Redface 2 alpha — settings and editor.
 
 New:
-- Search titles and message content by default.
-- Scope: titles + messages, titles only, messages only.
-- Show HFR matching-message excerpts when available.
-- Open the exact post when HFR gives a reply id.
-- Clearer horizontal category selector.
-- Changing text scope keeps the selected category.
+- HTTP proxy setting in alpha settings.
+- Insert image URLs from the BBCode editor.
+- Change subcategory while editing the first post.
+- More readable search category pivots on mobile.
 
 Report bugs via alpha or GitHub.

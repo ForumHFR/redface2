@@ -17,6 +17,14 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
+---
+
+## v56 — `0.3.16` — 2026-05-23
+
+**Statut** : `closed`
+**Commit** : build de test avant merge PR #194
+**Fichier** : artefact CD `dispatch-v56`
+
 Phase 2 close-out — réglage proxy alpha, polish recherche / Edit FP et helper image URL éditeur.
 
 ### Added
@@ -27,6 +35,9 @@ Phase 2 close-out — réglage proxy alpha, polish recherche / Edit FP et helper
 ### Fixed
 - Recherche : les pivots de catégories restent sur une seule ligne horizontale avec ellipsis, évitant les libellés verticaux sur mobile.
 - Edit FP : la sous-catégorie est modifiable via le même dropdown que la création de topic.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 56`, `versionName = "0.3.16"`.
 
 ---
 
