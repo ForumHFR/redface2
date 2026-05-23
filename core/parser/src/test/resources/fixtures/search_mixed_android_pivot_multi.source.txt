@@ -11,7 +11,10 @@ This fixture exercises :
 - `titre=3` + `cat=` — the « broadest possible search » UX.
 - `orderSearch=0` (matched-message date) instead of `orderSearch=1` (last-topic-reply date) used in the title-search fixtures — the listing order differs slightly but the row shape is identical.
 
-Like the content-only fixture, **the listing shape is identical** to the title-only variant. The parser already handles this case via the pivot-multi branch with no changes.
+In this specific capture, the first displayed category (Hardware) contains title-like
+rows without `.citation` blocks. Mixed mode can still return content-hit snippets
+when the row match comes from a post body, so parser consumers must treat the
+matched-post anchor as optional.
 
 Mixed mode is the most natural UX default for a « simple search » UI : the user types a term and HFR returns hits whether the term appears in a topic title OR in a post body. `titre=1` (title-only) becomes the « strict » mode, `titre=0` (content-only) the « niche » mode for searching inside post bodies.
 

@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.network
 import androidx.tracing.trace
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
@@ -303,22 +304,23 @@ class HfrClient @Inject constructor(
     }
 
     /**
-     * Phase 2G-A (#150 partiel) — fetches HFR's search result page for topic title search.
+     * Phase 2G-A/B (#150 partiel) — fetches HFR's search result page.
      *
      * Wire shape (cf. fixtures `search_*.html` captured 2026-05-22) : HFR's search form lives
      * at `POST /search.php` but renders a 1-second meta-refresh wait page that redirects to
      * `GET /forum1.php?recherches=1&...` carrying every form parameter in the query string.
      * Skipping the wait page and hitting `forum1.php` directly is the canonical fetch path.
      *
-     * - [query] : the user's term, forwarded as-is. Echoed back in upper-case by HFR.
-     * - [cat]   : the HFR cat id, encoded as `<id>*hfr.inc` (the form's expected shape).
-     *             Pass `null` for an all-categories search (encoded as an empty `cat=`).
-     * - [page]  : 1-based pagination ; currently always 1 for the 2G-A UI but plumbed
-     *             through for the multi-page follow-up.
-     * - [date]  : the « date d'aujourd'hui » HFR's form serialises even when `daterange=2`
-     *             (depuis le début) makes them functionally irrelevant. The repository
-     *             computes it from an injectable [java.time.Clock] so tests are
-     *             reproducible.
+     * - [query]     : the user's term, forwarded as-is. Echoed back in upper-case by HFR.
+     * - [cat]       : the HFR cat id, encoded as `<id>*hfr.inc` (the form's expected shape).
+     *                 Pass `null` for an all-categories search (encoded as an empty `cat=`).
+     * - [page]      : 1-based pagination ; currently always 1 for the MVP UI but plumbed
+     *                 through for the multi-page follow-up.
+     * - [date]      : the « date d'aujourd'hui » HFR's form serialises even when `daterange=2`
+     *                 (depuis le début) makes them functionally irrelevant. The repository
+     *                 computes it from an injectable [java.time.Clock] so tests are
+     *                 reproducible.
+     * - [textScope] : HFR's `titre` field (`1` titles, `3` titles + posts, `0` posts).
      *
      * Uses the **anonymous** client : the search endpoint is public and we don't want the
      * user's session cookies attached to a request whose URL contains the search payload
@@ -331,16 +333,22 @@ class HfrClient @Inject constructor(
         cat: Int?,
         page: Int,
         date: java.time.LocalDate,
+        textScope: SearchTextScope,
     ): String {
+        val orderSearch = if (textScope == SearchTextScope.TitlesOnly) {
+            ORDER_BY_LAST_TOPIC_REPLY
+        } else {
+            ORDER_BY_MATCHED_MESSAGE_DATE
+        }
         val url = baseUrl.newBuilder()
             .addPathSegment("forum1.php")
             .addQueryParameter("recherches", "1")
             .addQueryParameter("cat", cat?.let { "$it*hfr.inc" } ?: "")
-            .addQueryParameter("orderSearch", "1")
+            .addQueryParameter("orderSearch", orderSearch)
             .addQueryParameter("config", "hfr.inc")
             .addQueryParameter("pseud", "")
             .addQueryParameter("search", query)
-            .addQueryParameter("titre", "1")
+            .addQueryParameter("titre", textScope.hfrTitreValue.toString())
             .addQueryParameter("jour", date.dayOfMonth.toString())
             .addQueryParameter("mois", date.monthValue.toString())
             .addQueryParameter("annee", date.year.toString())
@@ -400,6 +408,8 @@ class HfrClient @Inject constructor(
     private companion object {
         // Prefix consumed by `docs/guides/profiling.md` — keep in lockstep with the catalogue.
         private const val TOPIC_TRACE_PREFIX = "rf2.topic"
+        private const val ORDER_BY_MATCHED_MESSAGE_DATE = "0"
+        private const val ORDER_BY_LAST_TOPIC_REPLY = "1"
     }
 
     private fun HttpUrl.isLoginUrl(): Boolean =

@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
@@ -91,7 +92,7 @@ class HfrClientTest {
     }
 
     @Test
-    fun `searchTopics builds the all-categories title search URL on anonymous client`() = runTest {
+    fun `searchTopics builds the all-categories mixed search URL on anonymous client`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>ok</body></html>"))
 
         val html = client.searchTopics(
@@ -99,6 +100,7 @@ class HfrClientTest {
             cat = null,
             page = 1,
             date = LocalDate.of(2026, 5, 22),
+            textScope = SearchTextScope.TitlesAndPosts,
         )
 
         assertEquals("<html><body>ok</body></html>", html)
@@ -108,11 +110,11 @@ class HfrClientTest {
         assertEquals("anonymous", request.headers["X-RF2-Client"])
         assertEquals("1", url.queryParameter("recherches"))
         assertEquals("", url.queryParameter("cat"))
-        assertEquals("1", url.queryParameter("orderSearch"))
+        assertEquals("0", url.queryParameter("orderSearch"))
         assertEquals("hfr.inc", url.queryParameter("config"))
         assertEquals("", url.queryParameter("pseud"))
         assertEquals("kotlin coroutines", url.queryParameter("search"))
-        assertEquals("1", url.queryParameter("titre"))
+        assertEquals("3", url.queryParameter("titre"))
         assertEquals("22", url.queryParameter("jour"))
         assertEquals("5", url.queryParameter("mois"))
         assertEquals("2026", url.queryParameter("annee"))
@@ -135,11 +137,31 @@ class HfrClientTest {
             cat = 10,
             page = 3,
             date = LocalDate.of(2026, 5, 22),
+            textScope = SearchTextScope.TitlesOnly,
         )
 
         val url = requireNotNull(server.takeRequest().requestUrl)
         assertEquals("10*hfr.inc", url.queryParameter("cat"))
         assertEquals("3", url.queryParameter("page"))
+        assertEquals("1", url.queryParameter("titre"))
+        assertEquals("1", url.queryParameter("orderSearch"))
+    }
+
+    @Test
+    fun `searchTopics encodes posts-only scope`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>ok</body></html>"))
+
+        client.searchTopics(
+            query = "kotlin",
+            cat = null,
+            page = 1,
+            date = LocalDate.of(2026, 5, 22),
+            textScope = SearchTextScope.PostsOnly,
+        )
+
+        val url = requireNotNull(server.takeRequest().requestUrl)
+        assertEquals("0", url.queryParameter("titre"))
+        assertEquals("0", url.queryParameter("orderSearch"))
     }
 
     private fun taggedClient(tag: String): OkHttpClient =

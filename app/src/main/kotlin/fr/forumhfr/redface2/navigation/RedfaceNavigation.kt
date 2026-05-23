@@ -264,10 +264,8 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
             entry<SearchRoute> {
                 SearchScreen(
                     onOpenTopic = { result ->
-                        // Phase 2G-A : title-search responses don't carry a `numreponse`,
-                        // so we open at the first page without scrolling to a specific post.
-                        // Post-content search (post-2G-A) will populate `page` + `numreponse`
-                        // and this branch should consume them then.
+                        // Title-search rows open page 1. Content-search rows can carry a
+                        // matched `numreponse` link, so consume it when HFR provides it.
                         backStack.add(
                             TopicRoute(
                                 cat = result.cat,

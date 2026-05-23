@@ -1,15 +1,23 @@
 <resources>
     <string name="search_title">Recherche</string>
     <string name="search_field_label">Mot-clé recherché</string>
-    <string name="search_field_placeholder">Sujet, mot dans le titre…</string>
+    <string name="search_field_placeholder">Mot dans un titre ou un message…</string>
     <string name="search_submit">Rechercher</string>
     <string name="search_retry">Réessayer</string>
-    <string name="search_idle_hint">Saisissez un mot-clé et lancez la recherche pour parcourir les sujets HFR.</string>
+    <string name="search_idle_hint">Saisissez un mot-clé pour chercher dans les titres et messages HFR. Les résultats ouvrent le topic, pas encore le message exact.</string>
     <string name="search_loading">Recherche en cours…</string>
     <string name="search_empty">Aucun résultat pour cette recherche.</string>
     <string name="search_error_network">Erreur réseau. Vérifiez votre connexion puis réessayez.</string>
     <string name="search_error_unknown">HFR a renvoyé une réponse inattendue. Réessayez.</string>
-    <string name="search_pivot_label">Catégories trouvées</string>
+    <string name="search_scope_label">Champ de recherche</string>
+    <string name="search_scope_titles_and_posts">Titres + messages</string>
+    <string name="search_scope_titles_only">Titres seuls</string>
+    <string name="search_scope_posts_only">Messages seuls</string>
+    <string name="search_future_filters_hint">Filtres auteur, date et pagination arrivent dans la suite de la recherche.</string>
+    <string name="search_pivot_label">Catégories HFR avec résultats</string>
+    <string name="search_pivot_hint">HFR affiche les topics d’une catégorie à la fois. Choisir une catégorie relance la même recherche dans ce périmètre.</string>
+    <string name="search_result_location">dans %1$s</string>
+    <string name="search_result_excerpt">Extrait : %1$s</string>
     <string name="search_result_replies">%1$d réponses · %2$d vues</string>
     <string name="search_result_author">par %1$s</string>
     <string name="search_result_last_reply">Dernier message %1$s par %2$s</string>

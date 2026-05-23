@@ -4,7 +4,10 @@ Captured : 2026-05-22 via curl, anonymous (no session cookies).
 
 Query : `search=android`, `cat=10*hfr.inc` (Programmation), `titre=0` (content of messages), `daterange=1` (à partir du), `jour=1 mois=1 annee=2025` (cutoff date).
 
-Shape : « daterange filter, explicit cat, content search » — exercises `daterange=1` (« à partir du <date> ») with a cutoff in early 2025. The response is, again, **identical in shape** to the default `daterange=2` variant — the date filter is applied server-side and does not modify the listing markup.
+Shape : « daterange filter, explicit cat, content search » — exercises `daterange=1`
+(« à partir du <date> ») with a cutoff in early 2025. The response keeps the
+same content-search shape as `daterange=2`: standard listing rows plus optional
+`.citation` blocks carrying `forum2.php?...page=N&numreponse=M` matched-post links.
 
 `daterange` value space (decoded from `/search.php?config=hfr.inc`) :
 

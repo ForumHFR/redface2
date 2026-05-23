@@ -19,6 +19,13 @@ package fr.forumhfr.redface2.core.model.search
  * The parser maps all four onto [SearchResultPage]. Empty result sets are NOT
  * exceptions ; they are an empty [SearchResultPage.topics] list with
  * [SearchResultPage.pivotCategories] empty too.
+ *
+ * HFR's `titre` parameter controls where the text is searched. Title matches
+ * return topic-level rows only. Post-body matches can additionally include a
+ * « Dernier message correspondant » snippet with a `forum2.php?...numreponse=`
+ * link ; the parser maps that optional detail to
+ * [SearchTopicResult.page], [SearchTopicResult.numreponse], and
+ * [SearchTopicResult.matchedExcerpt].
  */
 
 /**
@@ -28,8 +35,20 @@ package fr.forumhfr.redface2.core.model.search
 data class SearchRequest(
     val query: String,
     val category: SearchCategoryScope = SearchCategoryScope.All,
+    val textScope: SearchTextScope = SearchTextScope.TitlesAndPosts,
     val page: Int = 1,
 )
+
+/**
+ * HFR's `titre` form field. The app defaults to [TitlesAndPosts] because a
+ * mobile search field is expected to search broadly, while [TitlesOnly] keeps
+ * the stricter legacy mode available.
+ */
+enum class SearchTextScope(val hfrTitreValue: Int) {
+    TitlesOnly(hfrTitreValue = 1),
+    TitlesAndPosts(hfrTitreValue = 3),
+    PostsOnly(hfrTitreValue = 0),
+}
 
 /**
  * Whether the search should run across all categories or be scoped to a single
@@ -77,13 +96,14 @@ data class SearchPivotCategory(
 /**
  * One row of a search result listing. Distinct from [TopicSummary] because the
  * HTML search response does not expose the per-user fields the REST listing
- * does (`hasUnread`, `lastReadPage`, `flagType`) and the title-search variant
- * captured for 2G-A does not carry a `numreponse` — we project an honest
- * subset rather than nulling out fields the user might mistake for real.
+ * does (`hasUnread`, `lastReadPage`, `flagType`). We project the fields HFR
+ * actually serves on the search page instead of pretending this is a regular
+ * forum listing.
  *
- * `numreponse` and `page` are nullable on purpose : the title-search response
- * gives `(cat, topicId)` but not the position of a specific post. The
- * post-content search variant (not in scope for 2G-A) would populate them.
+ * `numreponse`, `page`, and `matchedExcerpt` are nullable on purpose : title
+ * matches give `(cat, topicId)` only. Post-body matches can add a second link
+ * to the matching message, but mixed searches may still contain plain title
+ * rows without snippet.
  *
  * `lastReplyAt` is left as a normalized String (NBSP-stripped) for this MVP
  * because HFR's serialization (« 22-05-2026 à 06:48 ») mixes localisation with
@@ -105,4 +125,5 @@ data class SearchTopicResult(
     val isLocked: Boolean,
     val page: Int?,
     val numreponse: Int?,
+    val matchedExcerpt: String?,
 )

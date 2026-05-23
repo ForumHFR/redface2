@@ -10,16 +10,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Phase 2G-A (#150 partiel) — tests for [SearchResultParser] driven by the four
+ * Phase 2G-A/B (#150 partiel) — tests for [SearchResultParser] driven by the
  * fixtures captured anonymously on 2026-05-22 :
  *
  *  - `search_no_results.html`             — minimal `.hop` page.
  *  - `search_kotlin_pivot_single.html`    — pivot dropdown with one option.
  *  - `search_android_pivot_multi.html`    — pivot dropdown with 18 options.
  *  - `search_kotlin_explicit_cat.html`    — no pivot, listing only.
+ *  - `search_content_kotlin_explicit_cat.html` — content snippets + numreponse links.
+ *  - `search_mixed_android_pivot_multi.html`   — broad title+content pivot.
  *
  * Each `@Test` exercises one invariant. We deliberately avoid synthetic HTML
- * for the four happy paths so the parser remains anchored to real HFR markup.
+ * for the happy paths so the parser remains anchored to real HFR markup.
  */
 class SearchResultParserTest {
 
@@ -57,6 +59,7 @@ class SearchResultParserTest {
         // be invented (the prompt's risk list calls this out explicitly).
         assertNull(first.numreponse)
         assertNull(first.page)
+        assertNull(first.matchedExcerpt)
         assertFalse(first.isLocked)
         assertEquals("Lt Ripley", first.author)
         assertEquals(2, first.replyCount)
@@ -109,6 +112,60 @@ class SearchResultParserTest {
         assertTrue("all rows should inherit the requested cat", page.topics.all { it.cat == 10 })
         // Same first topic as the pivot-single capture (deterministic listing).
         assertEquals(148_695, page.topics.first().topicId)
+    }
+
+    @Test
+    fun `content-only fixture exposes matched post anchor and excerpt`() {
+        val html = readFixture("search_content_kotlin_explicit_cat.html")
+        val page = parser.parse(
+            html,
+            query = "kotlin",
+            requestedCategory = SearchCategoryScope.Category(id = 10, name = "Programmation"),
+        )
+
+        assertEquals(emptyList<Any>(), page.pivotCategories)
+        assertEquals(14, page.topics.size)
+        val first = page.topics.first()
+        assertEquals(148_747, first.topicId)
+        assertEquals(1, first.page)
+        assertEquals(2_523_987, first.numreponse)
+        assertNotNull(first.matchedExcerpt)
+        assertTrue(
+            "expected the content-search snippet to be parsed, got <${first.matchedExcerpt}>",
+            first.matchedExcerpt!!.contains("Redface 2"),
+        )
+    }
+
+    @Test
+    fun `mixed fixture exposes nineteen pivot categories while keeping optional matched-post fields`() {
+        val html = readFixture("search_mixed_android_pivot_multi.html")
+        val page = parser.parse(html, query = "android", requestedCategory = SearchCategoryScope.All)
+
+        assertEquals(19, page.pivotCategories.size)
+        assertEquals("Overclocking, Cooling & Modding", page.pivotCategories.first { it.id == 2 }.label)
+        assertEquals(18, page.topics.size)
+        assertTrue("mixed all-cat listing should be auto-scoped to Hardware", page.topics.all { it.cat == 1 })
+        assertTrue(
+            "this fixture's first-category rows are title matches, so no matched-post link is present",
+            page.topics.all { it.numreponse == null && it.page == null && it.matchedExcerpt == null },
+        )
+    }
+
+    @Test
+    fun `daterange content fixture keeps matched post anchors`() {
+        val html = readFixture("search_daterange_since_2025.html")
+        val page = parser.parse(
+            html,
+            query = "android",
+            requestedCategory = SearchCategoryScope.Category(id = 10, name = "Programmation"),
+        )
+
+        assertEquals(10, page.topics.size)
+        assertTrue(
+            "daterange content-search rows should expose matched numreponse anchors",
+            page.topics.all { it.numreponse != null },
+        )
+        assertEquals(2_523_987, page.topics.first().numreponse)
     }
 
     @Test

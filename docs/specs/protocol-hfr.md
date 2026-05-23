@@ -305,20 +305,31 @@ Le `numreponse` d'un post est unique **au sein d'une catégorie** (`cat=X`). Deu
 
 - **Deep linking** : toujours inclure `cat` ET `numreponse` (optionnellement `post` pour la page). Un deep link qui ne fournit qu'un `numreponse` est ambigu.
 
-- **Recherche** : la recherche par **titres de sujets** (`titre=1`, captures Phase 2G-A) renvoie `(cat, topicId)` mais **pas** `numreponse` — le post précis n'est pas indiqué quand le hit porte sur le titre. La recherche par **contenu de posts** (`titre=3`, hors scope 2G-A) reste à capturer ; elle est censée porter `(cat, topicId, numreponse)` complet, mais ce n'est pas un fait prouvé tant qu'une fixture n'a pas été collectée. Côté nav, ne pas inventer un `numreponse` quand l'endpoint titres ne le fournit pas — ouvrir le topic page 1 et laisser l'utilisateur scroller.
+- **Recherche** : les résultats titre (`titre=1`) renvoient `(cat, topicId)` sans `numreponse` : ouvrir le topic page 1. Les résultats contenu (`titre=0`) et certains résultats mixtes (`titre=3`) peuvent ajouter sous le titre un lien `forum2.php?...page=N&numreponse=M` avec une citation « Dernier message correspondant » : dans ce cas, naviguer vers `(cat, topicId, page, numreponse)`. Ne jamais inventer un `numreponse` quand ce second lien est absent.
 
 ### Endpoint recherche (Phase 2G-A)
 
 Contrat live capturé le 2026-05-22 (cf. `core/parser/src/test/resources/fixtures/search_*.html` + `.source.txt`) :
 
 - Le form `/search.php?config=hfr.inc` est en **POST**. Sa soumission renvoie une page d'attente avec `<meta http-equiv="Refresh" content="1; url=/forum1.php?recherches=1&...">` qui redirige vers le GET canonique. **Skipper la page d'attente** et hit directement `/forum1.php?recherches=1&...` est la voie utilisée par `HfrClient.searchTopics(...)`.
-- Paramètres exhaustifs envoyés (l'ordre n'est pas significatif côté HFR mais reste stable pour la testabilité) : `recherches=1`, `cat=` (toutes) ou `cat=<id>*hfr.inc` (explicite), `orderSearch=1`, `config=hfr.inc`, `pseud=`, `search=<query>`, `titre=1`, `jour=<j>`, `mois=<m>`, `annee=<a>`, `resSearch=20`, `daterange=2`, `subcat=0`, `searchtype=1`, `trash=0`, `trash_post=0`, `moderation=0`.
+- Paramètres exhaustifs envoyés (l'ordre n'est pas significatif côté HFR mais reste stable pour la testabilité) : `recherches=1`, `cat=` (toutes) ou `cat=<id>*hfr.inc` (explicite), `orderSearch=<0|1>`, `config=hfr.inc`, `pseud=`, `search=<query>`, `titre=<0|1|3>`, `jour=<j>`, `mois=<m>`, `annee=<a>`, `resSearch=20`, `daterange=2`, `subcat=0`, `searchtype=1`, `trash=0`, `trash_post=0`, `moderation=0`.
+- Champ `titre` :
+  - `1` = titres seuls ;
+  - `3` = titres + contenu des messages, défaut mobile Redface 2 ;
+  - `0` = contenu des messages seul.
+- Champ `orderSearch` :
+  - `1` = tri par date du dernier message du topic, utilisé pour `titre=1` ;
+  - `0` = tri par date du message correspondant, utilisé pour `titre=0` et `titre=3`.
 - `jour/mois/annee` sont **requis** par le form HFR même quand `daterange=2` les rend fonctionnellement ignorés. Côté repo, on les calcule depuis un `java.time.Clock` injectable pour que les tests soient reproductibles.
 - Le résultat se décline en **4 shapes structurellement distinctes** :
   1. `no-results` : page minimaliste `<div class="hop">` + texte « Désolé, aucune réponse n'a été trouvée ! ». Mapping → `SearchResultPage(topics=[], pivotCategories=[])`.
   2. `pivot single` : bannière « Le moteur de recherche a trouvé des résultats dans les catégories suivantes » + `<select name="cat">` dans `<div class="search">` avec **1 option** `value="<id>*hfr.inc"` marquée `selected` + listing standard `forum1.php`. Déclenché quand `cat=` et une seule catégorie matche.
   3. `pivot multi` : même structure que `pivot single` mais N options dans le pivot. La liste pipe-delimited `<input name="post_cat_list" value="|1*hfr|16*hfr|...|13*hfr|">` mirrore les options (terminée par un pipe vide, le parser doit tolérer).
   4. `explicit cat` : aucune bannière, aucun pivot — listing `forum1.php` standard. Déclenché quand le request scope la recherche à une catégorie précise (`cat=<id>*hfr.inc`).
+- Ligne topic :
+  - le lien principal `a.cCatTopic` pointe vers le topic (`/hfr/...-sujet_<post>_<page>.htm`) ;
+  - quand le match vient d'un message, HFR ajoute souvent un second lien `forum2.php?...page=N&numreponse=M` contenant `<div class="citation"><b>Dernier message correspondant :</b>...` ; c'est la seule source fiable pour le scroll vers le post exact ;
+  - les lignes de titre ou certains résultats mixtes n'ont pas ce second lien : `page`, `numreponse` et extrait restent `null`.
 - Le footer de `forum1.php` contient un `<select name="cat" onchange=...>` (le « Goto category » présent sur tous les listings) avec des valeurs entières (`<option value="10">`). **Ne pas confondre** avec le pivot recherche, dont les valeurs sont au format `<id>*hfr.inc` et qui vit uniquement dans `<div class="search">`.
 - HFR upper-case la query echo dans le HTML retourné (`<input value="KOTLIN" name="search">`). Le match SQL est insensible à la casse — on n'a pas à se soucier de la casse côté UI.
 - Confidentialité : la query utilisateur apparaît en clair dans l'URL des résultats. Le repo logue uniquement la longueur (`queryLength=N`) et la présence d'une `cat`, et rebrande les `IOException` qui contiendraient l'URL complète avant propagation.

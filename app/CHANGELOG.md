@@ -15,6 +15,22 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## Unreleased
+
+Phase 2G-B — polish recherche avant nouvelle alpha.
+
+### Added
+- Recherche par défaut en mode « Titres + messages » (`titre=3`), avec choix explicite Titres + messages / Titres seuls / Messages seuls.
+- Affichage de l'extrait « Dernier message correspondant » quand HFR le fournit pour une recherche dans le contenu.
+- Navigation vers le post exact depuis un résultat de recherche contenu quand le lien HFR porte `numreponse`.
+- Indication sobre des filtres auteur/date/pagination à venir.
+
+### Fixed
+- Le pivot catégories HFR est affiché comme un sélecteur horizontal de périmètre, pas comme une liste de résultats à ouvrir.
+- Les cartes de résultats affichent leur catégorie/sous-catégorie pour clarifier le contexte.
+
+---
+
 ## v52 — `0.3.12` — 2026-05-22
 
 **Statut** : `closed`

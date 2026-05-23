@@ -50,7 +50,8 @@ class DefaultSearchRepository @Inject constructor(
         diagnostics.record(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
-            "GET forum1 search hasCat=${catId != null} queryLength=${request.query.length} page=${request.page}",
+            "GET forum1 search hasCat=${catId != null} scope=${request.textScope} " +
+                "queryLength=${request.query.length} page=${request.page}",
         )
         return withContext(ioDispatcher) {
             // HFR's form serialises today's date even when `daterange=2` makes it
@@ -70,6 +71,7 @@ class DefaultSearchRepository @Inject constructor(
                     cat = catId,
                     page = request.page,
                     date = today,
+                    textScope = request.textScope,
                 )
             } catch (error: SessionExpiredException) {
                 // `SessionExpiredException` extends `IOException` (so it's caught by the
