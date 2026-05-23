@@ -17,17 +17,29 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
-Post-v56 review hardening PR #194 — non distribué tant qu'un nouveau `versionCode` n'est pas généré.
+---
+
+## v57 — `0.3.17` — 2026-05-24
+
+**Statut** : `closed`
+**Commit** : à venir (workflow_dispatch sur branche PR #194 avant merge / tag)
+**Fichier** : artefact CD `dispatch-v57`
+
+Hardening review PR #194 : proxy HFR-only, `isSaving` non-zombie, dropdown EditFP M3, charset UTF-8 credentials proxy.
 
 ### Fixed
 - Paramètres proxy : un échec DataStore ne laisse plus le bouton Enregistrer bloqué en chargement.
 - Edit FP : le dropdown sous-catégorie utilise le composant Material 3 `ExposedDropdownMenuBox` pour fiabiliser le tap sur champ read-only.
 - Proxy : retrait du champ `scheme` non livré pour éviter de promettre un proxy HTTPS natif alors que le MVP supporte le proxy HTTP classique avec `CONNECT`.
 - Proxy : le proxy utilisateur est désormais limité aux domaines HFR (`hardware.fr` / `*.hardware.fr`) pour éviter de casser les images externes lorsque le proxy ne route que HFR.
+- Proxy : credentials Basic encodées en UTF-8 (plutôt que ISO-8859-1) pour éviter une boucle 407 silencieuse sur mots de passe proxy accentués.
 
 ### Docs
 - ADR-012 ajoutée pour cadrer le stockage local des credentials proxy.
 - Specs architecture réalignées : `:feature:settings` contient maintenant le `SettingsScreen` alpha.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 57`, `versionName = "0.3.17"`.
 
 ---
 

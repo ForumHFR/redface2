@@ -1,9 +1,9 @@
-Alpha Redface 2 — réglages et éditeur.
+Alpha Redface 2 v57 — hardening proxy.
 
-Nouveautés :
-- Réglage proxy HTTP dans les paramètres alpha.
-- Insertion d’image par URL depuis l’éditeur BBCode.
-- Changement de sous-catégorie lors de l’édition du FP.
-- Pivots de recherche plus lisibles sur mobile.
+Correctifs :
+- Proxy limité aux domaines HFR : les images externes ne passent plus par le proxy utilisateur.
+- Bouton Enregistrer du proxy débloqué après échec.
+- Credentials proxy UTF-8 pour mots de passe accentués.
+- Dropdown sous-catégorie EditFP fiabilisé (M3).
 
 Bugs : alpha ou GitHub.

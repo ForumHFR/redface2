@@ -1,9 +1,9 @@
-Redface 2 alpha — settings and editor.
+Redface 2 alpha v57 — proxy hardening.
 
-New:
-- HTTP proxy setting in alpha settings.
-- Insert image URLs from the BBCode editor.
-- Change subcategory while editing the first post.
-- More readable search category pivots on mobile.
+Fixes:
+- Proxy scoped to HFR hosts: external images stay direct.
+- Proxy "Save" button no longer stuck on DataStore failure.
+- Proxy credentials encoded in UTF-8 (non-latin1 passwords).
+- EditFP subcategory dropdown reliability (M3).
 
 Report bugs via alpha or GitHub.
