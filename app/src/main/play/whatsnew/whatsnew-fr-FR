@@ -1,9 +1,10 @@
-Build alpha Redface 2 — recherche HFR réelle.
+Build alpha Redface 2 — recherche HFR étendue.
 
 Nouveautés :
-- Onglet Recherche branché sur la recherche HFR par titre.
-- Résultats réels avec auteur, compteur, dernier message et catégorie.
-- Pivots de catégories quand HFR renvoie plusieurs familles de résultats.
-- Durcissement des cas de course et des réponses HTML inattendues.
+- Recherche par défaut dans les titres et les messages.
+- Choix Titres + messages / Titres seuls / Messages seuls.
+- Extrait « Dernier message correspondant » quand HFR le fournit.
+- Ouverture du post exact depuis les résultats contenu quand possible.
+- Pivot catégories clarifié en sélecteur horizontal.
 
 Merci de remonter tout bug via le canal alpha ou le dépôt GitHub.

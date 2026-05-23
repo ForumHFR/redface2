@@ -17,6 +17,14 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
+---
+
+## v53 — `0.3.13` — 2026-05-23
+
+**Statut** : `closed`
+**Commit** : à venir (build de test avant merge PR #183)
+**Fichier** : artefact CD `dispatch-v53`
+
 Phase 2G-B — polish recherche avant nouvelle alpha.
 
 ### Added
@@ -28,6 +36,10 @@ Phase 2G-B — polish recherche avant nouvelle alpha.
 ### Fixed
 - Le pivot catégories HFR est affiché comme un sélecteur horizontal de périmètre, pas comme une liste de résultats à ouvrir.
 - Les cartes de résultats affichent leur catégorie/sous-catégorie pour clarifier le contexte.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 53`, `versionName = "0.3.13"`.
+- Notes Play Console mises à jour pour le track alpha.
 
 ---
 

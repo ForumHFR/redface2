@@ -1,9 +1,10 @@
-Redface 2 alpha build — real HFR search.
+Redface 2 alpha build — expanded HFR search.
 
 New:
-- Search tab now uses HFR's real title-search endpoint.
-- Real results with author, counters, latest reply and category.
-- Category pivots when HFR returns several result families.
-- Hardened stale-result races and unexpected HTML responses.
+- Default search now covers titles and message content.
+- Scope selector: titles + messages, titles only, messages only.
+- “Matching message” excerpt when HFR provides it.
+- Opens the exact matching post from content-search results when possible.
+- Category pivot is now a clearer horizontal scope selector.
 
 Please report bugs via the alpha channel or the GitHub repository.
