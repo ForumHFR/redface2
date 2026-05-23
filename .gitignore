@@ -1,4 +1,5 @@
 .codex
+tmp/
 scripts/phase-minus-1-dashboard.sh
 .gradle/
 .gradle-user/
