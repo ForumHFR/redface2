@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * Phase 2G-A (#150 partiel) — ViewModel for [SearchScreen].
+ * Phase 2G-A/B (#150 partiel) — ViewModel for [SearchScreen].
  *
  * One [searchJob] is in flight at a time : a new submit/retry/category-change
  * cancels the previous one so an older response cannot overwrite a newer

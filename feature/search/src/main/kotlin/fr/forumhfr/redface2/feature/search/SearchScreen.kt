@@ -47,7 +47,7 @@ import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.search.SearchTopicResult
 
 /**
- * Phase 2G-A (#150 partiel) — search tab screen.
+ * Phase 2G-A/B (#150 partiel) — search tab screen.
  *
  * Sober single-field UX : type a query, tap « Rechercher » (or press IME action),
  * scroll the result cards, tap one to open the topic. When the query matched

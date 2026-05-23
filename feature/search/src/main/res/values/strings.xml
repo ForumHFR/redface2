@@ -4,7 +4,7 @@
     <string name="search_field_placeholder">Mot dans un titre ou un message…</string>
     <string name="search_submit">Rechercher</string>
     <string name="search_retry">Réessayer</string>
-    <string name="search_idle_hint">Saisissez un mot-clé pour chercher dans les titres et messages HFR. Les résultats ouvrent le topic, pas encore le message exact.</string>
+    <string name="search_idle_hint">Saisissez un mot-clé pour chercher dans les titres et messages HFR. Quand HFR fournit un extrait, le résultat ouvre le message correspondant ; sinon il ouvre le topic.</string>
     <string name="search_loading">Recherche en cours…</string>
     <string name="search_empty">Aucun résultat pour cette recherche.</string>
     <string name="search_error_network">Erreur réseau. Vérifiez votre connexion puis réessayez.</string>

@@ -8,7 +8,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
 /**
- * Phase 2G-A (#150 partiel) — Jsoup parser for HFR's search result page.
+ * Phase 2G-A/B (#150 partiel) — Jsoup parser for HFR's search result page.
  *
  * Input HTML comes from `GET /forum1.php?recherches=1&...` (anonymous). The
  * page can take four structurally distinct shapes — see [SearchResultPage]

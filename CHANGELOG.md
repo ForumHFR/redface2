@@ -18,6 +18,7 @@ Phase 2G-B (#150 suite) — recherche HFR alignée sur le formulaire réel : cho
 ### Fixed (Phase 2G-B #150 suite)
 - Le pivot catégories HFR n'est plus présenté comme une liste principale verticale : il est explicité comme un sélecteur de périmètre qui relance la même recherche dans une catégorie.
 - Le contrat fixtures 2G-B est corrigé : la fixture HTML était bonne, mais son `.source.txt` niait à tort le `numreponse` présent dans le second lien.
+- Les libellés et KDoc ne parlent plus de « recherche titre seulement » quand le comportement 2G-B couvre aussi les résultats contenu et le scroll vers `numreponse`.
 
 ### Added (Phase 2G-A #150 partiel)
 - Modèles `:core:model/search/` : `SearchRequest`, `SearchCategoryScope` (sealed All|Category), `SearchResultPage`, `SearchPivotCategory`, `SearchTopicResult`. Honest schema : `numreponse`/`page` `null` quand HFR ne porte pas le post précis.

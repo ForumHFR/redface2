@@ -135,7 +135,7 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 - [ ] Smileys éditeur complet — favoris, récents, upload smiley perso, sync MPStorage, GIFs externes (#11 suite)
 - [ ] Hébergement d'images — upload, rehost, bibliothèque (diberie, super-h.fr, imgur)
 - [x] **Recherche HFR MVP (#150 partiel, Phase 2G-A/B)** — recherche via `GET /forum1.php?recherches=1&...` (le form HFR `POST /search.php` renvoie une page de transition meta-refresh, on hit le GET canonique directement). Parser couvre les shapes capturées : `no-results` (page `.hop` minimaliste), `pivot single` (1 cat hit), `pivot multi` (N cats hit, sélecteur via `<select name="cat">` dans `<div class="search">`), `explicit cat` (listing standard sans bannière), et les extraits contenu `Dernier message correspondant` avec lien `forum2.php?...numreponse=...` quand HFR les fournit. Écran Recherche : champ + IME Search + bouton, choix Titres+messages/Titres/Messages, états idle/loading/empty/error/results, pivot horizontal pour relancer dans une autre catégorie. Navigation → `TopicRoute(cat, post, page, scrollTo)` quand le résultat porte un `numreponse`, sinon page 1.
-- [ ] Recherche HFR filtres avancés auteur/date + pagination (#150 suite, Phase 2G-B)
+- [ ] Recherche HFR filtres avancés auteur/date + pagination (#150 suite, post-2G-B)
 - [ ] Retirer un drapeau (delflag) — swipe + undo (#99, Phase 2G-C)
 
 **Livrable :** une app complète pour lire ET écrire sur le forum.

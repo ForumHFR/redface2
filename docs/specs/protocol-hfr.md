@@ -307,7 +307,7 @@ Le `numreponse` d'un post est unique **au sein d'une catégorie** (`cat=X`). Deu
 
 - **Recherche** : les résultats titre (`titre=1`) renvoient `(cat, topicId)` sans `numreponse` : ouvrir le topic page 1. Les résultats contenu (`titre=0`) et certains résultats mixtes (`titre=3`) peuvent ajouter sous le titre un lien `forum2.php?...page=N&numreponse=M` avec une citation « Dernier message correspondant » : dans ce cas, naviguer vers `(cat, topicId, page, numreponse)`. Ne jamais inventer un `numreponse` quand ce second lien est absent.
 
-### Endpoint recherche (Phase 2G-A)
+### Endpoint recherche (Phase 2G-A/B)
 
 Contrat live capturé le 2026-05-22 (cf. `core/parser/src/test/resources/fixtures/search_*.html` + `.source.txt`) :
 

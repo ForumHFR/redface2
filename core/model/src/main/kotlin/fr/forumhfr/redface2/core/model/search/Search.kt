@@ -1,7 +1,7 @@
 package fr.forumhfr.redface2.core.model.search
 
 /**
- * Phase 2G-A (#150 partiel) — domain models for the HFR forum search.
+ * Phase 2G-A/B (#150 partiel) — domain models for the HFR forum search.
  *
  * The search endpoint reachable at `/forum1.php?recherches=1&...` returns four
  * structurally distinct HTML shapes (cf. fixtures `search_*.html` under
