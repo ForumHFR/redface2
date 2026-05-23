@@ -17,6 +17,17 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
+Post-v56 review hardening PR #194 — non distribué tant qu'un nouveau `versionCode` n'est pas généré.
+
+### Fixed
+- Paramètres proxy : un échec DataStore ne laisse plus le bouton Enregistrer bloqué en chargement.
+- Edit FP : le dropdown sous-catégorie utilise le composant Material 3 `ExposedDropdownMenuBox` pour fiabiliser le tap sur champ read-only.
+- Proxy : retrait du champ `scheme` non livré pour éviter de promettre un proxy HTTPS natif alors que le MVP supporte le proxy HTTP classique avec `CONNECT`.
+
+### Docs
+- ADR-012 ajoutée pour cadrer le stockage local des credentials proxy.
+- Specs architecture réalignées : `:feature:settings` contient maintenant le `SettingsScreen` alpha.
+
 ---
 
 ## v56 — `0.3.16` — 2026-05-23

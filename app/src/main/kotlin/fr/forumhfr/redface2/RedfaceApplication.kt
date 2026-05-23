@@ -37,6 +37,8 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
     override fun newImageLoader(context: PlatformContext): ImageLoader =
         ImageLoader.Builder(context)
             .components {
+                // Use the shared anonymous client so Coil follows the user proxy without leaking
+                // HFR auth cookies to arbitrary external [img] hosts.
                 add(OkHttpNetworkFetcherFactory(callFactory = { imageClient }))
                 add(AnimatedImageDecoder.Factory())
             }

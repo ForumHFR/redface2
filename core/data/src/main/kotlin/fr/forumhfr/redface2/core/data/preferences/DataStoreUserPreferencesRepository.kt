@@ -8,7 +8,6 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
-import fr.forumhfr.redface2.core.domain.preferences.ProxyScheme
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -36,35 +35,31 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         withContext(ioDispatcher) {
             dataStore.edit { prefs ->
                 prefs[KEY_PROXY_ENABLED] = normalized.enabled
-                prefs[KEY_PROXY_SCHEME] = normalized.scheme.name
                 prefs[KEY_PROXY_HOST] = normalized.host
                 normalized.port?.let { prefs[KEY_PROXY_PORT] = it } ?: prefs.remove(KEY_PROXY_PORT)
+                // SECURITY: proxy credentials follow ADR-012 and must never be written to DiagnosticsLog.
                 normalized.username?.let { prefs[KEY_PROXY_USERNAME] = it } ?: prefs.remove(KEY_PROXY_USERNAME)
                 normalized.password?.let { prefs[KEY_PROXY_PASSWORD] = it } ?: prefs.remove(KEY_PROXY_PASSWORD)
             }
         }
     }
 
+    // PERF: intentionally synchronous because OkHttp/Coil clients are created during app bootstrap.
+    // The MVP accepts app restart after proxy changes; async hot-swap is tracked by #195.
     override fun readProxyConfigForNetworkBootstrap(): ProxyConfig =
         runBlocking(ioDispatcher) { observeProxyConfig().first() }
 
-    private fun toProxyConfig(prefs: Preferences): ProxyConfig {
-        val scheme = prefs[KEY_PROXY_SCHEME]
-            ?.let { raw -> runCatching { ProxyScheme.valueOf(raw) }.getOrNull() }
-            ?: ProxyScheme.HTTP
-        return ProxyConfig(
+    private fun toProxyConfig(prefs: Preferences): ProxyConfig =
+        ProxyConfig(
             enabled = prefs[KEY_PROXY_ENABLED] ?: false,
-            scheme = scheme,
             host = prefs[KEY_PROXY_HOST].orEmpty(),
             port = prefs[KEY_PROXY_PORT],
             username = prefs[KEY_PROXY_USERNAME],
             password = prefs[KEY_PROXY_PASSWORD],
         ).normalized()
-    }
 
     private companion object {
         val KEY_PROXY_ENABLED = booleanPreferencesKey("proxy_enabled")
-        val KEY_PROXY_SCHEME = stringPreferencesKey("proxy_scheme")
         val KEY_PROXY_HOST = stringPreferencesKey("proxy_host")
         val KEY_PROXY_PORT = intPreferencesKey("proxy_port")
         val KEY_PROXY_USERNAME = stringPreferencesKey("proxy_username")

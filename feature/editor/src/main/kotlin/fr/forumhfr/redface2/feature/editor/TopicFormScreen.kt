@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,13 +12,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import android.widget.Toast
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -25,15 +26,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -251,10 +252,10 @@ internal fun TopicFormContent(
  * `subcat=""` and we don't want the user to see a choice that cannot be
  * submitted. Placeholder shown until the user picks something.
  *
- * Implemented as `OutlinedTextField + DropdownMenu` rather than
- * `ExposedDropdownMenuBox` to keep the dependency surface minimal and avoid
- * the experimental annotations that the box variant still requires.
+ * Implemented with Material 3 `ExposedDropdownMenuBox` so the read-only field
+ * remains reliably tappable and accessible in both New and EditFirstPost modes.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SubcategoryDropdown(
     choices: List<fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice>,
@@ -266,22 +267,25 @@ private fun SubcategoryDropdown(
     val placeholder = stringResource(R.string.editor_topic_subcat_picker_placeholder)
     val selectedLabel = pickable.firstOrNull { it.id == selectedSubcat }?.label ?: placeholder
     var expanded by remember { mutableStateOf(false) }
-    Box(modifier = Modifier.fillMaxWidth()) {
+    val menuEnabled = enabled && pickable.isNotEmpty()
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = menuEnabled && it },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         OutlinedTextField(
             value = selectedLabel,
             onValueChange = {},
             readOnly = true,
             enabled = enabled,
             label = { Text(stringResource(R.string.editor_topic_subcat_picker_label)) },
-            // Plain text caret instead of an Icons import : keeps the
-            // dependency surface minimal (`material-icons-extended` is not on
-            // this module's classpath) and works fine for a single chevron.
-            trailingIcon = { Text(text = "▾") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(enabled = enabled) { expanded = true },
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = menuEnabled),
         )
-        DropdownMenu(
+        ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {
@@ -293,6 +297,7 @@ private fun SubcategoryDropdown(
                         expanded = false
                         onSelect(id)
                     },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
                 )
             }
         }

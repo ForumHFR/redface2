@@ -213,6 +213,8 @@ private fun PivotChips(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        // #188: long HFR category labels can otherwise wrap into unreadable vertical chips
+        // on narrow screens. Keep the pivot rail horizontal and each chip single-line.
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier

@@ -16,6 +16,7 @@ data class SettingsState(
 
 sealed interface SettingsError {
     data object InvalidProxy : SettingsError
+    data object PersistFailed : SettingsError
 }
 
 sealed interface SettingsIntent {

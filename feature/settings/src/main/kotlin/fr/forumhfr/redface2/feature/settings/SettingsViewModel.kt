@@ -56,16 +56,21 @@ class SettingsViewModel @Inject constructor(
         }
         _state.update { it.copy(isSaving = true, error = null, saved = false) }
         viewModelScope.launch {
-            userPreferencesRepository.saveProxyConfig(
-                ProxyConfig(
-                    enabled = snapshot.proxyEnabled,
-                    host = snapshot.proxyHost,
-                    port = port,
-                    username = snapshot.proxyUsername.ifBlank { null },
-                    password = snapshot.proxyPassword.ifBlank { null },
-                ),
-            )
-            _state.update { it.copy(isSaving = false, saved = true, error = null) }
+            runCatching {
+                userPreferencesRepository.saveProxyConfig(
+                    ProxyConfig(
+                        enabled = snapshot.proxyEnabled,
+                        host = snapshot.proxyHost,
+                        port = port,
+                        username = snapshot.proxyUsername.ifBlank { null },
+                        password = snapshot.proxyPassword.ifBlank { null },
+                    ),
+                )
+            }.onSuccess {
+                _state.update { it.copy(isSaving = false, saved = true, error = null) }
+            }.onFailure {
+                _state.update { it.copy(isSaving = false, saved = false, error = SettingsError.PersistFailed) }
+            }
         }
     }
 

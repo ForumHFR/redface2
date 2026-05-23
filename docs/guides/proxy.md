@@ -51,3 +51,5 @@ Ne pas inclure `http://`, `https://` ou `user:pass@` dans le champ hôte. Les id
 | Auth proxy refusée | Identifiants invalides ou type d'auth non Basic | Corriger les identifiants ; NTLM/Kerberos hors scope |
 
 Les credentials proxy ne doivent pas apparaître dans `DiagnosticsLog`. Si un diagnostic les contient, ouvrir une issue de sécurité sur le repo.
+
+Leur stockage local suit la même politique que les cookies HFR : DataStore non chiffré + protection FBE Android, formalisée dans l'[ADR-012]({{ site.baseurl }}/adr/012-credentials-proxy).

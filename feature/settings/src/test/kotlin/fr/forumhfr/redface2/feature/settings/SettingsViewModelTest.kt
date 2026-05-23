@@ -89,17 +89,36 @@ class SettingsViewModelTest {
         assertFalse(viewModel.state.value.isSaving)
     }
 
+    @Test
+    fun `save reports persist failure and re-enables saving when repository throws`() = runTest {
+        repository.failOnSave = true
+        val viewModel = SettingsViewModel(repository)
+
+        viewModel.submit(SettingsIntent.ProxyEnabledChanged(true))
+        viewModel.submit(SettingsIntent.ProxyHostChanged("proxy.local"))
+        viewModel.submit(SettingsIntent.ProxyPortChanged("8080"))
+        viewModel.submit(SettingsIntent.SaveProxyClicked)
+
+        val state = viewModel.state.value
+        assertEquals(SettingsError.PersistFailed, state.error)
+        assertFalse(state.saved)
+        assertFalse(state.isSaving)
+        assertTrue(state.canSave)
+    }
+
     private class FakeUserPreferencesRepository : UserPreferencesRepository {
         private val config = MutableStateFlow(ProxyConfig())
         var saveCalls: Int = 0
             private set
         var lastSaved: ProxyConfig? = null
             private set
+        var failOnSave: Boolean = false
 
         override fun observeProxyConfig(): Flow<ProxyConfig> = config
 
         override suspend fun saveProxyConfig(config: ProxyConfig) {
             saveCalls += 1
+            check(!failOnSave) { "boom" }
             val normalized = config.normalized()
             lastSaved = normalized
             this.config.value = normalized

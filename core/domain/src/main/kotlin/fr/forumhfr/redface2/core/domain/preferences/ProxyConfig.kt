@@ -9,7 +9,6 @@ package fr.forumhfr.redface2.core.domain.preferences
  */
 data class ProxyConfig(
     val enabled: Boolean = false,
-    val scheme: ProxyScheme = ProxyScheme.HTTP,
     val host: String = "",
     val port: Int? = null,
     val username: String? = null,
@@ -31,9 +30,4 @@ data class ProxyConfig(
         const val MIN_PORT = 1
         const val MAX_PORT = 65_535
     }
-}
-
-enum class ProxyScheme {
-    HTTP,
-    HTTPS,
 }

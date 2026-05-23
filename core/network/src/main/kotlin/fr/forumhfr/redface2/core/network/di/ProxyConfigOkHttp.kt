@@ -19,6 +19,7 @@ internal fun OkHttpClient.Builder.applyProxyConfig(config: ProxyConfig): OkHttpC
         )
 
         if (normalized.hasCredentials) {
+            // SECURITY: never record proxy username/password in DiagnosticsLog or request diagnostics.
             val credential = Credentials.basic(normalized.username.orEmpty(), normalized.password.orEmpty())
             proxyAuthenticator { _, response ->
                 if (response.request.header(PROXY_AUTHORIZATION) != null) {

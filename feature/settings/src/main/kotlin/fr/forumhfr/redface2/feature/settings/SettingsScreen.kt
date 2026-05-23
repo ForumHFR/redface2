@@ -142,6 +142,13 @@ internal fun SettingsContent(
                             color = MaterialTheme.colorScheme.error,
                         )
                     }
+                    if (state.error == SettingsError.PersistFailed) {
+                        Text(
+                            text = stringResource(R.string.settings_proxy_persist_failed),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                     if (state.saved) {
                         Text(
                             text = stringResource(R.string.settings_proxy_saved),
