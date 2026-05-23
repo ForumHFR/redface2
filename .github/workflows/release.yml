@@ -299,3 +299,44 @@ jobs:
           prerelease: ${{ contains(steps.meta.outputs.version_name, 'phase') || contains(steps.meta.outputs.version_name, 'rc') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ──────────────────────────────────────────────────────────────────────
+      # Cross-repo trigger : signal the redface2-fdroid repo to fetch the
+      # newly-uploaded APK and rebuild its F-Droid index. Uses a GitHub App
+      # (redface2-fdroid-publisher) installed only on redface2-fdroid ; the App
+      # generates a 1-hour token via JWT exchange — zero PAT, zero recurring
+      # maintenance. If the dispatch fails (App revoked, F-Droid repo down,
+      # GitHub API hiccup), we DON'T fail the whole release job : the APK is
+      # already on Play + GitHub Releases, the F-Droid mirror catching up
+      # later is a downstream concern. The publisher workflow has a manual
+      # workflow_dispatch fallback to recover.
+      # ──────────────────────────────────────────────────────────────────────
+      - name: Generate F-Droid publisher App token
+        id: fdroid_app_token
+        if: ${{ steps.meta.outputs.release_kind == 'tag' || inputs.attach_release }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RF2_FDROID_APP_ID }}
+          private-key: ${{ secrets.RF2_FDROID_APP_PRIVATE_KEY }}
+          owner: ForumHFR
+          repositories: redface2-fdroid
+
+      - name: Trigger F-Droid publish
+        if: ${{ steps.fdroid_app_token.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.fdroid_app_token.outputs.token }}
+        run: |
+          # The APK filename follows the `stamp_apk_name` convention
+          # established by `app/build.gradle.kts` (cf. ADR-0XX release
+          # filenames) : `redface2-v<vc>-<short_sha>.apk`. We rebuild it
+          # from the `meta` step outputs rather than scanning release
+          # assets, so we don't add another API roundtrip.
+          APK_FILENAME="redface2-v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}.apk"
+          echo "Triggering F-Droid publish for tag ${{ steps.meta.outputs.release_tag }} (apk=$APK_FILENAME)"
+          gh api repos/ForumHFR/redface2-fdroid/dispatches \
+            -f event_type=rf2_release \
+            -f "client_payload[tag]=${{ steps.meta.outputs.release_tag }}" \
+            -f "client_payload[apk_filename]=$APK_FILENAME" \
+            -f "client_payload[version_code]=${{ steps.meta.outputs.version_code }}"
