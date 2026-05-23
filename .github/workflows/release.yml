@@ -54,11 +54,12 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  # `contents: write` is the only scope needed — softprops/action-gh-release creates the
-  # GitHub Release + uploads assets via the REST API. We do not use OIDC tokens here
-  # (the Play Console upload uses a service-account JSON, not workload identity), so
-  # there is no `id-token: write/read` scope to grant.
+  # `contents: write` lets softprops/action-gh-release create the GitHub Release +
+  # upload assets via the REST API. `packages: read` is also required before checkout:
+  # the job itself runs inside a pinned GHCR container, and tag-triggered workflows do
+  # not get package read access once permissions are narrowed explicitly.
   contents: write
+  packages: read
 
 jobs:
   build:
