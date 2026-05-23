@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.URI
+import okhttp3.CookieJar
 import okhttp3.Credentials
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -16,18 +17,25 @@ import org.junit.Test
 class ProxyConfigOkHttpTest {
 
     @Test
-    fun `disabled proxy leaves OkHttp builder without proxy`() {
+    fun `disabled proxy leaves the OkHttp default selector behaviour untouched`() {
+        // Compare against a baseline client built from a fresh Builder: both must resolve
+        // proxies identically for any URL. This pins the contract "applyProxyConfig(disabled)
+        // installs no custom selector" without coupling to the JVM default's return value,
+        // which depends on system properties (`http.proxyHost`, etc.) and would flake on
+        // CI environments configured with a system proxy.
+        val baseline = OkHttpClient.Builder().build()
         val client = OkHttpClient.Builder()
             .applyProxyConfig(ProxyConfig(enabled = false, host = "proxy.local", port = 8_080))
             .build()
 
-        // Disabled: no custom proxy AND no custom selector that would forcibly route HFR through a user proxy.
         assertNull(client.proxy)
-        // The selector must not route HFR through a custom proxy when the user proxy is disabled.
-        // OkHttp's default selector returns NO_PROXY for ordinary HTTPS URLs in a unit-test JVM.
         assertEquals(
-            listOf(Proxy.NO_PROXY),
+            baseline.proxySelector.select(URI("https://forum.hardware.fr/")),
             client.proxySelector.select(URI("https://forum.hardware.fr/")),
+        )
+        assertEquals(
+            baseline.proxySelector.select(URI("https://rehost.diberie.com/")),
+            client.proxySelector.select(URI("https://rehost.diberie.com/")),
         )
     }
 
@@ -35,7 +43,8 @@ class ProxyConfigOkHttpTest {
     fun `enabled proxy routes HFR forum host through the user proxy`() {
         val client = clientWithEnabledProxy()
 
-        // With a ProxySelector installed, OkHttp does not expose a singular `client.proxy`.
+        // `client.proxy` was never assigned: applyProxyConfig only calls Builder.proxySelector(...)
+        // and never Builder.proxy(...). OkHttp keeps both fields independent.
         assertNull(client.proxy)
         assertHttpProxy(client.selectProxy("https://forum.hardware.fr/"))
     }
@@ -74,6 +83,33 @@ class ProxyConfigOkHttpTest {
     }
 
     @Test
+    fun `enabled proxy still routes HFR through user proxy when URI has a non-standard port`() {
+        val client = clientWithEnabledProxy()
+        // Defensive: matching is on the host alone, not host:port.
+        assertHttpProxy(client.selectProxy("https://forum.hardware.fr:8443/"))
+    }
+
+    @Test
+    fun `enabled proxy matches HFR host with trailing dot FQDN form`() {
+        val client = clientWithEnabledProxy()
+        // FQDN absolute form: some resolvers preserve the trailing dot. The selector must still match.
+        assertHttpProxy(client.selectProxy("https://forum.hardware.fr./"))
+        assertHttpProxy(client.selectProxy("https://hardware.fr./"))
+    }
+
+    @Test
+    fun `proxy selector survives newBuilder copy used by authenticated and anonymous clients`() {
+        // NetworkModule.provideAuthenticatedClient / provideAnonymousClient derive their clients
+        // via `baseClient.newBuilder().cookieJar(...).build()`. OkHttp's Builder copy constructor
+        // is supposed to preserve the ProxySelector — this test pins that contract so a future
+        // OkHttp upgrade or refactor can't silently break HFR routing through the user proxy.
+        val base = clientWithEnabledProxy()
+        val derived = base.newBuilder().cookieJar(CookieJar.NO_COOKIES).build()
+        assertHttpProxy(derived.selectProxy("https://forum.hardware.fr/"))
+        assertEquals(Proxy.NO_PROXY, derived.selectProxy("https://rehost.diberie.com/"))
+    }
+
+    @Test
     fun `enabled proxy keeps URIs without a host direct`() {
         val client = clientWithEnabledProxy()
         // OkHttp will never call select() with these in practice, but the contract is host-only.
@@ -106,12 +142,46 @@ class ProxyConfigOkHttpTest {
             .build()
 
         val authenticated = client.proxyAuthenticator.authenticate(null, response)
-        assertEquals(Credentials.basic("user", "secret"), authenticated?.header("Proxy-Authorization"))
+        assertEquals(
+            Credentials.basic("user", "secret", Charsets.UTF_8),
+            authenticated?.header("Proxy-Authorization"),
+        )
 
         val replayResponse = response.newBuilder()
             .request(requireNotNull(authenticated))
             .build()
         assertNull(client.proxyAuthenticator.authenticate(null, replayResponse))
+    }
+
+    @Test
+    fun `proxy credentials encode non-latin1 password in UTF-8`() {
+        // Regression test: Credentials.basic without an explicit charset defaults to ISO-8859-1,
+        // which silently mis-encodes accents and yields a 407 loop on proxies that expect UTF-8.
+        val client = OkHttpClient.Builder()
+            .applyProxyConfig(
+                ProxyConfig(
+                    enabled = true,
+                    host = "proxy.local",
+                    port = 8_080,
+                    username = "user",
+                    password = "été€",
+                ),
+            )
+            .build()
+
+        val request = Request.Builder().url("https://forum.hardware.fr/").build()
+        val response = Response.Builder()
+            .request(request)
+            .protocol(Protocol.HTTP_1_1)
+            .code(407)
+            .message("Proxy Authentication Required")
+            .build()
+        val authenticated = client.proxyAuthenticator.authenticate(null, response)
+
+        assertEquals(
+            Credentials.basic("user", "été€", Charsets.UTF_8),
+            authenticated?.header("Proxy-Authorization"),
+        )
     }
 
     private fun clientWithEnabledProxy(): OkHttpClient = OkHttpClient.Builder()

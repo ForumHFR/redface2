@@ -32,7 +32,14 @@ internal fun OkHttpClient.Builder.applyProxyConfig(config: ProxyConfig): OkHttpC
 
         if (normalized.hasCredentials) {
             // SECURITY: never record proxy username/password in DiagnosticsLog or request diagnostics.
-            val credential = Credentials.basic(normalized.username.orEmpty(), normalized.password.orEmpty())
+            // UTF-8 charset: avoids silent 407 loops when the proxy password contains non-latin1
+            // characters (accents, etc.). Modern proxies expect UTF-8; ISO-8859-1 (OkHttp legacy
+            // default) would mis-encode the credentials.
+            val credential = Credentials.basic(
+                normalized.username.orEmpty(),
+                normalized.password.orEmpty(),
+                Charsets.UTF_8,
+            )
             proxyAuthenticator { _, response ->
                 if (response.request.header(PROXY_AUTHORIZATION) != null) {
                     null
@@ -51,6 +58,11 @@ internal fun OkHttpClient.Builder.applyProxyConfig(config: ProxyConfig): OkHttpC
  * host is returned as [Proxy.NO_PROXY] so external image hosts (e.g.
  * `rehost.diberie.com`) keep loading in direct mode even when the user proxy
  * is enabled.
+ *
+ * Immutable; `select` is thread-safe. OkHttp may invoke it concurrently from
+ * multiple I/O threads. Does not chain to `ProxySelector.getDefault()` for
+ * non-HFR hosts so behaviour stays deterministic across Android device
+ * proxy settings.
  */
 private class HfrOnlyProxySelector(
     private val hfrProxy: Proxy,
@@ -65,11 +77,26 @@ private class HfrOnlyProxySelector(
         }
     }
 
+    // Intentionally a no-op: OkHttp manages route failure via its own RouteDatabase,
+    // and we don't surface proxy connect errors to DiagnosticsLog here to avoid leaking
+    // the proxy host/credentials into any future log surface. Hook here later if we
+    // ever add proxy-specific diagnostics (without leaking credentials).
     override fun connectFailed(uri: URI?, sa: SocketAddress?, ioe: IOException?) = Unit
 }
 
-private fun String.isHardwareFrHost(): Boolean =
-    equals("hardware.fr", ignoreCase = true) ||
-        endsWith(".hardware.fr", ignoreCase = true)
+/**
+ * Returns `true` when this host matches `hardware.fr` exactly or any subdomain
+ * of `hardware.fr`. Trailing dot (`hardware.fr.`, FQDN absolute form) is
+ * normalised away so a DNS-style absolute host still matches; this is
+ * documented because `java.net.URI.getHost()` usually strips the trailing dot
+ * but the resolver layer can occasionally hand one back.
+ */
+private fun String.isHardwareFrHost(): Boolean {
+    val normalized = trimEnd('.')
+    return normalized.equals(HFR_DOMAIN, ignoreCase = true) ||
+        normalized.endsWith(".$HFR_DOMAIN", ignoreCase = true)
+}
+
+private const val HFR_DOMAIN = "hardware.fr"
 
 private const val PROXY_AUTHORIZATION = "Proxy-Authorization"
