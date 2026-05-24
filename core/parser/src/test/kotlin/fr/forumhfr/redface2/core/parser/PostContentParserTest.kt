@@ -70,6 +70,14 @@ class PostContentParserTest {
                 "post #$numreponse should expose quoted author $expectedAuthor, got=${quotes.map { it.author }}",
                 quotes.any { it.author == expectedAuthor },
             )
+            val renderedTextFragments = post.content.allInlines()
+                .filterIsInstance<PostInline.Text>()
+                .joinToString(" ") { it.value }
+            assertFalse(
+                "post #$numreponse should not keep the HFR citation header in rendered text; " +
+                    "`$expectedAuthor a écrit :` belongs to the quote metadata, got=$renderedTextFragments",
+                renderedTextFragments.contains("$expectedAuthor a écrit"),
+            )
         }
     }
 
