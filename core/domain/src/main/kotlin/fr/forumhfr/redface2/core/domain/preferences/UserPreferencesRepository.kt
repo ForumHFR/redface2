@@ -26,5 +26,10 @@ interface UserPreferencesRepository {
      */
     fun observeIgnoreTopicCache(): Flow<Boolean>
 
+    /**
+     * Persists the alpha "Ignorer le cache topic" toggle. The default `false` stays in effect
+     * until the first call. Writes are dispatched on the IO dispatcher inside the DataStore
+     * implementation; callers should not wrap this in another `withContext(ioDispatcher)`.
+     */
     suspend fun setIgnoreTopicCache(enabled: Boolean)
 }

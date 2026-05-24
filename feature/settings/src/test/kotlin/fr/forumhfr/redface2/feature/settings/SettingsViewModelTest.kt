@@ -247,9 +247,51 @@ class SettingsViewModelTest {
         assertFalse("optimistic flip must revert on failure", state.ignoreTopicCache)
         assertFalse(state.isUpdatingIgnoreTopicCache)
         assertTrue("a topic-cache-specific error flag must be raised", state.ignoreTopicCacheError)
+        // Pin the contract: the DataStore write must actually be attempted before the failure
+        // is surfaced. Without this assertion a future refactor that short-circuits the call
+        // (e.g. early-return on same-value) would still pass since no exception is raised.
+        assertEquals(
+            "DataStore write must have been attempted before the failure was surfaced",
+            1,
+            repository.ignoreTopicCacheSetCalls,
+        )
         // The proxy-scoped error remains untouched — the two domains must not bleed.
         assertNull("proxy SettingsError must not be set by an ignore-topic-cache failure", state.error)
         assertFalse(state.saved)
+    }
+
+    @Test
+    fun `IgnoreTopicCacheChanged exposes in-progress state while DataStore is writing`() = runTest {
+        // Block the fake's setIgnoreTopicCache until we explicitly release it, so we can observe
+        // the intermediate state. Without this gate `runTest` would drain the launch in one shot
+        // and we'd only see the final post-write state.
+        val gate = CompletableDeferred<Unit>()
+        repository.blockIgnoreTopicCacheSetUntil = gate
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.IgnoreTopicCacheChanged(true))
+
+        // Optimistic flip applied + gate raised before the launch suspends on `await()`.
+        val midFlightState = viewModel.state.value
+        assertTrue(
+            "optimistic value must be exposed before DataStore confirms",
+            midFlightState.ignoreTopicCache,
+        )
+        assertTrue(
+            "gate flag must keep the Switch disabled while the write is in flight",
+            midFlightState.isUpdatingIgnoreTopicCache,
+        )
+        assertFalse(
+            "canToggleIgnoreTopicCache must be false while the write is in flight",
+            midFlightState.canToggleIgnoreTopicCache,
+        )
+
+        gate.complete(Unit)
+
+        val finalState = viewModel.state.value
+        assertFalse("gate must release after the write completes", finalState.isUpdatingIgnoreTopicCache)
+        assertTrue(finalState.ignoreTopicCache)
+        assertEquals(1, repository.ignoreTopicCacheSetCalls)
     }
 
     @Test
@@ -291,6 +333,7 @@ class SettingsViewModelTest {
         var lastIgnoreTopicCacheSet: Boolean? = null
             private set
         var failOnIgnoreTopicCacheSet: Boolean = false
+        var blockIgnoreTopicCacheSetUntil: CompletableDeferred<Unit>? = null
 
         override fun observeProxyConfig(): Flow<ProxyConfig> = config
 
@@ -308,6 +351,9 @@ class SettingsViewModelTest {
 
         override suspend fun setIgnoreTopicCache(enabled: Boolean) {
             ignoreTopicCacheSetCalls += 1
+            // Suspend the write here so the test can observe `isUpdatingIgnoreTopicCache = true`
+            // before the launch resumes. Same pattern as `FakeTopicCacheMaintenance.blockUntil`.
+            blockIgnoreTopicCacheSetUntil?.await()
             check(!failOnIgnoreTopicCacheSet) { "boom" }
             lastIgnoreTopicCacheSet = enabled
             ignoreTopicCache.value = enabled

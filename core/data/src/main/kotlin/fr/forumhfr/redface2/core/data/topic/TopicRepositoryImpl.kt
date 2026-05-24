@@ -38,6 +38,10 @@ class TopicRepositoryImpl @Inject constructor(
     /**
      * Cache-first read with TTL-driven refresh.
      *
+     * - **Alpha `ignoreTopicCache` toggle ON** → skip the Room read entirely and emit a
+     *   fresh AUTHENTICATED fetch. The result is still persisted so toggling back OFF
+     *   later finds a parser-coherent cache. Network failures propagate as a flow
+     *   exception (no silent fallback to a potentially stale cache row).
      * - Cache hit, **AUTHENTICATED** + fresh → emit and stop. No network. This is the
      *   snappy back-nav case: returning to a page within `CachePolicy.topicPage` does
      *   not refetch and does not silently mark drapeaux as read.
@@ -97,6 +101,10 @@ class TopicRepositoryImpl @Inject constructor(
      * ADR-003 § Prefetch) and persists the result *only if* it does not
      * overwrite an existing authenticated cache row. Failures are logged and
      * swallowed so a flaky prefetch never disturbs the user-facing flow.
+     *
+     * **No-op when the alpha `ignoreTopicCache` toggle is ON**: prefetching into Room
+     * while the user explicitly asked to bypass it would re-fill the very cache they
+     * want to skip, so the call returns early without hitting the network.
      */
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {
         val ignoreTopicCache = withContext(ioDispatcher) {
