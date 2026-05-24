@@ -12,4 +12,18 @@
     <string name="settings_proxy_invalid">Renseignez un hôte et un port entre 1 et 65535, ou désactivez le proxy.</string>
     <string name="settings_proxy_persist_failed">Impossible d’enregistrer le proxy. Vérifiez le stockage de l’app puis réessayez.</string>
     <string name="settings_proxy_scope">MVP Phase 2H : proxy HTTP classique appliqué uniquement aux domaines HFR (hardware.fr / *.hardware.fr) ; HTTPS via CONNECT. Les images externes restent en direct. Pas de proxy embarqué, PAC, bypass list ou SOCKS dans cette version.</string>
+
+    <!-- Phase 2 finish — alpha maintenance action ("Vider le cache des topics"). Used when a
+         parser / AST evolution makes the locally persisted PostContent stale ; forces a
+         re-fetch + re-parse on the next topic open. Does NOT log the user out, drop the
+         flag cache, or touch the proxy preferences. -->
+    <string name="settings_maintenance_title">Maintenance alpha</string>
+    <string name="settings_clear_topic_cache_intro">Supprime les pages de topics stockées localement. Les prochains topics ouverts seront retéléchargés depuis HFR. Les drapeaux, l\'authentification et les préférences proxy ne sont pas affectés.</string>
+    <string name="settings_clear_topic_cache_button">Vider le cache des topics</string>
+    <string name="settings_clear_topic_cache_confirm_title">Vider le cache des topics ?</string>
+    <string name="settings_clear_topic_cache_confirm_body">Cette action ne déconnecte pas et ne supprime pas les drapeaux. Les topics seront retéléchargés au prochain affichage.</string>
+    <string name="settings_clear_topic_cache_confirm_action">Vider</string>
+    <string name="settings_clear_topic_cache_confirm_cancel">Annuler</string>
+    <string name="settings_clear_topic_cache_success">Cache des topics vidé. Les prochains topics ouverts seront retéléchargés.</string>
+    <string name="settings_clear_topic_cache_failure">Impossible de vider le cache des topics. Réessayez ; si le problème persiste, signalez via Diagnostics.</string>
 </resources>

@@ -52,4 +52,25 @@ interface TopicDao {
         upsertPosts(posts)
         return true
     }
+
+    // Topic cache maintenance — wipes only the topic page + post tables so the next read
+    // through `observeTopicPage` goes through `fetchAndPersist` and re-parses HFR's HTML
+    // with the latest parser code. Used by the alpha "Vider le cache des topics" action
+    // when a parser/AST evolution makes existing cached `PostBlock`s look stale.
+    //
+    // Deliberately narrow: does NOT touch flag tables (handled by `FlagRepository`), auth
+    // cookies (DataStore + cookie jar), or user preferences (proxy / DataStore). The
+    // ordering posts → topic_pages mirrors how new rows are written so a future foreign
+    // key would not block the truncation.
+    @Query("DELETE FROM posts")
+    suspend fun deleteAllPosts()
+
+    @Query("DELETE FROM topic_pages")
+    suspend fun deleteAllTopicPages()
+
+    @Transaction
+    suspend fun clearTopicCache() {
+        deleteAllPosts()
+        deleteAllTopicPages()
+    }
 }

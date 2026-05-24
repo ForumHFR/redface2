@@ -17,6 +17,9 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
+### Added
+- Paramètres alpha : carte « Maintenance alpha » avec une action « Vider le cache des topics » (dialogue de confirmation Material 3, feedback inline succès / échec). Wipe les tables Room `posts` + `topic_pages` au sein d'une `@Transaction` ; **ne touche pas** aux drapeaux, à la session HFR, aux préférences proxy ni à la base de données globale (pas de `clearAllTables()`). Escape hatch pour forcer un reparse au prochain affichage quand le `PostContent` AST persisté est devenu obsolète (motivation : régression bordure invisible AMOLED v60 sur les pages topic déjà en cache).
+
 ---
 
 ## v60 — `0.3.20` — 2026-05-24

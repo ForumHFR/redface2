@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import javax.inject.Inject
@@ -16,6 +17,7 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val topicCacheMaintenance: TopicCacheMaintenance,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsState())
@@ -41,6 +43,16 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.ProxyPasswordChanged ->
                 _state.update { it.copy(proxyPassword = intent.password, saved = false, error = null) }
             SettingsIntent.SaveProxyClicked -> saveProxy()
+            SettingsIntent.ClearTopicCacheClicked ->
+                _state.update {
+                    // Reset any previous result so the dialog opens on a clean slate; the user
+                    // is about to re-confirm and shouldn't see a stale "succès" / "échec"
+                    // label leaking into the new attempt.
+                    it.copy(showClearTopicCacheConfirm = true, topicCacheClearResult = null)
+                }
+            SettingsIntent.ClearTopicCacheDismissed ->
+                _state.update { it.copy(showClearTopicCacheConfirm = false) }
+            SettingsIntent.ClearTopicCacheConfirmed -> clearTopicCache()
         }
     }
 
@@ -71,6 +83,37 @@ class SettingsViewModel @Inject constructor(
             }.onFailure {
                 _state.update { it.copy(isSaving = false, saved = false, error = SettingsError.PersistFailed) }
             }
+        }
+    }
+
+    private fun clearTopicCache() {
+        // Close the confirmation dialog upfront so the user can't double-confirm, then flip
+        // `isClearingTopicCache` so the button is disabled while Room runs the transaction.
+        _state.update {
+            it.copy(
+                showClearTopicCacheConfirm = false,
+                isClearingTopicCache = true,
+                topicCacheClearResult = null,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { topicCacheMaintenance.clearTopicCache() }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            isClearingTopicCache = false,
+                            topicCacheClearResult = TopicCacheClearResult.Success,
+                        )
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            isClearingTopicCache = false,
+                            topicCacheClearResult = TopicCacheClearResult.Failure,
+                        )
+                    }
+                }
         }
     }
 

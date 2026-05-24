@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.settings
 
+import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +14,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -21,6 +23,7 @@ import org.junit.Test
 class SettingsViewModelTest {
 
     private val repository = FakeUserPreferencesRepository()
+    private val topicCacheMaintenance = FakeTopicCacheMaintenance()
 
     @Before
     fun setUp() {
@@ -44,7 +47,7 @@ class SettingsViewModelTest {
             ),
         )
 
-        val viewModel = SettingsViewModel(repository)
+        val viewModel = newViewModel()
         val state = viewModel.state.value
 
         assertTrue(state.proxyEnabled)
@@ -56,7 +59,7 @@ class SettingsViewModelTest {
 
     @Test
     fun `save rejects enabled proxy with missing host or invalid port`() = runTest {
-        val viewModel = SettingsViewModel(repository)
+        val viewModel = newViewModel()
 
         viewModel.submit(SettingsIntent.ProxyEnabledChanged(true))
         viewModel.submit(SettingsIntent.ProxyHostChanged(""))
@@ -70,7 +73,7 @@ class SettingsViewModelTest {
 
     @Test
     fun `save persists normalized proxy config`() = runTest {
-        val viewModel = SettingsViewModel(repository)
+        val viewModel = newViewModel()
 
         viewModel.submit(SettingsIntent.ProxyEnabledChanged(true))
         viewModel.submit(SettingsIntent.ProxyHostChanged(" proxy.local "))
@@ -92,7 +95,7 @@ class SettingsViewModelTest {
     @Test
     fun `save reports persist failure and re-enables saving when repository throws`() = runTest {
         repository.failOnSave = true
-        val viewModel = SettingsViewModel(repository)
+        val viewModel = newViewModel()
 
         viewModel.submit(SettingsIntent.ProxyEnabledChanged(true))
         viewModel.submit(SettingsIntent.ProxyHostChanged("proxy.local"))
@@ -105,6 +108,88 @@ class SettingsViewModelTest {
         assertFalse(state.isSaving)
         assertTrue(state.canSave)
     }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Topic cache maintenance — "Vider le cache des topics" action
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `ClearTopicCacheClicked opens the confirmation dialog without touching the cache`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ClearTopicCacheClicked)
+
+        assertTrue(viewModel.state.value.showClearTopicCacheConfirm)
+        assertEquals(
+            "clear() must NOT run until the user confirms",
+            0,
+            topicCacheMaintenance.clearCalls,
+        )
+    }
+
+    @Test
+    fun `ClearTopicCacheDismissed closes the dialog without calling clear`() = runTest {
+        val viewModel = newViewModel()
+        viewModel.submit(SettingsIntent.ClearTopicCacheClicked)
+
+        viewModel.submit(SettingsIntent.ClearTopicCacheDismissed)
+
+        assertFalse(viewModel.state.value.showClearTopicCacheConfirm)
+        assertEquals(0, topicCacheMaintenance.clearCalls)
+        assertNull(viewModel.state.value.topicCacheClearResult)
+    }
+
+    @Test
+    fun `ClearTopicCacheConfirmed runs clear and surfaces Success`() = runTest {
+        val viewModel = newViewModel()
+        viewModel.submit(SettingsIntent.ClearTopicCacheClicked)
+
+        viewModel.submit(SettingsIntent.ClearTopicCacheConfirmed)
+
+        val state = viewModel.state.value
+        assertEquals(1, topicCacheMaintenance.clearCalls)
+        assertFalse("dialog must close at confirm time", state.showClearTopicCacheConfirm)
+        assertFalse("isClearing must flip back to false after success", state.isClearingTopicCache)
+        assertEquals(TopicCacheClearResult.Success, state.topicCacheClearResult)
+    }
+
+    @Test
+    fun `ClearTopicCacheConfirmed surfaces Failure when the maintenance call throws`() = runTest {
+        topicCacheMaintenance.failOnClear = true
+        val viewModel = newViewModel()
+        viewModel.submit(SettingsIntent.ClearTopicCacheClicked)
+
+        viewModel.submit(SettingsIntent.ClearTopicCacheConfirmed)
+
+        val state = viewModel.state.value
+        assertEquals(1, topicCacheMaintenance.clearCalls)
+        assertFalse(state.isClearingTopicCache)
+        assertEquals(TopicCacheClearResult.Failure, state.topicCacheClearResult)
+        // Proxy state stays untouched — the two domains must not bleed.
+        assertNull(state.error)
+        assertFalse(state.saved)
+    }
+
+    @Test
+    fun `re-clicking after a previous result resets the inline message`() = runTest {
+        topicCacheMaintenance.failOnClear = true
+        val viewModel = newViewModel()
+        viewModel.submit(SettingsIntent.ClearTopicCacheClicked)
+        viewModel.submit(SettingsIntent.ClearTopicCacheConfirmed)
+        assertEquals(TopicCacheClearResult.Failure, viewModel.state.value.topicCacheClearResult)
+
+        // Second pass — user retries
+        viewModel.submit(SettingsIntent.ClearTopicCacheClicked)
+
+        // The previous result must be cleared when the new confirmation opens, so the
+        // dialog isn't surfaced over a stale "échec" message that no longer reflects the
+        // pending operation.
+        assertTrue(viewModel.state.value.showClearTopicCacheConfirm)
+        assertNull(viewModel.state.value.topicCacheClearResult)
+    }
+
+    private fun newViewModel(): SettingsViewModel =
+        SettingsViewModel(repository, topicCacheMaintenance)
 
     private class FakeUserPreferencesRepository : UserPreferencesRepository {
         private val config = MutableStateFlow(ProxyConfig())
@@ -128,6 +213,17 @@ class SettingsViewModelTest {
 
         fun emit(value: ProxyConfig) {
             config.value = value
+        }
+    }
+
+    private class FakeTopicCacheMaintenance : TopicCacheMaintenance {
+        var clearCalls: Int = 0
+            private set
+        var failOnClear: Boolean = false
+
+        override suspend fun clearTopicCache() {
+            clearCalls += 1
+            check(!failOnClear) { "boom" }
         }
     }
 }

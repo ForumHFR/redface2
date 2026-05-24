@@ -11,13 +11,16 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -165,6 +168,84 @@ internal fun SettingsContent(
                     }
                 }
             }
+
+            MaintenanceCard(
+                state = state,
+                onIntent = onIntent,
+            )
         }
     }
+
+    if (state.showClearTopicCacheConfirm) {
+        ClearTopicCacheConfirmDialog(
+            onConfirm = { onIntent(SettingsIntent.ClearTopicCacheConfirmed) },
+            onDismiss = { onIntent(SettingsIntent.ClearTopicCacheDismissed) },
+        )
+    }
+}
+
+@Composable
+private fun MaintenanceCard(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_maintenance_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.settings_clear_topic_cache_intro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            when (state.topicCacheClearResult) {
+                TopicCacheClearResult.Success -> Text(
+                    text = stringResource(R.string.settings_clear_topic_cache_success),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                TopicCacheClearResult.Failure -> Text(
+                    text = stringResource(R.string.settings_clear_topic_cache_failure),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                null -> Unit
+            }
+            OutlinedButton(
+                enabled = state.canClearTopicCache,
+                onClick = { onIntent(SettingsIntent.ClearTopicCacheClicked) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.settings_clear_topic_cache_button))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ClearTopicCacheConfirmDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_clear_topic_cache_confirm_title)) },
+        text = { Text(stringResource(R.string.settings_clear_topic_cache_confirm_body)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.settings_clear_topic_cache_confirm_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_clear_topic_cache_confirm_cancel))
+            }
+        },
+    )
 }
