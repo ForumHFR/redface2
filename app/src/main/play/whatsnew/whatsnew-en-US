@@ -1,15 +1,11 @@
-Redface 2 alpha v59 — Phase 2 finish polish.
+Redface 2 alpha v60 — post-review fixes.
 
-New:
-- Global account menu (avatar/login/settings) on Flags, Forum, Search, Messages.
-- Author avatar in every post.
+Visual + a11y fixes:
+- Quote accent bar width reliably 4dp.
+- Avatars announce "Avatar de <pseudo>" to TalkBack in all cases.
 
-Improved:
-- Flags: denser header, "Cyans lus" FilterChip, compact refresh.
-- Quotes: vertical accent bar — readable on light, dark, AMOLED.
-
-Fixed:
-- Crash on quote containing inline image.
-- TalkBack a11y on account badge + avatars.
+Recap from v59:
+- Global account menu on Flags, Forum, Search, Messages.
+- Author avatars in posts, denser Flags, AMOLED-readable quotes.
 
 Report bugs via alpha or GitHub.

@@ -1,15 +1,11 @@
-Alpha Redface 2 v59 — polish Phase 2 finish.
+Alpha Redface 2 v60 — corrections post-review.
 
-Nouveautés :
-- Menu compte global (Drapeaux, Forum, Recherche, Messages).
-- Avatar de l'auteur dans chaque post.
+Correctifs visuels et a11y :
+- Bordure des citations fiabilisée (largeur 4dp garantie).
+- Avatars accessibles : TalkBack annonce « Avatar de <pseudo> » dans tous les cas.
 
-Améliorations :
-- Drapeaux : header densifié, FilterChip Cyans lus.
-- Citations lisibles en AMOLED (bordure d'accent).
-
-Correctifs :
-- Crash citation + image inline corrigé.
-- Accessibilité TalkBack (badge + avatars).
+Rappel des nouveautés v59 :
+- Menu compte global sur Drapeaux, Forum, Recherche, Messages.
+- Avatars dans les posts, Drapeaux densifié, citations lisibles AMOLED.
 
 Bugs : alpha ou GitHub.

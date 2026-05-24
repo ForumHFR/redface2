@@ -19,6 +19,24 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v60 — `0.3.20` — 2026-05-24
+
+**Statut** : `closed`
+**Commit** : workflow_dispatch sur `feature/phase2-finish-ui-polish-198-199-201-202` avant merge PR #207
+**Fichier** : artefact CD `dispatch-v60`
+
+Codex rereview corrections appliquées au polish v59 — pas de nouvelle feature, uniquement des fixes ciblés.
+
+### Fixed
+- QuoteFrame : la bordure verticale d'accent est désormais dessinée via `Modifier.drawBehind` sur la Column (largeur hard-codée en pixels), au lieu d'un `Box.matchParentSize().width(4.dp)` qui risquait de peindre l'accent sur toute la largeur du card selon l'ordre de résolution des contraintes Compose. Aucune mesure intrinsèque ni enfant match-parent — sans danger pour les quotes contenant `[img]` (SubcomposeLayout).
+- A11y avatar : la branche image chargée annonce maintenant « Avatar de <pseudo> » comme la branche placeholder standalone (avant : pseudo brut sans préfixe « Avatar de »). Une seule string localisée `R.string.avatar_content_description` utilisée pour les 2 modes.
+- KDoc `BADGE_SIZE` : retiré la mention erronée que `Surface(onClick = ...)` injecte automatiquement le 48dp interactif. C'est `Modifier.minimumInteractiveComponentSize()` appliqué explicitement qui fait le travail.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 60`, `versionName = "0.3.20"`.
+
+---
+
 ## v59 — `0.3.19` — 2026-05-24
 
 **Statut** : `closed`
