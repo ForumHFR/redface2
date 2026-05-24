@@ -19,6 +19,25 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v58 — `0.3.18` — 2026-05-24
+
+**Statut** : `closed`
+**Commit** : tag `app-v58` après merge PR #204
+**Fichier** : artefact CD `app-v58`
+
+Phase 2 finish — rechargement du topic après publication.
+
+### Fixed
+- Reply / quote / edit / edit FP : après une soumission acceptée par HFR, l'écran topic force maintenant le rafraîchissement de la page cible au lieu de réafficher un cache stale.
+- Reply simple : retour en bas de la page fraîchement rechargée quand HFR renvoie l'ancre `#bas`.
+- Quote / edit / edit FP : extraction de `#t{numreponse}` depuis l'URL de succès HFR pour revenir directement au post créé ou modifié.
+- Échec de rafraîchissement post-submit : feedback utilisateur explicite via Toast, avec fallback sur le cache existant plutôt qu'un écran cassé.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 58`, `versionName = "0.3.18"`.
+
+---
+
 ## v57 — `0.3.17` — 2026-05-24
 
 **Statut** : `closed`
