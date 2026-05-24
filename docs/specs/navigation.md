@@ -161,7 +161,7 @@ Issue #198 — chaque écran principal (Drapeaux, Forum, Recherche, Messages) ac
 - `Paramètres alpha`, `Diagnostics alpha`, `Signaler un contenu` (mailto `xat@azora.fr`) ;
 - footer version `v{name} (build {code})`.
 
-Le badge est un carré à coins arrondis (8dp), **pas un cercle**, cohérent avec [`RedfaceUserAvatar`]({{ site.baseurl }}/specs/models#post). L'anti-flicker auth est préservé : tant que `authState == null`, le badge montre `…` plutôt que `?` pour ne pas surfacer transitoirement un état « Anonyme ». La déconnexion vide d'abord `FlagRepository.clearSessionCache()` avant `AuthRepository.logout()` (même contrat que `FlagsViewModel.logout` avant le hoist).
+Le badge est un carré à coins arrondis (8dp), **pas un cercle**, cohérent avec [`RedfaceUserAvatar`]({{ site.baseurl }}/specs/models#post). L'anti-flicker auth est préservé : tant que `authState == null`, le badge montre `…` plutôt que `?` pour ne pas surfacer transitoirement un état « Anonyme ». La déconnexion (`AppAccountViewModel.logout`) vide d'abord `FlagRepository.clearSessionCache()` avant `AuthRepository.logout()` ; cet ordering est verrouillé par `AppAccountViewModelTest` côté `:app`.
 
 L'onglet `Messages` redevient un placeholder sobre « Les MPs arriveront en Phase 3 » jusqu'à l'arrivée du vrai écran inbox.
 
@@ -275,18 +275,12 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                 FlagsRoute(
                     onOpenFlag = { flag -> /* ... */ },
                     onLoginRequested = { /* ... */ },
+                    topBarActions = accountMenu,
                 )
             }
-            entry<ForumRoute> { ForumScreen(onOpenCategory = { /* ... */ }) }
-            entry<SearchRoute> { SearchScreen() }
-            entry<MessagesRoute> {
-                MessagesScreen(
-                    versionName = BuildConfig.VERSION_NAME,
-                    versionCode = BuildConfig.VERSION_CODE,
-                    onLoginRequested = { /* ... */ },
-                    onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
-                )
-            }
+            entry<ForumRoute> { ForumScreen(onOpenCategory = { /* ... */ }, topBarActions = accountMenu) }
+            entry<SearchRoute> { SearchScreen(onOpenTopic = { /* ... */ }, topBarActions = accountMenu) }
+            entry<MessagesRoute> { MessagesScreen(topBarActions = accountMenu) }
             entry<CategoryRoute> { route ->
                 ForumCategoryScreen(
                     request = CategoryRequest(

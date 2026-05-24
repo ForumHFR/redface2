@@ -41,6 +41,12 @@ class AppAccountViewModelTest {
 
     @Before
     fun setUp() {
+        // UnconfinedTestDispatcher dispatches eagerly through `Dispatchers.Main.immediate`,
+        // which is what `viewModelScope.launch { ... }` resolves to in the prod ViewModel.
+        // That is the only reason `vm.logout()` and `stateIn(SharingStarted.Eagerly, ...)`
+        // produce synchronous side-effects in the assertions below — switching to
+        // StandardTestDispatcher would require explicit `runCurrent()` / `advanceUntilIdle()`
+        // calls between the action and the assertion.
         Dispatchers.setMain(UnconfinedTestDispatcher())
     }
 
@@ -50,7 +56,7 @@ class AppAccountViewModelTest {
     }
 
     @Test
-    fun `logout clears the private flags cache before resetting auth state`() = runTest {
+    fun `logout clears the private flags cache exactly once before resetting auth state`() = runTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val vm = AppAccountViewModel(auth, flags)
@@ -60,27 +66,35 @@ class AppAccountViewModelTest {
         vm.logout()
 
         assertTrue("AuthRepository.logout() must be reached", auth.logoutCalled)
-        val observed = auth.cacheClearsObservedBeforeLogout
-        assertTrue(
-            "logout must call clearSessionCache() before AuthRepository.logout() — " +
-                "saw $clearsBeforeLogout clears pre-logout, $observed snapshot at logout",
-            observed > clearsBeforeLogout,
+        // Round-3 review (PR #207): tightened from `observed > clearsBeforeLogout` to a
+        // strict `clearsBeforeLogout + 1`. The previous form passed when `clearSessionCache()`
+        // ran any number of times before `authRepository.logout()`; the stricter assertion
+        // also catches future regressions that inadvertently add redundant cache clears
+        // in the logout coroutine (each would silently widen the surface tested here).
+        assertEquals(
+            "logout must call clearSessionCache() exactly once before AuthRepository.logout()",
+            clearsBeforeLogout + 1,
+            auth.cacheClearsObservedBeforeLogout,
         )
     }
 
     @Test
-    fun `authState mirrors the AuthRepository observation`() = runTest {
+    fun `authState mirrors the AuthRepository observation across login and logout transitions`() = runTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val vm = AppAccountViewModel(auth, flags)
 
-        // SharingStarted.Eagerly + initialValue = null. The first emission of the upstream
-        // flow lands synchronously through the UnconfinedTestDispatcher, so we should see
-        // the Authenticated state immediately.
+        // SharingStarted.Eagerly + initialValue = null. The first upstream emission lands
+        // synchronously through Dispatchers.Main.immediate (= UnconfinedTestDispatcher in
+        // setUp), so reading `.value` immediately is deterministic. Documented for the
+        // future maintainer who might swap dispatchers.
         assertEquals(AuthState.Authenticated("xaat"), vm.authState.value)
 
+        // Anonymous → Authenticated transition (post-login).
         auth.emit(AuthState.Anonymous)
         assertEquals(AuthState.Anonymous, vm.authState.value)
+        auth.emit(AuthState.Authenticated("xaat"))
+        assertEquals(AuthState.Authenticated("xaat"), vm.authState.value)
     }
 
     private class FakeAuthRepository(

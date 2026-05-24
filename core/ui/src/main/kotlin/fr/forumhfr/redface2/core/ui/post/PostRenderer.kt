@@ -188,19 +188,27 @@ private fun QuoteFrame(
         // measurements of SubcomposeLayout"` at runtime. We use a `Box` overlay instead:
         // the Column drives the height, and `matchParentSize()` on the accent reads the
         // box's measured height without going through intrinsics.
+        //
+        // Round-3: child order matters — `Box` paints children in declaration order, so the
+        // FIRST child sits BELOW the next. We declare the accent bar FIRST so it stays
+        // behind the content; inverting this order would make the bar overpaint the leading
+        // 4dp of the Column's padding. The Column's `padding(start = 4 + 12)` reserves
+        // exactly the width of the accent + a 12dp gutter, matching the round-1 visual
+        // layout (`Row { Box(4dp) + Column(padding=12dp) }` had a 12dp gutter between bar
+        // and text; we preserve it here).
         Box(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = QUOTE_ACCENT_WIDTH + 8.dp, top = 12.dp, end = 12.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                content = content,
-            )
             Box(
                 modifier = Modifier
                     .width(QUOTE_ACCENT_WIDTH)
                     .matchParentSize()
                     .background(accent),
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = QUOTE_ACCENT_WIDTH + 12.dp, top = 12.dp, end = 12.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                content = content,
             )
         }
     }

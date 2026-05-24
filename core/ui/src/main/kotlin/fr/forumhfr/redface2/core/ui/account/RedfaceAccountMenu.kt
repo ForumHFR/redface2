@@ -14,6 +14,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -149,16 +150,24 @@ private fun AccountBadge(
     // Material 3 `Surface(onClick = ...)` overload, which (1) clips the ripple to the rounded
     // shape (the previous form rippled a square inside our 8dp rounded corners), (2) injects
     // `Role.Button` for TalkBack so the badge announces as a button rather than a generic
-    // "Surface", (3) participates in `LocalMinimumInteractiveComponentSize` so the touch
-    // target is enforced to 48dp even if the visual badge stays at the requested 40dp.
+    // "Surface".
+    //
+    // Round-3 (post review F2): `Surface(onClick=)` does NOT automatically opt the visual into
+    // `LocalMinimumInteractiveComponentSize` — the M3 docs are explicit that
+    // `Modifier.minimumInteractiveComponentSize()` must be applied *explicitly* and BEFORE
+    // `.size(...)` to expand the touch target up to 48dp around the 40dp visual without
+    // resizing the painted Surface. Also adds `mergeDescendants = true` so TalkBack reads
+    // "Ouvrir le menu compte, bouton" instead of also announcing the decorative Text label
+    // (`X` / `?` / `…`) as a separate node.
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(BADGE_CORNER_RADIUS),
         color = containerColor,
         contentColor = contentColor,
         modifier = Modifier
+            .minimumInteractiveComponentSize()
             .size(BADGE_SIZE)
-            .semantics { contentDescription = accessibilityLabel },
+            .semantics(mergeDescendants = true) { contentDescription = accessibilityLabel },
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(

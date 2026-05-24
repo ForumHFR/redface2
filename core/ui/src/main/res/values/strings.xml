@@ -48,4 +48,8 @@
     <!-- TalkBack contentDescription for the account badge — exposes the badge as a button labelled
          « Ouvrir le menu compte » so a11y users hear an action rather than the raw `…` / `?` / initial. -->
     <string name="account_menu_open_description">Ouvrir le menu compte</string>
+    <!-- Avatar contentDescription — used by `RedfaceUserAvatar` so TalkBack announces "Avatar de <pseudo>"
+         instead of leaking the raw image / placeholder. #207 round-3 closes the a11y gap when the
+         avatar is rendered as a standalone placeholder (no SubcomposeAsyncImage parent). -->
+    <string name="avatar_content_description">Avatar de %1$s</string>
 </resources>

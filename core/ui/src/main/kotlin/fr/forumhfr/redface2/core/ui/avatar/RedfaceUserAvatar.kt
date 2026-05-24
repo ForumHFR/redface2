@@ -13,10 +13,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.ui.R
 import coil3.compose.LocalPlatformContext
 import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
@@ -46,10 +50,15 @@ fun RedfaceUserAvatar(
     val initial = author.firstOrNull()?.uppercaseChar()?.toString().orEmpty()
 
     if (avatarUrl.isNullOrBlank()) {
+        // Standalone branch — no SubcomposeAsyncImage parent to carry a contentDescription,
+        // so the placeholder itself must announce the author to TalkBack. We pass the
+        // author down so AvatarPlaceholder can attach a `semantics(mergeDescendants=true)`
+        // contentDescription on its Surface (#207 round-3, F2 R3).
         AvatarPlaceholder(
             initial = initial,
             modifier = modifier.size(size),
             shape = shape,
+            standaloneContentDescription = stringResource(R.string.avatar_content_description, author),
         )
         return
     }
@@ -80,9 +89,21 @@ private fun AvatarPlaceholder(
     initial: String,
     modifier: Modifier,
     shape: Shape,
+    // null when used as a SubcomposeAsyncImage loading/error slot — the parent already carries
+    // `contentDescription = author`, so we keep the placeholder muted to avoid double
+    // announcement. Non-null in standalone mode (no avatar URL) so TalkBack still reads the
+    // author through the placeholder Surface (#207 round-3, F2 R3).
+    standaloneContentDescription: String? = null,
 ) {
+    val surfaceModifier = if (standaloneContentDescription != null) {
+        modifier.semantics(mergeDescendants = true) {
+            contentDescription = standaloneContentDescription
+        }
+    } else {
+        modifier
+    }
     Surface(
-        modifier = modifier,
+        modifier = surfaceModifier,
         shape = shape,
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -92,10 +113,9 @@ private fun AvatarPlaceholder(
                 text = initial,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
-                // Round-2 review (PR #207): the initial is a decorative fallback when no avatar
-                // image is available. Stripping its semantics avoids TalkBack reading it twice —
-                // once as the SubcomposeAsyncImage `contentDescription` (which we set to the
-                // author pseudo) and once as a standalone `Text` node.
+                // Decorative letter — semantics are owned by the Surface (standalone) or by
+                // the SubcomposeAsyncImage parent (slot mode). Clearing here avoids the double
+                // announcement TalkBack would otherwise produce.
                 modifier = Modifier.clearAndSetSemantics {},
             )
         }
