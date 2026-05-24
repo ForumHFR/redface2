@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
@@ -31,6 +30,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
@@ -180,37 +182,40 @@ private fun QuoteFrame(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
         ),
     ) {
-        // Round-2 review (PR #207): the initial implementation used
-        // `Row(height = IntrinsicSize.Min)` + `Box.fillMaxHeight()` for the accent bar. That
-        // pattern crashes when the quote content contains a `SubcomposeAsyncImage`
-        // (PostBlock.Image dispatch) — `SubcomposeLayout` does not support intrinsic
-        // measurement and Compose throws `IllegalStateException: "Asking for intrinsic
-        // measurements of SubcomposeLayout"` at runtime. We use a `Box` overlay instead:
-        // the Column drives the height, and `matchParentSize()` on the accent reads the
-        // box's measured height without going through intrinsics.
+        // Quote accent bar (4dp, primary/tertiary alternated by depth).
         //
-        // Round-3: child order matters — `Box` paints children in declaration order, so the
-        // FIRST child sits BELOW the next. We declare the accent bar FIRST so it stays
-        // behind the content; inverting this order would make the bar overpaint the leading
-        // 4dp of the Column's padding. The Column's `padding(start = 4 + 12)` reserves
-        // exactly the width of the accent + a 12dp gutter, matching the round-1 visual
-        // layout (`Row { Box(4dp) + Column(padding=12dp) }` had a 12dp gutter between bar
-        // and text; we preserve it here).
-        Box(modifier = Modifier.fillMaxWidth()) {
-            Box(
-                modifier = Modifier
-                    .width(QUOTE_ACCENT_WIDTH)
-                    .matchParentSize()
-                    .background(accent),
-            )
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = QUOTE_ACCENT_WIDTH + 12.dp, top = 12.dp, end = 12.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                content = content,
-            )
-        }
+        // History: the original `Row(height = IntrinsicSize.Min) + Box.fillMaxHeight()` crashes
+        // on quotes containing `[img]` because `SubcomposeAsyncImage` (used by
+        // `PostBlock.Image`) does not support intrinsic measurement — Compose throws
+        // `IllegalStateException: "Asking for intrinsic measurements of SubcomposeLayout"`.
+        // The round-2 fix swapped to `Box(fillMaxWidth) { accent.matchParentSize() ; Column }`,
+        // but `Modifier.matchParentSize()` is documented to size the child to the **full** Box
+        // size and Compose may resolve it ahead of `.width(4.dp)` — the accent then risks
+        // painting across the entire card instead of staying a thin left border. The Codex
+        // rereview on PR #207 flagged this as a real rendering hazard.
+        //
+        // Final form: draw the 4dp accent directly with `drawBehind` on the content Column.
+        // No intrinsic measurement on a SubcomposeLayout subtree, no parent-matching child,
+        // and the bar's width is hard-coded in pixels so no ordering of constraints can grow
+        // it. The Column reserves `QUOTE_ACCENT_WIDTH + 12.dp` of left padding so the text
+        // starts at exactly the same x as the round-1 layout (gutter accent↔text = 12dp).
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .drawBehind {
+                    drawRect(
+                        color = accent,
+                        topLeft = Offset.Zero,
+                        size = Size(
+                            width = QUOTE_ACCENT_WIDTH.toPx(),
+                            height = this.size.height,
+                        ),
+                    )
+                }
+                .padding(start = QUOTE_ACCENT_WIDTH + 12.dp, top = 12.dp, end = 12.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            content = content,
+        )
     }
 }
 

@@ -48,29 +48,30 @@ fun RedfaceUserAvatar(
 ) {
     val shape = RoundedCornerShape(AVATAR_CORNER_RADIUS)
     val initial = author.firstOrNull()?.uppercaseChar()?.toString().orEmpty()
+    // Same localized "Avatar de <pseudo>" string for both branches so TalkBack reads the
+    // same sentence whether the avatar URL was provided or not (Codex rereview on PR #207
+    // flagged that the loaded-image branch was leaking the raw pseudo into the announcement).
+    val avatarContentDescription = stringResource(R.string.avatar_content_description, author)
 
     if (avatarUrl.isNullOrBlank()) {
         // Standalone branch — no SubcomposeAsyncImage parent to carry a contentDescription,
-        // so the placeholder itself must announce the author to TalkBack. We pass the
-        // author down so AvatarPlaceholder can attach a `semantics(mergeDescendants=true)`
-        // contentDescription on its Surface (#207 round-3, F2 R3).
+        // so the placeholder itself must announce the author to TalkBack. We pass the same
+        // localized string down so AvatarPlaceholder can attach `semantics(mergeDescendants=true)`
+        // on its Surface.
         AvatarPlaceholder(
             initial = initial,
             modifier = modifier.size(size),
             shape = shape,
-            standaloneContentDescription = stringResource(R.string.avatar_content_description, author),
+            standaloneContentDescription = avatarContentDescription,
         )
         return
     }
 
-    // Round-2 review (PR #207): set `contentDescription = author` so TalkBack announces "avatar
-    // de <pseudo>" instead of "image" + a separate pseudo Text below — the two were unlinked
-    // in the semantic tree and produced a noisy double announcement.
     SubcomposeAsyncImage(
         model = ImageRequest.Builder(LocalPlatformContext.current)
             .data(avatarUrl)
             .build(),
-        contentDescription = author,
+        contentDescription = avatarContentDescription,
         modifier = modifier
             .size(size)
             .clip(shape),

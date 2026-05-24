@@ -39,7 +39,7 @@ Phase 2 finish UI polish (#198 / #199 / #201 / #202).
 ### Fixed
 - A11y : badge compte expose `Role.Button` + `Modifier.minimumInteractiveComponentSize()` (48dp touch target sur 40dp visuel), `semantics(mergeDescendants=true)` empêche la double annonce TalkBack (review round 2 PR #207).
 - A11y : avatar utilisateur announce « Avatar de <pseudo> » dans les deux modes (image chargée et placeholder initiale standalone), au lieu de rester muet.
-- QuoteFrame : la migration `Box overlay + matchParentSize()` évite désormais le crash `IllegalStateException` (intrinsic measurement of SubcomposeLayout) qui touchait les citations contenant un `[img]`.
+- QuoteFrame : la bordure verticale d'accent est dessinée directement via `Modifier.drawBehind` (sans mesure intrinsèque ni enfant `matchParentSize`), ce qui évite le crash `IllegalStateException` "Asking for intrinsic measurements of SubcomposeLayout" qui touchait les citations contenant un `[img]` et garantit une bordure 4dp exacte indépendamment de l'ordre de résolution des contraintes Compose.
 
 ### Removed
 - `MessagesViewModel` + son test (logique compte/logout déplacée dans `AppAccountViewModel` côté `:app`).

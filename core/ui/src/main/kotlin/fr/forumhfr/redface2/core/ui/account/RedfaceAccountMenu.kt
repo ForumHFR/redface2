@@ -201,9 +201,10 @@ private fun AccountStatusHeader(authState: AuthState?) {
     }
 }
 
-// 40dp visual size — Material 3's `Surface(onClick = ...)` automatically pads the interactive
-// region up to `LocalMinimumInteractiveComponentSize` (48dp) so the touch target meets the
-// WCAG 2.5.5 / Material 3 spec without bloating the visual badge.
+// 40dp visual size. The explicit `Modifier.minimumInteractiveComponentSize()` applied on
+// `AccountBadge` (before `.size(BADGE_SIZE)`) expands the touch target to the Material 3
+// 48dp minimum without changing the painted badge — `Surface(onClick = ...)` does NOT
+// inject that minimum on its own (cf. M3 docs, Codex rereview on PR #207).
 private val BADGE_SIZE = 40.dp
 private val BADGE_CORNER_RADIUS = 8.dp
 private val HEADER_PADDING = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
