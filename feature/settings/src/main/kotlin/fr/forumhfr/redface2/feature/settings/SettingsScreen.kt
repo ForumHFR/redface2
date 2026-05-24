@@ -242,7 +242,52 @@ private fun MaintenanceCard(
             ) {
                 Text(stringResource(R.string.settings_clear_topic_cache_button))
             }
+
+            IgnoreTopicCacheRow(
+                state = state,
+                onIntent = onIntent,
+            )
         }
+    }
+}
+
+@Composable
+private fun IgnoreTopicCacheRow(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_ignore_topic_cache_title),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.settings_ignore_topic_cache_description),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = state.ignoreTopicCache,
+            enabled = state.canToggleIgnoreTopicCache,
+            onCheckedChange = { onIntent(SettingsIntent.IgnoreTopicCacheChanged(it)) },
+        )
+    }
+    if (state.ignoreTopicCacheError) {
+        Text(
+            text = stringResource(R.string.settings_ignore_topic_cache_persist_failed),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
     }
 }
 

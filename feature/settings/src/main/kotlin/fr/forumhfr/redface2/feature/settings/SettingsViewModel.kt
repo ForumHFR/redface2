@@ -24,9 +24,18 @@ class SettingsViewModel @Inject constructor(
     val state: StateFlow<SettingsState> = _state.asStateFlow()
 
     init {
+        // One-shot hydration of every persisted preference into `_state`. We deliberately
+        // use `.first()` (point-in-time read) rather than a long-lived collect, so toggling
+        // a preference from inside this screen does not race with itself via the observe
+        // path. Each `.copy(...)` keeps the other fields intact — never replace the whole
+        // state with a partial config, that would wipe the maintenance fields.
         viewModelScope.launch {
             val config = userPreferencesRepository.observeProxyConfig().first()
-            _state.value = config.toState()
+            _state.update { it.copyFromProxy(config) }
+        }
+        viewModelScope.launch {
+            val ignore = userPreferencesRepository.observeIgnoreTopicCache().first()
+            _state.update { it.copy(ignoreTopicCache = ignore) }
         }
     }
 
@@ -53,6 +62,7 @@ class SettingsViewModel @Inject constructor(
             SettingsIntent.ClearTopicCacheDismissed ->
                 _state.update { it.copy(showClearTopicCacheConfirm = false) }
             SettingsIntent.ClearTopicCacheConfirmed -> clearTopicCache()
+            is SettingsIntent.IgnoreTopicCacheChanged -> updateIgnoreTopicCache(intent.enabled)
         }
     }
 
@@ -117,11 +127,41 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private fun ProxyConfig.toState(): SettingsState = SettingsState(
-        proxyEnabled = enabled,
-        proxyHost = host,
-        proxyPort = port?.toString().orEmpty(),
-        proxyUsername = username.orEmpty(),
-        proxyPassword = password.orEmpty(),
+    private fun updateIgnoreTopicCache(desired: Boolean) {
+        val previous = _state.value.ignoreTopicCache
+        // Optimistic flip — the UI reflects the intent immediately, and the gate flag locks
+        // the switch while DataStore is writing. On failure we revert to `previous` and
+        // raise `ignoreTopicCacheError`, kept distinct from `SettingsError.PersistFailed`
+        // (proxy-scoped) so the maintenance card can show a topic-cache-specific message.
+        _state.update {
+            it.copy(
+                ignoreTopicCache = desired,
+                isUpdatingIgnoreTopicCache = true,
+                ignoreTopicCacheError = false,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setIgnoreTopicCache(desired) }
+                .onSuccess {
+                    _state.update { it.copy(isUpdatingIgnoreTopicCache = false) }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            ignoreTopicCache = previous,
+                            isUpdatingIgnoreTopicCache = false,
+                            ignoreTopicCacheError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun SettingsState.copyFromProxy(config: ProxyConfig): SettingsState = copy(
+        proxyEnabled = config.enabled,
+        proxyHost = config.host,
+        proxyPort = config.port?.toString().orEmpty(),
+        proxyUsername = config.username.orEmpty(),
+        proxyPassword = config.password.orEmpty(),
     )
 }

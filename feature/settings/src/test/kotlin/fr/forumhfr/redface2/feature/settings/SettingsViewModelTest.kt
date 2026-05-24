@@ -208,16 +208,89 @@ class SettingsViewModelTest {
         assertNull(viewModel.state.value.topicCacheClearResult)
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Ignore topic cache — alpha toggle
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates ignoreTopicCache from the persisted preference`() = runTest {
+        repository.emitIgnoreTopicCache(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.ignoreTopicCache)
+        assertFalse(viewModel.state.value.ignoreTopicCacheError)
+    }
+
+    @Test
+    fun `IgnoreTopicCacheChanged true persists the new value and exposes it`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.IgnoreTopicCacheChanged(true))
+
+        val state = viewModel.state.value
+        assertTrue(state.ignoreTopicCache)
+        assertFalse(state.isUpdatingIgnoreTopicCache)
+        assertFalse(state.ignoreTopicCacheError)
+        assertEquals(1, repository.ignoreTopicCacheSetCalls)
+        assertEquals(true, repository.lastIgnoreTopicCacheSet)
+    }
+
+    @Test
+    fun `IgnoreTopicCacheChanged failure reverts the optimistic flip and raises the error flag`() = runTest {
+        repository.failOnIgnoreTopicCacheSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.IgnoreTopicCacheChanged(true))
+
+        val state = viewModel.state.value
+        assertFalse("optimistic flip must revert on failure", state.ignoreTopicCache)
+        assertFalse(state.isUpdatingIgnoreTopicCache)
+        assertTrue("a topic-cache-specific error flag must be raised", state.ignoreTopicCacheError)
+        // The proxy-scoped error remains untouched — the two domains must not bleed.
+        assertNull("proxy SettingsError must not be set by an ignore-topic-cache failure", state.error)
+        assertFalse(state.saved)
+    }
+
+    @Test
+    fun `IgnoreTopicCacheChanged does not touch proxy or clear-cache state`() = runTest {
+        repository.emit(
+            ProxyConfig(enabled = true, host = "proxy.local", port = 8_080, username = "user", password = "secret"),
+        )
+        val viewModel = newViewModel()
+        // Trigger a previous clear-cache result to make sure the toggle does not wipe it.
+        viewModel.submit(SettingsIntent.ClearTopicCacheClicked)
+        viewModel.submit(SettingsIntent.ClearTopicCacheConfirmed)
+        assertEquals(TopicCacheClearResult.Success, viewModel.state.value.topicCacheClearResult)
+
+        viewModel.submit(SettingsIntent.IgnoreTopicCacheChanged(true))
+
+        val state = viewModel.state.value
+        // Proxy state untouched.
+        assertTrue(state.proxyEnabled)
+        assertEquals("proxy.local", state.proxyHost)
+        assertEquals("8080", state.proxyPort)
+        // Clear-cache result preserved — toggling one alpha tool must not erase the feedback
+        // from the other (orthogonal domains).
+        assertEquals(TopicCacheClearResult.Success, state.topicCacheClearResult)
+    }
+
     private fun newViewModel(): SettingsViewModel =
         SettingsViewModel(repository, topicCacheMaintenance)
 
     private class FakeUserPreferencesRepository : UserPreferencesRepository {
         private val config = MutableStateFlow(ProxyConfig())
+        private val ignoreTopicCache = MutableStateFlow(false)
         var saveCalls: Int = 0
             private set
         var lastSaved: ProxyConfig? = null
             private set
         var failOnSave: Boolean = false
+        var ignoreTopicCacheSetCalls: Int = 0
+            private set
+        var lastIgnoreTopicCacheSet: Boolean? = null
+            private set
+        var failOnIgnoreTopicCacheSet: Boolean = false
 
         override fun observeProxyConfig(): Flow<ProxyConfig> = config
 
@@ -231,8 +304,21 @@ class SettingsViewModelTest {
 
         override fun readProxyConfigForNetworkBootstrap(): ProxyConfig = config.value
 
+        override fun observeIgnoreTopicCache(): Flow<Boolean> = ignoreTopicCache
+
+        override suspend fun setIgnoreTopicCache(enabled: Boolean) {
+            ignoreTopicCacheSetCalls += 1
+            check(!failOnIgnoreTopicCacheSet) { "boom" }
+            lastIgnoreTopicCacheSet = enabled
+            ignoreTopicCache.value = enabled
+        }
+
         fun emit(value: ProxyConfig) {
             config.value = value
+        }
+
+        fun emitIgnoreTopicCache(value: Boolean) {
+            ignoreTopicCache.value = value
         }
     }
 

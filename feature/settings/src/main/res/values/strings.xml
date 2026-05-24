@@ -27,4 +27,12 @@
     <string name="settings_clear_topic_cache_in_progress">Vidage du cache des topics…</string>
     <string name="settings_clear_topic_cache_success">Cache des topics vidé. Les prochains topics ouverts seront retéléchargés.</string>
     <string name="settings_clear_topic_cache_failure">Impossible de vider le cache des topics. Réessayez depuis cette page.</string>
+
+    <!-- Phase 2 finish — alpha toggle "Ignorer le cache topic". Bypasses the topic Room cache
+         read path and turns the anonymous topic prefetch into a no-op, so a parser/renderer
+         change is observed on the next topic open without manually clearing the cache. Strictly
+         an alpha dogfood tool — flags, auth, proxy preferences are untouched. -->
+    <string name="settings_ignore_topic_cache_title">Ignorer le cache topic</string>
+    <string name="settings_ignore_topic_cache_description">Alpha : force le retéléchargement et le reparse des pages de topic. Utile après un changement de parser/rendu. Désactive le prefetch topic pour éviter de remplir Room inutilement.</string>
+    <string name="settings_ignore_topic_cache_persist_failed">Impossible de mémoriser le réglage « Ignorer le cache topic ». Réessayez.</string>
 </resources>

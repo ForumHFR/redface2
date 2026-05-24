@@ -91,6 +91,47 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeIgnoreTopicCache defaults to false on an empty store`() = runTest(dispatcher) {
+        repository.observeIgnoreTopicCache().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setIgnoreTopicCache persists true and false independently of the proxy config`() = runTest(dispatcher) {
+        // Seed a usable proxy first — we want to prove that flipping the topic-cache toggle
+        // does NOT touch any proxy key. The two concerns share the same DataStore file but
+        // must remain isolated; this is exactly the contract `setIgnoreTopicCache` advertises.
+        repository.saveProxyConfig(
+            ProxyConfig(
+                enabled = true,
+                host = "proxy.local",
+                port = 8_080,
+            ),
+        )
+
+        repository.setIgnoreTopicCache(true)
+        repository.observeIgnoreTopicCache().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        val proxyAfterEnable = repository.readProxyConfigForNetworkBootstrap()
+        assertTrue("proxy must stay enabled when toggling ignore-topic-cache", proxyAfterEnable.enabled)
+        assertEquals("proxy.local", proxyAfterEnable.host)
+        assertEquals(8_080, proxyAfterEnable.port)
+
+        repository.setIgnoreTopicCache(false)
+        repository.observeIgnoreTopicCache().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        val proxyAfterDisable = repository.readProxyConfigForNetworkBootstrap()
+        assertTrue("proxy stays enabled after disabling ignore-topic-cache", proxyAfterDisable.enabled)
+        assertEquals("proxy.local", proxyAfterDisable.host)
+    }
+
+    @Test
     fun `saving disabled proxy removes optional fields from effective config`() = runTest(dispatcher) {
         repository.saveProxyConfig(
             ProxyConfig(

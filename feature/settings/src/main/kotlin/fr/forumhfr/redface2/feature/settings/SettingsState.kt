@@ -15,12 +15,22 @@ data class SettingsState(
     val showClearTopicCacheConfirm: Boolean = false,
     val isClearingTopicCache: Boolean = false,
     val topicCacheClearResult: TopicCacheClearResult? = null,
+    // Alpha-only "Ignorer le cache topic" toggle (Phase 2 finish). Persisted in DataStore via
+    // UserPreferencesRepository — the ViewModel hydrates this field from the persisted value
+    // and writes back on user toggle. `isUpdatingIgnoreTopicCache` gates the switch while the
+    // write is in flight so a rapid double-tap can't queue two DataStore edits.
+    val ignoreTopicCache: Boolean = false,
+    val isUpdatingIgnoreTopicCache: Boolean = false,
+    val ignoreTopicCacheError: Boolean = false,
 ) {
     val canSave: Boolean
         get() = !isSaving
 
     val canClearTopicCache: Boolean
         get() = !isClearingTopicCache
+
+    val canToggleIgnoreTopicCache: Boolean
+        get() = !isUpdatingIgnoreTopicCache
 }
 
 sealed interface SettingsError {
@@ -53,4 +63,9 @@ sealed interface SettingsIntent {
     data object ClearTopicCacheClicked : SettingsIntent
     data object ClearTopicCacheConfirmed : SettingsIntent
     data object ClearTopicCacheDismissed : SettingsIntent
+
+    // Alpha "Ignorer le cache topic" toggle. The boolean is the desired post-flip state; the
+    // ViewModel applies it optimistically, then reverts on DataStore failure so the UI never
+    // shows a value that doesn't match what's persisted.
+    data class IgnoreTopicCacheChanged(val enabled: Boolean) : SettingsIntent
 }

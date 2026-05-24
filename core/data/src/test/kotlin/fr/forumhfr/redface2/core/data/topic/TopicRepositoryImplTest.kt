@@ -6,12 +6,16 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
+import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.HfrParser
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -297,11 +301,120 @@ class TopicRepositoryImplTest {
         assertEquals("fresh cache hit must not trigger a refresh", 1, server.requestCount)
     }
 
-    private fun repository(now: Instant): TopicRepositoryImpl = TopicRepositoryImpl(
+    // ──────────────────────────────────────────────────────────────────────
+    // Alpha "Ignorer le cache topic" toggle — bypass tests
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `observeTopicPage bypasses a fresh AUTHENTICATED cache when ignoreTopicCache is true`() = runTest {
+        // Warm the cache with an AUTHENTICATED row — without the toggle this would be a
+        // no-network case (cf. "skips the network refresh" test above). The toggle must
+        // override the TTL check entirely.
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
+        val prefs = FakeUserPreferencesRepository(ignoreTopicCacheInitial = false)
+        val warmup = repository(now = Instant.parse("2026-04-26T18:00:00Z"), userPreferences = prefs)
+        warmup.refreshTopicPage(1, 999_395, 1)
+        assertEquals(1, server.requestCount)
+
+        // Flip the toggle and reopen the page at the SAME instant — the cache would be fresh.
+        prefs.setIgnoreTopicCache(true)
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
+        val bypass = repository(now = Instant.parse("2026-04-26T18:00:00Z"), userPreferences = prefs)
+        bypass.observeTopicPage(1, 999_395, 1).test {
+            val fresh = awaitItem()
+            assertTrue(fresh.posts.isNotEmpty())
+            awaitComplete()
+        }
+
+        assertEquals(
+            "ignoreTopicCache=true must always hit the network, even on a TTL-fresh row",
+            2,
+            server.requestCount,
+        )
+    }
+
+    @Test
+    fun `observeTopicPage in bypass mode still persists the fetched page so the cache stays coherent`() = runTest {
+        val prefs = FakeUserPreferencesRepository(ignoreTopicCacheInitial = true)
+
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
+        val repo = repository(now = Instant.parse("2026-04-26T18:00:00Z"), userPreferences = prefs)
+        repo.observeTopicPage(1, 999_395, 1).test {
+            awaitItem()
+            awaitComplete()
+        }
+
+        val persisted = dao.getTopicPage(1, 999_395, 1)
+        assertNotNull(
+            "bypass mode must still persist so toggling back OFF finds a parser-coherent cache",
+            persisted,
+        )
+        assertEquals(FetchMode.AUTHENTICATED, persisted!!.authMode)
+    }
+
+    @Test
+    fun `prefetch is a no-op when ignoreTopicCache is true`() = runTest {
+        val prefs = FakeUserPreferencesRepository(ignoreTopicCacheInitial = true)
+        val repo = repository(now = Instant.parse("2026-04-26T18:00:00Z"), userPreferences = prefs)
+
+        // No MockResponse enqueued on purpose — if prefetch hits the network the test fails
+        // with a "no more responses" / IOException.
+        repo.prefetch(1, 999_395, 1)
+
+        assertEquals("prefetch must not issue any network call in bypass mode", 0, server.requestCount)
+        assertNull(
+            "prefetch must not write a Room row in bypass mode",
+            dao.getTopicPage(1, 999_395, 1),
+        )
+    }
+
+    @Test
+    fun `prefetch keeps current behaviour when ignoreTopicCache is false`() = runTest {
+        // Regression guard : the default false case must still issue an ANONYMOUS prefetch.
+        // Without this test, a future refactor of the bypass branch could silently disable
+        // prefetch globally.
+        val prefs = FakeUserPreferencesRepository(ignoreTopicCacheInitial = false)
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
+        val repo = repository(now = Instant.parse("2026-04-26T18:00:00Z"), userPreferences = prefs)
+
+        repo.prefetch(1, 999_395, 1)
+
+        assertEquals(1, server.requestCount)
+        val row = dao.getTopicPage(1, 999_395, 1)
+        assertNotNull(row)
+        assertEquals(FetchMode.ANONYMOUS, row!!.authMode)
+    }
+
+    @Test
+    fun `observeTopicPage bypass mode surfaces the network error as a flow exception`() = runTest {
+        // Conformance check : the prompt requires that "ne pas masquer les erreurs reseau en
+        // mode ignore-cache". With no cache to fall back to, the flow must propagate. Note:
+        // the cache MAY exist on disk, but the bypass path must not even read it.
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
+        val prefs = FakeUserPreferencesRepository(ignoreTopicCacheInitial = false)
+        repository(now = Instant.parse("2026-04-26T18:00:00Z"), userPreferences = prefs)
+            .refreshTopicPage(1, 999_395, 1)
+        prefs.setIgnoreTopicCache(true)
+
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+        val repo = repository(now = Instant.parse("2026-04-26T18:00:00Z"), userPreferences = prefs)
+        repo.observeTopicPage(1, 999_395, 1).test {
+            // No cached emission — bypass skipped the read. Then the network fails → the
+            // flow surfaces the failure rather than silently keeping the previous cache.
+            awaitError()
+        }
+        assertEquals(2, server.requestCount)
+    }
+
+    private fun repository(
+        now: Instant,
+        userPreferences: UserPreferencesRepository = FakeUserPreferencesRepository(),
+    ): TopicRepositoryImpl = TopicRepositoryImpl(
         client = client,
         parser = HfrParser(),
         topicDao = dao,
         clock = Clock.fixed(now, ZoneOffset.UTC),
+        userPreferencesRepository = userPreferences,
         ioDispatcher = Dispatchers.Unconfined,
     )
 
@@ -309,5 +422,29 @@ class TopicRepositoryImplTest {
         return requireNotNull(javaClass.getResource("/fixtures/$name")) {
             "Fixture not found: $name"
         }.readText()
+    }
+
+    /**
+     * Lightweight in-memory implementation. The bypass-cache tests need a writable toggle but
+     * not the real DataStore; they only exercise the network/cache decision branch. Proxy
+     * methods are stubbed out — `TopicRepositoryImpl` never reads them and Hilt only routes the
+     * real binding through `UserPreferencesRepository` in production.
+     */
+    private class FakeUserPreferencesRepository(
+        ignoreTopicCacheInitial: Boolean = false,
+    ) : UserPreferencesRepository {
+        private val ignoreTopicCache = MutableStateFlow(ignoreTopicCacheInitial)
+
+        override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
+
+        override suspend fun saveProxyConfig(config: ProxyConfig) = Unit
+
+        override fun readProxyConfigForNetworkBootstrap(): ProxyConfig = ProxyConfig()
+
+        override fun observeIgnoreTopicCache(): Flow<Boolean> = ignoreTopicCache
+
+        override suspend fun setIgnoreTopicCache(enabled: Boolean) {
+            ignoreTopicCache.value = enabled
+        }
     }
 }
