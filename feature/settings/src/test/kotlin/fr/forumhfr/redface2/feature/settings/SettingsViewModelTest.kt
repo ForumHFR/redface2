@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.settings
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -11,6 +12,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.yield
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -154,6 +156,24 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `ClearTopicCacheConfirmed exposes in-progress state while clear is running`() = runTest {
+        topicCacheMaintenance.blockUntil = CompletableDeferred()
+        val viewModel = newViewModel()
+        viewModel.submit(SettingsIntent.ClearTopicCacheClicked)
+
+        viewModel.submit(SettingsIntent.ClearTopicCacheConfirmed)
+
+        assertTrue(viewModel.state.value.isClearingTopicCache)
+        assertFalse(viewModel.state.value.canClearTopicCache)
+
+        topicCacheMaintenance.blockUntil?.complete(Unit)
+        yield()
+
+        assertFalse(viewModel.state.value.isClearingTopicCache)
+        assertEquals(TopicCacheClearResult.Success, viewModel.state.value.topicCacheClearResult)
+    }
+
+    @Test
     fun `ClearTopicCacheConfirmed surfaces Failure when the maintenance call throws`() = runTest {
         topicCacheMaintenance.failOnClear = true
         val viewModel = newViewModel()
@@ -220,9 +240,11 @@ class SettingsViewModelTest {
         var clearCalls: Int = 0
             private set
         var failOnClear: Boolean = false
+        var blockUntil: CompletableDeferred<Unit>? = null
 
         override suspend fun clearTopicCache() {
             clearCalls += 1
+            blockUntil?.await()
             check(!failOnClear) { "boom" }
         }
     }

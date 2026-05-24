@@ -60,8 +60,8 @@ interface TopicDao {
     //
     // Deliberately narrow: does NOT touch flag tables (handled by `FlagRepository`), auth
     // cookies (DataStore + cookie jar), or user preferences (proxy / DataStore). The
-    // ordering posts → topic_pages mirrors how new rows are written so a future foreign
-    // key would not block the truncation.
+    // ordering posts → topic_pages deletes child-like rows before their page metadata,
+    // keeping the operation safe if a future schema adds foreign keys.
     @Query("DELETE FROM posts")
     suspend fun deleteAllPosts()
 

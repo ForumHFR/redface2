@@ -3,10 +3,13 @@ package fr.forumhfr.redface2.core.data.cache
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
+import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
+import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.database.entities.PostEntity
 import fr.forumhfr.redface2.core.database.entities.TopicEntity
+import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.PostContent
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
@@ -41,7 +44,8 @@ import org.robolectric.annotation.Config
 class DefaultTopicCacheMaintenanceTest {
 
     private lateinit var database: RedfaceDatabase
-    private lateinit var dao: TopicDao
+    private lateinit var topicDao: TopicDao
+    private lateinit var flagDao: FlagDao
 
     @Before
     fun setUp() {
@@ -49,7 +53,8 @@ class DefaultTopicCacheMaintenanceTest {
         database = Room.inMemoryDatabaseBuilder(context, RedfaceDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        dao = database.topicDao()
+        topicDao = database.topicDao()
+        flagDao = database.flagDao()
     }
 
     @After
@@ -59,7 +64,7 @@ class DefaultTopicCacheMaintenanceTest {
 
     @Test
     fun `clearTopicCache wipes both topic_pages and posts`() = runTest {
-        val maintenance = DefaultTopicCacheMaintenance(dao, Dispatchers.Unconfined)
+        val maintenance = DefaultTopicCacheMaintenance(topicDao, Dispatchers.Unconfined)
 
         val topicEntity = TopicEntity(
             cat = 13,
@@ -78,33 +83,65 @@ class DefaultTopicCacheMaintenanceTest {
             samplePost(cat = 13, post = 84_540, numreponse = 1001),
             samplePost(cat = 13, post = 84_540, numreponse = 1002),
         )
-        dao.upsertTopicPageWithPosts(topicEntity, postEntities)
+        topicDao.upsertTopicPageWithPosts(topicEntity, postEntities)
         // Sanity check : the seed actually wrote both rows.
-        assertNotNull(dao.getTopicPage(13, 84_540, 2))
-        assertEquals(2, dao.getPostsByNumreponse(13, listOf(1001, 1002)).size)
+        assertNotNull(topicDao.getTopicPage(13, 84_540, 2))
+        assertEquals(2, topicDao.getPostsByNumreponse(13, listOf(1001, 1002)).size)
 
         maintenance.clearTopicCache()
 
         assertNull(
             "topic_pages must be empty after clearTopicCache",
-            dao.getTopicPage(13, 84_540, 2),
+            topicDao.getTopicPage(13, 84_540, 2),
         )
         assertTrue(
             "posts must be empty after clearTopicCache",
-            dao.getPostsByNumreponse(13, listOf(1001, 1002)).isEmpty(),
+            topicDao.getPostsByNumreponse(13, listOf(1001, 1002)).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `clearTopicCache keeps flag cache untouched`() = runTest {
+        val maintenance = DefaultTopicCacheMaintenance(topicDao, Dispatchers.Unconfined)
+        val flag = sampleFlag()
+        topicDao.upsertTopicPageWithPosts(
+            TopicEntity(
+                cat = 23,
+                post = 35_395,
+                page = 24,
+                title = "Redface 2",
+                totalPages = 24,
+                isFirstPostOwner = false,
+                pollJson = null,
+                numreponses = listOf(2_785_212),
+                fetchedAt = Instant.parse("2026-05-24T22:00:00Z"),
+                authMode = FetchMode.AUTHENTICATED,
+                subcat = 550,
+            ),
+            listOf(samplePost(cat = 23, post = 35_395, numreponse = 2_785_212)),
+        )
+        flagDao.upsertAll(listOf(flag))
+
+        maintenance.clearTopicCache()
+
+        assertTrue(topicDao.getPostsByNumreponse(23, listOf(2_785_212)).isEmpty())
+        assertEquals(
+            "flag_topics must survive the topic-only maintenance wipe",
+            listOf(flag),
+            flagDao.getFlags("xatelitte", FlagType.CYAN),
         )
     }
 
     @Test
     fun `clearTopicCache is idempotent — running it on an empty cache does not throw`() = runTest {
-        val maintenance = DefaultTopicCacheMaintenance(dao, Dispatchers.Unconfined)
+        val maintenance = DefaultTopicCacheMaintenance(topicDao, Dispatchers.Unconfined)
 
         // No seed — straight to clear. Room DELETEs against empty tables are no-ops; we
         // pin the behaviour because the UI button can be clicked even when there is
         // nothing to clear, and a user re-tap after a successful clear must not crash.
         maintenance.clearTopicCache()
 
-        assertNull(dao.getTopicPage(13, 84_540, 2))
+        assertNull(topicDao.getTopicPage(13, 84_540, 2))
     }
 
     private fun samplePost(cat: Int, post: Int, numreponse: Int): PostEntity = PostEntity(
@@ -119,6 +156,25 @@ class DefaultTopicCacheMaintenanceTest {
         isOwnPost = false,
         quotedAuthors = emptyList(),
         postIndex = null,
+        fetchedAt = Instant.parse("2026-05-24T22:00:00Z"),
+        authMode = FetchMode.AUTHENTICATED,
+    )
+
+    private fun sampleFlag(): FlagTopicEntity = FlagTopicEntity(
+        userId = "xatelitte",
+        type = FlagType.CYAN,
+        cat = 23,
+        subcat = 550,
+        topicId = 35_395,
+        title = "Redface 2",
+        totalPages = 24,
+        replyCount = 2_785_212,
+        hasUnread = true,
+        lastReadPage = 24,
+        lastPostReadId = 2_785_212L,
+        firstPostAuthor = "XaTriX",
+        lastReplyAuthor = "Lt Ripley",
+        lastReplyAt = "2026-05-24 22:00",
         fetchedAt = Instant.parse("2026-05-24T22:00:00Z"),
         authMode = FetchMode.AUTHENTICATED,
     )
