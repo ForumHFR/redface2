@@ -72,6 +72,16 @@ data class TopicRoute(
     val post: Int,
     val page: Int = 1,
     val scrollTo: Int? = null,
+    /**
+     * Issue #200 — bumped to `System.currentTimeMillis()` by the navigation host when the
+     * editor pops back after a successful submit (reply / quote / edit / edit-FP /
+     * create-topic). The new value invalidates the route key so the topic screen rebuilds
+     * its ViewModel and `loadCurrentPage()` skips the cache to force-fetch the latest page
+     * — otherwise the cache-aside path would serve a stale page that doesn't include the
+     * post the user just published. `null` on the normal nav path (forum / flags / deep
+     * link) so the cache-first behaviour is preserved everywhere else.
+     */
+    val submitSignal: Long? = null,
 ) : RedfaceNavKey
 
 @Serializable
@@ -339,6 +349,7 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                         post = route.post,
                         page = route.page,
                         scrollTo = route.scrollTo,
+                        submitSignal = route.submitSignal,
                     ),
                     onReply = { subcat, page ->
                         backStack.add(
@@ -428,12 +439,14 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                         quoteRef = route.quoteRef,
                     ),
                     onSubmitSucceeded = { targetPage, scrollTo ->
-                        // Pop the editor and refresh the topic page. Phase 2C-A always
-                        // pops back to the topic; targetPage informs which page to
-                        // reload — null falls back to the page we replied from.
-                        // Phase 2D (#147) edit sets `scrollTo = numreponse` so the
-                        // topic screen jumps to the edited post after refresh ;
-                        // reply / quote leave it null (refresh anchors `#bas`).
+                        // Pop the editor and refresh the topic page. `targetPage` is parsed
+                        // from HFR's success URL and tells us which page to land on;
+                        // `scrollTo` is the numreponse the parser extracted from the
+                        // `#t{N}` URL fragment (quote / edit post), or null when HFR
+                        // anchored `#bas` (plain reply). The bumped `submitSignal` invalidates
+                        // the route key so the topic screen rebuilds its ViewModel and
+                        // force-fetches the page — without it, the cache-aside path would
+                        // serve a page that pre-dates the freshly-published post (#200).
                         // Guard the pop the same way the global `onBack` lambda does:
                         // never collapse the back stack below the tab root.
                         if (backStack.size > 1) {
@@ -446,6 +459,7 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                                 topicEntry.copy(
                                     page = targetPage ?: topicEntry.page,
                                     scrollTo = scrollTo ?: topicEntry.scrollTo,
+                                    submitSignal = System.currentTimeMillis(),
                                 ),
                             )
                         }
@@ -463,12 +477,12 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                         numreponse = route.numreponse,
                     ),
                     onSubmitSucceeded = { targetPage, scrollTo ->
-                        // Phase 2D (#148) — pop the FP form, replace the topic
-                        // route below with one that refreshes the target page
-                        // and scrolls to the edited first post. Same pattern
-                        // as `PostEditorRoute.onSubmitSucceeded` ; the only
-                        // difference is the source route type (`TopicFormRoute`
-                        // vs `PostEditorRoute`).
+                        // Phase 2D (#148) — pop the FP form, replace the topic route below
+                        // with one that refreshes the target page and scrolls to the edited
+                        // first post. Same pattern as `PostEditorRoute.onSubmitSucceeded`;
+                        // `submitSignal` bumps the route key so the topic screen rebuilds
+                        // and force-fetches the page (issue #200) — otherwise the cache-
+                        // aside path could serve a stale page that pre-dates the FP edit.
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
                         }
@@ -479,6 +493,7 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                                 topicEntry.copy(
                                     page = targetPage ?: topicEntry.page,
                                     scrollTo = scrollTo ?: topicEntry.scrollTo,
+                                    submitSignal = System.currentTimeMillis(),
                                 ),
                             )
                         }

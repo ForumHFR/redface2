@@ -68,11 +68,23 @@ class TopicViewModel @AssistedInject constructor(
     private var firstContentInFlight: Boolean = false
 
     init {
-        loadCurrentPage()
+        if (request.submitSignal != null) {
+            // Issue #200 — the user just published a reply / quote / edit / edit-FP and the
+            // navigation host signalled us to skip the cache so the freshly-published post
+            // is actually visible. Without this short-circuit, `observeTopicPage` would
+            // emit a stale cached page that doesn't contain the new post (it was created
+            // server-side after the cache was populated).
+            forceRefreshCurrentPage()
+        } else {
+            loadCurrentPage()
+        }
     }
 
     fun send(intent: TopicIntent) {
         when (intent) {
+            // Retry goes through the cache-aside path even after a post-submit force
+            // refresh — by then the new post has been persisted and the user just wants
+            // to recover from a transient error.
             TopicIntent.Retry -> loadCurrentPage()
         }
     }
@@ -140,11 +152,68 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     private suspend fun maybeEmitScroll(visiblePosts: List<Int>) {
+        if (scrollEffectEmitted) return
         val target = request.scrollTo
-        val shouldEmit = !scrollEffectEmitted && target != null && target in visiblePosts
-        if (shouldEmit) {
-            _effects.send(TopicEffect.ScrollToPost(checkNotNull(target)))
-            scrollEffectEmitted = true
+        when {
+            target != null && target in visiblePosts -> {
+                _effects.send(TopicEffect.ScrollToPost(target))
+                scrollEffectEmitted = true
+            }
+            // Issue #200 — plain reply path: HFR anchors `#bas` and the parser leaves
+            // `scrollTo` null. We still got told this is a post-submit reload via
+            // `submitSignal`, so we scroll to the end of the (force-refreshed) page where
+            // the freshly-published reply lives. Gate on `submitSignal != null` to avoid
+            // any chance of stealing focus on a normal deep-link load that happens to
+            // arrive with `scrollTo = null`.
+            target == null && request.submitSignal != null -> {
+                _effects.send(TopicEffect.ScrollToEndOfPage)
+                scrollEffectEmitted = true
+            }
+        }
+    }
+
+    /**
+     * Issue #200 — post-submit force fetch. Bypasses [TopicRepository.observeTopicPage]
+     * (cache-aside) and calls [TopicRepository.refreshTopicPage] directly so the freshly
+     * published post is in the emitted [Topic]. Falls back to the cache-aside path on
+     * failure so the user is not stuck on an error screen when HFR is reachable but the
+     * specific refresh blipped.
+     */
+    private fun forceRefreshCurrentPage() {
+        // ArchitectureKonsistTest forbids any ViewModel function that mentions the
+        // anonymous warmup keyword AND calls `refreshTopicPage` — the guard exists to
+        // prevent anonymous warmups from upgrading silently into authenticated refreshes.
+        // This function is a deliberate authenticated refetch on the current page, so we
+        // route around the guard by simply not touching the warmup bookkeeping. A
+        // concurrent page+1 warmup that lands during this refresh persists a separate
+        // cache row and does not interfere with the current-page refetch.
+        loadJob?.cancel()
+        beginFirstContentSection()
+        _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
+        loadJob = viewModelScope.launch {
+            try {
+                val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
+                _state.update {
+                    it.copy(
+                        mode = TopicUiState.Mode.Loaded(topic),
+                        availablePages = (1..topic.totalPages).toList(),
+                    )
+                }
+                endFirstContentSectionIfNeeded()
+                maybeEmitScroll(topic.posts.map { it.numreponse })
+                // Skip the page+1 warmup here — see the function-level comment about the
+                // ArchitectureKonsistTest guard. The user just submitted and is unlikely to
+                // need page+1 immediately; the next normal navigation will trigger the
+                // warmup through `loadCurrentPage` as usual.
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
+                // Force-refresh failed — log for diagnostics, then recover by handing off
+                // to the regular cache-aside path so the user at least sees the previously
+                // cached page (without the new post, but with a Retry affordance).
+                android.util.Log.w(LOG_TAG, "Force refresh failed for post-submit reload", refreshError)
+                loadCurrentPage()
+            }
         }
     }
 
@@ -189,5 +258,6 @@ class TopicViewModel @AssistedInject constructor(
         // `TraceSectionMetric("rf2.topic.first_content")` consumer (future macrobenchmark
         // under #117 follow-up) keeps matching after refactors.
         private const val FIRST_CONTENT_SECTION = "rf2.topic.first_content"
+        private const val LOG_TAG = "TopicViewModel"
     }
 }

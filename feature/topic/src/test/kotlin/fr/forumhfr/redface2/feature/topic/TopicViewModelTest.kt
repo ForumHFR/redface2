@@ -308,12 +308,168 @@ class TopicViewModelTest {
         )
     }
 
-    private fun topicRequest(page: Int, scrollTo: Int? = null): TopicRequest = TopicRequest(
+    private fun topicRequest(
+        page: Int,
+        scrollTo: Int? = null,
+        submitSignal: Long? = null,
+    ): TopicRequest = TopicRequest(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
         page = page,
         scrollTo = scrollTo,
+        submitSignal = submitSignal,
     )
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Issue #200 — post-submit force refresh path
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `submitSignal triggers a force refresh instead of the cache-aside path`() = runTest {
+        // Reply / quote / edit / edit-FP landing: the navigation host bumped submitSignal
+        // so the ViewModel must skip observeTopicPage (cache-aside) and call refreshTopicPage
+        // directly, otherwise the user would see a stale page that doesn't include the post
+        // they just published.
+        val freshTopic = fakeTopic(page = 2, totalPages = 5, posts = listOf(fakePost(987)))
+        val repository = FakeTopicRepository(
+            flowsToReturn = emptyList(),
+            refreshTopicsToReturn = listOf(freshTopic),
+        )
+
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 2, submitSignal = 1_700_000_000_000L),
+            topicRepository = repository,
+        )
+
+        viewModel.state.test {
+            val loaded = awaitItem()
+            val mode = assertMode<TopicUiState.Mode.Loaded>(loaded)
+            assertEquals(freshTopic, mode.topic)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(
+            "Force refresh path must hit refreshTopicPage, not observeTopicPage",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+            repository.refreshCalls,
+        )
+        assertTrue(
+            "observeTopicPage must NOT be called when submitSignal is non-null",
+            repository.calls.isEmpty(),
+        )
+    }
+
+    @Test
+    fun `submitSignal with scrollTo emits ScrollToPost after the force refresh`() = runTest {
+        // Quote / edit / edit-FP path: the parser extracted #t{numreponse} so the navigation
+        // host passed scrollTo through. The ViewModel must emit ScrollToPost(target) once
+        // the force-refreshed page is loaded and contains the target post.
+        val targetNumreponse = 2_523_833
+        val freshTopic = fakeTopic(
+            page = 1,
+            totalPages = 3,
+            posts = listOf(fakePost(2_523_829), fakePost(targetNumreponse)),
+        )
+        val repository = FakeTopicRepository(
+            flowsToReturn = emptyList(),
+            refreshTopicsToReturn = listOf(freshTopic),
+        )
+
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 1, scrollTo = targetNumreponse, submitSignal = 42L),
+            topicRepository = repository,
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToPost(targetNumreponse), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `submitSignal without scrollTo emits ScrollToEndOfPage so plain reply lands on the new post`() = runTest {
+        // Plain reply path: HFR anchored #bas so the parser left scrollTo null. The ViewModel
+        // emits ScrollToEndOfPage so the screen scrolls to the last post (the one just
+        // published) rather than letting the user wonder where their reply went.
+        val freshTopic = fakeTopic(
+            page = 20,
+            totalPages = 20,
+            posts = listOf(fakePost(1), fakePost(2), fakePost(3)),
+        )
+        val repository = FakeTopicRepository(
+            flowsToReturn = emptyList(),
+            refreshTopicsToReturn = listOf(freshTopic),
+        )
+
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 20, scrollTo = null, submitSignal = 99L),
+            topicRepository = repository,
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToEndOfPage, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `normal load without submitSignal does not emit ScrollToEndOfPage`() = runTest {
+        // Regression guard: ScrollToEndOfPage is gated on submitSignal != null. A normal
+        // deep-link navigation (cache-aside) must never emit it, even when scrollTo is null,
+        // otherwise we would snap to the bottom on every back navigation.
+        val topic = fakeTopic(page = 1, totalPages = 1, posts = listOf(fakePost(1)))
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
+
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 1, scrollTo = null, submitSignal = null),
+            topicRepository = repository,
+        )
+
+        viewModel.state.test {
+            // wait for Loaded so the effect channel had a chance to receive anything
+            assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        // The effects channel is BUFFERED ; if anything had been sent it would still be
+        // there. tryReceive() is non-blocking so the assertion is deterministic.
+        viewModel.effects.test {
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `submitSignal refresh failure falls back to the cache-aside path`() = runTest {
+        // Resilience: a transient network blip on the force refresh must not strand the user
+        // on an error screen. The ViewModel falls back to observeTopicPage so the cached
+        // page is shown (without the new post — but with a Retry affordance).
+        val cachedTopic = fakeTopic(page = 2, totalPages = 5)
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(cachedTopic) }),
+            refreshErrorToThrow = IOException("force refresh transient failure"),
+        )
+
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 2, submitSignal = 7L),
+            topicRepository = repository,
+        )
+
+        viewModel.state.test {
+            val loaded = awaitItem()
+            val mode = assertMode<TopicUiState.Mode.Loaded>(loaded)
+            assertEquals(cachedTopic, mode.topic)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(
+            "Refresh attempted once before falling back",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+            repository.refreshCalls,
+        )
+        assertEquals(
+            "Fallback path must hit observeTopicPage after the failure",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+            repository.calls,
+        )
+    }
 
     private fun fakeTopic(
         page: Int,
@@ -360,9 +516,13 @@ class TopicViewModelTest {
 
 private class FakeTopicRepository(
     flowsToReturn: List<Flow<Topic>>,
+    private val refreshTopicsToReturn: List<Topic> = emptyList(),
+    private val refreshErrorToThrow: Throwable? = null,
 ) : TopicRepository {
     private val queue = ArrayDeque(flowsToReturn)
+    private val refreshQueue = ArrayDeque(refreshTopicsToReturn)
     val calls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
+    val refreshCalls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
     val prefetches: MutableList<Triple<Int, Int, Int>> = mutableListOf()
 
     /**
@@ -379,7 +539,10 @@ private class FakeTopicRepository(
     }
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
-        error("refreshTopicPage not used by ViewModel under test")
+        refreshCalls += Triple(cat, post, page)
+        refreshErrorToThrow?.let { throw it }
+        return refreshQueue.removeFirstOrNull()
+            ?: error("No more refresh topics queued (issue #200 post-submit force fetch path)")
     }
 
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {

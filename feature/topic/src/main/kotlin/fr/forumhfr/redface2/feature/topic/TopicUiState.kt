@@ -60,4 +60,13 @@ sealed interface TopicEffect {
      * the current `Topic.posts` list.
      */
     data class ScrollToPost(val numreponse: Int) : TopicEffect
+
+    /**
+     * Issue #200 — emitted after a plain reply submit when HFR's success URL anchors
+     * `#bas` instead of `#t{numreponse}`. The screen scrolls to the last post on the
+     * (force-refreshed) page so the user can see their freshly-published reply at the
+     * bottom. Distinct from [ScrollToPost] because we don't know the new numreponse
+     * — the parser couldn't extract it from the `#bas` fragment.
+     */
+    data object ScrollToEndOfPage : TopicEffect
 }

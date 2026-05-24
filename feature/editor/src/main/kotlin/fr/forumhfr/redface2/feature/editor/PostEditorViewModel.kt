@@ -514,12 +514,14 @@ class PostEditorViewModel @AssistedInject constructor(
     ) {
         when (result) {
             is ReplySubmitResult.Success -> {
-                // For Phase 2D edit, the topic refresh should land on the
-                // edited post — HFR's refresh URL anchors `#t{numreponse}`. We
-                // pass it explicitly so the navigation host can scroll to it
-                // after popping the editor. Reply / quote leave `scrollTo` null
-                // (the refresh anchors `#bas`, end of page).
-                val scrollTo = if (mode == PostEditorMode.Edit) numreponse else null
+                // Issue #200 — HFR's success URL fragment carries `#t{numreponse}` for quote
+                // and edit (the parser exposes it as `result.numreponse`), and `#bas` for a
+                // plain reply (numreponse is null then). Prefer the value the parser pulled
+                // out of HFR's own response over the local hint — they should agree for
+                // edit, but the parser is authoritative if HFR ever picks a different post
+                // index. Falls back to the locally-known numreponse for edit so existing
+                // tests that don't populate the parser numreponse still scroll to the post.
+                val scrollTo = result.numreponse ?: numreponse.takeIf { mode == PostEditorMode.Edit }
                 _effects.trySend(
                     PostEditorEffect.SubmitSucceeded(targetPage = result.targetPage, scrollTo = scrollTo),
                 )

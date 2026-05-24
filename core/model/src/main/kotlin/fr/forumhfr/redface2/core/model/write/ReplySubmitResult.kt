@@ -10,13 +10,22 @@ sealed interface ReplySubmitResult {
     /**
      * HFR replied with the success page. [refreshUrl] is the value carried by the
      * `<meta http-equiv="Refresh" content="N; url=…">` header — exactly the URL HFR
-     * wants the client to land on (typically `…/sujet_X_PAGE.htm#bas`). Callers
+     * wants the client to land on (typically `…/sujet_X_PAGE.htm#bas` for a fresh
+     * reply, `…/sujet_X_PAGE.htm#t{numreponse}` for quote / edit / edit-FP). Callers
      * should treat it as opaque and just navigate there, optionally extracting
-     * [targetPage] from the URL when they need to refresh a known cache.
+     * [targetPage] / [numreponse] from the URL when they need to refresh a known
+     * cache or scroll to the new post.
+     *
+     * [numreponse] is non-null when HFR's refresh URL exposes a `#t{N}` fragment
+     * (quote, edit post, edit FP, and any future endpoint that anchors on the
+     * created/edited post). For a plain reply HFR anchors `#bas` instead, so
+     * [numreponse] is null and the screen falls back to scrolling to the end of
+     * the refreshed page — issue #200.
      */
     data class Success(
         val refreshUrl: String?,
         val targetPage: Int?,
+        val numreponse: Int? = null,
     ) : ReplySubmitResult
 
     /** HFR refused to post and surfaced one of the known reasons. */

@@ -127,6 +127,17 @@ fun TopicScreen(
                         lazyListState.scrollToItem(index + 1)
                     }
                 }
+                TopicEffect.ScrollToEndOfPage -> {
+                    // Issue #200 — post-reply landing : HFR anchored `#bas`, the parser couldn't
+                    // extract a numreponse, so we land on the last item of the freshly-refreshed
+                    // page. The new post is by definition the last one HFR served on this page.
+                    val loadedMode = viewModel.state.first { it.mode is TopicUiState.Mode.Loaded }.mode
+                            as TopicUiState.Mode.Loaded
+                    if (loadedMode.topic.posts.isNotEmpty()) {
+                        // +1 for the header card (same offset rationale as ScrollToPost above).
+                        lazyListState.scrollToItem(loadedMode.topic.posts.size)
+                    }
+                }
             }
         }
     }
