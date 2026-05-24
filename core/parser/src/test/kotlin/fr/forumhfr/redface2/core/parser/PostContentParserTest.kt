@@ -47,6 +47,33 @@ class PostContentParserTest {
     }
 
     @Test
+    fun `redface2 page 24 citation tables surface as Quote blocks`() {
+        val topic = pageParser.parse(fixture("topic_redface2_p24.html"))
+
+        val posts = topic.posts.associateBy { it.numreponse }
+        listOf(
+            2785212 to "Lt Ripley",
+            2785217 to "Lt Ripley",
+            2785218 to "garath_",
+        ).forEach { (numreponse, expectedAuthor) ->
+            val post = requireNotNull(posts[numreponse]) {
+                "fixture should contain screenshot witness post #$numreponse"
+            }
+            val quotes = post.content.blocks.filterIsInstance<PostBlock.Quote>()
+
+            assertTrue(
+                "post #$numreponse should parse HFR <table class=\"citation\"> as Quote, " +
+                    "not flatten the header `${expectedAuthor} a écrit :` into a paragraph",
+                quotes.isNotEmpty(),
+            )
+            assertTrue(
+                "post #$numreponse should expose quoted author $expectedAuthor, got=${quotes.map { it.author }}",
+                quotes.any { it.author == expectedAuthor },
+            )
+        }
+    }
+
+    @Test
     fun `spoiler block is recognised and not flattened into paragraph`() {
         val topic = pageParser.parse(fixture("topic_khakha_page_146.html"))
 

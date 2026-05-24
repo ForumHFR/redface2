@@ -1,0 +1,18 @@
+Source: forum.hardware.fr, topic Redface 2, page 24
+URL: https://forum.hardware.fr/hfr/gsmgpspda/android/redface-phase-alpha-sujet_35395_24.htm
+Captured: 2026-05-24
+Mode: anonymous public HTML, direct HTTP capture
+Command:
+  curl -L https://forum.hardware.fr/hfr/gsmgpspda/android/redface-phase-alpha-sujet_35395_24.htm -o /tmp/redface2_topic_p24_raw.html
+
+Purpose:
+  Real HFR topic page containing quote rendering regressions observed on Android.
+  Relevant posts:
+  - #2785212: two top-level citations by Lt Ripley, including a nested duplicated rehost link.
+  - #2785217: single top-level citation by Lt Ripley.
+  - #2785218: single top-level citation by garath_ with perso smiley.
+
+Sanitization:
+  No authenticated cookies or private credentials were present.
+  Public profile ids, public post ids, and public image URLs are intentionally preserved because parser tests rely on real HFR markup.
+  `hash_check` fields are empty in this anonymous capture.
