@@ -210,6 +210,12 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
     val post: Int,
     val page: Int = 1,
     val scrollTo: Int? = null,            // numreponse cible pour #t{numreponse}
+    val submitSignal: Long? = null,       // Phase 2 (#200) — bumpé à System.currentTimeMillis() par le
+                                          // navigation host quand l'éditeur pop après un submit réussi.
+                                          // Invalide la route key, force la rebuild du ViewModel, et fait
+                                          // appeler `refreshTopicPage` (skip cache) pour que le post
+                                          // fraîchement publié soit visible. Reste null sur tous les autres
+                                          // chemins (deep link, pagination, retour Flags/Forum).
 ) : RedfaceNavKey
 @Serializable data class PostEditorRoute(
     val mode: PostEditorMode,

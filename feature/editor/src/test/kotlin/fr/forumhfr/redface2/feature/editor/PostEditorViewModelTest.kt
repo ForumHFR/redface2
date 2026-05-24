@@ -527,6 +527,64 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `Quote success forwards the parser-extracted numreponse as scrollTo (issue #200)`() = runTest {
+        // Issue #200 — quote anchors `#t{numreponse}` on the success URL so the parser
+        // surfaces the new post id directly. The ViewModel must propagate it as scrollTo
+        // so the topic screen scrolls to the freshly-created quote post after the
+        // post-submit force refresh.
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.submitResult = ReplySubmitResult.Success(
+            refreshUrl = "/hfr/foo/bar-sujet_148750_1.htm#t2523833",
+            targetPage = 1,
+            numreponse = 2_523_833,
+        )
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("citing")))
+
+        viewModel.effects.test {
+            viewModel.submit(PostEditorIntent.SubmitClicked)
+            val effect = awaitItem() as PostEditorEffect.SubmitSucceeded
+            assertEquals(1, effect.targetPage)
+            assertEquals(
+                "quote success must scroll to the new quote post id from the parser",
+                2_523_833,
+                effect.scrollTo,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `Edit success prefers the parser numreponse over the local hint (issue #200)`() = runTest {
+        // Issue #200 — when HFR's `#t{N}` fragment carries a numreponse, the parser is
+        // authoritative over the locally-known one. They should agree for edit, but if
+        // HFR ever anchors on a different post id (e.g. a moderator merge / split) the
+        // user lands where HFR said, not where we guessed.
+        val parserExtracted = 999_999
+        editPostRepository.submitResult = ReplySubmitResult.Success(
+            refreshUrl = "/hfr/foo/bar-sujet_35395_20.htm#t$parserExtracted",
+            targetPage = 20,
+            numreponse = parserExtracted,
+        )
+        val viewModel = newEditViewModel()
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("rewritten body")))
+
+        viewModel.effects.test {
+            viewModel.submit(PostEditorIntent.SubmitClicked)
+            val effect = awaitItem() as PostEditorEffect.SubmitSucceeded
+            assertEquals(20, effect.targetPage)
+            assertEquals(
+                "parser numreponse must win over the locally-known edit numreponse",
+                parserExtracted,
+                effect.scrollTo,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `submit with InvalidHashCheck silently refetches without clobbering quote draft`() = runTest {
         // `handleSubmitOutcome(InvalidHashCheck)` resets `loadedForm = null` and
         // re-invokes `loadReplyFormIfPossible()`. The `draftHydratedFromForm`

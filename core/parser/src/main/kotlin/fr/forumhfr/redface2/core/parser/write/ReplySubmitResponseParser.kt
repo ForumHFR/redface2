@@ -67,7 +67,14 @@ class ReplySubmitResponseParser {
         // structure intact ; Jsoup normalises the attribute order in older releases.
         val refresh = META_REFRESH_REGEX.find(html)?.groupValues?.getOrNull(1)?.trim()
         val page = refresh?.let { url -> PAGE_NUMBER_REGEX.find(url)?.groupValues?.getOrNull(1)?.toIntOrNull() }
-        return ReplySubmitResult.Success(refreshUrl = refresh, targetPage = page)
+        // Quote / edit / edit-FP anchor `#t{numreponse}` on the success URL, so the topic
+        // screen can scroll to the new (or updated) post after the post-submit refresh.
+        // Plain reply anchors `#bas` instead — no numreponse, caller falls back to
+        // scrolling to the end of the page (cf. issue #200).
+        val numreponse = refresh?.let { url ->
+            NUMREPONSE_FRAGMENT_REGEX.find(url)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        }
+        return ReplySubmitResult.Success(refreshUrl = refresh, targetPage = page, numreponse = numreponse)
     }
 
     private fun looksLikeInvalidTokenPlainText(head: String): Boolean {
@@ -102,5 +109,10 @@ class ReplySubmitResponseParser {
         // HFR's success refresh URLs look like `…/sujet_35395_20.htm#bas` — the second
         // integer between underscores is the page.
         private val PAGE_NUMBER_REGEX: Regex = Regex("""sujet_\d+_(\d+)""", RegexOption.IGNORE_CASE)
+
+        // Quote / edit / edit-FP refresh URLs end with `#t{numreponse}`. Plain reply
+        // ends with `#bas` — no match, the call site gets null and falls back to
+        // scrolling to the end of the refreshed page.
+        private val NUMREPONSE_FRAGMENT_REGEX: Regex = Regex("""#t(\d+)""", RegexOption.IGNORE_CASE)
     }
 }

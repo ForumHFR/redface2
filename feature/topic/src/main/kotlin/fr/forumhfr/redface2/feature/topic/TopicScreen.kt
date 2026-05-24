@@ -102,6 +102,12 @@ fun TopicScreen(
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     val lazyListState = rememberLazyListState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Resolve the string at composition time, not inside the LaunchedEffect collect block.
+    // Lint flags `context.getString(R.string.…)` inside a Compose call site (the call is in a
+    // suspending lambda but the surrounding scope is still a Composable). Capturing the message
+    // upfront keeps the rule happy and avoids re-resolving on every effect.
+    val refreshFailedMsg = stringResource(R.string.topic_post_submit_refresh_failed)
 
     // Single-shot scroll : `effects` emits `ScrollToPost` exactly once per request,
     // when the ViewModel has loaded a page that contains the requested numreponse.
@@ -126,6 +132,31 @@ fun TopicScreen(
                         // +1 because the LazyColumn header card occupies item 0.
                         lazyListState.scrollToItem(index + 1)
                     }
+                }
+                TopicEffect.ScrollToEndOfPage -> {
+                    // Issue #200 — post-reply landing : HFR anchored `#bas`, the parser couldn't
+                    // extract a numreponse, so we land on the last item of the freshly-refreshed
+                    // page. The new post is by definition the last one HFR served on this page.
+                    val loadedMode = viewModel.state.first { it.mode is TopicUiState.Mode.Loaded }.mode
+                            as TopicUiState.Mode.Loaded
+                    if (loadedMode.topic.posts.isNotEmpty()) {
+                        // +1 for the header card (same offset rationale as ScrollToPost above).
+                        lazyListState.scrollToItem(loadedMode.topic.posts.size)
+                    }
+                }
+                TopicEffect.PostSubmitRefreshFailed -> {
+                    // Issue #200 — HFR accepted the post but the local force refresh failed.
+                    // Surface a Toast so the user knows the submit went through and can
+                    // re-trigger the refresh manually (pull-to-refresh / Retry) instead of
+                    // assuming the post was silently lost. Toast picked over Snackbar to keep
+                    // this composable a plain Surface — wrapping the existing TopicContent in
+                    // a Scaffold + SnackbarHost is left for a follow-up if a richer feedback
+                    // surface is needed.
+                    android.widget.Toast.makeText(
+                        context,
+                        refreshFailedMsg,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
                 }
             }
         }

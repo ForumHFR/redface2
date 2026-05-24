@@ -462,6 +462,8 @@ sealed interface ReplySubmitResult {
     data class Success(
         val refreshUrl: String?,     // <meta http-equiv="Refresh" content="N; url=…">
         val targetPage: Int?,        // dérivé du shape sujet_X_Y.htm
+        val numreponse: Int? = null, // dérivé du fragment #t{N} ; quote / edit / edit-FP exposent
+                                     // le post id, reply pur anchor #bas et reste null (issue #200)
     ) : ReplySubmitResult
     data class Failure(val reason: ReplyFailureReason) : ReplySubmitResult
 }

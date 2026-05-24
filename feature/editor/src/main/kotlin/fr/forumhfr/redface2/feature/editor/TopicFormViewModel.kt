@@ -502,10 +502,13 @@ class TopicFormViewModel @AssistedInject constructor(
                 _effects.trySend(
                     TopicFormEffect.SubmitSucceeded(
                         targetPage = result.targetPage,
-                        // FP refresh URL anchors `#t{numreponse}` ; we surface
-                        // it so the navigation host can scroll to the edited
-                        // FP after refresh.
-                        scrollTo = numreponse,
+                        // Issue #200 — prefer the parser-extracted numreponse over the local
+                        // hint. For Edit FP the two should agree (HFR anchors `#t{N}` on the
+                        // FP id we're editing), but the parser stays authoritative if HFR
+                        // ever decides to anchor on a different post. Falls back to the
+                        // locally-known numreponse so existing tests / quote-style paths
+                        // that don't populate the parser numreponse still scroll correctly.
+                        scrollTo = result.numreponse ?: numreponse,
                     ),
                 )
                 _state.update { it.copy(isSubmitting = false, submitError = null) }

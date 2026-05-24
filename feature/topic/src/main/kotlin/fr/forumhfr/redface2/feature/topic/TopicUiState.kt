@@ -60,4 +60,25 @@ sealed interface TopicEffect {
      * the current `Topic.posts` list.
      */
     data class ScrollToPost(val numreponse: Int) : TopicEffect
+
+    /**
+     * Issue #200 — emitted after a plain reply submit when HFR's success URL anchors
+     * `#bas` instead of `#t{numreponse}`. The screen scrolls to the last post on the
+     * (force-refreshed) page so the user can see their freshly-published reply at the
+     * bottom. Distinct from [ScrollToPost] because we don't know the new numreponse
+     * — the parser couldn't extract it from the `#bas` fragment.
+     */
+    data object ScrollToEndOfPage : TopicEffect
+
+    /**
+     * Issue #200 — emitted when the post-submit force refresh (`refreshTopicPage`) fails.
+     * HFR has already accepted the post (the editor only emits its `SubmitSucceeded`
+     * effect on a `ReplySubmitResult.Success`), but the local refetch could not land,
+     * so the screen falls back to the stale cache. The screen surfaces a Toast (see
+     * `TopicScreen.kt`) telling the user that the post is published but the local view
+     * may not reflect it yet — pull-to-refresh fixes that. Without this effect, the
+     * user lands on a stale page that does not contain their fresh post and assumes
+     * the submit silently failed.
+     */
+    data object PostSubmitRefreshFailed : TopicEffect
 }

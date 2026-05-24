@@ -25,6 +25,9 @@ class ReplySubmitResponseParserTest {
         assertEquals(20, success.targetPage)
         assertTrue(refreshUrl.contains("sujet_35395_20"))
         assertTrue(refreshUrl.endsWith("#bas"))
+        // Issue #200 — plain reply anchors `#bas`, so the parser cannot extract a numreponse
+        // and the topic screen falls back to scrolling to the end of the refreshed page.
+        assertNull(success.numreponse)
     }
 
     @Test
@@ -41,6 +44,35 @@ class ReplySubmitResponseParserTest {
         assertEquals(20, success.targetPage)
         val refreshUrl = requireNotNull(success.refreshUrl) { "refreshUrl must be present" }
         assertTrue("refresh URL must anchor on the edited post", refreshUrl.contains("#t2784595"))
+        // Issue #200 — edit anchors `#t{numreponse}`, so the parser surfaces the numreponse
+        // and the navigation host can scroll to the edited post after the force refresh.
+        assertEquals(2_784_595, success.numreponse)
+    }
+
+    @Test
+    fun `quote success extracts the new post numreponse from the URL fragment`() {
+        // Issue #200 — quote anchors `#t{numreponse}` (the freshly-created quote post)
+        // so the topic screen can scroll directly to it after the force refresh.
+        val html = readFixture("write_quote_success_response.html")
+        val result = parser.parse(html)
+        assertTrue("quote success must classify as Success — got $result", result is ReplySubmitResult.Success)
+        val success = result as ReplySubmitResult.Success
+        // The fixture refreshes to …redface2-temporaire-bbcode-sujet_148750_1.htm#t2523833
+        assertEquals(1, success.targetPage)
+        assertEquals(2_523_833, success.numreponse)
+    }
+
+    @Test
+    fun `edit first post success extracts the FP numreponse from the URL fragment`() {
+        // Issue #200 — edit-FP anchors `#t{numreponse}` on the FP id so the topic screen
+        // scrolls back to the edited first post after the force refresh.
+        val html = readFixture("write_edit_first_post_success_response.html")
+        val result = parser.parse(html)
+        assertTrue("edit FP success must classify as Success — got $result", result is ReplySubmitResult.Success)
+        val success = result as ReplySubmitResult.Success
+        // The fixture refreshes to …redface2-temporaire-ecriture-sujet_148749_1.htm#t2523829
+        assertEquals(1, success.targetPage)
+        assertEquals(2_523_829, success.numreponse)
     }
 
     @Test
@@ -107,6 +139,8 @@ class ReplySubmitResponseParserTest {
         val result = parser.parse(html) as ReplySubmitResult.Success
         assertNotNull(result.refreshUrl)
         assertNull(result.targetPage)
+        // No `#t{N}` fragment either — the `liste_sujet` URL doesn't carry a post anchor.
+        assertNull(result.numreponse)
     }
 
     private fun readFixture(name: String): String {
