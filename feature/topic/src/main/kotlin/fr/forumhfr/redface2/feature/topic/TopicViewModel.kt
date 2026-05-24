@@ -210,7 +210,7 @@ class TopicViewModel @AssistedInject constructor(
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
                 // Force-refresh failed — log, tell the user HFR did accept the post even though
-                // the local view may be stale (Snackbar in the screen), and short-circuit the
+                // the local view may be stale (Toast in the screen, cf. TopicScreen.kt), and short-circuit the
                 // scroll-effect machinery so the cache-aside fallback we hand off to does NOT
                 // re-trigger `ScrollToEndOfPage` on a stale page (which would scroll the user to
                 // some pre-submit "last post" and confuse them into thinking they're looking at

@@ -74,10 +74,11 @@ sealed interface TopicEffect {
      * Issue #200 — emitted when the post-submit force refresh (`refreshTopicPage`) fails.
      * HFR has already accepted the post (the editor only emits its `SubmitSucceeded`
      * effect on a `ReplySubmitResult.Success`), but the local refetch could not land,
-     * so the screen falls back to the stale cache. The Snackbar tells the user that
-     * the post is published but the local view may not reflect it yet — pull-to-refresh
-     * fixes that. Without this effect, the user lands on a stale page that does not
-     * contain their fresh post and assumes the submit silently failed.
+     * so the screen falls back to the stale cache. The screen surfaces a Toast (see
+     * `TopicScreen.kt`) telling the user that the post is published but the local view
+     * may not reflect it yet — pull-to-refresh fixes that. Without this effect, the
+     * user lands on a stale page that does not contain their fresh post and assumes
+     * the submit silently failed.
      */
     data object PostSubmitRefreshFailed : TopicEffect
 }
