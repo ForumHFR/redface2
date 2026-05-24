@@ -21,7 +21,7 @@ import okhttp3.OkHttpClient
  *
  * `coil-network-okhttp` is registered with the anonymous OkHttp client so image loads share the
  * same timeout / user-agent configuration as the rest of the HFR traffic. The user proxy is
- * installed via a host-scoped `ProxySelector` ([HfrOnlyProxySelector]) that routes only
+ * installed via a host-scoped `ProxySelector` that routes only
  * `hardware.fr` / `*.hardware.fr` through the configured proxy ; external `[img]` hosts
  * (rehost.diberie.com, super-h.fr, imgur, etc.) stay direct so a proxy that only authorises
  * HFR does not break external image loads.
