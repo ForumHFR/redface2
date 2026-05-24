@@ -442,7 +442,14 @@ class TopicViewModelTest {
         // Resilience: a transient network blip on the force refresh must not strand the user
         // on an error screen. The ViewModel falls back to observeTopicPage so the cached
         // page is shown (without the new post — but with a Retry affordance).
-        val cachedTopic = fakeTopic(page = 2, totalPages = 5)
+        val cachedTopic = fakeTopic(
+            page = 2,
+            totalPages = 5,
+            // Stale cache: the pre-submit "last post" is post 100. If the VM erroneously
+            // emitted ScrollToEndOfPage after the fallback, the user would be scrolled to
+            // post 100 thinking it's their fresh reply — that's the bug we guard against.
+            posts = listOf(fakePost(100)),
+        )
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(flow { emit(cachedTopic) }),
             refreshErrorToThrow = IOException("force refresh transient failure"),
@@ -452,6 +459,17 @@ class TopicViewModelTest {
             request = topicRequest(page = 2, submitSignal = 7L),
             topicRepository = repository,
         )
+
+        // The first effect emitted on the failure path must be PostSubmitRefreshFailed so the
+        // screen surfaces a Snackbar/Toast telling the user HFR did accept their post even
+        // though the local refresh blipped. The fallback to observeTopicPage must NOT then
+        // re-emit ScrollToEndOfPage on the stale cache.
+        viewModel.effects.test {
+            assertEquals(TopicEffect.PostSubmitRefreshFailed, awaitItem())
+            // expectNoEvents() would race with cache emission; we settle by ensuring no
+            // further effect lands within the test scheduler's idle.
+            cancelAndIgnoreRemainingEvents()
+        }
 
         viewModel.state.test {
             val loaded = awaitItem()

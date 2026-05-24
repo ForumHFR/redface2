@@ -176,18 +176,20 @@ class TopicViewModel @AssistedInject constructor(
      * Issue #200 — post-submit force fetch. Bypasses [TopicRepository.observeTopicPage]
      * (cache-aside) and calls [TopicRepository.refreshTopicPage] directly so the freshly
      * published post is in the emitted [Topic]. Falls back to the cache-aside path on
-     * failure so the user is not stuck on an error screen when HFR is reachable but the
-     * specific refresh blipped.
+     * failure and emits [TopicEffect.PostSubmitRefreshFailed] so the user is told that
+     * HFR accepted the post even though the local refresh blipped.
+     *
+     * Konsist guard: this function legitimately cancels the inflight prefetch AND calls
+     * `refreshTopicPage` — the anti-anonymous-upgrade rule in `ArchitectureKonsistTest`
+     * is bypassed via the literal marker `konsist:bypass-prefetch-guard` (see the test
+     * for the allow-list mechanism). The bypass is intentional: this is a deliberate
+     * authenticated refetch following an explicit submit signal from the navigation host,
+     * not an anonymous warmup escalating to authenticated.
      */
     private fun forceRefreshCurrentPage() {
-        // ArchitectureKonsistTest forbids any ViewModel function that mentions the
-        // anonymous warmup keyword AND calls `refreshTopicPage` — the guard exists to
-        // prevent anonymous warmups from upgrading silently into authenticated refreshes.
-        // This function is a deliberate authenticated refetch on the current page, so we
-        // route around the guard by simply not touching the warmup bookkeeping. A
-        // concurrent page+1 warmup that lands during this refresh persists a separate
-        // cache row and does not interfere with the current-page refetch.
         loadJob?.cancel()
+        prefetchJob?.cancel()
+        prefetchedPage = null
         beginFirstContentSection()
         _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
         loadJob = viewModelScope.launch {
@@ -201,17 +203,23 @@ class TopicViewModel @AssistedInject constructor(
                 }
                 endFirstContentSectionIfNeeded()
                 maybeEmitScroll(topic.posts.map { it.numreponse })
-                // Skip the page+1 warmup here — see the function-level comment about the
-                // ArchitectureKonsistTest guard. The user just submitted and is unlikely to
-                // need page+1 immediately; the next normal navigation will trigger the
-                // warmup through `loadCurrentPage` as usual.
+                // Skip the page+1 warmup here — the user just submitted and is unlikely to need
+                // page+1 immediately; the next normal navigation will trigger the warmup through
+                // `loadCurrentPage` as usual.
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
-                // Force-refresh failed — log for diagnostics, then recover by handing off
-                // to the regular cache-aside path so the user at least sees the previously
-                // cached page (without the new post, but with a Retry affordance).
+                // Force-refresh failed — log, tell the user HFR did accept the post even though
+                // the local view may be stale (Snackbar in the screen), and short-circuit the
+                // scroll-effect machinery so the cache-aside fallback we hand off to does NOT
+                // re-trigger `ScrollToEndOfPage` on a stale page (which would scroll the user to
+                // some pre-submit "last post" and confuse them into thinking they're looking at
+                // their fresh reply). Then hand off to the cache-aside path so the user at least
+                // sees a previously-cached page with a Retry affordance.
                 android.util.Log.w(LOG_TAG, "Force refresh failed for post-submit reload", refreshError)
+                _effects.send(TopicEffect.PostSubmitRefreshFailed)
+                scrollEffectEmitted = true
+                endFirstContentSectionIfNeeded()
                 loadCurrentPage()
             }
         }

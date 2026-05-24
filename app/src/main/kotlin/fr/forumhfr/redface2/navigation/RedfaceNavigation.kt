@@ -458,7 +458,15 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                             backStack.add(
                                 topicEntry.copy(
                                     page = targetPage ?: topicEntry.page,
-                                    scrollTo = scrollTo ?: topicEntry.scrollTo,
+                                    // Issue #200 — do NOT fall back to topicEntry.scrollTo here.
+                                    // A topic opened from Flags / deep link / search may already carry
+                                    // a `scrollTo` (the post the user was originally jumping to). After
+                                    // a plain reply, the parser returns scrollTo=null because HFR anchors
+                                    // `#bas` — if we re-use the previous scrollTo, the topic screen scrolls
+                                    // back to that old post and never to the freshly-published reply, and
+                                    // the `ScrollToEndOfPage` fallback in `TopicViewModel.maybeEmitScroll`
+                                    // is silently suppressed (it gates on `target == null`).
+                                    scrollTo = scrollTo,
                                     submitSignal = System.currentTimeMillis(),
                                 ),
                             )
@@ -492,7 +500,15 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                             backStack.add(
                                 topicEntry.copy(
                                     page = targetPage ?: topicEntry.page,
-                                    scrollTo = scrollTo ?: topicEntry.scrollTo,
+                                    // Issue #200 — do NOT fall back to topicEntry.scrollTo here.
+                                    // A topic opened from Flags / deep link / search may already carry
+                                    // a `scrollTo` (the post the user was originally jumping to). After
+                                    // a plain reply, the parser returns scrollTo=null because HFR anchors
+                                    // `#bas` — if we re-use the previous scrollTo, the topic screen scrolls
+                                    // back to that old post and never to the freshly-published reply, and
+                                    // the `ScrollToEndOfPage` fallback in `TopicViewModel.maybeEmitScroll`
+                                    // is silently suppressed (it gates on `target == null`).
+                                    scrollTo = scrollTo,
                                     submitSignal = System.currentTimeMillis(),
                                 ),
                             )

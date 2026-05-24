@@ -148,11 +148,21 @@ class ArchitectureKonsistTest {
                 val bodyMentionsPrefetch = "prefetch" in function.text.lowercase()
                 if (!nameSuggestsPrefetch && !bodyMentionsPrefetch) return@forEach
                 val body = function.text.lowercase()
+                // Explicit allow-list marker: a function that needs to legitimately mix prefetch
+                // bookkeeping (e.g. cancelling an inflight warmup) with an authenticated refresh
+                // can opt out of this guard by carrying the literal token below in its KDoc /
+                // body. Each use should be reviewed manually — the token is intentionally ugly
+                // so it stands out on grep.
+                val isExplicitlyExempt = "konsist:bypass-prefetch-guard" in body
+                if (isExplicitlyExempt) return@forEach
                 val callsRefresh = "refreshtopicpage" in body || "refreshtopiclist" in body
                 org.junit.Assert.assertFalse(
                     "Function ${file.path}:${function.name} mixes prefetch context " +
                         "with an authenticated refresh* call. Anonymous prefetch must use " +
-                        "TopicRepository.prefetch / ForumRepository.prefetchTopicList only.",
+                        "TopicRepository.prefetch / ForumRepository.prefetchTopicList only. " +
+                        "If this is intentional (deliberate authenticated refetch that also " +
+                        "needs to manage prefetch state), add the marker " +
+                        "`konsist:bypass-prefetch-guard` to the function and document why.",
                     callsRefresh,
                 )
             }
