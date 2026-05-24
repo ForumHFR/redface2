@@ -63,6 +63,7 @@ import fr.forumhfr.redface2.core.model.search.SearchTopicResult
 fun SearchScreen(
     onOpenTopic: (SearchTopicResult) -> Unit,
     modifier: Modifier = Modifier,
+    topBarActions: @Composable (() -> Unit)? = null,
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -71,6 +72,7 @@ fun SearchScreen(
         onIntent = viewModel::submit,
         onOpenTopic = onOpenTopic,
         modifier = modifier,
+        topBarActions = topBarActions,
     )
 }
 
@@ -80,6 +82,7 @@ internal fun SearchContent(
     onIntent: (SearchIntent) -> Unit,
     onOpenTopic: (SearchTopicResult) -> Unit,
     modifier: Modifier = Modifier,
+    topBarActions: @Composable (() -> Unit)? = null,
 ) {
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -93,11 +96,18 @@ internal fun SearchContent(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = stringResource(R.string.search_title),
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = stringResource(R.string.search_title),
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                topBarActions?.invoke()
+            }
             SearchField(
                 query = state.query,
                 isSubmitEnabled = !state.isLoading && state.query.isNotBlank(),

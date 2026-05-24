@@ -30,4 +30,17 @@
     <string name="bbcode_color_orange">Orange</string>
     <string name="bbcode_color_grey">Gris</string>
     <string name="bbcode_preview_empty">La prévisualisation s\'affiche ici dès que vous saisissez du texte.</string>
+
+    <!-- #198 Menu compte global — shared by every main screen via RedfaceAccountMenu. -->
+    <string name="account_menu_status_loading">Compte en cours de vérification…</string>
+    <string name="account_menu_status_anonymous">Anonyme</string>
+    <string name="account_menu_status_authenticated">Connecté en tant que %1$s</string>
+    <string name="account_menu_login">Se connecter</string>
+    <string name="account_menu_logout">Se déconnecter</string>
+    <string name="account_menu_settings">Paramètres alpha</string>
+    <string name="account_menu_diagnostics">Diagnostics alpha</string>
+    <string name="account_menu_report_content">Signaler un contenu</string>
+    <string name="account_menu_version_footer">Redface 2 — v%1$s (build %2$d)</string>
+    <string name="account_menu_no_email_client">Aucune application e-mail trouvée pour envoyer le signalement.</string>
+    <string name="account_menu_report_email_subject">Signalement Redface 2 alpha</string>
 </resources>

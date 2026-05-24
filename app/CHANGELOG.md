@@ -17,6 +17,20 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
+Phase 2 finish UI polish (#198 / #199 / #201 / #202).
+
+### Added
+- Menu compte global accessible depuis Drapeaux, Forum, Recherche et Messages : avatar / login-logout / paramètres alpha / diagnostics / signalement / version. Sortie unique de l'onglet `Messages` qui devient un placeholder Phase 3 sobre (#198).
+- Avatars des auteurs HFR dans chaque post du topic (carré à coins arrondis, placeholder initiale quand l'URL est nulle / erreur, partagé via `:core:ui/RedfaceUserAvatar`) (#201).
+
+### Changed
+- Drapeaux : refresh manuel déplacé dans le header compact (`TextButton` à côté du menu compte) au lieu d'un bouton pleine largeur en fin de liste. Toggle « cyans déjà lus » passé en `FilterChip` Material 3 sous le tab row CYAN (#199).
+- Citations : `QuoteBlock` et `CollapsedQuoteBlock` gagnent une bordure verticale d'accent (4dp) sur le `surfaceContainerHighest` existant ; la couleur alterne `primary` / `tertiary` selon la profondeur d'imbrication pour rester lisible sur les 3 thèmes (clair / sombre / AMOLED). La règle `MAX_VISIBLE_QUOTE_DEPTH = 3` et le collapse au-delà sont préservés (#202).
+
+### Removed
+- `MessagesViewModel` + son test (logique compte/logout déplacée dans `AppAccountViewModel` côté `:app`).
+- Strings devenues mortes dans `:feature:messages` : `messages_section_account`, `messages_auth_loading`, `messages_anonymous_intro`, `messages_login_cta`, `messages_logged_in_as`, `messages_logout_cta`, `messages_section_alpha_tools`, `messages_app_version_footer`, `messages_diagnostics_cta`, `messages_settings_cta`, `messages_report_content_cta`, `messages_report_email_subject`, `messages_report_no_email_client`. Les versions globales équivalentes vivent dans `:core:ui/account_menu_*`.
+
 ---
 
 ## v58 — `0.3.18` — 2026-05-24

@@ -1,7 +1,10 @@
 package fr.forumhfr.redface2.navigation
 
+import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -12,10 +15,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.core.net.toUri
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
@@ -26,6 +33,7 @@ import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.account.RedfaceAccountMenu
 import fr.forumhfr.redface2.feature.auth.LoginScreen
 import fr.forumhfr.redface2.feature.editor.PostEditorMode
 import fr.forumhfr.redface2.feature.editor.PostEditorRequest
@@ -181,6 +189,15 @@ fun RedfaceApp(intent: Intent?) {
             )
         }
 
+        // Issue #198 — global account menu hoisted out of `Messages` and re-injected into
+        // every main screen as a trailing top-bar slot. Single ViewModel instance shared by
+        // every tab (Hilt hands back the same scoped instance for an identical owner).
+        val accountViewModel: AppAccountViewModel = hiltViewModel()
+        val authState by accountViewModel.authState.collectAsStateWithLifecycle()
+        val reportEmailSubject = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_report_email_subject)
+        val reportNoEmailClient = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_no_email_client)
+        val context = LocalContext.current
+
         NavigationSuiteScaffold(
             navigationSuiteItems = {
                 TopLevelDestination.entries.forEach { destination ->
@@ -195,16 +212,57 @@ fun RedfaceApp(intent: Intent?) {
         ) {
             Surface(modifier = Modifier.padding(horizontal = 8.dp)) {
                 val activeBackStack = backStacks.getValue(currentDestination)
-                RedfaceNavHost(backStack = activeBackStack)
+                val accountMenu: @Composable () -> Unit = {
+                    RedfaceAccountMenu(
+                        authState = authState,
+                        versionName = BuildConfig.VERSION_NAME,
+                        versionCode = BuildConfig.VERSION_CODE,
+                        onLogin = { activeBackStack.add(LoginRoute) },
+                        onLogout = accountViewModel::logout,
+                        onOpenSettings = { activeBackStack.add(SettingsRoute) },
+                        onOpenDiagnostics = { activeBackStack.add(DiagnosticsRoute) },
+                        onReportContent = {
+                            startReportEmail(context, reportEmailSubject, reportNoEmailClient)
+                        },
+                    )
+                }
+                RedfaceNavHost(backStack = activeBackStack, accountMenu = accountMenu)
             }
         }
     }
 }
 
+/**
+ * Issue #198 — fires the « Signaler un contenu » mailto intent. Falls back to a Toast when no
+ * mail client is installed (rooted devices, emulators). Subject string lives in `:core:ui` so
+ * `:feature:messages` no longer owns the global "report content" affordance.
+ */
+private fun startReportEmail(
+    context: Context,
+    subject: String,
+    noEmailClientMessage: String,
+) {
+    val intent = Intent(Intent.ACTION_SENDTO).apply {
+        data = "mailto:$REPORT_EMAIL".toUri()
+        putExtra(Intent.EXTRA_EMAIL, arrayOf(REPORT_EMAIL))
+        putExtra(Intent.EXTRA_SUBJECT, subject)
+    }
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, noEmailClientMessage, Toast.LENGTH_LONG).show()
+    }
+}
+
+private const val REPORT_EMAIL: String = "xat@azora.fr"
+
 @Composable
 @Suppress("CyclomaticComplexMethod") // One entry per top-level route + per-screen navigation callbacks ;
 // splitting the host would just push the same `when` shape one level deeper without reducing complexity.
-private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
+private fun RedfaceNavHost(
+    backStack: NavBackStack<NavKey>,
+    accountMenu: @Composable () -> Unit,
+) {
     NavDisplay(
         backStack = backStack,
         onBack = {
@@ -241,6 +299,7 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     onLoginRequested = {
                         backStack.add(LoginRoute)
                     },
+                    topBarActions = accountMenu,
                 )
             }
             entry<DiagnosticsRoute> {
@@ -273,6 +332,7 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                     onOpenCategory = { category ->
                         backStack.add(CategoryRoute(cat = category.id, subcat = null, page = 1))
                     },
+                    topBarActions = accountMenu,
                 )
             }
             entry<SearchRoute> {
@@ -289,16 +349,11 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                             ),
                         )
                     },
+                    topBarActions = accountMenu,
                 )
             }
             entry<MessagesRoute> {
-                MessagesScreen(
-                    versionName = BuildConfig.VERSION_NAME,
-                    versionCode = BuildConfig.VERSION_CODE,
-                    onLoginRequested = { backStack.add(LoginRoute) },
-                    onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
-                    onOpenSettings = { backStack.add(SettingsRoute) },
-                )
+                MessagesScreen(topBarActions = accountMenu)
             }
             entry<SettingsRoute> {
                 SettingsScreen()

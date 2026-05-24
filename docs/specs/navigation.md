@@ -152,6 +152,19 @@ Formulaire complet :
 - **Sondage** (optionnel) : question + options + choix multiple oui/non
 - **Preview** : avant-première du rendu du BBCode
 
+### Menu compte global
+
+Issue #198 — chaque écran principal (Drapeaux, Forum, Recherche, Messages) accepte un slot `topBarActions: @Composable (() -> Unit)? = null` dans son header. Le navigation host (`RedfaceApp` dans `app/.../RedfaceNavigation.kt`) instancie une seule `AppAccountViewModel` partagée et y branche un composant `RedfaceAccountMenu` (vivant dans `:core:ui/account/`) qui surface :
+
+- état compte (« Anonyme » / « Connecté en tant que X » / « Compte en cours de vérification… » pendant le warmup DataStore) ;
+- action `Se connecter` ou `Se déconnecter` selon `AuthState` ;
+- `Paramètres alpha`, `Diagnostics alpha`, `Signaler un contenu` (mailto `xat@azora.fr`) ;
+- footer version `v{name} (build {code})`.
+
+Le badge est un carré à coins arrondis (8dp), **pas un cercle**, cohérent avec [`RedfaceUserAvatar`]({{ site.baseurl }}/specs/models#post). L'anti-flicker auth est préservé : tant que `authState == null`, le badge montre `…` plutôt que `?` pour ne pas surfacer transitoirement un état « Anonyme ». La déconnexion vide d'abord `FlagRepository.clearSessionCache()` avant `AuthRepository.logout()` (même contrat que `FlagsViewModel.logout` avant le hoist).
+
+L'onglet `Messages` redevient un placeholder sobre « Les MPs arriveront en Phase 3 » jusqu'à l'arrivée du vrai écran inbox.
+
 ### Messages
 
 Deux onglets :

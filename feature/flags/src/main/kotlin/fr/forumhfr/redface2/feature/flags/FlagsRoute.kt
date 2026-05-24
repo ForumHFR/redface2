@@ -16,10 +16,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -43,19 +43,23 @@ import fr.forumhfr.redface2.core.ui.FlagItemDivider
 /**
  * Home tab entry point.
  *
- * Phase 1 polish (#154):
- * - The alpha footer no longer lives here. The account affordances (pseudo, logout)
- *   and the alpha tools (Diagnostics, content report, version) moved to the Messages
- *   tab where they sit until Phase 3 lands real MPs. The legacy « MPs non lus »
- *   counter was dropped along the way — it will come back through `MessagesViewModel`
- *   once real MPs ship, not as a transient footer pin.
- * - The CYAN tab hides `hasUnread = false` rows by default and exposes a switch to
- *   bring them back — controlled by [FlagsViewModel.showReadParticipatedTopics].
+ * Phase 2 finish UI polish (#198 / #199):
+ * - The "compte / outils alpha" footer that lived in [feature/messages] now sits in a
+ *   global account menu surfaced via [topBarActions] in the header row. Each main screen
+ *   accepts the same slot so the affordance is consistent across Drapeaux, Forum,
+ *   Recherche and Messages.
+ * - The CYAN « Afficher les drapeaux cyans déjà lus » toggle is now a compact `FilterChip`
+ *   under the tab row (only on CYAN), freeing vertical space for the list.
+ * - The « Actualiser » button is no longer a permanent full-width button at the end of
+ *   the success state — it lives in the header as a compact text button. The error state
+ *   still surfaces a `Retry` affordance because it's a recovery action, not a permanent
+ *   secondary control.
  */
 @Composable
 fun FlagsRoute(
     onOpenFlag: (Flag) -> Unit,
     onLoginRequested: () -> Unit,
+    topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel: FlagsViewModel = hiltViewModel()
     val authState by viewModel.authState.collectAsStateWithLifecycle()
@@ -73,11 +77,10 @@ fun FlagsRoute(
                 .statusBarsPadding()
                 .navigationBarsPadding(),
         ) {
-            Text(
-                text = stringResource(R.string.flags_title),
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+            FlagsHeader(
+                onRefresh = viewModel::refresh,
+                refreshEnabled = authState is AuthState.Authenticated,
+                topBarActions = topBarActions,
             )
 
             // Render nothing while authState is null (cookie jar warming up). Same
@@ -100,6 +103,41 @@ fun FlagsRoute(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun FlagsHeader(
+    onRefresh: () -> Unit,
+    refreshEnabled: Boolean,
+    topBarActions: @Composable (() -> Unit)?,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = stringResource(R.string.flags_title),
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (refreshEnabled) {
+                // Compact text button — replaces the legacy full-width "Actualiser" at the
+                // end of the list in success state. Refresh stays discoverable but no
+                // longer eats a row of vertical space (#199).
+                TextButton(onClick = onRefresh) {
+                    Text(stringResource(R.string.flags_refresh))
+                }
+            }
+            topBarActions?.invoke()
         }
     }
 }
@@ -151,10 +189,22 @@ private fun ColumnScope.AuthenticatedBody(
     }
 
     if (selectedTab == FlagType.CYAN) {
-        ShowReadParticipatedToggle(
-            checked = showReadParticipated,
-            onCheckedChange = actions.onToggleShowReadParticipated,
-        )
+        // #199 — compact FilterChip under the tab row, only on the CYAN tab where the
+        // « stale read participated » polluation is meaningful. RED and FAVORITE do not
+        // need the toggle (cf. FlagsViewModel `filterReadParticipatedIfNeeded` KDoc).
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FilterChip(
+                selected = showReadParticipated,
+                onClick = { actions.onToggleShowReadParticipated(!showReadParticipated) },
+                label = { Text(stringResource(R.string.flags_show_read_participated_chip)) },
+            )
+        }
     }
 
     when (val current = flagsState) {
@@ -193,12 +243,6 @@ private fun ColumnScope.AuthenticatedBody(
         }
 
         is FlagsResult.Success -> {
-            TextButton(
-                onClick = actions.onRefresh,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.flags_refresh))
-            }
             if (current.flags.isEmpty()) {
                 Text(
                     text = stringResource(R.string.flags_empty),
@@ -245,28 +289,6 @@ private data class AuthenticatedActions(
     val onLoginRequested: () -> Unit,
     val onToggleShowReadParticipated: (Boolean) -> Unit,
 )
-
-@Composable
-private fun ShowReadParticipatedToggle(
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            text = stringResource(R.string.flags_show_read_participated_toggle),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(end = 12.dp),
-        )
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
-}
 
 @Composable
 private fun flagMetadata(flag: Flag): String =

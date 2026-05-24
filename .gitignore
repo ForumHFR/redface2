@@ -1,6 +1,10 @@
 .codex
 tmp/
 scripts/phase-minus-1-dashboard.sh
+# Archived prompt drafts (mergées / fermées) — gardés localement pour référence
+# historique mais hors versionnement. Les drafts actifs au top-level de drafts/
+# restent visibles dans `git status` pour rappel.
+drafts/ARCHIVED/
 .gradle/
 .gradle-user/
 .gradle-tmp/

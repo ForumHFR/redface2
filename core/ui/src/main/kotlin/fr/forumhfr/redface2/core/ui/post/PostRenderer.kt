@@ -6,12 +6,17 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
@@ -45,6 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
@@ -134,20 +140,104 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
 @Composable
 private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
     if (isCollapsedQuoteDepth(quoteDepth)) {
-        CollapsedQuoteBlock(block)
+        CollapsedQuoteBlock(block, quoteDepth)
         return
     }
+    QuoteFrame(quoteDepth = quoteDepth) {
+        block.author?.let { author ->
+            Text(
+                text = stringResource(R.string.post_quote_author, author),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        PostBlocksRenderer(
+            blocks = block.content.blocks,
+            quoteDepth = quoteDepth + 1,
+        )
+    }
+}
+
+/**
+ * Issue #202 — quote container with a thick left accent bar so citations are immediately
+ * distinguishable from post content even on AMOLED, where `surface` (`#000000`) and
+ * `surfaceContainerHighest` (`#1B1616`) are visually indistinguishable. The bar uses the
+ * theme `primary` / `tertiary` accent (alternating by depth) so nested quotes keep a
+ * subtle hierarchy without redefining `quoteDepth` semantics — the existing N=3 collapse
+ * rule still applies above this layer (cf. `isCollapsedQuoteDepth`).
+ */
+@Composable
+private fun QuoteFrame(
+    quoteDepth: Int,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val accent = if (quoteDepth % 2 == 0) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.tertiary
+    }
     Card(
+        modifier = modifier,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
         ),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            Box(
+                modifier = Modifier
+                    .width(QUOTE_ACCENT_WIDTH)
+                    .fillMaxHeight()
+                    .background(accent),
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                content = content,
+            )
+        }
+    }
+}
+
+private val QUOTE_ACCENT_WIDTH: Dp = 4.dp
+
+@Composable
+private fun CollapsedQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
+    // Issue #3 mandates the masked tail beyond N=3 nested quotes stays *collapsible* — the user
+    // must be able to ask for the deeper sub-tree on demand. We reset quoteDepth to 0 once
+    // revealed so the user gets another N levels before the next collapse, instead of an
+    // unbounded recursion that would defeat the depth guard entirely.
+    var revealed by rememberSaveable(block) { mutableStateOf(false) }
+    QuoteFrame(
+        quoteDepth = quoteDepth,
+        modifier = Modifier.clickable { revealed = !revealed },
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            Text(
+                text = if (revealed) {
+                    stringResource(R.string.post_quote_collapsed_revealed)
+                } else {
+                    stringResource(R.string.post_quote_collapsed)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = if (revealed) {
+                    stringResource(R.string.post_quote_hide)
+                } else {
+                    stringResource(R.string.post_quote_show)
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (revealed) {
             block.author?.let { author ->
                 Text(
                     text = stringResource(R.string.post_quote_author, author),
@@ -157,67 +247,8 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
             }
             PostBlocksRenderer(
                 blocks = block.content.blocks,
-                quoteDepth = quoteDepth + 1,
+                quoteDepth = 0,
             )
-        }
-    }
-}
-
-@Composable
-private fun CollapsedQuoteBlock(block: PostBlock.Quote) {
-    // Issue #3 mandates the masked tail beyond N=3 nested quotes stays *collapsible* — the user
-    // must be able to ask for the deeper sub-tree on demand. We reset quoteDepth to 0 once
-    // revealed so the user gets another N levels before the next collapse, instead of an
-    // unbounded recursion that would defeat the depth guard entirely.
-    var revealed by rememberSaveable(block) { mutableStateOf(false) }
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        ),
-        modifier = Modifier.clickable { revealed = !revealed },
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = if (revealed) {
-                        stringResource(R.string.post_quote_collapsed_revealed)
-                    } else {
-                        stringResource(R.string.post_quote_collapsed)
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = if (revealed) {
-                        stringResource(R.string.post_quote_hide)
-                    } else {
-                        stringResource(R.string.post_quote_show)
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            if (revealed) {
-                block.author?.let { author ->
-                    Text(
-                        text = stringResource(R.string.post_quote_author, author),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                PostBlocksRenderer(
-                    blocks = block.content.blocks,
-                    quoteDepth = 0,
-                )
-            }
         }
     }
 }
