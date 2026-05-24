@@ -105,36 +105,12 @@ class FlagsViewModelTest {
         assertEquals(listOf(FlagType.FAVORITE), flags.refreshCalls)
     }
 
-    @Test
-    fun `logout clears the private flags cache before resetting auth state`() = runTest {
-        // Same invariant as MessagesViewModelTest: clearSessionCache() must fire BEFORE
-        // authRepository.logout() resets the cookie state. The fake AuthRepository
-        // captures the flag-cache clear count at the moment its logout() runs, so a
-        // future refactor that inverts the calls would leave cacheClearsObservedBeforeLogout
-        // at the pre-logout baseline and fail this test.
-        //
-        // Note: the eager subscription to `flagsState` triggers
-        // `clearFlagsCacheIfSessionChanged` on the first Authenticated emission, so the
-        // cache is already at 1 before the test runs `logout()`. After the logout flips
-        // AuthState → Anonymous, the same observer fires again from the Anonymous branch
-        // (another clear). We therefore assert ordering via the snapshot captured *inside*
-        // AuthRepository.logout(), not via a strict equality on the final count.
-        val flags = FakeFlagRepository()
-        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags)
-
-        val clearsBeforeLogout = flags.clearSessionCacheCallCount
-
-        vm.logout()
-
-        assertTrue(auth.logoutCalled)
-        val observed = auth.cacheClearsObservedBeforeLogout
-        assertTrue(
-            "logout must call clearSessionCache() before AuthRepository.logout() — " +
-                "saw $clearsBeforeLogout clears pre-logout, $observed snapshot at logout",
-            observed > clearsBeforeLogout,
-        )
-    }
+    // Round-2 review (PR #207): the `logout clears the private flags cache before resetting
+    // auth state` test moved to `AppAccountViewModelTest`. `FlagsViewModel.logout()` is gone —
+    // the global account menu (#198) now drives the logout from `AppAccountViewModel` which
+    // owns the canonical `clearSessionCache → authRepository.logout` ordering. The fakes
+    // below are kept because the rest of the suite still exercises auth-state transitions
+    // through `clearFlagsCacheIfSessionChanged`.
 
     @Test
     fun `flagsState propagates SessionExpiredException cause to drive the reconnect CTA`() = runTest {

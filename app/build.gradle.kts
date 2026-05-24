@@ -121,6 +121,7 @@ dependencies {
     implementation(libs.coil.network.okhttp)
 
     testImplementation(libs.junit4)
+    testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockk)
     testImplementation(libs.konsist)
     testImplementation(libs.robolectric)

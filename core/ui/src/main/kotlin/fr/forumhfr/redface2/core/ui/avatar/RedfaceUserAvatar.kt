@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -53,11 +54,14 @@ fun RedfaceUserAvatar(
         return
     }
 
+    // Round-2 review (PR #207): set `contentDescription = author` so TalkBack announces "avatar
+    // de <pseudo>" instead of "image" + a separate pseudo Text below — the two were unlinked
+    // in the semantic tree and produced a noisy double announcement.
     SubcomposeAsyncImage(
         model = ImageRequest.Builder(LocalPlatformContext.current)
             .data(avatarUrl)
             .build(),
-        contentDescription = null,
+        contentDescription = author,
         modifier = modifier
             .size(size)
             .clip(shape),
@@ -88,6 +92,11 @@ private fun AvatarPlaceholder(
                 text = initial,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
+                // Round-2 review (PR #207): the initial is a decorative fallback when no avatar
+                // image is available. Stripping its semantics avoids TalkBack reading it twice —
+                // once as the SubcomposeAsyncImage `contentDescription` (which we set to the
+                // author pseudo) and once as a standalone `Text` node.
+                modifier = Modifier.clearAndSetSemantics {},
             )
         }
     }

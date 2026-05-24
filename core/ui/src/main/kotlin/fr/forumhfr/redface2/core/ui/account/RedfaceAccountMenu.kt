@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.core.ui.account
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -23,6 +22,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.AuthState
@@ -142,14 +143,22 @@ private fun AccountBadge(
         is AuthState.Authenticated -> MaterialTheme.colorScheme.onPrimaryContainer
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
+    val accessibilityLabel = stringResource(R.string.account_menu_open_description)
 
+    // Round-2 review (PR #207): migrated from `Surface(modifier = ...clickable(onClick))` to the
+    // Material 3 `Surface(onClick = ...)` overload, which (1) clips the ripple to the rounded
+    // shape (the previous form rippled a square inside our 8dp rounded corners), (2) injects
+    // `Role.Button` for TalkBack so the badge announces as a button rather than a generic
+    // "Surface", (3) participates in `LocalMinimumInteractiveComponentSize` so the touch
+    // target is enforced to 48dp even if the visual badge stays at the requested 40dp.
     Surface(
+        onClick = onClick,
         shape = RoundedCornerShape(BADGE_CORNER_RADIUS),
         color = containerColor,
         contentColor = contentColor,
         modifier = Modifier
             .size(BADGE_SIZE)
-            .clickable(onClick = onClick),
+            .semantics { contentDescription = accessibilityLabel },
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
@@ -183,6 +192,9 @@ private fun AccountStatusHeader(authState: AuthState?) {
     }
 }
 
-private val BADGE_SIZE = 36.dp
+// 40dp visual size — Material 3's `Surface(onClick = ...)` automatically pads the interactive
+// region up to `LocalMinimumInteractiveComponentSize` (48dp) so the touch target meets the
+// WCAG 2.5.5 / Material 3 spec without bloating the visual badge.
+private val BADGE_SIZE = 40.dp
 private val BADGE_CORNER_RADIUS = 8.dp
 private val HEADER_PADDING = PaddingValues(horizontal = 16.dp, vertical = 8.dp)

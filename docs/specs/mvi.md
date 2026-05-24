@@ -142,7 +142,7 @@ class FlagsViewModel @Inject constructor(
 }
 ```
 
-> **Polish #154** — `MessagesRepository` n'est plus injectée dans `FlagsViewModel` : l'ancien `unreadMpCount` était surfacé dans le footer Drapeaux mais ce footer (pseudo, logout, version, signalement, Diagnostics) a été déplacé sur `MessagesScreen` en attendant Phase 3. Le compteur MP reviendra à côté de la liste réelle des MPs, pas en tant qu'overlay temporaire sur Drapeaux.
+> **Polish #154 → #198** — `MessagesRepository` n'est plus injectée dans `FlagsViewModel` : l'ancien `unreadMpCount` était surfacé dans le footer Drapeaux mais ce footer (pseudo, logout, version, signalement, Diagnostics) est passé par `MessagesScreen` (#154) avant d'être hoisté en Phase 2 finish (#198) dans le menu compte global (`RedfaceAccountMenu`, alimenté par `AppAccountViewModel`) accessible depuis chaque écran principal. Le compteur MP reviendra à côté de la liste réelle des MPs, pas en tant qu'overlay temporaire.
 
 `FlagRepository` est livrée comme un contrat à deux verbes (cf. `core/domain/.../FlagRepository.kt`) :
 
@@ -174,7 +174,7 @@ Quand cette extension arrive, `FlagsState` agrégé peut redevenir préférable 
 
 ### Screen (Compose) — forme livrée
 
-`feature/flags/src/main/kotlin/.../FlagsRoute.kt` est l'entrée stateful (récupère `FlagsViewModel` via `hiltViewModel()`, collecte ses `StateFlow` via `collectAsStateWithLifecycle()`). Depuis le polish #154, `FlagsRoute` se concentre sur la liste : 3 onglets, toggle « afficher les sujets participés déjà lus » (CYAN uniquement), bouton Actualiser, branche login si anonyme, branche reconnect si `SessionExpiredException`. Pas de footer alpha — les actions compte (pseudo / logout) et outils (Diagnostics, signalement, version) vivent sur `MessagesScreen` jusqu'à Phase 3. Le découpage `<Name>Screen` / `<Name>Content` reste l'objectif quand la complexité justifie le coût (filtre, tri, undo) — cf. cible Phase 2.
+`feature/flags/src/main/kotlin/.../FlagsRoute.kt` est l'entrée stateful (récupère `FlagsViewModel` via `hiltViewModel()`, collecte ses `StateFlow` via `collectAsStateWithLifecycle()`). Depuis le polish #154, `FlagsRoute` se concentre sur la liste : 3 onglets, toggle « afficher les sujets participés déjà lus » (CYAN uniquement), bouton Actualiser, branche login si anonyme, branche reconnect si `SessionExpiredException`. Pas de footer alpha — les actions compte (pseudo / logout) et outils (Diagnostics, signalement, version) vivent depuis #198 dans le menu compte global injecté via `topBarActions: @Composable (() -> Unit)? = null`. Le découpage `<Name>Screen` / `<Name>Content` reste l'objectif quand la complexité justifie le coût (filtre, tri, undo) — cf. cible Phase 2.
 
 ---
 

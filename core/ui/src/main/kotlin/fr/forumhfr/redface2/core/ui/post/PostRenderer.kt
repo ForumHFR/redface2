@@ -7,13 +7,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -183,19 +180,27 @@ private fun QuoteFrame(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
         ),
     ) {
-        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            Box(
-                modifier = Modifier
-                    .width(QUOTE_ACCENT_WIDTH)
-                    .fillMaxHeight()
-                    .background(accent),
-            )
+        // Round-2 review (PR #207): the initial implementation used
+        // `Row(height = IntrinsicSize.Min)` + `Box.fillMaxHeight()` for the accent bar. That
+        // pattern crashes when the quote content contains a `SubcomposeAsyncImage`
+        // (PostBlock.Image dispatch) — `SubcomposeLayout` does not support intrinsic
+        // measurement and Compose throws `IllegalStateException: "Asking for intrinsic
+        // measurements of SubcomposeLayout"` at runtime. We use a `Box` overlay instead:
+        // the Column drives the height, and `matchParentSize()` on the accent reads the
+        // box's measured height without going through intrinsics.
+        Box(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp),
+                    .padding(start = QUOTE_ACCENT_WIDTH + 8.dp, top = 12.dp, end = 12.dp, bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 content = content,
+            )
+            Box(
+                modifier = Modifier
+                    .width(QUOTE_ACCENT_WIDTH)
+                    .matchParentSize()
+                    .background(accent),
             )
         }
     }

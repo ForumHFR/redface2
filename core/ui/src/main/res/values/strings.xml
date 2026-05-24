@@ -42,5 +42,10 @@
     <string name="account_menu_report_content">Signaler un contenu</string>
     <string name="account_menu_version_footer">Redface 2 — v%1$s (build %2$d)</string>
     <string name="account_menu_no_email_client">Aucune application e-mail trouvée pour envoyer le signalement.</string>
-    <string name="account_menu_report_email_subject">Signalement Redface 2 alpha</string>
+    <!-- Conservé sur "Redface 2 — Signalement" pour ne pas casser la continuité de l'ancien sujet
+         `messages_report_email_subject` côté boîte mail destinataire (cf. prompt phase-2-finish-ui-polish §1). -->
+    <string name="account_menu_report_email_subject">Redface 2 — Signalement</string>
+    <!-- TalkBack contentDescription for the account badge — exposes the badge as a button labelled
+         « Ouvrir le menu compte » so a11y users hear an action rather than the raw `…` / `?` / initial. -->
+    <string name="account_menu_open_description">Ouvrir le menu compte</string>
 </resources>
