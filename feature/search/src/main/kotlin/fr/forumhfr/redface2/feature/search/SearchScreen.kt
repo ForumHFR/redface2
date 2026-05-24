@@ -12,9 +12,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -211,17 +213,25 @@ private fun PivotChips(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Row(
+        // #188: long HFR category labels can otherwise wrap into unreadable vertical chips
+        // on narrow screens. Keep the pivot rail horizontal and each chip single-line.
+        LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 40.dp)
-                .horizontalScroll(rememberScrollState()),
+                .heightIn(min = 40.dp),
         ) {
-            pivot.forEach { entry ->
+            items(items = pivot, key = { it.id }) { entry ->
                 AssistChip(
                     onClick = { onSelect(entry) },
-                    label = { Text(entry.label) },
+                    label = {
+                        Text(
+                            text = entry.label,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    modifier = Modifier.sizeIn(maxWidth = 220.dp),
                     colors = if (entry.id == selected?.id) {
                         AssistChipDefaults.assistChipColors(
                             containerColor = MaterialTheme.colorScheme.secondaryContainer,

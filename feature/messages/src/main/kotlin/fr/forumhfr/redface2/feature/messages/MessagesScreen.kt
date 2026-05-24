@@ -47,6 +47,7 @@ fun MessagesScreen(
     versionCode: Int,
     onLoginRequested: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val viewModel: MessagesViewModel = hiltViewModel()
     val authState by viewModel.authState.collectAsStateWithLifecycle()
@@ -93,6 +94,7 @@ fun MessagesScreen(
             AlphaToolsBlock(
                 versionLabel = versionLabel,
                 onOpenDiagnostics = onOpenDiagnostics,
+                onOpenSettings = onOpenSettings,
                 onReportContent = {
                     val intent = Intent(Intent.ACTION_SENDTO).apply {
                         data = "mailto:$REPORT_EMAIL".toUri()
@@ -164,6 +166,7 @@ private fun AccountBlock(
 private fun AlphaToolsBlock(
     versionLabel: String,
     onOpenDiagnostics: () -> Unit,
+    onOpenSettings: () -> Unit,
     onReportContent: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -174,6 +177,9 @@ private fun AlphaToolsBlock(
         )
         TextButton(onClick = onOpenDiagnostics, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.messages_diagnostics_cta))
+        }
+        TextButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+            Text(stringResource(R.string.messages_settings_cta))
         }
         TextButton(onClick = onReportContent, modifier = Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.messages_report_content_cta))

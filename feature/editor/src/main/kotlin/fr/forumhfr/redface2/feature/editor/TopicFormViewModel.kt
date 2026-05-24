@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.model.write.TopicForm
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.imageBbcodeTokenOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
@@ -117,6 +118,7 @@ class TopicFormViewModel @AssistedInject constructor(
             TopicFormIntent.SmileyPickerDismissed -> onSmileyPickerDismissed()
             is TopicFormIntent.SmileySearchQueryChanged -> onSmileySearchQueryChanged(intent.query)
             is TopicFormIntent.SmileySelected -> onSmileySelected(intent.token)
+            is TopicFormIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
         }
     }
 
@@ -219,6 +221,31 @@ class TopicFormViewModel @AssistedInject constructor(
                 withDraft
             }
             withPreview.copy(smileyPicker = SmileyPickerState.Hidden)
+        }
+    }
+
+    private fun onImageUrlInserted(url: String) {
+        val token = imageBbcodeTokenOrNull(url) ?: return
+        _state.update { current ->
+            val draft = current.draft
+            val selection = draft.selection
+            val outcome = insertBbcodeToken(
+                token = token,
+                text = draft.text,
+                selectionStart = selection.start,
+                selectionEnd = selection.end,
+                surroundWithSpaces = false,
+            )
+            val updatedDraft = TextFieldValue(
+                text = outcome.text,
+                selection = TextRange(outcome.selectionStart, outcome.selectionEnd),
+            )
+            val withDraft = current.withDraft(updatedDraft)
+            if (withDraft.isPreviewVisible) {
+                withDraft.copy(preview = previewParser.parsePreview(withDraft.draft.text))
+            } else {
+                withDraft
+            }
         }
     }
 

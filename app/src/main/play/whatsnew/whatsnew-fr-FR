@@ -1,11 +1,9 @@
-Alpha Redface 2 — recherche HFR étendue.
+Alpha Redface 2 v57 — hardening proxy.
 
-Nouveautés :
-- Recherche titres + contenu par défaut.
-- Scope : titres + messages, titres seuls, messages seuls.
-- Extrait HFR du message correspondant quand disponible.
-- Ouverture du post exact si HFR donne le numreponse.
-- Sélecteur horizontal de catégorie plus clair.
-- Changer le champ recherché conserve la catégorie.
+Correctifs :
+- Proxy limité aux domaines HFR : les images externes ne passent plus par le proxy utilisateur.
+- Bouton Enregistrer du proxy débloqué après échec.
+- Credentials proxy UTF-8 pour mots de passe accentués.
+- Dropdown sous-catégorie EditFP fiabilisé (M3).
 
 Bugs : alpha ou GitHub.

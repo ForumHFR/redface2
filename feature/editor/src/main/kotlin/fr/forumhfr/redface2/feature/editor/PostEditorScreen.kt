@@ -23,7 +23,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -75,6 +77,7 @@ private fun PostEditorContent(
     modifier: Modifier = Modifier,
 ) {
     val openSmileyPickerDescription = stringResource(R.string.editor_smiley_open_description)
+    var imageUrlDialogOpen by remember { mutableStateOf(false) }
     Surface(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
@@ -96,6 +99,7 @@ private fun PostEditorContent(
 
             BbcodeToolbar(
                 onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
+                onImageUrlRequested = { imageUrlDialogOpen = true },
             )
 
             // Phase 2F-B (#11) — quick access to the smiley picker. Lives next to the BBCode
@@ -205,6 +209,12 @@ private fun PostEditorContent(
                 onDismiss = { onIntent(PostEditorIntent.SmileyPickerDismissed) },
                 onQueryChange = { query -> onIntent(PostEditorIntent.SmileySearchQueryChanged(query)) },
                 onSmileyClicked = { token -> onIntent(PostEditorIntent.SmileySelected(token)) },
+            )
+        }
+        if (imageUrlDialogOpen) {
+            ImageUrlDialog(
+                onDismiss = { imageUrlDialogOpen = false },
+                onInsert = { url -> onIntent(PostEditorIntent.ImageUrlInserted(url)) },
             )
         }
     }

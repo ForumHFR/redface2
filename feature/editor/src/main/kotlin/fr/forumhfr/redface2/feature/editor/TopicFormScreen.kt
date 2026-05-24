@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,13 +12,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import android.widget.Toast
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -25,15 +26,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -51,7 +52,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
  *
  * Shared surface :
  * - Subject field (writable).
- * - Subcategory : read-only current label for EditFirstPost, dropdown for New.
+ * - Subcategory dropdown for both EditFirstPost and New.
  * - BBCode toolbar + draft field + optional preview.
  * - Per-post options (signature / smileys / email) identical to the post-level editor.
  * - Poll : if `state.pollPresent`, a sober note that mutation is not in this version.
@@ -118,6 +119,7 @@ internal fun TopicFormContent(
     modifier: Modifier = Modifier,
 ) {
     val openSmileyPickerDescription = stringResource(R.string.editor_smiley_open_description)
+    var imageUrlDialogOpen by remember { mutableStateOf(false) }
     Surface(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
@@ -144,32 +146,15 @@ internal fun TopicFormContent(
                 enabled = !state.isSubmitting,
                 label = { Text(stringResource(R.string.editor_topic_subject_label)) },
             )
-            // Subcategory : the New mode exposes a real dropdown picker because
-            // HFR ships no pre-selection and the wire submit rejects an empty
-            // `subcat=`. Edit FP keeps a read-only label : the current dropdown
-            // UX is intentionally deferred there (Phase 2D MVP only forwards
-            // whatever HFR pre-selected).
-            when (state.mode) {
-                TopicFormMode.New -> SubcategoryDropdown(
-                    choices = state.subcategoryChoices,
-                    selectedSubcat = state.selectedSubcat,
-                    enabled = !state.isSubmitting && !state.isLoadingForm,
-                    onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
-                )
-                TopicFormMode.EditFirstPost -> {
-                    val selectedChoice =
-                        state.subcategoryChoices.firstOrNull { it.id == state.selectedSubcat }
-                    if (selectedChoice != null) {
-                        Text(
-                            text = stringResource(R.string.editor_topic_subcat_current, selectedChoice.label),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
+            SubcategoryDropdown(
+                choices = state.subcategoryChoices,
+                selectedSubcat = state.selectedSubcat,
+                enabled = !state.isSubmitting && !state.isLoadingForm,
+                onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
+            )
             BbcodeToolbar(
                 onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
+                onImageUrlRequested = { imageUrlDialogOpen = true },
             )
             // Phase 2F-C (#11 partial) — quick access to the smiley picker. Same placement
             // and rationale as `PostEditorScreen` : smileys are point-insertions, not
@@ -253,6 +238,12 @@ internal fun TopicFormContent(
             }
         }
     }
+    if (imageUrlDialogOpen) {
+        ImageUrlDialog(
+            onDismiss = { imageUrlDialogOpen = false },
+            onInsert = { url -> onIntent(TopicFormIntent.ImageUrlInserted(url)) },
+        )
+    }
 }
 
 /**
@@ -261,10 +252,10 @@ internal fun TopicFormContent(
  * `subcat=""` and we don't want the user to see a choice that cannot be
  * submitted. Placeholder shown until the user picks something.
  *
- * Implemented as `OutlinedTextField + DropdownMenu` rather than
- * `ExposedDropdownMenuBox` to keep the dependency surface minimal and avoid
- * the experimental annotations that the box variant still requires.
+ * Implemented with Material 3 `ExposedDropdownMenuBox` so the read-only field
+ * remains reliably tappable and accessible in both New and EditFirstPost modes.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SubcategoryDropdown(
     choices: List<fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice>,
@@ -276,22 +267,25 @@ private fun SubcategoryDropdown(
     val placeholder = stringResource(R.string.editor_topic_subcat_picker_placeholder)
     val selectedLabel = pickable.firstOrNull { it.id == selectedSubcat }?.label ?: placeholder
     var expanded by remember { mutableStateOf(false) }
-    Box(modifier = Modifier.fillMaxWidth()) {
+    val menuEnabled = enabled && pickable.isNotEmpty()
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = menuEnabled && it },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         OutlinedTextField(
             value = selectedLabel,
             onValueChange = {},
             readOnly = true,
             enabled = enabled,
             label = { Text(stringResource(R.string.editor_topic_subcat_picker_label)) },
-            // Plain text caret instead of an Icons import : keeps the
-            // dependency surface minimal (`material-icons-extended` is not on
-            // this module's classpath) and works fine for a single chevron.
-            trailingIcon = { Text(text = "▾") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable(enabled = enabled) { expanded = true },
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = menuEnabled),
         )
-        DropdownMenu(
+        ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {
@@ -303,6 +297,7 @@ private fun SubcategoryDropdown(
                         expanded = false
                         onSelect(id)
                     },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
                 )
             }
         }

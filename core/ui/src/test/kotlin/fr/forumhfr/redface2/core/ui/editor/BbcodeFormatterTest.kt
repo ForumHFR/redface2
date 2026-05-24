@@ -299,4 +299,32 @@ class BbcodeFormatterTest {
         assertEquals(7, result.selectionStart)
         assertEquals(7, result.selectionEnd)
     }
+
+    // ----- Phase 2F-E (#189) : image URL helper -----------------------------
+
+    @Test
+    fun `image helper accepts http and https URLs`() {
+        assertEquals(
+            "[img]https://rehost.diberie.com/Picture/Get/r/511520[/img]",
+            imageBbcodeTokenOrNull(" https://rehost.diberie.com/Picture/Get/r/511520 "),
+        )
+        assertEquals(
+            "[img]http://example.com/a.gif[/img]",
+            imageBbcodeTokenOrNull("http://example.com/a.gif"),
+        )
+    }
+
+    @Test
+    fun `image helper rejects non-web schemes`() {
+        listOf(
+            "",
+            "javascript:alert(1)",
+            "file:///sdcard/pic.jpg",
+            "content://media/external/images/1",
+            "data:image/png;base64,abc",
+            "https:///missing-host.png",
+        ).forEach { candidate ->
+            assertEquals("expected <$candidate> to be rejected", null, imageBbcodeTokenOrNull(candidate))
+        }
+    }
 }

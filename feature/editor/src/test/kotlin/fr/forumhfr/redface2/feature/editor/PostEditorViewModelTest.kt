@@ -782,6 +782,39 @@ class PostEditorViewModelTest {
         }
     }
 
+    @Test
+    fun `ImageUrlInserted inserts img token at caret and refreshes visible preview`() = runTest {
+        val viewModel = newReplyViewModel()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("photo: ", TextRange(7))))
+        viewModel.submit(PostEditorIntent.TogglePreview)
+        viewModel.submit(PostEditorIntent.ImageUrlInserted(" https://rehost.diberie.com/Picture/Get/r/511520 "))
+
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            val expected = "photo: [img]https://rehost.diberie.com/Picture/Get/r/511520[/img]"
+            assertEquals(expected, state.draft.text)
+            assertEquals(expected.length, state.draft.selection.start)
+            assertEquals(previewParser.contentFor(expected), state.preview)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `ImageUrlInserted ignores unsafe schemes`() = runTest {
+        val viewModel = newReplyViewModel()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("photo: ", TextRange(7))))
+        viewModel.submit(PostEditorIntent.ImageUrlInserted("content://media/external/images/1"))
+
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            assertEquals("photo: ", state.draft.text)
+            assertEquals(7, state.draft.selection.start)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun newEditViewModel(
         subcat: Int? = SAMPLE_SUBCAT,
         numreponse: Int? = SAMPLE_EDITED_NUMREPONSE,

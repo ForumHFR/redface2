@@ -122,6 +122,9 @@ sealed interface TopicFormIntent {
     data object SmileyPickerDismissed : TopicFormIntent
     data class SmileySearchQueryChanged(val query: String) : TopicFormIntent
     data class SmileySelected(val token: String) : TopicFormIntent
+
+    /** Phase 2F-E (#189) — insert `[img]url[/img]` for a validated remote image URL. */
+    data class ImageUrlInserted(val url: String) : TopicFormIntent
 }
 
 /**

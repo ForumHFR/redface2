@@ -71,7 +71,7 @@ graph TB
 
 ## État du projet
 
-Phase courante : **Phase 1 — Core lecture** ([roadmap]({{ site.baseurl }}/specs/roadmap)). La Phase 0 (bootstrap : Gradle multi-modules, CI, thème Material 3, navigation, Hilt) est livrée. Le slice topic fixe + l'AST `PostContent` + le `PostRenderer` Compose sont en cours d'intégration via [#3](https://github.com/ForumHFR/redface2/issues/3) et la série de PRs [#78](https://github.com/ForumHFR/redface2/pull/78) / [#80](https://github.com/ForumHFR/redface2/pull/80).
+Phase courante : **Phase 2 — Écriture, close-out alpha** ([roadmap]({{ site.baseurl }}/specs/roadmap)). La Phase 1 (lecture : login, drapeaux, forum, topics, cache, deep links, recherche de base) est livrée ; la Phase 2 ferme les derniers flux d'écriture et de polish avant de basculer vers les MPs.
 
 Les specs restent la source de vérité du projet, mais elles doivent désormais refléter le code réel : tout écart entre une page canonique et le repo est traité comme un bug de spec, pas comme une dette future. Voir [`/spec-reality`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/spec-reality/SKILL.md) pour la procédure d'audit cross-fichier.
 
@@ -101,3 +101,4 @@ Les contributions sont les bienvenues : ouvrez une issue, commentez les existant
 - [Pourquoi Redface 2 ?]({{ site.baseurl }}/guides/rationale) — Le contexte et les doutes assumés
 - [Nommage]({{ site.baseurl }}/guides/naming) — Le futur nom de l'app
 - [Références écosystème HFR]({{ site.baseurl }}/guides/references) — Clients tiers, docs MesDiscussions, outillage compagnon
+- [Proxy utilisateur]({{ site.baseurl }}/guides/proxy) — Router le trafic HFR via un proxy configurable dans l'app

@@ -12,6 +12,7 @@
     <string name="messages_section_alpha_tools">Outils alpha</string>
     <string name="messages_app_version_footer">Redface 2 — v%1$s (build %2$d)</string>
     <string name="messages_diagnostics_cta">Diagnostics alpha</string>
+    <string name="messages_settings_cta">Paramètres alpha</string>
     <string name="messages_report_content_cta">Signaler un contenu</string>
     <string name="messages_report_email_subject">Redface 2 — Signalement</string>
     <string name="messages_report_no_email_client">Aucune application e-mail trouvée. Écrivez à xat@azora.fr.</string>

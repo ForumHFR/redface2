@@ -609,6 +609,44 @@ class TopicFormViewModelTest {
         assertEquals(SAMPLE_USER_ID, smileyRepository.lastUserId)
     }
 
+    @Test
+    fun `ImageUrlInserted works in topic-level forms and refreshes visible preview`() = runTest {
+        val viewModel = newViewModel()
+        viewModel.state.test {
+            awaitHydratedState()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("image: ", TextRange(7))))
+        viewModel.submit(TopicFormIntent.TogglePreview)
+        viewModel.submit(TopicFormIntent.ImageUrlInserted("https://example.com/pic.gif"))
+
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            val expected = "image: [img]https://example.com/pic.gif[/img]"
+            assertEquals(expected, state.draft.text)
+            assertEquals(expected.length, state.draft.selection.start)
+            val block = state.preview.blocks.single() as PostBlock.Paragraph
+            val inline = block.inlines.single() as PostInline.Text
+            assertEquals(expected, inline.value)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `ImageUrlInserted ignores invalid URLs in topic-level forms`() = runTest {
+        val viewModel = newViewModel()
+        viewModel.state.test {
+            awaitHydratedState()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("image: ", TextRange(7))))
+        viewModel.submit(TopicFormIntent.ImageUrlInserted("javascript:alert(1)"))
+
+        assertEquals("image: ", viewModel.state.value.draft.text)
+    }
+
     private fun newTopicViewModel(
         entrySubcat: Int?,
         diagnostics: DiagnosticsLog = DiagnosticsLog(),

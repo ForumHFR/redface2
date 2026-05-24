@@ -25,7 +25,6 @@
     <string name="editor_option_smiley_disabled">Désactiver les smilies</string>
     <string name="editor_option_email_notification">Activer la notification par email du sujet</string>
     <string name="editor_topic_subject_label">Titre du sujet</string>
-    <string name="editor_topic_subcat_current">Sous-catégorie actuelle : %1$s</string>
     <string name="editor_topic_subcat_picker_label">Sous-catégorie</string>
     <string name="editor_topic_subcat_picker_placeholder">Choisir une sous-catégorie</string>
     <string name="editor_topic_poll_readonly_note">Ce sujet contient un sondage. Son édition n\'est pas encore disponible dans cette version ; vos réponses utilisateurs et options de vote restent inchangées.</string>
@@ -41,4 +40,10 @@
     <string name="editor_smiley_search_empty">Aucun smiley trouvé.</string>
     <string name="editor_smiley_search_error">Erreur réseau. Réessaie dans un instant.</string>
     <string name="editor_smiley_insert_description">Insérer %1$s</string>
+    <string name="editor_image_url_title">Insérer une image</string>
+    <string name="editor_image_url_label">URL de l’image</string>
+    <string name="editor_image_url_help">URL http:// ou https:// uniquement.</string>
+    <string name="editor_image_url_error">Seules les URL http:// et https:// sont acceptées.</string>
+    <string name="editor_image_url_insert">Insérer</string>
+    <string name="editor_image_url_cancel">Annuler</string>
 </resources>

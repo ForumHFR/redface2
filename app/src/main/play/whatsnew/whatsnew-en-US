@@ -1,11 +1,9 @@
-Redface 2 alpha — expanded HFR search.
+Redface 2 alpha v57 — proxy hardening.
 
-New:
-- Search titles and message content by default.
-- Scope: titles + messages, titles only, messages only.
-- Show HFR matching-message excerpts when available.
-- Open the exact post when HFR gives a reply id.
-- Clearer horizontal category selector.
-- Changing text scope keeps the selected category.
+Fixes:
+- Proxy scoped to HFR hosts: external images stay direct.
+- Proxy "Save" button no longer stuck on DataStore failure.
+- Proxy credentials encoded in UTF-8 (non-latin1 passwords).
+- EditFP subcategory dropdown reliability (M3).
 
 Report bugs via alpha or GitHub.

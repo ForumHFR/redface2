@@ -39,3 +39,4 @@ Les numéros `004` à `007` sont volontairement laissés libres pour des décisi
 | [ADR-009]({{ site.baseurl }}/adr/009-okhttp-5-3-plus) | OkHttp 5.3+ retenu comme client HTTP principal |
 | [ADR-010]({{ site.baseurl }}/adr/010-licence-client-android) | GPL-3.0-only retenue pour le client Android |
 | [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast) | AST sémantique `PostContent` comme contrat de rendu |
+| [ADR-012]({{ site.baseurl }}/adr/012-credentials-proxy) | Credentials proxy : extension d'Option A |
