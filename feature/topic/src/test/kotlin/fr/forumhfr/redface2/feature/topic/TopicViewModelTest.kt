@@ -461,8 +461,8 @@ class TopicViewModelTest {
         )
 
         // The first effect emitted on the failure path must be PostSubmitRefreshFailed so the
-        // screen surfaces a Snackbar/Toast telling the user HFR did accept their post even
-        // though the local refresh blipped. The fallback to observeTopicPage must NOT then
+        // screen surfaces a Toast (cf. TopicScreen.kt) telling the user HFR did accept their post
+        // even though the local refresh blipped. The fallback to observeTopicPage must NOT then
         // re-emit ScrollToEndOfPage on the stale cache.
         viewModel.effects.test {
             assertEquals(TopicEffect.PostSubmitRefreshFailed, awaitItem())
