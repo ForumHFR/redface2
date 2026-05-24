@@ -17,6 +17,14 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
+---
+
+## v59 — `0.3.19` — 2026-05-24
+
+**Statut** : `closed`
+**Commit** : tag `app-v59` après merge PR #207
+**Fichier** : artefact CD `app-v59`
+
 Phase 2 finish UI polish (#198 / #199 / #201 / #202).
 
 ### Added
@@ -25,11 +33,18 @@ Phase 2 finish UI polish (#198 / #199 / #201 / #202).
 
 ### Changed
 - Drapeaux : refresh manuel déplacé dans le header compact (`TextButton` à côté du menu compte) au lieu d'un bouton pleine largeur en fin de liste. Toggle « cyans déjà lus » passé en `FilterChip` Material 3 sous le tab row CYAN (#199).
-- Citations : `QuoteBlock` et `CollapsedQuoteBlock` gagnent une bordure verticale d'accent (4dp) sur le `surfaceContainerHighest` existant ; la couleur alterne `primary` / `tertiary` selon la profondeur d'imbrication pour rester lisible sur les 3 thèmes (clair / sombre / AMOLED). La règle `MAX_VISIBLE_QUOTE_DEPTH = 3` et le collapse au-delà sont préservés (#202).
+- Citations : `QuoteBlock` et `CollapsedQuoteBlock` gagnent une bordure verticale d'accent (4dp, `primary`/`tertiary` alterné par profondeur) sur le `surfaceContainerHighest` existant — la régression d'invisibilité AMOLED est résolue, les quotes restent identifiables sur les 3 thèmes (clair/sombre/AMOLED). La règle `MAX_VISIBLE_QUOTE_DEPTH = 3` et le collapse au-delà sont préservés (#202).
+- `app/build.gradle.kts` : `versionCode = 59`, `versionName = "0.3.19"`.
+
+### Fixed
+- A11y : badge compte expose `Role.Button` + `Modifier.minimumInteractiveComponentSize()` (48dp touch target sur 40dp visuel), `semantics(mergeDescendants=true)` empêche la double annonce TalkBack (review round 2 PR #207).
+- A11y : avatar utilisateur announce « Avatar de <pseudo> » dans les deux modes (image chargée et placeholder initiale standalone), au lieu de rester muet.
+- QuoteFrame : la migration `Box overlay + matchParentSize()` évite désormais le crash `IllegalStateException` (intrinsic measurement of SubcomposeLayout) qui touchait les citations contenant un `[img]`.
 
 ### Removed
 - `MessagesViewModel` + son test (logique compte/logout déplacée dans `AppAccountViewModel` côté `:app`).
-- Strings devenues mortes dans `:feature:messages` : `messages_section_account`, `messages_auth_loading`, `messages_anonymous_intro`, `messages_login_cta`, `messages_logged_in_as`, `messages_logout_cta`, `messages_section_alpha_tools`, `messages_app_version_footer`, `messages_diagnostics_cta`, `messages_settings_cta`, `messages_report_content_cta`, `messages_report_email_subject`, `messages_report_no_email_client`. Les versions globales équivalentes vivent dans `:core:ui/account_menu_*`.
+- Strings devenues mortes dans `:feature:messages` : 13 strings `messages_section_account`, `messages_auth_loading`, `messages_anonymous_intro`, `messages_login_cta`, `messages_logged_in_as`, `messages_logout_cta`, `messages_section_alpha_tools`, `messages_app_version_footer`, `messages_diagnostics_cta`, `messages_settings_cta`, `messages_report_content_cta`, `messages_report_email_subject`, `messages_report_no_email_client`. Les versions globales équivalentes vivent dans `:core:ui/account_menu_*`.
+- String `flags_show_read_participated_toggle` (remplacée par `flags_show_read_participated_chip` pour le FilterChip).
 
 ---
 

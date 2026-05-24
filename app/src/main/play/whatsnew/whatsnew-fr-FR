@@ -1,9 +1,15 @@
-Alpha Redface 2 v57 — hardening proxy.
+Alpha Redface 2 v59 — polish Phase 2 finish.
+
+Nouveautés :
+- Menu compte global (Drapeaux, Forum, Recherche, Messages).
+- Avatar de l'auteur dans chaque post.
+
+Améliorations :
+- Drapeaux : header densifié, FilterChip Cyans lus.
+- Citations lisibles en AMOLED (bordure d'accent).
 
 Correctifs :
-- Proxy limité aux domaines HFR : les images externes ne passent plus par le proxy utilisateur.
-- Bouton Enregistrer du proxy débloqué après échec.
-- Credentials proxy UTF-8 pour mots de passe accentués.
-- Dropdown sous-catégorie EditFP fiabilisé (M3).
+- Crash citation + image inline corrigé.
+- Accessibilité TalkBack (badge + avatars).
 
 Bugs : alpha ou GitHub.

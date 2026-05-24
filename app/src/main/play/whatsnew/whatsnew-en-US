@@ -1,9 +1,15 @@
-Redface 2 alpha v57 — proxy hardening.
+Redface 2 alpha v59 — Phase 2 finish polish.
 
-Fixes:
-- Proxy scoped to HFR hosts: external images stay direct.
-- Proxy "Save" button no longer stuck on DataStore failure.
-- Proxy credentials encoded in UTF-8 (non-latin1 passwords).
-- EditFP subcategory dropdown reliability (M3).
+New:
+- Global account menu (avatar/login/settings) on Flags, Forum, Search, Messages.
+- Author avatar in every post.
+
+Improved:
+- Flags: denser header, "Cyans lus" FilterChip, compact refresh.
+- Quotes: vertical accent bar — readable on light, dark, AMOLED.
+
+Fixed:
+- Crash on quote containing inline image.
+- TalkBack a11y on account badge + avatars.
 
 Report bugs via alpha or GitHub.
