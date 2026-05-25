@@ -13,6 +13,17 @@ android {
             // Stubs `android.util.Log.*` to no-op so production code paths exercised by Compose
             // (PostRenderer, Coil) do not crash with "not mocked" on JVM. Matches :core:data.
             isReturnDefaultValues = true
+            all {
+                // Roborazzi recommandé : force le hardware `pixelCopy` Robolectric pour que les
+                // captures Compose rendent les overlays / `drawBehind` correctement (sans ça
+                // certains effets graphiques sortent transparents en mode `legacy`).
+                it.systemProperties["robolectric.pixelCopyRenderMode"] = "hardware"
+                // Roborazzi sans son plugin Gradle (AGP 9 pas encore supporté côté plugin).
+                // En mode `record`, chaque `captureRoboImage(filePath = ...)` écrit le PNG. Le
+                // diagnostic AMOLED quote tourne en local via `:core:ui:testDebugUnitTest` —
+                // pas de comparaison vs golden, juste un dump visuel des composables.
+                it.systemProperties["roborazzi.test.record"] = "true"
+            }
         }
     }
 }
@@ -37,5 +48,10 @@ dependencies {
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    // Roborazzi — local visual diagnostics for the AMOLED quote rendering bug (PR #207).
+    // Not gated in CI : runs on demand via `:core:ui:recordRoborazziDebug` and writes PNGs
+    // under `build/outputs/roborazzi/` (gitignored via the `build/` rule).
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
