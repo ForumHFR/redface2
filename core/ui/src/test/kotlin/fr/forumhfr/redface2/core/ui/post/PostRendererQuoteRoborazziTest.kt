@@ -34,9 +34,14 @@ import org.robolectric.annotation.GraphicsMode
  *
  * These captures are not yet golden references gated in CI. They run on demand via :
  *
- *     ./scripts/docker-dev.sh ./gradlew :core:ui:recordRoborazziDebug --console=plain --no-daemon
+ *     ./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
+ *         --tests '*PostRendererQuoteRoborazziTest*' --console=plain --no-daemon
  *
- * PNGs land under `core/ui/build/outputs/roborazzi/` (gitignored). The intent is a fast visual
+ * The Roborazzi Gradle plugin is **not** applied (AGP 9 incompatibility, cf.
+ * takahirom/roborazzi#781), so the usual `recordRoborazziDebug` task does not exist —
+ * `roborazzi.test.record=true` is forced via `systemProperty` in `core/ui/build.gradle.kts`
+ * so the plain `:core:ui:testDebugUnitTest` task is enough to write the PNGs. Output lands
+ * under `core/ui/build/outputs/roborazzi/` (gitignored). The intent is a fast visual
  * feedback loop for the AMOLED quote diagnostic without having to flash the AAB to a device
  * between every iteration.
  */
