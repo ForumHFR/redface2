@@ -35,7 +35,17 @@ class SettingsViewModel @Inject constructor(
         }
         viewModelScope.launch {
             val ignore = userPreferencesRepository.observeIgnoreTopicCache().first()
-            _state.update { it.copy(ignoreTopicCache = ignore) }
+            _state.update { current ->
+                // Startup race guard: if the user already flipped the toggle (or a write is in
+                // flight) while this hydration coroutine was suspended on `.first()`, do NOT
+                // overwrite the local change with the stale snapshot we just collected. The
+                // toggle is an alpha diagnostic — it must not lie about its own state.
+                if (current.ignoreTopicCacheTouchedLocally || current.isUpdatingIgnoreTopicCache) {
+                    current
+                } else {
+                    current.copy(ignoreTopicCache = ignore)
+                }
+            }
         }
     }
 
@@ -129,21 +139,33 @@ class SettingsViewModel @Inject constructor(
 
     private fun updateIgnoreTopicCache(desired: Boolean) {
         val previous = _state.value.ignoreTopicCache
-        // Optimistic flip — the UI reflects the intent immediately, and the gate flag locks
-        // the switch while DataStore is writing. On failure we revert to `previous` and
-        // raise `ignoreTopicCacheError`, kept distinct from `SettingsError.PersistFailed`
-        // (proxy-scoped) so the maintenance card can show a topic-cache-specific message.
+        // Optimistic flip — the UI reflects the intent immediately, the gate flag locks the
+        // switch while DataStore is writing, and `ignoreTopicCacheTouchedLocally = true`
+        // forbids the still-running startup hydration from overwriting this change with a
+        // stale snapshot later. We keep the touched flag at `true` for the rest of the VM's
+        // lifetime: even after a failure-revert the user has expressed an intent, so a late
+        // hydration value would no longer be the source of truth.
         _state.update {
             it.copy(
                 ignoreTopicCache = desired,
                 isUpdatingIgnoreTopicCache = true,
                 ignoreTopicCacheError = false,
+                ignoreTopicCacheTouchedLocally = true,
             )
         }
         viewModelScope.launch {
             runCatching { userPreferencesRepository.setIgnoreTopicCache(desired) }
                 .onSuccess {
-                    _state.update { it.copy(isUpdatingIgnoreTopicCache = false) }
+                    // Re-affirm `ignoreTopicCache = desired` explicitly. Without this, a stale
+                    // hydration that resumed *between* the optimistic flip and onSuccess could
+                    // have left the field at a wrong value; reasserting here makes the final
+                    // state self-consistent regardless of interleaving.
+                    _state.update {
+                        it.copy(
+                            ignoreTopicCache = desired,
+                            isUpdatingIgnoreTopicCache = false,
+                        )
+                    }
                 }
                 .onFailure {
                     _state.update {

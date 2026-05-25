@@ -22,6 +22,12 @@ data class SettingsState(
     val ignoreTopicCache: Boolean = false,
     val isUpdatingIgnoreTopicCache: Boolean = false,
     val ignoreTopicCacheError: Boolean = false,
+    /**
+     * Internal startup-race guard. Set to `true` the moment the user flips the toggle locally,
+     * so the (still-suspended) initial DataStore hydration coroutine in `init` cannot resume
+     * later and overwrite the optimistic flip with a stale snapshot. Never surfaced in the UI.
+     */
+    val ignoreTopicCacheTouchedLocally: Boolean = false,
 ) {
     val canSave: Boolean
         get() = !isSaving

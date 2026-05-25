@@ -7,6 +7,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -295,6 +296,75 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `hydration race - a stale initial DataStore emission must not overwrite a local toggle change`() = runTest {
+        // Reproduce the startup race: the init coroutine subscribes to
+        // observeIgnoreTopicCache() and suspends on .first() because the override emits
+        // nothing yet. The user then flips the toggle locally (optimistic true + write
+        // succeeds). Finally, the still-suspended init resumes and tries to apply a
+        // stale `false` — the guard must skip the apply.
+        val initialHydrationFlow = MutableSharedFlow<Boolean>(replay = 0)
+        repository.ignoreTopicCacheObserveOverride = initialHydrationFlow
+        val viewModel = newViewModel()
+
+        // Step 1: init is now suspended on `initialHydrationFlow.first()`.
+        // Step 2: user flips the toggle. The optimistic flip + DataStore write run
+        // synchronously under UnconfinedTestDispatcher and complete before we return here.
+        viewModel.submit(SettingsIntent.IgnoreTopicCacheChanged(true))
+        assertTrue(
+            "optimistic flip must reach the state synchronously",
+            viewModel.state.value.ignoreTopicCache,
+        )
+        assertTrue(viewModel.state.value.ignoreTopicCacheTouchedLocally)
+        assertFalse(
+            "write must have completed under the UnconfinedTestDispatcher",
+            viewModel.state.value.isUpdatingIgnoreTopicCache,
+        )
+
+        // Step 3: the late hydration finally produces a stale `false`. On the buggy code
+        // this overwrites the local true; on the fixed code the guard skips the apply.
+        initialHydrationFlow.emit(false)
+
+        val finalState = viewModel.state.value
+        assertTrue(
+            "stale initial DataStore hydration must NOT overwrite the local toggle change",
+            finalState.ignoreTopicCache,
+        )
+        assertFalse(finalState.isUpdatingIgnoreTopicCache)
+        assertFalse(finalState.ignoreTopicCacheError)
+        assertEquals(1, repository.ignoreTopicCacheSetCalls)
+        assertEquals(true, repository.lastIgnoreTopicCacheSet)
+    }
+
+    @Test
+    fun `hydration race - failure path keeps the toggle latched to the reverted previous value`() = runTest {
+        // Symmetric guard for the failure branch: the local flip happens first, then DataStore
+        // write fails (revert to previous=false + error flag), then a stale hydration arrives.
+        // The reverted state must survive — the hydration must NOT silently mutate it back to
+        // anything else, even if the stale value happens to match the reverted one.
+        repository.failOnIgnoreTopicCacheSet = true
+        val initialHydrationFlow = MutableSharedFlow<Boolean>(replay = 0)
+        repository.ignoreTopicCacheObserveOverride = initialHydrationFlow
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.IgnoreTopicCacheChanged(true))
+        // After failure: reverted to false + error flag raised; touchedLocally remains true.
+        val midState = viewModel.state.value
+        assertFalse(midState.ignoreTopicCache)
+        assertTrue(midState.ignoreTopicCacheError)
+        assertTrue(midState.ignoreTopicCacheTouchedLocally)
+
+        // Stale hydration arrives — must be ignored because touchedLocally == true.
+        initialHydrationFlow.emit(true)
+
+        val finalState = viewModel.state.value
+        assertFalse(
+            "stale hydration must not flip the toggle back on after a failed write",
+            finalState.ignoreTopicCache,
+        )
+        assertTrue(finalState.ignoreTopicCacheError)
+    }
+
+    @Test
     fun `IgnoreTopicCacheChanged does not touch proxy or clear-cache state`() = runTest {
         repository.emit(
             ProxyConfig(enabled = true, host = "proxy.local", port = 8_080, username = "user", password = "secret"),
@@ -347,7 +417,16 @@ class SettingsViewModelTest {
 
         override fun readProxyConfigForNetworkBootstrap(): ProxyConfig = config.value
 
-        override fun observeIgnoreTopicCache(): Flow<Boolean> = ignoreTopicCache
+        /**
+         * Test seam for the startup-race test: when non-null, `observeIgnoreTopicCache()` returns
+         * this overridden flow instead of the internal `MutableStateFlow`. That lets the test hold
+         * the initial `.first()` suspension, perform a local toggle while the hydration is still
+         * pending, and only then release a stale emission to verify the guard ignores it.
+         */
+        var ignoreTopicCacheObserveOverride: Flow<Boolean>? = null
+
+        override fun observeIgnoreTopicCache(): Flow<Boolean> =
+            ignoreTopicCacheObserveOverride ?: ignoreTopicCache
 
         override suspend fun setIgnoreTopicCache(enabled: Boolean) {
             ignoreTopicCacheSetCalls += 1
