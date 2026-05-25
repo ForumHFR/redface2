@@ -17,9 +17,25 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
+---
+
+## v61 — `0.3.21` — 2026-05-25
+
+**Statut** : `local`
+**Commit** : `f567e69` sur `feature/phase2-finish-ui-polish-198-199-201-202` avant merge PR #207
+**Fichier** : à produire via `workflow_dispatch` du job `release.yml` (ou push d'un tag `app-v61`)
+
+Slice maintenance alpha sur la PR #207 — réponse à la régression bordure invisible AMOLED v60 et bug quote stale persisté.
+
 ### Added
-- Paramètres alpha : carte « Maintenance alpha » avec une action « Vider le cache des topics » (dialogue de confirmation Material 3, feedback inline succès / échec). Wipe les tables Room `posts` + `topic_pages` au sein d'une `@Transaction` ; **ne touche pas** aux drapeaux, à la session HFR, aux préférences proxy ni à la base de données globale (pas de `clearAllTables()`). Escape hatch pour forcer un reparse au prochain affichage quand le `PostContent` AST persisté est devenu obsolète (motivation : régression bordure invisible AMOLED v60 sur les pages topic déjà en cache).
+- Paramètres alpha : carte « Maintenance alpha » avec une action « Vider le cache des topics » (dialogue de confirmation Material 3, feedback inline succès / échec, indicateur de progression M3 pendant le wipe). Wipe les tables Room `posts` + `topic_pages` au sein d'une `@Transaction` ; **ne touche pas** aux drapeaux, à la session HFR, aux préférences proxy ni à la base de données globale (pas de `clearAllTables()`). Escape hatch pour forcer un reparse au prochain affichage quand le `PostContent` AST persisté est devenu obsolète.
 - Paramètres alpha : switch « Ignorer le cache topic » dans la carte « Maintenance alpha ». Quand actif, `TopicRepositoryImpl.observeTopicPage` saute la lecture Room et part directement sur le réseau (le résultat est toujours persisté pour rester cohérent avec le parser courant), et `prefetch()` devient no-op. Outil de dogfood alpha uniquement — les drapeaux, l'authentification, le proxy et les préférences non liées sont intacts. Préférence persistée dans DataStore (`ignore_topic_cache`, default `false`).
+
+### Fixed
+- Settings : race d'hydratation du toggle « Ignorer le cache topic ». Quand l'utilisateur flippait le switch avant que la coroutine d'init n'ait fini de lire la valeur DataStore initiale, l'hydration tardive écrasait le flip optimiste avec la valeur stale (le toggle pouvait afficher `false` alors que DataStore était à `true`). Guard ajouté : `ignoreTopicCacheTouchedLocally` empêche l'hydratation d'écraser une modification locale, et `onSuccess` ré-affirme `ignoreTopicCache = desired` pour une cohérence finale quel que soit l'interleaving.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 61`, `versionName = "0.3.21"`.
 
 ---
 
