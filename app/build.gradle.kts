@@ -38,8 +38,8 @@ android {
         // track (alpha) and in the GitHub Release flag, not in versionName itself.
         // versionName is also surfaced in the app footer via BuildConfig.VERSION_NAME so
         // dogfood builds advertise their lineage to the user.
-        versionCode = 61
-        versionName = "0.3.21"
+        versionCode = 62
+        versionName = "0.3.22"
 
         // Manifest placeholder so a side-by-side install (dogfood/preview overlay)
         // can override the launcher label without touching tracked manifest/strings.

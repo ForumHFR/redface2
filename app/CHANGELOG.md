@@ -19,11 +19,27 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
-## v61 — `0.3.21` — 2026-05-25
+## v62 — `0.3.22` — 2026-05-27
 
 **Statut** : `local`
-**Commit** : `f567e69` sur `feature/phase2-finish-ui-polish-198-199-201-202` avant merge PR #207
-**Fichier** : à produire via `workflow_dispatch` du job `release.yml` (ou push d'un tag `app-v61`)
+**Commit** : `156a858` sur `feature/phase2-finish-ui-polish-198-199-201-202` avant merge PR #207
+**Fichier** : à produire via `workflow_dispatch` du job `release.yml` (ou push d'un tag `app-v62`)
+
+Correctif du bug de citations invisibles en mode connecté — la vraie cause, trouvée via la boucle de feedback émulateur.
+
+### Fixed
+- Citations (`PostBlock.Quote`) cassées en mode **authentifié** : HFR sert `<table class="oldcitation">` pour un compte connecté utilisant le style de citation classique, vs `<table class="citation">` en anonyme. Le parser ne connaissait que `citation`/`quote` → la citation était avalée et rendue en texte brut côté connecté uniquement (rendu OK en anonyme). `PostContentParser` reconnaît désormais `oldcitation` aux 3 points de classification + le sélecteur d'auteur. Test de régression avec fragment HTML réel capturé en mode connecté. Limitation connue tracée (TODO Phase 2) : le href de citation loggé `forum2.php?...#tM` n'est pas matché par `CITATION_HREF_REGEX`, donc le « aller au message cité » reste inactif en connecté (la citation s'affiche correctement).
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 62`, `versionName = "0.3.22"`.
+
+---
+
+## v61 — `0.3.21` — 2026-05-25
+
+**Statut** : `closed`
+**Commit** : `workflow_dispatch` sur `feature/phase2-finish-ui-polish-198-199-201-202` (run #26388655525, success)
+**Fichier** : AAB uploadé sur le canal Play closed alpha
 
 Slice maintenance alpha sur la PR #207 — réponse à la régression bordure invisible AMOLED v60 et bug quote stale persisté.
 
