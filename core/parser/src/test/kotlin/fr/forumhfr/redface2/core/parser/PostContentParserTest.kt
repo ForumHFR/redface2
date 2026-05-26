@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
+import org.jsoup.Jsoup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -79,6 +80,47 @@ class PostContentParserTest {
                 renderedTextFragments.contains("$expectedAuthor a écrit"),
             )
         }
+    }
+
+    @Test
+    fun `logged-in oldcitation table surfaces as a Quote block`() {
+        // Real content fragment captured from topic RF2 page 25 while LOGGED IN (post
+        // #2785312, antiseptiqueIncolore citing XaTriX). HFR serves the citation as
+        // <table class="oldcitation"> for accounts using the classic citation style,
+        // whereas anonymous reads get <table class="citation">. Before the selector fix the
+        // parser only knew "citation" → the whole quote was swallowed and the post rendered
+        // as if it had no citation block (bug confirmed on S25, v0.3.21, logged in only).
+        val loggedInQuoteHtml = """
+            <div id="para2785312"><p></p><div class="container"><table class="oldcitation">
+            <tr class="none"><td><b class="s1"><a href="/forum2.php?config=hfr.inc&amp;cat=23&amp;subcat=550&amp;post=35395&amp;page=25&amp;p=1&amp;numreponse=0&amp;new=0&amp;nojs=0#t2785311" class="Topic">XaTriX a écrit :</a></b>
+            <hr size="1" /><p>Bon en fait RF1 et HFR+ ont aussi la nouvelle catégorie sans rien faire
+            <img src="https://forum-images.hardware.fr/icones/smilies/lol.gif" alt=":lol:" title=":lol:" /><br /></p>
+            <hr size="1" /></td></tr></table></div><p><br />Hfr4droid aussi finalement
+            <div style="clear: both;"> </div></p></div>
+        """.trimIndent()
+        val contentElement = Jsoup.parse(loggedInQuoteHtml).selectFirst("div[id^=para]")
+
+        val ast = PostContentParser().parse(contentElement).ast
+
+        val quotes = ast.allBlocks().filterIsInstance<PostBlock.Quote>()
+        assertTrue(
+            "logged-in <table class=\"oldcitation\"> must be parsed as a Quote, not swallowed",
+            quotes.isNotEmpty(),
+        )
+        assertEquals("XaTriX", quotes.first().author)
+        // The reply text outside the citation survives, and the citation header is not
+        // flattened into the rendered paragraph text.
+        val renderedText = ast.allInlines()
+            .filterIsInstance<PostInline.Text>()
+            .joinToString(" ") { it.value }
+        assertTrue(
+            "reply body after the quote must remain, got=$renderedText",
+            renderedText.contains("Hfr4droid aussi finalement"),
+        )
+        assertFalse(
+            "citation header `XaTriX a écrit :` must not leak into rendered text, got=$renderedText",
+            renderedText.contains("XaTriX a écrit"),
+        )
     }
 
     @Test
