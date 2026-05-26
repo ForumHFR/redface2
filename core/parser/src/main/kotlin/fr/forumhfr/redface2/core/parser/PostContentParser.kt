@@ -476,6 +476,10 @@ class PostContentParser {
         val PERSO_SMILEY_REGEX = Regex("""^\[:[^]]+]$""")
 
         // Citation header href: https://forum.hardware.fr/hfr/.../sujet_<post>_<page>.htm#t<numreponse>
+        // TODO(Phase 2): this only matches the static permalink form. In logged-in mode HFR
+        // serves the dynamic `forum2.php?...&page=N...#t<numreponse>` form instead, which this
+        // regex misses → Quote.page / Quote.numreponse stay null and scroll-to-cited-post is
+        // inactive for authenticated users. Pinned by `logged-in oldcitation table …` test.
         val CITATION_HREF_REGEX = Regex("""sujet_\d+_(\d+)\.htm#t(\d+)""")
     }
 }

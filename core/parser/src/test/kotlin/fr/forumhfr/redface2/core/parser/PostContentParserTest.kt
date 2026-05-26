@@ -108,6 +108,17 @@ class PostContentParserTest {
             quotes.isNotEmpty(),
         )
         assertEquals("XaTriX", quotes.first().author)
+        // Known limitation pinned here: the logged-in oldcitation header href is a dynamic
+        // `forum2.php?...page=N...#tM` link, NOT the static `sujet_<post>_<page>.htm#tN`
+        // permalink that CITATION_HREF_REGEX matches. So page/numreponse stay null in
+        // logged-in mode → scroll-to-cited-post is inactive when authenticated. Tracked by a
+        // TODO next to CITATION_HREF_REGEX in PostContentParser; deliberate, Phase 2 work.
+        assertEquals("page stays null for the logged-in forum2.php citation href", null, quotes.first().page)
+        assertEquals(
+            "numreponse stays null for the logged-in forum2.php citation href",
+            null,
+            quotes.first().numreponse,
+        )
         // The reply text outside the citation survives, and the citation header is not
         // flattened into the rendered paragraph text.
         val renderedText = ast.allInlines()
