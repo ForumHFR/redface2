@@ -1,11 +1,11 @@
-Redface 2 alpha v60 — post-review fixes.
+Redface 2 alpha v62 — logged-in quotes fixed.
 
-Visual + a11y fixes:
-- Quote accent bar width reliably 4dp.
-- Avatars announce "Avatar de <pseudo>" to TalkBack in all cases.
+Fixes:
+- Quotes now render correctly while logged in.
+- HFR `citation` and `oldcitation` variants are both parsed.
 
-Recap from v59:
-- Global account menu on Flags, Forum, Search, Messages.
-- Author avatars in posts, denser Flags, AMOLED-readable quotes.
+v61 recap:
+- "Clear topic cache" maintenance action.
+- Alpha "Ignore topic cache" option for cache bug diagnostics.
 
 Report bugs via alpha or GitHub.

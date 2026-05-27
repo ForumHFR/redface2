@@ -1,11 +1,11 @@
-Alpha Redface 2 v60 — corrections post-review.
+Alpha Redface 2 v62 — citations connectées corrigées.
 
-Correctifs visuels et a11y :
-- Bordure des citations fiabilisée (largeur 4dp garantie).
-- Avatars accessibles : TalkBack annonce « Avatar de <pseudo> » dans tous les cas.
+Correctifs :
+- Les citations s’affichent correctement en étant connecté.
+- Les variantes HFR `citation` / `oldcitation` sont maintenant reconnues.
 
-Rappel des nouveautés v59 :
-- Menu compte global sur Drapeaux, Forum, Recherche, Messages.
-- Avatars dans les posts, Drapeaux densifié, citations lisibles AMOLED.
+Rappel v61 :
+- Bouton « Vider le cache des topics ».
+- Option alpha « Ignorer le cache topic » pour diagnostiquer les bugs de cache.
 
 Bugs : alpha ou GitHub.
