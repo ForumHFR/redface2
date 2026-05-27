@@ -54,7 +54,7 @@ Les exemples ViewModel ci-dessous sont **des squelettes illustratifs** — certa
 
 ## Écran Drapeaux (accueil)
 
-> **Statut Phase 1B.4 → 1B.5 livré** : le `FlagsViewModel` réel expose plusieurs `StateFlow` séparés (auth, MP, onglet courant, liste de drapeaux du tab) plutôt qu'un seul `FlagsState` agrégé, et un nombre limité d'actions (`selectTab`, `refresh`, `logout`). Pas de tri, pas de filtre, pas de `RemoveFlag`/`UndoRemoveFlag`, pas de pull-to-refresh : ces capacités sont **hors scope Phase 1B** et arriveront au plus tôt en Phase 1D / Phase 2 quand un cas d'usage le justifie. Un bouton « Actualiser » force néanmoins un fetch réseau explicite sur l'onglet courant, pour éviter que le cache mémoire de session ne bloque le dogfood. Le squelette illustratif Phase 1+ ci-dessous a été remplacé par la forme actuellement shippée.
+> **Statut Phase 2 finish livré** : le `FlagsViewModel` réel expose plusieurs `StateFlow` séparés (auth, onglet courant `FlagTab`, liste de drapeaux du tab, `isRefreshing`, `removeFlagState`/`removeFlagEvent`) plutôt qu'un seul `FlagsState` agrégé. Onglets via `FlagTab` (Cyan/Red/Favorite + **Super**, placeholder « super favoris » sans backend, `flagType == null`). Le filtre CYAN « afficher les cyans déjà lus » se pilote par **re-tap de l'onglet Cyan** (le `FilterChip` a été retiré). Le **retrait d'un drapeau** (#99, `delflag.php`, confirmation + pas d'undo optimiste) est livré. Le **pull-to-refresh** (`PullToRefreshBox` M3) a remplacé le bouton « Actualiser ». `logout()` ne vit plus ici (déplacé dans `AppAccountViewModel`, #198). Le squelette illustratif ci-dessous reflète la forme shippée.
 
 ### ViewModel — forme livrée
 
@@ -68,12 +68,26 @@ class FlagsViewModel @Inject constructor(
 
     private var observedPseudo: String? = null
 
-    private val _selectedTab = MutableStateFlow(FlagType.CYAN)
-    val selectedTab: StateFlow<FlagType> = _selectedTab.asStateFlow()
+    // Phase 2 finish — 4 onglets via FlagTab (Cyan/Red/Favorite/Super). FlagTab.flagType est
+    // nullable : Super est un placeholder « super favoris à venir » sans backend (flagType == null
+    // → aucun fetch). Les 3 autres mappent vers FlagType.
+    private val _selectedTab = MutableStateFlow<FlagTab>(FlagTab.Cyan)
+    val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
 
-    // #154 polish — CYAN-only client filter, default hides `hasUnread = false` rows.
+    // CYAN-only client filter (default hides `hasUnread = false`). Le toggle est déclenché par un
+    // re-tap de l'onglet Cyan déjà sélectionné (le FilterChip a été retiré).
     private val _showReadParticipatedTopics = MutableStateFlow(false)
     val showReadParticipatedTopics: StateFlow<Boolean> = _showReadParticipatedTopics.asStateFlow()
+
+    // Anchored over the existing list during the user-driven pull-to-refresh round-trip
+    // (Material 3 PullToRefreshBox a remplacé le bouton « Actualiser »). Même pattern que ForumViewModel.
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    // #99 — retrait d'un drapeau : confirmation (RemoveFlagState Idle/Confirming/Removing) +
+    // évènement one-shot (RemoveFlagEvent Success/Failure) consommé par l'écran pour un snackbar.
+    val removeFlagState: StateFlow<RemoveFlagState> // = _removeFlagState.asStateFlow()
+    val removeFlagEvent: StateFlow<RemoveFlagEvent?> // = _removeFlagEvent.asStateFlow()
 
     val authState: StateFlow<AuthState?> =
         authRepository.observeAuthState()
@@ -83,34 +97,41 @@ class FlagsViewModel @Inject constructor(
         .onEach(::clearFlagsCacheIfSessionChanged)
         .flatMapLatest { state ->
             when (state) {
-                null -> flowOf<FlagsResult?>(null)
-                AuthState.Anonymous -> flowOf<FlagsResult?>(null)
-                is AuthState.Authenticated -> selectedTab.flatMapLatest { type ->
-                    combine(
-                        flagRepository.observe(type),
-                        _showReadParticipatedTopics,
-                    ) { result, showRead -> filterReadParticipatedIfNeeded(result, type, showRead) }
+                null, AuthState.Anonymous -> flowOf<FlagsResult?>(null)
+                is AuthState.Authenticated -> selectedTab.flatMapLatest { tab ->
+                    when (val type = tab.flagType) {
+                        null -> flowOf<FlagsResult?>(null) // Super placeholder : pas de fetch
+                        else -> combine(
+                            flagRepository.observe(type),
+                            _showReadParticipatedTopics,
+                        ) { result, showRead -> filterReadParticipatedIfNeeded(result, type, showRead) }
+                    }
                 }
             }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, initialValue = null)
 
-    fun selectTab(type: FlagType) { _selectedTab.value = type }
+    // Re-tap Cyan déjà sélectionné → toggle du filtre via le setter (point de mutation unique).
+    fun selectTab(tab: FlagTab) {
+        if (tab == FlagTab.Cyan && _selectedTab.value == FlagTab.Cyan) {
+            setShowReadParticipatedTopics(!_showReadParticipatedTopics.value)
+            return
+        }
+        _selectedTab.value = tab
+    }
     fun setShowReadParticipatedTopics(value: Boolean) { _showReadParticipatedTopics.value = value }
 
-    fun refresh() {
-        viewModelScope.launch { flagRepository.refresh(_selectedTab.value) }
-    }
-
-    fun logout() {
+    fun refresh() { // no-op sur Super (flagType == null)
+        val type = _selectedTab.value.flagType ?: return
         viewModelScope.launch {
-            // Order matters: drop the private cache before flipping AuthState to
-            // Anonymous so the Flags tab can't redraw the previous user's rows
-            // for a frame after logout fires.
-            flagRepository.clearSessionCache()
-            authRepository.logout()
+            _isRefreshing.value = true
+            try { flagRepository.refresh(type) } finally { _isRefreshing.value = false }
         }
     }
+
+    // requestRemoveFlag(flag) → Confirming ; confirmRemoveFlag() → Removing → flagRepository.removeFlag
+    // → one-shot event ; consumeRemoveFlagEvent() après affichage du snackbar.
+    // NB : logout() ne vit plus ici — déplacé dans AppAccountViewModel (#198, menu compte global).
 
     private fun filterReadParticipatedIfNeeded(
         result: FlagsResult,
@@ -174,7 +195,7 @@ Quand cette extension arrive, `FlagsState` agrégé peut redevenir préférable 
 
 ### Screen (Compose) — forme livrée
 
-`feature/flags/src/main/kotlin/.../FlagsRoute.kt` est l'entrée stateful (récupère `FlagsViewModel` via `hiltViewModel()`, collecte ses `StateFlow` via `collectAsStateWithLifecycle()`). Depuis le polish #154, `FlagsRoute` se concentre sur la liste : 3 onglets, toggle « afficher les sujets participés déjà lus » (CYAN uniquement), bouton Actualiser, branche login si anonyme, branche reconnect si `SessionExpiredException`. Pas de footer alpha — les actions compte (pseudo / logout) et outils (Diagnostics, signalement, version) vivent depuis #198 dans le menu compte global injecté via `topBarActions: @Composable (() -> Unit)? = null`. Le découpage `<Name>Screen` / `<Name>Content` reste l'objectif quand la complexité justifie le coût (filtre, tri, undo) — cf. cible Phase 2.
+`feature/flags/src/main/kotlin/.../FlagsRoute.kt` est l'entrée stateful (récupère `FlagsViewModel` via `hiltViewModel()`, collecte ses `StateFlow` via `collectAsStateWithLifecycle()`). Depuis le polish #154 et la refonte Phase 2 finish, `FlagsRoute` se concentre sur la liste : 4 onglets (Cyan / Lu / Favoris / **Super** placeholder), toggle « afficher les sujets participés déjà lus » (CYAN, via re-tap de l'onglet), pull-to-refresh `PullToRefreshBox` (plus de bouton Actualiser), action « Retirer le drapeau » avec dialog de confirmation (#99), branche login si anonyme, branche reconnect si `SessionExpiredException`. Pas de footer alpha — les actions compte (pseudo / logout) et outils (Diagnostics, signalement, version) vivent depuis #198 dans le menu compte global injecté via `topBarActions: @Composable (() -> Unit)? = null`. Le découpage `<Name>Screen` / `<Name>Content` reste l'objectif quand la complexité justifie le coût (filtre, tri, undo) — cf. cible Phase 2.
 
 ---
 

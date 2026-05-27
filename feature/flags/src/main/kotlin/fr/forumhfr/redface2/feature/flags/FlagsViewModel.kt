@@ -142,7 +142,10 @@ class FlagsViewModel @Inject constructor(
      */
     fun selectTab(tab: FlagTab) {
         if (tab == FlagTab.Cyan && _selectedTab.value == FlagTab.Cyan) {
-            _showReadParticipatedTopics.update { !it }
+            // Re-tapping the already-selected Cyan tab toggles the read-cyan filter. Route the
+            // mutation through [setShowReadParticipatedTopics] so that setter stays the single
+            // mutation point for `_showReadParticipatedTopics` (no second code path to drift).
+            setShowReadParticipatedTopics(!_showReadParticipatedTopics.value)
             return
         }
         _selectedTab.value = tab

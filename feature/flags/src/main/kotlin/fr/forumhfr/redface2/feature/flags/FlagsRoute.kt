@@ -191,9 +191,12 @@ private fun RemoveFlagConfirmationDialog(
     )
 }
 
+// Type label for use OUTSIDE the tab row (e.g. the #99 removal confirmation dialog). RED uses
+// the unabbreviated `flags_type_read_only` (« Lus uniquement »); the tab row uses the shorter
+// `flags_tab_read_only` (« Lu ») which is only meant to fit the cramped tab strip.
 private fun flagTypeLabel(type: FlagType): Int = when (type) {
     FlagType.CYAN -> R.string.flags_tab_my_topics
-    FlagType.RED -> R.string.flags_tab_read_only
+    FlagType.RED -> R.string.flags_type_read_only
     FlagType.FAVORITE -> R.string.flags_tab_favorite
 }
 
