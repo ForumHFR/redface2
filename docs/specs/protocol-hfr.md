@@ -63,13 +63,13 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 
 ### Retirer un drapeau — `delflag.php` (#99, Phase 2 finish)
 
-Suppression **unitaire** d'un drapeau = **GET authentifié** (les mutations drapeaux restent HTML, cf. ADR-003 — la sémantique REST `PUT topics/{id}/` reste opaque). Contrat **vérifié sur HFR réel** (compte de test authentifié, `hash_check` neutralisé), fixtures `flag_delete_success.html` / `flag_delete_already_removed.html` :
+Suppression **unitaire** d'un drapeau = **GET authentifié** (les mutations drapeaux restent HTML, cf. ADR-003 — la sémantique REST `PUT topics/{id}/` reste opaque). Forme **vérifiée sur HFR réel pour un favori** (`owntopic=3`, compte de test authentifié, fixtures `flag_delete_success.html` / `flag_delete_already_removed.html`) :
 
 ```
 /user/delflag.php?config=hfr.inc&cat={cat}&subcat={subcat}&post={topicId}&page={page}&p=1&sondage=0&owntopic={TYPE}&new=0
 ```
 
-- `owntopic={TYPE}` = **le type de drapeau** à retirer : `CYAN=1`, `RED=2`, `FAVORITE=3` (même discriminant que le `flag_owntopic` REST, cf. `core/model/.../Flag.kt`). HFR clé la suppression sur ce champ : viser le mauvais bucket ne retire pas le bon drapeau.
+- `owntopic={TYPE}` = **le type de drapeau** à retirer : `CYAN=1`, `RED=2`, `FAVORITE=3` (même discriminant que le `flag_owntopic` REST, cf. `core/model/.../Flag.kt`). HFR clé la suppression sur ce champ : viser le mauvais bucket ne retire pas le bon drapeau. `FAVORITE=3` est prouvé par capture `delflag.php` réelle ; `CYAN=1` et `RED=2` sont inférés du mapping HFR `owntopic` déjà prouvé côté listing/REST et restent à confirmer par capture destructive dédiée.
 - `{cat}` = catégorie ; `{subcat}` = sous-catégorie, **nullable** → on émet `subcat=` (vide) quand elle est absente (les listings REST drapeaux ne la portent pas toujours).
 - `{post}` = `topicId` ; `{page}` = `lastReadPage` du drapeau (sa page courante).
 - **Succès** : page HTML contenant le texte littéral **« Drapeau effacé avec succès »** (dans un `<div class="hop">`), HTTP 200.

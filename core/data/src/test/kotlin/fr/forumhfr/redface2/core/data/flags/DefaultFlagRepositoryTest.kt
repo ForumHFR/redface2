@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
@@ -660,6 +661,37 @@ class DefaultFlagRepositoryTest {
         }
 
         // No Room eviction on failure.
+        coVerify(exactly = 0) {
+            flagDao.deleteFlag(userId = any(), type = any(), cat = any(), topicId = any())
+        }
+    }
+
+    @Test
+    fun `removeFlag session expiry touches no cache and returns failure`() = runTest {
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val flagDao = stubFlagDao()
+        val hfrClient = mockk<HfrClient>()
+        val expired = SessionExpiredException("https://forum.hardware.fr/login.php")
+        coEvery {
+            hfrClient.removeFlag(cat = any(), subcat = any(), topicId = any(), type = any(), page = any())
+        } throws expired
+        val repo = buildRepository(apiClient, forumRepository, flagDao = flagDao, hfrClient = hfrClient)
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            val seeded = awaitItem() as FlagsResult.Success
+            val flag = seeded.flags.single()
+
+            val result = repo.removeFlag(flag)
+            assertTrue("expected failure, got $result", result.isFailure)
+            assertTrue(result.exceptionOrNull() is SessionExpiredException)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+
         coVerify(exactly = 0) {
             flagDao.deleteFlag(userId = any(), type = any(), cat = any(), topicId = any())
         }

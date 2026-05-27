@@ -170,7 +170,7 @@ class DefaultFlagRepository @Inject constructor(
             ?: return Result.failure(IllegalStateException("Removing a flag requires an authenticated HFR session"))
 
         return runCatching {
-            val html = withContext(ioDispatcher) {
+            val result = withContext(ioDispatcher) {
                 val response = hfrClient.removeFlag(
                     cat = flag.cat,
                     subcat = flag.subcat,
@@ -180,7 +180,7 @@ class DefaultFlagRepository @Inject constructor(
                 )
                 flagDeleteResponseParser.parse(response)
             }
-            when (html) {
+            when (result) {
                 FlagDeleteResult.Success -> Unit
                 FlagDeleteResult.Failure -> throw FlagDeleteFailedException(flag.topicId)
             }
@@ -198,7 +198,7 @@ class DefaultFlagRepository @Inject constructor(
         val updated: FlagsResult.Success? = synchronized(cachedSuccesses) {
             val current = cachedSuccesses[flag.type] ?: return@synchronized null
             val trimmed = current.flags.filterNot {
-                it.cat == flag.cat && it.topicId == flag.topicId && it.type == flag.type
+                it.cat == flag.cat && it.topicId == flag.topicId
             }
             FlagsResult.Success(trimmed).also { cachedSuccesses[flag.type] = it }
         }

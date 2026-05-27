@@ -371,9 +371,9 @@ class HfrClient @Inject constructor(
      * owns. Per ADR-003 the drapeau mutations stay HTML (the REST `PUT topics/{id}/`
      * semantics for downgrade/no-op are opaque), so this is a GET on the legacy endpoint.
      *
-     * Wire shape (contract recaptured on HFR réel, cf. `docs/specs/protocol-hfr.md`
-     * § Retirer un drapeau and the fixtures `flag_delete_success.html` /
-     * `flag_delete_already_removed.html`) :
+     * Wire shape (captured on HFR réel for `FAVORITE -> owntopic=3`, cf.
+     * `docs/specs/protocol-hfr.md` § Retirer un drapeau and the fixtures
+     * `flag_delete_success.html` / `flag_delete_already_removed.html`) :
      *
      * `/user/delflag.php?config=hfr.inc&cat={cat}&subcat={subcat}&post={topicId}
      * &page={page}&p=1&sondage=0&owntopic={1|2|3}&new=0`
@@ -381,6 +381,8 @@ class HfrClient @Inject constructor(
      * - [type] maps to the `owntopic` discriminator that identifies the drapeau bucket :
      *   `CYAN → 1`, `RED → 2`, `FAVORITE → 3` (same mapping as the REST `flag_owntopic`,
      *   cf. `Flag.kt`). Targeting the right bucket matters : HFR keys the deletion on it.
+     *   The `FAVORITE` branch is proven by a destructive capture ; `CYAN` / `RED` reuse the
+     *   same proven `owntopic` discriminant and should be recaptured when safe.
      * - [subcat] is nullable. REST flag listings do not always carry a sub-category, so we
      *   emit an empty `subcat=` when it is null — mirroring how HFR's own listing links
      *   serialise a missing sub-category, and matching the `getPrivateMessageListPage`
