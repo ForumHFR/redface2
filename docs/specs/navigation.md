@@ -152,6 +152,19 @@ Formulaire complet :
 - **Sondage** (optionnel) : question + options + choix multiple oui/non
 - **Preview** : avant-première du rendu du BBCode
 
+### Menu compte global
+
+Issue #198 — chaque écran principal (Drapeaux, Forum, Recherche, Messages) accepte un slot `topBarActions: @Composable (() -> Unit)? = null` dans son header. Le navigation host (`RedfaceApp` dans `app/.../RedfaceNavigation.kt`) instancie une seule `AppAccountViewModel` partagée et y branche un composant `RedfaceAccountMenu` (vivant dans `:core:ui/account/`) qui surface :
+
+- état compte (« Anonyme » / « Connecté en tant que X » / « Compte en cours de vérification… » pendant le warmup DataStore) ;
+- action `Se connecter` ou `Se déconnecter` selon `AuthState` ;
+- `Paramètres alpha`, `Diagnostics alpha`, `Signaler un contenu` (mailto `xat@azora.fr`) ;
+- footer version `v{name} (build {code})`.
+
+Le badge est un carré à coins arrondis (8dp), **pas un cercle**, cohérent avec [`RedfaceUserAvatar`]({{ site.baseurl }}/specs/models#post). L'anti-flicker auth est préservé : tant que `authState == null`, le badge montre `…` plutôt que `?` pour ne pas surfacer transitoirement un état « Anonyme ». La déconnexion (`AppAccountViewModel.logout`) vide d'abord `FlagRepository.clearSessionCache()` avant `AuthRepository.logout()` ; cet ordering est verrouillé par `AppAccountViewModelTest` côté `:app`.
+
+L'onglet `Messages` redevient un placeholder sobre « Les MPs arriveront en Phase 3 » jusqu'à l'arrivée du vrai écran inbox.
+
 ### Messages
 
 Deux onglets :
@@ -262,18 +275,12 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                 FlagsRoute(
                     onOpenFlag = { flag -> /* ... */ },
                     onLoginRequested = { /* ... */ },
+                    topBarActions = accountMenu,
                 )
             }
-            entry<ForumRoute> { ForumScreen(onOpenCategory = { /* ... */ }) }
-            entry<SearchRoute> { SearchScreen() }
-            entry<MessagesRoute> {
-                MessagesScreen(
-                    versionName = BuildConfig.VERSION_NAME,
-                    versionCode = BuildConfig.VERSION_CODE,
-                    onLoginRequested = { /* ... */ },
-                    onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
-                )
-            }
+            entry<ForumRoute> { ForumScreen(onOpenCategory = { /* ... */ }, topBarActions = accountMenu) }
+            entry<SearchRoute> { SearchScreen(onOpenTopic = { /* ... */ }, topBarActions = accountMenu) }
+            entry<MessagesRoute> { MessagesScreen(topBarActions = accountMenu) }
             entry<CategoryRoute> { route ->
                 ForumCategoryScreen(
                     request = CategoryRequest(
@@ -491,7 +498,7 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 > **Statut Phase 5+** — multi-pane n'est pas livré en Phase 1. Dans le snippet ci-dessous :
 >
 > - le **pattern de composition** (`NavDisplay` + `ListDetailPaneScaffold` sur le même back stack, switch `WindowSizeClass`) est **illustratif** — c'est ce qui sera implémenté Phase 5+ ;
-> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested)`, `MessagesScreen(versionName, versionCode, onLoginRequested, onOpenDiagnostics)`, `SearchScreen()`, `TopicScreen(request: TopicRequest, onReply: (subcat, page) -> Unit, onQuote: (subcat, page, quotedNumreponse, quoteRef) -> Unit, onEdit: (subcat, page, numreponse) -> Unit, onEditFirstPost: (subcat, page, numreponse) -> Unit, onOpenPage)`, `PostEditorScreen(request: PostEditorRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`, `TopicFormScreen(request: TopicFormRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`) sont les signatures **réelles** livrées dans le repo (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../PostEditorScreen.kt`, `feature/editor/.../TopicFormScreen.kt`).
+> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested, topBarActions)`, `MessagesScreen(topBarActions)`, `SearchScreen(onOpenTopic, topBarActions)`, `ForumScreen(onOpenCategory, topBarActions)`, `TopicScreen(request: TopicRequest, onReply: (subcat, page) -> Unit, onQuote: (subcat, page, quotedNumreponse, quoteRef) -> Unit, onEdit: (subcat, page, numreponse) -> Unit, onEditFirstPost: (subcat, page, numreponse) -> Unit, onOpenPage)`, `PostEditorScreen(request: PostEditorRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`, `TopicFormScreen(request: TopicFormRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`) sont les signatures **réelles** livrées dans le repo (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../PostEditorScreen.kt`, `feature/editor/.../TopicFormScreen.kt`). Le slot `topBarActions: @Composable (() -> Unit)? = null` carrie le menu compte global depuis #198 — cf. § « Menu compte global ».
 >
 > Le call-site `onOpenFlag = { flag -> backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = ...)) }` passe désormais le topic concerné — Phase 1B.4 a remplacé le placeholder mock par la liste réelle des drapeaux.
 
@@ -557,7 +564,7 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
 }
 ```
 
-Phase 1B.4 a livré `FlagsRoute` (dans `:feature:flags`) avec le vrai modèle `Flag` ; en Phase 1D-1 le scroll anchor est passé de `firstUnreadPostId` à `lastPostReadId` (REST `last_post_read_id`) : `backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.lastPostReadId?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()))`. Phase 1C-A a ensuite remplacé les placeholders Forum/Category par `ForumScreen` + `ForumCategoryScreen` alimentés par `ForumRepository` REST. Le polish pré-Phase 2 (#154) a retiré les constantes `DEMO_TOPIC_*` et leurs callbacks : `SearchScreen()` n'expose plus de bouton de navigation, et `MessagesScreen(versionName, versionCode, onLoginRequested, onOpenDiagnostics)` accueille temporairement les actions compte (login/logout) et outils alpha (Diagnostics, signalement, version) jusqu'à ce que Phase 3 livre la vraie liste de MPs.
+Phase 1B.4 a livré `FlagsRoute` (dans `:feature:flags`) avec le vrai modèle `Flag` ; en Phase 1D-1 le scroll anchor est passé de `firstUnreadPostId` à `lastPostReadId` (REST `last_post_read_id`) : `backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.lastPostReadId?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()))`. Phase 1C-A a ensuite remplacé les placeholders Forum/Category par `ForumScreen` + `ForumCategoryScreen` alimentés par `ForumRepository` REST. Le polish pré-Phase 2 (#154) a retiré les constantes `DEMO_TOPIC_*` et leurs callbacks : `SearchScreen()` n'expose plus de bouton de navigation. La Phase 2 finish (#198) a hoisté les actions compte (login/logout) et outils alpha (Diagnostics, signalement, version) vers le **menu compte global** (`RedfaceAccountMenu` dans `:core:ui`, `AppAccountViewModel` dans `:app/navigation/`) injecté par `topBarActions` dans chaque écran principal — `MessagesScreen` redevient un placeholder « MPs Phase 3 » sobre.
 
 ---
 

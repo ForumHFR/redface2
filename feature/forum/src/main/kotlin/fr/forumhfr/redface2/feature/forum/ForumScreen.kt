@@ -49,6 +49,7 @@ import fr.forumhfr.redface2.core.model.Category
 @Composable
 fun ForumScreen(
     onOpenCategory: (Category) -> Unit,
+    topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel: ForumViewModel = hiltViewModel()
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -64,12 +65,20 @@ fun ForumScreen(
                 .statusBarsPadding()
                 .navigationBarsPadding(),
         ) {
-            Text(
-                text = stringResource(R.string.forum_title),
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = stringResource(R.string.forum_title),
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                topBarActions?.invoke()
+            }
 
             PullToRefreshBox(
                 isRefreshing = isRefreshing,

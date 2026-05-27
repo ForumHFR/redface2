@@ -49,6 +49,19 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     override fun readProxyConfigForNetworkBootstrap(): ProxyConfig =
         runBlocking(ioDispatcher) { observeProxyConfig().first() }
 
+    override fun observeIgnoreTopicCache(): Flow<Boolean> =
+        dataStore.data
+            .map { prefs -> prefs[KEY_IGNORE_TOPIC_CACHE] ?: false }
+            .catch { emit(false) }
+
+    override suspend fun setIgnoreTopicCache(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_IGNORE_TOPIC_CACHE] = enabled
+            }
+        }
+    }
+
     private fun toProxyConfig(prefs: Preferences): ProxyConfig =
         ProxyConfig(
             enabled = prefs[KEY_PROXY_ENABLED] ?: false,
@@ -64,5 +77,6 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_PROXY_PORT = intPreferencesKey("proxy_port")
         val KEY_PROXY_USERNAME = stringPreferencesKey("proxy_username")
         val KEY_PROXY_PASSWORD = stringPreferencesKey("proxy_password")
+        val KEY_IGNORE_TOPIC_CACHE = booleanPreferencesKey("ignore_topic_cache")
     }
 }

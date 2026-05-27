@@ -19,6 +19,89 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v62 — `0.3.22` — 2026-05-27
+
+**Statut** : `local`
+**Commit** : `156a858` sur `feature/phase2-finish-ui-polish-198-199-201-202` avant merge PR #207
+**Fichier** : à produire via `workflow_dispatch` du job `release.yml` (ou push d'un tag `app-v62`)
+
+Correctif du bug de citations invisibles en mode connecté — la vraie cause, trouvée via la boucle de feedback émulateur.
+
+### Fixed
+- Citations (`PostBlock.Quote`) cassées en mode **authentifié** : HFR sert `<table class="oldcitation">` pour un compte connecté utilisant le style de citation classique, vs `<table class="citation">` en anonyme. Le parser ne connaissait que `citation`/`quote` → la citation était avalée et rendue en texte brut côté connecté uniquement (rendu OK en anonyme). `PostContentParser` reconnaît désormais `oldcitation` aux 3 points de classification + le sélecteur d'auteur. Test de régression avec fragment HTML réel capturé en mode connecté. Limitation connue tracée (TODO Phase 2) : le href de citation loggé `forum2.php?...#tM` n'est pas matché par `CITATION_HREF_REGEX`, donc le « aller au message cité » reste inactif en connecté (la citation s'affiche correctement).
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 62`, `versionName = "0.3.22"`.
+
+---
+
+## v61 — `0.3.21` — 2026-05-25
+
+**Statut** : `closed`
+**Commit** : `workflow_dispatch` sur `feature/phase2-finish-ui-polish-198-199-201-202` (run #26388655525, success)
+**Fichier** : AAB uploadé sur le canal Play closed alpha
+
+Slice maintenance alpha sur la PR #207 — réponse à la régression bordure invisible AMOLED v60 et bug quote stale persisté.
+
+### Added
+- Paramètres alpha : carte « Maintenance alpha » avec une action « Vider le cache des topics » (dialogue de confirmation Material 3, feedback inline succès / échec, indicateur de progression M3 pendant le wipe). Wipe les tables Room `posts` + `topic_pages` au sein d'une `@Transaction` ; **ne touche pas** aux drapeaux, à la session HFR, aux préférences proxy ni à la base de données globale (pas de `clearAllTables()`). Escape hatch pour forcer un reparse au prochain affichage quand le `PostContent` AST persisté est devenu obsolète.
+- Paramètres alpha : switch « Ignorer le cache topic » dans la carte « Maintenance alpha ». Quand actif, `TopicRepositoryImpl.observeTopicPage` saute la lecture Room et part directement sur le réseau (le résultat est toujours persisté pour rester cohérent avec le parser courant), et `prefetch()` devient no-op. Outil de dogfood alpha uniquement — les drapeaux, l'authentification, le proxy et les préférences non liées sont intacts. Préférence persistée dans DataStore (`ignore_topic_cache`, default `false`).
+
+### Fixed
+- Settings : race d'hydratation du toggle « Ignorer le cache topic ». Quand l'utilisateur flippait le switch avant que la coroutine d'init n'ait fini de lire la valeur DataStore initiale, l'hydration tardive écrasait le flip optimiste avec la valeur stale (le toggle pouvait afficher `false` alors que DataStore était à `true`). Guard ajouté : `ignoreTopicCacheTouchedLocally` empêche l'hydratation d'écraser une modification locale, et `onSuccess` ré-affirme `ignoreTopicCache = desired` pour une cohérence finale quel que soit l'interleaving.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 61`, `versionName = "0.3.21"`.
+
+---
+
+## v60 — `0.3.20` — 2026-05-24
+
+**Statut** : `closed`
+**Commit** : workflow_dispatch sur `feature/phase2-finish-ui-polish-198-199-201-202` avant merge PR #207
+**Fichier** : artefact CD `dispatch-v60`
+
+Codex rereview corrections appliquées au polish v59 — pas de nouvelle feature, uniquement des fixes ciblés.
+
+### Fixed
+- QuoteFrame : la bordure verticale d'accent est désormais dessinée via `Modifier.drawBehind` sur la Column (largeur hard-codée en pixels), au lieu d'un `Box.matchParentSize().width(4.dp)` qui risquait de peindre l'accent sur toute la largeur du card selon l'ordre de résolution des contraintes Compose. Aucune mesure intrinsèque ni enfant match-parent — sans danger pour les quotes contenant `[img]` (SubcomposeLayout).
+- A11y avatar : la branche image chargée annonce maintenant « Avatar de <pseudo> » comme la branche placeholder standalone (avant : pseudo brut sans préfixe « Avatar de »). Une seule string localisée `R.string.avatar_content_description` utilisée pour les 2 modes.
+- KDoc `BADGE_SIZE` : retiré la mention erronée que `Surface(onClick = ...)` injecte automatiquement le 48dp interactif. C'est `Modifier.minimumInteractiveComponentSize()` appliqué explicitement qui fait le travail.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 60`, `versionName = "0.3.20"`.
+
+---
+
+## v59 — `0.3.19` — 2026-05-24
+
+**Statut** : `closed`
+**Commit** : tag `app-v59` après merge PR #207
+**Fichier** : artefact CD `app-v59`
+
+Phase 2 finish UI polish (#198 / #199 / #201 / #202).
+
+### Added
+- Menu compte global accessible depuis Drapeaux, Forum, Recherche et Messages : avatar / login-logout / paramètres alpha / diagnostics / signalement / version. Sortie unique de l'onglet `Messages` qui devient un placeholder Phase 3 sobre (#198).
+- Avatars des auteurs HFR dans chaque post du topic (carré à coins arrondis, placeholder initiale quand l'URL est nulle / erreur, partagé via `:core:ui/RedfaceUserAvatar`) (#201).
+
+### Changed
+- Drapeaux : refresh manuel déplacé dans le header compact (`TextButton` à côté du menu compte) au lieu d'un bouton pleine largeur en fin de liste. Toggle « cyans déjà lus » passé en `FilterChip` Material 3 sous le tab row CYAN (#199).
+- Citations : `QuoteBlock` et `CollapsedQuoteBlock` gagnent une bordure verticale d'accent (4dp, `primary`/`tertiary` alterné par profondeur) sur le `surfaceContainerHighest` existant — la régression d'invisibilité AMOLED est résolue, les quotes restent identifiables sur les 3 thèmes (clair/sombre/AMOLED). La règle `MAX_VISIBLE_QUOTE_DEPTH = 3` et le collapse au-delà sont préservés (#202).
+- `app/build.gradle.kts` : `versionCode = 59`, `versionName = "0.3.19"`.
+
+### Fixed
+- A11y : badge compte expose `Role.Button` + `Modifier.minimumInteractiveComponentSize()` (48dp touch target sur 40dp visuel), `semantics(mergeDescendants=true)` empêche la double annonce TalkBack (review round 2 PR #207).
+- A11y : avatar utilisateur announce « Avatar de <pseudo> » dans les deux modes (image chargée et placeholder initiale standalone), au lieu de rester muet.
+- QuoteFrame : la bordure verticale d'accent est dessinée directement via `Modifier.drawBehind` (sans mesure intrinsèque ni enfant `matchParentSize`), ce qui évite le crash `IllegalStateException` "Asking for intrinsic measurements of SubcomposeLayout" qui touchait les citations contenant un `[img]` et garantit une bordure 4dp exacte indépendamment de l'ordre de résolution des contraintes Compose.
+
+### Removed
+- `MessagesViewModel` + son test (logique compte/logout déplacée dans `AppAccountViewModel` côté `:app`).
+- Strings devenues mortes dans `:feature:messages` : 13 strings `messages_section_account`, `messages_auth_loading`, `messages_anonymous_intro`, `messages_login_cta`, `messages_logged_in_as`, `messages_logout_cta`, `messages_section_alpha_tools`, `messages_app_version_footer`, `messages_diagnostics_cta`, `messages_settings_cta`, `messages_report_content_cta`, `messages_report_email_subject`, `messages_report_no_email_client`. Les versions globales équivalentes vivent dans `:core:ui/account_menu_*`.
+- String `flags_show_read_participated_toggle` (remplacée par `flags_show_read_participated_chip` pour le FilterChip).
+
+---
+
 ## v58 — `0.3.18` — 2026-05-24
 
 **Statut** : `closed`

@@ -47,6 +47,7 @@ import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
+import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -578,27 +579,44 @@ private fun TopicPostCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = post.postIndex?.let { postIndex ->
-                    stringResource(
-                        R.string.topic_post_header_with_index,
-                        postIndex,
-                        post.author,
-                        post.numreponse,
+            // #201 — avatar + author header in a Row so the visual identity of the poster
+            // is immediately visible. Falls back to a placeholder square (cf.
+            // `RedfaceUserAvatar`) when `Post.avatarUrl == null` or the load errors.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                RedfaceUserAvatar(
+                    avatarUrl = post.avatarUrl,
+                    author = post.author,
+                )
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = post.postIndex?.let { postIndex ->
+                            stringResource(
+                                R.string.topic_post_header_with_index,
+                                postIndex,
+                                post.author,
+                                post.numreponse,
+                            )
+                        } ?: stringResource(
+                            R.string.topic_post_header_without_index,
+                            post.author,
+                            post.numreponse,
+                        ),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
                     )
-                } ?: stringResource(
-                    R.string.topic_post_header_without_index,
-                    post.author,
-                    post.numreponse,
-                ),
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = post.date.asTopicDate(),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+                    Text(
+                        text = post.date.asTopicDate(),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             PostRenderer(content = post.content)
             if (onQuote != null || onEdit != null) {
                 // Actions row at the bottom of the post card, sober TextButtons

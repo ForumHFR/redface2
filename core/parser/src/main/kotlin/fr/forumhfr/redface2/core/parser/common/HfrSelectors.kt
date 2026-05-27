@@ -16,7 +16,13 @@ object HfrSelectors {
     const val POST_AVATAR = ".avatar_center img[src]"
     const val POST_TOOLBAR_LEFT = ".toolbar .left"
     const val POST_CONTENT = "div[id^=para]"
-    const val POST_CITATION_AUTHOR = "table.citation b.s1 a.Topic"
+    // HFR sert deux variantes de table de citation selon le contexte : `table.citation` en
+    // anonyme, `table.oldcitation` pour un utilisateur connecté dont le profil utilise le style
+    // de citation classique (cas réel observé sur le compte XaTriX, topic RF2 en mode loggé).
+    // Les deux doivent être reconnues, sinon la citation d'un post est avalée et rendue en
+    // texte brut côté connecté (bug confirmé sur S25, v0.3.21).
+    const val POST_CITATION_AUTHOR =
+        "table.citation b.s1 a.Topic, table.oldcitation b.s1 a.Topic"
     const val POST_EDITED = "div.edited"
     const val POST_SIGNATURE = "span.signature"
 

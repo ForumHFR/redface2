@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.database.entities.PostEntity
 import fr.forumhfr.redface2.core.database.entities.TopicEntity
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.network.HfrClient
@@ -20,6 +21,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 
@@ -29,12 +31,17 @@ class TopicRepositoryImpl @Inject constructor(
     private val parser: HfrParser,
     private val topicDao: TopicDao,
     private val clock: Clock,
+    private val userPreferencesRepository: UserPreferencesRepository,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : TopicRepository {
 
     /**
      * Cache-first read with TTL-driven refresh.
      *
+     * - **Alpha `ignoreTopicCache` toggle ON** → skip the Room read entirely and emit a
+     *   fresh AUTHENTICATED fetch. The result is still persisted so toggling back OFF
+     *   later finds a parser-coherent cache. Network failures propagate as a flow
+     *   exception (no silent fallback to a potentially stale cache row).
      * - Cache hit, **AUTHENTICATED** + fresh → emit and stop. No network. This is the
      *   snappy back-nav case: returning to a page within `CachePolicy.topicPage` does
      *   not refetch and does not silently mark drapeaux as read.
@@ -49,6 +56,18 @@ class TopicRepositoryImpl @Inject constructor(
      *   show its error state.
      */
     override fun observeTopicPage(cat: Int, post: Int, page: Int): Flow<Topic> = flow {
+        // Alpha "Ignorer le cache topic" toggle (Phase 2 finish): when enabled, skip the
+        // Room read entirely and emit a fresh network fetch. The result is still persisted
+        // so toggling back OFF later finds a cache coherent with the current parser. We
+        // evaluate the preference once per `observeTopicPage` call — no long-lived collect.
+        val ignoreTopicCache = withContext(ioDispatcher) {
+            userPreferencesRepository.observeIgnoreTopicCache().first()
+        }
+        if (ignoreTopicCache) {
+            emit(fetchAndPersist(cat, post, page, FetchMode.AUTHENTICATED))
+            return@flow
+        }
+
         val cached = withContext(ioDispatcher) { loadFromCache(cat, post, page) }
         if (cached != null) {
             emit(cached.topic)
@@ -82,8 +101,23 @@ class TopicRepositoryImpl @Inject constructor(
      * ADR-003 § Prefetch) and persists the result *only if* it does not
      * overwrite an existing authenticated cache row. Failures are logged and
      * swallowed so a flaky prefetch never disturbs the user-facing flow.
+     *
+     * **No-op when the alpha `ignoreTopicCache` toggle is ON**: prefetching into Room
+     * while the user explicitly asked to bypass it would re-fill the very cache they
+     * want to skip, so the call returns early without hitting the network.
      */
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {
+        val ignoreTopicCache = withContext(ioDispatcher) {
+            userPreferencesRepository.observeIgnoreTopicCache().first()
+        }
+        if (ignoreTopicCache) {
+            // The alpha toggle promises that "Ignorer le cache topic" suspends the prefetch as
+            // well — prefetching into Room while the user wants to bypass it would re-fill the
+            // very cache they asked us to skip. Cancellation semantics are preserved because we
+            // do nothing.
+            Log.d(LOG_TAG, "Skipped topic prefetch because ignore topic cache is enabled")
+            return
+        }
         try {
             fetchAndPersist(cat, post, page, FetchMode.ANONYMOUS)
         } catch (cancellation: CancellationException) {

@@ -18,5 +18,7 @@
     <string name="flags_item_metadata_with_author">%1$s · %2$d rép. · p.%3$d/%4$d</string>
     <string name="flags_item_metadata_no_author">%1$d rép. · p.%2$d/%3$d</string>
 
-    <string name="flags_show_read_participated_toggle">Afficher les sujets participés déjà lus</string>
+    <!-- #199 — compact FilterChip label under the CYAN tab. Replaces the legacy full-width
+         `flags_show_read_participated_toggle` Switch label, trimmed for chip ergonomics. -->
+    <string name="flags_show_read_participated_chip">Cyans lus</string>
 </resources>

@@ -105,12 +105,11 @@ class FlagsViewModel @Inject constructor(
         viewModelScope.launch { flagRepository.refresh(_selectedTab.value) }
     }
 
-    fun logout() {
-        viewModelScope.launch {
-            flagRepository.clearSessionCache()
-            authRepository.logout()
-        }
-    }
+    // Round-2 review (PR #207): `logout()` was removed from this ViewModel — the global account
+    // menu (#198) now drives the logout from `AppAccountViewModel.logout()`, which owns the
+    // canonical `clearSessionCache → authRepository.logout` ordering. Keeping a second copy
+    // here was dead code that drifted at the first refactor; the matching invariant test was
+    // moved to `AppAccountViewModelTest`.
 
     private fun filterReadParticipatedIfNeeded(
         result: FlagsResult,

@@ -29,6 +29,15 @@ turbine = "1.2.1"
 konsist = "0.17.3"
 javax-inject = "1"
 androidx-tracing = "1.3.0"
+# Roborazzi 1.63.0 — JVM screenshot testing on top of Robolectric. Used **without** the
+# Gradle plugin because the latter is not yet AGP 9 compatible (cf.
+# https://github.com/takahirom/roborazzi/pull/781). We consume `roborazzi` +
+# `roborazzi-compose` as plain test artifacts and force `roborazzi.test.record=true` via
+# `systemProperty` so `./gradlew :core:ui:testDebugUnitTest` writes the PNGs directly.
+# `@GraphicsMode(NATIVE)` is required on test classes that call `captureRoboImage`. Wired
+# only in `:core:ui` for the moment as a diagnostic channel for AMOLED quote rendering
+# (cf. PR #207).
+roborazzi = "1.63.0"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -75,6 +84,8 @@ robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectr
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
 detekt-cli = { module = "io.gitlab.arturbosch.detekt:detekt-cli", version.ref = "detekt" }
+roborazzi = { module = "io.github.takahirom.roborazzi:roborazzi", version.ref = "roborazzi" }
+roborazzi-compose = { module = "io.github.takahirom.roborazzi:roborazzi-compose", version.ref = "roborazzi" }
 javax-inject = { module = "javax.inject:javax.inject", version.ref = "javax-inject" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }

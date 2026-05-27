@@ -1,9 +1,11 @@
-Alpha Redface 2 v57 — hardening proxy.
+Alpha Redface 2 v62 — citations connectées corrigées.
 
 Correctifs :
-- Proxy limité aux domaines HFR : les images externes ne passent plus par le proxy utilisateur.
-- Bouton Enregistrer du proxy débloqué après échec.
-- Credentials proxy UTF-8 pour mots de passe accentués.
-- Dropdown sous-catégorie EditFP fiabilisé (M3).
+- Les citations s’affichent correctement en étant connecté.
+- Les variantes HFR `citation` / `oldcitation` sont maintenant reconnues.
+
+Rappel v61 :
+- Bouton « Vider le cache des topics ».
+- Option alpha « Ignorer le cache topic » pour diagnostiquer les bugs de cache.
 
 Bugs : alpha ou GitHub.
