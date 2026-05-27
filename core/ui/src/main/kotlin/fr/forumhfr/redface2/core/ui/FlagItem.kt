@@ -37,10 +37,14 @@ import fr.forumhfr.redface2.core.model.FlagType
  * because `:core:ui` has no localized resources of its own — keeping the i18n boundary
  * clean per the convention recorded in `docs/guides/contributing.md`.
  *
- * [trailingAction] is an optional slot at the end of the row (e.g. the « Retirer le
- * drapeau » button, #99). When present, the title column takes the remaining width via
+ * [trailingAction] is an optional slot at the end of the row for an inline affordance (e.g.
+ * an overflow / quick action). When present, the title column takes the remaining width via
  * `weight(1f)` so the action stays pinned to the right and the text ellipsises instead of
  * overlapping it. When absent (default), the column fills the row as before.
+ *
+ * Note (#99): the « Retirer le drapeau » affordance is no longer an inline `trailingAction`
+ * button — `:feature:flags` now wraps this row in a Material 3 `SwipeToDismissBox`
+ * (swipe-to-remove + confirmation dialog). The slot is kept for future inline actions.
  */
 @Composable
 fun FlagItem(

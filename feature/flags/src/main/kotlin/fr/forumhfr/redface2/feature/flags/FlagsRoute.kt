@@ -24,10 +24,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -36,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -63,6 +67,11 @@ import fr.forumhfr.redface2.core.ui.FlagItemDivider
  * - Refresh is now a Material 3 `PullToRefreshBox` (swipe down) instead of a header button,
  *   matching `feature/forum`. The error state still surfaces a `Retry` affordance because
  *   it's a recovery action, not a permanent secondary control.
+ * - Flag removal (#99) is now a Material 3 `SwipeToDismissBox` (swipe end-to-start) instead
+ *   of a trailing « Retirer » button. The swipe only *opens* the existing confirmation dialog
+ *   ([requestRemoveFlag]) — it never dismisses the row on its own. See [SwipeableFlagItem] for
+ *   the « confirm before network » detail (the row is reset to settled, so it stays in place
+ *   until the user confirms and the repository evicts it from the cache).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -351,22 +360,16 @@ private fun ColumnScope.AuthenticatedBody(
                         // (cf. AGENTS.md), not globally. Using "cat-topicId" eliminates the
                         // latent crash if the listing ever returns the same topicId in two cats.
                         items(items = current.flags, key = { "${it.cat}-${it.topicId}" }) { flag ->
-                            // Anti double-tap (#99): disable the « Retirer » action of every row
-                            // while any removal is in flight. `removeFlagState` is Removing only
+                            // Anti double-tap (#99): block a swipe from raising a second removal
+                            // while one is already in flight. `removeFlagState` is Removing only
                             // between confirm and the repository result.
                             val removalInFlight = state.removeFlagState is RemoveFlagState.Removing
-                            FlagItem(
+                            SwipeableFlagItem(
                                 flag = flag,
                                 metadata = flagMetadata(flag),
+                                removalInFlight = removalInFlight,
                                 onClick = { actions.onOpenFlag(flag) },
-                                trailingAction = {
-                                    TextButton(
-                                        onClick = { actions.onRequestRemoveFlag(flag) },
-                                        enabled = !removalInFlight,
-                                    ) {
-                                        Text(stringResource(R.string.flags_remove_action))
-                                    }
-                                },
+                                onRequestRemove = { actions.onRequestRemoveFlag(flag) },
                             )
                             FlagItemDivider()
                         }
@@ -374,6 +377,91 @@ private fun ColumnScope.AuthenticatedBody(
                 }
             }
         }
+    }
+}
+
+/**
+ * One swipeable flag row (#99). Wraps [FlagItem] in a Material 3 [SwipeToDismissBox] so a swipe
+ * **end-to-start** raises the existing confirmation dialog via [onRequestRemove].
+ *
+ * Crucial « confirm before network » detail: the swipe must **not** dismiss the row on its own.
+ * The actual removal only happens after the user confirms in the dialog (the repository then
+ * evicts the item from the cache, which recomposes the list away). To keep the row in place we:
+ *
+ *  1. fire [onRequestRemove] from the non-deprecated [SwipeToDismissBox] `onDismiss` callback, then
+ *  2. animate the box back to [SwipeToDismissBoxValue.Settled] via `reset()` in a [LaunchedEffect]
+ *     keyed on `currentValue`, so the row snaps back regardless of whether the user confirms or
+ *     cancels the dialog.
+ *
+ * We do **not** use the `confirmValueChange` veto overload of [rememberSwipeToDismissBoxState]:
+ * it is deprecated in the locked Material 3 (BOM 2026.04.01) — the verified message is
+ * « confirmValueChange is deprecated without replacement ». `onDismiss` + `reset()` is the
+ * supported equivalent (cf. Context7 + the locked material3 classes.jar).
+ *
+ * Only swipe-to-start is enabled ([enableDismissFromStartToEnd] = false): a single, predictable
+ * gesture, with no accidental removal on a start-to-end pan. While a removal is in flight
+ * ([removalInFlight]), gestures are disabled (anti double-tap) — the ViewModel also guards this,
+ * but disabling the gesture avoids a pointless dialog flash.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeableFlagItem(
+    flag: Flag,
+    metadata: String,
+    removalInFlight: Boolean,
+    onClick: () -> Unit,
+    onRequestRemove: () -> Unit,
+) {
+    val dismissState = rememberSwipeToDismissBoxState()
+
+    // Snap the row back to settled whenever a swipe lands on a dismissed value. This is what
+    // keeps the item visible until the dialog decides its fate — the swipe is only a trigger.
+    LaunchedEffect(dismissState.currentValue) {
+        if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+            dismissState.reset()
+        }
+    }
+
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = true,
+        gesturesEnabled = !removalInFlight,
+        onDismiss = { onRequestRemove() },
+        backgroundContent = { SwipeRemoveBackground() },
+    ) {
+        FlagItem(
+            flag = flag,
+            metadata = metadata,
+            onClick = onClick,
+            // Opaque background so the destructive backdrop never bleeds through the row while
+            // it is animating back to settled.
+            modifier = Modifier.background(MaterialTheme.colorScheme.surface),
+        )
+    }
+}
+
+/**
+ * Destructive M3 backdrop revealed under a flag row while swiping end-to-start (#99). Uses
+ * `errorContainer` / `onErrorContainer` from the theme — no hardcoded color — and a text label
+ * (« Retirer ») rather than a Material Icons glyph, because the icons-extended dependency is not
+ * on the classpath in this module.
+ */
+@Composable
+private fun SwipeRemoveBackground() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(horizontal = 24.dp),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        Text(
+            text = stringResource(R.string.flags_remove_action),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            textAlign = TextAlign.End,
+        )
     }
 }
 
