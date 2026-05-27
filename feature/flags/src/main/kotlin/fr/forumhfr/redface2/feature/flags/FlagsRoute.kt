@@ -35,10 +35,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -50,6 +54,7 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.ui.FlagItem
 import fr.forumhfr.redface2.core.ui.FlagItemDivider
+import kotlinx.coroutines.launch
 
 /**
  * Home tab entry point.
@@ -360,9 +365,10 @@ private fun ColumnScope.AuthenticatedBody(
                         // (cf. AGENTS.md), not globally. Using "cat-topicId" eliminates the
                         // latent crash if the listing ever returns the same topicId in two cats.
                         items(items = current.flags, key = { "${it.cat}-${it.topicId}" }) { flag ->
-                            // Anti double-tap (#99): block a swipe from raising a second removal
-                            // while one is already in flight. `removeFlagState` is Removing only
-                            // between confirm and the repository result.
+                            // Anti double-tap (#99): while a removal is in flight, swipe is
+                            // disabled across the list. `removeFlagState` is Removing only between
+                            // confirm and the repository result (a brief window); the modal dialog
+                            // already blocks the Confirming phase and the ViewModel rejects re-entry.
                             val removalInFlight = state.removeFlagState is RemoveFlagState.Removing
                             SwipeableFlagItem(
                                 flag = flag,
@@ -386,12 +392,16 @@ private fun ColumnScope.AuthenticatedBody(
  *
  * Crucial « confirm before network » detail: the swipe must **not** dismiss the row on its own.
  * The actual removal only happens after the user confirms in the dialog (the repository then
- * evicts the item from the cache, which recomposes the list away). To keep the row in place we:
+ * evicts the item from the cache, which recomposes the list away). So from the non-deprecated
+ * [SwipeToDismissBox] `onDismiss` callback we both fire [onRequestRemove] **and** immediately
+ * `reset()` the box back to [SwipeToDismissBoxValue.Settled] — the row snaps back whether the user
+ * confirms or cancels. This is the canonical Material 3 stable pattern (cf. Context7
+ * `SwipeToDismissBox` sample).
  *
- *  1. fire [onRequestRemove] from the non-deprecated [SwipeToDismissBox] `onDismiss` callback, then
- *  2. animate the box back to [SwipeToDismissBoxValue.Settled] via `reset()` in a [LaunchedEffect]
- *     keyed on `currentValue`, so the row snaps back regardless of whether the user confirms or
- *     cancels the dialog.
+ * Resetting from a separate `LaunchedEffect` keyed on `currentValue` looks equivalent but is
+ * racy: `reset()` = `animateTo(Settled)` flips `currentValue` early, re-keying the effect and
+ * cancelling the reset mid-animation, which leaves the row **stuck at the dismissed offset** once
+ * the dialog grabs focus (reproduced on device). Resetting inside `onDismiss` avoids the race.
  *
  * We do **not** use the `confirmValueChange` veto overload of [rememberSwipeToDismissBoxState]:
  * it is deprecated in the locked Material 3 (BOM 2026.04.01) — the verified message is
@@ -399,9 +409,10 @@ private fun ColumnScope.AuthenticatedBody(
  * supported equivalent (cf. Context7 + the locked material3 classes.jar).
  *
  * Only swipe-to-start is enabled ([enableDismissFromStartToEnd] = false): a single, predictable
- * gesture, with no accidental removal on a start-to-end pan. While a removal is in flight
- * ([removalInFlight]), gestures are disabled (anti double-tap) — the ViewModel also guards this,
- * but disabling the gesture avoids a pointless dialog flash.
+ * gesture, with no accidental removal on a start-to-end pan. The swipe is also the *only* removal
+ * affordance, so the row carries a TalkBack/switch-access `customActions` entry mirroring it.
+ * While a removal is in flight ([removalInFlight]), gestures are disabled across the list (the
+ * ViewModel also guards re-entry) — `Removing` is only the brief confirm→result window.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -413,21 +424,22 @@ private fun SwipeableFlagItem(
     onRequestRemove: () -> Unit,
 ) {
     val dismissState = rememberSwipeToDismissBoxState()
-
-    // Snap the row back to settled whenever a swipe lands on a dismissed value. This is what
-    // keeps the item visible until the dialog decides its fate — the swipe is only a trigger.
-    LaunchedEffect(dismissState.currentValue) {
-        if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
-            dismissState.reset()
-        }
-    }
+    val scope = rememberCoroutineScope()
+    val removeLabel = stringResource(R.string.flags_remove_action)
 
     SwipeToDismissBox(
         state = dismissState,
         enableDismissFromStartToEnd = false,
         enableDismissFromEndToStart = true,
         gesturesEnabled = !removalInFlight,
-        onDismiss = { onRequestRemove() },
+        // The swipe only *triggers* the confirmation — it must never dismiss the row itself.
+        // Raise the dialog and snap the box back from the SAME callback (canonical M3 stable
+        // pattern). Doing the reset() here instead of a LaunchedEffect(currentValue) avoids the
+        // re-key race that otherwise leaves the row stuck at the dismissed offset.
+        onDismiss = {
+            onRequestRemove()
+            scope.launch { dismissState.reset() }
+        },
         backgroundContent = { SwipeRemoveBackground() },
     ) {
         FlagItem(
@@ -435,8 +447,18 @@ private fun SwipeableFlagItem(
             metadata = metadata,
             onClick = onClick,
             // Opaque background so the destructive backdrop never bleeds through the row while
-            // it is animating back to settled.
-            modifier = Modifier.background(MaterialTheme.colorScheme.surface),
+            // it is animating back to settled. Swipe is the only removal affordance now, so we
+            // also expose a TalkBack/switch-access custom action mirroring it.
+            modifier = Modifier
+                .background(MaterialTheme.colorScheme.surface)
+                .semantics {
+                    customActions = listOf(
+                        CustomAccessibilityAction(removeLabel) {
+                            onRequestRemove()
+                            true
+                        },
+                    )
+                },
         )
     }
 }
