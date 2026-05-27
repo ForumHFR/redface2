@@ -84,7 +84,7 @@ class FlagsViewModelTest {
             val cyan = awaitItem() as FlagsResult.Success
             assertEquals(FlagType.CYAN, cyan.flags.single().type)
 
-            vm.selectTab(FlagType.RED)
+            vm.selectTab(FlagTab.Red)
             flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED))))
             val red = awaitItem() as FlagsResult.Success
             assertEquals(FlagType.RED, red.flags.single().type)
@@ -99,10 +99,81 @@ class FlagsViewModelTest {
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val vm = FlagsViewModel(auth, flags)
 
-        vm.selectTab(FlagType.FAVORITE)
+        vm.selectTab(FlagTab.Favorite)
         vm.refresh()
 
         assertEquals(listOf(FlagType.FAVORITE), flags.refreshCalls)
+    }
+
+    @Test
+    fun `refresh toggles isRefreshing around the round-trip`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+
+        assertEquals(false, vm.isRefreshing.value)
+        vm.refresh()
+        // FakeFlagRepository.refresh returns immediately, so by the time the launched
+        // coroutine settles isRefreshing is back to false (UnconfinedTestDispatcher runs
+        // it eagerly). The contract pinned here: it must end at false, never stuck true.
+        assertEquals(false, vm.isRefreshing.value)
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+    }
+
+    @Test
+    fun `selecting the Super tab is a placeholder with no fetch and null state`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN))))
+            awaitItem() // CYAN content
+
+            vm.selectTab(FlagTab.Super)
+            // Super maps to no FlagType: the state collapses back to null (placeholder body).
+            assertNull(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        // No FlagType is backing Super, so refresh() while on it must not hit the repository.
+        vm.refresh()
+        assertTrue("Super refresh must be a no-op", flags.refreshCalls.isEmpty())
+        assertEquals(false, vm.isRefreshing.value)
+    }
+
+    @Test
+    fun `re-tapping the already selected Cyan tab toggles the read participated filter`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+
+        // Cyan is selected by default; re-tapping it flips the toggle on, then off.
+        assertEquals(false, vm.showReadParticipatedTopics.value)
+        vm.selectTab(FlagTab.Cyan)
+        assertEquals(true, vm.showReadParticipatedTopics.value)
+        vm.selectTab(FlagTab.Cyan)
+        assertEquals(false, vm.showReadParticipatedTopics.value)
+        // Re-tap must not switch the selected tab or trigger a refetch.
+        assertEquals(FlagTab.Cyan, vm.selectedTab.value)
+        assertTrue("re-tap must not refetch", flags.refreshCalls.isEmpty())
+    }
+
+    @Test
+    fun `selecting Cyan from another tab does not toggle the filter`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+
+        vm.selectTab(FlagTab.Red)
+        assertEquals(false, vm.showReadParticipatedTopics.value)
+
+        // First tap on Cyan from RED selects it without toggling the filter.
+        vm.selectTab(FlagTab.Cyan)
+        assertEquals(FlagTab.Cyan, vm.selectedTab.value)
+        assertEquals(false, vm.showReadParticipatedTopics.value)
     }
 
     // Round-2 review (PR #207): the `logout clears the private flags cache before resetting
@@ -210,7 +281,7 @@ class FlagsViewModelTest {
         vm.flagsState.test {
             awaitItem() // initial null
 
-            vm.selectTab(FlagType.RED)
+            vm.selectTab(FlagTab.Red)
             flags.emit(
                 FlagType.RED,
                 FlagsResult.Success(
@@ -227,7 +298,7 @@ class FlagsViewModelTest {
                 red.flags.map { it.topicId },
             )
 
-            vm.selectTab(FlagType.FAVORITE)
+            vm.selectTab(FlagTab.Favorite)
             flags.emit(
                 FlagType.FAVORITE,
                 FlagsResult.Success(

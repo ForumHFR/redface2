@@ -40,8 +40,8 @@ class FlagsViewModel @Inject constructor(
 
     private var observedPseudo: String? = null
 
-    private val _selectedTab = MutableStateFlow(FlagType.CYAN)
-    val selectedTab: StateFlow<FlagType> = _selectedTab.asStateFlow()
+    private val _selectedTab = MutableStateFlow<FlagTab>(FlagTab.Cyan)
+    val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
 
     /**
      * User-controlled visibility of CYAN flags whose [fr.forumhfr.redface2.core.model.Flag.hasUnread]
@@ -72,6 +72,10 @@ class FlagsViewModel @Inject constructor(
      * shows the login intro instead of an empty list); Authenticated → emits the result
      * from FlagRepository for the current tab. Switching tabs (or auth state) cancels
      * any in-flight observation via [flatMapLatest].
+     *
+     * The [FlagTab.Super] tab is a placeholder (future « super favoris », no backend yet):
+     * selecting it maps to no [FlagType] and emits `null`, so the screen renders its
+     * placeholder body instead of a list and **no** repository observation is started.
      */
     val flagsState: StateFlow<FlagsResult?> = authState
         .onEach(::clearFlagsCacheIfSessionChanged)
@@ -79,12 +83,15 @@ class FlagsViewModel @Inject constructor(
             when (state) {
                 null -> flowOf<FlagsResult?>(null)
                 AuthState.Anonymous -> flowOf<FlagsResult?>(null)
-                is AuthState.Authenticated -> selectedTab.flatMapLatest { type ->
-                    combine(
-                        flagRepository.observe(type),
-                        _showReadParticipatedTopics,
-                    ) { result, showRead ->
-                        filterReadParticipatedIfNeeded(result, type, showRead)
+                is AuthState.Authenticated -> selectedTab.flatMapLatest { tab ->
+                    when (val type = tab.flagType) {
+                        null -> flowOf<FlagsResult?>(null) // Super placeholder: no fetch.
+                        else -> combine(
+                            flagRepository.observe(type),
+                            _showReadParticipatedTopics,
+                        ) { result, showRead ->
+                            filterReadParticipatedIfNeeded(result, type, showRead)
+                        }
                     }
                 }
             }
@@ -119,8 +126,26 @@ class FlagsViewModel @Inject constructor(
     private val _removeFlagEvent = MutableStateFlow<RemoveFlagEvent?>(null)
     val removeFlagEvent: StateFlow<RemoveFlagEvent?> = _removeFlagEvent.asStateFlow()
 
-    fun selectTab(type: FlagType) {
-        _selectedTab.value = type
+    /**
+     * Toggled around the user-driven [refresh] round-trip so the Material 3
+     * `PullToRefreshBox` indicator can stay anchored over the existing list instead of
+     * blanking it back to a cold spinner. Same pattern as `ForumViewModel.isRefreshing`.
+     */
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    /**
+     * Tab selection. Re-tapping [FlagTab.Cyan] while it is **already** selected toggles
+     * [showReadParticipatedTopics] (show / hide the already-read participated topics) —
+     * the inline replacement for the former « Cyans lus » FilterChip. Selecting Cyan from
+     * another tab only switches to it (no toggle). Other tabs just switch.
+     */
+    fun selectTab(tab: FlagTab) {
+        if (tab == FlagTab.Cyan && _selectedTab.value == FlagTab.Cyan) {
+            _showReadParticipatedTopics.update { !it }
+            return
+        }
+        _selectedTab.value = tab
     }
 
     /** User tapped « Retirer le drapeau » on [flag] : raise the confirmation dialog. */
@@ -171,7 +196,16 @@ class FlagsViewModel @Inject constructor(
     }
 
     fun refresh() {
-        viewModelScope.launch { flagRepository.refresh(_selectedTab.value) }
+        // Super is a placeholder with no backing FlagType — pull-to-refresh is a no-op there.
+        val type = _selectedTab.value.flagType ?: return
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            try {
+                flagRepository.refresh(type)
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
     }
 
     // Round-2 review (PR #207): `logout()` was removed from this ViewModel — the global account
@@ -214,6 +248,37 @@ class FlagsViewModel @Inject constructor(
                 observedPseudo = state.pseudo
             }
         }
+    }
+}
+
+/**
+ * UI-level tab model for the Drapeaux screen. The three real tabs map to a [FlagType] the
+ * repository can fetch ; [Super] is a placeholder for the future « super favoris » feature
+ * and intentionally carries no [FlagType] (no `flag_owntopic` is known, no backend exists).
+ *
+ * The ViewModel keeps fetching/filtering on [FlagType] for the three real tabs ; this type
+ * only drives which tab is selected so the screen can render a placeholder body for [Super]
+ * without polluting the domain enum.
+ */
+sealed interface FlagTab {
+    /** Backing flag type, or `null` for the placeholder [Super] tab. */
+    val flagType: FlagType?
+
+    data object Cyan : FlagTab {
+        override val flagType: FlagType = FlagType.CYAN
+    }
+
+    data object Red : FlagTab {
+        override val flagType: FlagType = FlagType.RED
+    }
+
+    data object Favorite : FlagTab {
+        override val flagType: FlagType = FlagType.FAVORITE
+    }
+
+    /** Placeholder — future « super favoris ». No fetch, no backend. */
+    data object Super : FlagTab {
+        override val flagType: FlagType? = null
     }
 }
 

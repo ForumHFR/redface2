@@ -19,6 +19,12 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ### Added
 - **Retirer un drapeau (#99, Phase 2 finish)** : action « Retirer » sur chaque ligne de la liste des drapeaux, avec **dialog de confirmation Material 3 obligatoire** (titre du topic + type de drapeau) avant tout appel réseau, puis snackbar de succès/échec. Suppression unitaire via `GET /user/delflag.php` authentifié (mapping `FlagType`→`owntopic` : CYAN=1, RED=2, FAVORITE=3), classée sur le texte « Drapeau effacé avec succès ». En cas de succès, le drapeau est retiré des caches mémoire et Room et la liste se met à jour immédiatement ; en cas d'échec, aucun cache n'est touché. Pas d'undo optimiste. Action désactivée pendant l'appel (anti double-tap). Suppression en masse hors scope.
+- **Onglet « Super » (placeholder)** : 4e onglet sur la page Drapeaux, à droite de Favoris, pour les futurs « super favoris ». Pour l'instant un écran placeholder M3 sobre (« Super favoris — à venir » + explication), sans liste ni appel réseau. Modélisé via un type UI local `FlagTab` (Cyan / Red / Favorite / Super) qui mappe vers `FlagType` pour les 3 onglets réels ; l'enum domaine `FlagType` n'est pas touchée.
+
+### Changed
+- **Toggle « cyans lus » intégré à l'onglet Cyan** : le `FilterChip` « Cyans lus » séparé est retiré. Re-cliquer sur l'onglet **Cyan déjà sélectionné** bascule l'affichage des cyans déjà lus (premier clic depuis un autre onglet : sélection simple, sans bascule). Indicateur discret « · +lus » ajouté au libellé de l'onglet Cyan quand les cyans lus sont affichés. Le filtre reste sans effet sur les onglets Lu / Favoris.
+- **Onglet « Lus uniquement » renommé « Lu »** sur la page Drapeaux (gain de place sur le tab row).
+- **Pull-to-refresh sur la liste des drapeaux** : le bouton « Actualiser » du header est remplacé par un `PullToRefreshBox` Material 3 (swipe vers le bas) autour de la liste, branché sur un état `isRefreshing` exposé par le ViewModel — même pattern que la page Forum. Sans effet sur l'onglet Super (no-op).
 
 ---
 

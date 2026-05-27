@@ -4,23 +4,28 @@
     <string name="flags_login_cta">Se connecter à HFR</string>
 
     <string name="flags_tab_my_topics">Mes sujets</string>
-    <string name="flags_tab_read_only">Lus uniquement</string>
+    <string name="flags_tab_read_only">Lu</string>
     <string name="flags_tab_favorite">Favoris</string>
+    <!-- 4e onglet placeholder : futurs « super favoris ». Aucun backend pour l'instant. -->
+    <string name="flags_tab_super">Super</string>
+
+    <!-- Indicateur discret sur l'onglet Cyan : suffixe ajouté au libellé quand les cyans
+         déjà lus sont affichés (re-tap de l'onglet Cyan déjà sélectionné). -->
+    <string name="flags_tab_cyan_read_shown_suffix"> · +lus</string>
+
+    <!-- Onglet « Super » : écran placeholder M3, futurs super favoris. Pas de fetch réseau. -->
+    <string name="flags_super_placeholder_title">Super favoris — à venir</string>
+    <string name="flags_super_placeholder_body">Les « super favoris » permettront d\'épingler les sujets les plus importants. Cette vue arrivera dans une prochaine version.</string>
 
     <string name="flags_empty">Aucun drapeau dans cette vue.</string>
     <string name="flags_error">Impossible de récupérer les drapeaux. Vérifie ta connexion ou réessaie.</string>
     <string name="flags_session_expired">Session HFR expirée. Reconnecte-toi pour recharger tes drapeaux.</string>
     <string name="flags_retry">Réessayer</string>
-    <string name="flags_refresh">Actualiser</string>
 
     <!-- Footer metadata formats. With author: "Shaad · 69017 rép. · p.1725/1726". Without
          author (HFR returns no last replier on brand new topics): "69017 rép. · p.1/1". -->
     <string name="flags_item_metadata_with_author">%1$s · %2$d rép. · p.%3$d/%4$d</string>
     <string name="flags_item_metadata_no_author">%1$d rép. · p.%2$d/%3$d</string>
-
-    <!-- #199 — compact FilterChip label under the CYAN tab. Replaces the legacy full-width
-         `flags_show_read_participated_toggle` Switch label, trimmed for chip ergonomics. -->
-    <string name="flags_show_read_participated_chip">Cyans lus</string>
 
     <!-- #99 — Retirer un drapeau (delflag). Action sur chaque ligne + dialog de confirmation
          obligatoire avant l'appel réseau, puis snackbar de résultat. -->
