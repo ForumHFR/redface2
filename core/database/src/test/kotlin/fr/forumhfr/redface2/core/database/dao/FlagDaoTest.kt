@@ -151,16 +151,57 @@ class FlagDaoTest {
         assertEquals(newer, dao.getLastFetchedAt("alice", FlagType.CYAN))
     }
 
+    @Test
+    fun `deleteFlag removes only the matching userId, type, cat and topicId`() = runTest {
+        // #99 delflag eviction key is (userId, type, cat, topicId). Seed a row that should be
+        // deleted and three near-misses that must survive : same topicId in another type,
+        // same topicId in another cat, and another user.
+        dao.upsertAll(
+            listOf(
+                row(userId = "alice", topicId = 100, type = FlagType.FAVORITE, cat = 23),
+                row(userId = "alice", topicId = 100, type = FlagType.CYAN, cat = 23),
+                row(userId = "alice", topicId = 100, type = FlagType.FAVORITE, cat = 5),
+                row(userId = "bob", topicId = 100, type = FlagType.FAVORITE, cat = 23),
+            ),
+        )
+
+        dao.deleteFlag(userId = "alice", type = FlagType.FAVORITE, cat = 23, topicId = 100)
+
+        // The exact row is gone …
+        assertTrue(
+            dao.getFlags("alice", FlagType.FAVORITE).none { it.cat == 23 && it.topicId == 100 },
+        )
+        // … but the other type, the other cat, and the other user are untouched.
+        assertEquals(listOf(100), dao.getFlags("alice", FlagType.CYAN).map { it.topicId })
+        assertTrue(
+            "same topicId in another cat must survive",
+            dao.getFlags("alice", FlagType.FAVORITE).any { it.cat == 5 && it.topicId == 100 },
+        )
+        assertEquals(listOf(100), dao.getFlags("bob", FlagType.FAVORITE).map { it.topicId })
+    }
+
+    @Test
+    fun `deleteFlag is a no-op when the row is already absent`() = runTest {
+        dao.upsertAll(listOf(row(userId = "alice", topicId = 1, type = FlagType.CYAN)))
+
+        // Deleting a row that does not exist must not throw and must not affect siblings.
+        dao.deleteFlag(userId = "alice", type = FlagType.CYAN, cat = 23, topicId = 999)
+
+        assertEquals(listOf(1), dao.getFlags("alice", FlagType.CYAN).map { it.topicId })
+    }
+
+    @Suppress("LongParameterList") // Test row factory : each field has a default so call-sites stay terse.
     private fun row(
         userId: String,
         topicId: Int,
         type: FlagType,
+        cat: Int = 23,
         fetchedAt: Instant = Instant.parse("2026-04-26T18:00:00Z"),
         lastReplyAt: String = "2026-04-26 18:00",
     ): FlagTopicEntity = FlagTopicEntity(
         userId = userId,
         type = type,
-        cat = 23,
+        cat = cat,
         subcat = 550,
         topicId = topicId,
         title = "fixture topic $topicId",

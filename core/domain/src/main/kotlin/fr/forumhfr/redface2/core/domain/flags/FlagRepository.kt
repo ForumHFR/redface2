@@ -40,6 +40,24 @@ interface FlagRepository {
 
     /** Drop all per-tab in-memory results tied to the current auth session. */
     fun clearSessionCache()
+
+    /**
+     * Remove a single drapeau (#99). Per ADR-003 the mutation stays HTML : a GET on
+     * `/user/delflag.php` keyed on the flag's `(cat, subcat, topicId, owntopic, page)`
+     * tuple, classified by the « Drapeau effacé avec succès » response sentence (the REST
+     * layer only reads drapeaux, it does not delete them).
+     *
+     * On **success** the implementation drops the row from both its in-memory and Room
+     * caches (logical key `cat + topicId + type`) and re-broadcasts the updated list to
+     * active observers of [flag]'s [Flag.type], so the screen updates immediately without
+     * a refetch. On **failure** (already removed, refused, or an unexpected page) **no**
+     * cache is touched and the [Result] carries the cause. A session-expired GET surfaces
+     * as a failed [Result] wrapping the underlying exception, like the read path.
+     *
+     * Returns [Result.success] with [Unit] on a confirmed deletion, [Result.failure]
+     * otherwise — including transport / session-expiry errors.
+     */
+    suspend fun removeFlag(flag: Flag): Result<Unit>
 }
 
 /**

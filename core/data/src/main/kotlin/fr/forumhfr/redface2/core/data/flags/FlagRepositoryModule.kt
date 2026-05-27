@@ -6,6 +6,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
+import fr.forumhfr.redface2.core.parser.write.FlagDeleteResponseParser
 import javax.inject.Qualifier
 import javax.inject.Singleton
 import kotlinx.serialization.json.Json
@@ -46,4 +47,13 @@ internal object FlagsJsonModule {
         ignoreUnknownKeys = true
         explicitNulls = false
     }
+
+    /**
+     * Stateless parser for the `delflag.php` response (#99). Provided rather than
+     * `@Inject`-constructed to mirror the `ReplySubmitResponseParser` binding in
+     * `ReplyRepositoryModule` — `:core:parser` classes stay free of DI annotations.
+     */
+    @Provides
+    @Singleton
+    fun provideFlagDeleteResponseParser(): FlagDeleteResponseParser = FlagDeleteResponseParser()
 }

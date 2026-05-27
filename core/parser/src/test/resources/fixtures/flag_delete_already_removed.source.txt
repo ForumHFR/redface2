@@ -1,0 +1,1 @@
+GET /user/delflag.php sur un favori déjà retiré — page "Aucun favori n\047est repertorié". Capturé HFR authentifié. @XaaT 2026-05.

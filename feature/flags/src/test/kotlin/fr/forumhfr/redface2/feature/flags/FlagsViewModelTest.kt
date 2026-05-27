@@ -266,6 +266,96 @@ class FlagsViewModelTest {
         }
     }
 
+    @Test
+    fun `requestRemoveFlag moves to Confirming and confirm runs through to Success`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+        val flag = stubFlag(1, FlagType.CYAN)
+
+        vm.removeFlagState.test {
+            assertEquals(RemoveFlagState.Idle, awaitItem())
+
+            vm.requestRemoveFlag(flag)
+            assertEquals(RemoveFlagState.Confirming(flag), awaitItem())
+
+            // Gate the repository so the Removing state is observable before it resolves.
+            flags.removeFlagResult = kotlinx.coroutines.CompletableDeferred()
+            vm.confirmRemoveFlag()
+            assertEquals(RemoveFlagState.Removing(flag), awaitItem())
+
+            flags.removeFlagResult.complete(Result.success(Unit))
+            assertEquals(RemoveFlagState.Idle, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(listOf(flag), flags.removeFlagCalls)
+        assertEquals(RemoveFlagEvent.Success(flag.title), vm.removeFlagEvent.value)
+    }
+
+    @Test
+    fun `cancelRemoveFlag returns to Idle without calling the repository`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+
+        vm.requestRemoveFlag(stubFlag(1, FlagType.CYAN))
+        vm.cancelRemoveFlag()
+
+        assertEquals(RemoveFlagState.Idle, vm.removeFlagState.value)
+        assertTrue("cancel must not call removeFlag", flags.removeFlagCalls.isEmpty())
+    }
+
+    @Test
+    fun `confirmRemoveFlag failure emits a Failure event`() = runTest {
+        val flags = FakeFlagRepository()
+        flags.removeFlagResult = kotlinx.coroutines.CompletableDeferred(
+            Result.failure(IllegalStateException("delflag refused")),
+        )
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+        val flag = stubFlag(2, FlagType.FAVORITE)
+
+        vm.requestRemoveFlag(flag)
+        vm.confirmRemoveFlag()
+
+        assertEquals(RemoveFlagState.Idle, vm.removeFlagState.value)
+        assertEquals(RemoveFlagEvent.Failure(flag.title), vm.removeFlagEvent.value)
+    }
+
+    @Test
+    fun `requestRemoveFlag is ignored while a removal is in flight`() = runTest {
+        val flags = FakeFlagRepository()
+        flags.removeFlagResult = kotlinx.coroutines.CompletableDeferred()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+        val firstFlag = stubFlag(1, FlagType.CYAN)
+
+        vm.requestRemoveFlag(firstFlag)
+        vm.confirmRemoveFlag() // -> Removing, suspended on the deferred
+
+        // A second request while in flight must be a no-op (anti double-tap).
+        vm.requestRemoveFlag(stubFlag(2, FlagType.CYAN))
+        assertEquals(RemoveFlagState.Removing(firstFlag), vm.removeFlagState.value)
+
+        flags.removeFlagResult.complete(Result.success(Unit))
+    }
+
+    @Test
+    fun `consumeRemoveFlagEvent clears the one-shot event`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+        val flag = stubFlag(3, FlagType.RED)
+
+        vm.requestRemoveFlag(flag)
+        vm.confirmRemoveFlag()
+        assertEquals(RemoveFlagEvent.Success(flag.title), vm.removeFlagEvent.value)
+
+        vm.consumeRemoveFlagEvent()
+        assertNull(vm.removeFlagEvent.value)
+    }
+
     private fun stubFlag(
         topicId: Int,
         type: FlagType,
@@ -327,6 +417,16 @@ class FlagsViewModelTest {
             private set
         var clearSessionCacheCallCount: Int = 0
             private set
+        var removeFlagCalls: List<Flag> = emptyList()
+            private set
+
+        /**
+         * Result the next [removeFlag] call returns. A [CompletableDeferred] lets a test gate
+         * the suspension so it can assert the intermediate [RemoveFlagState.Removing] before the
+         * call resolves.
+         */
+        var removeFlagResult: kotlinx.coroutines.CompletableDeferred<Result<Unit>> =
+            kotlinx.coroutines.CompletableDeferred(Result.success(Unit))
 
         override fun observe(type: FlagType): Flow<FlagsResult> =
             perType.getValue(type).asSharedFlow()
@@ -337,6 +437,11 @@ class FlagsViewModelTest {
 
         override fun clearSessionCache() {
             clearSessionCacheCallCount += 1
+        }
+
+        override suspend fun removeFlag(flag: Flag): Result<Unit> {
+            removeFlagCalls = removeFlagCalls + flag
+            return removeFlagResult.await()
         }
 
         suspend fun emit(type: FlagType, result: FlagsResult) {

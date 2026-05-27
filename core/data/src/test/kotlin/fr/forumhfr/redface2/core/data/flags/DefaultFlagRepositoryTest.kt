@@ -10,9 +10,12 @@ import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
+import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.network.HfrApiClient
+import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
+import fr.forumhfr.redface2.core.parser.write.FlagDeleteResponseParser
 import io.mockk.every
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -42,6 +45,9 @@ import org.robolectric.annotation.Config
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [33])
+// One class per repository keeps every REST read + #99 delflag code path co-located with its
+// fixtures and helpers ; splitting would scatter the shared MockK wiring across files.
+@Suppress("LargeClass")
 class DefaultFlagRepositoryTest {
 
     private val json: Json = Json {
@@ -587,6 +593,114 @@ class DefaultFlagRepositoryTest {
         }
     }
 
+    @Test
+    fun `removeFlag success drops the item from the exposed cache and Room`() = runTest {
+        // Seed the in-memory cache with the captured cat23 participated flag (topic 35395).
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val flagDao = stubFlagDao()
+        val hfrClient = mockk<HfrClient>()
+        // delflag.php success page carries the confirmation sentence. The full captured HTML
+        // shape is pinned by FlagDeleteResponseParserTest in :core:parser ; here we only need
+        // the success marker so the repository takes its success branch.
+        coEvery {
+            hfrClient.removeFlag(cat = 23, subcat = any(), topicId = 35395, type = FlagType.CYAN, page = any())
+        } returns DELETE_SUCCESS_HTML
+        val repo = buildRepository(apiClient, forumRepository, flagDao = flagDao, hfrClient = hfrClient)
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            val seeded = awaitItem() as FlagsResult.Success
+            val flag = seeded.flags.single { it.topicId == 35395 }
+
+            val result = repo.removeFlag(flag)
+            assertTrue("expected success, got $result", result.isSuccess)
+
+            // The repository re-broadcasts the trimmed list to active observers.
+            val updated = awaitItem() as FlagsResult.Success
+            assertTrue("topic 35395 must be gone", updated.flags.none { it.topicId == 35395 })
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        // Room row evicted with the logical key (userId, type, cat, topicId).
+        coVerify {
+            flagDao.deleteFlag(userId = "xat", type = FlagType.CYAN, cat = 23, topicId = 35395)
+        }
+    }
+
+    @Test
+    fun `removeFlag failure touches no cache and returns failure`() = runTest {
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.FAVORITES, capturedParticipatedFixture)
+        }
+        val flagDao = stubFlagDao()
+        val hfrClient = mockk<HfrClient>()
+        // delflag.php "already removed" page does NOT carry the success sentence (the real
+        // capture shows « Aucun favori n'est repertorié », pinned in :core:parser).
+        coEvery {
+            hfrClient.removeFlag(cat = any(), subcat = any(), topicId = any(), type = any(), page = any())
+        } returns DELETE_FAILURE_HTML
+        val repo = buildRepository(apiClient, forumRepository, flagDao = flagDao, hfrClient = hfrClient)
+
+        repo.observe(FlagType.FAVORITE).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            val seeded = awaitItem() as FlagsResult.Success
+            val flag = seeded.flags.single()
+
+            val result = repo.removeFlag(flag)
+            assertTrue("expected failure, got $result", result.isFailure)
+
+            // No re-broadcast: the next awaitItem would time out, so we assert no further
+            // emission via expectNoEvents.
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        // No Room eviction on failure.
+        coVerify(exactly = 0) {
+            flagDao.deleteFlag(userId = any(), type = any(), cat = any(), topicId = any())
+        }
+    }
+
+    @Test
+    fun `removeFlag fails fast when anonymous without hitting the network`() = runTest {
+        val apiClient = mockk<HfrApiClient>(relaxed = true)
+        val hfrClient = mockk<HfrClient>(relaxed = true)
+        val anonymousAuth = mockk<AuthRepository>()
+        every { anonymousAuth.observeAuthState() } returns flowOf(AuthState.Anonymous)
+        val repo = buildRepository(
+            apiClient = apiClient,
+            forumRepository = stubForumRepository(sampleCategories),
+            authRepository = anonymousAuth,
+            hfrClient = hfrClient,
+        )
+
+        val result = repo.removeFlag(sampleFlag())
+        assertTrue("anonymous removeFlag must fail", result.isFailure)
+        coVerify(exactly = 0) {
+            hfrClient.removeFlag(cat = any(), subcat = any(), topicId = any(), type = any(), page = any())
+        }
+    }
+
+    private fun sampleFlag(type: FlagType = FlagType.CYAN, topicId: Int = 35395): Flag = Flag(
+        cat = 23,
+        subcat = 550,
+        topicId = topicId,
+        title = "Redface 2",
+        totalPages = 10,
+        replyCount = 42,
+        type = type,
+        hasUnread = true,
+        lastReadPage = 7,
+        lastPostReadId = 1234L,
+        firstPostAuthor = "XaT",
+        lastReplyAuthor = "XaTelitte",
+        lastReplyAt = "2026-05-03 12:00",
+    )
+
     private fun stubForumRepository(categories: List<Category>): ForumRepository {
         val repo = mockk<ForumRepository>()
         coEvery { repo.observeCategories() } returns flowOf(ForumResult.Success(categories))
@@ -615,14 +729,18 @@ class DefaultFlagRepositoryTest {
         }
     }
 
+    @Suppress("LongParameterList") // Test factory : each dep has a default so call-sites stay terse.
     private fun buildRepository(
         apiClient: HfrApiClient,
         forumRepository: ForumRepository,
         authRepository: AuthRepository = stubAuthRepository(),
         flagDao: FlagDao = stubFlagDao(),
         clock: Clock = Clock.fixed(Instant.parse("2026-05-03T12:00:00Z"), ZoneOffset.UTC),
+        hfrClient: HfrClient = mockk(relaxed = true),
     ): DefaultFlagRepository = DefaultFlagRepository(
         apiClient = apiClient,
+        hfrClient = hfrClient,
+        flagDeleteResponseParser = FlagDeleteResponseParser(),
         forumRepository = forumRepository,
         authRepository = authRepository,
         flagCacheStore = FlagCacheStore(
@@ -689,5 +807,14 @@ class DefaultFlagRepositoryTest {
               }
             }
         """
+
+        // Minimal delflag.php response bodies for the repository branch tests. The exhaustive
+        // HTML shapes are captured fixtures pinned by FlagDeleteResponseParserTest (:core:parser) ;
+        // here we only exercise the repository's success/failure dispatch, so the marker
+        // sentence (and its absence) is all that matters.
+        const val DELETE_SUCCESS_HTML =
+            """<html><body><div class="hop">Drapeau effacé avec succès</div></body></html>"""
+        const val DELETE_FAILURE_HTML =
+            """<html><body><div class="hop">Aucun favori n'est repertorié</div></body></html>"""
     }
 }

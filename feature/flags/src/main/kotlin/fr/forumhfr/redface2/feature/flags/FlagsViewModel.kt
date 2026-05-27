@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -93,8 +95,75 @@ class FlagsViewModel @Inject constructor(
             initialValue = null,
         )
 
+    /**
+     * Drives the « Retirer le drapeau » interaction (#99). MVI-style explicit state so the
+     * UI stays declarative and the network call is gated behind a confirmation :
+     *
+     * - [RemoveFlagState.Idle] — nothing pending.
+     * - [RemoveFlagState.Confirming] — the user tapped « Retirer » ; the screen shows the M3
+     *   confirmation dialog ([RemoveFlagState.Confirming.flag] feeds its title + type).
+     * - [RemoveFlagState.Removing] — the user confirmed ; the network call is in flight and the
+     *   action is disabled (anti double-tap).
+     *
+     * One-shot results are exposed separately via [removeFlagEvents] so a config change does
+     * not replay a stale snackbar.
+     */
+    private val _removeFlagState = MutableStateFlow<RemoveFlagState>(RemoveFlagState.Idle)
+    val removeFlagState: StateFlow<RemoveFlagState> = _removeFlagState.asStateFlow()
+
+    /**
+     * One-shot success/failure of a removal, consumed by the screen to show a snackbar.
+     * `null` once consumed (cf. [consumeRemoveFlagEvent]) so it does not re-fire across
+     * recompositions / config changes.
+     */
+    private val _removeFlagEvent = MutableStateFlow<RemoveFlagEvent?>(null)
+    val removeFlagEvent: StateFlow<RemoveFlagEvent?> = _removeFlagEvent.asStateFlow()
+
     fun selectTab(type: FlagType) {
         _selectedTab.value = type
+    }
+
+    /** User tapped « Retirer le drapeau » on [flag] : raise the confirmation dialog. */
+    fun requestRemoveFlag(flag: Flag) {
+        // Ignore a second request while a removal is already in flight (anti double-tap):
+        // the in-flight flag wins until it resolves.
+        if (_removeFlagState.value is RemoveFlagState.Removing) return
+        _removeFlagState.value = RemoveFlagState.Confirming(flag)
+    }
+
+    /** User dismissed the confirmation dialog without confirming. */
+    fun cancelRemoveFlag() {
+        if (_removeFlagState.value is RemoveFlagState.Confirming) {
+            _removeFlagState.value = RemoveFlagState.Idle
+        }
+    }
+
+    /**
+     * User confirmed the removal in the dialog. Moves to [RemoveFlagState.Removing] (disables
+     * the action), calls the repository, and emits a one-shot [RemoveFlagEvent]. The repository
+     * owns the cache reconciliation, so the list updates on its own on success — no optimistic
+     * mutation here (addflag is not proven for every type, so we never speculatively re-add).
+     */
+    fun confirmRemoveFlag() {
+        val confirming = _removeFlagState.value as? RemoveFlagState.Confirming ?: return
+        val flag = confirming.flag
+        _removeFlagState.value = RemoveFlagState.Removing(flag)
+        viewModelScope.launch {
+            val result = flagRepository.removeFlag(flag)
+            _removeFlagState.value = RemoveFlagState.Idle
+            _removeFlagEvent.update {
+                if (result.isSuccess) {
+                    RemoveFlagEvent.Success(flag.title)
+                } else {
+                    RemoveFlagEvent.Failure(flag.title)
+                }
+            }
+        }
+    }
+
+    /** Consume the one-shot removal event after the snackbar has been shown. */
+    fun consumeRemoveFlagEvent() {
+        _removeFlagEvent.value = null
     }
 
     fun setShowReadParticipatedTopics(value: Boolean) {
@@ -146,4 +215,24 @@ class FlagsViewModel @Inject constructor(
             }
         }
     }
+}
+
+/**
+ * State of the « Retirer le drapeau » interaction (#99). [Confirming] and [Removing] carry
+ * the target [Flag] so the dialog can render its title + type and the screen can disable the
+ * matching row's action while the call is in flight.
+ */
+sealed interface RemoveFlagState {
+    data object Idle : RemoveFlagState
+    data class Confirming(val flag: Flag) : RemoveFlagState
+    data class Removing(val flag: Flag) : RemoveFlagState
+}
+
+/**
+ * One-shot outcome of a removal, surfaced as a snackbar. Carries the topic [title] for the
+ * message ; no raw error detail (the repository already redacts the HFR body).
+ */
+sealed interface RemoveFlagEvent {
+    data class Success(val title: String) : RemoveFlagEvent
+    data class Failure(val title: String) : RemoveFlagEvent
 }

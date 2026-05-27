@@ -48,6 +48,21 @@ interface FlagDao {
     @Query("DELETE FROM flag_topics WHERE userId = :userId AND type = :type")
     suspend fun deleteForType(userId: String, type: FlagType)
 
+    /**
+     * Removes a single cached drapeau row after a successful `delflag.php` (#99). The
+     * logical key is `(userId, type, cat, topicId)` — the same `cat + topicId` pair the
+     * UI uses as a Compose list key (unique within a category, cf. AGENTS.md) scoped to
+     * the flag's bucket [type]. `subcat` is intentionally **not** part of the predicate :
+     * REST flag listings do not always carry it, and a row is uniquely identified without
+     * it. No-op (0 rows) when the row is already gone — harmless, the network deletion is
+     * the source of truth.
+     */
+    @Query(
+        "DELETE FROM flag_topics WHERE userId = :userId AND type = :type " +
+            "AND cat = :cat AND topicId = :topicId",
+    )
+    suspend fun deleteFlag(userId: String, type: FlagType, cat: Int, topicId: Int)
+
     @Query("DELETE FROM flag_topics WHERE userId = :userId")
     suspend fun deleteAllForUser(userId: String)
 

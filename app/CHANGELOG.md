@@ -17,6 +17,9 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
+### Added
+- **Retirer un drapeau (#99, Phase 2 finish)** : action « Retirer » sur chaque ligne de la liste des drapeaux, avec **dialog de confirmation Material 3 obligatoire** (titre du topic + type de drapeau) avant tout appel réseau, puis snackbar de succès/échec. Suppression unitaire via `GET /user/delflag.php` authentifié (mapping `FlagType`→`owntopic` : CYAN=1, RED=2, FAVORITE=3), classée sur le texte « Drapeau effacé avec succès ». En cas de succès, le drapeau est retiré des caches mémoire et Room et la liste se met à jour immédiatement ; en cas d'échec, aucun cache n'est touché. Pas d'undo optimiste. Action désactivée pendant l'appel (anti double-tap). Suppression en masse hors scope.
+
 ---
 
 ## v62 — `0.3.22` — 2026-05-27

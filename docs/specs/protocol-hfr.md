@@ -50,7 +50,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Conversation MP | GET | `/message.php?config=hfr.inc&cat=prive&post={mp_id}&page={page}` | **oui** |
 | Liste des MPs | GET | `/forum1.php?config=hfr.inc&cat=prive&page={page}&subcat=&sondage=0&owntopic=0&trash=0&trash_post=0&moderation=0&new=0&nojs=0&subcatgroup=0` | **oui** |
 | Ajouter aux drapeaux | GET | `/user/addflag.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
-| Retirer des drapeaux | GET | `/user/delflag.php?config=hfr.inc&cat={cat}&post={post}&p=1&sondage=0&owntopic={0,1}&new=0` | **oui** |
+| Retirer un drapeau | GET | `/user/delflag.php?config=hfr.inc&cat={cat}&subcat={subcat}&post={topicId}&page={page}&p=1&sondage=0&owntopic={1,2,3}&new=0` | **oui** |
 | Profil public | GET | `/hfr/profil-{user_id}.htm` | non |
 | Paramètres utilisateur | GET | `/editprofil.php?config=hfr.inc&page={1..7}` | **oui** |
 | Modération (alerte) | GET/POST | `/modo.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
@@ -60,6 +60,24 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 > **Note sur `PRIVATE_MESSAGE_CAT_ID`** : la catégorie des MPs est la **chaîne** `"prive"` et non un entier. Attention lors du typage côté Kotlin — `cat: String` pour les endpoints MP ou sentinel dédié.
 
 > **Note sur l'URL "Liste des MPs"** : l'endpoint canonique est `forum1.php?config=hfr.inc&cat=prive&...`, **pas** `message.php?config=hfr.inc` (qui ouvre le composer d'un MP isolé). Vérifié dans le legacy v1 (`HFREndpoints.PRIVATE_MESSAGES_URL`, prouvé en prod ~10 ans) et reproduit dans `:core:network HfrClient.getPrivateMessageListPage()` de Phase 1B.1. Toute la chaîne de query params (`subcat=`, `sondage=0`, `owntopic=0`, etc.) est conservée à l'identique du legacy par défensif — HFR pourrait accepter une URL plus courte mais ce n'est pas testé.
+
+### Retirer un drapeau — `delflag.php` (#99, Phase 2 finish)
+
+Suppression **unitaire** d'un drapeau = **GET authentifié** (les mutations drapeaux restent HTML, cf. ADR-003 — la sémantique REST `PUT topics/{id}/` reste opaque). Contrat **vérifié sur HFR réel** (compte de test authentifié, `hash_check` neutralisé), fixtures `flag_delete_success.html` / `flag_delete_already_removed.html` :
+
+```
+/user/delflag.php?config=hfr.inc&cat={cat}&subcat={subcat}&post={topicId}&page={page}&p=1&sondage=0&owntopic={TYPE}&new=0
+```
+
+- `owntopic={TYPE}` = **le type de drapeau** à retirer : `CYAN=1`, `RED=2`, `FAVORITE=3` (même discriminant que le `flag_owntopic` REST, cf. `core/model/.../Flag.kt`). HFR clé la suppression sur ce champ : viser le mauvais bucket ne retire pas le bon drapeau.
+- `{cat}` = catégorie ; `{subcat}` = sous-catégorie, **nullable** → on émet `subcat=` (vide) quand elle est absente (les listings REST drapeaux ne la portent pas toujours).
+- `{post}` = `topicId` ; `{page}` = `lastReadPage` du drapeau (sa page courante).
+- **Succès** : page HTML contenant le texte littéral **« Drapeau effacé avec succès »** (dans un `<div class="hop">`), HTTP 200.
+- **Échec / déjà retiré** : page HTML **sans** ce texte (ex. « Aucun favori n'est repertorié »), HTTP 200 aussi. Le texte de succès est donc le **seul** signal.
+
+Côté code : `HfrClient.removeFlag(cat, subcat, topicId, type, page)` construit l'URL et mappe `FlagType`→`owntopic` ; `FlagDeleteResponseParser` classe la réponse (succès vs échec) ; `DefaultFlagRepository.removeFlag(flag)` retire l'item des caches mémoire **et** Room **uniquement en cas de succès** et ré-émet la liste mise à jour, sinon ne touche à aucun cache. **Pas d'undo optimiste** : `addflag` n'est pas prouvé pour tous les types, donc on ne ré-ajoute jamais spéculativement.
+
+> **Hors scope #99** : la suppression en masse (form POST `manageaction.php`) n'est pas implémentée.
 
 ---
 

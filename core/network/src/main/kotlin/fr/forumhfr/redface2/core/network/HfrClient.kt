@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.network
 import androidx.tracing.trace
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
@@ -363,6 +364,71 @@ class HfrClient @Inject constructor(
             .build()
         val request = Request.Builder().url(url).get().build()
         return anonymous.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
+     * Phase 2 finish (#99) — GET `/user/delflag.php` to remove a single drapeau the user
+     * owns. Per ADR-003 the drapeau mutations stay HTML (the REST `PUT topics/{id}/`
+     * semantics for downgrade/no-op are opaque), so this is a GET on the legacy endpoint.
+     *
+     * Wire shape (contract recaptured on HFR réel, cf. `docs/specs/protocol-hfr.md`
+     * § Retirer un drapeau and the fixtures `flag_delete_success.html` /
+     * `flag_delete_already_removed.html`) :
+     *
+     * `/user/delflag.php?config=hfr.inc&cat={cat}&subcat={subcat}&post={topicId}
+     * &page={page}&p=1&sondage=0&owntopic={1|2|3}&new=0`
+     *
+     * - [type] maps to the `owntopic` discriminator that identifies the drapeau bucket :
+     *   `CYAN → 1`, `RED → 2`, `FAVORITE → 3` (same mapping as the REST `flag_owntopic`,
+     *   cf. `Flag.kt`). Targeting the right bucket matters : HFR keys the deletion on it.
+     * - [subcat] is nullable. REST flag listings do not always carry a sub-category, so we
+     *   emit an empty `subcat=` when it is null — mirroring how HFR's own listing links
+     *   serialise a missing sub-category, and matching the `getPrivateMessageListPage`
+     *   precedent of an empty `subcat`.
+     * - [page] is the drapeau's `lastReadPage` (its current page), forwarded verbatim.
+     *
+     * Returns the response HTML for [fr.forumhfr.redface2.core.parser.write] to classify :
+     * success carries « Drapeau effacé avec succès », anything else (e.g. an already-removed
+     * favourite) does not. HFR returns HTTP 200 in both cases, so the body text is the only
+     * signal.
+     *
+     * Always uses the authenticated client : delflag is a destructive mutation, a freshly
+     * expired session must raise [SessionExpiredException] rather than silently hitting the
+     * anonymous page.
+     */
+    suspend fun removeFlag(
+        cat: Int,
+        subcat: Int?,
+        topicId: Int,
+        type: FlagType,
+        page: Int,
+    ): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("user")
+            .addPathSegment("delflag.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", cat.toString())
+            .addQueryParameter("subcat", subcat?.toString().orEmpty())
+            .addQueryParameter("post", topicId.toString())
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("p", "1")
+            .addQueryParameter("sondage", "0")
+            .addQueryParameter("owntopic", type.toOwntopic().toString())
+            .addQueryParameter("new", "0")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
+     * Maps [FlagType] to the HFR `owntopic` discriminator used by `delflag.php` / `addflag.php`
+     * and the REST `flag_owntopic` field. Kept private to the network layer : the mapping is a
+     * wire detail of the HFR contract, not a domain concept the rest of the app should know.
+     */
+    private fun FlagType.toOwntopic(): Int = when (this) {
+        FlagType.CYAN -> 1
+        FlagType.RED -> 2
+        FlagType.FAVORITE -> 3
     }
 
     /**

@@ -14,17 +14,22 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,6 +37,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.LaunchedEffect
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.model.AuthState
@@ -66,45 +72,126 @@ fun FlagsRoute(
     val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
     val flagsState by viewModel.flagsState.collectAsStateWithLifecycle()
     val showReadParticipated by viewModel.showReadParticipatedTopics.collectAsStateWithLifecycle()
+    val removeFlagState by viewModel.removeFlagState.collectAsStateWithLifecycle()
+    val removeFlagEvent by viewModel.removeFlagEvent.collectAsStateWithLifecycle()
 
-    Surface(
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // One-shot snackbar for the delflag outcome (#99). Keyed on the event instance so a
+    // config change does not replay it ; consumed once shown so it never re-fires.
+    val successMessage = stringResource(R.string.flags_remove_success)
+    val failureMessage = stringResource(R.string.flags_remove_failure)
+    LaunchedEffect(removeFlagEvent) {
+        when (val event = removeFlagEvent) {
+            null -> Unit
+            is RemoveFlagEvent.Success -> {
+                snackbarHostState.showSnackbar(String.format(successMessage, event.title))
+                viewModel.consumeRemoveFlagEvent()
+            }
+            is RemoveFlagEvent.Failure -> {
+                snackbarHostState.showSnackbar(String.format(failureMessage, event.title))
+                viewModel.consumeRemoveFlagEvent()
+            }
+        }
+    }
+
+    Scaffold(
         modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.surface,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding(),
+        containerColor = MaterialTheme.colorScheme.surface,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+    ) { _ ->
+        // The screen already manages its own status/navigation bars padding inside the
+        // Column ; the Scaffold is here purely to anchor the SnackbarHost above the system
+        // bars, so its content padding is intentionally not applied to the Column.
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.surface,
         ) {
-            FlagsHeader(
-                onRefresh = viewModel::refresh,
-                refreshEnabled = authState is AuthState.Authenticated,
-                topBarActions = topBarActions,
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding(),
+            ) {
+                FlagsHeader(
+                    onRefresh = viewModel::refresh,
+                    refreshEnabled = authState is AuthState.Authenticated,
+                    topBarActions = topBarActions,
+                )
 
-            // Render nothing while authState is null (cookie jar warming up). Same
-            // anti-flicker convention as PR #91; defaulting to "Anonymous" here would
-            // bring the cold-start "Se connecter" flash back.
-            authState?.let { state ->
-                when (state) {
-                    AuthState.Anonymous -> AnonymousBody(onLoginRequested)
-                    is AuthState.Authenticated -> AuthenticatedBody(
-                        selectedTab = selectedTab,
-                        flagsState = flagsState,
-                        showReadParticipated = showReadParticipated,
-                        actions = AuthenticatedActions(
-                            onSelectTab = viewModel::selectTab,
-                            onOpenFlag = onOpenFlag,
-                            onRefresh = viewModel::refresh,
-                            onLoginRequested = onLoginRequested,
-                            onToggleShowReadParticipated = viewModel::setShowReadParticipatedTopics,
-                        ),
-                    )
+                // Render nothing while authState is null (cookie jar warming up). Same
+                // anti-flicker convention as PR #91; defaulting to "Anonymous" here would
+                // bring the cold-start "Se connecter" flash back.
+                authState?.let { state ->
+                    when (state) {
+                        AuthState.Anonymous -> AnonymousBody(onLoginRequested)
+                        is AuthState.Authenticated -> AuthenticatedBody(
+                            selectedTab = selectedTab,
+                            flagsState = flagsState,
+                            showReadParticipated = showReadParticipated,
+                            removeFlagState = removeFlagState,
+                            actions = AuthenticatedActions(
+                                onSelectTab = viewModel::selectTab,
+                                onOpenFlag = onOpenFlag,
+                                onRefresh = viewModel::refresh,
+                                onLoginRequested = onLoginRequested,
+                                onToggleShowReadParticipated = viewModel::setShowReadParticipatedTopics,
+                                onRequestRemoveFlag = viewModel::requestRemoveFlag,
+                            ),
+                        )
+                    }
                 }
             }
         }
     }
+
+    // Confirmation gate before any network call (#99). The dialog renders only while the
+    // ViewModel is in the Confirming state ; confirming moves to Removing (action disabled)
+    // and fires the delflag call.
+    (removeFlagState as? RemoveFlagState.Confirming)?.let { confirming ->
+        RemoveFlagConfirmationDialog(
+            flag = confirming.flag,
+            onConfirm = viewModel::confirmRemoveFlag,
+            onDismiss = viewModel::cancelRemoveFlag,
+        )
+    }
+}
+
+/**
+ * M3 confirmation dialog shown before the delflag network call (#99). Spells out the topic
+ * title and the drapeau type so the user knows exactly what they are removing — the removal
+ * is not undoable in-app (no optimistic re-add), so confirmation is mandatory.
+ */
+@Composable
+private fun RemoveFlagConfirmationDialog(
+    flag: Flag,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val typeLabel = stringResource(flagTypeLabel(flag.type))
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.flags_remove_dialog_title)) },
+        text = {
+            Text(stringResource(R.string.flags_remove_dialog_message, flag.title, typeLabel))
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.flags_remove_dialog_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.flags_remove_dialog_cancel))
+            }
+        },
+    )
+}
+
+private fun flagTypeLabel(type: FlagType): Int = when (type) {
+    FlagType.CYAN -> R.string.flags_tab_my_topics
+    FlagType.RED -> R.string.flags_tab_read_only
+    FlagType.FAVORITE -> R.string.flags_tab_favorite
 }
 
 @Composable
@@ -169,6 +256,7 @@ private fun ColumnScope.AuthenticatedBody(
     selectedTab: FlagType,
     flagsState: FlagsResult?,
     showReadParticipated: Boolean,
+    removeFlagState: RemoveFlagState,
     actions: AuthenticatedActions,
 ) {
     val tabs = listOf(
@@ -269,10 +357,22 @@ private fun ColumnScope.AuthenticatedBody(
                     // (cf. AGENTS.md), not globally. Using "cat-topicId" eliminates the
                     // latent crash if the listing ever returns the same topicId in two cats.
                     items(items = current.flags, key = { "${it.cat}-${it.topicId}" }) { flag ->
+                        // Anti double-tap (#99): disable the « Retirer » action of every row
+                        // while any removal is in flight. `removeFlagState` is Removing only
+                        // between confirm and the repository result.
+                        val removalInFlight = removeFlagState is RemoveFlagState.Removing
                         FlagItem(
                             flag = flag,
                             metadata = flagMetadata(flag),
                             onClick = { actions.onOpenFlag(flag) },
+                            trailingAction = {
+                                TextButton(
+                                    onClick = { actions.onRequestRemoveFlag(flag) },
+                                    enabled = !removalInFlight,
+                                ) {
+                                    Text(stringResource(R.string.flags_remove_action))
+                                }
+                            },
                         )
                         FlagItemDivider()
                     }
@@ -288,6 +388,7 @@ private data class AuthenticatedActions(
     val onRefresh: () -> Unit,
     val onLoginRequested: () -> Unit,
     val onToggleShowReadParticipated: (Boolean) -> Unit,
+    val onRequestRemoveFlag: (Flag) -> Unit,
 )
 
 @Composable

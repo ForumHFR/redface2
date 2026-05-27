@@ -21,4 +21,16 @@
     <!-- #199 — compact FilterChip label under the CYAN tab. Replaces the legacy full-width
          `flags_show_read_participated_toggle` Switch label, trimmed for chip ergonomics. -->
     <string name="flags_show_read_participated_chip">Cyans lus</string>
+
+    <!-- #99 — Retirer un drapeau (delflag). Action sur chaque ligne + dialog de confirmation
+         obligatoire avant l'appel réseau, puis snackbar de résultat. -->
+    <string name="flags_remove_action">Retirer</string>
+    <string name="flags_remove_dialog_title">Retirer le drapeau ?</string>
+    <!-- %1$s = titre du topic, %2$s = libellé du type de drapeau (Mes sujets / Lus uniquement / Favoris). -->
+    <string name="flags_remove_dialog_message">Retirer le drapeau « %2$s » sur « %1$s » ? Cette action est définitive depuis l\'app.</string>
+    <string name="flags_remove_dialog_confirm">Retirer</string>
+    <string name="flags_remove_dialog_cancel">Annuler</string>
+    <!-- %1$s = titre du topic. -->
+    <string name="flags_remove_success">Drapeau retiré : %1$s</string>
+    <string name="flags_remove_failure">Impossible de retirer le drapeau : %1$s</string>
 </resources>

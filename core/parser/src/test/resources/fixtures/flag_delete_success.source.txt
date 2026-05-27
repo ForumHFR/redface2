@@ -1,0 +1,1 @@
+GET /user/delflag.php?config=hfr.inc&cat=...&post=...&owntopic=3 (favori) — page de succès "Drapeau effacé avec succès". Capturé HFR authentifié, hash_check neutralisé. @XaaT 2026-05.
