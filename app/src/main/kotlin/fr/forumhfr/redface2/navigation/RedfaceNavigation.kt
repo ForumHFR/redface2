@@ -736,15 +736,15 @@ private fun RedfaceNavHost(
                         }
                     },
                     onNewTopicCreated = { cat, subcat, newTopicId, newNumreponse ->
-                        // Phase 2E (#149). Two paths :
-                        //  - When the success URL parser eventually lands and
-                        //    `newTopicId` is non-null, jump straight to the
+                        // Phase 2E (#149) / #206. Two paths :
+                        //  - Nominal : `newTopicId` is non-null (extracted from the
+                        //    bddpost.php success refresh URL), jump straight to the
                         //    fresh topic so the user sees their first post.
-                        //  - Until then (no success fixture captured yet),
-                        //    pop the composer and replace it with a
-                        //    [CategoryRoute] pointing at the d'arrivée
-                        //    sub-category. The screen-side Toast tells the
-                        //    user the POST went through.
+                        //  - Fallback : HFR returned a success without a parsable
+                        //    `sujet_` segment, so `newTopicId` is null — pop the
+                        //    composer and replace it with a [CategoryRoute] pointing
+                        //    at the d'arrivée sub-category. The screen-side Toast
+                        //    tells the user the POST went through.
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
                         }

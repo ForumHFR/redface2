@@ -121,7 +121,11 @@ class ReplySubmitResponseParser {
         // `sujet_{topicId}_{page}` segment carries both the topic id (group 1) and the
         // landing page (group 2). create-topic (#206) relies on group 1 for the freshly
         // allocated topic id ; reply/quote/edit use group 2 for scroll restoration.
-        private val SUJET_SEGMENT_REGEX: Regex = Regex("""sujet_(\d+)_(\d+)""", RegexOption.IGNORE_CASE)
+        // The `(?<![a-z])` lookbehind keeps the literal token `sujet_` anchored so a
+        // listing URL like `liste_sujet_1_2.htm` can never be mistaken for a thread
+        // segment (the real `sujet_` is always preceded by `/` or `-`, never a letter).
+        private val SUJET_SEGMENT_REGEX: Regex =
+            Regex("""(?<![a-z])sujet_(\d+)_(\d+)""", RegexOption.IGNORE_CASE)
 
         // Quote / edit / edit-FP refresh URLs end with `#t{numreponse}`. Plain reply
         // ends with `#bas` — no match, the call site gets null and falls back to

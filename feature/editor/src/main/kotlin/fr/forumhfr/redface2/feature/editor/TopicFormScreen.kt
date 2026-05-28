@@ -79,11 +79,12 @@ fun TopicFormScreen(
                     onSubmitSucceeded(effect.targetPage, effect.scrollTo)
                 is TopicFormEffect.NewTopicCreated -> {
                     if (effect.newTopicId == null) {
-                        // Until a `write_create_topic_success_response.html`
-                        // fixture lands, the repository cannot extract the new
-                        // topic id from HFR's refresh URL. Surface a sober
-                        // Toast so the user knows the POST succeeded before
-                        // navigating back to the category listing.
+                        // Fallback path (#206): the create succeeded but HFR's refresh
+                        // URL carried no `sujet_{id}_{page}` segment, so the repository
+                        // could not extract the new topic id. Surface a sober Toast so
+                        // the user knows the POST succeeded before navigating back to
+                        // the category listing. The nominal path (id present) jumps
+                        // straight to the created topic — no Toast needed.
                         Toast.makeText(context, newTopicCreatedFallback, Toast.LENGTH_LONG).show()
                     }
                     onNewTopicCreated(effect.cat, effect.subcat, effect.newTopicId, effect.newNumreponse)

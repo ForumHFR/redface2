@@ -78,6 +78,10 @@ class ReplySubmitResponseParserTest {
         // The fixture refreshes to …redface2-temporaire-ecriture-sujet_148749_1.htm#t2523829
         assertEquals(1, success.targetPage)
         assertEquals(2_523_829, success.numreponse)
+        // #206 — this real fixture (page 1, `#t{N}` anchor, freshly-created test topic
+        // 148749) IS the canonical create-topic success shape, so it pins the topicId
+        // extraction on real HFR bytes ; no fabricated create-topic fixture is needed.
+        assertEquals(148_749, success.topicId)
     }
 
     @Test
@@ -152,25 +156,22 @@ class ReplySubmitResponseParserTest {
     }
 
     @Test
-    fun `create-topic success shape yields topicId, page and numreponse together`() {
-        // #206 — create-topic POSTs to the same `bddpost.php` as quote, so its success
-        // `<meta refresh>` carries the identical `…/sujet_{newTopicId}_1.htm#t{numreponse}`
-        // shape. We don't yet have a dedicated live create-topic capture (capturing one
-        // means POSTing a real public topic), so this pins the extraction the repository
-        // relies on against the canonical shape: a fresh topic lands on page 1 with the
-        // first post's numreponse anchored. The reply/quote fixtures above already prove
-        // the same regex on real HFR HTML.
+    fun `slug containing a listing token does not get mistaken for a thread segment`() {
+        // #206 hardening — a hypothetical `liste_sujet_1_2.htm` listing URL must NOT be
+        // parsed as a thread segment. The `(?<![a-z])` lookbehind on `sujet_` rejects the
+        // `liste_sujet_` form (preceded by a letter) while still matching the real
+        // `/…-sujet_N_M.htm` (preceded by `-` or `/`). This is a regex-robustness pin, not
+        // a contract fixture — the real reply/quote/edit-FP fixtures above prove the shape.
         val html = """
             <html><head>
-              <meta http-equiv="Refresh" content="1; url=/hfr/Programmation/Divers-6/mon-test-sujet_148751_1.htm#t2523900" />
+              <meta http-equiv="Refresh" content="1; url=/hfr/cat/liste_sujet_1_2.htm" />
             </head><body>
               <div class="hop">Votre réponse a été postée avec succès !</div>
             </body></html>
         """.trimIndent()
         val success = parser.parse(html) as ReplySubmitResult.Success
-        assertEquals(148_751, success.topicId)
-        assertEquals(1, success.targetPage)
-        assertEquals(2_523_900, success.numreponse)
+        assertNull("liste_sujet_ must not be read as a thread topic id", success.topicId)
+        assertNull(success.targetPage)
     }
 
     private fun readFixture(name: String): String {

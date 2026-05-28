@@ -139,10 +139,12 @@ sealed interface TopicFormEffect {
     ) : TopicFormEffect
 
     /**
-     * Phase 2E (#149) — emitted on a successful create-topic POST. Until the
-     * success fixture is captured the repository forwards `(null, null)` for
-     * the brand-new ids ; the navigation host falls back to [CategoryRoute] in
-     * that case and surfaces a Toast.
+     * Phase 2E (#149) — emitted on a successful create-topic POST. Since #206 the
+     * repository extracts `(newTopicId, newNumreponse)` from the `bddpost.php`
+     * success refresh URL (same `sujet_{id}_{page}#t{N}` shape as reply/quote), so
+     * the navigation host jumps straight to the created topic. The ids stay nullable :
+     * if HFR ever returns a success without the `sujet_` segment, they're null and the
+     * host falls back to [CategoryRoute] + a Toast.
      */
     data class NewTopicCreated(
         val cat: Int,
