@@ -106,6 +106,38 @@ class ReplySubmitResponseParserTest {
     }
 
     @Test
+    fun `refresh to a listing URL is not mistaken for a create-topic success`() {
+        // #214 review — pin the lookbehind in the create-classification path : a refresh to a
+        // listing (`liste_sujet_1_2.htm`, no reply/edit marker) must NOT be classified as a
+        // create success via `hasThreadRefresh`. The `_` before `sujet` makes the lookbehind
+        // reject it → falls through to Unknown.
+        val html = """
+            <html><head>
+              <meta http-equiv="Refresh" content="1; url=/hfr/cat/liste_sujet_1_2.htm" />
+            </head><body><div class="hop">Opération effectuée.</div></body></html>
+        """.trimIndent()
+        assertEquals(
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown),
+            parser.parse(html),
+        )
+    }
+
+    @Test
+    fun `refresh to the home page is not a create-topic success`() {
+        // #214 review — a bare home refresh (no `sujet_{id}_{page}` segment, no marker) is not
+        // a thread redirect → Unknown, never a false success.
+        val html = """
+            <html><head>
+              <meta http-equiv="Refresh" content="1; url=/" />
+            </head><body><div class="hop">Opération effectuée.</div></body></html>
+        """.trimIndent()
+        assertEquals(
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown),
+            parser.parse(html),
+        )
+    }
+
+    @Test
     fun `empty message error is classified`() {
         val html = readFixture("write_empty_message_error.html")
         val result = parser.parse(html)

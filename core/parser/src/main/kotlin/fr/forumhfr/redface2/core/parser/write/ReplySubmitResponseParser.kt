@@ -143,10 +143,11 @@ class ReplySubmitResponseParser {
         // `sujet_{topicId}_{page}` segment carries both the topic id (group 1) and the
         // landing page (group 2). create-topic (#206) relies on group 1 for the freshly
         // allocated topic id ; reply/quote/edit use group 2 for scroll restoration.
-        // The `(?<![a-z_])` lookbehind keeps the literal token `sujet_` anchored so a
-        // listing URL like `liste_sujet_1_2.htm` can never be mistaken for a thread
-        // segment : the real `sujet_` is always preceded by `/` or `-`, never a letter
-        // or an underscore (`liste_sujet` has `_` right before `sujet`, so it's excluded).
+        // The `(?<![a-z_])` lookbehind is what excludes a listing URL like
+        // `liste_sujet_1_2.htm` : there the char right before `sujet` is `_` (from
+        // `liste_`), so the lookbehind rejects the match. A real thread segment is
+        // preceded by `/` or `-` (e.g. `…-sujet_35395_20.htm`), which the lookbehind
+        // allows. (It's the `_`/letter exclusion that protects, not the `/`/`-` prefix.)
         private val SUJET_SEGMENT_REGEX: Regex =
             Regex("""(?<![a-z_])sujet_(\d+)_(\d+)""", RegexOption.IGNORE_CASE)
 

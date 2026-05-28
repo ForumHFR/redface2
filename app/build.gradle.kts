@@ -67,7 +67,7 @@ android {
         // `applicationIdSuffix=".debug"` from the convention plugin, so it installs next to
         // a release build ; this just makes the icon legible on the device. Release keeps
         // `@string/app_name`.
-        manifestPlaceholders["appLabel"] = "redface2debugadb"
+        manifestPlaceholders["appLabel"] = "Redface 2 ADB"
     }
 
     buildFeatures {
