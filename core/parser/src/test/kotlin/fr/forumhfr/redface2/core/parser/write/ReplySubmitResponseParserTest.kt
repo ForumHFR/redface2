@@ -85,6 +85,27 @@ class ReplySubmitResponseParserTest {
     }
 
     @Test
+    fun `create-topic success is classified via the thread refresh even without a known success sentence`() {
+        // #214 — HFR's create-topic success page uses a different sentence than reply/edit,
+        // so the marker clauses miss it ; before the fix it fell through to Unknown and the
+        // app showed an error although the topic WAS created. The robust signal is the
+        // `<meta refresh>` to a real `sujet_{id}_{page}` thread URL. This is a classification
+        // logic pin (the exact create success sentence / a real capture is tracked in #214) —
+        // the body deliberately omits any reply/edit marker to prove refresh-only detection.
+        val html = """
+            <html><head>
+              <meta http-equiv="Refresh" content="1; url=/hfr/Programmation/Divers-6/mon-test-sujet_148760_1.htm#t2524000" />
+            </head><body>
+              <div class="hop">Opération effectuée.</div>
+            </body></html>
+        """.trimIndent()
+        val success = parser.parse(html) as ReplySubmitResult.Success
+        assertEquals(148_760, success.topicId)
+        assertEquals(1, success.targetPage)
+        assertEquals(2_524_000, success.numreponse)
+    }
+
+    @Test
     fun `empty message error is classified`() {
         val html = readFixture("write_empty_message_error.html")
         val result = parser.parse(html)

@@ -58,8 +58,30 @@ class ReplySubmitResponseParser {
             // so `parseSuccess` reuses the same extraction.
             body.contains(EDIT_SUCCESS_MARKER, ignoreCase = true) -> parseSuccess(html)
 
+            // #214 — create-topic success is NOT caught by the reply/edit sentences
+            // above (HFR uses a different success message for a brand-new topic), which
+            // mis-classified it as Unknown → the app showed an error even though the
+            // topic was created. The robust, sentence-agnostic signal is the success
+            // `<meta refresh>` to a real `…/sujet_{topicId}_{page}.htm` thread URL : the
+            // four documented failure pages (empty / anti-flood / locked / invalid token,
+            // matched above) carry NO such refresh, so reaching this clause means HFR
+            // accepted the post and is redirecting to the resulting topic. This also makes
+            // #206's topicId extraction reachable on the create flow.
+            hasThreadRefresh(html) -> parseSuccess(html)
+
             else -> ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         }
+    }
+
+    /**
+     * True when the response carries a `<meta http-equiv=Refresh>` whose URL contains a
+     * real `sujet_{topicId}_{page}` thread segment — HFR's "post accepted, go to the
+     * thread" signal, independent of the (deploy- and flow-dependent) success sentence.
+     * Failure pages redirect nowhere, so this never fires on them.
+     */
+    private fun hasThreadRefresh(html: String): Boolean {
+        val refresh = META_REFRESH_REGEX.find(html)?.groupValues?.getOrNull(1) ?: return false
+        return SUJET_SEGMENT_REGEX.containsMatchIn(refresh)
     }
 
     private fun parseSuccess(html: String): ReplySubmitResult.Success {
