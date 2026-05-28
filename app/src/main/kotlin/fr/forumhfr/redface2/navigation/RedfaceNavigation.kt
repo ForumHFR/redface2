@@ -46,11 +46,15 @@ import fr.forumhfr.redface2.feature.forum.CategoryRequest
 import fr.forumhfr.redface2.feature.forum.ForumCategoryScreen
 import fr.forumhfr.redface2.feature.forum.ForumScreen
 import fr.forumhfr.redface2.feature.messages.MessagesScreen
+import fr.forumhfr.redface2.feature.profile.ProfilePreviewSheet
+import fr.forumhfr.redface2.feature.profile.ProfileRoute
+import fr.forumhfr.redface2.feature.profile.ProfileViewModel
 import fr.forumhfr.redface2.feature.search.SearchScreen
 import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import kotlinx.serialization.Serializable
+import androidx.compose.material3.ExperimentalMaterial3Api
 
 @Serializable
 sealed interface RedfaceNavKey : NavKey
@@ -145,6 +149,25 @@ data object DiagnosticsRoute : RedfaceNavKey
 @Serializable
 data object SettingsRoute : RedfaceNavKey
 
+/**
+ * Phase 2 finish (#208) — full profile page route.
+ *
+ * Navigation is always [userId]-first. [pseudo] and [avatarUrl] are display hints shown
+ * while the profile is loading — they can be pre-populated from the topic page tap site
+ * so the user sees a meaningful placeholder immediately.
+ *
+ * The ModalBottomSheet preview is hoisted in [RedfaceApp] as overlay state, not as a
+ * back-stack route — it shares the same [ProfileViewModel] instance with the bottom sheet
+ * (same SavedStateHandle key) so navigating to [ProfileFullRoute] from the sheet reuses
+ * the already-loaded profile data.
+ */
+@Serializable
+data class ProfileFullRoute(
+    val userId: Int,
+    val pseudo: String,
+    val avatarUrl: String? = null,
+) : RedfaceNavKey
+
 internal enum class TopLevelDestination(
     val labelRes: Int,
     val rootRoute: RedfaceNavKey,
@@ -160,6 +183,19 @@ internal data class ParsedDeepLink(
     val route: RedfaceNavKey,
 )
 
+/**
+ * Holds the pending profile bottom sheet request, if any.
+ *
+ * Null = no sheet visible. Non-null = a profile sheet is open for the given user.
+ * [avatarUrl] is a display hint populated from the topic page tap.
+ */
+private data class ProfileSheetRequest(
+    val userId: Int,
+    val pseudo: String,
+    val avatarUrl: String?,
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RedfaceApp(intent: Intent?) {
     RedfaceTheme {
@@ -169,6 +205,11 @@ fun RedfaceApp(intent: Intent?) {
         val messagesBackStack = rememberNavBackStack(MessagesRoute)
 
         var currentDestination by rememberSaveable { mutableStateOf(TopLevelDestination.Flags) }
+
+        // Phase 2 finish (#208) — profile bottom sheet state, hoisted to `:app` so that
+        // `:feature:topic` never depends on `:feature:profile`. The sheet is opened from
+        // any TopicScreen tap on an avatar/author with a non-null profileId.
+        var profileSheetRequest by remember { mutableStateOf<ProfileSheetRequest?>(null) }
 
         val backStacks = remember(flagsBackStack, forumBackStack, searchBackStack, messagesBackStack) {
             mapOf(
@@ -226,7 +267,41 @@ fun RedfaceApp(intent: Intent?) {
                         },
                     )
                 }
-                RedfaceNavHost(backStack = activeBackStack, accountMenu = accountMenu)
+                RedfaceNavHost(
+                    backStack = activeBackStack,
+                    accountMenu = accountMenu,
+                    onOpenProfile = { userId, pseudo, avatarUrl ->
+                        profileSheetRequest = ProfileSheetRequest(userId, pseudo, avatarUrl)
+                    },
+                )
+            }
+        }
+
+        // Phase 2 finish (#208) — profile bottom sheet, rendered as an overlay on top of
+        // the current tab. The ViewModel is scoped to the sheet's nav entry so it is
+        // re-created each time a new profileId is requested. `profileSheetRequest` drives
+        // visibility; setting it to null dismisses the sheet via `onDismiss`.
+        profileSheetRequest?.let { request ->
+            // key = userId ensures a fresh ViewModel (and a fresh fetch) whenever the user
+            // opens a different profile from the same topic screen without a navigation hop.
+            androidx.compose.runtime.key(request.userId) {
+                ProfilePreviewSheet(
+                    userId = request.userId,
+                    pseudoHint = request.pseudo,
+                    avatarUrlHint = request.avatarUrl,
+                    onDismiss = { profileSheetRequest = null },
+                    onOpenFullProfile = { userId, pseudo, avatarUrl ->
+                        profileSheetRequest = null
+                        // Navigate to the full profile page on the active tab's back stack.
+                        backStacks.getValue(currentDestination).add(
+                            ProfileFullRoute(
+                                userId = userId,
+                                pseudo = pseudo,
+                                avatarUrl = avatarUrl,
+                            ),
+                        )
+                    },
+                )
             }
         }
     }
@@ -262,6 +337,7 @@ private const val REPORT_EMAIL: String = "xat@azora.fr"
 private fun RedfaceNavHost(
     backStack: NavBackStack<NavKey>,
     accountMenu: @Composable () -> Unit,
+    onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     NavDisplay(
         backStack = backStack,
@@ -397,6 +473,26 @@ private fun RedfaceNavHost(
                     },
                 )
             }
+            entry<ProfileFullRoute> { route ->
+                // Phase 2 finish (#208) — full profile page.
+                // ProfileViewModel uses SavedStateHandle to receive userId/pseudo/avatarUrl.
+                // With Compose Navigation 3 + Hilt, the ViewModel is created fresh per nav
+                // entry (scoped to the entry's ViewModelStore by `rememberViewModelStoreNavEntryDecorator`).
+                // We pass the route arguments by creating a ViewModel instance via the Hilt
+                // assisted-inject mechanism: `hiltViewModel` + `ViewModelProvider.Factory`
+                // route-to-key bridge. For the MVP we use `ProfileViewModelFromRoute` that
+                // accepts the route arguments directly.
+                ProfileRoute(
+                    userId = route.userId,
+                    pseudoHint = route.pseudo,
+                    avatarUrlHint = route.avatarUrl,
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                )
+            }
             entry<TopicRoute> { route ->
                 TopicScreen(
                     request = TopicRequest(
@@ -406,6 +502,7 @@ private fun RedfaceNavHost(
                         scrollTo = route.scrollTo,
                         submitSignal = route.submitSignal,
                     ),
+                    onOpenProfile = onOpenProfile,
                     onReply = { subcat, page ->
                         backStack.add(
                             PostEditorRoute(
