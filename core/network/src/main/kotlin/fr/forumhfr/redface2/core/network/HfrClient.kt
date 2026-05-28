@@ -423,6 +423,38 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * Phase 2 finish (#208) — GET the public profile page for user [userId].
+     *
+     * Wire shape (cf. `docs/specs/protocol-hfr.md` § Profil public):
+     * `GET /hfr/profil-{userId}.htm` — no authentication required for public profiles.
+     *
+     * The endpoint is documented in the endpoint table as `Profil public | non` (auth not
+     * required). The fixture `profile_xatrix_authenticated.html` was captured in an
+     * authenticated session but the page content is the same anonymously — the difference
+     * is only in the HFR session cookie used, not in the profile page layout.
+     *
+     * Uses the [anonymous] client: profile reads must never mark drapeaux as read (the
+     * prefetch-non-authentifié rule, cf. `docs/specs/protocol-hfr.md`). Using the
+     * anonymous client also avoids leaking the user's session to a page whose content
+     * is publicly visible.
+     */
+    suspend fun getProfile(userId: Int): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("hfr")
+            .addPathSegment("profil-$userId.htm")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return withContext(ioDispatcher) {
+            anonymous.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw java.io.IOException("HFR returned ${response.code} for $url")
+                }
+                response.body.string()
+            }
+        }
+    }
+
+    /**
      * Maps [FlagType] to the HFR `owntopic` discriminator used by `delflag.php` / `addflag.php`
      * and the REST `flag_owntopic` field. Kept private to the network layer : the mapping is a
      * wire detail of the HFR contract, not a domain concept the rest of the app should know.
