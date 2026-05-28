@@ -158,8 +158,8 @@ class ReplySubmitResponseParserTest {
     @Test
     fun `slug containing a listing token does not get mistaken for a thread segment`() {
         // #206 hardening — a hypothetical `liste_sujet_1_2.htm` listing URL must NOT be
-        // parsed as a thread segment. The `(?<![a-z])` lookbehind on `sujet_` rejects the
-        // `liste_sujet_` form (preceded by a letter) while still matching the real
+        // parsed as a thread segment. The `(?<![a-z_])` lookbehind on `sujet_` rejects the
+        // `liste_sujet_` form (preceded by an underscore) while still matching the real
         // `/…-sujet_N_M.htm` (preceded by `-` or `/`). This is a regex-robustness pin, not
         // a contract fixture — the real reply/quote/edit-FP fixtures above prove the shape.
         val html = """
