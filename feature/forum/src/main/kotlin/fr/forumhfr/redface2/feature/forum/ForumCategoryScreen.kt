@@ -129,6 +129,10 @@ fun ForumCategoryScreen(
                     onSelectPage = viewModel::selectPage,
                     currentPage = state.page,
                     pageCount = state.pageCount,
+                    // #206 workaround — highlight the row whose title matches the topic
+                    // the user just created. Plumbed from the route (not the StateFlow)
+                    // since it is a fixed one-shot display hint, null on every other path.
+                    highlightTitle = request.highlightTitle,
                 )
             }
         }
@@ -223,6 +227,7 @@ private fun TopicsBody(
     onSelectPage: (Int) -> Unit,
     currentPage: Int,
     pageCount: Int,
+    highlightTitle: String?,
 ) {
     when (state) {
         TopicsUiState.Loading -> Box(
@@ -266,7 +271,11 @@ private fun TopicsBody(
                     item { TopicsEmpty(searchQuery = searchQuery) }
                 } else {
                     items(filteredTopics, key = TopicSummary::topicId) { topic ->
-                        TopicRow(topic = topic, onClick = { onOpenTopic(topic) })
+                        TopicRow(
+                            topic = topic,
+                            highlighted = matchesHighlightedTitle(topic, highlightTitle),
+                            onClick = { onOpenTopic(topic) },
+                        )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
@@ -305,13 +314,27 @@ private fun TopicsEmpty(searchQuery: String) {
 @Composable
 private fun TopicRow(
     topic: TopicSummary,
+    highlighted: Boolean,
     onClick: () -> Unit,
 ) {
+    // #206 workaround — tint the freshly-created topic's row with the same M3 role the
+    // topic reader uses to highlight a target post (`secondaryContainer`, cf.
+    // `TopicScreen.TopicPostCard`), so the surbrillance is sober and consistent across
+    // the app. No hard-coded colour. `highlighted` is false on every normal nav path,
+    // so the row keeps the default transparent background then.
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .then(
+            if (highlighted) {
+                Modifier.background(MaterialTheme.colorScheme.secondaryContainer)
+            } else {
+                Modifier
+            },
+        )
+        .clickable(onClick = onClick)
+        .padding(horizontal = 24.dp, vertical = 12.dp)
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 24.dp, vertical = 12.dp),
+        modifier = rowModifier,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FlagIndicator(flagType = topic.flagType)

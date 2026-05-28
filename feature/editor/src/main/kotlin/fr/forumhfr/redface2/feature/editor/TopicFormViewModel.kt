@@ -436,7 +436,9 @@ class TopicFormViewModel @AssistedInject constructor(
                 )
             }
             outcome.fold(
-                onSuccess = { result -> handleNewTopicOutcome(context, selectedSubcat, result) },
+                onSuccess = { result ->
+                    handleNewTopicOutcome(context, selectedSubcat, snapshot.subject.text, result)
+                },
                 onFailure = ::handleSubmitFailure,
             )
         }
@@ -467,6 +469,7 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun handleNewTopicOutcome(
         context: NewTopicContext,
         selectedSubcat: Int,
+        subject: String,
         result: NewTopicSubmitResult,
     ) {
         when (result) {
@@ -477,6 +480,10 @@ class TopicFormViewModel @AssistedInject constructor(
                         subcat = selectedSubcat,
                         newTopicId = result.newTopicId,
                         newNumreponse = result.newNumreponse,
+                        // Carry the posted title so the listing we land on can highlight
+                        // the fresh row by exact-title match (#206 workaround). HFR never
+                        // returns the topic id on a create, so this is the only handle we have.
+                        subject = subject,
                     ),
                 )
                 _state.update { it.copy(isSubmitting = false, submitError = null) }

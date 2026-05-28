@@ -62,7 +62,9 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 fun TopicFormScreen(
     request: TopicFormRequest,
     onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?) -> Unit,
-    onNewTopicCreated: (cat: Int, subcat: Int, newTopicId: Int?, newNumreponse: Int?) -> Unit,
+    // #206 workaround — `subject` is the exact posted title, forwarded to the category
+    // listing so it can highlight the freshly-created row (HFR never returns the new id).
+    onNewTopicCreated: (cat: Int, subcat: Int, newTopicId: Int?, newNumreponse: Int?, subject: String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: TopicFormViewModel = hiltViewModel<TopicFormViewModel, TopicFormViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -79,15 +81,21 @@ fun TopicFormScreen(
                     onSubmitSucceeded(effect.targetPage, effect.scrollTo)
                 is TopicFormEffect.NewTopicCreated -> {
                     if (effect.newTopicId == null) {
-                        // Fallback path (#206): the create succeeded but HFR's refresh
-                        // URL carried no `sujet_{id}_{page}` segment, so the repository
-                        // could not extract the new topic id. Surface a sober Toast so
-                        // the user knows the POST succeeded before navigating back to
-                        // the category listing. The nominal path (id present) jumps
-                        // straight to the created topic — no Toast needed.
+                        // Fallback path (#206, the only real path): the create succeeded but
+                        // HFR's refresh URL carried no `sujet_{id}_{page}` segment, so the
+                        // repository could not extract the new topic id (confirmed always the
+                        // case for create — #214). Surface a sober Toast so the user knows the
+                        // POST went through before landing back on the category listing, which
+                        // will highlight the freshly-created row by exact-title match.
                         Toast.makeText(context, newTopicCreatedFallback, Toast.LENGTH_LONG).show()
                     }
-                    onNewTopicCreated(effect.cat, effect.subcat, effect.newTopicId, effect.newNumreponse)
+                    onNewTopicCreated(
+                        effect.cat,
+                        effect.subcat,
+                        effect.newTopicId,
+                        effect.newNumreponse,
+                        effect.subject,
+                    )
                 }
             }
         }

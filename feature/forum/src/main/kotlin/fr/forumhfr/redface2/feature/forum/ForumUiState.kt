@@ -105,6 +105,25 @@ private fun String.foldForSearch(): String =
 private val COMBINING_MARKS = Regex("\\p{InCombiningDiacriticalMarks}+")
 
 /**
+ * #206 workaround (« Exact post-création »). Returns `true` when [topic]'s title is the
+ * one the user just posted, so the listing can highlight that exact row.
+ *
+ * Direct navigation to the created topic is impossible — HFR redirects a create to the
+ * category listing and never returns the new topic id (#214). The only reliable handle is
+ * the title the user typed, so the match is **exact** : both sides are trimmed (HFR strips
+ * surrounding whitespace on the title) and compared case-insensitively. This is deliberately
+ * strict — a `contains` match would risk highlighting an older topic whose title is a
+ * substring of the new one, which is exactly the false positive this workaround must avoid.
+ *
+ * Returns `false` for a `null` or blank [highlightTitle] (the normal nav path) so callers can
+ * use it as an unconditional predicate that degrades to "no highlight".
+ */
+internal fun matchesHighlightedTitle(topic: TopicSummary, highlightTitle: String?): Boolean {
+    val needle = highlightTitle?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+    return topic.title.trim().equals(needle, ignoreCase = true)
+}
+
+/**
  * Pure helper kept top-level so it can be exercised in isolation. Falls back to `1`
  * when either input is non-positive or when the math underflows — the pager renders
  * a "Page 1 / 1" cell in that case which is what we want for empty listings.

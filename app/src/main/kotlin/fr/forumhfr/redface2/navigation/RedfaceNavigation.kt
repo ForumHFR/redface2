@@ -77,6 +77,15 @@ data class CategoryRoute(
     val cat: Int,
     val subcat: Int? = null,
     val page: Int = 1,
+    /**
+     * #206 workaround (« Exact post-création »). When the listing is reached right after a
+     * successful create-topic POST, this carries the **exact posted title**. HFR redirects
+     * a create to the category listing and never returns the new topic id (#214), so direct
+     * navigation is impossible — instead the listing highlights the row whose title matches
+     * this value (trimmed, case-insensitive). `null` on every normal navigation path (forum
+     * tap, deep link, sub-category switch) → no highlight.
+     */
+    val highlightTitle: String? = null,
 ) : RedfaceNavKey
 
 @Serializable
@@ -509,6 +518,10 @@ private fun RedfaceNavHost(
                         cat = route.cat,
                         initialSubcat = route.subcat,
                         initialPage = route.page,
+                        // #206 workaround — forwards the freshly-created topic title so the
+                        // listing highlights its row by exact-title match. Null on every
+                        // normal nav path → no highlight.
+                        highlightTitle = route.highlightTitle,
                     ),
                     onOpenTopic = { topic ->
                         backStack.add(
@@ -735,16 +748,18 @@ private fun RedfaceNavHost(
                             )
                         }
                     },
-                    onNewTopicCreated = { cat, subcat, newTopicId, newNumreponse ->
+                    onNewTopicCreated = { cat, subcat, newTopicId, newNumreponse, subject ->
                         // Phase 2E (#149) / #206. Two paths :
-                        //  - Nominal : `newTopicId` is non-null (extracted from the
-                        //    bddpost.php success refresh URL), jump straight to the
-                        //    fresh topic so the user sees their first post.
-                        //  - Fallback : HFR returned a success without a parsable
-                        //    `sujet_` segment, so `newTopicId` is null — pop the
-                        //    composer and replace it with a [CategoryRoute] pointing
-                        //    at the d'arrivée sub-category. The screen-side Toast
-                        //    tells the user the POST went through.
+                        //  - Fallback (the real one) : `newTopicId` is null — HFR redirects a
+                        //    create to the category listing and never returns the new id (#214).
+                        //    Pop the composer and replace it with a [CategoryRoute] pointing at
+                        //    the d'arrivée sub-category, carrying `highlightTitle = subject` so
+                        //    the listing highlights the freshly-created row by exact-title match
+                        //    (« Exact post-création »). The screen-side Toast also tells the user
+                        //    the POST went through.
+                        //  - Nominal (dead for create, kept for safety) : if HFR ever started
+                        //    returning a parsable `sujet_` segment, `newTopicId` would be non-null
+                        //    and we'd jump straight to the fresh topic. Never exercised today.
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
                         }
@@ -766,13 +781,19 @@ private fun RedfaceNavHost(
                             // on the targeted subcat (may differ from the entry
                             // chip when the user picked another sub-category
                             // in the dropdown) so the listing refresh lands on
-                            // the right rail.
+                            // the right rail, and pass the posted title so the row
+                            // created by this POST is highlighted on arrival (#206).
                             val categoryBelow = backStack.lastOrNull() as? CategoryRoute
                             if (categoryBelow != null) {
                                 backStack.removeAt(backStack.lastIndex)
                             }
                             backStack.add(
-                                CategoryRoute(cat = cat, subcat = subcat, page = 1),
+                                CategoryRoute(
+                                    cat = cat,
+                                    subcat = subcat,
+                                    page = 1,
+                                    highlightTitle = subject,
+                                ),
                             )
                         }
                     },

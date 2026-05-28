@@ -139,18 +139,25 @@ sealed interface TopicFormEffect {
     ) : TopicFormEffect
 
     /**
-     * Phase 2E (#149) — emitted on a successful create-topic POST. Since #206 the
-     * repository extracts `(newTopicId, newNumreponse)` from the `bddpost.php`
-     * success refresh URL (same `sujet_{id}_{page}#t{N}` shape as reply/quote), so
-     * the navigation host jumps straight to the created topic. The ids stay nullable :
-     * if HFR ever returns a success without the `sujet_` segment, they're null and the
-     * host falls back to [CategoryRoute] + a Toast.
+     * Phase 2E (#149) — emitted on a successful create-topic POST.
+     *
+     * Live capture (#214, fixture `write_create_topic_success_response.html`) confirmed
+     * HFR redirects to the **category listing** after a create and never returns the
+     * created topic id : `newTopicId` / `newNumreponse` are therefore *always* null on
+     * the create path (the non-null branch is kept only for the theoretical case HFR
+     * starts anchoring `sujet_{id}_{page}#t{N}` like reply/quote does).
+     *
+     * Since direct navigation is impossible, [subject] carries the **exact posted title**
+     * so the navigation host can ask the category listing it lands on to highlight the
+     * freshly-created row by exact-title match (the #206 workaround, « Exact post-création »).
      */
     data class NewTopicCreated(
         val cat: Int,
         val subcat: Int,
         val newTopicId: Int?,
         val newNumreponse: Int?,
+        /** Exact subject the user posted ; used to highlight the new row in the listing (#206). */
+        val subject: String,
     ) : TopicFormEffect
 }
 
