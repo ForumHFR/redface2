@@ -50,7 +50,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Conversation MP | GET | `/message.php?config=hfr.inc&cat=prive&post={mp_id}&page={page}` | **oui** |
 | Liste des MPs | GET | `/forum1.php?config=hfr.inc&cat=prive&page={page}&subcat=&sondage=0&owntopic=0&trash=0&trash_post=0&moderation=0&new=0&nojs=0&subcatgroup=0` | **oui** |
 | Ajouter aux drapeaux | GET | `/user/addflag.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
-| Retirer des drapeaux | GET | `/user/delflag.php?config=hfr.inc&cat={cat}&post={post}&p=1&sondage=0&owntopic={0,1}&new=0` | **oui** |
+| Retirer un drapeau | GET | `/user/delflag.php?config=hfr.inc&cat={cat}&subcat={subcat}&post={topicId}&page={page}&p=1&sondage=0&owntopic={1,2,3}&new=0` | **oui** |
 | Profil public | GET | `/hfr/profil-{user_id}.htm` | non |
 | Paramètres utilisateur | GET | `/editprofil.php?config=hfr.inc&page={1..7}` | **oui** |
 | Modération (alerte) | GET/POST | `/modo.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
@@ -60,6 +60,40 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 > **Note sur `PRIVATE_MESSAGE_CAT_ID`** : la catégorie des MPs est la **chaîne** `"prive"` et non un entier. Attention lors du typage côté Kotlin — `cat: String` pour les endpoints MP ou sentinel dédié.
 
 > **Note sur l'URL "Liste des MPs"** : l'endpoint canonique est `forum1.php?config=hfr.inc&cat=prive&...`, **pas** `message.php?config=hfr.inc` (qui ouvre le composer d'un MP isolé). Vérifié dans le legacy v1 (`HFREndpoints.PRIVATE_MESSAGES_URL`, prouvé en prod ~10 ans) et reproduit dans `:core:network HfrClient.getPrivateMessageListPage()` de Phase 1B.1. Toute la chaîne de query params (`subcat=`, `sondage=0`, `owntopic=0`, etc.) est conservée à l'identique du legacy par défensif — HFR pourrait accepter une URL plus courte mais ce n'est pas testé.
+
+### Retirer un drapeau — `delflag.php` (#99, Phase 2 finish)
+
+Suppression **unitaire** d'un drapeau = **GET authentifié** (les mutations drapeaux restent HTML, cf. ADR-003 — la sémantique REST `PUT topics/{id}/` reste opaque). Forme **vérifiée sur HFR réel pour un favori** (`owntopic=3`, compte de test authentifié, fixtures `flag_delete_success.html` / `flag_delete_already_removed.html`) :
+
+```
+/user/delflag.php?config=hfr.inc&cat={cat}&subcat={subcat}&post={topicId}&page={page}&p=1&sondage=0&owntopic={TYPE}&new=0
+```
+
+- `owntopic={TYPE}` = **le type de drapeau** à retirer : `CYAN=1`, `RED=2`, `FAVORITE=3` (même discriminant que le `flag_owntopic` REST, cf. `core/model/.../Flag.kt`). HFR clé la suppression sur ce champ. `FAVORITE=3` est **vérifié en live le 2026-05-28** (curl authentifié + recoupement REST : le bucket `favorites/` passe de `results_count` 1 → 0). **`numreponse` n'est PAS requis** pour le delflag favori : l'URL ci-dessus (sans `numreponse`) retire bien le favori — donc l'impl #99, qui n'expose pas la position, est correcte. `CYAN=1` et `RED=2` restent inférés du mapping `owntopic` (non testés en isolation faute de drapeau cyan/red jetable — ils sont automatiques, cf. ci-dessous).
+- `{cat}` = catégorie ; `{subcat}` = sous-catégorie, **nullable** → on émet `subcat=` (vide) quand elle est absente (les listings REST drapeaux ne la portent pas toujours).
+- `{post}` = `topicId` ; `{page}` = `lastReadPage` du drapeau (sa page courante).
+- **Succès** : page HTML contenant le texte littéral **« Drapeau effacé avec succès »** (dans un `<div class="hop">`), HTTP 200.
+- **Échec / déjà retiré** : page HTML **sans** ce texte (ex. « Aucun favori n'est repertorié »), HTTP 200 aussi. Le texte de succès est donc le **seul** signal.
+
+Côté code : `HfrClient.removeFlag(cat, subcat, topicId, type, page)` construit l'URL et mappe `FlagType`→`owntopic` ; `FlagDeleteResponseParser` classe la réponse (succès vs échec) ; `DefaultFlagRepository.removeFlag(flag)` retire l'item des caches mémoire **et** Room **uniquement en cas de succès** et ré-émet la liste mise à jour, sinon ne touche à aucun cache. **Pas d'undo optimiste** : `addflag` n'est pas prouvé pour tous les types, donc on ne ré-ajoute jamais spéculativement.
+
+### Ajouter / re-poser un drapeau — `addflag.php` (vérifié live 2026-05-28)
+
+`/user/addflag.php?config=hfr.inc&cat={cat}&post={topicId}&numreponse={position}&page={page}&ref={index}&p=1&sondage=0&owntopic={N}&subcat={subcat}` (GET authentifié, lien « Mettre un favori sur cette position » de chaque post en vue topic).
+
+**`addflag.php` ne pose QUE des favoris.** Testé en live avec `owntopic=0/1/2/3` : les quatre renvoient « Favori positionné avec succès » **et** le recoupement REST confirme que le topic atterrit dans le bucket `favorites/` (jamais `read/`). **`owntopic` est donc ignoré par addflag** — il ne sert pas à choisir le type. Effet de bord observé : poser un favori fait aussi entrer le topic dans `participated/` (cyan), retiré par le même `delflag`.
+
+Conséquence : **les drapeaux CYAN (participé) et RED (lu) sont automatiques** — posés par HFR au 1er post (cyan) ou à la lecture (red), **pas via une URL**. Il n'existe aucun moyen de les (re)poser par requête.
+
+### API REST : lecture seule pour les drapeaux (vérifié live 2026-05-28)
+
+Les mutations de drapeaux **ne sont pas possibles via `/webservices/rest_api.php`**. `POST` / `PUT` / `DELETE` sur `…/topics/{id}/flags/favorites/` ou `…/topics/{id}/` renvoient **HTTP 200 mais `{"error":true,"error_code":501,"error_description":"unknow resource identifier"}`** et ne mutent rien (le bucket reste inchangé). C'est la confirmation empirique d'ADR-003 : le REST couvre le **browsing/lecture** des drapeaux, les mutations passent obligatoirement par `addflag.php` / `delflag.php` (HTML).
+
+### Pas d'undo (décision actée par le contrat)
+
+Un « annuler la suppression » n'est **pas réalisable** : `addflag.php` ne sait reposer que des favoris, et cyan/red sont automatiques (rien à re-poser par URL). Un undo de favori serait théoriquement possible (`addflag` + `numreponse` de la position) mais le `Flag` du listing n'expose pas cette position de façon fiable. #99 s'en tient donc à une **confirmation avant suppression, sans undo**.
+
+> **Hors scope #99** : la suppression en masse (form POST `manageaction.php`) n'est pas implémentée.
 
 ---
 

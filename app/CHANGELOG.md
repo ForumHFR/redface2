@@ -19,6 +19,26 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ---
 
+## v63 — `0.3.23` — 2026-05-28
+
+**Statut** : `closed`
+**Commit** : head de `feature/phase2-finish-delflag-99` (PR #99), dispatch `release.yml` `play_track=alpha`
+**Fichier** : AAB uploadé sur le canal Play closed alpha
+
+Phase 2 finish — refonte de la page Drapeaux + retrait d'un drapeau (#99). Premier AAB distribué à embarquer aussi le correctif citations connecté de v62 (resté `local`).
+
+### Added
+- **Retirer un drapeau (#99, Phase 2 finish)** : **swipe-to-remove** sur chaque ligne de la liste des drapeaux (`SwipeToDismissBox` Material 3, swipe vers la gauche / end-to-start) qui ouvre un **dialog de confirmation Material 3 obligatoire** (titre du topic + type de drapeau) avant tout appel réseau, puis snackbar de succès/échec. Le swipe ne supprime jamais la ligne seul : elle revient en place (`reset()` vers `Settled`, déclenché depuis `onDismiss` pour éviter une race d'annulation de la coroutine) tant que l'utilisateur n'a pas confirmé — la suppression réelle n'a lieu qu'à la confirmation, quand le repo évince l'item du cache. Fond destructif `errorContainer` + libellé « Retirer » (pas de couleur en dur). Suppression unitaire via `GET /user/delflag.php` authentifié (mapping `FlagType`→`owntopic` : CYAN=1, RED=2, FAVORITE=3), classée sur le texte « Drapeau effacé avec succès ». En cas de succès, le drapeau est retiré des caches mémoire et Room et la liste se met à jour immédiatement ; en cas d'échec, aucun cache n'est touché. Pas d'undo optimiste. Geste désactivé pendant l'appel (anti double-tap). Le swipe étant la seule affordance de retrait, une action d'accessibilité (`customActions` « Retirer ») est exposée à TalkBack / switch-access. Suppression en masse hors scope.
+- **Onglet « Super » (placeholder)** : 4e onglet sur la page Drapeaux, à droite de Favoris, pour les futurs « super favoris ». Pour l'instant un écran placeholder M3 sobre (« Super favoris — à venir » + explication), sans liste ni appel réseau. Modélisé via un type UI local `FlagTab` (Cyan / Red / Favorite / Super) qui mappe vers `FlagType` pour les 3 onglets réels ; l'enum domaine `FlagType` n'est pas touchée.
+
+### Changed
+- **Toggle « cyans lus » intégré à l'onglet Cyan** : le `FilterChip` « Cyans lus » séparé est retiré. Re-cliquer sur l'onglet **Cyan déjà sélectionné** bascule l'affichage des cyans déjà lus (premier clic depuis un autre onglet : sélection simple, sans bascule). Indicateur discret « · +lus » ajouté au libellé de l'onglet Cyan quand les cyans lus sont affichés. Le filtre reste sans effet sur les onglets Lu / Favoris.
+- **Onglet « Lus uniquement » renommé « Lu »** sur la page Drapeaux (gain de place sur le tab row).
+- **Pull-to-refresh sur la liste des drapeaux** : le bouton « Actualiser » du header est remplacé par un `PullToRefreshBox` Material 3 (swipe vers le bas) autour de la liste, branché sur un état `isRefreshing` exposé par le ViewModel — même pattern que la page Forum. Sans effet sur l'onglet Super (no-op).
+- `app/build.gradle.kts` : `versionCode = 63`, `versionName = "0.3.23"`.
+
+---
+
 ## v62 — `0.3.22` — 2026-05-27
 
 **Statut** : `local`

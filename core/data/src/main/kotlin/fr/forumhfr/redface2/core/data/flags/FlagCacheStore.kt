@@ -43,6 +43,17 @@ class FlagCacheStore @Inject constructor(
         }
     }
 
+    /**
+     * Removes a single cached drapeau row after a successful `delflag.php` (#99). Keyed on
+     * the logical `(userId, type, cat, topicId)` tuple — see [FlagDao.deleteFlag]. No-op
+     * when the row is already absent.
+     */
+    suspend fun delete(userId: String, type: FlagType, cat: Int, topicId: Int) {
+        withContext(ioDispatcher) {
+            flagDao.deleteFlag(userId = userId, type = type, cat = cat, topicId = topicId)
+        }
+    }
+
     data class CachedFlags(
         val result: FlagsResult.Success,
         val isFresh: Boolean,

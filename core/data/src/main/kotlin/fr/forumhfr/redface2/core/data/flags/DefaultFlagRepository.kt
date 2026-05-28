@@ -13,8 +13,11 @@ import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.write.FlagDeleteResult
 import fr.forumhfr.redface2.core.network.HfrApiClient
+import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
+import fr.forumhfr.redface2.core.parser.write.FlagDeleteResponseParser
 import java.util.EnumMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -60,9 +63,15 @@ import kotlinx.serialization.json.Json
  * while the repository attempts a background refresh. [clearSessionCache] still
  * clears the process cache immediately on logout / account switch.
  */
+// #99 added the HTML mutation collaborators (HfrClient + delflag parser) on top of the
+// existing REST read deps ; all 8 are distinct Hilt-injected singletons, a parameter object
+// would only hide the dependency surface from DI.
+@Suppress("LongParameterList")
 @Singleton
 class DefaultFlagRepository @Inject constructor(
     private val apiClient: HfrApiClient,
+    private val hfrClient: HfrClient,
+    private val flagDeleteResponseParser: FlagDeleteResponseParser,
     private val forumRepository: ForumRepository,
     private val authRepository: AuthRepository,
     private val flagCacheStore: FlagCacheStore,
@@ -134,6 +143,86 @@ class DefaultFlagRepository @Inject constructor(
 
     override fun clearSessionCache() {
         synchronized(cachedSuccesses) { cachedSuccesses.clear() }
+    }
+
+    /**
+     * Removes [flag] via `delflag.php` (#99) and reconciles the caches on success only.
+     *
+     * Flow :
+     * 1. Resolve the authenticated user ; abort with a failed [Result] if anonymous (the
+     *    delflag GET would land on the login page anyway).
+     * 2. GET `/user/delflag.php` through [HfrClient] (HTML mutation per ADR-003) and
+     *    classify the body with [FlagDeleteResponseParser]. Network + Jsoup parse are both
+     *    on [ioDispatcher] — `HfrClient` already hops, but we keep the explicit
+     *    `withContext` so the CPU-bound parse never runs on the caller's dispatcher (project
+     *    rule, cf. `DefaultReplyRepository`).
+     * 3. **Success** → drop the row from the in-memory success cache *and* Room (logical key
+     *    `cat + topicId + type`), then re-broadcast the trimmed list to active observers of
+     *    [flag]'s [Flag.type] so the screen updates without a refetch.
+     * 4. **Failure / unexpected page** → touch no cache, return [Result.failure].
+     *
+     * A [SessionExpiredException] (or any transport error) raised by [HfrClient] propagates
+     * as a failed [Result] via [runCatching] — no cache is mutated, matching the read path's
+     * "never trust a half-finished mutation" stance.
+     */
+    override suspend fun removeFlag(flag: Flag): Result<Unit> {
+        val userId = currentUserId()
+            ?: return Result.failure(IllegalStateException("Removing a flag requires an authenticated HFR session"))
+
+        return runCatching {
+            val result = withContext(ioDispatcher) {
+                val response = hfrClient.removeFlag(
+                    cat = flag.cat,
+                    subcat = flag.subcat,
+                    topicId = flag.topicId,
+                    type = flag.type,
+                    page = flag.lastReadPage,
+                )
+                flagDeleteResponseParser.parse(response)
+            }
+            when (result) {
+                FlagDeleteResult.Success -> Unit
+                FlagDeleteResult.Failure -> throw FlagDeleteFailedException(flag.topicId)
+            }
+        }.onSuccess {
+            evictFlagFromCaches(userId = userId, flag = flag)
+        }
+    }
+
+    /**
+     * Drops [flag] from the in-memory success cache and Room, then re-emits the trimmed
+     * list to active observers of its tab. Called only after a confirmed `delflag.php`
+     * success, so it never has to reason about a partial mutation.
+     */
+    private suspend fun evictFlagFromCaches(userId: String, flag: Flag) {
+        val updated: FlagsResult.Success? = synchronized(cachedSuccesses) {
+            val current = cachedSuccesses[flag.type] ?: return@synchronized null
+            val trimmed = current.flags.filterNot {
+                it.cat == flag.cat && it.topicId == flag.topicId
+            }
+            FlagsResult.Success(trimmed).also { cachedSuccesses[flag.type] = it }
+        }
+
+        // Room eviction is best-effort : the network deletion already succeeded, so a Room
+        // hiccup must not turn a successful removal into a user-visible failure. A stale
+        // disk row would be corrected on the next refresh anyway.
+        runCatching {
+            flagCacheStore.delete(
+                userId = userId,
+                type = flag.type,
+                cat = flag.cat,
+                topicId = flag.topicId,
+            )
+        }.onFailure { throwable ->
+            Log.w(LOG_TAG, "Could not evict deleted flag ${flag.topicId} from Room cache", throwable)
+        }
+
+        // Re-broadcast outside the lock so observers see the trimmed list immediately
+        // (mirrors the optimistic-free contract : the cache is the source of truth and the
+        // network deletion already confirmed).
+        if (updated != null) {
+            refreshes.getValue(flag.type).emit(updated)
+        }
     }
 
     private suspend fun fetch(type: FlagType, userId: String): FlagsResult = withContext(ioDispatcher) {
@@ -279,3 +368,14 @@ class DefaultFlagRepository @Inject constructor(
         const val MAX_PAGES = 100
     }
 }
+
+/**
+ * Raised internally by [DefaultFlagRepository.removeFlag] when HFR's `delflag.php`
+ * response did not carry the « Drapeau effacé avec succès » confirmation (the drapeau
+ * was already gone, the deletion was refused, or HFR served an unexpected page). It is
+ * the cause wrapped in the failed [Result] returned to the caller, so the UI can surface
+ * a generic "could not remove" message. No response body is carried — the page can embed
+ * session metadata.
+ */
+class FlagDeleteFailedException(topicId: Int) :
+    Exception("HFR did not confirm the drapeau removal for topic $topicId")

@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import java.time.LocalDate
 import kotlinx.coroutines.Dispatchers
@@ -162,6 +163,61 @@ class HfrClientTest {
         val url = requireNotNull(server.takeRequest().requestUrl)
         assertEquals("0", url.queryParameter("titre"))
         assertEquals("0", url.queryParameter("orderSearch"))
+    }
+
+    @Test
+    fun `removeFlag builds the delflag URL on the authenticated client mapping each type to owntopic`() = runTest {
+        // owntopic discriminator: CYAN→1, RED→2, FAVORITE→3 (cf. Flag.kt / protocol-hfr.md).
+        listOf(
+            FlagType.CYAN to "1",
+            FlagType.RED to "2",
+            FlagType.FAVORITE to "3",
+        ).forEach { (type, expectedOwntopic) ->
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody("<html><body>Drapeau effacé avec succès</body></html>"),
+            )
+
+            val html = client.removeFlag(cat = 23, subcat = 550, topicId = 35395, type = type, page = 7)
+
+            assertTrue(html.contains("Drapeau effacé avec succès"))
+            val request = server.takeRequest()
+            val url = requireNotNull(request.requestUrl)
+            assertEquals("authenticated", request.headers["X-RF2-Client"])
+            assertEquals("/user/delflag.php", url.encodedPath)
+            assertEquals("hfr.inc", url.queryParameter("config"))
+            assertEquals("23", url.queryParameter("cat"))
+            assertEquals("550", url.queryParameter("subcat"))
+            assertEquals("35395", url.queryParameter("post"))
+            assertEquals("7", url.queryParameter("page"))
+            assertEquals("1", url.queryParameter("p"))
+            assertEquals("0", url.queryParameter("sondage"))
+            assertEquals(expectedOwntopic, url.queryParameter("owntopic"))
+            assertEquals("0", url.queryParameter("new"))
+        }
+    }
+
+    @Test
+    fun `removeFlag emits an empty subcat when the flag has none`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>ok</body></html>"))
+
+        client.removeFlag(cat = 5, subcat = null, topicId = 1000, type = FlagType.FAVORITE, page = 1)
+
+        val url = requireNotNull(server.takeRequest().requestUrl)
+        // A null subcat serialises as `subcat=` (empty) rather than being dropped, mirroring
+        // how HFR's own listing links serialise a missing sub-category.
+        assertEquals("", url.queryParameter("subcat"))
+    }
+
+    @Test
+    fun `removeFlag raises SessionExpired when HFR serves the login form`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "/login.php"))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html>login</html>"))
+
+        val error = runCatching {
+            client.removeFlag(cat = 23, subcat = 550, topicId = 35395, type = FlagType.CYAN, page = 1)
+        }.exceptionOrNull()
+
+        assertTrue("expected SessionExpiredException, got $error", error is SessionExpiredException)
     }
 
     private fun taggedClient(tag: String): OkHttpClient =

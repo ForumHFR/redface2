@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -38,8 +40,8 @@ class FlagsViewModel @Inject constructor(
 
     private var observedPseudo: String? = null
 
-    private val _selectedTab = MutableStateFlow(FlagType.CYAN)
-    val selectedTab: StateFlow<FlagType> = _selectedTab.asStateFlow()
+    private val _selectedTab = MutableStateFlow<FlagTab>(FlagTab.Cyan)
+    val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
 
     /**
      * User-controlled visibility of CYAN flags whose [fr.forumhfr.redface2.core.model.Flag.hasUnread]
@@ -70,6 +72,10 @@ class FlagsViewModel @Inject constructor(
      * shows the login intro instead of an empty list); Authenticated → emits the result
      * from FlagRepository for the current tab. Switching tabs (or auth state) cancels
      * any in-flight observation via [flatMapLatest].
+     *
+     * The [FlagTab.Super] tab is a placeholder (future « super favoris », no backend yet):
+     * selecting it maps to no [FlagType] and emits `null`, so the screen renders its
+     * placeholder body instead of a list and **no** repository observation is started.
      */
     val flagsState: StateFlow<FlagsResult?> = authState
         .onEach(::clearFlagsCacheIfSessionChanged)
@@ -77,12 +83,15 @@ class FlagsViewModel @Inject constructor(
             when (state) {
                 null -> flowOf<FlagsResult?>(null)
                 AuthState.Anonymous -> flowOf<FlagsResult?>(null)
-                is AuthState.Authenticated -> selectedTab.flatMapLatest { type ->
-                    combine(
-                        flagRepository.observe(type),
-                        _showReadParticipatedTopics,
-                    ) { result, showRead ->
-                        filterReadParticipatedIfNeeded(result, type, showRead)
+                is AuthState.Authenticated -> selectedTab.flatMapLatest { tab ->
+                    when (val type = tab.flagType) {
+                        null -> flowOf<FlagsResult?>(null) // Super placeholder: no fetch.
+                        else -> combine(
+                            flagRepository.observe(type),
+                            _showReadParticipatedTopics,
+                        ) { result, showRead ->
+                            filterReadParticipatedIfNeeded(result, type, showRead)
+                        }
                     }
                 }
             }
@@ -93,8 +102,96 @@ class FlagsViewModel @Inject constructor(
             initialValue = null,
         )
 
-    fun selectTab(type: FlagType) {
-        _selectedTab.value = type
+    /**
+     * Drives the « Retirer le drapeau » interaction (#99). MVI-style explicit state so the
+     * UI stays declarative and the network call is gated behind a confirmation :
+     *
+     * - [RemoveFlagState.Idle] — nothing pending.
+     * - [RemoveFlagState.Confirming] — the user tapped « Retirer » ; the screen shows the M3
+     *   confirmation dialog ([RemoveFlagState.Confirming.flag] feeds its title + type).
+     * - [RemoveFlagState.Removing] — the user confirmed ; the network call is in flight and the
+     *   action is disabled (anti double-tap).
+     *
+     * One-shot results are exposed separately via [removeFlagEvents] so a config change does
+     * not replay a stale snackbar.
+     */
+    private val _removeFlagState = MutableStateFlow<RemoveFlagState>(RemoveFlagState.Idle)
+    val removeFlagState: StateFlow<RemoveFlagState> = _removeFlagState.asStateFlow()
+
+    /**
+     * One-shot success/failure of a removal, consumed by the screen to show a snackbar.
+     * `null` once consumed (cf. [consumeRemoveFlagEvent]) so it does not re-fire across
+     * recompositions / config changes.
+     */
+    private val _removeFlagEvent = MutableStateFlow<RemoveFlagEvent?>(null)
+    val removeFlagEvent: StateFlow<RemoveFlagEvent?> = _removeFlagEvent.asStateFlow()
+
+    /**
+     * Toggled around the user-driven [refresh] round-trip so the Material 3
+     * `PullToRefreshBox` indicator can stay anchored over the existing list instead of
+     * blanking it back to a cold spinner. Same pattern as `ForumViewModel.isRefreshing`.
+     */
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    /**
+     * Tab selection. Re-tapping [FlagTab.Cyan] while it is **already** selected toggles
+     * [showReadParticipatedTopics] (show / hide the already-read participated topics) —
+     * the inline replacement for the former « Cyans lus » FilterChip. Selecting Cyan from
+     * another tab only switches to it (no toggle). Other tabs just switch.
+     */
+    fun selectTab(tab: FlagTab) {
+        if (tab == FlagTab.Cyan && _selectedTab.value == FlagTab.Cyan) {
+            // Re-tapping the already-selected Cyan tab toggles the read-cyan filter. Route the
+            // mutation through [setShowReadParticipatedTopics] so that setter stays the single
+            // mutation point for `_showReadParticipatedTopics` (no second code path to drift).
+            setShowReadParticipatedTopics(!_showReadParticipatedTopics.value)
+            return
+        }
+        _selectedTab.value = tab
+    }
+
+    /** User tapped « Retirer le drapeau » on [flag] : raise the confirmation dialog. */
+    fun requestRemoveFlag(flag: Flag) {
+        // Ignore a second request while a removal is already in flight (anti double-tap):
+        // the in-flight flag wins until it resolves.
+        if (_removeFlagState.value is RemoveFlagState.Removing) return
+        _removeFlagState.value = RemoveFlagState.Confirming(flag)
+    }
+
+    /** User dismissed the confirmation dialog without confirming. */
+    fun cancelRemoveFlag() {
+        if (_removeFlagState.value is RemoveFlagState.Confirming) {
+            _removeFlagState.value = RemoveFlagState.Idle
+        }
+    }
+
+    /**
+     * User confirmed the removal in the dialog. Moves to [RemoveFlagState.Removing] (disables
+     * the action), calls the repository, and emits a one-shot [RemoveFlagEvent]. The repository
+     * owns the cache reconciliation, so the list updates on its own on success — no optimistic
+     * mutation here (addflag is not proven for every type, so we never speculatively re-add).
+     */
+    fun confirmRemoveFlag() {
+        val confirming = _removeFlagState.value as? RemoveFlagState.Confirming ?: return
+        val flag = confirming.flag
+        _removeFlagState.value = RemoveFlagState.Removing(flag)
+        viewModelScope.launch {
+            val result = flagRepository.removeFlag(flag)
+            _removeFlagState.value = RemoveFlagState.Idle
+            _removeFlagEvent.update {
+                if (result.isSuccess) {
+                    RemoveFlagEvent.Success(flag.title)
+                } else {
+                    RemoveFlagEvent.Failure(flag.title)
+                }
+            }
+        }
+    }
+
+    /** Consume the one-shot removal event after the snackbar has been shown. */
+    fun consumeRemoveFlagEvent() {
+        _removeFlagEvent.value = null
     }
 
     fun setShowReadParticipatedTopics(value: Boolean) {
@@ -102,7 +199,16 @@ class FlagsViewModel @Inject constructor(
     }
 
     fun refresh() {
-        viewModelScope.launch { flagRepository.refresh(_selectedTab.value) }
+        // Super is a placeholder with no backing FlagType — pull-to-refresh is a no-op there.
+        val type = _selectedTab.value.flagType ?: return
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            try {
+                flagRepository.refresh(type)
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
     }
 
     // Round-2 review (PR #207): `logout()` was removed from this ViewModel — the global account
@@ -146,4 +252,55 @@ class FlagsViewModel @Inject constructor(
             }
         }
     }
+}
+
+/**
+ * UI-level tab model for the Drapeaux screen. The three real tabs map to a [FlagType] the
+ * repository can fetch ; [Super] is a placeholder for the future « super favoris » feature
+ * and intentionally carries no [FlagType] (no `flag_owntopic` is known, no backend exists).
+ *
+ * The ViewModel keeps fetching/filtering on [FlagType] for the three real tabs ; this type
+ * only drives which tab is selected so the screen can render a placeholder body for [Super]
+ * without polluting the domain enum.
+ */
+sealed interface FlagTab {
+    /** Backing flag type, or `null` for the placeholder [Super] tab. */
+    val flagType: FlagType?
+
+    data object Cyan : FlagTab {
+        override val flagType: FlagType = FlagType.CYAN
+    }
+
+    data object Red : FlagTab {
+        override val flagType: FlagType = FlagType.RED
+    }
+
+    data object Favorite : FlagTab {
+        override val flagType: FlagType = FlagType.FAVORITE
+    }
+
+    /** Placeholder — future « super favoris ». No fetch, no backend. */
+    data object Super : FlagTab {
+        override val flagType: FlagType? = null
+    }
+}
+
+/**
+ * State of the « Retirer le drapeau » interaction (#99). [Confirming] and [Removing] carry
+ * the target [Flag] so the dialog can render its title + type and the screen can disable the
+ * matching row's action while the call is in flight.
+ */
+sealed interface RemoveFlagState {
+    data object Idle : RemoveFlagState
+    data class Confirming(val flag: Flag) : RemoveFlagState
+    data class Removing(val flag: Flag) : RemoveFlagState
+}
+
+/**
+ * One-shot outcome of a removal, surfaced as a snackbar. Carries the topic [title] for the
+ * message ; no raw error detail (the repository already redacts the HFR body).
+ */
+sealed interface RemoveFlagEvent {
+    data class Success(val title: String) : RemoveFlagEvent
+    data class Failure(val title: String) : RemoveFlagEvent
 }

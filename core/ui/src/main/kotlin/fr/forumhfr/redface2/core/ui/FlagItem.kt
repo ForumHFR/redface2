@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,6 +36,15 @@ import fr.forumhfr.redface2.core.model.FlagType
  * The footer string is passed in pre-formatted from the caller (`:feature:flags`)
  * because `:core:ui` has no localized resources of its own — keeping the i18n boundary
  * clean per the convention recorded in `docs/guides/contributing.md`.
+ *
+ * [trailingAction] is an optional slot at the end of the row for an inline affordance (e.g.
+ * an overflow / quick action). When present, the title column takes the remaining width via
+ * `weight(1f)` so the action stays pinned to the right and the text ellipsises instead of
+ * overlapping it. When absent (default), the column fills the row as before.
+ *
+ * Note (#99): the « Retirer le drapeau » affordance is no longer an inline `trailingAction`
+ * button — `:feature:flags` now wraps this row in a Material 3 `SwipeToDismissBox`
+ * (swipe-to-remove + confirmation dialog). The slot is kept for future inline actions.
  */
 @Composable
 fun FlagItem(
@@ -42,6 +52,7 @@ fun FlagItem(
     metadata: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    trailingAction: (@Composable RowScope.() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier
@@ -53,7 +64,7 @@ fun FlagItem(
     ) {
         FlagDot(type = flag.type, hasUnread = flag.hasUnread)
         Column(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = if (trailingAction != null) Modifier.weight(1f) else Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
@@ -72,6 +83,7 @@ fun FlagItem(
                 )
             }
         }
+        trailingAction?.invoke(this)
     }
 }
 
