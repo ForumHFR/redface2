@@ -94,6 +94,7 @@ dependencies {
     implementation(project(":feature:auth"))
     implementation(project(":feature:search"))
     implementation(project(":feature:settings"))
+    implementation(project(":feature:profile"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

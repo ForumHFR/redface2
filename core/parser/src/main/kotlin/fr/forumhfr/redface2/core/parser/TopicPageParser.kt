@@ -109,6 +109,7 @@ class TopicPageParser(
             quotedAuthors = content.quotedAuthors,
             postIndex = null,
             quoteRef = parseQuoteRef(postTable),
+            profileId = parseProfileId(postTable),
         )
     }
 
@@ -150,6 +151,25 @@ class TopicPageParser(
     // link. `&amp;` is normalised by Jsoup to `&` in the parsed attribute
     // value. The chain is null-safe end-to-end : missing toolbar, missing
     // quote link, or unparseable ref all return `null` without a fallback.
+    /**
+     * Phase 2 finish (#208) — extracts the HFR numeric user id from the profile link
+     * `<a href="/hfr/profil-{userId}.htm">` in the post's left toolbar. The profile
+     * icon link is rendered adjacent to the timestamp and quote/edit links.
+     *
+     * Pattern observed on `topic_khakha_page_1.html`:
+     * `<a href="https://forum.hardware.fr/hfr/profil-599674.htm" target="_blank" rel="nofollow">
+     *   <img ... title="Voir son profil" ...></a>`
+     *
+     * Returns null when no such link is found (« Publicité » rows, anonymous reads, or
+     * future HFR changes). The profile tap is hidden in that case — no magic default.
+     */
+    private fun parseProfileId(postTable: Element): Int? =
+        postTable.selectFirst(HfrSelectors.POST_TOOLBAR_LEFT)
+            ?.select("a[href*=/hfr/profil-]")
+            ?.firstOrNull()
+            ?.attr("href")
+            ?.let { PROFILE_ID_REGEX.find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
+
     private fun parseQuoteRef(postTable: Element): Int? =
         postTable.selectFirst(HfrSelectors.POST_TOOLBAR_LEFT)
             ?.select("a[href*=numrep=]")
@@ -269,3 +289,5 @@ private data class PageInfo(
 
 private val QUOTE_REF_REGEX: Regex = Regex("""[?&]ref=(\d+)""")
 private val EDIT_NUMREPONSE_REGEX: Regex = Regex("""[?&]numreponse=(\d+)""")
+// Matches `/hfr/profil-{userId}.htm` — the `\d+` captures the numeric user id.
+private val PROFILE_ID_REGEX: Regex = Regex("""/hfr/profil-(\d+)\.htm""")

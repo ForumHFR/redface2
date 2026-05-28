@@ -63,6 +63,7 @@ graph TB
     APP --> FA[":feature:auth"]
     APP --> FS[":feature:settings"]
     APP --> FSR[":feature:search"]
+    APP --> FPR[":feature:profile"]
     APP --> CDATA[":core:data"]
 
     FFL --> CDOM[":core:domain"]
@@ -91,6 +92,9 @@ graph TB
     FSR --> CDOM
     FSR --> CU
 
+    FPR --> CDOM
+    FPR --> CU
+
     CDOM --> CM[":core:model"]
     CEXT --> CM
     CU --> CM
@@ -112,6 +116,7 @@ graph TB
     style CD fill:#3498db,color:#fff
     style CU fill:#9b59b6,color:#fff
     style CEXT fill:#8e44ad,color:#fff
+    style FPR fill:#1abc9c,color:#fff
 ```
 
 ### Modules core
@@ -141,10 +146,11 @@ Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (com
 | `:feature:auth` | Login HFR | `:core:domain`, `:core:ui` |
 | `:feature:search` | Recherche dans les topics et posts, filtres | `:core:domain`, `:core:ui` |
 | `:feature:settings` | Préférences, thème, gestion cache | `:core:domain`, `:core:ui` |
+| `:feature:profile` | Profil utilisateur — bottom sheet résumé + page complète (Phase 2 finish #208) | `:core:domain`, `:core:ui` |
 
 ### Modules feature (extensions communautaires — Phase 4)
 
-Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le projet compte 15 modules (8 core + 7 features base). Les extensions sont des modules Gradle isolés qui s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant. La décision de découpage v1 est formalisée dans [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1).
+Les 8 modules extension arrivent en **Phase 4** uniquement. En Phases 0 à 3, le projet compte 16 modules (8 core + 8 features base). Les extensions sont des modules Gradle isolés qui s'enregistrent via Hilt `@IntoSet` — ajouter une extension ne demande aucune modification du code existant. La décision de découpage v1 est formalisée dans [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1).
 
 > **État réel des modules en Phase 2** : tous les modules core et feature de base sont déclarés dans `settings.gradle.kts`, mais `:core:extension` ne contient encore que le squelette Gradle (`build.gradle.kts`) sans code Kotlin. `:core:network` et `:core:database` ont reçu leur backbone Phase 1A (`HfrClient`, `TopicRepositoryImpl` cache-aside, schema Room v1). `:feature:auth` contient le login HFR Phase 1B.1 (`LoginScreen` / `LoginViewModel`). `:feature:settings` contient le `SettingsScreen` alpha Phase 2H pour le proxy utilisateur. C'est volontaire : le découpage est fixé dès le bootstrap (ADR-001) pour figer les frontières, mais le code arrive feature par feature. La prose ci-dessus décrit le **contrat cible** ; la réalité courante est trackée par la roadmap.
 

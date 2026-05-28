@@ -12,6 +12,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -46,11 +47,15 @@ import fr.forumhfr.redface2.feature.forum.CategoryRequest
 import fr.forumhfr.redface2.feature.forum.ForumCategoryScreen
 import fr.forumhfr.redface2.feature.forum.ForumScreen
 import fr.forumhfr.redface2.feature.messages.MessagesScreen
+import fr.forumhfr.redface2.feature.profile.ProfilePreviewSheet
+import fr.forumhfr.redface2.feature.profile.ProfileRoute
+import fr.forumhfr.redface2.feature.profile.ProfileViewModel
 import fr.forumhfr.redface2.feature.search.SearchScreen
 import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import kotlinx.serialization.Serializable
+import androidx.compose.material3.ExperimentalMaterial3Api
 
 @Serializable
 sealed interface RedfaceNavKey : NavKey
@@ -145,6 +150,37 @@ data object DiagnosticsRoute : RedfaceNavKey
 @Serializable
 data object SettingsRoute : RedfaceNavKey
 
+/**
+ * Phase 2 finish (#208) — full profile page route.
+ *
+ * Navigation is always [userId]-first. [pseudo] and [avatarUrl] are display hints shown
+ * while the profile is loading — they can be pre-populated from the topic page tap site
+ * so the user sees a meaningful placeholder immediately.
+ *
+ * Architecture note (MVP limitation): the ModalBottomSheet preview ([ProfilePreviewSheet])
+ * is hoisted in [RedfaceApp] as an overlay composable, while this route is a back-stack
+ * nav entry with its own [androidx.lifecycle.ViewModelStore]. They are **two separate
+ * [ProfileViewModel] instances** — each fetches the profile independently. This means
+ * navigating from the sheet to the full page triggers a second network request. This is
+ * the accepted MVP trade-off; no shared ViewModel or caching across the two entry points
+ * is implemented yet.
+ *
+ * TODO(profile): caching follow-up — open a dedicated issue (none filed yet to keep this
+ * PR scope-bound) and link it here. Candidate approaches: (a) shared `Singleton` Room-
+ * backed cache keyed by `userId`, (b) repository-level in-memory `Cache<Int, UserProfile>`
+ * with a short TTL, (c) hoisting the ViewModel to a `LocalViewModelStoreOwner` shared by
+ * the sheet and the page.
+ *
+ * [ProfileViewModel] uses `@AssistedInject` (not SavedStateHandle) to receive [userId],
+ * [pseudo], and [avatarUrl] at construction time.
+ */
+@Serializable
+data class ProfileFullRoute(
+    val userId: Int,
+    val pseudo: String,
+    val avatarUrl: String? = null,
+) : RedfaceNavKey
+
 internal enum class TopLevelDestination(
     val labelRes: Int,
     val rootRoute: RedfaceNavKey,
@@ -160,6 +196,54 @@ internal data class ParsedDeepLink(
     val route: RedfaceNavKey,
 )
 
+/**
+ * Holds the pending profile bottom sheet request, if any.
+ *
+ * Null = no sheet visible. Non-null = a profile sheet is open for the given user.
+ * [avatarUrl] is a display hint populated from the topic page tap.
+ *
+ * Review feedback I3: [origin] captures the [TopLevelDestination] the user was on
+ * **when the sheet was opened**, not « the tab currently focused ». Without this,
+ * switching tabs while the sheet is open and then tapping « Voir le profil complet »
+ * would push [ProfileFullRoute] onto the wrong tab's back stack, hijacking the
+ * other tab's navigation history. The fix is to preserve the origin and route the
+ * full-page entry there instead of the active tab.
+ *
+ * The [Saver] allows [rememberSaveable] to survive configuration changes (rotation).
+ * Fields: [Int] userId, [String] pseudo, [String?] avatarUrl, [String] origin tag —
+ * all primitive-compatible. The save lambda is typed `(ProfileSheetRequest?) -> List<Any?>`
+ * because `listSaver` is parameterised on the original (nullable) type, so the legacy
+ * null check is necessary even though in practice `rememberSaveable` only invokes save
+ * on a non-null value. Review feedback M2: the inner expression is simplified to a single
+ * `?:` instead of an if/else.
+ */
+private data class ProfileSheetRequest(
+    val userId: Int,
+    val pseudo: String,
+    val avatarUrl: String?,
+    val origin: TopLevelDestination,
+) {
+    companion object {
+        val Saver = listSaver<ProfileSheetRequest?, Any?>(
+            save = { req ->
+                req?.let { listOf(it.userId, it.pseudo, it.avatarUrl, it.origin.name) }
+                    ?: listOf(null, null, null, null)
+            },
+            restore = { list ->
+                val userId = list[0] as? Int ?: return@listSaver null
+                val pseudo = list[1] as? String ?: return@listSaver null
+                val avatarUrl = list[2] as? String
+                val originName = list[3] as? String ?: return@listSaver null
+                val origin = runCatching { TopLevelDestination.valueOf(originName) }
+                    .getOrNull()
+                    ?: return@listSaver null
+                ProfileSheetRequest(userId, pseudo, avatarUrl, origin)
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RedfaceApp(intent: Intent?) {
     RedfaceTheme {
@@ -169,6 +253,15 @@ fun RedfaceApp(intent: Intent?) {
         val messagesBackStack = rememberNavBackStack(MessagesRoute)
 
         var currentDestination by rememberSaveable { mutableStateOf(TopLevelDestination.Flags) }
+
+        // Phase 2 finish (#208) — profile bottom sheet state, hoisted to `:app` so that
+        // `:feature:topic` never depends on `:feature:profile`. The sheet is opened from
+        // any TopicScreen tap on an avatar/author with a non-null profileId.
+        // rememberSaveable + custom Saver keeps the sheet open across configuration changes
+        // (e.g. rotation) — without it the sheet would silently close on every rotation.
+        var profileSheetRequest by rememberSaveable(stateSaver = ProfileSheetRequest.Saver) {
+            mutableStateOf<ProfileSheetRequest?>(null)
+        }
 
         val backStacks = remember(flagsBackStack, forumBackStack, searchBackStack, messagesBackStack) {
             mapOf(
@@ -226,7 +319,58 @@ fun RedfaceApp(intent: Intent?) {
                         },
                     )
                 }
-                RedfaceNavHost(backStack = activeBackStack, accountMenu = accountMenu)
+                RedfaceNavHost(
+                    backStack = activeBackStack,
+                    accountMenu = accountMenu,
+                    onOpenProfile = { userId, pseudo, avatarUrl ->
+                        // Review feedback I3: capture the **origin** tab so that
+                        // « Voir le profil complet » lands on the correct back stack
+                        // even if the user switches tabs while the sheet is open.
+                        profileSheetRequest = ProfileSheetRequest(
+                            userId = userId,
+                            pseudo = pseudo,
+                            avatarUrl = avatarUrl,
+                            origin = currentDestination,
+                        )
+                    },
+                )
+            }
+        }
+
+        // Phase 2 finish (#208) — profile bottom sheet, rendered as an overlay on top of
+        // the current tab. The sheet is not a Navigation entry, so its Hilt ViewModel uses
+        // the Activity store. `ProfilePreviewSheet` supplies `key = "profile-$userId"` to
+        // avoid reusing the first opened profile for every subsequent tap. Reopening the
+        // same userId intentionally reuses that Activity-scoped state in this MVP.
+        // `profileSheetRequest` drives visibility; setting it to null dismisses the sheet.
+        profileSheetRequest?.let { request ->
+            // key = userId recreates the Compose sheet slot when the target profile changes.
+            // It does not by itself change the ViewModelStoreOwner; the Hilt key in the sheet
+            // is what scopes one VM per userId.
+            androidx.compose.runtime.key(request.userId) {
+                ProfilePreviewSheet(
+                    userId = request.userId,
+                    pseudoHint = request.pseudo,
+                    avatarUrlHint = request.avatarUrl,
+                    onDismiss = { profileSheetRequest = null },
+                    onOpenFullProfile = { userId, pseudo, avatarUrl ->
+                        profileSheetRequest = null
+                        // Review feedback I3: route the full-page entry to the back
+                        // stack of the **origin** tab — the tab the user was on when
+                        // the sheet was opened — not the tab currently focused. The
+                        // user can switch tabs while the sheet is up ; tapping
+                        // « Voir le profil complet » must land where they started.
+                        backStacks.getValue(request.origin).add(
+                            ProfileFullRoute(
+                                userId = userId,
+                                pseudo = pseudo,
+                                avatarUrl = avatarUrl,
+                            ),
+                        )
+                        // Switch back to the origin tab so the new entry is visible.
+                        currentDestination = request.origin
+                    },
+                )
             }
         }
     }
@@ -262,6 +406,7 @@ private const val REPORT_EMAIL: String = "xat@azora.fr"
 private fun RedfaceNavHost(
     backStack: NavBackStack<NavKey>,
     accountMenu: @Composable () -> Unit,
+    onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     NavDisplay(
         backStack = backStack,
@@ -397,6 +542,26 @@ private fun RedfaceNavHost(
                     },
                 )
             }
+            entry<ProfileFullRoute> { route ->
+                // Phase 2 finish (#208) — full profile page.
+                // ProfileViewModel uses @AssistedInject (not SavedStateHandle) to receive
+                // userId/pseudo/avatarUrl. With Compose Navigation 3 + Hilt, the ViewModel is
+                // created fresh per nav entry (scoped to the entry's ViewModelStore by
+                // `rememberViewModelStoreNavEntryDecorator`). Arguments are passed via the
+                // assisted-inject factory: `hiltViewModel(creationCallback = { it.create(...) })`.
+                // This is a separate ViewModel instance from the one created in ProfilePreviewSheet
+                // — see ProfileFullRoute KDoc for the MVP trade-off explanation.
+                ProfileRoute(
+                    userId = route.userId,
+                    pseudoHint = route.pseudo,
+                    avatarUrlHint = route.avatarUrl,
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                )
+            }
             entry<TopicRoute> { route ->
                 TopicScreen(
                     request = TopicRequest(
@@ -406,6 +571,7 @@ private fun RedfaceNavHost(
                         scrollTo = route.scrollTo,
                         submitSignal = route.submitSignal,
                     ),
+                    onOpenProfile = onOpenProfile,
                     onReply = { subcat, page ->
                         backStack.add(
                             PostEditorRoute(

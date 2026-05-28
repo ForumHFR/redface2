@@ -17,6 +17,23 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
+### Added
+- **#208 — Profil utilisateur** : tap sur l'avatar ou le pseudo d'un post ouvre une `ModalBottomSheet` résumé (avatar carré/arrondi, pseudo, localisation, date d'inscription, nombre de posts, bouton « Voir le profil complet »). Naviguer vers la page complète affiche en plus la signature. Le bouton « Derniers messages » est désactivé (marqué « à venir ») faute de route stable.
+- **Parser profil** : `ProfileParser` extrait `UserProfile` depuis `/hfr/profil-{userId}.htm` (tolérant aux champs absents).
+- **`Post.profileId`** : champ nullable extrait par `TopicPageParser` depuis le lien `<a href="/hfr/profil-{N}.htm">` du toolbar. Persisté en Room (migration v5→v6).
+- **`:feature:profile`** : nouveau module Gradle (`ProfileViewModel` AssistedInject, `ProfileScreen`, `ProfilePreviewSheet`).
+
+### Fixed (review Opus 4-flavor sur PR #208)
+- **Signature en clair** : `UserProfile.signatureHtml` (HTML brut) devient `UserProfile.signatureText` (texte plat extrait par `Jsoup.text()` côté parser). L'écran ne rend plus les balises `<br>` / `<div>` comme caractères littéraux.
+- **A11y bouton retour** : le bouton retour du `TopAppBar` profil garde le glyphe `←` mais porte maintenant `contentDescription = stringResource(R.string.profile_back)` sur l'`IconButton` (audible TalkBack).
+- **Sheet vs onglets** : `ProfileSheetRequest` capture l'onglet d'origine ; tap « Voir le profil complet » route la page complète vers le back stack de cet onglet (et revient dessus) au lieu de le pousser sur l'onglet courant.
+- **Sheet dismiss animé** : « Voir le profil complet » joue `sheetState.hide()` avant la navigation au lieu de couper la sheet abruptement.
+- **Cancellation propagée** : `DefaultProfileRepository` n'utilise plus `runCatching` (avale `CancellationException`) ; try/catch manuel qui rethrow `CancellationException` pour préserver la concurrence structurée.
+- **Zone tappable** : dans `TopicScreen`, la zone d'ouverture profil est restreinte à l'avatar et au pseudo (la date n'ouvre plus le profil par erreur).
+- **i18n** : strings UI de `:feature:profile` externalisées dans `feature/profile/src/main/res/values/strings.xml` ; `ProfileViewModel` expose `ErrorKind` + `cause` (plus de string `"Erreur inconnue"` côté VM).
+- **Retry race** : `ProfileViewModel` cancelle le `loadJob` précédent avant chaque retry pour empêcher les coroutines concurrentes de race sur `_state`.
+- **Konsist** : nouveau test qui vérifie qu'aucun fichier de `:feature:topic` n'importe `fr.forumhfr.redface2.feature.profile.*`.
+
 ---
 
 ## v63 — `0.3.23` — 2026-05-28

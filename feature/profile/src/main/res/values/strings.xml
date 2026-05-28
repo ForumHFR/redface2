@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Phase 2 finish (#208) — UI strings for the :feature:profile module.
+
+  Review feedback I7: all hard-coded French strings used by ProfileScreen,
+  ProfilePreviewSheet, and ProfileViewModel are externalized here so the
+  module is i18n-ready and the ViewModel does not own UI labels (the VM
+  surfaces an ErrorKind enum and the UI resolves the final message via
+  stringResource).
+-->
+<resources>
+    <!-- TopAppBar / navigation -->
+    <string name="profile_title_fallback">Profil</string>
+    <string name="profile_back">Retour</string>
+
+    <!-- Field labels -->
+    <string name="profile_field_post_count">Messages postés</string>
+    <string name="profile_field_registered_at">Inscription</string>
+    <string name="profile_field_signature">Signature</string>
+    <string name="profile_field_membership">Membre depuis</string>
+    <string name="profile_field_messages_short">Messages</string>
+
+    <!-- Actions -->
+    <string name="profile_action_open_full">Voir le profil complet</string>
+    <string name="profile_action_retry">Réessayer</string>
+    <string name="profile_action_recent_posts_coming_soon">Derniers messages (à venir)</string>
+
+    <!-- Error messages -->
+    <string name="profile_error_load_failed">Impossible de charger le profil.</string>
+    <string name="profile_error_unknown">Erreur inconnue</string>
+</resources>

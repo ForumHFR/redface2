@@ -38,6 +38,7 @@ include(":feature:messages")
 include(":feature:auth")
 include(":feature:search")
 include(":feature:settings")
+include(":feature:profile")
 
 // Phase 4 — modules extension gardés visibles mais hors bootstrap v1.
 // include(":feature:bookmarks")

@@ -28,4 +28,18 @@ data class Post(
      * backfill to `NULL` and recover the real value on the next live fetch.
      */
     val quoteRef: Int? = null,
+    /**
+     * HFR numeric user id extracted from the profile link in the post toolbar
+     * (`<a href="/hfr/profil-{userId}.htm">`). Used as the canonical key for
+     * opening the profile bottom sheet / full profile page. Phase 2 finish (#208).
+     *
+     * Null when HFR did not render a profile link (e.g. « Publicité » rows,
+     * anonymous reads without a profile link, or future server-side changes).
+     * The UI hides the « Voir le profil » tap target in that case rather than
+     * guessing a user id.
+     *
+     * Persisted in Room v6 (cf. `MIGRATION_5_6`) — a cache hit keeps the
+     * profile tap available without a network round-trip.
+     */
+    val profileId: Int? = null,
 )

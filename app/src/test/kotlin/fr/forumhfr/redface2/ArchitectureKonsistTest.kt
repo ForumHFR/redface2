@@ -116,6 +116,34 @@ class ArchitectureKonsistTest {
     }
 
     @Test
+    fun `feature topic does not depend on feature profile`() {
+        // Phase 2 finish (#208) — the « ouvrir le profil » affordance is hoisted to `:app`
+        // as a callback `onOpenProfile(userId, pseudo, avatarUrl)` so `:feature:topic` can
+        // emit the request without importing `:feature:profile`. A direct import would
+        // break the architecture boundary documented in
+        // `docs/specs/navigation.md` § Profil utilisateur and bring the profile module
+        // into every screen that already depends on topic (search results, flag opens,
+        // category drilldowns…). This Konsist guard catches such regressions at build
+        // time (review feedback I9).
+        val topicFiles = Konsist
+            .scopeFromProject()
+            .slice { file ->
+                file.path.contains("/feature/topic/") &&
+                    !file.path.contains("/build/") &&
+                    !file.path.contains("/src/test/")
+            }
+            .files
+
+        assertTrue("Konsist must scan :feature:topic production files", topicFiles.isNotEmpty())
+
+        topicFiles.assertFalse { file ->
+            file.imports.any { imported ->
+                imported.name.orEmpty().startsWith(FEATURE_PROFILE_PACKAGE)
+            }
+        }
+    }
+
+    @Test
     fun `prefetch call sites use the prefetch entry points only`() {
         // Phase 1D PR 4 — anonymous prefetch must funnel through the dedicated
         // repository methods (`TopicRepository.prefetch`, `ForumRepository.prefetchTopicList`),
@@ -174,6 +202,8 @@ class ArchitectureKonsistTest {
             "fr.forumhfr.redface2.core.network.qualifiers"
         const val ANONYMOUS_CLIENT_QUALIFIER =
             "$ANONYMOUS_CLIENT_PACKAGE.AnonymousClient"
+        const val FEATURE_PROFILE_PACKAGE =
+            "fr.forumhfr.redface2.feature.profile."
         val AUTH_DIR_TOKENS = listOf("/auth/", "/messages/")
     }
 }

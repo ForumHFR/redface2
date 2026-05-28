@@ -28,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,8 +39,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -97,6 +100,18 @@ fun TopicScreen(
      */
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
+    /**
+     * Phase 2 finish (#208) — emitted when the user taps on a post avatar or author name.
+     * Carries the numeric user id (canonical key for profile navigation) plus display hints
+     * [pseudo] and [avatarUrl] that `:app` can show immediately while the profile loads.
+     *
+     * Only emitted when [Post.profileId] is non-null — posts that don't carry a HFR profile
+     * link (e.g. « Publicité » rows, anonymous reads) never invoke this callback.
+     *
+     * `:feature:topic` does not depend on `:feature:profile` — the hoist lives in `:app`
+     * (cf. `docs/specs/architecture.md` § Frontière feature:topic ↔ feature:profile).
+     */
+    onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     val viewModel = hiltViewModel<TopicViewModel, TopicViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -172,6 +187,7 @@ fun TopicScreen(
         onEdit = onEdit,
         onEditFirstPost = onEditFirstPost,
         onOpenPage = onOpenPage,
+        onOpenProfile = onOpenProfile,
     )
 }
 
@@ -186,6 +202,7 @@ internal fun TopicContent(
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
+    onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -236,6 +253,7 @@ internal fun TopicContent(
                     onEdit = onEdit,
                     onEditFirstPost = onEditFirstPost,
                     onOpenPage = onOpenPage,
+                    onOpenProfile = onOpenProfile,
                     listState = listState,
                 )
             }
@@ -253,6 +271,7 @@ private fun TopicLoadedContent(
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
+    onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
     listState: LazyListState,
 ) {
     val highlight = state.request.scrollTo
@@ -312,11 +331,18 @@ private fun TopicLoadedContent(
             } else {
                 null
             }
+            // Phase 2 finish (#208) — profile tap is enabled only when HFR exposed
+            // a profile link for this post (Post.profileId != null). Posts without a
+            // profile link (Publicité rows, anonymous reads) keep the tap hidden.
+            val profileAction: (() -> Unit)? = post.profileId?.let { profileId ->
+                { onOpenProfile(profileId, post.author, post.avatarUrl) }
+            }
             TopicPostCard(
                 post = post,
                 highlighted = highlight == post.numreponse,
                 onQuote = quoteAction,
                 onEdit = editAction,
+                onOpenProfile = profileAction,
             )
         }
     }
@@ -563,6 +589,11 @@ private fun TopicPostCard(
     highlighted: Boolean,
     onQuote: (() -> Unit)?,
     onEdit: (() -> Unit)?,
+    /**
+     * Phase 2 finish (#208) — tapping the avatar or author opens the profile bottom sheet.
+     * Null when [Post.profileId] is null (Publicité rows, anonymous reads).
+     */
+    onOpenProfile: (() -> Unit)? = null,
 ) {
     Card(
         colors = CardDefaults.cardColors(
@@ -582,6 +613,42 @@ private fun TopicPostCard(
             // #201 — avatar + author header in a Row so the visual identity of the poster
             // is immediately visible. Falls back to a placeholder square (cf.
             // `RedfaceUserAvatar`) when `Post.avatarUrl == null` or the load errors.
+            // Phase 2 finish (#208) — tapping the avatar OR the author pseudo opens the
+            // profile bottom sheet when `onOpenProfile` is non-null. Review feedback I6:
+            // the clickable surface is now restricted to the avatar + the pseudo Text. The
+            // date Text below is intentionally outside the clickable zone so a tap on the
+            // date does NOT open the profile (the legacy implementation clickable-d the
+            // whole parent Row, which made the date erroneously open the profile). Each
+            // clickable element keeps `minimumInteractiveComponentSize()` so it still
+            // meets the Material 48dp touch target — the avatar default is 40dp and the
+            // pseudo line height is smaller than 48dp.
+            val openProfileLabel = if (onOpenProfile != null) {
+                stringResource(R.string.topic_open_profile_action)
+            } else {
+                null
+            }
+            val avatarModifier = if (onOpenProfile != null) {
+                Modifier
+                    .minimumInteractiveComponentSize()
+                    .clickable(
+                        onClick = onOpenProfile,
+                        role = Role.Button,
+                        onClickLabel = openProfileLabel,
+                    )
+            } else {
+                Modifier
+            }
+            val pseudoModifier = if (onOpenProfile != null) {
+                Modifier
+                    .minimumInteractiveComponentSize()
+                    .clickable(
+                        onClick = onOpenProfile,
+                        role = Role.Button,
+                        onClickLabel = openProfileLabel,
+                    )
+            } else {
+                Modifier
+            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Top,
@@ -589,27 +656,40 @@ private fun TopicPostCard(
                 RedfaceUserAvatar(
                     avatarUrl = post.avatarUrl,
                     author = post.author,
+                    modifier = avatarModifier,
                 )
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Text(
-                        text = post.postIndex?.let { postIndex ->
-                            stringResource(
-                                R.string.topic_post_header_with_index,
-                                postIndex,
-                                post.author,
-                                post.numreponse,
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        post.postIndex?.let { postIndex ->
+                            Text(
+                                text = stringResource(R.string.topic_post_index_prefix, postIndex),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
                             )
-                        } ?: stringResource(
-                            R.string.topic_post_header_without_index,
-                            post.author,
-                            post.numreponse,
-                        ),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                        }
+                        Text(
+                            text = post.author,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            // Clickable on the pseudo only — post number and date stay inert.
+                            modifier = Modifier
+                                .weight(weight = 1f, fill = false)
+                                .then(pseudoModifier),
+                        )
+                        Text(
+                            text = stringResource(R.string.topic_post_numreponse_suffix, post.numreponse),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                     Text(
                         text = post.date.asTopicDate(),
                         style = MaterialTheme.typography.labelMedium,
