@@ -338,12 +338,15 @@ fun RedfaceApp(intent: Intent?) {
         }
 
         // Phase 2 finish (#208) — profile bottom sheet, rendered as an overlay on top of
-        // the current tab. The ViewModel is scoped to the sheet's nav entry so it is
-        // re-created each time a new profileId is requested. `profileSheetRequest` drives
-        // visibility; setting it to null dismisses the sheet via `onDismiss`.
+        // the current tab. The sheet is not a Navigation entry, so its Hilt ViewModel uses
+        // the Activity store. `ProfilePreviewSheet` supplies `key = "profile-$userId"` to
+        // avoid reusing the first opened profile for every subsequent tap. Reopening the
+        // same userId intentionally reuses that Activity-scoped state in this MVP.
+        // `profileSheetRequest` drives visibility; setting it to null dismisses the sheet.
         profileSheetRequest?.let { request ->
-            // key = userId ensures a fresh ViewModel (and a fresh fetch) whenever the user
-            // opens a different profile from the same topic screen without a navigation hop.
+            // key = userId recreates the Compose sheet slot when the target profile changes.
+            // It does not by itself change the ViewModelStoreOwner; the Hilt key in the sheet
+            // is what scopes one VM per userId.
             androidx.compose.runtime.key(request.userId) {
                 ProfilePreviewSheet(
                     userId = request.userId,

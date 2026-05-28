@@ -40,8 +40,8 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  * Occupies the full screen and shows all available profile fields.
  *
  * [userId], [pseudoHint], [avatarUrlHint] are passed from the [ProfileFullRoute] nav entry.
- * A [ProfileViewModel] is created via Hilt with a custom factory that injects these
- * arguments into the [androidx.lifecycle.SavedStateHandle] at construction time.
+ * A [ProfileViewModel] is created via Hilt AssistedInject with a custom factory that
+ * receives these arguments at construction time.
  *
  * TODO(profile): the sheet ↔ full-page transition currently builds two ProfileViewModel
  *  instances and fires two network calls — see KDoc on [fr.forumhfr.redface2.navigation

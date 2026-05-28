@@ -7,6 +7,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -32,19 +33,20 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class ProfileViewModelTest {
 
+    private lateinit var repository: ProfileRepository
+
     @Before
     fun setUp() {
         // Use UnconfinedTestDispatcher so viewModelScope.launch {} completes
         // synchronously, matching the test pattern used in FlagsViewModelTest.
         Dispatchers.setMain(UnconfinedTestDispatcher())
+        repository = mockk()
     }
 
     @After
     fun tearDown() {
         Dispatchers.resetMain()
     }
-
-    private val repository = mockk<ProfileRepository>()
 
     private val dummyProfile = UserProfile(
         userId = 54596,
@@ -123,15 +125,24 @@ class ProfileViewModelTest {
 
     @Test
     fun `Retry intent re-triggers load after error`() = runTest {
-        coEvery { repository.getProfile(54596) }
-            .returnsMany(
-                Result.failure(IOException("first attempt")),
-                Result.success(dummyProfile),
-            )
+        val firstAttempt = CompletableDeferred<Result<UserProfile>>()
+        val secondAttempt = CompletableDeferred<Result<UserProfile>>()
+        val attempts = ArrayDeque(listOf(firstAttempt, secondAttempt))
+        coEvery { repository.getProfile(54596) } coAnswers {
+            attempts.removeFirst().await()
+        }
 
         val vm = createViewModel()
 
         vm.state.test {
+            val initialLoadingState = awaitItem()
+            assertTrue(
+                "Initial load should start in Loading",
+                initialLoadingState.mode is ProfileUiState.Mode.Loading,
+            )
+
+            firstAttempt.complete(Result.failure(IOException("first attempt")))
+
             val errorState = awaitItem()
             assertTrue("First load should fail", errorState.mode is ProfileUiState.Mode.Error)
 
@@ -140,6 +151,8 @@ class ProfileViewModelTest {
             // After Retry: Loading, then Loaded
             val loadingState = awaitItem()
             assertTrue("Should return to Loading on Retry", loadingState.mode is ProfileUiState.Mode.Loading)
+
+            secondAttempt.complete(Result.success(dummyProfile))
 
             val loadedState = awaitItem()
             assertTrue("Second load should succeed", loadedState.mode is ProfileUiState.Mode.Loaded)
@@ -198,8 +211,7 @@ class ProfileViewModelTest {
             while (lastState.mode !is ProfileUiState.Mode.Loaded) {
                 lastState = awaitItem()
             }
-            assertTrue("Final state must be Loaded", lastState.mode is ProfileUiState.Mode.Loaded)
-            assertEquals(dummyProfile, (lastState.mode as ProfileUiState.Mode.Loaded).profile)
+            assertEquals(dummyProfile, lastState.mode.profile)
             cancelAndIgnoreRemainingEvents()
         }
     }

@@ -2,7 +2,6 @@ package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -29,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,6 +42,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -661,24 +662,34 @@ private fun TopicPostCard(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Text(
-                        text = post.postIndex?.let { postIndex ->
-                            stringResource(
-                                R.string.topic_post_header_with_index,
-                                postIndex,
-                                post.author,
-                                post.numreponse,
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        post.postIndex?.let { postIndex ->
+                            Text(
+                                text = stringResource(R.string.topic_post_index_prefix, postIndex),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
                             )
-                        } ?: stringResource(
-                            R.string.topic_post_header_without_index,
-                            post.author,
-                            post.numreponse,
-                        ),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        // Clickable on the pseudo line only — the date below stays inert.
-                        modifier = pseudoModifier,
-                    )
+                        }
+                        Text(
+                            text = post.author,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            // Clickable on the pseudo only — post number and date stay inert.
+                            modifier = Modifier
+                                .weight(weight = 1f, fill = false)
+                                .then(pseudoModifier),
+                        )
+                        Text(
+                            text = stringResource(R.string.topic_post_numreponse_suffix, post.numreponse),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                     Text(
                         text = post.date.asTopicDate(),
                         style = MaterialTheme.typography.labelMedium,

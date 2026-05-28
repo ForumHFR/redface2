@@ -113,7 +113,7 @@ Accessible depuis la lecture topic via un tap sur l'avatar ou le pseudo d'un pos
 1. `TopicScreen` émet `onOpenProfile(userId, pseudo, avatarUrl)` — callback sans dépendance sur `:feature:profile`.
 2. `:app` (`RedfaceApp`) ouvre une **`ModalBottomSheet`** (`ProfilePreviewSheet`) avec : avatar carré/arrondi, pseudo, localisation, date d'inscription, nombre de posts, bouton « Voir le profil complet ».
 3. Si le chargement échoue, la sheet reste lisible avec le pseudo/avatar hint + message d'erreur.
-4. Bouton « Voir le profil complet » navigue vers `ProfileFullRoute(userId, pseudo, avatarUrl?)` sur le back stack de l'onglet actif.
+4. Bouton « Voir le profil complet » navigue vers `ProfileFullRoute(userId, pseudo, avatarUrl?)` sur le back stack de l'onglet d'origine (celui depuis lequel la sheet a été ouverte), même si l'utilisateur change d'onglet pendant que la sheet est visible.
 5. `ProfileFullRoute` affiche la page complète avec tous les champs disponibles.
 
 **Routes :**

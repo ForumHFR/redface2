@@ -25,7 +25,7 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ### Fixed (review Opus 4-flavor sur PR #208)
 - **Signature en clair** : `UserProfile.signatureHtml` (HTML brut) devient `UserProfile.signatureText` (texte plat extrait par `Jsoup.text()` côté parser). L'écran ne rend plus les balises `<br>` / `<div>` comme caractères littéraux.
-- **A11y bouton retour** : `Text("←")` du `TopAppBar` profil remplacé par `Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.profile_back))` (audible TalkBack, RTL-aware).
+- **A11y bouton retour** : le bouton retour du `TopAppBar` profil garde le glyphe `←` mais porte maintenant `contentDescription = stringResource(R.string.profile_back)` sur l'`IconButton` (audible TalkBack).
 - **Sheet vs onglets** : `ProfileSheetRequest` capture l'onglet d'origine ; tap « Voir le profil complet » route la page complète vers le back stack de cet onglet (et revient dessus) au lieu de le pousser sur l'onglet courant.
 - **Sheet dismiss animé** : « Voir le profil complet » joue `sheetState.hide()` avant la navigation au lieu de couper la sheet abruptement.
 - **Cancellation propagée** : `DefaultProfileRepository` n'utilise plus `runCatching` (avale `CancellationException`) ; try/catch manuel qui rethrow `CancellationException` pour préserver la concurrence structurée.
