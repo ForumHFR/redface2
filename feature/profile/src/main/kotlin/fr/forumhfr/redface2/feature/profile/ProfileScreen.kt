@@ -58,7 +58,13 @@ fun ProfileRoute(
     avatarUrlHint: String?,
     onBack: () -> Unit,
 ) {
+    // `key = "profile-$userId"` derives a distinct VM per profile in the nav entry's
+    // ViewModelStore. Even though each `ProfileFullRoute` navigation creates its own back
+    // stack entry, navigating Profile(A) → back → Profile(B) within the same composable
+    // host could otherwise return the cached A-instance because `hiltViewModel` keys by
+    // class, not by `creationCallback` arguments.
     val viewModel = hiltViewModel<ProfileViewModel, ProfileViewModel.Factory>(
+        key = "profile-$userId",
         creationCallback = { factory ->
             factory.create(
                 userId = userId,

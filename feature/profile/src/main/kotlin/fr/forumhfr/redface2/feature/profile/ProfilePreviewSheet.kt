@@ -67,7 +67,14 @@ fun ProfilePreviewSheet(
     avatarUrlHint: String?,
     onDismiss: () -> Unit,
     onOpenFullProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
+    // `key = "profile-$userId"` is critical: this composable is hosted inside `RedfaceApp`
+    // whose `ViewModelStoreOwner` is the Activity (shared across every profile sheet open).
+    // Without an explicit key, Hilt caches the first instance and skips `creationCallback`
+    // on subsequent calls — so tapping a different profile would show the first profile.
+    // The Compose `key(userId)` wrapper in `RedfaceNavigation` recreates the slot but does
+    // not change the store; this `key` makes Hilt derive a distinct VM per userId.
     viewModel: ProfileViewModel = hiltViewModel<ProfileViewModel, ProfileViewModel.Factory>(
+        key = "profile-$userId",
         creationCallback = { factory ->
             factory.create(
                 userId = userId,
