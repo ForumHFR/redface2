@@ -612,28 +612,50 @@ private fun TopicPostCard(
             // #201 — avatar + author header in a Row so the visual identity of the poster
             // is immediately visible. Falls back to a placeholder square (cf.
             // `RedfaceUserAvatar`) when `Post.avatarUrl == null` or the load errors.
-            // Phase 2 finish (#208) — tapping the avatar opens the profile bottom sheet
-            // when `onOpenProfile` is non-null (i.e. when HFR exposed a profile link).
-            // minimumInteractiveComponentSize guarantees the 48dp Material touch target.
-            // Role.Button and onClickLabel let TalkBack announce the action correctly.
+            // Phase 2 finish (#208) — tapping the avatar OR the author pseudo opens the
+            // profile bottom sheet when `onOpenProfile` is non-null. Review feedback I6:
+            // the clickable surface is now restricted to the avatar + the pseudo Text. The
+            // date Text below is intentionally outside the clickable zone so a tap on the
+            // date does NOT open the profile (the legacy implementation clickable-d the
+            // whole parent Row, which made the date erroneously open the profile). Each
+            // clickable element keeps `minimumInteractiveComponentSize()` so it still
+            // meets the Material 48dp touch target — the avatar default is 40dp and the
+            // pseudo line height is smaller than 48dp.
+            val openProfileLabel = if (onOpenProfile != null) {
+                stringResource(R.string.topic_open_profile_action)
+            } else {
+                null
+            }
+            val avatarModifier = if (onOpenProfile != null) {
+                Modifier
+                    .minimumInteractiveComponentSize()
+                    .clickable(
+                        onClick = onOpenProfile,
+                        role = Role.Button,
+                        onClickLabel = openProfileLabel,
+                    )
+            } else {
+                Modifier
+            }
+            val pseudoModifier = if (onOpenProfile != null) {
+                Modifier
+                    .minimumInteractiveComponentSize()
+                    .clickable(
+                        onClick = onOpenProfile,
+                        role = Role.Button,
+                        onClickLabel = openProfileLabel,
+                    )
+            } else {
+                Modifier
+            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Top,
-                modifier = if (onOpenProfile != null) {
-                    Modifier
-                        .minimumInteractiveComponentSize()
-                        .clickable(
-                            onClick = onOpenProfile,
-                            role = Role.Button,
-                            onClickLabel = stringResource(R.string.topic_open_profile_action),
-                        )
-                } else {
-                    Modifier
-                },
             ) {
                 RedfaceUserAvatar(
                     avatarUrl = post.avatarUrl,
                     author = post.author,
+                    modifier = avatarModifier,
                 )
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -654,6 +676,8 @@ private fun TopicPostCard(
                         ),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
+                        // Clickable on the pseudo line only — the date below stays inert.
+                        modifier = pseudoModifier,
                     )
                     Text(
                         text = post.date.asTopicDate(),

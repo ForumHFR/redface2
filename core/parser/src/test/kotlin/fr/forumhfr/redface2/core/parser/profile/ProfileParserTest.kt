@@ -2,7 +2,6 @@ package fr.forumhfr.redface2.core.parser.profile
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -47,22 +46,26 @@ class ProfileParserTest {
         val profile = parser.parse(fixture("profile/profile_xatrix_authenticated.html"), 54596)
         // The fixture was saved from a browser and has a local relative path.
         // The parser should reconstruct the canonical CDN URL from the userId in the filename.
-        assertNotNull("avatarUrl should not be null", profile.avatarUrl)
-        assertTrue(
-            "avatarUrl should contain mesdiscussions-54596",
-            profile.avatarUrl!!.contains("54596"),
+        // Review feedback M8: assert the exact reconstructed URL, not a substring — the
+        // substring match would still pass if the parser regressed to a malformed URL
+        // that happened to contain "54596" somewhere in the path.
+        assertEquals(
+            "https://forum-images.hardware.fr/images/perso/54596/mesdiscussions-54596.png",
+            profile.avatarUrl,
         )
     }
 
     @Test
-    fun `parse XaTriX profile - signature extracted when not blank`() {
+    fun `parse XaTriX profile - signature extracted as plain text without HTML tags`() {
         val profile = parser.parse(fixture("profile/profile_xatrix_authenticated.html"), 54596)
-        // XaTriX has a signature "Proxytaf ? non rien"
-        assertNotNull("Signature should be present for XaTriX", profile.signatureHtml)
-        assertTrue(
-            "Signature should contain some text",
-            profile.signatureHtml!!.isNotBlank(),
-        )
+        // Review feedback C1: the signature in the fixture is HTML
+        // (`Proxytaf ? non rien<br><div style="clear: both;"> </div>&nbsp;`) and the
+        // legacy `signatureHtml` was rendered verbatim in the UI, showing the raw
+        // `<br>` / `<div>` tags as literal characters. The parser now flattens to text
+        // (`Jsoup.text()`) so the UI can Text(...) it directly. Asserting the exact
+        // plain-text value guards against a regression that would leak HTML tags back
+        // into the field.
+        assertEquals("Proxytaf ? non rien", profile.signatureText)
     }
 
     // ─── ezzz fixture (anonymous capture, userId=15867) ──────────────────────
@@ -101,10 +104,10 @@ class ProfileParserTest {
     @Test
     fun `parse ezzz profile - avatarUrl reconstructed from mesdiscussions pattern`() {
         val profile = parser.parse(fixture("profile/profile_ezzz_anonymous.html"), 15867)
-        assertNotNull("avatarUrl should not be null for ezzz", profile.avatarUrl)
-        assertTrue(
-            "avatarUrl should contain mesdiscussions-15867",
-            profile.avatarUrl!!.contains("15867"),
+        // Review feedback M8: exact URL, not a substring match.
+        assertEquals(
+            "https://forum-images.hardware.fr/images/perso/15867/mesdiscussions-15867.png",
+            profile.avatarUrl,
         )
     }
 
@@ -120,7 +123,7 @@ class ProfileParserTest {
         assertNull(profile.registeredAt)
         assertNull(profile.location)
         assertNull(profile.avatarUrl)
-        assertNull(profile.signatureHtml)
+        assertNull(profile.signatureText)
     }
 
     @Test

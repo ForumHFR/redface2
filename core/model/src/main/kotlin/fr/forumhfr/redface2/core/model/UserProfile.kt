@@ -18,7 +18,15 @@ package fr.forumhfr.redface2.core.model
 data class UserProfile(
     /** HFR numeric user id, extracted from `/hfr/profil-{userId}.htm`. */
     val userId: Int,
-    /** Display pseudo as shown on the profile page. */
+    /**
+     * Display pseudo as shown on the profile page.
+     *
+     * The parser tries three sources in order (« Pseudo : » row, `<h4 class="Ext">`
+     * header, HTML `<title>`) and falls back to the literal `"?"` only when **all**
+     * three are empty (defensive case for fully-empty / placeholder HTML).
+     * Kept non-null to avoid forcing every UI call-site to handle a missing pseudo
+     * (in practice a real HFR profile page always exposes one).
+     */
     val pseudo: String,
     /**
      * Absolute URL of the avatar image served by HFR
@@ -40,12 +48,19 @@ data class UserProfile(
      */
     val location: String?,
     /**
-     * Signature HTML rendered by HFR inside `td.profilCase3` for the « Signature »
-     * row. Stored as raw HTML string for MVP — proper BBCode round-trip is deferred
-     * until the editor Phase 2 signature flow is needed. Null when the row is absent
-     * or the content is only whitespace.
+     * Signature plain text extracted from HFR's `td.profilCase3` cell for the
+     * « Signature » row.
+     *
+     * The signature is rendered server-side as HTML (HFR converts the user's BBCode
+     * to inline markup with `<br>`, `<div>`, occasional inline styling). We flatten
+     * it to plain text at parse time (`Jsoup.parse(html).text()`) so the UI can
+     * display it with a simple `Text(...)` composable without rendering raw HTML
+     * tags as literal characters. A full BBCode round-trip / styled rendering is
+     * deferred — the signature is a low-priority display field and the MVP brief
+     * accepts the limitation. Null when the row is absent or the content is only
+     * whitespace.
      */
-    val signatureHtml: String?,
+    val signatureText: String?,
     /**
      * Untyped key→value pairs for every HFR profile row that the parser encountered
      * but did not promote to a dedicated typed field (e.g. « Profession », « Loisirs »,

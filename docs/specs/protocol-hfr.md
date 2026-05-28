@@ -121,14 +121,14 @@ GET /hfr/profil-{userId}.htm
 | `Nombre de messages postés` | `postCount: Int?` | |
 | `Date d'arrivée sur le forum` | `registeredAt: String?` | Format `DD/MM/YYYY` brut |
 | `Ville` | `location: String?` | Null si vide |
-| `Signature des messages` | `signatureHtml: String?` | HTML brut (BBCode rendu par HFR) |
+| `Signature des messages` | `signatureText: String?` | Texte plat (`Jsoup.text()` côté parser — voir limites) |
 
 **Champs HFR non promus** : Email (obfusqué par HFR → `"Vous n'avez pas accès à cette information"`), Date de naissance, Sexe, Profession, Loisirs, Citation personnelle, Statut. Ces champs sont conservés dans `rawFields` pour forward-compatibility.
 
 **Limites connues** :
 - Emails obfusqués : ne jamais tenter de déobfusquer (cf. AGENTS.md § "Emails obfusqués").
 - `registeredAt` reste `String` : le format HFR `DD/MM/YYYY` n'est pas un ISO standard. Promotion en `LocalDate` ou `Instant` reportée à un use-case concret (tri, calcul "membre depuis N ans").
-- `signatureHtml` : rendu par HFR depuis BBCode propriétaire. Round-trip BBCode hors scope.
+- `signatureText` : la signature est rendue par HFR depuis BBCode propriétaire comme un fragment HTML (`<br>`, `<div>`, inline styling). Le parser flatten via `Jsoup.text()` pour que l'UI puisse `Text(...)` directement sans afficher les balises HTML littérales. Round-trip BBCode et rendu stylé hors scope MVP.
 - Les posts « Publicité » (régies intégrées) n'ont pas de lien profil → `Post.profileId = null`.
 
 **Fixtures** :

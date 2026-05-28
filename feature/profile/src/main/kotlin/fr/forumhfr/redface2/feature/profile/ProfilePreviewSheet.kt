@@ -15,17 +15,21 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.UserProfile
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
+import kotlinx.coroutines.launch
 
 /**
  * Phase 2 finish (#208) — ModalBottomSheet summary of a user's profile.
@@ -40,6 +44,11 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  * - The [ProfileViewModel] is created here with Hilt navigation compose.
  *
  * Avatar shape: square/rectangle with rounded corners — constraint from the brief.
+ *
+ * Review feedback I4: tapping « Voir le profil complet » plays the sheet's hide
+ * animation (`sheetState.hide()` then `onOpenFullProfile(...)` on completion) instead
+ * of snapping the sheet away abruptly. Same pattern as Material 3's reference Sheet
+ * sample.
  *
  * @param userId          The user id to load the profile for (canonical key).
  * @param pseudoHint      Display hint shown immediately before the profile is loaded.
@@ -69,7 +78,10 @@ fun ProfilePreviewSheet(
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    // Review feedback M5: `skipPartiallyExpanded = false` was redundant — that's the
+    // default for `rememberModalBottomSheetState`. Removed the explicit argument.
+    val sheetState = rememberModalBottomSheetState()
+    val coroutineScope = rememberCoroutineScope()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -89,10 +101,35 @@ fun ProfilePreviewSheet(
                     ?.profile
                     ?.avatarUrl
                     ?: avatarUrlHint
-                onOpenFullProfile(userId, pseudo, avatarUrl)
+                // Review feedback I4: animate `hide()` first, then fire the navigation
+                // callback once the sheet is actually off-screen. The previous code
+                // nulled `profileSheetRequest` synchronously inside the host, snapping
+                // the sheet away without the slide-down animation Material 3 ships.
+                hideThenNavigate(coroutineScope, sheetState) {
+                    onOpenFullProfile(userId, pseudo, avatarUrl)
+                }
             },
         )
     }
+}
+
+/**
+ * Plays the sheet's hide animation, then invokes [action] once the sheet is no longer
+ * visible. Encapsulates the standard Material 3 « animated dismiss before navigation »
+ * idiom so the caller does not need to thread the coroutine scope / sheetState manually.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+private fun hideThenNavigate(
+    coroutineScope: kotlinx.coroutines.CoroutineScope,
+    sheetState: SheetState,
+    action: () -> Unit,
+) {
+    coroutineScope.launch { sheetState.hide() }
+        .invokeOnCompletion {
+            if (!sheetState.isVisible) {
+                action()
+            }
+        }
 }
 
 @Composable
@@ -120,7 +157,9 @@ private fun ProfilePreviewContent(
                 ProfilePreviewHero(pseudo = pseudoHint, avatarUrl = avatarUrlHint)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Impossible de charger le profil.",
+                    // Review feedback I7: localised via stringResource ; the ViewModel
+                    // surfaces an ErrorKind enum, not a String.
+                    text = stringResource(R.string.profile_error_load_failed),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -129,7 +168,7 @@ private fun ProfilePreviewContent(
                     onClick = { onIntent(ProfileIntent.Retry) },
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                 ) {
-                    Text("Réessayer")
+                    Text(stringResource(R.string.profile_action_retry))
                 }
             }
 
@@ -144,7 +183,7 @@ private fun ProfilePreviewContent(
             onClick = onOpenFullProfile,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Voir le profil complet")
+            Text(stringResource(R.string.profile_action_open_full))
         }
 
         Spacer(Modifier.height(8.dp))
@@ -206,10 +245,16 @@ private fun ProfilePreviewLoaded(profile: UserProfile) {
     Spacer(Modifier.height(12.dp))
 
     profile.registeredAt?.let { regAt ->
-        ProfilePreviewRow(label = "Membre depuis", value = regAt)
+        ProfilePreviewRow(
+            label = stringResource(R.string.profile_field_membership),
+            value = regAt,
+        )
     }
     profile.postCount?.let { count ->
-        ProfilePreviewRow(label = "Messages", value = count.toString())
+        ProfilePreviewRow(
+            label = stringResource(R.string.profile_field_messages_short),
+            value = count.toString(),
+        )
     }
 }
 

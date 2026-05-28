@@ -53,7 +53,7 @@ class ProfileViewModelTest {
         registeredAt = "12/06/2002",
         postCount = 213400,
         location = "Katowice (PL)",
-        signatureHtml = null,
+        signatureText = null,
     )
 
     private fun createViewModel(
@@ -102,14 +102,21 @@ class ProfileViewModelTest {
     }
 
     @Test
-    fun `network error exposes Error state`() = runTest {
-        coEvery { repository.getProfile(54596) } returns Result.failure(IOException("network error"))
+    fun `network error exposes Error state with ErrorKind Unknown and original cause`() = runTest {
+        // Review feedback I7: the ViewModel must surface an ErrorKind enum (not a String
+        // message) so the UI resolves the localised text via stringResource. The original
+        // Throwable is preserved on `cause` for diagnostics / future per-error-type messages.
+        val cause = IOException("network error")
+        coEvery { repository.getProfile(54596) } returns Result.failure(cause)
 
         val vm = createViewModel()
 
         vm.state.test {
             val state = awaitItem()
             assertTrue("Mode should be Error on failure", state.mode is ProfileUiState.Mode.Error)
+            val error = state.mode as ProfileUiState.Mode.Error
+            assertEquals(ProfileUiState.ErrorKind.Unknown, error.kind)
+            assertEquals(cause, error.cause)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -161,5 +168,39 @@ class ProfileViewModelTest {
         createViewModel()
 
         coVerify(exactly = 1) { repository.getProfile(54596) }
+    }
+
+    @Test
+    fun `rapid Retry taps - only the last result is observable in state`() = runTest {
+        // Review feedback I8: when the user taps Retry multiple times before the previous
+        // attempt completes, only the freshest result should land in the state — otherwise
+        // a slow first attempt finishing AFTER a fast second one would clobber the second's
+        // result. The ViewModel cancels the previous loadJob before launching a new one.
+        val firstResult = Result.failure<UserProfile>(IOException("stale"))
+        val secondResult = Result.success(dummyProfile)
+        coEvery { repository.getProfile(54596) }.returnsMany(firstResult, secondResult, secondResult)
+
+        val vm = createViewModel()
+
+        vm.state.test {
+            // Initial load (uses firstResult)
+            val errorState = awaitItem()
+            assertTrue("First load surfaces Error", errorState.mode is ProfileUiState.Mode.Error)
+
+            // Two Retry taps back-to-back. UnconfinedTestDispatcher serialises the
+            // launch{} blocks, but the cancel-before-launch invariant still gates how
+            // many results actually update _state. The final state must be Loaded.
+            vm.onIntent(ProfileIntent.Retry)
+            vm.onIntent(ProfileIntent.Retry)
+
+            // Drain to the final state.
+            var lastState = awaitItem()
+            while (lastState.mode !is ProfileUiState.Mode.Loaded) {
+                lastState = awaitItem()
+            }
+            assertTrue("Final state must be Loaded", lastState.mode is ProfileUiState.Mode.Loaded)
+            assertEquals(dummyProfile, (lastState.mode as ProfileUiState.Mode.Loaded).profile)
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 }

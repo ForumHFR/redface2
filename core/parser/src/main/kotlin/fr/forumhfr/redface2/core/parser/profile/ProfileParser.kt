@@ -59,9 +59,11 @@ class ProfileParser {
         // Avatar: the `<img>` inside `div.avatar_center` on the profile page.
         val avatarUrl = parseAvatarUrl(document)
 
-        // Signature HTML: the full inner HTML of the profilCase3 cell for the signature row.
-        // Stored raw for MVP — proper BBCode round-trip is deferred.
-        val signatureHtml = parseSignatureHtml(document)
+        // Signature: plain text extracted from the profilCase3 cell for the signature row.
+        // HFR renders the signature as inline HTML (`<br>`, `<div>`, occasional styling) ;
+        // we flatten to text at parse time so the UI can `Text(...)` it directly instead of
+        // showing literal tag characters. Full BBCode round-trip is deferred.
+        val signatureText = parseSignatureText(document)
 
         // Post count: the value for « Nombre de messages postés ».
         val postCount = rows[KEY_POST_COUNT]?.trim()?.toIntOrNull()
@@ -82,11 +84,27 @@ class ProfileParser {
             registeredAt = registeredAt,
             postCount = postCount,
             location = location,
-            signatureHtml = signatureHtml,
+            signatureText = signatureText,
             rawFields = rawFields,
         )
     }
 
+    /**
+     * Extracts the pseudo from the profile page.
+     *
+     * Tries three strategies in order, returning the first non-empty match:
+     * 1. the « Pseudo : » row in the main table ;
+     * 2. the `<h4 class="Ext">Informations sur : XaTriX</h4>` page header ;
+     * 3. the HTML document `<title>` (everything before ` - FORUM HardWare.fr`).
+     *
+     * **Sentinel fallback** (review feedback M3): when none of the three sources
+     * yields a value (extremely defensive case — only happens on a fully empty /
+     * placeholder HTML page), we return the literal `"?"` so [UserProfile.pseudo]
+     * can stay non-null. The contract is documented on the data class field. The
+     * alternative — promoting `pseudo` to `String?` — would force every UI call
+     * site to handle null even though in practice an HFR profile page always
+     * exposes the pseudo somewhere.
+     */
     private fun parsePseudo(document: org.jsoup.nodes.Document, rows: Map<String, String>): String {
         // Preferred: from the row « Pseudo : »
         val fromRow = rows[KEY_PSEUDO]?.trim()?.takeIf(String::isNotEmpty)
@@ -96,7 +114,9 @@ class ProfileParser {
         val fromTitle = TITLE_PSEUDO_REGEX.find(title)?.groupValues?.getOrNull(1)?.trim()
             ?.takeIf(String::isNotEmpty)
 
-        // Last fallback: from the HTML `<title>XaTriX - FORUM HardWare.fr</title>`
+        // Last fallback: from the HTML `<title>XaTriX - FORUM HardWare.fr</title>`.
+        // The literal `"?"` is the documented sentinel value when even the HTML title
+        // is empty (see KDoc on this function and on [UserProfile.pseudo]).
         val fromPageTitle = document.title().trim().substringBefore(" - ").trim().ifEmpty { "?" }
 
         return fromRow ?: fromTitle ?: fromPageTitle
@@ -134,28 +154,35 @@ class ProfileParser {
     }
 
     /**
-     * Returns the raw inner HTML of the `profilCase3` cell for the « Signature »
+     * Returns the plain-text content of the `profilCase3` cell for the « Signature »
      * row, trimmed and null when blank or absent.
      *
-     * The signature is stored as HTML because HFR renders it as a styled fragment
-     * (BBCode interpreted server-side). A full BBCode round-trip is out of scope for
-     * Phase 2 finish — the raw HTML is sufficient for the profile screen display.
+     * HFR renders the signature as a styled HTML fragment (`<br>`, `<div>`, inline
+     * styling — BBCode interpreted server-side). We flatten to plain text via
+     * `Element.text()` so the UI can render it through a simple `Text(...)`
+     * composable without raw `<br>` / `<div>` tag characters leaking into the view.
+     * A full BBCode round-trip / styled rendering is out of scope for Phase 2 finish.
      */
-    private fun parseSignatureHtml(document: org.jsoup.nodes.Document): String? {
+    private fun parseSignatureText(document: org.jsoup.nodes.Document): String? {
         // Locate the row whose profilCase2 cell contains the signature label.
         return document.select("tr.profil").firstOrNull { row ->
             val label = row.selectFirst("td.profilCase2")?.text()?.trimLabel()
             label == KEY_SIGNATURE
         }
             ?.selectFirst("td.profilCase3")
-            ?.let { cell ->
-                // Remove the trailing ` &nbsp;` or whitespace-only text nodes.
-                val inner = cell.html().trim()
-                inner.takeIf { it.isNotBlank() && it != "&nbsp;" }
-            }
+            ?.text()
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
     }
 
-    /** Strips trailing `&nbsp;: ` / `: ` / ` ` decoration from row header cells. */
+    /**
+     * Strips trailing `&nbsp;: ` / `: ` / ` ` decoration from row header cells.
+     *
+     * Two distinct space characters are stripped explicitly to avoid visual
+     * confusion (review feedback M6): a regular ASCII space (U+0020) and a
+     * non-breaking space (U+00A0 — what Jsoup decodes `&nbsp;` to). Both occur
+     * in HFR's profil HTML headers.
+     */
     private fun String.trimLabel(): String =
         this.trim().trimEnd(':', ' ', ' ').trim()
 

@@ -30,9 +30,22 @@ data class ProfileUiState(
             val profile: UserProfile,
         ) : Mode
 
+        /**
+         * Review feedback I7: the ViewModel must not own the user-visible string.
+         * It surfaces an [ErrorKind] (and optionally the originating [Throwable] for
+         * diagnostics) and the UI maps it to a localised `stringResource(...)`. This
+         * keeps `:feature:profile` layer-clean and i18n-ready.
+         */
         data class Error(
-            val message: String,
+            val kind: ErrorKind,
+            val cause: Throwable? = null,
         ) : Mode
+    }
+
+    /** Classification of profile-load failures surfaced by the ViewModel to the UI. */
+    enum class ErrorKind {
+        /** Generic / unknown failure — UI shows the « load failed » string. */
+        Unknown,
     }
 
     companion object {

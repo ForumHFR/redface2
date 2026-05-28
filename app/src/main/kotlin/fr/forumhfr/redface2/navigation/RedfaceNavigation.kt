@@ -165,6 +165,12 @@ data object SettingsRoute : RedfaceNavKey
  * the accepted MVP trade-off; no shared ViewModel or caching across the two entry points
  * is implemented yet.
  *
+ * TODO(profile): caching follow-up — open a dedicated issue (none filed yet to keep this
+ * PR scope-bound) and link it here. Candidate approaches: (a) shared `Singleton` Room-
+ * backed cache keyed by `userId`, (b) repository-level in-memory `Cache<Int, UserProfile>`
+ * with a short TTL, (c) hoisting the ViewModel to a `LocalViewModelStoreOwner` shared by
+ * the sheet and the page.
+ *
  * [ProfileViewModel] uses `@AssistedInject` (not SavedStateHandle) to receive [userId],
  * [pseudo], and [avatarUrl] at construction time.
  */
@@ -196,25 +202,42 @@ internal data class ParsedDeepLink(
  * Null = no sheet visible. Non-null = a profile sheet is open for the given user.
  * [avatarUrl] is a display hint populated from the topic page tap.
  *
+ * Review feedback I3: [origin] captures the [TopLevelDestination] the user was on
+ * **when the sheet was opened**, not « the tab currently focused ». Without this,
+ * switching tabs while the sheet is open and then tapping « Voir le profil complet »
+ * would push [ProfileFullRoute] onto the wrong tab's back stack, hijacking the
+ * other tab's navigation history. The fix is to preserve the origin and route the
+ * full-page entry there instead of the active tab.
+ *
  * The [Saver] allows [rememberSaveable] to survive configuration changes (rotation).
- * Fields: [Int] userId, [String] pseudo, [String?] avatarUrl — all primitive-compatible.
+ * Fields: [Int] userId, [String] pseudo, [String?] avatarUrl, [String] origin tag —
+ * all primitive-compatible. The save lambda is typed `(ProfileSheetRequest?) -> List<Any?>`
+ * because `listSaver` is parameterised on the original (nullable) type, so the legacy
+ * null check is necessary even though in practice `rememberSaveable` only invokes save
+ * on a non-null value. Review feedback M2: the inner expression is simplified to a single
+ * `?:` instead of an if/else.
  */
 private data class ProfileSheetRequest(
     val userId: Int,
     val pseudo: String,
     val avatarUrl: String?,
+    val origin: TopLevelDestination,
 ) {
     companion object {
         val Saver = listSaver<ProfileSheetRequest?, Any?>(
             save = { req ->
-                if (req == null) listOf(null, null, null)
-                else listOf(req.userId, req.pseudo, req.avatarUrl)
+                req?.let { listOf(it.userId, it.pseudo, it.avatarUrl, it.origin.name) }
+                    ?: listOf(null, null, null, null)
             },
             restore = { list ->
                 val userId = list[0] as? Int ?: return@listSaver null
                 val pseudo = list[1] as? String ?: return@listSaver null
                 val avatarUrl = list[2] as? String
-                ProfileSheetRequest(userId, pseudo, avatarUrl)
+                val originName = list[3] as? String ?: return@listSaver null
+                val origin = runCatching { TopLevelDestination.valueOf(originName) }
+                    .getOrNull()
+                    ?: return@listSaver null
+                ProfileSheetRequest(userId, pseudo, avatarUrl, origin)
             },
         )
     }
@@ -300,7 +323,15 @@ fun RedfaceApp(intent: Intent?) {
                     backStack = activeBackStack,
                     accountMenu = accountMenu,
                     onOpenProfile = { userId, pseudo, avatarUrl ->
-                        profileSheetRequest = ProfileSheetRequest(userId, pseudo, avatarUrl)
+                        // Review feedback I3: capture the **origin** tab so that
+                        // « Voir le profil complet » lands on the correct back stack
+                        // even if the user switches tabs while the sheet is open.
+                        profileSheetRequest = ProfileSheetRequest(
+                            userId = userId,
+                            pseudo = pseudo,
+                            avatarUrl = avatarUrl,
+                            origin = currentDestination,
+                        )
                     },
                 )
             }
@@ -321,14 +352,20 @@ fun RedfaceApp(intent: Intent?) {
                     onDismiss = { profileSheetRequest = null },
                     onOpenFullProfile = { userId, pseudo, avatarUrl ->
                         profileSheetRequest = null
-                        // Navigate to the full profile page on the active tab's back stack.
-                        backStacks.getValue(currentDestination).add(
+                        // Review feedback I3: route the full-page entry to the back
+                        // stack of the **origin** tab — the tab the user was on when
+                        // the sheet was opened — not the tab currently focused. The
+                        // user can switch tabs while the sheet is up ; tapping
+                        // « Voir le profil complet » must land where they started.
+                        backStacks.getValue(request.origin).add(
                             ProfileFullRoute(
                                 userId = userId,
                                 pseudo = pseudo,
                                 avatarUrl = avatarUrl,
                             ),
                         )
+                        // Switch back to the origin tab so the new entry is visible.
+                        currentDestination = request.origin
                     },
                 )
             }

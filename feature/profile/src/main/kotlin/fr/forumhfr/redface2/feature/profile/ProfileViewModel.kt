@@ -7,6 +7,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.profile.ProfileRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +26,10 @@ import kotlinx.coroutines.launch
  * supplied at construction time by the Compose caller (`hiltViewModel(creationCallback
  * = { factory -> factory.create(...) })`), while [profileRepository] is injected by
  * Hilt's usual component binding.
+ *
+ * Review feedback I7/I8: error states surface an [ProfileUiState.ErrorKind] (the UI
+ * resolves the user-visible string via `stringResource`) and a [loadJob] is held so
+ * concurrent Retry taps cancel the previous in-flight load.
  */
 @HiltViewModel(assistedFactory = ProfileViewModel.Factory::class)
 class ProfileViewModel @AssistedInject constructor(
@@ -39,6 +44,13 @@ class ProfileViewModel @AssistedInject constructor(
     )
     val state: StateFlow<ProfileUiState> = _state.asStateFlow()
 
+    /**
+     * In-flight load job. Held so a Retry (or a follow-up [loadProfile] call) can
+     * cancel a previous load that has not completed yet — without this, rapid taps
+     * on Retry spawn N concurrent coroutines whose results race to update [_state].
+     */
+    private var loadJob: Job? = null
+
     init {
         loadProfile()
     }
@@ -50,17 +62,25 @@ class ProfileViewModel @AssistedInject constructor(
     }
 
     private fun loadProfile() {
-        _state.update { it.copy(mode = ProfileUiState.Mode.Loading) }
-        viewModelScope.launch {
+        // Review feedback I8: cancel any in-flight load before starting a new one.
+        // Without this, a tap-spam on « Réessayer » fans out N concurrent coroutines
+        // and the slowest one wins the race to update _state.
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            _state.update { it.copy(mode = ProfileUiState.Mode.Loading) }
             profileRepository.getProfile(userId).fold(
                 onSuccess = { profile ->
                     _state.update { it.copy(mode = ProfileUiState.Mode.Loaded(profile)) }
                 },
                 onFailure = { error ->
+                    // Review feedback I7: ViewModel must not carry a localised String. It
+                    // surfaces the kind + cause ; the UI resolves the message via
+                    // `stringResource(R.string.profile_error_load_failed)`.
                     _state.update {
                         it.copy(
                             mode = ProfileUiState.Mode.Error(
-                                error.message ?: "Erreur inconnue",
+                                kind = ProfileUiState.ErrorKind.Unknown,
+                                cause = error,
                             ),
                         )
                     }

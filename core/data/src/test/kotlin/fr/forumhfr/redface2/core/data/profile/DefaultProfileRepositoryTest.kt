@@ -7,6 +7,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -44,7 +45,7 @@ class DefaultProfileRepositoryTest {
         registeredAt = "12/06/2002",
         postCount = 213400,
         location = "Katowice (PL)",
-        signatureHtml = null,
+        signatureText = null,
     )
 
     @Test
@@ -89,5 +90,29 @@ class DefaultProfileRepositoryTest {
         val result = repository.getProfile(54596)
 
         assertTrue("Result should be failure on parser exception", result.isFailure)
+    }
+
+    @Test
+    fun `getProfile re-throws CancellationException without wrapping in Result_failure`() = runTest {
+        // Review feedback I5: the legacy implementation used `runCatching`, which
+        // swallows CancellationException and turns it into a `Result.failure(...)`.
+        // That breaks structured concurrency — the parent job's cancellation never
+        // propagates and orphaned coroutines keep running after the caller is gone.
+        // The fix is a manual try/catch that rethrows CancellationException ; this
+        // test guards against a regression by asserting the exception propagates and
+        // is NOT swallowed into a Result.failure.
+        val cancellation = CancellationException("cooperative cancel")
+        coEvery { client.getProfile(54596) } throws cancellation
+
+        var caught: Throwable? = null
+        try {
+            repository.getProfile(54596)
+        } catch (@Suppress("TooGenericExceptionCaught") t: Throwable) {
+            caught = t
+        }
+        assertTrue(
+            "CancellationException must be re-thrown by the repository — got $caught",
+            caught is CancellationException,
+        )
     }
 }

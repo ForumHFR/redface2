@@ -19,11 +19,11 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Robolectric-driven migration tests for `MIGRATION_1_2`, `MIGRATION_2_3` and
- * `MIGRATION_3_4`. The migrations are hand-written DDL ; without these tests a typo
- * (missing column, wrong index name, wrong default) would only crash on a real
- * upgrade-in-place install, where the diagnostic loop is days long. The tests take
- * seconds.
+ * Robolectric-driven migration tests for every hand-written Room migration in the schema
+ * — currently `MIGRATION_1_2`, `MIGRATION_2_3`, `MIGRATION_3_4`, `MIGRATION_4_5` and
+ * `MIGRATION_5_6` (Phase 2 finish #208 added `Post.profileId` in v6). Without these tests
+ * a typo (missing column, wrong index name, wrong default) would only crash on a real
+ * upgrade-in-place install, where the diagnostic loop is days long. The tests take seconds.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [33])

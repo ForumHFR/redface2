@@ -36,12 +36,12 @@ Phase 2 finish (#208). Modèle `UserProfile` dans `:core:model`, parser dans `:c
 ```kotlin
 data class UserProfile(
     val userId: Int,            // clé canonique — toujours non-null
-    val pseudo: String,
+    val pseudo: String,         // fallback sentinelle "?" documenté si toutes les sources sont vides
     val avatarUrl: String?,     // CDN HFR reconstruit depuis mesdiscussions-{N}.png
     val registeredAt: String?,  // format HFR brut "DD/MM/YYYY" — promotion Instant reportée
     val postCount: Int?,
     val location: String?,      // ville HFR, null si vide ou absent
-    val signatureHtml: String?, // HTML brut rendu par HFR — round-trip BBCode hors scope MVP
+    val signatureText: String?, // texte plat (Jsoup.text()) — round-trip BBCode hors scope MVP
     val rawFields: Map<String, String> = emptyMap(), // champs non promus (Profession, Loisirs, …)
 )
 ```
