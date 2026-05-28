@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.flags
 
+import android.annotation.SuppressLint
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -79,6 +80,10 @@ import kotlinx.coroutines.launch
  *   until the user confirms and the repository evicts it from the cache).
  */
 @OptIn(ExperimentalMaterial3Api::class)
+// Intentional: the Scaffold here only anchors the SnackbarHost above system bars; the inner
+// Column applies its own statusBars/navigationBars padding (see comment below). Suppression
+// justified inline at the content lambda usage.
+@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
 fun FlagsRoute(
     onOpenFlag: (Flag) -> Unit,
