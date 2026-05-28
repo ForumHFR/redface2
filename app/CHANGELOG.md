@@ -17,6 +17,12 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
+### Added
+- **#208 — Profil utilisateur** : tap sur l'avatar ou le pseudo d'un post ouvre une `ModalBottomSheet` résumé (avatar carré/arrondi, pseudo, localisation, date d'inscription, nombre de posts, bouton « Voir le profil complet »). Naviguer vers la page complète affiche en plus la signature. Le bouton « Derniers messages » est désactivé (marqué « à venir ») faute de route stable.
+- **Parser profil** : `ProfileParser` extrait `UserProfile` depuis `/hfr/profil-{userId}.htm` (tolérant aux champs absents).
+- **`Post.profileId`** : champ nullable extrait par `TopicPageParser` depuis le lien `<a href="/hfr/profil-{N}.htm">` du toolbar. Persisté en Room (migration v5→v6).
+- **`:feature:profile`** : nouveau module Gradle (`ProfileViewModel` AssistedInject, `ProfileScreen`, `ProfilePreviewSheet`).
+
 ---
 
 ## v63 — `0.3.23` — 2026-05-28
