@@ -316,15 +316,15 @@ class DefaultTopicFormRepository @Inject constructor(
         return try {
             withContext(ioDispatcher) {
                 val responseHtml = hfrClient.submitNewTopic(formBody)
-                // The wire endpoint is shared with reply/quote ; the same
-                // classifier disambiguates Success vs the 4 failure variants.
-                // The success `<meta refresh>` URL shape is identical across
-                // bddpost.php flows (`…/sujet_{topicId}_{page}.htm#t{numreponse}`),
-                // so the shared parser extracts the freshly-allocated topic id and
-                // numreponse — validated against the real reply/quote success
-                // fixtures (#206). When HFR omits the segment (unexpected shape),
-                // the values stay null and the navigation host falls back to the
-                // category refresh path.
+                // The wire endpoint is shared with reply/quote ; the same classifier
+                // disambiguates Success vs the failure variants (#214 added the
+                // create-specific success marker « Votre message a été posté avec succès »).
+                // IMPORTANT (verified live, cf. write_create_topic_success_response.html) :
+                // on a successful create HFR refreshes to the category LISTING, not to the
+                // new topic, and returns NO topic id. So `outcome.topicId`/`numreponse` are
+                // always null here and the navigation host lands on the category listing —
+                // direct navigation to the created topic (the original #206 goal) is not
+                // possible because HFR never exposes the freshly-allocated id.
                 when (val outcome = replySubmitResponseParser.parse(responseHtml)) {
                     is ReplySubmitResult.Success -> {
                         diagnostics.record(

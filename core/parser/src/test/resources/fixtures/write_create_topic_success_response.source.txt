@@ -1,0 +1,18 @@
+Source : capture live de la réponse HTML brute renvoyée par HFR après un POST
+`bddpost.php?config=hfr.inc` de CRÉATION DE TOPIC réussi.
+Capturé : 2026-05-29, depuis l'app Redface 2 debug (build avec log temporaire
+CT_DBG sur `DefaultTopicFormRepository.submitNewTopic`, retiré ensuite), via
+adb logcat, en créant un topic de test dans la catégorie Programmation (cat=10)
+avec le compte de test xatelitte. Topic de test posté réellement sur HFR.
+Mode : authentifié (session de l'app).
+Sanitization : aucune donnée sensible présente dans la réponse (pas de pseudo,
+pas de hash_check, pas d'email). Contenu intégral conservé tel quel.
+
+Contrat clé (#214 / #206) :
+- Phrase de succès = « Votre message a été posté avec succès ! » — DISTINCTE de
+  reply (« Votre réponse a été postée avec succès ») et edit (« Votre message a
+  été édité avec succès »). C'est le marker à matcher pour classer le succès.
+- Le `<meta refresh>` pointe vers `…/liste_sujet-1.htm` (la LISTE de la
+  catégorie), PAS vers le sujet créé. HFR ne renvoie donc AUCUN topic id ni
+  numreponse sur un create réussi → la « navigation directe vers le sujet créé »
+  (#206) est impossible ; le seul comportement est de revenir à la liste.

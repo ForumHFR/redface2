@@ -85,32 +85,30 @@ class ReplySubmitResponseParserTest {
     }
 
     @Test
-    fun `create-topic success is classified via the thread refresh even without a known success sentence`() {
-        // #214 — HFR's create-topic success page uses a different sentence than reply/edit,
-        // so the marker clauses miss it ; before the fix it fell through to Unknown and the
-        // app showed an error although the topic WAS created. The robust signal is the
-        // `<meta refresh>` to a real `sujet_{id}_{page}` thread URL. This is a classification
-        // logic pin (the exact create success sentence / a real capture is tracked in #214) —
-        // the body deliberately omits any reply/edit marker to prove refresh-only detection.
-        val html = """
-            <html><head>
-              <meta http-equiv="Refresh" content="1; url=/hfr/Programmation/Divers-6/mon-test-sujet_148760_1.htm#t2524000" />
-            </head><body>
-              <div class="hop">Opération effectuée.</div>
-            </body></html>
-        """.trimIndent()
-        val success = parser.parse(html) as ReplySubmitResult.Success
-        assertEquals(148_760, success.topicId)
-        assertEquals(1, success.targetPage)
-        assertEquals(2_524_000, success.numreponse)
+    fun `create-topic success is classified via its own marker and exposes no topic id`() {
+        // #214 — real capture (`write_create_topic_success_response.html`, 2026-05-29).
+        // HFR's create-topic success uses « Votre message a été posté avec succès ! » —
+        // distinct from reply/edit, so before the fix it fell through to Unknown and the app
+        // showed an error although the topic WAS created. The refresh points to the category
+        // listing (`…/liste_sujet-1.htm`), NOT to the new topic, so HFR returns no topic id :
+        // topicId / targetPage / numreponse are all null and the caller lands on the listing.
+        val html = readFixture("write_create_topic_success_response.html")
+        val result = parser.parse(html)
+        assertTrue("create-topic success must classify as Success — got $result", result is ReplySubmitResult.Success)
+        val success = result as ReplySubmitResult.Success
+        val refreshUrl = requireNotNull(success.refreshUrl) { "refreshUrl must be present" }
+        assertTrue("refresh lands on the category listing", refreshUrl.contains("liste_sujet"))
+        assertNull("create success has no thread segment → no topic id", success.topicId)
+        assertNull(success.targetPage)
+        assertNull(success.numreponse)
     }
 
     @Test
-    fun `refresh to a listing URL is not mistaken for a create-topic success`() {
-        // #214 review — pin the lookbehind in the create-classification path : a refresh to a
-        // listing (`liste_sujet_1_2.htm`, no reply/edit marker) must NOT be classified as a
-        // create success via `hasThreadRefresh`. The `_` before `sujet` makes the lookbehind
-        // reject it → falls through to Unknown.
+    fun `a refresh page without any known success marker is not a false success`() {
+        // #214 — classification keys on the explicit success sentences (reply/edit/create),
+        // NOT on the mere presence of a `<meta refresh>`. A page that redirects somewhere but
+        // carries no known success marker must stay Unknown (defensive : guards against a
+        // future deploy where a refresh alone would be over-trusted). Listing refresh variant.
         val html = """
             <html><head>
               <meta http-equiv="Refresh" content="1; url=/hfr/cat/liste_sujet_1_2.htm" />
@@ -123,9 +121,9 @@ class ReplySubmitResponseParserTest {
     }
 
     @Test
-    fun `refresh to the home page is not a create-topic success`() {
-        // #214 review — a bare home refresh (no `sujet_{id}_{page}` segment, no marker) is not
-        // a thread redirect → Unknown, never a false success.
+    fun `a bare home refresh without a success marker stays Unknown`() {
+        // #214 — same guard, home redirect : no known success sentence → Unknown, never a
+        // false success.
         val html = """
             <html><head>
               <meta http-equiv="Refresh" content="1; url=/" />

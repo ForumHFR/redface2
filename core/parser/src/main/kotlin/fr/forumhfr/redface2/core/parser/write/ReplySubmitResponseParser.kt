@@ -58,30 +58,17 @@ class ReplySubmitResponseParser {
             // so `parseSuccess` reuses the same extraction.
             body.contains(EDIT_SUCCESS_MARKER, ignoreCase = true) -> parseSuccess(html)
 
-            // #214 — create-topic success is NOT caught by the reply/edit sentences
-            // above (HFR uses a different success message for a brand-new topic), which
-            // mis-classified it as Unknown → the app showed an error even though the
-            // topic was created. The robust, sentence-agnostic signal is the success
-            // `<meta refresh>` to a real `…/sujet_{topicId}_{page}.htm` thread URL : the
-            // four documented failure pages (empty / anti-flood / locked / invalid token,
-            // matched above) carry NO such refresh, so reaching this clause means HFR
-            // accepted the post and is redirecting to the resulting topic. This also makes
-            // #206's topicId extraction reachable on the create flow.
-            hasThreadRefresh(html) -> parseSuccess(html)
+            // #214 — create-topic success uses its OWN sentence, distinct from reply and
+            // edit (captured live, cf. `write_create_topic_success_response.html`). Without
+            // this marker it fell through to Unknown → the app showed an error although the
+            // topic was created (risk of duplicates). NB : on a create, HFR's `<meta refresh>`
+            // points to the category LISTING (`…/liste_sujet-1.htm`), NOT to the new topic —
+            // it never returns the freshly-allocated topic id, so `parseSuccess` yields a
+            // null topicId/page/numreponse here and the navigation host lands on the listing.
+            body.contains(CREATE_SUCCESS_MARKER, ignoreCase = true) -> parseSuccess(html)
 
             else -> ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         }
-    }
-
-    /**
-     * True when the response carries a `<meta http-equiv=Refresh>` whose URL contains a
-     * real `sujet_{topicId}_{page}` thread segment — HFR's "post accepted, go to the
-     * thread" signal, independent of the (deploy- and flow-dependent) success sentence.
-     * Failure pages redirect nowhere, so this never fires on them.
-     */
-    private fun hasThreadRefresh(html: String): Boolean {
-        val refresh = META_REFRESH_REGEX.find(html)?.groupValues?.getOrNull(1) ?: return false
-        return SUJET_SEGMENT_REGEX.containsMatchIn(refresh)
     }
 
     private fun parseSuccess(html: String): ReplySubmitResult.Success {
@@ -136,13 +123,20 @@ class ReplySubmitResponseParser {
         // see `write_edit_success_response.html`.
         private const val EDIT_SUCCESS_MARKER: String = "votre message a été édité avec succès"
 
+        // #214 — create-topic success sentence, captured live 2026-05-29 ; see
+        // `write_create_topic_success_response.html`. Distinct from reply ("réponse
+        // postée") and edit ("message édité"). HFR refreshes to the category listing
+        // here, not to the new topic, so no topic id is recoverable on create.
+        private const val CREATE_SUCCESS_MARKER: String = "votre message a été posté avec succès"
+
         private val META_REFRESH_REGEX: Regex =
             Regex("""<meta[^>]*http-equiv="Refresh"[^>]*content="\d+\s*;\s*url=([^"]+)""", RegexOption.IGNORE_CASE)
 
-        // HFR's success refresh URLs look like `…/{slug}-sujet_35395_20.htm#bas` — the
-        // `sujet_{topicId}_{page}` segment carries both the topic id (group 1) and the
-        // landing page (group 2). create-topic (#206) relies on group 1 for the freshly
-        // allocated topic id ; reply/quote/edit use group 2 for scroll restoration.
+        // reply / quote / edit success refresh URLs look like `…/{slug}-sujet_35395_20.htm#bas`
+        // — the `sujet_{topicId}_{page}` segment carries the topic id (group 1) and the
+        // landing page (group 2), used for scroll restoration. NB : create-topic does NOT
+        // hit this — its success refresh points to the category listing (`liste_sujet-1.htm`,
+        // no `sujet_{id}_{page}` segment), so topicId/page stay null on create (#214).
         // The `(?<![a-z_])` lookbehind is what excludes a listing URL like
         // `liste_sujet_1_2.htm` : there the char right before `sujet` is `_` (from
         // `liste_`), so the lookbehind rejects the match. A real thread segment is

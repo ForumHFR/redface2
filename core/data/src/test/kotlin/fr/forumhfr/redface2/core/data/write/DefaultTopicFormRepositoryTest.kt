@@ -325,66 +325,28 @@ class DefaultTopicFormRepositoryTest {
     }
 
     @Test
-    fun `POST new-topic Success surfaces newTopicId and newNumreponse from the refresh URL`() = runTest {
-        // #206 — create-topic shares bddpost.php with quote, so its success `<meta refresh>`
-        // has the identical `…/sujet_{newTopicId}_{page}.htm#t{numreponse}` shape. We replay
-        // the real `write_quote_success_response.html` (sujet_148750_1.htm#t2523833) to prove
-        // the repository now forwards the freshly-allocated (topicId, numreponse) instead of
-        // the historical (null, null). The navigation host uses these to jump straight to the
-        // created topic.
+    fun `POST new-topic classifies the real create success and exposes no topic id`() = runTest {
+        // #214 — replays the REAL create-topic success page captured live
+        // (`write_create_topic_success_response.html`, « Votre message a été posté avec
+        // succès ! », refresh to `…/liste_sujet-1.htm`). HFR redirects to the category
+        // LISTING and returns NO topic id, so the repository classifies Success but with
+        // `(newTopicId, newNumreponse) = (null, null)` — the navigation host then lands on
+        // the category listing (direct navigation to the created topic is impossible, #206).
         server.enqueue(MockResponse().setBody(fixture("write_create_topic_form_android_cat.html")))
-        server.enqueue(MockResponse().setBody(fixture("write_quote_success_response.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_create_topic_success_response.html")))
 
         val context = NewTopicContext(cat = 23, entrySubcat = 550)
         val form = repository.fetchNewTopicForm(context)
         val result = repository.submitNewTopic(
             context = context,
             form = form,
-            subject = "Topic test Redface 2 #206",
+            subject = "Topic test Redface 2 #214",
             bbcodeContent = "Contenu du nouveau topic.",
             selectedSubcat = 562,
             options = ReplyFormOptions(signatureEnabled = true),
         )
 
         assertTrue("Create-topic must classify Success — got $result", result is NewTopicSubmitResult.Success)
-        val success = result as NewTopicSubmitResult.Success
-        assertEquals(148_750, success.newTopicId)
-        assertEquals(2_523_833, success.newNumreponse)
-        assertEquals(23, success.targetCat)
-        assertEquals(562, success.targetSubcat)
-    }
-
-    @Test
-    fun `POST new-topic Success without a parsable segment falls back to null ids`() = runTest {
-        // #206 fallback contract (review F3): if HFR returns a success page whose refresh
-        // URL carries no `sujet_{id}_{page}` segment, the repository must still classify
-        // Success but forward (null, null) — that's exactly the path the navigation host
-        // consumes to fall back to CategoryRoute + Toast instead of jumping to a half-known
-        // topic. No real fixture exists for this malformed-success edge, so the response is
-        // an inline minimal success (same pattern as the parser's null-page edge test).
-        server.enqueue(MockResponse().setBody(fixture("write_create_topic_form_android_cat.html")))
-        server.enqueue(
-            MockResponse().setBody(
-                """
-                <html><head>
-                  <meta http-equiv="Refresh" content="1; url=/hfr/Programmation/Divers-6/liste_sujet-1.htm" />
-                </head><body><div class="hop">Votre réponse a été postée avec succès !</div></body></html>
-                """.trimIndent(),
-            ),
-        )
-
-        val context = NewTopicContext(cat = 23, entrySubcat = 550)
-        val form = repository.fetchNewTopicForm(context)
-        val result = repository.submitNewTopic(
-            context = context,
-            form = form,
-            subject = "Topic test fallback",
-            bbcodeContent = "Contenu.",
-            selectedSubcat = 562,
-            options = ReplyFormOptions(signatureEnabled = true),
-        )
-
-        assertTrue("must still classify Success — got $result", result is NewTopicSubmitResult.Success)
         val success = result as NewTopicSubmitResult.Success
         assertEquals(null, success.newTopicId)
         assertEquals(null, success.newNumreponse)

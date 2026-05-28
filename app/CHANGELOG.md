@@ -18,12 +18,13 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 ## Unreleased
 
 ### Fixed
-- **#214 — Création de topic : succès ne s'affiche plus en erreur.** Le submit create-topic réussit côté HFR mais l'app affichait « HFR a renvoyé une réponse inattendue » (le topic était pourtant créé → risque de doublons). Cause : `ReplySubmitResponseParser` ne reconnaissait que les phrases de succès reply/edit ; la page de succès create utilise une autre phrase → classée `Unknown`. Fix : classification robuste, indépendante de la phrase — un succès est détecté par la présence du `<meta refresh>` vers une vraie URL de topic `…/sujet_{id}_{page}.htm` (les 4 pages d'échec n'ont pas ce refresh). Rend aussi l'extraction `topicId` de #206 réellement atteinte sur le flux create.
+- **#214 — Création de topic : succès ne s'affiche plus en erreur.** Le submit create-topic réussit côté HFR mais l'app affichait « HFR a renvoyé une réponse inattendue » (le topic était pourtant créé → risque de doublons). Cause confirmée par capture live (`write_create_topic_success_response.html`) : HFR renvoie une phrase de succès propre au create — **« Votre message a été posté avec succès ! »** — que `ReplySubmitResponseParser` ne connaissait pas (il ne matchait que reply « réponse postée » et edit « message édité »). Fix : ajout du marker create. Validé contre la vraie fixture.
 
 ### Changed
 - **Build debug** : le libellé du lanceur de la variante `debug` (installée côté-à-côté via `applicationIdSuffix=.debug`) devient **« Redface 2 ADB »** (au lieu de « Redface 2 ») pour distinguer l'install dogfood adb. La release garde `@string/app_name`.
 
 ### Known issues
+- **#206 — « Navigation directe vers le sujet créé » impossible (corrigé par la réalité HFR).** La capture live montre qu'après un create réussi, HFR redirige vers la **liste de la catégorie** (`…/liste_sujet-1.htm`), **sans jamais renvoyer l'id du sujet créé**. La fonctionnalité d'origine de #206 (ouvrir directement le topic) n'est donc pas réalisable : `newTopicId`/`newNumreponse` sont toujours `null` et l'app revient à la liste (comportement correct et seul possible). À acter sur #206 / PR #212 (retirer l'extraction `topicId` create devenue morte, requalifier le scope).
 - **#213 — Catégorie sans sous-catégorie (ex. « Intelligence Artificielle », `force_subcat=false`)** : création ET réponse cassées (le formulaire create exige un `<select subcat>` absent ; le bouton Répondre est désactivé faute de `subcat` valide). Fix non livré ici : changement multi-couches (modéliser `force_subcat`, relâcher `canSubmit`/guard/buildBody, distinguer subcat réel 0 vs sentinelle `SUBCAT_UNKNOWN`) + vérification d'un POST 0-sous-cat. Tracé dans #213.
 
 ---
