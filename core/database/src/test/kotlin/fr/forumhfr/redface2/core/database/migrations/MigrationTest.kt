@@ -105,7 +105,7 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
 
         try {
@@ -235,7 +235,7 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
 
         try {
@@ -326,7 +326,7 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
 
         try {
@@ -388,7 +388,7 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
 
         try {
@@ -401,6 +401,60 @@ class MigrationTest {
                     -1,
                     cursor.getInt(0),
                 )
+            }
+        } finally {
+            migrated.close()
+        }
+    }
+
+    /**
+     * Phase 2 finish (#208) — v5 → v6 adds nullable `profileId` to `posts`.
+     *
+     * Verifies:
+     * 1. The migration runs cleanly against the v5 fixture.
+     * 2. Pre-existing post rows survive the migration.
+     * 3. The new column defaults to NULL on old rows.
+     */
+    @Test
+    fun migrate_5_to_6_adds_nullable_profileId_to_posts() {
+        val dbName = "migration_5_6_test"
+
+        // 1. Create a v5 database and insert a posts row so we can validate
+        //    that the column is added without losing existing data.
+        helper.createDatabase(dbName, 5).apply {
+            execSQL(
+                """INSERT INTO topic_pages (cat, post, page, title, totalPages, isFirstPostOwner,
+                   numreponses, fetchedAt, authMode, subcat)
+                   VALUES (23, 35395, 1, 'Test topic', 10, 0, '[]', 1000, 'AUTHENTICATED', 550)""",
+            )
+            execSQL(
+                """INSERT INTO posts (cat, numreponse, post, author, date, content, avatarUrl,
+                   isEditable, isOwnPost, quotedAuthors, postIndex, fetchedAt, authMode, quoteRef)
+                   VALUES (23, 100, 35395, 'XaTriX', 1000,
+                   '{"blocks":[]}', NULL, 0, 0, '[]', 1, 1000, 'AUTHENTICATED', NULL)""",
+            )
+            close()
+        }
+
+        // 2. Run MIGRATION_5_6 and validate against the v6 schema.
+        helper.runMigrationsAndValidate(dbName, 6, true, MIGRATION_5_6).close()
+
+        // 3. Open the production Room database to verify data integrity.
+        val migrated = Room.databaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java,
+            dbName,
+        )
+            .allowMainThreadQueries()
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .build()
+
+        try {
+            migrated.openHelper.readableDatabase.query(
+                "SELECT profileId FROM posts WHERE cat = 23 AND numreponse = 100",
+            ).use { cursor ->
+                assertTrue("pre-v6 post row must survive MIGRATION_5_6", cursor.moveToFirst())
+                assertTrue("profileId must be NULL for pre-v6 rows", cursor.isNull(0))
             }
         } finally {
             migrated.close()

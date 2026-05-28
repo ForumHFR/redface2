@@ -57,4 +57,13 @@ data class PostEntity(
      * quote link (locked topic, anonymous read) keep `NULL` legitimately.
      */
     val quoteRef: Int? = null,
+    /**
+     * HFR user id from the profile link `<a href="/hfr/profil-{N}.htm">` in the
+     * post toolbar. Phase 2 finish (#208). Nullable on disk for three reasons:
+     *
+     * - pre-v6 rows backfill to `NULL` (the next live fetch sets the real value);
+     * - « Publicité » rows and anonymous reads legitimately have no profile link;
+     * - future HFR changes may stop rendering the link for some post types.
+     */
+    val profileId: Int? = null,
 )

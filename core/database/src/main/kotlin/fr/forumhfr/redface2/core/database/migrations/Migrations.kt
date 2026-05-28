@@ -145,6 +145,26 @@ val MIGRATION_3_4: Migration = object : Migration(3, 4) {
 }
 
 /**
+ * v5 → v6 (Phase 2 finish, #208):
+ *
+ * Adds `profileId` to `posts`. Stores the HFR numeric user id extracted from the
+ * profile link `<a href="/hfr/profil-{N}.htm">` in each post's left toolbar. This
+ * enables the profile bottom sheet tap without a network round-trip on a cache hit.
+ *
+ * Nullable on disk because:
+ * - pre-v6 rows backfill to `NULL` (recovered on the next live fetch);
+ * - « Publicité » rows and anonymous reads legitimately carry no profile link;
+ * - HFR may stop rendering the link for certain post types in the future.
+ *
+ * Pure DDL, no row rewrite — topic pages are short-lived cache.
+ */
+val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE posts ADD COLUMN profileId INTEGER")
+    }
+}
+
+/**
  * v4 → v5 (Phase 2C, #146 round 2):
  *
  * Adds `quoteRef` to `posts`. Without this column, every fresh cache hit (the

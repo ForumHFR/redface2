@@ -487,6 +487,67 @@ class TopicPageParserTest {
         assertNull("quote-less post must expose null quoteRef", post.quoteRef)
     }
 
+    // ─── profileId (#208) ───────────────────────────────────────────────────────
+
+    @Test
+    fun `profileId is extracted from profil link on khakha page 1`() {
+        val topic = parser.parse(fixture("topic_khakha_page_1.html"))
+        // The first post on khakha p1 is by Mora1651 (profil-599674.htm).
+        val firstPost = topic.posts.first()
+        assertEquals(
+            "First post on khakha page 1 should have profileId=599674",
+            599674,
+            firstPost.profileId,
+        )
+    }
+
+    @Test
+    fun `all real posts on khakha page 1 have a non-null profileId`() {
+        val topic = parser.parse(fixture("topic_khakha_page_1.html"))
+        // The khakha fixture contains one « Publicité » ad row without a profile
+        // link. All other posts have a real user profile link.
+        val postsWithProfile = topic.posts.filter { it.profileId != null }
+        assertTrue(
+            "At least half the posts should have a profileId",
+            postsWithProfile.size >= topic.posts.size / 2,
+        )
+    }
+
+    @Test
+    fun `profileId is null for a post with no profile link`() {
+        // Synthesised minimal page: one post without any profil- link.
+        val html = """
+            <html><body>
+              <input name="cat" value="13" />
+              <input name="post" value="84540" />
+              <input name="subcat" value="432" />
+              <table><tbody>
+                <tr class="fondForum2Title">
+                  <th class="messCase1">Auteur</th>
+                  <th><h3>No profile page</h3></th>
+                </tr>
+              </tbody></table>
+              <table class="messagetable"><tbody>
+                <tr class="message">
+                  <td class="messCase1"><a name="t12345"></a><b class="s2">Publicité</b></td>
+                  <td class="messCase2">
+                    <div class="toolbar"><div class="left">
+                      Posté le 01-01-2024&nbsp;à&nbsp;10:00:00
+                      <img src="profile.gif" title="Voir son profil">
+                    </div></div>
+                    <div id="para12345"><p>ad content</p></div>
+                  </td>
+                </tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        assertNull(
+            "Post without profil link should have null profileId",
+            topic.posts.single().profileId,
+        )
+    }
+
     private fun fixture(name: String): String {
         return requireNotNull(javaClass.getResource("/fixtures/$name")) {
             "Fixture not found: $name"
