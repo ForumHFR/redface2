@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -38,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -612,11 +614,19 @@ private fun TopicPostCard(
             // `RedfaceUserAvatar`) when `Post.avatarUrl == null` or the load errors.
             // Phase 2 finish (#208) — tapping the avatar opens the profile bottom sheet
             // when `onOpenProfile` is non-null (i.e. when HFR exposed a profile link).
+            // minimumInteractiveComponentSize guarantees the 48dp Material touch target.
+            // Role.Button and onClickLabel let TalkBack announce the action correctly.
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Top,
                 modifier = if (onOpenProfile != null) {
-                    Modifier.clickable(onClick = onOpenProfile)
+                    Modifier
+                        .minimumInteractiveComponentSize()
+                        .clickable(
+                            onClick = onOpenProfile,
+                            role = Role.Button,
+                            onClickLabel = stringResource(R.string.topic_open_profile_action),
+                        )
                 } else {
                     Modifier
                 },

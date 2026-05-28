@@ -6,7 +6,7 @@ nav_order: 1
 permalink: /adr/001-modules-gradle-v1
 ---
 
-# ADR-001 — Découpage Gradle v1 : 15 modules avant les extensions
+# ADR-001 — Découpage Gradle v1 : 16 modules avant les extensions
 
 ## Statut
 
@@ -20,7 +20,7 @@ Un monolithe unique `:app` simplifie le bootstrap, mais ne protège pas les fron
 
 ## Décision
 
-La v1 de Redface 2 adopte un découpage en **15 modules** pour les Phases 0 à 3 :
+La v1 de Redface 2 adopte un découpage en **16 modules** pour les Phases 0 à 3 :
 
 - **8 modules core**
   - `:core:model`
@@ -31,7 +31,7 @@ La v1 de Redface 2 adopte un découpage en **15 modules** pour les Phases 0 à 3
   - `:core:database`
   - `:core:ui`
   - `:core:extension`
-- **7 modules feature de base**
+- **8 modules feature de base**
   - `:feature:forum`
   - `:feature:topic`
   - `:feature:editor`
@@ -39,8 +39,11 @@ La v1 de Redface 2 adopte un découpage en **15 modules** pour les Phases 0 à 3
   - `:feature:auth`
   - `:feature:search`
   - `:feature:settings`
+  - `:feature:profile`
 
 Les **8 modules d'extensions communautaires** arrivent en **Phase 4**, pas avant.
+
+> **Amendement PR #208 (Phase 2 finish)** — `:feature:profile` (bottom sheet résumé + page complète du profil utilisateur) ajouté en Phase 2. Total : 16 modules (8 core + 8 features base).
 
 ## Conséquences
 

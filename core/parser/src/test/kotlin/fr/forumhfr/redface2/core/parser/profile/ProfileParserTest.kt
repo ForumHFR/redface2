@@ -138,11 +138,19 @@ class ProfileParserTest {
     @Test
     fun `rawFields preserves fields not promoted to typed properties`() {
         val profile = parser.parse(fixture("profile/profile_xatrix_authenticated.html"), 54596)
-        // Profession / Loisirs / Citation personnelle are expected in rawFields
-        // because they are not promoted to typed fields in Phase 2 finish.
+        // In the XaTriX fixture, the fields that survive into rawFields are those
+        // with non-empty key AND non-empty value (the parser filters via
+        // `if (key.isNotEmpty() && value.isNotEmpty())`). Fields like "Profession",
+        // "Loisirs", and "Citation personnelle" are empty cells (&#160; / &nbsp;) in
+        // this fixture, so they are filtered out. The fields actually present are
+        // "Sexe" ("homme") and "Configuration matérielle".
         assertTrue(
             "rawFields should not be empty for XaTriX",
             profile.rawFields.isNotEmpty(),
+        )
+        assertTrue(
+            "rawFields should contain 'Sexe' for XaTriX",
+            "Sexe" in profile.rawFields,
         )
     }
 

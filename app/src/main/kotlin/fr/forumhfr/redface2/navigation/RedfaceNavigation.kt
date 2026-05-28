@@ -12,6 +12,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -156,10 +157,16 @@ data object SettingsRoute : RedfaceNavKey
  * while the profile is loading — they can be pre-populated from the topic page tap site
  * so the user sees a meaningful placeholder immediately.
  *
- * The ModalBottomSheet preview is hoisted in [RedfaceApp] as overlay state, not as a
- * back-stack route — it shares the same [ProfileViewModel] instance with the bottom sheet
- * (same SavedStateHandle key) so navigating to [ProfileFullRoute] from the sheet reuses
- * the already-loaded profile data.
+ * Architecture note (MVP limitation): the ModalBottomSheet preview ([ProfilePreviewSheet])
+ * is hoisted in [RedfaceApp] as an overlay composable, while this route is a back-stack
+ * nav entry with its own [androidx.lifecycle.ViewModelStore]. They are **two separate
+ * [ProfileViewModel] instances** — each fetches the profile independently. This means
+ * navigating from the sheet to the full page triggers a second network request. This is
+ * the accepted MVP trade-off; no shared ViewModel or caching across the two entry points
+ * is implemented yet.
+ *
+ * [ProfileViewModel] uses `@AssistedInject` (not SavedStateHandle) to receive [userId],
+ * [pseudo], and [avatarUrl] at construction time.
  */
 @Serializable
 data class ProfileFullRoute(
@@ -188,12 +195,30 @@ internal data class ParsedDeepLink(
  *
  * Null = no sheet visible. Non-null = a profile sheet is open for the given user.
  * [avatarUrl] is a display hint populated from the topic page tap.
+ *
+ * The [Saver] allows [rememberSaveable] to survive configuration changes (rotation).
+ * Fields: [Int] userId, [String] pseudo, [String?] avatarUrl — all primitive-compatible.
  */
 private data class ProfileSheetRequest(
     val userId: Int,
     val pseudo: String,
     val avatarUrl: String?,
-)
+) {
+    companion object {
+        val Saver = listSaver<ProfileSheetRequest?, Any?>(
+            save = { req ->
+                if (req == null) listOf(null, null, null)
+                else listOf(req.userId, req.pseudo, req.avatarUrl)
+            },
+            restore = { list ->
+                val userId = list[0] as? Int ?: return@listSaver null
+                val pseudo = list[1] as? String ?: return@listSaver null
+                val avatarUrl = list[2] as? String
+                ProfileSheetRequest(userId, pseudo, avatarUrl)
+            },
+        )
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -209,7 +234,11 @@ fun RedfaceApp(intent: Intent?) {
         // Phase 2 finish (#208) — profile bottom sheet state, hoisted to `:app` so that
         // `:feature:topic` never depends on `:feature:profile`. The sheet is opened from
         // any TopicScreen tap on an avatar/author with a non-null profileId.
-        var profileSheetRequest by remember { mutableStateOf<ProfileSheetRequest?>(null) }
+        // rememberSaveable + custom Saver keeps the sheet open across configuration changes
+        // (e.g. rotation) — without it the sheet would silently close on every rotation.
+        var profileSheetRequest by rememberSaveable(stateSaver = ProfileSheetRequest.Saver) {
+            mutableStateOf<ProfileSheetRequest?>(null)
+        }
 
         val backStacks = remember(flagsBackStack, forumBackStack, searchBackStack, messagesBackStack) {
             mapOf(
@@ -475,13 +504,13 @@ private fun RedfaceNavHost(
             }
             entry<ProfileFullRoute> { route ->
                 // Phase 2 finish (#208) — full profile page.
-                // ProfileViewModel uses SavedStateHandle to receive userId/pseudo/avatarUrl.
-                // With Compose Navigation 3 + Hilt, the ViewModel is created fresh per nav
-                // entry (scoped to the entry's ViewModelStore by `rememberViewModelStoreNavEntryDecorator`).
-                // We pass the route arguments by creating a ViewModel instance via the Hilt
-                // assisted-inject mechanism: `hiltViewModel` + `ViewModelProvider.Factory`
-                // route-to-key bridge. For the MVP we use `ProfileViewModelFromRoute` that
-                // accepts the route arguments directly.
+                // ProfileViewModel uses @AssistedInject (not SavedStateHandle) to receive
+                // userId/pseudo/avatarUrl. With Compose Navigation 3 + Hilt, the ViewModel is
+                // created fresh per nav entry (scoped to the entry's ViewModelStore by
+                // `rememberViewModelStoreNavEntryDecorator`). Arguments are passed via the
+                // assisted-inject factory: `hiltViewModel(creationCallback = { it.create(...) })`.
+                // This is a separate ViewModel instance from the one created in ProfilePreviewSheet
+                // — see ProfileFullRoute KDoc for the MVP trade-off explanation.
                 ProfileRoute(
                     userId = route.userId,
                     pseudoHint = route.pseudo,

@@ -14,6 +14,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -78,6 +79,7 @@ fun ProfilePreviewSheet(
             state = state,
             pseudoHint = pseudoHint,
             avatarUrlHint = avatarUrlHint,
+            onIntent = viewModel::onIntent,
             onOpenFullProfile = {
                 val pseudo = (state.mode as? ProfileUiState.Mode.Loaded)
                     ?.profile
@@ -98,6 +100,7 @@ private fun ProfilePreviewContent(
     state: ProfileUiState,
     pseudoHint: String,
     avatarUrlHint: String?,
+    onIntent: (ProfileIntent) -> Unit,
     onOpenFullProfile: () -> Unit,
 ) {
     Column(
@@ -121,6 +124,13 @@ private fun ProfilePreviewContent(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
+                Spacer(Modifier.height(4.dp))
+                OutlinedButton(
+                    onClick = { onIntent(ProfileIntent.Retry) },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) {
+                    Text("Réessayer")
+                }
             }
 
             is ProfileUiState.Mode.Loaded -> {

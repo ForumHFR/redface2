@@ -78,9 +78,4 @@ class ProfileViewModel @AssistedInject constructor(
         ): ProfileViewModel
     }
 
-    companion object {
-        const val ARG_USER_ID = "userId"
-        const val ARG_PSEUDO = "pseudo"
-        const val ARG_AVATAR_URL = "avatarUrl"
-    }
 }
