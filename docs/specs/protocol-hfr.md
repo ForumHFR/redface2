@@ -214,6 +214,10 @@ La réponse succès est identique pour une réponse simple et pour une quote (`w
 - reply simple : refresh vers le topic avec ancre `#bas` ;
 - quote : refresh vers le topic avec ancre `#t{numreponse_cité}` dans la capture dédiée.
 
+L'URL de refresh suit la forme `…/{slug}-sujet_{topicId}_{page}.htm#{ancre}`. Le segment `sujet_{topicId}_{page}` porte **deux** entiers exploitables : le `topicId` (1er groupe) et la `page` d'arrivée (2e groupe). `ReplySubmitResponseParser` les extrait tous deux, plus le `numreponse` quand l'ancre est `#t{N}`.
+
+**Create-topic (#206)** : un POST `bddpost.php` de nouveau topic réussit avec la **même shape** que reply/quote (même endpoint, même page de succès). Le `topicId` extrait du refresh est donc la clé du sujet fraîchement créé — c'est le seul moyen de l'apprendre, HFR ne le renvoie pas ailleurs. L'extraction est validée contre les fixtures réelles `write_reply_success_response.html` (`sujet_35395_20.htm#bas`) et `write_quote_success_response.html` (`sujet_148750_1.htm#t2523833`). Une fixture dédiée `write_create_topic_success_response.html` n'a **pas** été capturée : un POST live créerait un vrai topic public non supprimable par un compte non-modo ; à capturer uniquement sur une cat sandbox avec accord explicite, pour durcir le parser contre une éventuelle divergence de shape propre au create-topic.
+
 Le client doit recharger la page topic et localiser le nouveau `numreponse` dans le topic. Lors du test anti-flood, les trois réponses consécutives acceptées ont créé `numreponse=2784599`, `2784600`, puis `2784601`.
 
 Erreurs observées :

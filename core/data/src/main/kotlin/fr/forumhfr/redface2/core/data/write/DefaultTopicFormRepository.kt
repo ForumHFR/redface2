@@ -318,22 +318,25 @@ class DefaultTopicFormRepository @Inject constructor(
                 val responseHtml = hfrClient.submitNewTopic(formBody)
                 // The wire endpoint is shared with reply/quote ; the same
                 // classifier disambiguates Success vs the 4 failure variants.
-                // The success URL parsing (newTopicId / newNumreponse) is
-                // deferred until a real `write_create_topic_success_response.html`
-                // fixture is captured ; surfacing null on success is honest
-                // and lets the navigation host fall back to the category
-                // refresh path.
+                // The success `<meta refresh>` URL shape is identical across
+                // bddpost.php flows (`…/sujet_{topicId}_{page}.htm#t{numreponse}`),
+                // so the shared parser extracts the freshly-allocated topic id and
+                // numreponse — validated against the real reply/quote success
+                // fixtures (#206). When HFR omits the segment (unexpected shape),
+                // the values stay null and the navigation host falls back to the
+                // category refresh path.
                 when (val outcome = replySubmitResponseParser.parse(responseHtml)) {
                     is ReplySubmitResult.Success -> {
                         diagnostics.record(
                             DiagnosticsLog.Level.INFO,
                             LOG_TAG,
                             "POST new-topic Success hasRefreshUrl=${outcome.refreshUrl != null} " +
+                                "hasTopicId=${outcome.topicId != null} " +
                                 "targetCat=${context.cat} targetSubcat=$selectedSubcat",
                         )
                         NewTopicSubmitResult.Success(
-                            newTopicId = null,
-                            newNumreponse = null,
+                            newTopicId = outcome.topicId,
+                            newNumreponse = outcome.numreponse,
                             targetCat = context.cat,
                             targetSubcat = selectedSubcat,
                             refreshUrl = outcome.refreshUrl,

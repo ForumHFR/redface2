@@ -755,6 +755,10 @@ private fun RedfaceNavHost(
                                     post = newTopicId,
                                     page = 1,
                                     scrollTo = newNumreponse,
+                                    // Bump the route key like the reply/quote/edit paths so the
+                                    // topic screen builds fresh (not from a stale cache entry)
+                                    // and scrolls to the freshly-created first post (#206).
+                                    submitSignal = System.currentTimeMillis(),
                                 ),
                             )
                         } else {

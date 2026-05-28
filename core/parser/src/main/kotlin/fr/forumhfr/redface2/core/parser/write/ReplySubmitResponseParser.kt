@@ -66,7 +66,13 @@ class ReplySubmitResponseParser {
         // Use the raw HTML rather than Jsoup so we keep the literal `1; url=…`
         // structure intact ; Jsoup normalises the attribute order in older releases.
         val refresh = META_REFRESH_REGEX.find(html)?.groupValues?.getOrNull(1)?.trim()
-        val page = refresh?.let { url -> PAGE_NUMBER_REGEX.find(url)?.groupValues?.getOrNull(1)?.toIntOrNull() }
+        // `sujet_{topicId}_{page}` — `SUJET_SEGMENT_REGEX` captures both integers in one
+        // pass. The topic id is informational for reply/quote/edit (the caller already
+        // knows it) but is the only way to learn the freshly-allocated id on create-topic
+        // (#206) ; the bddpost.php success URL shape is identical across all four flows.
+        val sujet = refresh?.let { url -> SUJET_SEGMENT_REGEX.find(url) }
+        val topicId = sujet?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val page = sujet?.groupValues?.getOrNull(2)?.toIntOrNull()
         // Quote / edit / edit-FP anchor `#t{numreponse}` on the success URL, so the topic
         // screen can scroll to the new (or updated) post after the post-submit refresh.
         // Plain reply anchors `#bas` instead — no numreponse, caller falls back to
@@ -74,7 +80,12 @@ class ReplySubmitResponseParser {
         val numreponse = refresh?.let { url ->
             NUMREPONSE_FRAGMENT_REGEX.find(url)?.groupValues?.getOrNull(1)?.toIntOrNull()
         }
-        return ReplySubmitResult.Success(refreshUrl = refresh, targetPage = page, numreponse = numreponse)
+        return ReplySubmitResult.Success(
+            refreshUrl = refresh,
+            targetPage = page,
+            numreponse = numreponse,
+            topicId = topicId,
+        )
     }
 
     private fun looksLikeInvalidTokenPlainText(head: String): Boolean {
@@ -106,9 +117,11 @@ class ReplySubmitResponseParser {
         private val META_REFRESH_REGEX: Regex =
             Regex("""<meta[^>]*http-equiv="Refresh"[^>]*content="\d+\s*;\s*url=([^"]+)""", RegexOption.IGNORE_CASE)
 
-        // HFR's success refresh URLs look like `…/sujet_35395_20.htm#bas` — the second
-        // integer between underscores is the page.
-        private val PAGE_NUMBER_REGEX: Regex = Regex("""sujet_\d+_(\d+)""", RegexOption.IGNORE_CASE)
+        // HFR's success refresh URLs look like `…/{slug}-sujet_35395_20.htm#bas` — the
+        // `sujet_{topicId}_{page}` segment carries both the topic id (group 1) and the
+        // landing page (group 2). create-topic (#206) relies on group 1 for the freshly
+        // allocated topic id ; reply/quote/edit use group 2 for scroll restoration.
+        private val SUJET_SEGMENT_REGEX: Regex = Regex("""sujet_(\d+)_(\d+)""", RegexOption.IGNORE_CASE)
 
         // Quote / edit / edit-FP refresh URLs end with `#t{numreponse}`. Plain reply
         // ends with `#bas` — no match, the call site gets null and falls back to

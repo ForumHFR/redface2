@@ -9,17 +9,19 @@ package fr.forumhfr.redface2.core.model.write
  * thread. The two cannot be retrofitted onto the same data class without
  * polluting the reply path with create-only fields.
  *
- * `newTopicId` and `newNumreponse` are nullable on purpose : the Phase 2A
- * capture campaign did **not** record a `write_create_topic_success_response.html`
- * fixture, so until that capture lands the repository classifies success via
- * the same `ReplySubmitResponseParser` heuristic as reply/quote and forwards
- * `(null, null)` rather than guess a URL format. Navigation falls back to the
- * `CategoryRoute` refresh path in that case.
+ * `newTopicId` and `newNumreponse` are extracted from the `<meta refresh>` URL
+ * of the `bddpost.php` success page, whose `…/sujet_{topicId}_{page}.htm#t{numreponse}`
+ * shape is identical across reply / quote / edit / create-topic — validated against
+ * the real `write_reply_success_response.html` / `write_quote_success_response.html`
+ * fixtures (#206). They stay nullable because HFR may, in an unexpected response,
+ * omit the segment ; in that case navigation falls back to the `CategoryRoute`
+ * refresh path rather than jump to a half-known topic. A dedicated
+ * `write_create_topic_success_response.html` capture would harden the parser against
+ * a create-only shape divergence, but is not required for the extraction itself.
  *
  * `refreshUrl` is the raw URL HFR returned in the `<meta http-equiv=Refresh>` ;
- * we keep it around for downstream parsing once the success fixture exists,
- * but it must never be logged in `DiagnosticsLog` (contains the pseudo + topic
- * id in plain text).
+ * we keep it around for downstream parsing / diagnostics, but it must never be
+ * logged in `DiagnosticsLog` (contains the pseudo + topic id in plain text).
  */
 sealed interface NewTopicSubmitResult {
     data class Success(

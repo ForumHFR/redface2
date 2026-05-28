@@ -325,6 +325,36 @@ class DefaultTopicFormRepositoryTest {
     }
 
     @Test
+    fun `POST new-topic Success surfaces newTopicId and newNumreponse from the refresh URL`() = runTest {
+        // #206 — create-topic shares bddpost.php with quote, so its success `<meta refresh>`
+        // has the identical `…/sujet_{newTopicId}_{page}.htm#t{numreponse}` shape. We replay
+        // the real `write_quote_success_response.html` (sujet_148750_1.htm#t2523833) to prove
+        // the repository now forwards the freshly-allocated (topicId, numreponse) instead of
+        // the historical (null, null). The navigation host uses these to jump straight to the
+        // created topic.
+        server.enqueue(MockResponse().setBody(fixture("write_create_topic_form_android_cat.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_quote_success_response.html")))
+
+        val context = NewTopicContext(cat = 23, entrySubcat = 550)
+        val form = repository.fetchNewTopicForm(context)
+        val result = repository.submitNewTopic(
+            context = context,
+            form = form,
+            subject = "Topic test Redface 2 #206",
+            bbcodeContent = "Contenu du nouveau topic.",
+            selectedSubcat = 562,
+            options = ReplyFormOptions(signatureEnabled = true),
+        )
+
+        assertTrue("Create-topic must classify Success — got $result", result is NewTopicSubmitResult.Success)
+        val success = result as NewTopicSubmitResult.Success
+        assertEquals(148_750, success.newTopicId)
+        assertEquals(2_523_833, success.newNumreponse)
+        assertEquals(23, success.targetCat)
+        assertEquals(562, success.targetSubcat)
+    }
+
+    @Test
     fun `POST new-topic with signature off omits the wire key`() = runTest {
         // Browser-style submit : an unchecked option is absent from the POST,
         // not present-and-false. We pin this contract for the three toggles

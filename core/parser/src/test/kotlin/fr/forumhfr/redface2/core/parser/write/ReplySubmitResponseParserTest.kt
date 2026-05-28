@@ -28,6 +28,8 @@ class ReplySubmitResponseParserTest {
         // Issue #200 — plain reply anchors `#bas`, so the parser cannot extract a numreponse
         // and the topic screen falls back to scrolling to the end of the refreshed page.
         assertNull(success.numreponse)
+        // #206 — topic id is the first integer of `sujet_{topicId}_{page}`.
+        assertEquals(35_395, success.topicId)
     }
 
     @Test
@@ -60,6 +62,9 @@ class ReplySubmitResponseParserTest {
         // The fixture refreshes to …redface2-temporaire-bbcode-sujet_148750_1.htm#t2523833
         assertEquals(1, success.targetPage)
         assertEquals(2_523_833, success.numreponse)
+        // #206 — same `sujet_{topicId}_{page}` segment carries the topic id ; this real
+        // quote fixture is the reference for create-topic's identical success shape.
+        assertEquals(148_750, success.topicId)
     }
 
     @Test
@@ -141,6 +146,31 @@ class ReplySubmitResponseParserTest {
         assertNull(result.targetPage)
         // No `#t{N}` fragment either — the `liste_sujet` URL doesn't carry a post anchor.
         assertNull(result.numreponse)
+        // #206 — `liste_sujet` has no `sujet_{topicId}_{page}` segment, so topicId is null
+        // and the create-topic navigation host falls back to the category refresh path.
+        assertNull(result.topicId)
+    }
+
+    @Test
+    fun `create-topic success shape yields topicId, page and numreponse together`() {
+        // #206 — create-topic POSTs to the same `bddpost.php` as quote, so its success
+        // `<meta refresh>` carries the identical `…/sujet_{newTopicId}_1.htm#t{numreponse}`
+        // shape. We don't yet have a dedicated live create-topic capture (capturing one
+        // means POSTing a real public topic), so this pins the extraction the repository
+        // relies on against the canonical shape: a fresh topic lands on page 1 with the
+        // first post's numreponse anchored. The reply/quote fixtures above already prove
+        // the same regex on real HFR HTML.
+        val html = """
+            <html><head>
+              <meta http-equiv="Refresh" content="1; url=/hfr/Programmation/Divers-6/mon-test-sujet_148751_1.htm#t2523900" />
+            </head><body>
+              <div class="hop">Votre réponse a été postée avec succès !</div>
+            </body></html>
+        """.trimIndent()
+        val success = parser.parse(html) as ReplySubmitResult.Success
+        assertEquals(148_751, success.topicId)
+        assertEquals(1, success.targetPage)
+        assertEquals(2_523_900, success.numreponse)
     }
 
     private fun readFixture(name: String): String {

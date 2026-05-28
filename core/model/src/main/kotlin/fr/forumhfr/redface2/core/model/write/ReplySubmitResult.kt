@@ -21,11 +21,19 @@ sealed interface ReplySubmitResult {
      * created/edited post). For a plain reply HFR anchors `#bas` instead, so
      * [numreponse] is null and the screen falls back to scrolling to the end of
      * the refreshed page — issue #200.
+     *
+     * [topicId] is the first integer of the `sujet_{topicId}_{page}` segment of
+     * the refresh URL. For reply / quote / edit the caller already knows the topic
+     * it posted to, so it's informational ; it matters for **create-topic** (#206),
+     * where the freshly-allocated topic id is only learnable from this URL — the
+     * `bddpost.php` success shape is identical across all four flows, so the same
+     * extraction serves them all.
      */
     data class Success(
         val refreshUrl: String?,
         val targetPage: Int?,
         val numreponse: Int? = null,
+        val topicId: Int? = null,
     ) : ReplySubmitResult
 
     /** HFR refused to post and surfaced one of the known reasons. */
