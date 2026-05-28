@@ -17,6 +17,16 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
+---
+
+## v64 — `0.3.24` — 2026-05-28
+
+**Statut** : `closed`
+**Commit** : head de `feature/phase2-finish-create-topic-206` (#206 ; profil #208 déjà mergé via PR #211), dispatch `release.yml` `play_track=alpha`
+**Fichier** : AAB uploadé sur le canal Play closed alpha
+
+Phase 2 finish — profil utilisateur (#208) + navigation directe vers le sujet créé après un create-topic (#206). Bump versionCode 63→64.
+
 ### Added
 - **#206 — Create topic : navigation directe vers le sujet créé** : après une création de topic réussie, l'app ouvre directement le nouveau sujet à la bonne ancre au lieu de retomber sur la liste de la sous-catégorie. `ReplySubmitResponseParser` extrait désormais le `topicId` (1er entier du segment `sujet_{topicId}_{page}` de l'URL `<meta refresh>`) en plus de la page et du numreponse ; `DefaultTopicFormRepository.submitNewTopic` le branche dans `NewTopicSubmitResult.Success(newTopicId, newNumreponse)` et la navigation propage `submitSignal` pour forcer un rebuild frais. La shape de succès `bddpost.php` étant identique à reply/quote/edit, l'extraction est validée contre les fixtures réelles `write_reply_success_response.html` / `write_quote_success_response.html`. Capture dédiée `write_create_topic_success_response.html` non requise pour l'extraction (la réponse de succès d'un POST de création n'a jamais été sauvegardée en Phase 2A ; elle ne durcirait que contre une divergence d'ancre, déjà gérée par le fallback null).
 - **#208 — Profil utilisateur** : tap sur l'avatar ou le pseudo d'un post ouvre une `ModalBottomSheet` résumé (avatar carré/arrondi, pseudo, localisation, date d'inscription, nombre de posts, bouton « Voir le profil complet »). Naviguer vers la page complète affiche en plus la signature. Le bouton « Derniers messages » est désactivé (marqué « à venir ») faute de route stable.
@@ -34,6 +44,9 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 - **i18n** : strings UI de `:feature:profile` externalisées dans `feature/profile/src/main/res/values/strings.xml` ; `ProfileViewModel` expose `ErrorKind` + `cause` (plus de string `"Erreur inconnue"` côté VM).
 - **Retry race** : `ProfileViewModel` cancelle le `loadJob` précédent avant chaque retry pour empêcher les coroutines concurrentes de race sur `_state`.
 - **Konsist** : nouveau test qui vérifie qu'aucun fichier de `:feature:topic` n'importe `fr.forumhfr.redface2.feature.profile.*`.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 64`, `versionName = "0.3.24"`.
 
 ---
 
