@@ -80,7 +80,7 @@ graph TB
     style TOPIC fill:#e74c3c,color:#fff
 ```
 
-> **Lecture du graphe** : ce diagramme décrit le **flow utilisateur**, pas le découpage en `NavKey`. Les huit routes typées réelles sont `FlagsListRoute`, `ForumRoute`, `CategoryRoute`, `TopicRoute`, `SearchRoute`, `MessagesRoute`, `PostEditorRoute`, `TopicFormRoute` (cf. § Implémentation ci-dessous). Plusieurs nœuds du graphe sont des **states internes au screen** plutôt que des routes distinctes : `TABMP` / `TABMULTI` correspondent à `MessageTab.CLASSIC` / `MessageTab.MULTI` dans le `MessagesState` ; `CATS` / `SUBCATS` / `TOPICLIST` sont couverts par la même `CategoryRoute(cat, subcat?, page)`. Le mapping flow → routes typées est explicite dans le code de `entryProvider` plus bas.
+> **Lecture du graphe** : ce diagramme décrit le **flow utilisateur**, pas le découpage en `NavKey`. Les routes typées réelles sont `FlagsListRoute`, `ForumRoute`, `CategoryRoute`, `TopicRoute`, `SearchRoute`, `MessagesRoute`, `PostEditorRoute`, `TopicFormRoute`, `ProfileFullRoute` (Phase 2 finish #208) (cf. § Implémentation ci-dessous). Plusieurs nœuds du graphe sont des **states internes au screen** plutôt que des routes distinctes : `TABMP` / `TABMULTI` correspondent à `MessageTab.CLASSIC` / `MessageTab.MULTI` dans le `MessagesState` ; `CATS` / `SUBCATS` / `TOPICLIST` sont couverts par la même `CategoryRoute(cat, subcat?, page)`. Le mapping flow → routes typées est explicite dans le code de `entryProvider` plus bas.
 
 ---
 
@@ -104,6 +104,31 @@ L'écran le plus important de l'app. Affiche les topics suivis par l'utilisateur
 - Tap → ouvrir le topic à la dernière position non lue
 - Long press → menu contextuel (retirer drapeau, copier URL, partager)
 - Swipe → retirer le drapeau (avec undo)
+
+### Profil utilisateur (Phase 2 finish #208)
+
+Accessible depuis la lecture topic via un tap sur l'avatar ou le pseudo d'un post (quand `Post.profileId != null`).
+
+**Flow :**
+1. `TopicScreen` émet `onOpenProfile(userId, pseudo, avatarUrl)` — callback sans dépendance sur `:feature:profile`.
+2. `:app` (`RedfaceApp`) ouvre une **`ModalBottomSheet`** (`ProfilePreviewSheet`) avec : avatar carré/arrondi, pseudo, localisation, date d'inscription, nombre de posts, bouton « Voir le profil complet ».
+3. Si le chargement échoue, la sheet reste lisible avec le pseudo/avatar hint + message d'erreur.
+4. Bouton « Voir le profil complet » navigue vers `ProfileFullRoute(userId, pseudo, avatarUrl?)` sur le back stack de l'onglet actif.
+5. `ProfileFullRoute` affiche la page complète avec tous les champs disponibles.
+
+**Routes :**
+
+```kotlin
+@Serializable data class ProfileFullRoute(
+    val userId: Int,        // clé canonique — jamais null
+    val pseudo: String,     // hint d'affichage avant chargement
+    val avatarUrl: String? = null, // hint d'affichage avant chargement
+) : RedfaceNavKey
+```
+
+**Contrainte de frontière** : `:feature:topic` ne dépend **pas** de `:feature:profile`. Le callback `onOpenProfile` est la seule surface d'interaction. `:app` possède la `ModalBottomSheet` et la route complète.
+
+**Limites connues** : le bouton « Derniers messages » dans la page complète est désactivé (marqué « à venir »). Aucune route stable vers les posts d'un utilisateur n'existe en Phase 2. La route sera activée dans une future PR quand la recherche par auteur sera disponible.
 
 ### Topic (lecture)
 

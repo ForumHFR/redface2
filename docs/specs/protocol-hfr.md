@@ -95,6 +95,46 @@ Un « annuler la suppression » n'est **pas réalisable** : `addflag.php` ne sai
 
 > **Hors scope #99** : la suppression en masse (form POST `manageaction.php`) n'est pas implémentée.
 
+### Profil public — `/hfr/profil-{userId}.htm` (#208, Phase 2 finish)
+
+**GET anonyme** (pas de session requise). URL exacte :
+
+```
+GET /hfr/profil-{userId}.htm
+```
+
+- `{userId}` = identifiant numérique HFR. La **clé de navigation canonique** est toujours `userId`, pas le pseudo (qui peut changer).
+- Auth **non requise** pour les profils publics. Le contenu est identique en session anonyme et authentifiée — seule la présence des cookies de session change, pas le rendu de la page profil.
+- Utilise l'`@AnonymousClient` dans `HfrClient.getProfile` pour ne pas déclencher de mise à jour des drapeaux.
+
+**Structure HTML** :
+- `body#unique__user_page__view_user_profile` — identifiant de corps de page fiable.
+- `h4.Ext` — titre « Informations sur : {pseudo} ».
+- `table.main tr.profil` — rows de données, chaque row ayant `td.profilCase2` (label) et `td.profilCase3` (valeur).
+- `div.avatar_center img[src]` — image avatar. En session live, `src` est une URL absolue CDN ; dans les fixtures browser-save, un chemin relatif — le parser reconstruit l'URL canonique depuis le pattern `mesdiscussions-{N}.png`.
+
+**Champs promus par le parser** :
+
+| Label HFR | Champ `UserProfile` | Notes |
+|---|---|---|
+| `Pseudo` | `pseudo` | |
+| `Nombre de messages postés` | `postCount: Int?` | |
+| `Date d'arrivée sur le forum` | `registeredAt: String?` | Format `DD/MM/YYYY` brut |
+| `Ville` | `location: String?` | Null si vide |
+| `Signature des messages` | `signatureHtml: String?` | HTML brut (BBCode rendu par HFR) |
+
+**Champs HFR non promus** : Email (obfusqué par HFR → `"Vous n'avez pas accès à cette information"`), Date de naissance, Sexe, Profession, Loisirs, Citation personnelle, Statut. Ces champs sont conservés dans `rawFields` pour forward-compatibility.
+
+**Limites connues** :
+- Emails obfusqués : ne jamais tenter de déobfusquer (cf. AGENTS.md § "Emails obfusqués").
+- `registeredAt` reste `String` : le format HFR `DD/MM/YYYY` n'est pas un ISO standard. Promotion en `LocalDate` ou `Instant` reportée à un use-case concret (tri, calcul "membre depuis N ans").
+- `signatureHtml` : rendu par HFR depuis BBCode propriétaire. Round-trip BBCode hors scope.
+- Les posts « Publicité » (régies intégrées) n'ont pas de lien profil → `Post.profileId = null`.
+
+**Fixtures** :
+- `core/parser/src/test/resources/fixtures/profile/profile_xatrix_authenticated.html` — userId=54596, session auth, fixture complète avec signature.
+- `core/parser/src/test/resources/fixtures/profile/profile_ezzz_anonymous.html` — userId=15867, session anonyme, pas de localisation.
+
 ---
 
 ## Form fields critiques

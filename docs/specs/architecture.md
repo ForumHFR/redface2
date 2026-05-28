@@ -63,6 +63,7 @@ graph TB
     APP --> FA[":feature:auth"]
     APP --> FS[":feature:settings"]
     APP --> FSR[":feature:search"]
+    APP --> FPR[":feature:profile"]
     APP --> CDATA[":core:data"]
 
     FFL --> CDOM[":core:domain"]
@@ -91,6 +92,9 @@ graph TB
     FSR --> CDOM
     FSR --> CU
 
+    FPR --> CDOM
+    FPR --> CU
+
     CDOM --> CM[":core:model"]
     CEXT --> CM
     CU --> CM
@@ -112,6 +116,7 @@ graph TB
     style CD fill:#3498db,color:#fff
     style CU fill:#9b59b6,color:#fff
     style CEXT fill:#8e44ad,color:#fff
+    style FPR fill:#1abc9c,color:#fff
 ```
 
 ### Modules core
@@ -141,6 +146,7 @@ Les features ne dépendent que de `:core:domain` (interfaces) et `:core:ui` (com
 | `:feature:auth` | Login HFR | `:core:domain`, `:core:ui` |
 | `:feature:search` | Recherche dans les topics et posts, filtres | `:core:domain`, `:core:ui` |
 | `:feature:settings` | Préférences, thème, gestion cache | `:core:domain`, `:core:ui` |
+| `:feature:profile` | Profil utilisateur — bottom sheet résumé + page complète (Phase 2 finish #208) | `:core:domain`, `:core:ui` |
 
 ### Modules feature (extensions communautaires — Phase 4)
 

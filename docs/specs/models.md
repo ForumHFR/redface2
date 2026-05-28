@@ -18,12 +18,35 @@ Structures du domaine métier.
 
 Certains modèles référencés dans `navigation.md` et `extensions.md` sont volontairement laissés à définir au moment d'implémenter leurs écrans, pour éviter la dette de spec pré-code :
 
-- **`UserProfile`** — données du popup profil rapide (avatar, date inscription, nombre posts, localisation). Nécessaire Phase 2 pour la feature "Voir un profil utilisateur" (listée dans la section [Lecture du scope]({{ site.baseurl }}/specs/scope#lecture)) et son extension Phase 4 ["Infos profil rapides"]({{ site.baseurl }}/specs/extensions#infos-profil-rapides).
+- **`UserProfile`** — livré en Phase 2 finish (#208) — voir section [Profil utilisateur](#profil-utilisateur) ci-dessous.
 - **`UserStats`** — statistiques détaillées utilisateur (posts par cat, activité, topics créés). Nécessaire Phase 4 pour la feature "Stats utilisateur".
 
 `TopicSummary` est livré en Phase 1C-A pour le Forum et la liste des topics — voir la section [Catégories et browsing](#catégories-et-browsing) ci-dessous.
 
 Ces autres modèles émergeront du premier prototype de chaque écran. Pas de spec préventive à faire maintenant.
+
+---
+
+---
+
+## Profil utilisateur
+
+Phase 2 finish (#208). Modèle `UserProfile` dans `:core:model`, parser dans `:core:parser/profile/ProfileParser.kt`. Champs fragiles nullables pour tolérance aux variations HFR.
+
+```kotlin
+data class UserProfile(
+    val userId: Int,            // clé canonique — toujours non-null
+    val pseudo: String,
+    val avatarUrl: String?,     // CDN HFR reconstruit depuis mesdiscussions-{N}.png
+    val registeredAt: String?,  // format HFR brut "DD/MM/YYYY" — promotion Instant reportée
+    val postCount: Int?,
+    val location: String?,      // ville HFR, null si vide ou absent
+    val signatureHtml: String?, // HTML brut rendu par HFR — round-trip BBCode hors scope MVP
+    val rawFields: Map<String, String> = emptyMap(), // champs non promus (Profession, Loisirs, …)
+)
+```
+
+`Post.profileId: Int?` (Phase 2 finish #208) — id numérique HFR extrait depuis `<a href="/hfr/profil-{N}.htm">` dans le toolbar de chaque post. Null pour les posts « Publicité » ou les reads anonymes sans lien profil. Persisté en Room v6 (`MIGRATION_5_6`). Clé canonique pour la navigation vers le profil — `post.author` et `post.avatarUrl` sont des hints d'affichage.
 
 ---
 
