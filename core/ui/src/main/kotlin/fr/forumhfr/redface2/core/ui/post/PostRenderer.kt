@@ -530,6 +530,11 @@ internal fun imageInlineContent(image: PostInline.InlineImage): InlineTextConten
         placeholder = Placeholder(
             width = box.placeholderWidth,
             height = box.placeholderHeight,
+            // Inline [img] deliberately keeps Center, unlike smileys (which moved to AboveBaseline
+            // for web parity in #203). An embedded image is a 240×180 block of user media, not an
+            // emotive glyph riding the text baseline: centring it on the line reads better and
+            // matches how a wrapped thumbnail sits next to text. Do not "unify" this with the
+            // smiley alignment without a visual pass — the two contracts are intentionally distinct.
             placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
         ),
     ) {
