@@ -118,6 +118,39 @@ class PostRendererInlineLayoutTest {
     }
 
     @Test
+    fun `perso smiley placeholder bottom sits on the text baseline for web parity`() {
+        // #203 — HFR serves smileys as bare <img> with no vertical-align, so the browser uses the
+        // CSS default `baseline` (the bottom of the sprite rests on the text baseline). RF2 must
+        // match that: `PlaceholderVerticalAlign.AboveBaseline` aligns the placeholder bottom with
+        // the baseline. The previous `Center` straddled the 50sp perso bucket across the line centre
+        // (≈15sp above AND below a 20sp body line), the "smiley au milieu de la ligne, par-dessus le
+        // texte" reported in #203. We mount the smiley between real text so the first baseline is
+        // anchored by the font metrics, then assert the placeholder bottom lands on it. A regression
+        // back to `Center` pushes the bottom well below the baseline and fails this assertion.
+        val capture = LayoutCapture()
+        mountInlineContent(
+            capture,
+            listOf(
+                PostInline.Text("ab "),
+                persoSmileyInlines().first(),
+                PostInline.Text(" cd"),
+            ),
+        )
+        capture.fontScale.value = 1f
+        composeTestRule.waitForIdle()
+        val rect = requireSingleRect(capture, "perso smiley")
+        val baseline = requireNotNull(capture.layout.value?.firstBaseline) {
+            "perso smiley : no TextLayoutResult / firstBaseline captured"
+        }
+        assertCloseEnough(
+            label = "perso smiley placeholder bottom vs first baseline",
+            expected = baseline,
+            actual = rect.bottom,
+            tolerance = BASELINE_TOLERANCE_PX,
+        )
+    }
+
+    @Test
     fun `inline image placeholder lands on the policy bucket at fontScale 1`() {
         val capture = LayoutCapture()
         mountInlineContent(capture, inlineImageInlines())
@@ -346,6 +379,14 @@ class PostRendererInlineLayoutTest {
          * placeholder tests use.
          */
         const val SIZE_TOLERANCE_PX: Float = 0.5f
+
+        /**
+         * Baseline alignment (#203) tolerates a touch more than raw size: the placeholder bottom is
+         * compared against `firstBaseline`, which the layout pass derives from the font's descent
+         * rounding on top of the placeholder height. 2 px stays well under one body-line of slack
+         * while absorbing that sub-pixel quantisation.
+         */
+        const val BASELINE_TOLERANCE_PX: Float = 2f
 
         /** Ratio comparisons need a smaller relative tolerance. 0.01 covers float rounding. */
         const val RATIO_TOLERANCE: Float = 0.01f

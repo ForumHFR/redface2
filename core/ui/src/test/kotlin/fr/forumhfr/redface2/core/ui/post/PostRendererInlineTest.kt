@@ -137,7 +137,7 @@ class PostRendererInlineTest {
     }
 
     @Test
-    fun `builtin smiley with imageUrl uses the small bucket placeholder centred`() {
+    fun `builtin smiley with imageUrl uses the small bucket placeholder baseline-aligned`() {
         // Builtin smileys are typically 16x16 to 18x18 in HFR's icon set. The small bucket fits
         // them inline with body-medium text without a noticeable height bump on the line.
         val inlines = listOf(
@@ -162,8 +162,11 @@ class PostRendererInlineTest {
             placeholder.height,
         )
         assertEquals(
-            "smileys must align centred so the surrounding line height stretches symmetrically",
-            PlaceholderVerticalAlign.Center,
+            // #203 — HFR serves smileys as bare <img> (CSS default vertical-align: baseline), so RF2
+            // aligns the placeholder bottom with the text baseline for web parity instead of
+            // centring it across the line (which straddled tall perso buckets over the body line).
+            "smileys must align above the baseline to match HFR's web rendering",
+            PlaceholderVerticalAlign.AboveBaseline,
             placeholder.placeholderVerticalAlign,
         )
     }
@@ -201,8 +204,9 @@ class PostRendererInlineTest {
             placeholder.width,
         )
         assertEquals(
-            "perso smileys must align centred for symmetric line-height stretch",
-            PlaceholderVerticalAlign.Center,
+            // #203 — same web-parity rule as builtin: baseline-aligned, not centred on the line.
+            "perso smileys must align above the baseline to match HFR's web rendering",
+            PlaceholderVerticalAlign.AboveBaseline,
             placeholder.placeholderVerticalAlign,
         )
     }

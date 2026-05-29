@@ -552,7 +552,15 @@ internal fun smileyInlineContent(smiley: PostInline.Smiley): InlineTextContent {
         placeholder = Placeholder(
             width = box.placeholderWidth,
             height = box.placeholderHeight,
-            placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
+            // #203 — web parity. HFR serves both builtin (`/icones/…`) and perso (`/images/perso/…`)
+            // smileys as bare `<img>` with no `vertical-align`, so the browser falls back to the CSS
+            // default `baseline`: the bottom of the sprite sits on the text baseline. `Center` (the
+            // previous value) instead straddled the placeholder across the line centre, which on a
+            // 50sp perso bucket overflowed ~15sp above AND below a 20sp body line — the "smiley au
+            // milieu de la ligne, par-dessus le texte" reported in #203. `AboveBaseline` reproduces
+            // the web baseline alignment. Verified against captured fixtures (no perso/builtin smiley
+            // carries a width/height/style attribute in a post body).
+            placeholderVerticalAlign = PlaceholderVerticalAlign.AboveBaseline,
         ),
     ) {
         AsyncImage(
