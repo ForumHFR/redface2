@@ -325,6 +325,36 @@ class DefaultTopicFormRepositoryTest {
     }
 
     @Test
+    fun `POST new-topic classifies the real create success and exposes no topic id`() = runTest {
+        // #214 — replays the REAL create-topic success page captured live
+        // (`write_create_topic_success_response.html`, « Votre message a été posté avec
+        // succès ! », refresh to `…/liste_sujet-1.htm`). HFR redirects to the category
+        // LISTING and returns NO topic id, so the repository classifies Success but with
+        // `(newTopicId, newNumreponse) = (null, null)` — the navigation host then lands on
+        // the category listing (direct navigation to the created topic is impossible, #206).
+        server.enqueue(MockResponse().setBody(fixture("write_create_topic_form_android_cat.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_create_topic_success_response.html")))
+
+        val context = NewTopicContext(cat = 23, entrySubcat = 550)
+        val form = repository.fetchNewTopicForm(context)
+        val result = repository.submitNewTopic(
+            context = context,
+            form = form,
+            subject = "Topic test Redface 2 #214",
+            bbcodeContent = "Contenu du nouveau topic.",
+            selectedSubcat = 562,
+            options = ReplyFormOptions(signatureEnabled = true),
+        )
+
+        assertTrue("Create-topic must classify Success — got $result", result is NewTopicSubmitResult.Success)
+        val success = result as NewTopicSubmitResult.Success
+        assertEquals(null, success.newTopicId)
+        assertEquals(null, success.newNumreponse)
+        assertEquals(23, success.targetCat)
+        assertEquals(562, success.targetSubcat)
+    }
+
+    @Test
     fun `POST new-topic with signature off omits the wire key`() = runTest {
         // Browser-style submit : an unchecked option is absent from the POST,
         // not present-and-false. We pin this contract for the three toggles

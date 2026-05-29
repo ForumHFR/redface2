@@ -332,6 +332,35 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `New mode success carries the posted subject for the listing highlight (#206)`() = runTest {
+        // HFR never returns the created topic id (#214), so the only handle the listing has
+        // to highlight the fresh row is the exact title the user posted. Assert the effect
+        // carries it even on the realistic null-id success path.
+        topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Success(
+            newTopicId = null,
+            newNumreponse = null,
+            targetCat = SAMPLE_CAT,
+            targetSubcat = SAMPLE_OTHER_SUBCAT,
+            refreshUrl = null,
+        )
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        viewModel.state.test {
+            expectMostRecentItem()
+            cancelAndIgnoreRemainingEvents()
+        }
+        viewModel.effects.test {
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Mon nouveau sujet")))
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            val effect = awaitItem() as TopicFormEffect.NewTopicCreated
+            assertNull(effect.newTopicId)
+            assertEquals("Mon nouveau sujet", effect.subject)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `New mode refetch after InvalidHashCheck does not clobber subject or draft`() = runTest {
         topicFormRepository.newTopicSubmitResult =
             NewTopicSubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)

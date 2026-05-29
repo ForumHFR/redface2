@@ -214,6 +214,10 @@ La réponse succès est identique pour une réponse simple et pour une quote (`w
 - reply simple : refresh vers le topic avec ancre `#bas` ;
 - quote : refresh vers le topic avec ancre `#t{numreponse_cité}` dans la capture dédiée.
 
+Pour reply / quote / edit, l'URL de refresh suit la forme `…/{slug}-sujet_{topicId}_{page}.htm#{ancre}`. Le segment `sujet_{topicId}_{page}` porte **deux** entiers exploitables : le `topicId` (1er groupe) et la `page` d'arrivée (2e groupe). `ReplySubmitResponseParser` les extrait tous deux, plus le `numreponse` quand l'ancre est `#t{N}`.
+
+**Create-topic (#214 / #206)** : la réponse de succès live `write_create_topic_success_response.html` utilise la phrase distincte « Votre message a été posté avec succès ! » et refresh vers la **liste de la catégorie** (`…/liste_sujet-1.htm`), pas vers le topic créé. HFR ne renvoie donc ni `topicId`, ni `numreponse` sur un create réussi. La navigation directe vers le sujet créé est impossible avec ce contrat ; Redface 2 revient sur la liste cible et met en évidence la ligne dont le titre correspond exactement au sujet posté.
+
 Le client doit recharger la page topic et localiser le nouveau `numreponse` dans le topic. Lors du test anti-flood, les trois réponses consécutives acceptées ont créé `numreponse=2784599`, `2784600`, puis `2784601`.
 
 Erreurs observées :
@@ -281,7 +285,7 @@ Pour un post normal, la réponse succès contient un refresh vers la page du top
 
 Les inconnues restantes sont explicitement limitées aux points suivants :
 
-- succès de création topic : formulaire GET capturé (`write_create_topic_form_android_cat.html`) et POST MVP livré en Phase 2E (#149), mais toujours pas de fixture `write_create_topic_success_response.html`. Impact : le submit classe le succès via `ReplySubmitResponseParser` sans extraire `newTopicId` / `newNumreponse` ; la navigation retombe sur la liste de la sous-catégorie cible + Toast tant qu'une capture succès réelle ne prouve pas le format du refresh ;
+- succès de création topic : formulaire GET capturé (`write_create_topic_form_android_cat.html`) et réponse POST succès capturée (`write_create_topic_success_response.html`). Contrat connu : refresh vers la liste, aucun id du topic créé. Limite restante : la navigation directe #206 est impossible ; workaround livré = highlight exact du titre dans la liste d'arrivée ;
 - sondage : les champs de formulaire FP sont observés, mais aucun POST avec sondage n'a été envoyé. Impact : création/édition de sondage hors MVP écriture ;
 - `verifrequet=1100` : valeur observée dans tous les formulaires, pas de variant négatif testé. Impact : envoyer la valeur observée telle quelle ;
 - second paramètre de `[quotemsg=numreponse,X,user_id]` : valeurs observées `768`, `640`, `1`; le sens exact reste opaque. Impact : ne pas reconstruire localement les quotes, réutiliser le `content_form` prérempli par HFR ;

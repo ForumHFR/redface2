@@ -58,6 +58,15 @@ class ReplySubmitResponseParser {
             // so `parseSuccess` reuses the same extraction.
             body.contains(EDIT_SUCCESS_MARKER, ignoreCase = true) -> parseSuccess(html)
 
+            // #214 — create-topic success uses its OWN sentence, distinct from reply and
+            // edit (captured live, cf. `write_create_topic_success_response.html`). Without
+            // this marker it fell through to Unknown → the app showed an error although the
+            // topic was created (risk of duplicates). NB : on a create, HFR's `<meta refresh>`
+            // points to the category LISTING (`…/liste_sujet-1.htm`), NOT to the new topic —
+            // it never returns the freshly-allocated topic id, so `parseSuccess` yields a
+            // null topicId/page/numreponse here and the navigation host lands on the listing.
+            body.contains(CREATE_SUCCESS_MARKER, ignoreCase = true) -> parseSuccess(html)
+
             else -> ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         }
     }
@@ -66,7 +75,13 @@ class ReplySubmitResponseParser {
         // Use the raw HTML rather than Jsoup so we keep the literal `1; url=…`
         // structure intact ; Jsoup normalises the attribute order in older releases.
         val refresh = META_REFRESH_REGEX.find(html)?.groupValues?.getOrNull(1)?.trim()
-        val page = refresh?.let { url -> PAGE_NUMBER_REGEX.find(url)?.groupValues?.getOrNull(1)?.toIntOrNull() }
+        // `sujet_{topicId}_{page}` — `SUJET_SEGMENT_REGEX` captures both integers in one
+        // pass. The topic id is informational for reply/quote/edit (the caller already
+        // knows it). Create-topic is different: HFR refreshes to `liste_sujet-1.htm`
+        // and exposes no topic id (#214), so this extraction stays null there.
+        val sujet = refresh?.let { url -> SUJET_SEGMENT_REGEX.find(url) }
+        val topicId = sujet?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val page = sujet?.groupValues?.getOrNull(2)?.toIntOrNull()
         // Quote / edit / edit-FP anchor `#t{numreponse}` on the success URL, so the topic
         // screen can scroll to the new (or updated) post after the post-submit refresh.
         // Plain reply anchors `#bas` instead — no numreponse, caller falls back to
@@ -74,7 +89,12 @@ class ReplySubmitResponseParser {
         val numreponse = refresh?.let { url ->
             NUMREPONSE_FRAGMENT_REGEX.find(url)?.groupValues?.getOrNull(1)?.toIntOrNull()
         }
-        return ReplySubmitResult.Success(refreshUrl = refresh, targetPage = page, numreponse = numreponse)
+        return ReplySubmitResult.Success(
+            refreshUrl = refresh,
+            targetPage = page,
+            numreponse = numreponse,
+            topicId = topicId,
+        )
     }
 
     private fun looksLikeInvalidTokenPlainText(head: String): Boolean {
@@ -103,12 +123,27 @@ class ReplySubmitResponseParser {
         // see `write_edit_success_response.html`.
         private const val EDIT_SUCCESS_MARKER: String = "votre message a été édité avec succès"
 
+        // #214 — create-topic success sentence, captured live 2026-05-29 ; see
+        // `write_create_topic_success_response.html`. Distinct from reply ("réponse
+        // postée") and edit ("message édité"). HFR refreshes to the category listing
+        // here, not to the new topic, so no topic id is recoverable on create.
+        private const val CREATE_SUCCESS_MARKER: String = "votre message a été posté avec succès"
+
         private val META_REFRESH_REGEX: Regex =
             Regex("""<meta[^>]*http-equiv="Refresh"[^>]*content="\d+\s*;\s*url=([^"]+)""", RegexOption.IGNORE_CASE)
 
-        // HFR's success refresh URLs look like `…/sujet_35395_20.htm#bas` — the second
-        // integer between underscores is the page.
-        private val PAGE_NUMBER_REGEX: Regex = Regex("""sujet_\d+_(\d+)""", RegexOption.IGNORE_CASE)
+        // reply / quote / edit success refresh URLs look like `…/{slug}-sujet_35395_20.htm#bas`
+        // — the `sujet_{topicId}_{page}` segment carries the topic id (group 1) and the
+        // landing page (group 2), used for scroll restoration. NB : create-topic does NOT
+        // hit this — its success refresh points to the category listing (`liste_sujet-1.htm`,
+        // no `sujet_{id}_{page}` segment), so topicId/page stay null on create (#214).
+        // The `(?<![a-z_])` lookbehind is what excludes a listing URL like
+        // `liste_sujet_1_2.htm` : there the char right before `sujet` is `_` (from
+        // `liste_`), so the lookbehind rejects the match. A real thread segment is
+        // preceded by `/` or `-` (e.g. `…-sujet_35395_20.htm`), which the lookbehind
+        // allows. (It's the `_`/letter exclusion that protects, not the `/`/`-` prefix.)
+        private val SUJET_SEGMENT_REGEX: Regex =
+            Regex("""(?<![a-z_])sujet_(\d+)_(\d+)""", RegexOption.IGNORE_CASE)
 
         // Quote / edit / edit-FP refresh URLs end with `#t{numreponse}`. Plain reply
         // ends with `#bas` — no match, the call site gets null and falls back to

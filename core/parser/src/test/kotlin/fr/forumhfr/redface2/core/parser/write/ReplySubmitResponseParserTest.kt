@@ -28,6 +28,8 @@ class ReplySubmitResponseParserTest {
         // Issue #200 — plain reply anchors `#bas`, so the parser cannot extract a numreponse
         // and the topic screen falls back to scrolling to the end of the refreshed page.
         assertNull(success.numreponse)
+        // #206 — topic id is the first integer of `sujet_{topicId}_{page}`.
+        assertEquals(35_395, success.topicId)
     }
 
     @Test
@@ -60,6 +62,9 @@ class ReplySubmitResponseParserTest {
         // The fixture refreshes to …redface2-temporaire-bbcode-sujet_148750_1.htm#t2523833
         assertEquals(1, success.targetPage)
         assertEquals(2_523_833, success.numreponse)
+        // #206 — same `sujet_{topicId}_{page}` segment carries the topic id for
+        // reply/quote/edit-style refresh URLs.
+        assertEquals(148_750, success.topicId)
     }
 
     @Test
@@ -73,6 +78,60 @@ class ReplySubmitResponseParserTest {
         // The fixture refreshes to …redface2-temporaire-ecriture-sujet_148749_1.htm#t2523829
         assertEquals(1, success.targetPage)
         assertEquals(2_523_829, success.numreponse)
+        // #206 — edit-FP also uses the `sujet_{topicId}_{page}#t{N}` shape, so topicId
+        // extraction stays pinned on real HFR bytes for topic-refresh flows.
+        assertEquals(148_749, success.topicId)
+    }
+
+    @Test
+    fun `create-topic success is classified via its own marker and exposes no topic id`() {
+        // #214 — real capture (`write_create_topic_success_response.html`, 2026-05-29).
+        // HFR's create-topic success uses « Votre message a été posté avec succès ! » —
+        // distinct from reply/edit, so before the fix it fell through to Unknown and the app
+        // showed an error although the topic WAS created. The refresh points to the category
+        // listing (`…/liste_sujet-1.htm`), NOT to the new topic, so HFR returns no topic id :
+        // topicId / targetPage / numreponse are all null and the caller lands on the listing.
+        val html = readFixture("write_create_topic_success_response.html")
+        val result = parser.parse(html)
+        assertTrue("create-topic success must classify as Success — got $result", result is ReplySubmitResult.Success)
+        val success = result as ReplySubmitResult.Success
+        val refreshUrl = requireNotNull(success.refreshUrl) { "refreshUrl must be present" }
+        assertTrue("refresh lands on the category listing", refreshUrl.contains("liste_sujet"))
+        assertNull("create success has no thread segment → no topic id", success.topicId)
+        assertNull(success.targetPage)
+        assertNull(success.numreponse)
+    }
+
+    @Test
+    fun `a refresh page without any known success marker is not a false success`() {
+        // #214 — classification keys on the explicit success sentences (reply/edit/create),
+        // NOT on the mere presence of a `<meta refresh>`. A page that redirects somewhere but
+        // carries no known success marker must stay Unknown (defensive : guards against a
+        // future deploy where a refresh alone would be over-trusted). Listing refresh variant.
+        val html = """
+            <html><head>
+              <meta http-equiv="Refresh" content="1; url=/hfr/cat/liste_sujet_1_2.htm" />
+            </head><body><div class="hop">Opération effectuée.</div></body></html>
+        """.trimIndent()
+        assertEquals(
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown),
+            parser.parse(html),
+        )
+    }
+
+    @Test
+    fun `a bare home refresh without a success marker stays Unknown`() {
+        // #214 — same guard, home redirect : no known success sentence → Unknown, never a
+        // false success.
+        val html = """
+            <html><head>
+              <meta http-equiv="Refresh" content="1; url=/" />
+            </head><body><div class="hop">Opération effectuée.</div></body></html>
+        """.trimIndent()
+        assertEquals(
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown),
+            parser.parse(html),
+        )
     }
 
     @Test
@@ -141,6 +200,28 @@ class ReplySubmitResponseParserTest {
         assertNull(result.targetPage)
         // No `#t{N}` fragment either — the `liste_sujet` URL doesn't carry a post anchor.
         assertNull(result.numreponse)
+        // #206 — `liste_sujet` has no `sujet_{topicId}_{page}` segment, so topicId is null
+        // and the create-topic navigation host falls back to the category refresh path.
+        assertNull(result.topicId)
+    }
+
+    @Test
+    fun `slug containing a listing token does not get mistaken for a thread segment`() {
+        // #206 hardening — a hypothetical `liste_sujet_1_2.htm` listing URL must NOT be
+        // parsed as a thread segment. The `(?<![a-z_])` lookbehind on `sujet_` rejects the
+        // `liste_sujet_` form (preceded by an underscore) while still matching the real
+        // `/…-sujet_N_M.htm` (preceded by `-` or `/`). This is a regex-robustness pin, not
+        // a contract fixture — the real reply/quote/edit-FP fixtures above prove the shape.
+        val html = """
+            <html><head>
+              <meta http-equiv="Refresh" content="1; url=/hfr/cat/liste_sujet_1_2.htm" />
+            </head><body>
+              <div class="hop">Votre réponse a été postée avec succès !</div>
+            </body></html>
+        """.trimIndent()
+        val success = parser.parse(html) as ReplySubmitResult.Success
+        assertNull("liste_sujet_ must not be read as a thread topic id", success.topicId)
+        assertNull(success.targetPage)
     }
 
     private fun readFixture(name: String): String {

@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -129,6 +130,14 @@ fun ForumCategoryScreen(
                     onSelectPage = viewModel::selectPage,
                     currentPage = state.page,
                     pageCount = state.pageCount,
+                    // #206 workaround — highlight only on the listing page/subcat reached
+                    // immediately after create. If the user changes page or subcat, the route
+                    // hint is ignored so an unrelated same-title topic is not highlighted there.
+                    highlightTitle = routeScopedHighlightTitle(
+                        request = request,
+                        selectedSubcat = state.selectedSubcat,
+                        page = state.page,
+                    ),
                 )
             }
         }
@@ -223,6 +232,7 @@ private fun TopicsBody(
     onSelectPage: (Int) -> Unit,
     currentPage: Int,
     pageCount: Int,
+    highlightTitle: String?,
 ) {
     when (state) {
         TopicsUiState.Loading -> Box(
@@ -266,7 +276,11 @@ private fun TopicsBody(
                     item { TopicsEmpty(searchQuery = searchQuery) }
                 } else {
                     items(filteredTopics, key = TopicSummary::topicId) { topic ->
-                        TopicRow(topic = topic, onClick = { onOpenTopic(topic) })
+                        TopicRow(
+                            topic = topic,
+                            highlighted = matchesHighlightedTitle(topic, highlightTitle),
+                            onClick = { onOpenTopic(topic) },
+                        )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
@@ -305,13 +319,47 @@ private fun TopicsEmpty(searchQuery: String) {
 @Composable
 private fun TopicRow(
     topic: TopicSummary,
+    highlighted: Boolean,
     onClick: () -> Unit,
 ) {
+    // #206 workaround — tint the freshly-created topic's row with the same M3 role the
+    // topic reader uses to highlight a target post (`secondaryContainer`, cf.
+    // `TopicScreen.TopicPostCard`), so the surbrillance is sober and consistent across
+    // the app. No hard-coded colour. `highlighted` is false on every normal nav path and
+    // after page/subcat changes, so the row keeps the default transparent background then.
+    // NB : this is NOT a transient flash — it stays while the landing page/subcat is shown.
+    // Exact duplicate titles remain the unavoidable ambiguity because HFR exposes no id on
+    // create.
+    val newTopicHighlightDescription = stringResource(R.string.category_topic_new_highlight)
+    // When highlighted, pair the text with `onSecondaryContainer` so the contrast is the
+    // one M3 guarantees against `secondaryContainer` (plain `onSurface` is not a guaranteed
+    // pairing, notably in dark theme). Also expose a `stateDescription` so the highlight is
+    // not a colour-only signal (TalkBack / colour-blind), mirroring `FlagIndicator` below.
+    val titleColor = if (highlighted) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val metadataColor = if (highlighted) {
+        MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.74f)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .then(
+            if (highlighted) {
+                Modifier
+                    .background(MaterialTheme.colorScheme.secondaryContainer)
+                    .semantics { stateDescription = newTopicHighlightDescription }
+            } else {
+                Modifier
+            },
+        )
+        .clickable(onClick = onClick)
+        .padding(horizontal = 24.dp, vertical = 12.dp)
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 24.dp, vertical = 12.dp),
+        modifier = rowModifier,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FlagIndicator(flagType = topic.flagType)
@@ -319,7 +367,7 @@ private fun TopicRow(
             Text(
                 text = topic.title,
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = titleColor,
                 fontWeight = if (topic.hasUnread == true) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 2,
             )
@@ -333,7 +381,7 @@ private fun TopicRow(
                     topic.totalPages,
                 ),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = metadataColor,
                 maxLines = 1,
             )
             if (topic.isSticky || topic.isLocked) {

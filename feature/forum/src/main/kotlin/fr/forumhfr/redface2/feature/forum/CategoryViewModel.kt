@@ -338,4 +338,11 @@ data class CategoryRequest(
     val cat: Int,
     val initialSubcat: Int?,
     val initialPage: Int = 1,
+    /**
+     * #206 workaround (« Exact post-création »). Non-null only when this listing is reached
+     * right after a successful create-topic POST : carries the exact posted title so the
+     * screen highlights the matching row (HFR never returns the created topic id — #214 — so
+     * direct navigation is impossible). `null` on every normal nav path → no highlight.
+     */
+    val highlightTitle: String? = null,
 )

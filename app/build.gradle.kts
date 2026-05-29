@@ -38,8 +38,8 @@ android {
         // track (alpha) and in the GitHub Release flag, not in versionName itself.
         // versionName is also surfaced in the app footer via BuildConfig.VERSION_NAME so
         // dogfood builds advertise their lineage to the user.
-        versionCode = 63
-        versionName = "0.3.23"
+        versionCode = 64
+        versionName = "0.3.24"
 
         // Manifest placeholder so a side-by-side install (dogfood/preview overlay)
         // can override the launcher label without touching tracked manifest/strings.
@@ -59,6 +59,15 @@ android {
         buildTypes.named("release") {
             signingConfig = signingConfigs.getByName("upload")
         }
+    }
+
+    buildTypes.named("debug") {
+        // Distinct launcher label for the side-by-side dogfood install pushed over adb
+        // (create-topic debugging, #213/#214). The debug variant already gets
+        // `applicationIdSuffix=".debug"` from the convention plugin, so it installs next to
+        // a release build ; this just makes the icon legible on the device. Release keeps
+        // `@string/app_name`.
+        manifestPlaceholders["appLabel"] = "Redface 2 ADB"
     }
 
     buildFeatures {

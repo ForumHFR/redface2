@@ -13,6 +13,8 @@
     <string name="category_subcategories_error">Sous-catégories indisponibles</string>
     <string name="category_topics_error">Topics indisponibles</string>
     <string name="category_topic_metadata">par %1$s · dernier %2$s · %3$s · %4$d réponses · %5$d pages</string>
+    <!-- #206 — stateDescription a11y sur la ligne du topic fraîchement créé mise en évidence. -->
+    <string name="category_topic_new_highlight">Sujet que vous venez de créer</string>
     <string name="category_badge_sticky">Épinglé</string>
     <string name="category_badge_locked">Fermé</string>
     <string name="category_pager_previous">Précédent</string>

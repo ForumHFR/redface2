@@ -18,6 +18,30 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 ## Unreleased
 
 ### Added
+- **#206 — Highlight du topic fraîchement créé dans la liste (workaround).** La navigation directe vers le sujet créé étant impossible — HFR redirige vers la **liste de la catégorie** sans jamais renvoyer l'id du topic (confirmé live, cf. #214) — l'app **met en évidence le sujet fraîchement créé dans la liste sur laquelle elle atterrit**, par **correspondance exacte du titre** posté (titre trimé, insensible à la casse). Match exact (un `contains` highlighterait à tort un ancien sujet dont le titre est un préfixe) ; seul cas de sur-match résiduel : deux sujets au titre strictement identique seraient mis en évidence ensemble. La mise en évidence reste affichée uniquement sur la page/sous-catégorie d'arrivée ; elle disparaît dès que l'utilisateur change de page ou de sous-catégorie. Ligne accessible (`stateDescription` « Sujet que vous venez de créer ») et texte en `onSecondaryContainer` pour le contraste M3. Plumbing : l'effet `NewTopicCreated` porte désormais le `subject` saisi → propagé jusqu'à `CategoryRoute.highlightTitle` sur le path fallback (toujours le cas pour un create) → descendu jusqu'à la ligne de liste. Surbrillance sobre réutilisant le rôle M3 `secondaryContainer` (même style que le highlight d'un post cible dans `TopicScreen`, aucune couleur en dur). Dégrade proprement : `highlightTitle == null` sur tous les chemins de navigation normaux (forum, deep link, switch de sous-catégorie) → aucun highlight. C'est la version réalisable de #206.
+
+### Fixed
+- **#214 — Création de topic : succès ne s'affiche plus en erreur.** Le submit create-topic réussit côté HFR mais l'app affichait « HFR a renvoyé une réponse inattendue » (le topic était pourtant créé → risque de doublons). Cause confirmée par capture live (`write_create_topic_success_response.html`) : HFR renvoie une phrase de succès propre au create — **« Votre message a été posté avec succès ! »** — que `ReplySubmitResponseParser` ne connaissait pas (il ne matchait que reply « réponse postée » et edit « message édité »). Fix : ajout du marker create. Validé contre la vraie fixture.
+
+### Changed
+- **Build debug** : le libellé du lanceur de la variante `debug` (installée côté-à-côté via `applicationIdSuffix=.debug`) devient **« Redface 2 ADB »** (au lieu de « Redface 2 ») pour distinguer l'install dogfood adb. La release garde `@string/app_name`.
+
+### Known issues
+- **#206 — « Navigation directe vers le sujet créé » impossible (remplacée par le highlight, cf. *Added*).** La capture live montre qu'après un create réussi, HFR redirige vers la **liste de la catégorie** (`…/liste_sujet-1.htm`), **sans jamais renvoyer l'id du sujet créé** : `newTopicId`/`newNumreponse` sont toujours `null`. La fonctionnalité d'origine de #206 (ouvrir directement le topic) n'est donc pas réalisable. **Solution livrée** (voir *Added* ci-dessus) : l'app met en évidence le sujet fraîchement créé dans la liste par correspondance exacte du titre — le workaround validé « Exact post-création ». La branche `newTopicId != null` (jump direct) reste dans le code mais est morte pour le create ; conservée par sécurité si HFR se mettait un jour à ancrer un segment `sujet_`.
+- **#213 — Catégorie sans sous-catégorie (ex. « Intelligence Artificielle », `force_subcat=false`)** : création ET réponse cassées (le formulaire create exige un `<select subcat>` absent ; le bouton Répondre est désactivé faute de `subcat` valide). Fix non livré ici : changement multi-couches (modéliser `force_subcat`, relâcher `canSubmit`/guard/buildBody, distinguer subcat réel 0 vs sentinelle `SUBCAT_UNKNOWN`) + vérification d'un POST 0-sous-cat. Tracé dans #213.
+
+---
+
+## v64 — `0.3.24` — 2026-05-28
+
+**Statut** : `closed`
+**Commit** : head de `feature/phase2-finish-create-topic-206` (#206 ; profil #208 déjà mergé via PR #211), dispatch `release.yml` `play_track=alpha`
+**Fichier** : AAB uploadé sur le canal Play closed alpha
+
+Phase 2 finish — profil utilisateur (#208) + première tentative #206 de navigation create-topic, invalidée ensuite par la capture live #214 (voir Unreleased). Bump versionCode 63→64.
+
+### Added
+- **#206 — Create topic : tentative initiale de navigation directe** : cette build a tenté d'extraire un `topicId` depuis les refresh URLs `sujet_{topicId}_{page}` connues sur reply/quote/edit. Le dogfood suivant a prouvé que le succès create-topic réel est différent (`liste_sujet-1.htm`, aucun topic id) ; cette entrée est conservée comme historique, le correctif livré est documenté en *Unreleased* (#214 + highlight).
 - **#208 — Profil utilisateur** : tap sur l'avatar ou le pseudo d'un post ouvre une `ModalBottomSheet` résumé (avatar carré/arrondi, pseudo, localisation, date d'inscription, nombre de posts, bouton « Voir le profil complet »). Naviguer vers la page complète affiche en plus la signature. Le bouton « Derniers messages » est désactivé (marqué « à venir ») faute de route stable.
 - **Parser profil** : `ProfileParser` extrait `UserProfile` depuis `/hfr/profil-{userId}.htm` (tolérant aux champs absents).
 - **`Post.profileId`** : champ nullable extrait par `TopicPageParser` depuis le lien `<a href="/hfr/profil-{N}.htm">` du toolbar. Persisté en Room (migration v5→v6).
@@ -33,6 +57,9 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 - **i18n** : strings UI de `:feature:profile` externalisées dans `feature/profile/src/main/res/values/strings.xml` ; `ProfileViewModel` expose `ErrorKind` + `cause` (plus de string `"Erreur inconnue"` côté VM).
 - **Retry race** : `ProfileViewModel` cancelle le `loadJob` précédent avant chaque retry pour empêcher les coroutines concurrentes de race sur `_state`.
 - **Konsist** : nouveau test qui vérifie qu'aucun fichier de `:feature:topic` n'importe `fr.forumhfr.redface2.feature.profile.*`.
+
+### Changed
+- `app/build.gradle.kts` : `versionCode = 64`, `versionName = "0.3.24"`.
 
 ---
 

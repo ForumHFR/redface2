@@ -21,11 +21,19 @@ sealed interface ReplySubmitResult {
      * created/edited post). For a plain reply HFR anchors `#bas` instead, so
      * [numreponse] is null and the screen falls back to scrolling to the end of
      * the refreshed page — issue #200.
+     *
+     * [topicId] is the first integer of the `sujet_{topicId}_{page}` segment of
+     * the refresh URL. For reply / quote / edit the caller already knows the topic
+     * it posted to, so this is informational. Create-topic is the exception in the
+     * opposite direction: the real HFR success response refreshes to the category
+     * listing (`liste_sujet-1.htm`) and exposes no topic id (#214), so this field is
+     * null on create.
      */
     data class Success(
         val refreshUrl: String?,
         val targetPage: Int?,
         val numreponse: Int? = null,
+        val topicId: Int? = null,
     ) : ReplySubmitResult
 
     /** HFR refused to post and surfaced one of the known reasons. */
