@@ -36,6 +36,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -146,7 +147,13 @@ fun TopicScreen(
                     val index = loadedMode.topic.posts.indexOfFirst { it.numreponse == effect.numreponse }
                     if (index >= 0) {
                         // +1 because the LazyColumn header card occupies item 0.
-                        lazyListState.scrollToItem(index + 1)
+                        val target = index + 1
+                        lazyListState.scrollToItem(target)
+                        // #197 — block images above the target grow from 160dp to up to 480dp once
+                        // Coil decodes them, shifting the offset *after* this one-shot scroll and
+                        // leaving the target off-screen on a cold image cache. Keep it pinned while
+                        // the layout settles (bails on user scroll, bounded by a frame budget).
+                        lazyListState.reanchorWhileMediaSettles(target)
                     }
                 }
                 TopicEffect.ScrollToEndOfPage -> {
@@ -190,6 +197,50 @@ fun TopicScreen(
         onOpenProfile = onOpenProfile,
     )
 }
+
+/**
+ * #197 — keep [target] pinned to the top of the viewport while upstream block images settle.
+ *
+ * `PostBlock.Image` renders a `SubcomposeAsyncImage` that starts at `blockImageMinHeight` (160.dp)
+ * while loading/erroring and grows to its decoded height (up to `blockImageMaxHeight`, 480.dp) once
+ * Coil resolves the bitmap. Any block image in a post *above* the deep-link target shifts the
+ * cumulative scroll offset by up to +320.dp *after* the initial one-shot `scrollToItem`, leaving the
+ * target scrolled off-screen. A warm image cache decodes synchronously before the first measure,
+ * which is why #197 only reproduces on a cold cache.
+ *
+ * We re-pin every frame until the target stays at the top for [REANCHOR_STABLE_FRAMES] consecutive
+ * frames, bounded by [REANCHOR_MAX_FRAMES] so a never-resolving image cannot hold the list hostage.
+ * We bail the instant the user grabs the list (`isScrollInProgress`) so the settle window never
+ * fights manual scrolling — extending the single-shot, no-focus-stealing contract documented on
+ * [TopicEffect]. Inline smileys/images are *not* a factor here: their `InlineTextContent`
+ * placeholders are fixed-size, so only block images move the geometry.
+ */
+private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int) {
+    var stableFrames = 0
+    repeat(REANCHOR_MAX_FRAMES) {
+        withFrameNanos { }
+        // A user drag/fling during the settle window wins outright — never re-snap on them.
+        if (isScrollInProgress) return
+        val pinned = firstVisibleItemIndex == target && firstVisibleItemScrollOffset == 0
+        if (pinned) {
+            stableFrames++
+            if (stableFrames >= REANCHOR_STABLE_FRAMES) return
+        } else {
+            // The geometry above the target changed (an image grew) — pull it back to the top.
+            scrollToItem(target)
+            stableFrames = 0
+        }
+    }
+}
+
+/**
+ * ~2 s at 60 fps : long enough to cover a cold image decode on a typical page, short enough that a
+ * stuck/never-resolving image cannot pin the list indefinitely. Cf. [reanchorWhileMediaSettles].
+ */
+private const val REANCHOR_MAX_FRAMES = 120
+
+/** Three identical frames in a row = the layout above the target has stopped growing. */
+private const val REANCHOR_STABLE_FRAMES = 3
 
 @Composable
 @Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
