@@ -572,6 +572,13 @@ internal fun smileyInlineContent(smiley: PostInline.Smiley): InlineTextContent {
             model = smiley.imageUrl,
             contentDescription = description,
             contentScale = PostMediaDisplayPolicy.smileyContentScale,
+            // Bottom-align the sprite inside the placeholder so its *visible* bottom rests on the
+            // baseline (= the placeholder bottom, since AboveBaseline). With ContentScale.Fit a
+            // sprite that doesn't fill the 70×50 bucket's height is letterboxed; the default Center
+            // alignment then floats it ~1px above the baseline — off by that gap from HFR web, which
+            // sits the bare <img> bottom on the baseline. BottomCenter closes that gap for any aspect
+            // ratio (#131 web-parity polish; a no-op for sprites that already fill the bucket height).
+            alignment = Alignment.BottomCenter,
             modifier = Modifier.fillMaxSize(),
         )
     }
