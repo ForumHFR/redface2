@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -321,12 +322,33 @@ private fun TopicRow(
     // topic reader uses to highlight a target post (`secondaryContainer`, cf.
     // `TopicScreen.TopicPostCard`), so the surbrillance is sober and consistent across
     // the app. No hard-coded colour. `highlighted` is false on every normal nav path,
-    // so the row keeps the default transparent background then.
+    // so the row keeps the default transparent background then. NB : this is NOT a
+    // transient one-shot — it stays as long as the landing category screen lives (and the
+    // matching row is shown), and reappears if the user navigates back to it. That is
+    // acceptable (the row really is the just-created topic) ; the cost of a true one-shot
+    // (consuming a route arg mid-composition) is not worth it for this hint.
+    val newTopicHighlightDescription = stringResource(R.string.category_topic_new_highlight)
+    // When highlighted, pair the text with `onSecondaryContainer` so the contrast is the
+    // one M3 guarantees against `secondaryContainer` (plain `onSurface` is not a guaranteed
+    // pairing, notably in dark theme). Also expose a `stateDescription` so the highlight is
+    // not a colour-only signal (TalkBack / colour-blind), mirroring `FlagIndicator` below.
+    val titleColor = if (highlighted) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val metadataColor = if (highlighted) {
+        MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.74f)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
     val rowModifier = Modifier
         .fillMaxWidth()
         .then(
             if (highlighted) {
-                Modifier.background(MaterialTheme.colorScheme.secondaryContainer)
+                Modifier
+                    .background(MaterialTheme.colorScheme.secondaryContainer)
+                    .semantics { stateDescription = newTopicHighlightDescription }
             } else {
                 Modifier
             },
@@ -342,7 +364,7 @@ private fun TopicRow(
             Text(
                 text = topic.title,
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = titleColor,
                 fontWeight = if (topic.hasUnread == true) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 2,
             )
@@ -356,7 +378,7 @@ private fun TopicRow(
                     topic.totalPages,
                 ),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = metadataColor,
                 maxLines = 1,
             )
             if (topic.isSticky || topic.isLocked) {
