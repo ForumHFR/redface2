@@ -481,8 +481,9 @@ class TopicFormViewModel @AssistedInject constructor(
                         newTopicId = result.newTopicId,
                         newNumreponse = result.newNumreponse,
                         // Carry the posted title so the listing we land on can highlight
-                        // the fresh row by exact-title match (#206 workaround). HFR never
-                        // returns the topic id on a create, so this is the only handle we have.
+                        // the fresh row by exact-title match (#206 workaround). The live
+                        // create success response never returns a topic id (#214), so this
+                        // is the only handle we have.
                         subject = subject,
                     ),
                 )

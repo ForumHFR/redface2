@@ -130,10 +130,14 @@ fun ForumCategoryScreen(
                     onSelectPage = viewModel::selectPage,
                     currentPage = state.page,
                     pageCount = state.pageCount,
-                    // #206 workaround — highlight the row whose title matches the topic
-                    // the user just created. Plumbed from the route (not the StateFlow)
-                    // since it is a fixed one-shot display hint, null on every other path.
-                    highlightTitle = request.highlightTitle,
+                    // #206 workaround — highlight only on the listing page/subcat reached
+                    // immediately after create. If the user changes page or subcat, the route
+                    // hint is ignored so an unrelated same-title topic is not highlighted there.
+                    highlightTitle = routeScopedHighlightTitle(
+                        request = request,
+                        selectedSubcat = state.selectedSubcat,
+                        page = state.page,
+                    ),
                 )
             }
         }
@@ -321,12 +325,11 @@ private fun TopicRow(
     // #206 workaround — tint the freshly-created topic's row with the same M3 role the
     // topic reader uses to highlight a target post (`secondaryContainer`, cf.
     // `TopicScreen.TopicPostCard`), so the surbrillance is sober and consistent across
-    // the app. No hard-coded colour. `highlighted` is false on every normal nav path,
-    // so the row keeps the default transparent background then. NB : this is NOT a
-    // transient one-shot — it stays as long as the landing category screen lives (and the
-    // matching row is shown), and reappears if the user navigates back to it. That is
-    // acceptable (the row really is the just-created topic) ; the cost of a true one-shot
-    // (consuming a route arg mid-composition) is not worth it for this hint.
+    // the app. No hard-coded colour. `highlighted` is false on every normal nav path and
+    // after page/subcat changes, so the row keeps the default transparent background then.
+    // NB : this is NOT a transient flash — it stays while the landing page/subcat is shown.
+    // Exact duplicate titles remain the unavoidable ambiguity because HFR exposes no id on
+    // create.
     val newTopicHighlightDescription = stringResource(R.string.category_topic_new_highlight)
     // When highlighted, pair the text with `onSecondaryContainer` so the contrast is the
     // one M3 guarantees against `secondaryContainer` (plain `onSurface` is not a guaranteed

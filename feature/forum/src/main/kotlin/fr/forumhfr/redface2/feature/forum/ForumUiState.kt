@@ -113,7 +113,8 @@ private val COMBINING_MARKS = Regex("\\p{InCombiningDiacriticalMarks}+")
  * the title the user typed, so the match is **exact** : both sides are trimmed (HFR strips
  * surrounding whitespace on the title) and compared case-insensitively. This is deliberately
  * strict — a `contains` match would risk highlighting an older topic whose title is a
- * substring of the new one, which is exactly the false positive this workaround must avoid.
+ * substring of the new one. Exact duplicate titles can still match together; this is the
+ * residual ambiguity of the workaround because HFR exposes no created topic id.
  *
  * Returns `false` for a `null` or blank [highlightTitle] (the normal nav path) so callers can
  * use it as an unconditional predicate that degrades to "no highlight".
@@ -122,6 +123,26 @@ internal fun matchesHighlightedTitle(topic: TopicSummary, highlightTitle: String
     val needle = highlightTitle?.trim()?.takeIf { it.isNotEmpty() } ?: return false
     return topic.title.trim().equals(needle, ignoreCase = true)
 }
+
+/**
+ * Keep the #206 create-topic highlight scoped to the exact listing reached after the POST.
+ * The route argument may survive while the same screen lets the user change page or subcat;
+ * ignoring it outside the initial `(subcat, page)` prevents highlighting an unrelated
+ * same-title topic elsewhere in the category.
+ */
+internal fun routeScopedHighlightTitle(
+    request: CategoryRequest,
+    selectedSubcat: Int?,
+    page: Int,
+): String? =
+    if (
+        selectedSubcat == request.initialSubcat &&
+        page == request.initialPage.coerceAtLeast(1)
+    ) {
+        request.highlightTitle
+    } else {
+        null
+    }
 
 /**
  * Pure helper kept top-level so it can be exercised in isolation. Falls back to `1`

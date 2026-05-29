@@ -9,8 +9,8 @@ import org.junit.Test
  * Pure-helper tests for [matchesHighlightedTitle] — the #206 « Exact post-création »
  * workaround. HFR redirects a successful create to the category listing and never returns
  * the new topic id (#214), so the listing highlights the freshly-created row by exact-title
- * match. These tests pin the contract : one-shot, exact (trimmed, case-insensitive), zero
- * false positive, and degrades to "no highlight" when no title is carried.
+ * match. These tests pin the contract : exact (trimmed, case-insensitive), avoids substring
+ * matches, and degrades to "no highlight" when no title is carried.
  */
 class MatchesHighlightedTitleTest {
 
@@ -43,9 +43,9 @@ class MatchesHighlightedTitleTest {
     }
 
     @Test
-    fun `substring is not a match (zero false positive)`() {
+    fun `substring is not a match`() {
         // A `contains` match would wrongly highlight an older topic whose title is a prefix
-        // of the new one. Exact match is what guarantees the one-shot precision #206 wants.
+        // of the new one. Exact duplicate titles can still match; HFR exposes no better handle.
         assertFalse(matchesHighlightedTitle(topic("Test"), "Test de la nouvelle feature"))
         assertFalse(matchesHighlightedTitle(topic("Test de la nouvelle feature"), "Test"))
     }

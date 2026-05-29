@@ -24,10 +24,10 @@ sealed interface ReplySubmitResult {
      *
      * [topicId] is the first integer of the `sujet_{topicId}_{page}` segment of
      * the refresh URL. For reply / quote / edit the caller already knows the topic
-     * it posted to, so it's informational ; it matters for **create-topic** (#206),
-     * where the freshly-allocated topic id is only learnable from this URL — the
-     * `bddpost.php` success shape is identical across all four flows, so the same
-     * extraction serves them all.
+     * it posted to, so this is informational. Create-topic is the exception in the
+     * opposite direction: the real HFR success response refreshes to the category
+     * listing (`liste_sujet-1.htm`) and exposes no topic id (#214), so this field is
+     * null on create.
      */
     data class Success(
         val refreshUrl: String?,

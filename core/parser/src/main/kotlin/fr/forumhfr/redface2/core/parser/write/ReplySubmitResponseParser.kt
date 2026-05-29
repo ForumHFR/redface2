@@ -77,8 +77,8 @@ class ReplySubmitResponseParser {
         val refresh = META_REFRESH_REGEX.find(html)?.groupValues?.getOrNull(1)?.trim()
         // `sujet_{topicId}_{page}` — `SUJET_SEGMENT_REGEX` captures both integers in one
         // pass. The topic id is informational for reply/quote/edit (the caller already
-        // knows it) but is the only way to learn the freshly-allocated id on create-topic
-        // (#206) ; the bddpost.php success URL shape is identical across all four flows.
+        // knows it). Create-topic is different: HFR refreshes to `liste_sujet-1.htm`
+        // and exposes no topic id (#214), so this extraction stays null there.
         val sujet = refresh?.let { url -> SUJET_SEGMENT_REGEX.find(url) }
         val topicId = sujet?.groupValues?.getOrNull(1)?.toIntOrNull()
         val page = sujet?.groupValues?.getOrNull(2)?.toIntOrNull()

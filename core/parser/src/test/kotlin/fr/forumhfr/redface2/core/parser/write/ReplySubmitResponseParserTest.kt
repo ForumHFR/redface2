@@ -62,8 +62,8 @@ class ReplySubmitResponseParserTest {
         // The fixture refreshes to …redface2-temporaire-bbcode-sujet_148750_1.htm#t2523833
         assertEquals(1, success.targetPage)
         assertEquals(2_523_833, success.numreponse)
-        // #206 — same `sujet_{topicId}_{page}` segment carries the topic id ; this real
-        // quote fixture is the reference for create-topic's identical success shape.
+        // #206 — same `sujet_{topicId}_{page}` segment carries the topic id for
+        // reply/quote/edit-style refresh URLs.
         assertEquals(148_750, success.topicId)
     }
 
@@ -78,9 +78,8 @@ class ReplySubmitResponseParserTest {
         // The fixture refreshes to …redface2-temporaire-ecriture-sujet_148749_1.htm#t2523829
         assertEquals(1, success.targetPage)
         assertEquals(2_523_829, success.numreponse)
-        // #206 — this real fixture (page 1, `#t{N}` anchor, freshly-created test topic
-        // 148749) IS the canonical create-topic success shape, so it pins the topicId
-        // extraction on real HFR bytes ; no fabricated create-topic fixture is needed.
+        // #206 — edit-FP also uses the `sujet_{topicId}_{page}#t{N}` shape, so topicId
+        // extraction stays pinned on real HFR bytes for topic-refresh flows.
         assertEquals(148_749, success.topicId)
     }
 
