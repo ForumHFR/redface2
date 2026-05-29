@@ -639,19 +639,25 @@ private fun TopicPostCard(
                 Modifier
             }
             val pseudoModifier = if (onOpenProfile != null) {
-                Modifier
-                    .minimumInteractiveComponentSize()
-                    .clickable(
-                        onClick = onOpenProfile,
-                        role = Role.Button,
-                        onClickLabel = openProfileLabel,
-                    )
+                // No minimumInteractiveComponentSize() on the pseudo: it reserves a 48dp-tall box
+                // and centres the text inside it, which inflated the header Row and left the pseudo
+                // floating mid-height with the date pushed far below it. The avatar beside it is the
+                // 48dp-compliant touch target for the very same `onOpenProfile` action, so the pseudo
+                // stays a convenience tap at its natural text height without bloating the layout.
+                Modifier.clickable(
+                    onClick = onOpenProfile,
+                    role = Role.Button,
+                    onClickLabel = openProfileLabel,
+                )
             } else {
                 Modifier
             }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Top,
+                // Centre the avatar against the name+date block so the identity line reads as one
+                // tidy unit (the previous Top alignment + the inflated pseudo made the pseudo look
+                // vertically centred while the date dropped well below the avatar).
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 RedfaceUserAvatar(
                     avatarUrl = post.avatarUrl,
