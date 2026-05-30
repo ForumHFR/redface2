@@ -1,0 +1,24 @@
+Source: forum.hardware.fr — message.php, formulaire de REPONSE a un message du topic IA (cat=32)
+Mode: capture HTML AUTHENTIFIEE (compte public XaTriX), browser-save Firefox
+Captured: 2026-05-30
+
+Origine:
+  Sauvegarde « page complete » du navigateur sur la page message.php de reponse au
+  topic IA. Browser-save : URLs de ressources reecrites vers « ..._files/ », mais la
+  structure DOM et les hrefs/champs fonctionnels sont intacts (ce que lisent les parsers).
+
+Interet pour les tests (ReplyFormParser / DefaultReplyRepository) :
+  - Formulaire principal <form name="hop" id="hop" action="/bddpost.php?config=hfr.inc">.
+  - Champs de reponse : cat=32, subcat=0, post=7, numrep (vide ici), new, page, p,
+    sondage, owntopic, config, hash_check, verifrequet, pseudo=XaTriX,
+    textarea name="content_form" (vide), options signature/smiley/email.
+  - id smiley perso public : find_smilies_timer('hfr.inc',54596) (id public de XaTriX).
+
+Scrub :
+  - hash_check  : 32-hex reel -> value="SCRUBBED_HASH_CHECK"   (4 occurrences, dont 1 hors attribut value)
+  - verifrequet : numerique   -> value="SCRUBBED_VERIFREQUET"  (1 occurrence)
+  - codehex (unlog.php) : token 32-hex de session -> SCRUBBED_CODEHEX  (2 occurrences)
+  Conserves : pseudo public XaTriX, id smiley 54596, structure DOM, hrefs et champs de form.
+  Note : email@hostname.com present dans une bulle d'aide BBcode HFR ([email]email@hostname.com[/email])
+         est un placeholder de la doc HFR, pas une adresse reelle — laisse tel quel.
+  Verification : grep -iE 'hash_check"? ?value="[0-9a-f]{8}|verifrequet"? ?value="[0-9]'  => 0 resultat.

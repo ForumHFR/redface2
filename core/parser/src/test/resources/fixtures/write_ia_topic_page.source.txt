@@ -1,0 +1,32 @@
+Source: forum.hardware.fr — topic « Claude by Anthropic [Topic Unique] », categorie Intelligence Artificielle (cat=32)
+Page: lecture du topic avec le formulaire de reponse rapide (bddpost) ouvert en bas de page
+Mode: capture HTML AUTHENTIFIEE (compte public XaTriX), browser-save Firefox
+Captured: 2026-05-30
+
+Origine:
+  Sauvegarde « page complete » du navigateur sur la page de lecture du topic IA.
+  C'est un browser-save : les URLs de ressources (images, css, js) ont ete reecrites
+  par le navigateur vers le dossier « ..._files/ ». Les parsers ne lisent QUE la
+  structure DOM et les hrefs des liens fonctionnels (message.php, bddpost.php,
+  viewbbcode.php, addflag.php, profil-N.htm), qui eux restent intacts — donc OK.
+
+Interet pour les tests:
+  - Toolbar de post authentifiee, categorie IA : presence du lien « Voir le bbcode »
+    (viewbbcode.php, numreponse=) et du lien « Citer / Repondre a ce message »
+    (message.php?...&numrep=...&ref=1) dans <div class="toolbar"><div class="left">.
+  - Le lien Citer est double-imbrique <a href=...numrep...><a href=...numrep...><img quote.gif></a></a>
+    a l'interieur d'un <span class="md_noclass_cryptlink...">. Jsoup desimbrique les <a>
+    illegaux ; parseQuoteRef trouve quand meme numrep=&ref=1 (verifie via jsoup 1.15.3).
+  - Formulaire de reponse rapide <form name="hop" action="/bddpost.php?config=hfr.inc">
+    avec champs cat=32, subcat=0, post=7, numrep, hash_check, verifrequet.
+  - id smiley perso public : find_smilies_timer('hfr.inc',54596) (id public de XaTriX).
+
+Scrub (donnees de session reelles remplacees par des placeholders) :
+  - hash_check  : valeur reelle 32-hex  -> value="SCRUBBED_HASH_CHECK"   (5 occurrences)
+  - verifrequet : valeur numerique      -> value="SCRUBBED_VERIFREQUET"  (1 occurrence)
+  - codehex (unlog.php) : token 32-hex de session -> SCRUBBED_CODEHEX     (2 occurrences)
+  Conserves intentionnellement (donnees publiques, requises par les parsers) :
+    pseudo public XaTriX, ids de profil publics, id smiley perso 54596,
+    classes md_noclass_cryptlink (encodage public des URLs message.php),
+    structure DOM, hrefs fonctionnels, champs cat/subcat/post/numrep/ref.
+  Verification : grep -iE 'hash_check"? ?value="[0-9a-f]{8}|verifrequet"? ?value="[0-9]'  => 0 resultat.

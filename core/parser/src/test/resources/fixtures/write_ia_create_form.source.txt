@@ -1,0 +1,29 @@
+Source: forum.hardware.fr — formulaire de CREATION d'un nouveau sujet dans la categorie Intelligence Artificielle (cat=32)
+Mode: capture HTML AUTHENTIFIEE (compte public XaTriX), browser-save Firefox
+Captured: 2026-05-30
+
+Origine:
+  Sauvegarde « page complete » du navigateur sur le composer de creation de topic IA.
+  Browser-save : URLs de ressources reecrites vers « ..._files/ », structure DOM et
+  champs de form intacts.
+
+CONTRAT SUBCAT (point cle, lie a #213) :
+  La categorie IA (cat=32) n'a AUCUNE sous-categorie. Le formulaire de creation servi
+  par HFR ne contient donc :
+    - AUCUN <select name="subcat">  (0 occurrence)
+    - AUCUN <input name="subcat">   (0 occurrence)
+  Seul <input name="cat" value="32"> est present (deux fois : un hidden + un id="catid").
+  Les 3 occurrences de la chaine "subcat" sont des parametres subcat=0 dans des liens
+  de navigation/recherche (breadcrumb, fastsearch), pas des champs de formulaire.
+  Formulaire principal : <form name="hop" id="hop" action="/bddpost.php?config=hfr.inc">
+  avec champs cat, post, p, sondage, owntopic, new, hash_check, verifrequet, config,
+  input name="titre"/"sujet" (titre du sujet), textarea name="content_form" (vide).
+  id smiley perso public : find_smilies_timer('hfr.inc',54596) (id public de XaTriX).
+
+Scrub :
+  - hash_check  : 32-hex reel -> value="SCRUBBED_HASH_CHECK"   (4 occurrences, dont 1 hors attribut value)
+  - verifrequet : numerique   -> value="SCRUBBED_VERIFREQUET"  (1 occurrence)
+  - codehex (unlog.php) : token 32-hex de session -> SCRUBBED_CODEHEX  (2 occurrences)
+  Conserves : pseudo public XaTriX, id smiley 54596, structure DOM, hrefs et champs de form.
+  Note : email@hostname.com est un placeholder de la doc BBcode HFR, pas une adresse reelle.
+  Verification : grep -iE 'hash_check"? ?value="[0-9a-f]{8}|verifrequet"? ?value="[0-9]'  => 0 resultat.

@@ -1,0 +1,8 @@
+Copie de core/parser/src/test/resources/fixtures/write_ia_reply_form.html
+(meme contenu, meme scrub) pour les tests repository de :data.
+
+Voir core/parser/src/test/resources/fixtures/write_ia_reply_form.source.txt pour
+l'origine complete et le rapport de scrub (hash_check / verifrequet / codehex remplaces
+par des placeholders, pseudo public XaTriX et structure conserves).
+
+Verification : grep -iE 'hash_check"? ?value="[0-9a-f]{8}|verifrequet"? ?value="[0-9]'  => 0 resultat.
