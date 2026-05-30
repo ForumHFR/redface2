@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.unit.sp
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
 import org.junit.Assert.assertEquals
@@ -106,6 +107,48 @@ class PostRendererInlineTest {
     }
 
     @Test
+    fun `collectInlineMedia applies the provided smiley box resolver to the placeholder (175 seam)`() {
+        // #175 — the production caller passes a cache-backed resolver returning the measured size;
+        // here we pin that whatever box the resolver yields lands on the InlineTextContent placeholder
+        // (the seam through which intrinsic sizing flows). Default-resolver/bucket behaviour stays
+        // covered by the bucket tests below.
+        val inlines = listOf(
+            PostInline.Smiley(
+                kind = SmileyKind.Perso("measured"),
+                imageUrl = "https://forum-images.hardware.fr/images/perso/measured.gif",
+            ),
+        )
+        val media = collectInlineMedia(inlines) { InlineMediaBox(33.sp, 21.sp) }
+        val placeholder = media["post-smiley-0"]?.placeholder
+        assertNotNull("resolved smiley should yield an InlineTextContent", placeholder)
+        assertEquals(33.sp, placeholder!!.width)
+        assertEquals(21.sp, placeholder.height)
+    }
+
+    @Test
+    fun `collectMeasurableSmileyUrls skips builtins and keeps perso urls only`() {
+        // #175 — builtin HFR smileys have a known small size and must not trigger intrinsic measurement
+        // on the hot path. Perso smileys stay measurable because their corpus sizes are heterogeneous.
+        val builtinUrl = "https://forum-images.hardware.fr/icones/smilies/jap.gif"
+        val nestedBuiltinUrl = "https://forum-images.hardware.fr/icones/smilies/o.gif"
+        val persoUrl = "https://forum-images.hardware.fr/images/perso/cosmoschtroumpf.gif"
+        val nestedPersoUrl = "https://forum-images.hardware.fr/images/perso/t/tall.gif"
+        val inlines = listOf(
+            PostInline.Smiley(kind = SmileyKind.Builtin(":jap:"), imageUrl = builtinUrl),
+            PostInline.Smiley(kind = SmileyKind.Perso("cosmoschtroumpf"), imageUrl = persoUrl),
+            PostInline.Strong(
+                children = listOf(
+                    PostInline.Smiley(kind = SmileyKind.Builtin(":o"), imageUrl = nestedBuiltinUrl),
+                    PostInline.Smiley(kind = SmileyKind.Perso("tall"), imageUrl = nestedPersoUrl),
+                ),
+            ),
+            PostInline.InlineImage(url = "https://forum.hardware.fr/images/foo.png", description = "foo"),
+        )
+
+        assertEquals(setOf(persoUrl, nestedPersoUrl), collectMeasurableSmileyUrls(inlines))
+    }
+
+    @Test
     fun `inline image emits a post-image placeholder and a matching map entry`() {
         val inlines = listOf(
             PostInline.InlineImage(
@@ -162,10 +205,10 @@ class PostRendererInlineTest {
             placeholder.height,
         )
         assertEquals(
-            // #203 — HFR serves smileys as bare <img> (CSS default vertical-align: baseline), so RF2
-            // aligns the placeholder bottom with the text baseline for web parity instead of
-            // centring it across the line (which straddled tall perso buckets over the body line).
-            "smileys must align above the baseline to match HFR's web rendering",
+            // #175 — AboveBaseline: the sprite bottom sits on the text baseline (web/RF1 parity, #203).
+            // Zero overlap for a tall perso comes from the unspecified lineHeight on media paragraphs
+            // (the line grows upward to contain it), NOT from the alignment — see smileyInlineContent.
+            "smileys must be baseline-aligned (AboveBaseline) for web parity",
             PlaceholderVerticalAlign.AboveBaseline,
             placeholder.placeholderVerticalAlign,
         )
@@ -204,8 +247,8 @@ class PostRendererInlineTest {
             placeholder.width,
         )
         assertEquals(
-            // #203 — same web-parity rule as builtin: baseline-aligned, not centred on the line.
-            "perso smileys must align above the baseline to match HFR's web rendering",
+            // #175 — same rule as builtin: AboveBaseline (web parity); zero overlap via line growth.
+            "perso smileys must be baseline-aligned (AboveBaseline) for web parity",
             PlaceholderVerticalAlign.AboveBaseline,
             placeholder.placeholderVerticalAlign,
         )

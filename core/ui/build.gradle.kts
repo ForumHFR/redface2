@@ -52,6 +52,10 @@ dependencies {
     implementation(libs.coil.network.okhttp)
 
     testImplementation(libs.junit4)
+    // #175 — FakeImageLoaderEngine + ColorImage(width,height) give deterministic intrinsic-size
+    // measurements under Robolectric (no network/decode), and runTest drives the suspend measure.
+    testImplementation(libs.coil.test)
+    testImplementation(libs.kotlinx.coroutines.test)
     // #130 — Robolectric runtime hosts `createComposeRule()` on JVM ; the manifest is debug-only
     // and pulls the Activity surrogate the rule mounts internally ; the BOM platform aligns the
     // ui-test artifacts with the production Compose versions.

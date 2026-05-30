@@ -1,9 +1,9 @@
-Redface 2 alpha v65 — topic reading polish.
+Redface 2 alpha v66 — adaptive smileys.
 
-Fixes:
-- Inline smileys align better with text.
-- More reliable jump-to-post while images load.
-- Compact post header after profile links.
-- New-topic success and list highlight.
+Changes:
+- Perso smileys now render from their measured native size.
+- Tiny smileys stay tiny; large smileys are capped cleanly.
+- Text lines grow to avoid smiley overlap.
+- Builtin smileys keep their known small size.
 
 Report bugs via alpha or GitHub.

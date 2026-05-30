@@ -1,9 +1,9 @@
-Alpha Redface 2 v65 — polish lecture topic.
+Alpha Redface 2 v66 — smileys adaptatifs.
 
-Correctifs :
-- Smileys inline mieux alignés avec le texte.
-- Scroll vers un post plus fiable pendant le chargement des images.
-- Header de post compact après clic sur profil.
-- Création de topic : succès et mise en évidence dans la liste.
+Changements :
+- Smileys perso rendus à leur taille native mesurée.
+- Micro-smileys conservés petits, gros smileys réduits proprement.
+- Lignes de texte adaptées pour éviter le chevauchement.
+- Builtins gardés sur leur petite taille connue.
 
 Bugs : alpha ou GitHub.
