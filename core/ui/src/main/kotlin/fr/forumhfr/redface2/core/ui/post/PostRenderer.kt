@@ -530,6 +530,11 @@ internal fun imageInlineContent(image: PostInline.InlineImage): InlineTextConten
         placeholder = Placeholder(
             width = box.placeholderWidth,
             height = box.placeholderHeight,
+            // Inline [img] deliberately keeps Center, unlike smileys (which moved to AboveBaseline
+            // for web parity in #203). An embedded image is a 240×180 block of user media, not an
+            // emotive glyph riding the text baseline: centring it on the line reads better and
+            // matches how a wrapped thumbnail sits next to text. Do not "unify" this with the
+            // smiley alignment without a visual pass — the two contracts are intentionally distinct.
             placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
         ),
     ) {
@@ -552,13 +557,28 @@ internal fun smileyInlineContent(smiley: PostInline.Smiley): InlineTextContent {
         placeholder = Placeholder(
             width = box.placeholderWidth,
             height = box.placeholderHeight,
-            placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
+            // #203 — web parity. HFR serves both builtin (`/icones/…`) and perso (`/images/perso/…`)
+            // smileys as bare `<img>` with no `vertical-align`, so the browser falls back to the CSS
+            // default `baseline`: the bottom of the sprite sits on the text baseline. `Center` (the
+            // previous value) instead straddled the placeholder across the line centre, which on a
+            // 50sp perso bucket overflowed ~15sp above AND below a 20sp body line — the "smiley au
+            // milieu de la ligne, par-dessus le texte" reported in #203. `AboveBaseline` reproduces
+            // the web baseline alignment. Verified against captured fixtures (no perso/builtin smiley
+            // carries a width/height/style attribute in a post body).
+            placeholderVerticalAlign = PlaceholderVerticalAlign.AboveBaseline,
         ),
     ) {
         AsyncImage(
             model = smiley.imageUrl,
             contentDescription = description,
             contentScale = PostMediaDisplayPolicy.smileyContentScale,
+            // Bottom-align the sprite inside the placeholder so its *visible* bottom rests on the
+            // baseline (= the placeholder bottom, since AboveBaseline). With ContentScale.Fit a
+            // sprite that doesn't fill the 70×50 bucket's height is letterboxed; the default Center
+            // alignment then floats it ~1px above the baseline — off by that gap from HFR web, which
+            // sits the bare <img> bottom on the baseline. BottomCenter closes that gap for any aspect
+            // ratio (#131 web-parity polish; a no-op for sprites that already fill the bucket height).
+            alignment = Alignment.BottomCenter,
             modifier = Modifier.fillMaxSize(),
         )
     }

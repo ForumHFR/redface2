@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.MutableState
@@ -114,6 +115,67 @@ class PostRendererInlineLayoutTest {
             expected = PostMediaDisplayPolicy.persoSmiley.placeholderHeight.value,
             actual = rect.height,
             tolerance = SIZE_TOLERANCE_PX,
+        )
+    }
+
+    @Test
+    fun `perso smiley placeholder bottom sits on the text baseline for web parity`() {
+        // #203 — HFR serves smileys as bare <img> with no vertical-align, so the browser uses the
+        // CSS default `baseline` (the bottom of the sprite rests on the text baseline). RF2 must
+        // match that: `PlaceholderVerticalAlign.AboveBaseline` aligns the placeholder bottom with
+        // the baseline. The previous `Center` straddled the 50sp perso bucket across the line centre
+        // (≈15sp above AND below a 20sp body line), the "smiley au milieu de la ligne, par-dessus le
+        // texte" reported in #203. We mount the smiley between real text so the first baseline is
+        // anchored by the font metrics, then assert the placeholder bottom lands on it. A regression
+        // back to `Center` pushes the bottom well below the baseline and fails this assertion.
+        val capture = LayoutCapture()
+        mountInlineContent(
+            capture,
+            listOf(
+                PostInline.Text("ab "),
+                persoSmileyInlines().first(),
+                PostInline.Text(" cd"),
+            ),
+        )
+        capture.fontScale.value = 1f
+        composeTestRule.waitForIdle()
+        val rect = requireSingleRect(capture, "perso smiley")
+        val baseline = requireNotNull(capture.layout.value?.firstBaseline) {
+            "perso smiley : no TextLayoutResult / firstBaseline captured"
+        }
+        assertCloseEnough(
+            label = "perso smiley placeholder bottom vs first baseline",
+            expected = baseline,
+            actual = rect.bottom,
+            tolerance = BASELINE_TOLERANCE_PX,
+        )
+    }
+
+    @Test
+    fun `builtin smiley placeholder bottom sits on the text baseline for web parity`() {
+        // #203 — same baseline rule as the perso case, on the 18sp builtin bucket (served from
+        // `/icones/…`). Builtin smileys are the most common path on HFR, so pin the geometry here
+        // too: a regression back to `Center` would push the bottom below the baseline and fail.
+        val capture = LayoutCapture()
+        mountInlineContent(
+            capture,
+            listOf(
+                PostInline.Text("ab "),
+                builtinSmileyInlines().first(),
+                PostInline.Text(" cd"),
+            ),
+        )
+        capture.fontScale.value = 1f
+        composeTestRule.waitForIdle()
+        val rect = requireSingleRect(capture, "builtin smiley")
+        val baseline = requireNotNull(capture.layout.value?.firstBaseline) {
+            "builtin smiley : no TextLayoutResult / firstBaseline captured"
+        }
+        assertCloseEnough(
+            label = "builtin smiley placeholder bottom vs first baseline",
+            expected = baseline,
+            actual = rect.bottom,
+            tolerance = BASELINE_TOLERANCE_PX,
         )
     }
 
@@ -283,20 +345,27 @@ class PostRendererInlineLayoutTest {
      * [TextLayoutResult] in [capture] gives the test access to `placeholderRects` after each
      * fontScale change. Density stays fixed at `1f` so the assertions at fontScale=1 reduce to
      * `sp == px`.
+     *
+     * The [Text] is mounted under [MaterialTheme] with `style = bodyMedium` to mirror the production
+     * `ParagraphBlock` (which renders posts in `MaterialTheme.typography.bodyMedium`): the baseline
+     * assertions then pin the same font metrics the app actually uses, not the bare `Text` default.
      */
     private fun mountInlineContent(capture: LayoutCapture, inlines: List<PostInline>) {
         val annotated = buildInlineText(inlines, emptyLinkStyles, imageAlt = "img")
         val media: Map<String, InlineTextContent> = collectInlineMedia(inlines)
         composeTestRule.setContent {
             val fontScale = capture.fontScale.value
-            CompositionLocalProvider(
-                LocalDensity provides Density(density = 1f, fontScale = fontScale),
-            ) {
-                Text(
-                    text = annotated,
-                    inlineContent = media,
-                    onTextLayout = { result -> capture.layout.value = result },
-                )
+            MaterialTheme {
+                CompositionLocalProvider(
+                    LocalDensity provides Density(density = 1f, fontScale = fontScale),
+                ) {
+                    Text(
+                        text = annotated,
+                        inlineContent = media,
+                        style = MaterialTheme.typography.bodyMedium,
+                        onTextLayout = { result -> capture.layout.value = result },
+                    )
+                }
             }
         }
         composeTestRule.waitForIdle()
@@ -346,6 +415,14 @@ class PostRendererInlineLayoutTest {
          * placeholder tests use.
          */
         const val SIZE_TOLERANCE_PX: Float = 0.5f
+
+        /**
+         * Baseline alignment (#203) tolerates a touch more than raw size: the placeholder bottom is
+         * compared against `firstBaseline`, which the layout pass derives from the font's descent
+         * rounding on top of the placeholder height. 2 px stays well under one body-line of slack
+         * while absorbing that sub-pixel quantisation.
+         */
+        const val BASELINE_TOLERANCE_PX: Float = 2f
 
         /** Ratio comparisons need a smaller relative tolerance. 0.01 covers float rounding. */
         const val RATIO_TOLERANCE: Float = 0.01f
