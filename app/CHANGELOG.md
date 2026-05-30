@@ -17,14 +17,30 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
+Aucun changement applicatif non distribué.
+
+---
+
+## v65 — `0.3.25` — 2026-05-30
+
+**Statut** : `closed`
+**Commit** : tag `app-v65` après merge des PR #215, #216 et #217
+**Fichier** : AAB uploadé sur le canal Play closed alpha + tag pour F-Droid
+
+Phase 2 finish — polish lecture topic après retours alpha : baseline smileys, stabilité du scroll deep-link pendant le chargement des images et régression de header après liens profil. Embarque aussi les corrections #206/#214 restées en *Unreleased* depuis v64.
+
 ### Added
 - **#206 — Highlight du topic fraîchement créé dans la liste (workaround).** La navigation directe vers le sujet créé étant impossible — HFR redirige vers la **liste de la catégorie** sans jamais renvoyer l'id du topic (confirmé live, cf. #214) — l'app **met en évidence le sujet fraîchement créé dans la liste sur laquelle elle atterrit**, par **correspondance exacte du titre** posté (titre trimé, insensible à la casse). Match exact (un `contains` highlighterait à tort un ancien sujet dont le titre est un préfixe) ; seul cas de sur-match résiduel : deux sujets au titre strictement identique seraient mis en évidence ensemble. La mise en évidence reste affichée uniquement sur la page/sous-catégorie d'arrivée ; elle disparaît dès que l'utilisateur change de page ou de sous-catégorie. Ligne accessible (`stateDescription` « Sujet que vous venez de créer ») et texte en `onSecondaryContainer` pour le contraste M3. Plumbing : l'effet `NewTopicCreated` porte désormais le `subject` saisi → propagé jusqu'à `CategoryRoute.highlightTitle` sur le path fallback (toujours le cas pour un create) → descendu jusqu'à la ligne de liste. Surbrillance sobre réutilisant le rôle M3 `secondaryContainer` (même style que le highlight d'un post cible dans `TopicScreen`, aucune couleur en dur). Dégrade proprement : `highlightTitle == null` sur tous les chemins de navigation normaux (forum, deep link, switch de sous-catégorie) → aucun highlight. C'est la version réalisable de #206.
 
 ### Fixed
 - **#214 — Création de topic : succès ne s'affiche plus en erreur.** Le submit create-topic réussit côté HFR mais l'app affichait « HFR a renvoyé une réponse inattendue » (le topic était pourtant créé → risque de doublons). Cause confirmée par capture live (`write_create_topic_success_response.html`) : HFR renvoie une phrase de succès propre au create — **« Votre message a été posté avec succès ! »** — que `ReplySubmitResponseParser` ne connaissait pas (il ne matchait que reply « réponse postée » et edit « message édité »). Fix : ajout du marker create. Validé contre la vraie fixture.
+- **#203 — Smileys inline alignés sur la baseline.** Le rendu Compose aligne désormais les smileys inline sur la baseline du texte, pour se rapprocher du rendu web HFR et limiter les sauts visuels entre texte et smileys.
+- **#197 — Re-ancrage du scroll deep-link pendant le chargement des images-blocs.** Quand un lien pointe vers un post précis, `TopicScreen` continue de surveiller la position pendant une fenêtre de décodage initiale afin de compenser les images qui gonflent au-dessus de la cible après le premier scroll. Le watcher reste annulable dès que l'utilisateur scrolle manuellement.
+- **Régression #208 — Header de post compact après liens profil.** Le pseudo cliquable n'étire plus le header du post : la zone tappable reste limitée à l'avatar/pseudo et le layout garde une hauteur stable.
 
 ### Changed
 - **Build debug** : le libellé du lanceur de la variante `debug` (installée côté-à-côté via `applicationIdSuffix=.debug`) devient **« Redface 2 ADB »** (au lieu de « Redface 2 ») pour distinguer l'install dogfood adb. La release garde `@string/app_name`.
+- `app/build.gradle.kts` : `versionCode = 65`, `versionName = "0.3.25"`.
 
 ### Known issues
 - **#206 — « Navigation directe vers le sujet créé » impossible (remplacée par le highlight, cf. *Added*).** La capture live montre qu'après un create réussi, HFR redirige vers la **liste de la catégorie** (`…/liste_sujet-1.htm`), **sans jamais renvoyer l'id du sujet créé** : `newTopicId`/`newNumreponse` sont toujours `null`. La fonctionnalité d'origine de #206 (ouvrir directement le topic) n'est donc pas réalisable. **Solution livrée** (voir *Added* ci-dessus) : l'app met en évidence le sujet fraîchement créé dans la liste par correspondance exacte du titre — le workaround validé « Exact post-création ». La branche `newTopicId != null` (jump direct) reste dans le code mais est morte pour le create ; conservée par sécurité si HFR se mettait un jour à ancrer un segment `sujet_`.
