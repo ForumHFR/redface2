@@ -32,9 +32,11 @@ import kotlin.math.roundToInt
 internal object PostMediaDisplayPolicy {
 
     /**
-     * Smileys are textual/emotive glyphs: fit them to the reserved bucket so even tiny historical
-     * perso sprites remain visible on high-density phones. Ratio is preserved; square smileys fill
-     * the bucket, wide/tall ones are letterboxed.
+     * #175 — the smiley placeholder is now sized to the smiley's measured intrinsic size (or a
+     * provisional cold-cache fallback), so [ContentScale.Fit] just maps the bitmap into that
+     * same-ratio box without distortion. It no longer upscales a tiny sprite to an oversized fixed
+     * bucket (the pre-#175 model): the size difference between a 15×15 and a 70×50 now comes from
+     * the source, matching web/RF1.
      */
     val smileyContentScale: ContentScale = ContentScale.Fit
 
@@ -45,8 +47,12 @@ internal object PostMediaDisplayPolicy {
     val inlineImageContentScale: ContentScale = ContentScale.Inside
 
     /**
+     * **Not the #175 production size** — since intrinsic sizing landed, this fixed box survives only
+     * as the default [collectInlineMedia] resolver used by tests (production sizes from the measured
+     * native px, see the object KDoc; the in-flight cold fallback is [builtinPreseedSize]).
+     *
      * Built-in HFR smileys (`:jap:`, `:o`, `:D`, `;)`, `:??:`, …) — served from `/icones/<x>.gif`
-     * and `/icones/smilies/<x>.gif`. HFR ships them at 16×16 historically; the 18-sp bucket is
+     * and `/icones/smilies/<x>.gif`. HFR ships them at 16×16 historically; the 18-sp box is
      * a tiny pad so a slightly taller variant doesn't get clipped at the baseline.
      */
     val builtinSmiley: InlineMediaBox = InlineMediaBox(
@@ -55,18 +61,17 @@ internal object PostMediaDisplayPolicy {
     )
 
     /**
+     * **Not the #175 production size** — since intrinsic sizing landed, this fixed box survives only
+     * as the default [collectInlineMedia] resolver used by tests (production sizes from the measured
+     * native px, see the object KDoc; the in-flight cold fallback is [persoColdFallbackSize]).
+     *
      * User-uploaded persona smileys (`[:cosmoschtroumpf]`, `[:rofl]`, …) — served from
      * `/images/perso/<x>.gif` or `/images/perso/<N>/<x>.gif`. Sizes are heterogeneous; the bulk
      * of the exhaustive wikismilies corpus lands on height 50 px, with width commonly ranging up
      * to 70 px. The top sizes found during dogfood were 70×50 (8047), 50×50 (2811), 67×50
      * (1142), then many W×50 variants; tiny historical sprites (15×15, 19×19, 16×16) exist too.
-     *
-     * 70×50 is a corpus-first bucket after dogfood on v32-v34:
-     * - 40×40 + Inside fixed overlap but made common perso unreadable on phones;
-     * - 56×56 + Fit made tiny sprites readable but letterboxed the dominant 70×50 shape;
-     * - 70×50 + Fit keeps common perso at their native HFR ratio while upscaling tiny ones to a
-     *   readable 50 px-high glyph;
-     * - placeholder height stays below the old broken 64sp line rhythm.
+     * 70×50 (the dominant corpus size) is therefore the natural provisional size to minimise reflow
+     * before the measured size lands.
      */
     val persoSmiley: InlineMediaBox = InlineMediaBox(
         placeholderWidth = 70.sp,
@@ -120,6 +125,11 @@ internal data class PixelSize(val width: Int, val height: Int)
 /**
  * Pure mirror of [ContentScale.Fit]: uniformly scale [source] so it fits inside [bucket] while
  * preserving aspect ratio. Returns the resulting size.
+ *
+ * #175 note: this is **no longer on the production smiley path** (which uses
+ * [intrinsicSmileyDisplaySize] + [capToWidth]); it is retained as a pure-JVM `Fit` reference and is
+ * still exercised by tests. Cross-referenced from [intrinsicSmileyDisplaySize] only for its shared
+ * anti-collapse clamp.
  *
  * The result is clamped to at least 1×1 to guard against extreme aspect ratios where rounding
  * would otherwise collapse one dimension to 0 (e.g. a 1×100 banner downscaled into a 70×50
