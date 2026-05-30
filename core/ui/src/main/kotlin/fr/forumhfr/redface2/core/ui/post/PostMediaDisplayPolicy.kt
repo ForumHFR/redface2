@@ -152,3 +152,55 @@ internal fun fitScaledMediaSize(source: PixelSize, bucket: PixelSize): PixelSize
         height = (source.height * scale).roundToInt().coerceAtLeast(1),
     )
 }
+
+/**
+ * #175 — absolute caps for an inline smiley, in **sp** (the intrinsic native px are treated as
+ * logical/CSS px and fed to the placeholder as `.sp` directly — see [intrinsicSmileyDisplaySize]).
+ *
+ * Calibrated against the wikismilies corpus (dominant 70×50, then 50×50/67×50): the height cap of
+ * 70sp lets the dominant 70×50 pass through untouched (~3.5× a 20sp body line, like the web) and
+ * only clamps rare oversized sprites. The width cap is a coarse abuse guard; the *real* horizontal
+ * limit is the relative `0.9 × contentWidth` (RF1's `img { max-width: 90% }`) applied renderer-side
+ * where the container width is known. Values are starting points to calibrate in dogfood (#175).
+ */
+internal const val SMILEY_MAX_HEIGHT_SP = 70
+internal const val SMILEY_MAX_WIDTH_SP = 240
+
+/**
+ * #175 — provisional placeholder sizes used while a smiley's intrinsic size is still being measured
+ * (cold cache), to minimise reflow when the real size lands. Builtins are pre-seeded at their known
+ * ~16×16 (HFR icon set); perso falls back to the dominant 70×50 corpus size.
+ */
+internal val builtinPreseedSize = PixelSize(16, 16)
+internal val persoColdFallbackSize = PixelSize(70, 50)
+
+/**
+ * #175 — the no-upscale + cap policy that replaces the fixed [InlineMediaBox] buckets for smileys.
+ *
+ * Given a smiley's intrinsic native size [nativePx] (raw bitmap px from Coil, treated as logical/CSS
+ * px), returns the display size to feed the placeholder (as `.sp`):
+ *  - **no upscale**: never larger than native — a 15×15 stays 15×15 (the old `Fit` bucket blew it up
+ *    to 50×50), a 70×50 stays 70×50, a `:jap:` ~16×16 stays small. The builtin↔perso size difference
+ *    emerges from the source, matching RF1/web ;
+ *  - **cap down** to [maxWidthSp]×[maxHeightSp] preserving aspect ratio (a huge sprite shrinks) ;
+ *  - clamped ≥ 1 per axis (same anti-collapse guard as [fitScaledMediaSize]).
+ *
+ * The *relative* width cap (≈`0.9 × contentWidth`) is applied separately in the renderer, which is
+ * the only place the container width is known (BoxWithConstraints).
+ */
+internal fun intrinsicSmileyDisplaySize(
+    nativePx: PixelSize,
+    maxWidthSp: Int = SMILEY_MAX_WIDTH_SP,
+    maxHeightSp: Int = SMILEY_MAX_HEIGHT_SP,
+): PixelSize {
+    require(nativePx.width > 0 && nativePx.height > 0) { "nativePx must be positive" }
+    val scale = minOf(
+        maxWidthSp.toFloat() / nativePx.width.toFloat(),
+        maxHeightSp.toFloat() / nativePx.height.toFloat(),
+        1f,
+    )
+    return PixelSize(
+        width = (nativePx.width * scale).roundToInt().coerceAtLeast(1),
+        height = (nativePx.height * scale).roundToInt().coerceAtLeast(1),
+    )
+}
