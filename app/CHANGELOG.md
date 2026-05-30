@@ -21,6 +21,25 @@ Aucun changement applicatif non distribué.
 
 ---
 
+## v66 — `0.3.26` — 2026-05-30
+
+**Statut** : `closed`
+**Commit** : tag `app-v66` après merge de la PR #222
+**Fichier** : AAB uploadé sur le canal Play closed alpha + tag pour F-Droid
+
+Phase 2 finish — dogfood du rendu adaptatif des smileys inline (#175) après les retours sur les buckets fixes. Cette version garde les smileys builtin sur leur petite taille connue et mesure les smileys perso à leur taille intrinsèque pour éviter à la fois les micro-smileys agrandis et les gros smileys qui chevauchent le texte.
+
+### Changed
+- **#175 — Smileys inline à taille intrinsèque.** Les smileys perso ne passent plus par un bucket fixe unique `70×50` : l'app mesure leur taille native via Coil, applique un no-upscale, un cap absolu et un cap relatif de largeur façon RF1/HFR web. Les micro-smileys restent petits, les `70×50` dominants restent lisibles, et les très gros sprites sont réduits au lieu de déborder.
+- **Ligne de texte adaptative pour les smileys hauts.** Les paragraphes contenant des smileys inline retirent le `lineHeight` fixe pour laisser la ligne grandir autour du placeholder baseline-aligned. Objectif : zéro chevauchement avec les lignes voisines.
+- **Build / release** : `app/build.gradle.kts` passe à `versionCode = 66`, `versionName = "0.3.26"`.
+
+### Known issues
+- **#175 / #131 — Gate dogfood encore ouvert.** Les specs canoniques documentent encore la stratégie bucket fixe tant que ce rendu adaptatif n'est pas validé en alpha. Si le dogfood confirme le choix, `protocol-hfr.md`, `roadmap.md` et l'ADR de rendu smileys seront actés dans une PR dédiée.
+- **Cap relatif sous `fontScale > 1`.** Le cap de largeur relatif est exact au fontScale standard et légèrement permissif avec les grandes tailles de police. À calibrer si le dogfood accessibilité montre un débordement réel.
+
+---
+
 ## v65 — `0.3.25` — 2026-05-30
 
 **Statut** : `closed`

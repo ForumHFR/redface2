@@ -8,10 +8,11 @@ import androidx.compose.ui.unit.IntSize
  * #175 — process-wide cache of measured intrinsic media sizes, keyed by image URL.
  *
  * The URL's native size is immutable, so we measure it once (via [measureIntrinsicMediaSize]) and
- * reuse it for every occurrence across posts/screens — the N copies of the same `:jap:` never
- * re-measure. Backed by a Compose `SnapshotStateMap` so a write (when a measurement lands) triggers
- * recomposition of the paragraphs reading that URL, which then rebuild their placeholders at the
- * final size.
+ * reuse it for every occurrence across posts/screens — the N copies of the same perso smiley do not
+ * re-measure once the first result has landed. Builtin HFR smileys bypass measurement entirely and
+ * use their known small size. Backed by a Compose `SnapshotStateMap` so a write (when a measurement
+ * lands) triggers recomposition of the paragraphs reading that URL, which then rebuild their
+ * placeholders at the final size.
  *
  * Failures are memoized too (with a TTL): a dead host / 404 must not be re-fetched on every
  * recomposition or LazyColumn re-entry — without this the cold-cache placeholder path would flood

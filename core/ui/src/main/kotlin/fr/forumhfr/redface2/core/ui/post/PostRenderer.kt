@@ -154,7 +154,7 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     // write recomposes this block and only the inline-content Map (not the AnnotatedString) is rebuilt
     // at the final size. Cold/miss → a provisional fallback to minimise reflow (builtin ~16, perso 70×50).
     val sizeCache = LocalIntrinsicMediaSizeCache.current
-    val smileyUrls = remember(inlines) { collectSmileyUrls(inlines) }
+    val smileyUrls = remember(inlines) { collectMeasurableSmileyUrls(inlines) }
     val measuredSizes: Map<String, IntSize?> = smileyUrls.associateWith { sizeCache.get(it) }
 
     // Measure the not-yet-known URLs. Coil's execute() is a main-safe suspend call (it dispatches its
@@ -590,25 +590,37 @@ private fun walkInlinesForMedia(
     }
 }
 
-/** Collects the distinct (non-null) smiley image URLs of [inlines], for #175 measurement. */
-private fun collectSmileyUrls(inlines: List<PostInline>): Set<String> {
+/**
+ * Collects distinct perso smiley image URLs of [inlines], for #175 intrinsic measurement.
+ *
+ * Builtin HFR smileys are intentionally skipped: their historical 16×16-ish size is known and stable,
+ * so measuring/fetching every `:jap:`/`:o` on a cold topic would contradict the pre-seed contract and
+ * add avoidable work to the common path.
+ */
+internal fun collectMeasurableSmileyUrls(inlines: List<PostInline>): Set<String> {
     val urls = LinkedHashSet<String>()
-    fun walk(list: List<PostInline>) {
-        list.forEach { inline ->
-            when (inline) {
-                is PostInline.Smiley -> inline.imageUrl?.let { urls += it }
-                is PostInline.Strong -> walk(inline.children)
-                is PostInline.Emphasis -> walk(inline.children)
-                is PostInline.Underline -> walk(inline.children)
-                is PostInline.Strike -> walk(inline.children)
-                is PostInline.Color -> walk(inline.children)
-                is PostInline.Link -> walk(inline.children)
-                else -> Unit
-            }
-        }
-    }
-    walk(inlines)
+    collectMeasurableSmileyUrlsInto(inlines, urls)
     return urls
+}
+
+private fun collectMeasurableSmileyUrlsInto(inlines: List<PostInline>, urls: MutableSet<String>) {
+    inlines.forEach { inline -> collectMeasurableSmileyUrl(inline, urls) }
+}
+
+private fun collectMeasurableSmileyUrl(inline: PostInline, urls: MutableSet<String>) {
+    when (inline) {
+        is PostInline.Smiley -> {
+            if (inline.kind is SmileyKind.Perso) inline.imageUrl?.let { urls += it }
+        }
+
+        is PostInline.Strong -> collectMeasurableSmileyUrlsInto(inline.children, urls)
+        is PostInline.Emphasis -> collectMeasurableSmileyUrlsInto(inline.children, urls)
+        is PostInline.Underline -> collectMeasurableSmileyUrlsInto(inline.children, urls)
+        is PostInline.Strike -> collectMeasurableSmileyUrlsInto(inline.children, urls)
+        is PostInline.Color -> collectMeasurableSmileyUrlsInto(inline.children, urls)
+        is PostInline.Link -> collectMeasurableSmileyUrlsInto(inline.children, urls)
+        else -> Unit
+    }
 }
 
 /**

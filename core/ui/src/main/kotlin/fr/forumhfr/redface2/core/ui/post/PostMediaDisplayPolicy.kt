@@ -18,8 +18,9 @@ import kotlin.math.roundToInt
  * [intrinsicSmileyDisplaySize] + [capToWidth]), fed by an async Coil measurement cached per URL
  * (`IntrinsicMediaSizeCache`, driven by `PostRenderer.ParagraphBlock`). The intrinsic px are treated
  * as logical/CSS pixels (→ `.sp` directly, NOT `/density`), reproducing the web/RF1 rendering. The old
- * fixed [builtinSmiley]/[persoSmiley] buckets now survive only as the **cold-cache fallback** shown
- * while a smiley's size is in flight (and as the default `collectInlineMedia` resolver in tests).
+ * fixed [builtinSmiley]/[persoSmiley] buckets now survive only as fallbacks: builtins use their known
+ * small size directly, while perso smileys use the 70×50 cold-cache fallback while measurement is
+ * in flight (and as the default `collectInlineMedia` resolver in tests).
  *
  * Inline `[img]` ([inlineImage]) is OUT of #175 scope and still uses its fixed 240×180 bucket with
  * [inlineImageContentScale] (`Inside`) — a separate UX contract; revisit if dogfood shows it needs
@@ -180,9 +181,10 @@ internal const val SMILEY_MAX_WIDTH_SP = 240
 internal const val SMILEY_RELATIVE_MAX_WIDTH_FRACTION = 0.9f
 
 /**
- * #175 — provisional placeholder sizes used while a smiley's intrinsic size is still being measured
- * (cold cache), to minimise reflow when the real size lands. Builtins are pre-seeded at their known
- * ~16×16 (HFR icon set); perso falls back to the dominant 70×50 corpus size.
+ * #175 — provisional placeholder sizes used while a perso smiley's intrinsic size is still being
+ * measured (cold cache), to minimise reflow when the real size lands. Builtins are never measured:
+ * they use their known ~16×16 HFR icon size directly. Perso falls back to the dominant 70×50 corpus
+ * size until measurement completes.
  */
 internal val builtinPreseedSize = PixelSize(16, 16)
 internal val persoColdFallbackSize = PixelSize(70, 50)

@@ -126,6 +126,29 @@ class PostRendererInlineTest {
     }
 
     @Test
+    fun `collectMeasurableSmileyUrls skips builtins and keeps perso urls only`() {
+        // #175 — builtin HFR smileys have a known small size and must not trigger intrinsic measurement
+        // on the hot path. Perso smileys stay measurable because their corpus sizes are heterogeneous.
+        val builtinUrl = "https://forum-images.hardware.fr/icones/smilies/jap.gif"
+        val nestedBuiltinUrl = "https://forum-images.hardware.fr/icones/smilies/o.gif"
+        val persoUrl = "https://forum-images.hardware.fr/images/perso/cosmoschtroumpf.gif"
+        val nestedPersoUrl = "https://forum-images.hardware.fr/images/perso/t/tall.gif"
+        val inlines = listOf(
+            PostInline.Smiley(kind = SmileyKind.Builtin(":jap:"), imageUrl = builtinUrl),
+            PostInline.Smiley(kind = SmileyKind.Perso("cosmoschtroumpf"), imageUrl = persoUrl),
+            PostInline.Strong(
+                children = listOf(
+                    PostInline.Smiley(kind = SmileyKind.Builtin(":o"), imageUrl = nestedBuiltinUrl),
+                    PostInline.Smiley(kind = SmileyKind.Perso("tall"), imageUrl = nestedPersoUrl),
+                ),
+            ),
+            PostInline.InlineImage(url = "https://forum.hardware.fr/images/foo.png", description = "foo"),
+        )
+
+        assertEquals(setOf(persoUrl, nestedPersoUrl), collectMeasurableSmileyUrls(inlines))
+    }
+
+    @Test
     fun `inline image emits a post-image placeholder and a matching map entry`() {
         val inlines = listOf(
             PostInline.InlineImage(
