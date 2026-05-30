@@ -222,9 +222,14 @@ fun TopicScreen(
  * target drift once the first image finally grows.
  * Bounded by [REANCHOR_MAX_FRAMES] so a never-resolving image cannot hold the list hostage, and we
  * bail the instant the user grabs the list (`isScrollInProgress`) so the settle window never fights
- * manual scrolling — extending the single-shot, no-focus-stealing contract on [TopicEffect]. Inline
- * smileys/images are *not* a factor: their `InlineTextContent` placeholders are fixed-size, so only
- * block images move the geometry.
+ * manual scrolling — extending the single-shot, no-focus-stealing contract on [TopicEffect].
+ *
+ * #175 note — this no longer covers every source of post-load geometry shift: inline smileys now use
+ * intrinsic (measured) placeholder sizes (`:core:ui` `IntrinsicMediaSizeCache`), so a perso whose size
+ * lands *after* this settle window — or after a manual scroll, which this loop deliberately does not
+ * fight — can still nudge the geometry. The provisional fallbacks (pre-seeded builtin / dominant 70×50
+ * perso) keep that nudge small in the common case; a dedicated warmup-before-reanchor is the follow-up
+ * if a deep-link to a perso-heavy post drifts in practice (to validate on a cold-cache device).
  *
  * The per-frame decision is delegated to the pure [reanchorStep] so the state machine is unit-tested
  * without a frame clock or a live `LazyListState`.

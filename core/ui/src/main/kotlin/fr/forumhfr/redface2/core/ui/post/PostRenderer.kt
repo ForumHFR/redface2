@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -64,6 +65,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
+import kotlin.math.roundToInt
 
 /**
  * Maximum number of nested quote levels that render expanded inline. Issue #3 explicit
@@ -139,9 +141,6 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     val sizeCache = LocalIntrinsicMediaSizeCache.current
     val smileyUrls = remember(inlines) { collectSmileyUrls(inlines) }
     val measuredSizes: Map<String, IntSize?> = smileyUrls.associateWith { sizeCache.get(it) }
-    val inlineContent = remember(inlines, measuredSizes) {
-        collectInlineMedia(inlines) { smiley -> smileyDisplayBox(smiley, measuredSizes) }
-    }
 
     // Measure the not-yet-known URLs. Coil's execute() is a main-safe suspend call (it dispatches its
     // own I/O), and reuses the shared SingletonImageLoader caches the rendering AsyncImage hits — so
@@ -158,15 +157,24 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
         }
     }
 
-    if (annotated.text.isBlank() && inlineContent.isEmpty()) {
+    if (annotated.text.isBlank() && !hasInlineMedia(inlines)) {
         return
     }
-    Text(
-        text = annotated,
-        inlineContent = inlineContent,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurface,
-    )
+    // #175 — cap each smiley to RF1's `img { max-width: 90% }`: never wider than 90% of the content
+    // width. BoxWithConstraints exposes that width (it shrinks with quote depth via QuoteFrame), so a
+    // large perso no longer overflows / overlaps the surrounding text in a narrow quote.
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val maxSmileyWidthSp = (maxWidth.value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+        val inlineContent = remember(inlines, measuredSizes, maxSmileyWidthSp) {
+            collectInlineMedia(inlines) { smiley -> smileyDisplayBox(smiley, measuredSizes, maxSmileyWidthSp) }
+        }
+        Text(
+            text = annotated,
+            inlineContent = inlineContent,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
 }
 
 @Composable
@@ -589,21 +597,42 @@ private fun collectSmileyUrls(inlines: List<PostInline>): Set<String> {
 }
 
 /**
- * #175 — resolve a smiley's placeholder box: measured native size (no-upscale + cap) when known,
- * else a provisional fallback (pre-seeded builtin / dominant 70×50 perso) to minimise reflow while
- * the measurement is in flight.
+ * #175 — resolve a smiley's placeholder box: measured native size (no-upscale + absolute cap) when
+ * known, else a provisional fallback (pre-seeded builtin / dominant 70×50 perso) to minimise reflow
+ * while the measurement is in flight. Finally clamped to [maxWidthSp] (RF1's relative `max-width:90%`)
+ * so a large perso cannot overflow a narrow quote line.
  */
-private fun smileyDisplayBox(smiley: PostInline.Smiley, measured: Map<String, IntSize?>): InlineMediaBox {
+private fun smileyDisplayBox(
+    smiley: PostInline.Smiley,
+    measured: Map<String, IntSize?>,
+    maxWidthSp: Int,
+): InlineMediaBox {
     val size = smiley.imageUrl?.let { measured[it] }
-    if (size != null) {
-        val display = intrinsicSmileyDisplaySize(PixelSize(size.width, size.height))
-        return InlineMediaBox(display.width.sp, display.height.sp)
+    val base = if (size != null) {
+        intrinsicSmileyDisplaySize(PixelSize(size.width, size.height))
+    } else {
+        when (smiley.kind) {
+            is SmileyKind.Builtin -> builtinPreseedSize
+            is SmileyKind.Perso -> persoColdFallbackSize
+        }
     }
-    val fallback = when (smiley.kind) {
-        is SmileyKind.Builtin -> builtinPreseedSize
-        is SmileyKind.Perso -> persoColdFallbackSize
+    val capped = capToWidth(base, maxWidthSp)
+    return InlineMediaBox(capped.width.sp, capped.height.sp)
+}
+
+/** True when [inlines] contains at least one renderable inline media (a smiley with a URL, or an image). */
+private fun hasInlineMedia(inlines: List<PostInline>): Boolean = inlines.any { inline ->
+    when (inline) {
+        is PostInline.InlineImage -> true
+        is PostInline.Smiley -> inline.imageUrl != null
+        is PostInline.Strong -> hasInlineMedia(inline.children)
+        is PostInline.Emphasis -> hasInlineMedia(inline.children)
+        is PostInline.Underline -> hasInlineMedia(inline.children)
+        is PostInline.Strike -> hasInlineMedia(inline.children)
+        is PostInline.Color -> hasInlineMedia(inline.children)
+        is PostInline.Link -> hasInlineMedia(inline.children)
+        else -> false
     }
-    return InlineMediaBox(fallback.width.sp, fallback.height.sp)
 }
 
 internal fun imageInlineContent(image: PostInline.InlineImage): InlineTextContent {

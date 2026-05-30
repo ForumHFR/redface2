@@ -167,6 +167,14 @@ internal const val SMILEY_MAX_HEIGHT_SP = 70
 internal const val SMILEY_MAX_WIDTH_SP = 240
 
 /**
+ * #175 — RF1's `img { max-width: 90% }` ported to the smiley path: a smiley never occupies more than
+ * this fraction of the available content width. Applied renderer-side (the only place the container
+ * width is known, via `BoxWithConstraints`) so a large perso shrinks to fit instead of overflowing /
+ * overlapping the text in a narrow quote — and it stays correct as the width shrinks with quote depth.
+ */
+internal const val SMILEY_RELATIVE_MAX_WIDTH_FRACTION = 0.9f
+
+/**
  * #175 — provisional placeholder sizes used while a smiley's intrinsic size is still being measured
  * (cold cache), to minimise reflow when the real size lands. Builtins are pre-seeded at their known
  * ~16×16 (HFR icon set); perso falls back to the dominant 70×50 corpus size.
@@ -202,5 +210,19 @@ internal fun intrinsicSmileyDisplaySize(
     return PixelSize(
         width = (nativePx.width * scale).roundToInt().coerceAtLeast(1),
         height = (nativePx.height * scale).roundToInt().coerceAtLeast(1),
+    )
+}
+
+/**
+ * #175 — scale [size] down so its width fits [maxWidthSp] (the relative cap, ≈90% of the content
+ * width), preserving aspect ratio and clamping to ≥1 per axis. A no-op when it already fits or when
+ * [maxWidthSp] is non-positive (defensive: a zero-width container should not collapse the smiley).
+ */
+internal fun capToWidth(size: PixelSize, maxWidthSp: Int): PixelSize {
+    if (maxWidthSp <= 0 || size.width <= maxWidthSp) return size
+    val scale = maxWidthSp.toFloat() / size.width.toFloat()
+    return PixelSize(
+        width = maxWidthSp,
+        height = (size.height * scale).roundToInt().coerceAtLeast(1),
     )
 }

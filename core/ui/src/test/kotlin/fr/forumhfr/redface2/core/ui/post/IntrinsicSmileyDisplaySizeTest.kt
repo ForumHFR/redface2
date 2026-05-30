@@ -50,4 +50,20 @@ class IntrinsicSmileyDisplaySizeTest {
     fun `non-positive native size is rejected`() {
         intrinsicSmileyDisplaySize(PixelSize(0, 50))
     }
+
+    @Test
+    fun `capToWidth is a no-op when the smiley already fits`() {
+        assertEquals(PixelSize(70, 50), capToWidth(PixelSize(70, 50), maxWidthSp = 200))
+    }
+
+    @Test
+    fun `capToWidth shrinks an over-wide smiley to the cap, preserving aspect ratio`() {
+        // 240×70 in a narrow quote whose 90% width is 120sp → 120×35 (height halved with width).
+        assertEquals(PixelSize(120, 35), capToWidth(PixelSize(240, 70), maxWidthSp = 120))
+    }
+
+    @Test
+    fun `capToWidth is defensive against a zero or negative container width`() {
+        assertEquals(PixelSize(70, 50), capToWidth(PixelSize(70, 50), maxWidthSp = 0))
+    }
 }
