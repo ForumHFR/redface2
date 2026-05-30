@@ -422,15 +422,23 @@ private fun TopicLoadedContent(
             // exposed only when (a) we are on page 1 (FP lives there by
             // definition), (b) HFR rendered the FP edit link in the toolbar
             // (`Topic.isFirstPostOwner`, parsed from the first post on the
-            // page) and (c) the topic has a usable `subcat`. `numreponse` of
-            // the FP comes from the first post, not from `topic.post` (which
-            // is the topic id, a different scope).
-            @Suppress("ComplexCondition") // FP visibility = 4-way conjunction by design : ownership,
-            // postable topic, page 1, non-empty posts. Extracting is unhelpful — each clause guards a
-            // different invariant (HFR permission, write contract, page scope, fixture safety).
+            // page) and (c) the topic is postable WITH a real sub-category.
+            // #213 — unlike Reply/Quote/Edit-post (gated on `canReply` alone,
+            // subcat=0 OK for a category without sub-category), FP edit also
+            // requires `subcat > 0`: the FP recategorise flow
+            // (TopicFormViewModel/TopicFormState) is NOT relaxed for subcat=0
+            // (its sub-category dropdown contract for a 0-subcat category is not
+            // captured yet), so offering it on an IA-style topic would open an
+            // editor that fails with MissingSubcat. Kept strict to avoid a
+            // button-shows-but-submit-fails regression (FP-in-0-subcat = #213 follow-up).
+            // `numreponse` of the FP comes from the first post, not `topic.post`.
+            @Suppress("ComplexCondition") // FP visibility = 5-way conjunction by design : ownership,
+            // postable topic, real subcat, page 1, non-empty posts. Extracting is unhelpful — each
+            // clause guards a different invariant (HFR permission, write contract, page scope, fixture safety).
             val editFirstPostAction: (() -> Unit)? = if (
                 topic.isFirstPostOwner &&
                 topic.canReply &&
+                topic.subcat > 0 &&
                 topic.page == 1 &&
                 topic.posts.isNotEmpty()
             ) {

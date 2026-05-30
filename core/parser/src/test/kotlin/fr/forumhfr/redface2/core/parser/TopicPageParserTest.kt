@@ -244,6 +244,35 @@ class TopicPageParserTest {
     }
 
     @Test
+    fun `subcat is read from the bddpost form not the fast-search widget when they differ`() {
+        // Source-of-truth proof (the real auth fixtures carry the SAME value in both
+        // the fast-search widget and the bddpost form, so they cannot distinguish the
+        // source). Here the fast-search `/forum1.php` widget says subcat=999 while the
+        // `bddpost` reply form says subcat=550 : the parser MUST return 550, proving it
+        // reads `form[action*=bddpost.php] input[name=subcat]` and never the widget.
+        val html = """
+            <html><body>
+              <input type="hidden" name="cat" value="23" />
+              <input type="hidden" name="post" value="35395" />
+              <form action="/forum1.php">
+                <input type="hidden" name="subcat" value="999" />
+              </form>
+              <form name="hop" action="/bddpost.php?config=hfr.inc">
+                <input type="hidden" name="cat" value="23" />
+                <input type="hidden" name="subcat" value="550" />
+              </form>
+              <table><tbody>
+                <tr class="fondForum2Title"><td><h3>Mismatched subcat inputs</h3></td></tr>
+                <tr class="fondForum2PagesHaut"><td class="left"><b>1</b></td></tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        assertTrue(topic.canReply)
+        assertEquals(550, topic.subcat)
+    }
+
+    @Test
     fun `quoteRef extracted from quote link href on the khakha page 2 fixture`() {
         // page 2 of the khakha fixture exposes a stable ref distribution (0, 1, 2, …)
         // because each post sits at its own position in the page (40 posts visible).
