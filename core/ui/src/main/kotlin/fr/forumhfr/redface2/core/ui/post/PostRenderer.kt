@@ -166,9 +166,9 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     //  - width: cap each smiley to RF1's `img { max-width: 90% }` of the content width (read from
     //    BoxWithConstraints, which shrinks with quote depth) so it never overflows a narrow quote;
     //  - height: for media paragraphs drop bodyMedium's fixed `lineHeight` so the LINE GROWS to
-    //    contain the placeholder. With the clamp + Center, a 70sp sprite still overflowed upward onto
-    //    the line above (measured top y=-22→+7); unspecified lineHeight lets the line expand → zero
-    //    overlap. Plain-text paragraphs keep the bodyMedium rhythm.
+    //    contain the (baseline-aligned) placeholder. With the clamp a tall sprite overflowed UP off
+    //    its line onto the line above (measured top y=-22 over a 28sp first line); unspecified
+    //    lineHeight lets the ascent expand → zero overlap. Plain-text paragraphs keep the bodyMedium rhythm.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val maxSmileyWidthSp = (maxWidth.value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
         val inlineContent = remember(inlines, measuredSizes, maxSmileyWidthSp) {
@@ -674,15 +674,15 @@ internal fun smileyInlineContent(smiley: PostInline.Smiley, box: InlineMediaBox)
         placeholder = Placeholder(
             width = box.placeholderWidth,
             height = box.placeholderHeight,
-            // #175 — `Center`, deliberately NOT `AboveBaseline`. AboveBaseline anchors the sprite's
-            // bottom to the baseline and extends it UPWARD *without growing the line*, so a tall perso
-            // overflows onto the line above (measured: a 70sp sprite reaches y=-22 over a 28sp first
-            // line — the overlap reported on the franzhermann post). Only Center/Top/Bottom make the
-            // line grow to contain the placeholder; Center grows it symmetrically → the line gets
-            // taller and there is ZERO overlap. The #203 "straddle" that pushed us to AboveBaseline
-            // came from the old 50sp bucket blowing up tiny sprites; with #175 intrinsic sizing a
-            // small smiley is ~line height, so Center sits it naturally on the line instead.
-            placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
+            // #175 — AboveBaseline: the sprite bottom sits on the text baseline, exactly like a bare
+            // <img> in the browser (web/RF1 parity, consistent with #203). The line's text stays on its
+            // baseline (aligned with neighbouring lines) and a tall smiley rises above it. This avoids
+            // overlap ONLY because media paragraphs drop bodyMedium's fixed lineHeight (see
+            // ParagraphBlock): with the clamp, AboveBaseline pushed a tall sprite UP off its line onto
+            // the line above (measured top y=-22 over a 28sp first line); letting the line grow lets the
+            // ascent expand to contain it → ZERO overlap. (Center was trialled — zero overlap too — but
+            // it floated the line's text at the smiley's mid-height, breaking its baseline vs neighbours.)
+            placeholderVerticalAlign = PlaceholderVerticalAlign.AboveBaseline,
         ),
     ) {
         AsyncImage(

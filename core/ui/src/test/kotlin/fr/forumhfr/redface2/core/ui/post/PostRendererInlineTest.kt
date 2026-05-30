@@ -157,7 +157,7 @@ class PostRendererInlineTest {
     }
 
     @Test
-    fun `builtin smiley with imageUrl uses the small bucket placeholder centred`() {
+    fun `builtin smiley with imageUrl uses the small bucket placeholder baseline-aligned`() {
         // Builtin smileys are typically 16x16 to 18x18 in HFR's icon set. The small bucket fits
         // them inline with body-medium text without a noticeable height bump on the line.
         val inlines = listOf(
@@ -182,12 +182,11 @@ class PostRendererInlineTest {
             placeholder.height,
         )
         assertEquals(
-            // #175 — Center, not AboveBaseline: Center grows the line to contain the placeholder so a
-            // tall perso never overflows onto the line above (AboveBaseline did — the franzhermann
-            // overlap). With intrinsic sizing small smileys are ~line height, so Center no longer
-            // straddles them (the #203 straddle came from the oversized 50sp bucket #175 removed).
-            "smileys must be Center-aligned so the line grows to contain them (zero overlap)",
-            PlaceholderVerticalAlign.Center,
+            // #175 — AboveBaseline: the sprite bottom sits on the text baseline (web/RF1 parity, #203).
+            // Zero overlap for a tall perso comes from the unspecified lineHeight on media paragraphs
+            // (the line grows upward to contain it), NOT from the alignment — see smileyInlineContent.
+            "smileys must be baseline-aligned (AboveBaseline) for web parity",
+            PlaceholderVerticalAlign.AboveBaseline,
             placeholder.placeholderVerticalAlign,
         )
     }
@@ -225,9 +224,9 @@ class PostRendererInlineTest {
             placeholder.width,
         )
         assertEquals(
-            // #175 — same rule as builtin: Center so the line grows to contain a tall perso (zero overlap).
-            "perso smileys must be Center-aligned so the line grows to contain them (zero overlap)",
-            PlaceholderVerticalAlign.Center,
+            // #175 — same rule as builtin: AboveBaseline (web parity); zero overlap via line growth.
+            "perso smileys must be baseline-aligned (AboveBaseline) for web parity",
+            PlaceholderVerticalAlign.AboveBaseline,
             placeholder.placeholderVerticalAlign,
         )
     }

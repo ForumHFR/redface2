@@ -120,11 +120,11 @@ class PostRendererInlineLayoutTest {
     }
 
     @Test
-    fun `perso smiley stays contained within its line under Center (no overflow)`() {
-        // #175 — Center grows the line to contain the placeholder (vs AboveBaseline, which extended a
-        // tall sprite upward out of the line — the franzhermann overlap). Mount a perso between text
-        // and assert it stays inside line 0's bounds: the zero-overlap contract that replaces the
-        // earlier #203 baseline assertion (cf. smileyInlineContent).
+    fun `perso smiley stays contained within its grown line (no overflow)`() {
+        // #175 — the line grows (unspecified lineHeight on media paragraphs) to contain the
+        // baseline-aligned (AboveBaseline) placeholder, so a perso never overflows onto adjacent
+        // lines. Mount a perso between text and assert it stays inside line 0's bounds — the
+        // zero-overlap contract (cf. smileyInlineContent + ParagraphBlock).
         val capture = LayoutCapture()
         mountInlineContent(
             capture,
@@ -136,7 +136,7 @@ class PostRendererInlineLayoutTest {
     }
 
     @Test
-    fun `builtin smiley stays contained within its line under Center (no overflow)`() {
+    fun `builtin smiley stays contained within its grown line (no overflow)`() {
         val capture = LayoutCapture()
         mountInlineContent(
             capture,
@@ -404,8 +404,8 @@ class PostRendererInlineLayoutTest {
 
     /**
      * #175 — asserts the single placeholder is fully contained within its own (first) line: no
-     * overflow above or below. This is the zero-overlap contract `Center` gives (the line grows to
-     * fit the placeholder), as opposed to `AboveBaseline` which overflowed upward.
+     * overflow above or below. The line grows (unspecified lineHeight on media paragraphs) to fit the
+     * baseline-aligned placeholder — the zero-overlap contract #175 requires.
      */
     private fun assertContainedInLine(capture: LayoutCapture, label: String) {
         val rect = requireSingleRect(capture, label)
