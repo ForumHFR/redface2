@@ -10,29 +10,24 @@ import fr.forumhfr.redface2.core.model.SmileyKind
 import kotlin.math.roundToInt
 
 /**
- * Pure, JVM-testable mapping from a media inline node to the bucket size used by Compose's
- * [androidx.compose.foundation.text.InlineTextContent] `Placeholder`. The matching `AsyncImage`
- * fills the placeholder via `Modifier.fillMaxSize()` rather than carrying its own `dp` size — so
- * the image always tracks the `sp`-sized placeholder, even when `fontScale != 1` (accessibility).
+ * Pure, JVM-testable sizing for inline post media (smileys + inline images). The matching `AsyncImage`
+ * fills the placeholder via `Modifier.fillMaxSize()` rather than carrying its own `dp` size — so the
+ * image always tracks the `sp`-sized placeholder, even when `fontScale != 1` (accessibility).
  *
- * Why buckets and not measured intrinsic sizes (cf. arbitrage Codex on issue #109): Compose
- * `InlineTextContent` requires a **fixed** `Placeholder` size at the time the `AnnotatedString`
- * is built. Real HFR smileys range from 15×15 (`:tinostar:`, `:grilled:`) up to ~70×50 for the
- * common perso, with rare larger sprites. Async measurement via `ImageLoader.execute()` would
- * force a recomposition pass with a visible "size pop" on first scroll, plus a per-URL cache to
- * maintain. Phase 1 therefore picks two smiley buckets keyed on [SmileyKind] (the parser already
- * classifies the BBCode token via `alt`/`title`) plus one inline-image bucket.
+ * #175 — SMILEYS are sized by their **measured intrinsic** native dimensions (no-upscale + cap, see
+ * [intrinsicSmileyDisplaySize] + [capToWidth]), fed by an async Coil measurement cached per URL
+ * (`IntrinsicMediaSizeCache`, driven by `PostRenderer.ParagraphBlock`). The intrinsic px are treated
+ * as logical/CSS pixels (→ `.sp` directly, NOT `/density`), reproducing the web/RF1 rendering. The old
+ * fixed [builtinSmiley]/[persoSmiley] buckets now survive only as the **cold-cache fallback** shown
+ * while a smiley's size is in flight (and as the default `collectInlineMedia` resolver in tests).
  *
- * [smileyContentScale] is `ContentScale.Fit`: HFR perso smileys are expressive sprites, and tiny
- * 15×15 sources become unreadable on phones when left at native size. The line-height bug from the
- * initial 64×64 policy came from the old `Modifier.size(.dp)` child drifting from the `sp`
- * placeholder, plus an overly large bucket — not from scaling the sprite to the placeholder.
- * Keeping `Modifier.fillMaxSize()` makes the rendered smiley track the reserved text line under
- * `fontScale`, while the 70×50 bucket follows the dominant wikismilies corpus shape without
- * returning to the old broken 64sp line height.
+ * Inline `[img]` ([inlineImage]) is OUT of #175 scope and still uses its fixed 240×180 bucket with
+ * [inlineImageContentScale] (`Inside`) — a separate UX contract; revisit if dogfood shows it needs
+ * the same intrinsic treatment.
  *
- * Re-evaluate in Phase 2/4 if a fixed bucket still feels wrong on real corpora; intrinsic-size
- * measurement remains the open Phase 2/4 option.
+ * Why this took fixed buckets as a stopgap in #109: Compose `InlineTextContent` requires a **fixed**
+ * `Placeholder` size when the `AnnotatedString` is built, so intrinsic sizing needs async-measure →
+ * cache → recompose; a cold first paint can still reflow once before the measured size lands.
  */
 internal object PostMediaDisplayPolicy {
 

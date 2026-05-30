@@ -134,18 +134,32 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     val annotated = remember(inlines, linkStyles, imageAlt) {
         buildInlineText(inlines, linkStyles, imageAlt)
     }
+    val hasMedia = remember(inlines) { hasInlineMedia(inlines) }
 
-    // #175 — adaptive smiley sizing. Read each smiley's measured native size from the URL cache;
-    // the reads are tracked snapshot reads, so when a measurement lands the SnapshotStateMap write
-    // recomposes this block and only the inline-content Map (not the AnnotatedString) is rebuilt at
-    // the final size. Cold/miss → a provisional fallback to minimise reflow (builtin ~16, perso 70×50).
+    // Plain-text paragraph (the common case): no inline media to size, so render directly with the
+    // bodyMedium rhythm and skip the whole #175 machinery — no cache reads, no measurement effect, no
+    // BoxWithConstraints/SubcomposeLayout wrapper.
+    if (!hasMedia) {
+        if (annotated.text.isBlank()) return
+        Text(
+            text = annotated,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        return
+    }
+
+    // #175 — media paragraph: adaptive smiley sizing. Read each smiley's measured native size from the
+    // URL cache; the reads are tracked snapshot reads, so when a measurement lands the SnapshotStateMap
+    // write recomposes this block and only the inline-content Map (not the AnnotatedString) is rebuilt
+    // at the final size. Cold/miss → a provisional fallback to minimise reflow (builtin ~16, perso 70×50).
     val sizeCache = LocalIntrinsicMediaSizeCache.current
     val smileyUrls = remember(inlines) { collectSmileyUrls(inlines) }
     val measuredSizes: Map<String, IntSize?> = smileyUrls.associateWith { sizeCache.get(it) }
 
     // Measure the not-yet-known URLs. Coil's execute() is a main-safe suspend call (it dispatches its
-    // own I/O), and reuses the shared SingletonImageLoader caches the rendering AsyncImage hits — so
-    // no double network fetch. A dead URL is recorded as a failure (TTL) so it is not re-fetched.
+    // own I/O), and reuses the shared SingletonImageLoader caches the rendering AsyncImage hits — so no
+    // double network fetch. A dead URL is recorded as a failure (TTL) so it is not re-fetched.
     val platformContext = LocalPlatformContext.current
     LaunchedEffect(smileyUrls) {
         val loader = SingletonImageLoader.get(platformContext)
@@ -158,27 +172,21 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
         }
     }
 
-    val hasMedia = remember(inlines) { hasInlineMedia(inlines) }
-    if (annotated.text.isBlank() && !hasMedia) {
-        return
-    }
-    // #175 — two guards against a tall/large inline smiley overlapping the text:
+    // Two guards against a tall/large inline smiley overlapping the text:
     //  - width: cap each smiley to RF1's `img { max-width: 90% }` of the content width (read from
     //    BoxWithConstraints, which shrinks with quote depth) so it never overflows a narrow quote;
-    //  - height: for media paragraphs drop bodyMedium's fixed `lineHeight` so the LINE GROWS to
-    //    contain the (baseline-aligned) placeholder. With the clamp a tall sprite overflowed UP off
-    //    its line onto the line above (measured top y=-22 over a 28sp first line); unspecified
-    //    lineHeight lets the ascent expand → zero overlap. Plain-text paragraphs keep the bodyMedium rhythm.
+    //  - height: drop bodyMedium's fixed `lineHeight` so the LINE GROWS to contain the baseline-aligned
+    //    placeholder. With the clamp a tall sprite overflowed UP off its line onto the line above
+    //    (measured top y=-22 over a 28sp first line); unspecified lineHeight lets the ascent expand → zero overlap.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val maxSmileyWidthSp = (maxWidth.value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
         val inlineContent = remember(inlines, measuredSizes, maxSmileyWidthSp) {
             collectInlineMedia(inlines) { smiley -> smileyDisplayBox(smiley, measuredSizes, maxSmileyWidthSp) }
         }
-        val baseStyle = MaterialTheme.typography.bodyMedium
         Text(
             text = annotated,
             inlineContent = inlineContent,
-            style = if (hasMedia) baseStyle.copy(lineHeight = TextUnit.Unspecified) else baseStyle,
+            style = MaterialTheme.typography.bodyMedium.copy(lineHeight = TextUnit.Unspecified),
             color = MaterialTheme.colorScheme.onSurface,
         )
     }
