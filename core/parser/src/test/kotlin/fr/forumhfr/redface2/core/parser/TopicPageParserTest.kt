@@ -293,6 +293,59 @@ class TopicPageParserTest {
         assertEquals(5, byNumreponse[16628222]?.quoteRef)
     }
 
+    // ─── cat IA (cat=32, no sub-category) — #213 / quote (#146) ─────────────────
+
+    @Test
+    fun `quoteRef and canReply are robust on the real authenticated IA topic page`() {
+        // #213 / #146 — `write_ia_topic_page.html` is a real authenticated capture of
+        // the cat=32 « Intelligence artificielle » topic (no sub-category : subcat=0).
+        // The toolbar « Citer » link is double-nested inside a
+        // `<span class="md_noclass_cryptlink…"><a …numrep…><a …numrep…><img quote.gif></a></a>`,
+        // which Jsoup de-nests into two sibling `<a>`. The premise of the task was that
+        // this defeats `parseQuoteRef` — verified empirically (jsoup 1.22.2) it does NOT :
+        // `.toolbar .left` resolves, `a[href*=numrep=]` returns the de-nested anchors
+        // carrying `…&numrep=N&ref=M`, and the `[?&]ref=` filter correctly keeps the
+        // quote link while discarding `viewbbcode.php` (numreponse= only) and
+        // `addflag.php` (ref= but no numrep=). This test pins that contract on the real
+        // fixture so a future selector tweak cannot silently regress IA quoting.
+        val topic = parser.parse(fixture("write_ia_topic_page.html"))
+
+        assertEquals("cat IA", 32, topic.cat)
+        assertEquals("topic id", 7, topic.post)
+        // The authenticated IA topic ships the bddpost reply form with subcat=0
+        // (postable) — canReply must be true and subcat kept verbatim at 0.
+        assertTrue("authenticated IA topic carries the bddpost form", topic.canReply)
+        assertEquals(0, topic.subcat)
+
+        assertTrue("IA topic must have posts", topic.posts.isNotEmpty())
+        val first = topic.posts.first()
+        assertEquals(16244, first.numreponse)
+        assertEquals("first IA post must expose a quoteRef (ref=1)", 1, first.quoteRef)
+        // Every real post on this page carries a quote link — none collapses to null.
+        assertTrue(
+            "every IA post must expose a non-null quoteRef",
+            topic.posts.all { it.quoteRef != null },
+        )
+    }
+
+    @Test
+    fun `existing topic fixtures keep their quoteRef after the IA capture is added`() {
+        // Regression guard for FIX 1 : whatever selector parses the IA quote link
+        // must NOT alter the quoteRef contract on the pre-existing real fixtures.
+        val khakha2 = parser.parse(fixture("topic_khakha_page_2.html"))
+        val byNumreponse = khakha2.posts.associateBy { it.numreponse }
+        assertEquals(0, byNumreponse[16628071]?.quoteRef)
+        assertEquals(2, byNumreponse[16628106]?.quoteRef)
+        assertEquals(5, byNumreponse[16628222]?.quoteRef)
+
+        // The multipage fixture is authenticated and must keep stable quoteRefs too.
+        val multipage = parser.parse(fixture("topic_page_multipage.html"))
+        assertTrue(
+            "authenticated multipage fixture must keep at least one non-null quoteRef",
+            multipage.posts.any { it.quoteRef != null },
+        )
+    }
+
     @Test
     fun `isFirstPostOwner is true on page 1 when the first post toolbar exposes an edit link`() {
         // Phase 2D #148 — the « Modifier le premier message » action only fires

@@ -30,6 +30,16 @@ data class TopicFormState(
     val validation: BbcodeValidation = BbcodeValidation.Idle,
     val selectedSubcat: Int? = null,
     val subcategoryChoices: List<TopicFormSubcategoryChoice> = emptyList(),
+    /**
+     * #213 — mirror of [TopicForm.hasSubcategorySelect]. `true` when the parsed
+     * form carried a `<select name=subcat>` (the category HAS sub-categories),
+     * `false` when it did not (a category WITHOUT sub-category, e.g. cat IA,
+     * which posts with `subcat=0`). Drives the [canSubmit] branch for the New
+     * mode : a sub-category-less cat is submittable with `subcat=0` and no
+     * explicit pick, while a cat WITH sub-categories still requires
+     * `selectedSubcat > 0`. Defaults to `true` so the historical contract holds.
+     */
+    val hasSubcategorySelect: Boolean = true,
     val pollPresent: Boolean = false,
     val pollEditable: Boolean = false,
     val signatureEnabled: Boolean = false,
@@ -77,16 +87,18 @@ data class TopicFormState(
      * successfully loaded, the session is not anonymous, and we are not
      * already submitting.
      *
-     * #213 follow-up — **out of scope here**. The reply / quote / edit-post chain was
-     * relaxed to `subcat >= 0` (cat without sub-category, e.g. IA, is postable). The
-     * topic-level form keeps the strict `subcat > 0` / `selectedSubcat > 0` because :
-     *   - the EditFirstPost form contract in a cat WITHOUT sub-category is **not
-     *     captured** (only the REPLY IA form is) ; and
-     *   - the create-topic FP parser fail-fasts when « Aucune » (`<option value="">`)
-     *     is selected (`TopicFormParserTest`), so relaxing `selectedSubcat` here would
-     *     contradict an invariant the FP parser reaffirms elsewhere.
-     * Treat cat-0-subcat for EditFirstPost / New like the New mode : a separate
-     * follow-up under #213, once the FP form for a sub-category-less cat is captured.
+     * #213 — the New (create-topic) branch now supports a category WITHOUT a
+     * sub-category (e.g. cat IA, cat=32) : when the parsed form carried no
+     * `<select name=subcat>` ([hasSubcategorySelect] = false), HFR posts with
+     * `subcat=0`, so submit is allowed without an explicit `selectedSubcat`.
+     * A category WITH sub-categories still requires `selectedSubcat > 0` so the
+     * user cannot post into « no sub-category » by accident.
+     *
+     * EditFirstPost stays strict (`subcat > 0` / `selectedSubcat > 0`) because the
+     * FP form contract in a cat WITHOUT sub-category is **not captured** (only the
+     * REPLY and CREATE IA forms are), and the FP parser fail-fasts on a missing
+     * select — relaxing it here would contradict that invariant. Treat cat-0-subcat
+     * for EditFirstPost as a separate follow-up under #213, once that form is captured.
      */
     val canSubmit: Boolean
         get() = when (mode) {
@@ -104,13 +116,22 @@ data class TopicFormState(
                     !isAnonymous
             TopicFormMode.New ->
                 cat != null &&
-                    (selectedSubcat != null && selectedSubcat > 0) &&
+                    isSubcatChoiceComplete &&
                     subject.text.isNotBlank() &&
                     draft.text.isNotBlank() &&
                     !isLoadingForm &&
                     !isSubmitting &&
                     !isAnonymous
         }
+
+    /**
+     * #213 — true when the sub-category routing is complete enough to POST a new
+     * topic : either the cat has no sub-category at all (`hasSubcategorySelect`
+     * false → `subcat=0` is the wire value), or the user has picked a real
+     * sub-category (`selectedSubcat > 0`).
+     */
+    private val isSubcatChoiceComplete: Boolean
+        get() = !hasSubcategorySelect || (selectedSubcat != null && selectedSubcat > 0)
 }
 
 /**

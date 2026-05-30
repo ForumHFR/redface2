@@ -37,6 +37,10 @@ import org.junit.Before
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("LargeClass") // One class per ViewModel keeps every code path co-located with the
+// shared `Fake*Repository` test doubles — splitting per phase (#148 edit FP / #149 create /
+// #213 cat-0-subcat / #11 smiley) would shred the fakes into duplicated copies. Mirrors the
+// same suppression already carried by `PostEditorViewModelTest`.
 class TopicFormViewModelTest {
 
     private val previewParser = FakePreviewParser()
@@ -272,6 +276,78 @@ class TopicFormViewModelTest {
         viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
         viewModel.submit(TopicFormIntent.SubmitClicked)
         // No POST happened because canSubmit returned false.
+        assertEquals(0, topicFormRepository.newTopicSubmitCalls)
+    }
+
+    @Test
+    fun `New mode in a cat without sub-category enables submit with subcat 0 and posts it`() = runTest {
+        // #213 — cat IA (cat=32) has no sub-category : HFR serves a create form with
+        // no `<select name=subcat>`, so the parser returns `hasSubcategorySelect = false`,
+        // `selectedSubcat = null` and no choices. The submit must still be allowed
+        // (the « cat without sub-category » case posts `subcat=0`) without the user
+        // ever picking a sub-category, and the repository must receive `subcat = 0`.
+        topicFormRepository.newTopicFormResult = TopicForm(
+            hashCheck = "FAKE_HASH",
+            subject = "",
+            initialContent = "",
+            userId = SAMPLE_USER_ID,
+            selectedSubcat = null,
+            subcategoryChoices = emptyList(),
+            hasSubcategorySelect = false,
+            hiddenFields = mapOf("cat" to "32"),
+            options = ReplyFormOptions(),
+            msgIcon = "1",
+            poll = TopicPollForm(present = false, fields = emptyMap(), editableInThisVersion = false),
+            isAnonymous = false,
+        )
+        topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Success(
+            newTopicId = null,
+            newNumreponse = null,
+            targetCat = IA_CAT,
+            targetSubcat = 0,
+            refreshUrl = null,
+        )
+        val viewModel = newTopicViewModel(cat = IA_CAT, entrySubcat = null)
+        viewModel.state.test {
+            val hydrated = expectMostRecentItem()
+            // No select, no entry chip : selectedSubcat stays null but the form
+            // signals a sub-category-less cat.
+            assertNull(hydrated.selectedSubcat)
+            assertFalse(hydrated.hasSubcategorySelect)
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Sujet IA")))
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Corps IA", TextRange(8))))
+            // canSubmit must be true WITHOUT any SubcatSelected.
+            val ready = expectMostRecentItem()
+            assertTrue("cat-without-subcat must enable submit with subcat=0", ready.canSubmit)
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(1, topicFormRepository.newTopicSubmitCalls)
+        assertEquals(
+            "subcat=0 must be posted for a cat without sub-category",
+            0,
+            topicFormRepository.lastSubmittedSubcat,
+        )
+    }
+
+    @Test
+    fun `New mode in a cat WITH sub-categories keeps submit disabled until a subcat is picked`() = runTest {
+        // Symmetric guard for FIX 2 : a cat WITH sub-categories (the default fixture,
+        // `hasSubcategorySelect = true`, no pre-selection) must keep submit disabled
+        // until the user picks a sub-category. Relaxing the cat-0-subcat case must not
+        // leak into the normal flow.
+        val viewModel = newTopicViewModel(cat = SAMPLE_CAT, entrySubcat = null)
+        viewModel.state.test {
+            val hydrated = expectMostRecentItem()
+            assertTrue("default fixture exposes a subcat select", hydrated.hasSubcategorySelect)
+            assertNull(hydrated.selectedSubcat)
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            val blocked = expectMostRecentItem()
+            assertFalse("missing subcat selection must keep submit disabled", blocked.canSubmit)
+            cancelAndIgnoreRemainingEvents()
+        }
+        viewModel.submit(TopicFormIntent.SubmitClicked)
         assertEquals(0, topicFormRepository.newTopicSubmitCalls)
     }
 
@@ -678,11 +754,12 @@ class TopicFormViewModelTest {
 
     private fun newTopicViewModel(
         entrySubcat: Int?,
+        cat: Int = SAMPLE_CAT,
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
     ): TopicFormViewModel = TopicFormViewModel(
         request = TopicFormRequest(
             mode = TopicFormMode.New,
-            cat = SAMPLE_CAT,
+            cat = cat,
             subcat = entrySubcat,
             topicId = null,
             page = null,
@@ -904,6 +981,7 @@ class TopicFormViewModelTest {
 
     private companion object {
         const val SAMPLE_CAT = 23
+        const val IA_CAT = 32
         const val SAMPLE_TOPIC_ID = 35_395
         const val SAMPLE_SUBCAT = 550
         const val SAMPLE_OTHER_SUBCAT = 388

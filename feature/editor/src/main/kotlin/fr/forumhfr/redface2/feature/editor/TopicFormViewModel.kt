@@ -422,7 +422,16 @@ class TopicFormViewModel @AssistedInject constructor(
             smileyDisabled = snapshot.smileyDisabled,
             emailNotificationEnabled = snapshot.emailNotificationEnabled,
         )
-        val selectedSubcat = snapshot.selectedSubcat ?: error("canSubmit lied about selectedSubcat")
+        // #213 — a category WITHOUT a sub-category posts with `subcat=0`. In that
+        // case `selectedSubcat` is legitimately null (no <select> to pick from) and
+        // `canSubmit` already allowed the POST, so we resolve to 0 rather than
+        // erroring. A cat WITH sub-categories keeps the invariant : `canSubmit`
+        // guarantees a non-null `selectedSubcat`, so a null here is a real bug.
+        val selectedSubcat = if (!snapshot.hasSubcategorySelect) {
+            snapshot.selectedSubcat ?: 0
+        } else {
+            snapshot.selectedSubcat ?: error("canSubmit lied about selectedSubcat")
+        }
         _state.update { it.copy(isSubmitting = true, submitError = null) }
         submitJob = viewModelScope.launch {
             val outcome = runCatching {
@@ -631,6 +640,10 @@ class TopicFormViewModel @AssistedInject constructor(
             //    request), letting the user override via the dropdown later.
             selectedSubcat = if (hydrateOptions) form.selectedSubcat ?: subcat else selectedSubcat,
             subcategoryChoices = form.subcategoryChoices,
+            // #213 — propagate whether HFR served a <select name=subcat>. A cat
+            // without sub-category (false) is submittable with subcat=0 ; a cat
+            // with sub-categories (true) keeps requiring an explicit pick.
+            hasSubcategorySelect = form.hasSubcategorySelect,
             pollPresent = form.poll.present,
             pollEditable = form.poll.editableInThisVersion,
             signatureEnabled = if (hydrateOptions) form.options.signatureEnabled else signatureEnabled,

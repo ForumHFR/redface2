@@ -50,6 +50,23 @@ data class TopicForm(
      */
     val selectedSubcat: Int?,
     val subcategoryChoices: List<TopicFormSubcategoryChoice>,
+    /**
+     * #213 — `true` when HFR served a `<select name="subcat">` on this form
+     * (i.e. the category HAS sub-categories), `false` when it did not. The
+     * « Intelligence artificielle » category (cat=32) has no sub-category, so
+     * HFR ships the create-topic form WITHOUT any `<select name=subcat>` nor
+     * `<input name=subcat>` ; the form is nonetheless valid and posts with
+     * `subcat=0` (proven on the live `write_ia_create_form.html` capture).
+     *
+     * The create flow uses this flag to decide whether submit needs a
+     * `selectedSubcat > 0` (`true`) or may post `subcat=0` straight away
+     * (`false`). Edit FP never reaches this branch : it fail-fasts at parse
+     * time when the select is missing, so the value is always `true` there.
+     *
+     * Defaults to `true` so the historical contract (a cat with sub-categories
+     * requiring an explicit pick) holds for every existing construction site.
+     */
+    val hasSubcategorySelect: Boolean = true,
     val hiddenFields: Map<String, String>,
     val options: ReplyFormOptions,
     val msgIcon: String?,

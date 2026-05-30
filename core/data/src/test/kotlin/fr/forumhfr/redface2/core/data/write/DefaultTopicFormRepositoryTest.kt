@@ -325,6 +325,65 @@ class DefaultTopicFormRepositoryTest {
     }
 
     @Test
+    fun `POST new-topic in a cat without sub-category posts subcat=0 (cat IA)`() = runTest {
+        // #213 — the « Intelligence artificielle » category (cat=32) ships a create
+        // form with NO <select name=subcat> (real fixture `write_ia_create_form.html`).
+        // The parser surfaces `hasSubcategorySelect = false` / `selectedSubcat = null`,
+        // and the ViewModel posts `subcat=0`. End-to-end, the repository must accept
+        // `selectedSubcat = 0` for such a form and put `subcat=0` on the wire.
+        server.enqueue(MockResponse().setBody(fixture("write_ia_create_form.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+
+        val context = NewTopicContext(cat = 32, entrySubcat = null)
+        val form = repository.fetchNewTopicForm(context)
+        assertFalse("IA cat has no <select name=subcat>", form.hasSubcategorySelect)
+
+        val result = repository.submitNewTopic(
+            context = context,
+            form = form,
+            subject = "Sujet IA",
+            bbcodeContent = "Corps du sujet IA.",
+            selectedSubcat = 0,
+            options = ReplyFormOptions(),
+        )
+        assertTrue("cat-0-subcat create must classify Success — got $result", result is NewTopicSubmitResult.Success)
+
+        server.takeRequest() // drop GET
+        val recorded = server.takeRequest()
+        assertEquals("POST", recorded.method)
+        assertEquals("bddpost.php", recorded.requestUrl!!.pathSegments.first())
+        val body = parseFormBody(recorded.body.readUtf8())
+        assertEquals("Sujet IA", body["sujet"])
+        assertEquals("32", body["cat"])
+        assertEquals("subcat=0 must reach the wire for a sub-category-less cat", "0", body["subcat"])
+    }
+
+    @Test
+    fun `POST new-topic rejects subcat=0 for a cat WITH sub-categories`() = runTest {
+        // Symmetric guard : posting `subcat=0` against a cat that DOES expose a
+        // <select name=subcat> would silently drop the topic into « no sub-category ».
+        // The repository must short-circuit that as a failure.
+        server.enqueue(MockResponse().setBody(fixture("write_create_topic_form_android_cat.html")))
+
+        val context = NewTopicContext(cat = 23, entrySubcat = 550)
+        val form = repository.fetchNewTopicForm(context)
+        assertTrue("Android cat exposes a <select name=subcat>", form.hasSubcategorySelect)
+
+        val result = repository.submitNewTopic(
+            context = context,
+            form = form,
+            subject = "Topic",
+            bbcodeContent = "Body",
+            selectedSubcat = 0,
+            options = ReplyFormOptions(),
+        )
+        assertTrue("subcat=0 on a cat with sub-categories must fail", result is NewTopicSubmitResult.Failure)
+        // No POST went out — only the GET form fetch was consumed.
+        server.takeRequest()
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun `POST new-topic classifies the real create success and exposes no topic id`() = runTest {
         // #214 — replays the REAL create-topic success page captured live
         // (`write_create_topic_success_response.html`, « Votre message a été posté avec
