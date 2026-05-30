@@ -257,17 +257,22 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `submit refuses when subcat is zero (HFR moderator-space wire shape)`() = runTest {
-        // 0 is HFR's wire shape for the moderator-only space (cf. cat=0 family).
-        // No fixture exercises subcat=0 on a user topic, so write flows refuse it
-        // to avoid sending a malformed POST.
+    fun `subcat zero opens the reply form (cat without sub-category, e g IA)`() = runTest {
+        // #213 — `subcat = 0` is HFR's wire shape for a category WITHOUT a
+        // sub-category (e.g. cat=32 « Intelligence artificielle »). A live capture
+        // of the IA reply form proved HFR posts with `subcat=0`, so the editor must
+        // open : no MissingSubcat, the form is fetched, and the built ReplyContext
+        // carries `subcat = 0` (not re-collapsed to the sentinel downstream).
+        replyRepository.formResult = Result.success(authenticatedForm())
         val viewModel = newReplyViewModel(subcat = 0)
         viewModel.state.test {
             val settled = expectMostRecentItem()
-            assertEquals(SubmitError.MissingSubcat, settled.submitError)
+            assertNull("subcat=0 is postable — no MissingSubcat", settled.submitError)
+            assertFalse(settled.isLoadingForm)
             cancelAndIgnoreRemainingEvents()
         }
-        assertEquals(0, replyRepository.formFetches)
+        assertEquals(1, replyRepository.formFetches)
+        assertEquals(0, replyRepository.lastFetchedContext?.subcat)
     }
 
     @Test

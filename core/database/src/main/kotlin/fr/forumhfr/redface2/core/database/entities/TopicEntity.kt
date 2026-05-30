@@ -25,14 +25,27 @@ data class TopicEntity(
      */
     val authMode: FetchMode,
     /**
-     * Sub-category id captured from the topic page HTML (Phase 2C, #145). Required by
+     * Sub-category id of POST, read from the `bddpost` reply form (#213). Required by
      * HFR's write endpoints (`message.php` / `bddpost.php`). Defaults to `-1` for rows
-     * persisted before the v3 → v4 migration; the value `-1` is a sentinel meaning
-     * "unknown, refresh required" and is **never** sent to HFR — write flows check
-     * `subcat > 0` before posting. The `> 0` (instead of `>= 0`) is intentional :
-     * HFR's `cat=0` / `cat=prive` moderator-space wire shape emits `subcat=0` and
-     * Phase 2C has no fixture proving it would be accepted, so write paths treat
-     * `subcat=0` exactly like the missing-subcat sentinel.
+     * persisted before the v3 → v4 migration; the value `-1` (SUBCAT_UNKNOWN) is a
+     * sentinel meaning "no reply form was present (logged-out / anon prefetch / locked
+     * topic), refresh required" and is **never** sent to HFR — write flows refuse
+     * `subcat < 0`.
+     *
+     * `subcat = 0` is a **valid, postable** value (#213) : HFR emits `subcat=0` in the
+     * reply form of a category WITHOUT a sub-category (e.g. cat=32
+     * « Intelligence artificielle »), proven by a live capture (see
+     * `docs/specs/protocol-hfr.md` § POST `bddpost.php`). Write paths gate on
+     * `subcat >= 0`, not `> 0`.
      */
     val subcat: Int = -1,
+    /**
+     * Whether HFR rendered the `bddpost` reply form on the page this row was written
+     * from (#213). Persisted in Room v7 (cf. `MIGRATION_6_7`) so a cache hit keeps the
+     * reply / quote / edit buttons enabled without a network round-trip. Defaults to
+     * `false` : pre-v7 rows backfill to `false` (recovered on the next live
+     * authenticated fetch) and anonymous prefetch rows are read-only by construction —
+     * see [fr.forumhfr.redface2.core.model.Topic.canReply].
+     */
+    val canReply: Boolean = false,
 )

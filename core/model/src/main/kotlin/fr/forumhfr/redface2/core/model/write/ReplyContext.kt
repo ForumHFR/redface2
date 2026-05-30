@@ -2,11 +2,13 @@ package fr.forumhfr.redface2.core.model.write
 
 /**
  * Identifies the topic page the user is about to reply to. Built from a loaded
- * `Topic` (Phase 2C: only opens once `Topic.hasSubcat` is true) and passed to the
+ * `Topic` (#213: only opens once `Topic.canReply` is true) and passed to the
  * reply repository so the repository can build the HFR `message.php` GET URL.
  *
  * All four ids come from the same parsed HTML page — there is no implicit default.
- * The repository will refuse to operate if [subcat] is negative.
+ * The repository will refuse to operate if [subcat] is negative. `subcat = 0` is a
+ * valid, postable value : a category without sub-category (e.g. cat IA) posts with
+ * `subcat=0`. Only the SUBCAT_UNKNOWN sentinel (-1) is rejected.
  */
 data class ReplyContext(
     val cat: Int,
@@ -33,9 +35,10 @@ data class ReplyContext(
 ) {
     init {
         require(cat >= 0) { "cat must be >= 0, was $cat" }
-        // Refuse both the SUBCAT_UNKNOWN sentinel (-1) and the moderator-space wire
-        // shape (0). Mirrors `Topic.hasSubcat` — see its KDoc.
-        require(subcat > 0) { "subcat must be > 0 (sentinel or moderator space), was $subcat" }
+        // #213 — refuse only the SUBCAT_UNKNOWN sentinel (-1, no reply form was
+        // present). `subcat = 0` is postable (cat without sub-category, e.g. IA).
+        // See `Topic.subcat` / `Topic.canReply` KDoc.
+        require(subcat >= 0) { "subcat must be >= 0 (SUBCAT_UNKNOWN sentinel rejected), was $subcat" }
         require(topicId >= 0) { "topicId must be >= 0, was $topicId" }
         require(page >= 1) { "page must be >= 1, was $page" }
         // Quote requires a positive cited numreponse (the HFR `numrep` query param

@@ -19,24 +19,28 @@ class TopicPageParser(
         val document = Jsoup.parse(html)
         val pageInfo = parsePageInfo(document)
         val posts = parsePosts(document)
+        val replyForm = document.selectFirst(REPLY_FORM_SELECTOR)
 
         return Topic(
             cat = requireInputValue(document, HfrSelectors.CATEGORY_ID_INPUT),
             post = requireInputValue(document, HfrSelectors.TOPIC_ID_INPUT),
-            // subcat is required by Phase 2C's write contract but the Phase 1
-            // read flow is older — falling back to the SUBCAT_UNKNOWN sentinel
-            // keeps a topic readable even if HFR ever stops emitting the field,
-            // at the cost of disabling reply until a future capture surfaces a
-            // real id. Several HFR widgets render `input[name=subcat]` on the
-            // same page (fast-search header, reply form, …), so we explicitly
-            // pick the last occurrence which is the one that lives next to the
-            // reply form.
-            subcat = optionalSubcat(document),
+            // #213 — postability is driven by the presence of the `bddpost` reply
+            // form, which HFR renders only on an authenticated, non-locked topic.
+            // The POST subcat is the `input[name=subcat]` of THAT form (it can be
+            // `0` for a category without sub-category, e.g. cat IA — a valid,
+            // postable value). When no reply form is present (logged-out / prefetch
+            // anon page, locked topic), the page only ships the fast-search widget
+            // subcat which is useless for writing : we fall back to the
+            // SUBCAT_UNKNOWN sentinel and leave the topic read-only.
+            subcat = replyFormSubcat(replyForm),
             title = document.selectFirst(HfrSelectors.TOPIC_TITLE)?.text()?.trim()
                 ?: error("Topic title not found"),
             posts = posts,
             page = pageInfo.current,
             totalPages = pageInfo.total,
+            // True only when HFR rendered the `bddpost` reply form on this page.
+            // See [subcat] above and `Topic.canReply` KDoc.
+            canReply = replyForm != null,
             // Phase 2D #148 : the « Modifier le premier message » action only
             // makes sense when the page actually contains the first post, i.e.
             // on page 1. We additionally require HFR to have rendered the edit
@@ -51,15 +55,23 @@ class TopicPageParser(
         )
     }
 
-    private fun optionalSubcat(document: Document): Int {
-        val inputs = document.select(HfrSelectors.SUBCATEGORY_ID_INPUT)
-        if (inputs.isEmpty()) return Topic.SUBCAT_UNKNOWN
-        // Several HFR widgets ship a subcat hidden input on the same page (search
-        // header, reply form, …) — they all carry the same value in practice. We
-        // pick the last occurrence because the reply form (Phase 2C write target)
-        // is rendered after the search widget, so the last write is the most
-        // trustworthy from the write-contract perspective.
-        return inputs.last()?.attr("value")?.toIntOrNull() ?: Topic.SUBCAT_UNKNOWN
+    /**
+     * #213 — the POST subcat is read from the `input[name=subcat]` of the `bddpost`
+     * reply form, never from the fast-search widget that also ships a `subcat` input
+     * on the topic page. HFR renders the reply form only in an authenticated session
+     * on a non-locked topic, so this is also the source of truth for [Topic.canReply].
+     *
+     * `0` is kept verbatim — a category without sub-category (e.g. cat IA, cat=32)
+     * posts with `subcat=0` (proven by a live capture, see protocol-hfr.md). Only the
+     * absence of the form (or of its subcat input) falls back to [Topic.SUBCAT_UNKNOWN],
+     * which write flows refuse.
+     */
+    private fun replyFormSubcat(replyForm: Element?): Int {
+        if (replyForm == null) return Topic.SUBCAT_UNKNOWN
+        return replyForm.selectFirst(HfrSelectors.SUBCATEGORY_ID_INPUT)
+            ?.attr("value")
+            ?.toIntOrNull()
+            ?: Topic.SUBCAT_UNKNOWN
     }
 
     private fun parsePosts(
@@ -287,6 +299,12 @@ private data class PageInfo(
     val total: Int,
 )
 
+// #213 — the reply form posts to `/bddpost.php` (possibly with query params, e.g.
+// `?config=hfr.inc`). We match `action*=bddpost.php` and deliberately NOT
+// `action*=bdd` : the latter would also match the `bdd.php` edit endpoint and the
+// fast-search `forum1.php` form must never count as a reply form. Mirrors the proven
+// `ReplyFormParser` selector contract.
+private const val REPLY_FORM_SELECTOR: String = "form[action*=bddpost.php]"
 private val QUOTE_REF_REGEX: Regex = Regex("""[?&]ref=(\d+)""")
 private val EDIT_NUMREPONSE_REGEX: Regex = Regex("""[?&]numreponse=(\d+)""")
 // Matches `/hfr/profil-{userId}.htm` — the `\d+` captures the numeric user id.

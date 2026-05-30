@@ -93,9 +93,10 @@ data class PostEditorState(
     val canSubmit: Boolean
         get() = (mode == PostEditorMode.Reply || (mode == PostEditorMode.Edit && numreponse != null)) &&
             page != null &&
-            // Reject the `null` unknown, the `-1` SUBCAT_UNKNOWN sentinel and the `0`
-            // moderator-space wire shape (`Topic.hasSubcat` uses the same rule).
-            (subcat != null && subcat > 0) &&
+            // #213 — reject the `null` unknown and the `-1` SUBCAT_UNKNOWN sentinel.
+            // `subcat = 0` is postable (cat without sub-category, e.g. IA) — see
+            // `Topic.subcat` / `Topic.canReply`.
+            (subcat != null && subcat >= 0) &&
             topicId != null &&
             draft.text.isNotBlank() &&
             !isSubmitting &&

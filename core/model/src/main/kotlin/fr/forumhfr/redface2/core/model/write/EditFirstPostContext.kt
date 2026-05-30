@@ -22,10 +22,10 @@ data class EditFirstPostContext(
 ) {
     init {
         require(cat >= 0) { "cat must be >= 0, was $cat" }
-        // Same `subcat > 0` rule as `ReplyContext` / `EditPostContext` : refuse
-        // both the SUBCAT_UNKNOWN sentinel and HFR's `cat=0` / `cat=prive`
-        // moderator-space wire shape. See `Topic.hasSubcat` for the rationale.
-        require(subcat > 0) { "subcat must be > 0 (sentinel or moderator space), was $subcat" }
+        // Same `subcat >= 0` rule as `ReplyContext` / `EditPostContext` (#213) :
+        // refuse only the SUBCAT_UNKNOWN sentinel (-1). `subcat = 0` is postable
+        // (cat without sub-category). See `Topic.subcat` / `Topic.canReply`.
+        require(subcat >= 0) { "subcat must be >= 0 (SUBCAT_UNKNOWN sentinel rejected), was $subcat" }
         require(topicId > 0) { "topicId must be > 0, was $topicId" }
         require(page == 1) {
             "page must be 1 for the first post — FP lives on page 1 by definition, was $page"

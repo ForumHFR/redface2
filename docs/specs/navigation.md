@@ -261,7 +261,7 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
     val topicId: Int? = null,             // requis pour Reply (Phase 2C)
     val numreponse: Int? = null,          // requis à terme pour Edit
     val page: Int? = null,                // page topic en cours, requis Reply (#145)
-    val subcat: Int? = null,              // sous-cat HFR, requis Reply (#145) — TopicScreen ne pousse PostEditorRoute que si topic.hasSubcat
+    val subcat: Int? = null,              // sous-cat HFR de POST, requis Reply (#145). subcat=0 valide (cat sans sous-cat, #213). TopicScreen ne pousse PostEditorRoute que si topic.canReply (présence du formulaire bddpost)
     val quotedNumreponse: Int? = null,    // Phase 2C (#146) : null = reply simple ; non-null = quote (numreponse du post cité)
     val quoteRef: Int? = null,            // Phase 2C (#146) : ref opaque parsé depuis le href quote ; transmis verbatim à HFR
 ) : RedfaceNavKey
@@ -328,9 +328,11 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
             entry<TopicRoute> { route ->
                 TopicScreen(
                     request = TopicRequest(route.cat, route.post, route.page, route.scrollTo),
-                    // Phase 2C (#145): TopicScreen exposes subcat from the parsed topic
-                    // page; the reply button is disabled when `topic.hasSubcat` is false
-                    // (cached row from before the v3 → v4 Room migration).
+                    // #213: TopicScreen exposes subcat from the parsed topic page; the
+                    // reply button is disabled when `topic.canReply` is false (no bddpost
+                    // reply form on the page: logged-out / prefetch anon row, locked topic,
+                    // or a cached row from before the v7 Room migration). subcat=0 (cat
+                    // without sub-category) is a valid, postable value.
                     onReply = { subcat, page ->
                         backStack.add(
                             PostEditorRoute(

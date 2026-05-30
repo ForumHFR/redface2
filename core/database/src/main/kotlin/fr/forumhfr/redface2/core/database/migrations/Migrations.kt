@@ -186,3 +186,23 @@ val MIGRATION_4_5: Migration = object : Migration(4, 5) {
         db.execSQL("ALTER TABLE posts ADD COLUMN quoteRef INTEGER")
     }
 }
+
+/**
+ * v6 → v7 (#213):
+ *
+ * Adds `canReply` to `topic_pages`. Postability is driven by the presence of the
+ * `bddpost` reply form on the topic page (rendered only on an authenticated,
+ * non-locked topic) — see `Topic.canReply`. Persisting it keeps the reply / quote /
+ * edit buttons enabled on a cache hit without a network round-trip.
+ *
+ * Backfilled to `0` (`false`) for pre-v7 rows : they were written before we observed
+ * the reply form, so they stay read-only until the next live authenticated fetch
+ * surfaces a real value. Stored as `INTEGER NOT NULL` (Room's Boolean encoding).
+ *
+ * Pure DDL, no row rewrite — topic pages are short-lived cache.
+ */
+val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE topic_pages ADD COLUMN canReply INTEGER NOT NULL DEFAULT 0")
+    }
+}

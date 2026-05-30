@@ -20,10 +20,11 @@ import org.robolectric.annotation.Config
 
 /**
  * Robolectric-driven migration tests for every hand-written Room migration in the schema
- * — currently `MIGRATION_1_2`, `MIGRATION_2_3`, `MIGRATION_3_4`, `MIGRATION_4_5` and
- * `MIGRATION_5_6` (Phase 2 finish #208 added `Post.profileId` in v6). Without these tests
- * a typo (missing column, wrong index name, wrong default) would only crash on a real
- * upgrade-in-place install, where the diagnostic loop is days long. The tests take seconds.
+ * — currently `MIGRATION_1_2`, `MIGRATION_2_3`, `MIGRATION_3_4`, `MIGRATION_4_5`,
+ * `MIGRATION_5_6` (Phase 2 finish #208 added `Post.profileId` in v6) and `MIGRATION_6_7`
+ * (#213 added `Topic.canReply` in v7). Without these tests a typo (missing column, wrong
+ * index name, wrong default) would only crash on a real upgrade-in-place install, where
+ * the diagnostic loop is days long. The tests take seconds.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [33])
@@ -105,7 +106,14 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+            )
             .build()
 
         try {
@@ -235,7 +243,14 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+            )
             .build()
 
         try {
@@ -326,7 +341,14 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+            )
             .build()
 
         try {
@@ -347,11 +369,11 @@ class MigrationTest {
     /**
      * Phase 2C (#145) — proves `MIGRATION_3_4` adds `subcat` to `topic_pages` with
      * the sentinel default `-1`, that pre-existing rows are preserved and that the
-     * new column is queryable as a real `INTEGER`. The sentinel value is the
-     * "unknown, must be refreshed before any write flow" marker; write paths gate
-     * on `subcat > 0` (excluding both the sentinel and HFR's `cat=0` /
-     * `cat=prive` moderator-space wire shape) so the value is never transmitted
-     * to HFR.
+     * new column is queryable as a real `INTEGER`. The sentinel value (-1,
+     * SUBCAT_UNKNOWN) is the "unknown, must be refreshed before any write flow"
+     * marker. Since #213, write paths gate on `subcat >= 0` (rejecting only the
+     * sentinel) : `subcat = 0` is a valid, postable value for a category without
+     * sub-category (e.g. cat IA), proven by a live capture of the IA reply form.
      */
     @Test
     fun migrate_3_to_4_adds_subcat_with_sentinel_default_to_topic_pages() {
@@ -388,7 +410,14 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+            )
             .build()
 
         try {
@@ -446,7 +475,14 @@ class MigrationTest {
             dbName,
         )
             .allowMainThreadQueries()
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+            )
             .build()
 
         try {
@@ -455,6 +491,65 @@ class MigrationTest {
             ).use { cursor ->
                 assertTrue("pre-v6 post row must survive MIGRATION_5_6", cursor.moveToFirst())
                 assertTrue("profileId must be NULL for pre-v6 rows", cursor.isNull(0))
+            }
+        } finally {
+            migrated.close()
+        }
+    }
+
+    /**
+     * #213 — v6 → v7 adds `canReply` to `topic_pages` with the default `0` (`false`).
+     *
+     * Verifies:
+     * 1. The migration runs cleanly against the v6 fixture.
+     * 2. Pre-existing topic rows survive the migration.
+     * 3. The new column defaults to `0` (read-only) on pre-v7 rows — they stay
+     *    read-only until the next live authenticated fetch surfaces the reply form.
+     */
+    @Test
+    fun migrate_6_to_7_adds_canReply_with_false_default_to_topic_pages() {
+        val dbName = "migration_6_7_test"
+
+        // 1. Create a v6 database and insert a topic_pages row that pre-dates `canReply`.
+        helper.createDatabase(dbName, 6).apply {
+            execSQL(
+                """INSERT INTO topic_pages (cat, post, page, title, totalPages, isFirstPostOwner,
+                   numreponses, fetchedAt, authMode, subcat)
+                   VALUES (23, 35395, 1, 'v6 cached topic', 10, 0, '[]', 1000, 'AUTHENTICATED', 550)""",
+            )
+            close()
+        }
+
+        // 2. Run MIGRATION_6_7 and validate against the v7 schema.
+        helper.runMigrationsAndValidate(dbName, 7, true, MIGRATION_6_7).close()
+
+        // 3. Open the production Room database (which chains every migration).
+        val migrated = Room.databaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java,
+            dbName,
+        )
+            .allowMainThreadQueries()
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+            )
+            .build()
+
+        try {
+            migrated.openHelper.readableDatabase.query(
+                "SELECT canReply FROM topic_pages WHERE cat = 23 AND post = 35395 AND page = 1",
+            ).use { cursor ->
+                assertTrue("v6 row must survive MIGRATION_6_7", cursor.moveToFirst())
+                assertEquals(
+                    "canReply must default to 0 (read-only) for pre-v7 rows",
+                    0,
+                    cursor.getInt(0),
+                )
             }
         } finally {
             migrated.close()

@@ -426,11 +426,11 @@ private fun TopicLoadedContent(
             // the FP comes from the first post, not from `topic.post` (which
             // is the topic id, a different scope).
             @Suppress("ComplexCondition") // FP visibility = 4-way conjunction by design : ownership,
-            // valid subcat, page 1, non-empty posts. Extracting is unhelpful — each clause guards a
+            // postable topic, page 1, non-empty posts. Extracting is unhelpful — each clause guards a
             // different invariant (HFR permission, write contract, page scope, fixture safety).
             val editFirstPostAction: (() -> Unit)? = if (
                 topic.isFirstPostOwner &&
-                topic.hasSubcat &&
+                topic.canReply &&
                 topic.page == 1 &&
                 topic.posts.isNotEmpty()
             ) {
@@ -450,16 +450,17 @@ private fun TopicLoadedContent(
             items = topic.posts,
             key = { post -> post.numreponse },
         ) { post ->
-            // « Citer » is enabled only when (a) the topic has a usable subcat
-            // (same gate as Reply) and (b) HFR exposed a quote link for *this*
-            // post (locked topics, anonymous-fallback rows do not). Both go via
-            // the same `PostEditorRoute`, only the editor request shape differs.
-            val quoteAction: (() -> Unit)? = post.quoteRef?.takeIf { topic.hasSubcat }
+            // « Citer » is enabled only when (a) the topic is postable — the
+            // `bddpost` reply form was present (#213, same gate as Reply) — and (b)
+            // HFR exposed a quote link for *this* post (locked topics,
+            // anonymous-fallback rows do not). Both go via the same
+            // `PostEditorRoute`, only the editor request shape differs.
+            val quoteAction: (() -> Unit)? = post.quoteRef?.takeIf { topic.canReply }
                 ?.let { ref -> { onQuote(topic.subcat, topic.page, post.numreponse, ref) } }
             // Phase 2D (#147) — « Modifier » is exposed by HFR only on the
-            // user's own posts of an unlocked topic. Same hasSubcat gate as
-            // Citer to refuse the SUBCAT_UNKNOWN cache.
-            val editAction: (() -> Unit)? = if (post.isEditable && topic.hasSubcat) {
+            // user's own posts of an unlocked topic. Same canReply gate as
+            // Citer (#213) to refuse a read-only topic (no reply form).
+            val editAction: (() -> Unit)? = if (post.isEditable && topic.canReply) {
                 { onEdit(topic.subcat, topic.page, post.numreponse) }
             } else {
                 null
@@ -530,10 +531,13 @@ private fun TopicHeaderCard(
             }
             Button(
                 onClick = { onReply(topic.subcat, topic.page) },
-                // Topic pages cached before Phase 2C have `subcat = SUBCAT_UNKNOWN`. We
-                // refuse to open the editor in that state — the next live refresh of
-                // the topic will populate a real subcat and the button comes back.
-                enabled = topic.hasSubcat,
+                // #213 — the button is enabled only when HFR rendered the `bddpost`
+                // reply form (authenticated, non-locked topic). Read-only topics
+                // (logged-out / prefetch anon rows, locked topics, pre-#213 cache)
+                // carry `canReply = false` ; the button comes back after a live
+                // authenticated refresh surfaces the form. `subcat = 0` (cat without
+                // sub-category, e.g. IA) is a valid postable value and is forwarded.
+                enabled = topic.canReply,
             ) {
                 Text(text = stringResource(R.string.topic_reply))
             }

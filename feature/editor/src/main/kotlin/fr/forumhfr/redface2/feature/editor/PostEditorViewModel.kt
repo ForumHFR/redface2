@@ -571,7 +571,9 @@ class PostEditorViewModel @AssistedInject constructor(
         val subcat = snapshot.subcat ?: return null
         val topicId = snapshot.topicId ?: return null
         val numreponse = snapshot.numreponse ?: return null
-        if (subcat <= 0 || topicId <= 0 || numreponse <= 0) return null
+        // #213 — `subcat = 0` is postable (cat without sub-category) ; only the
+        // SUBCAT_UNKNOWN sentinel (-1) is blocking. Keep `> 0` for topicId / numreponse.
+        if (subcat < 0 || topicId <= 0 || numreponse <= 0) return null
         return EditPostContext(
             cat = snapshot.cat,
             subcat = subcat,
@@ -587,9 +589,9 @@ class PostEditorViewModel @AssistedInject constructor(
         val page = snapshot.page ?: return null
         val subcat = snapshot.subcat ?: return null
         val topicId = snapshot.topicId ?: return null
-        // Mirror the `Topic.hasSubcat` / `ReplyContext.init` rule : reject both the
-        // sentinel (-1) and the moderator-space wire shape (0).
-        if (subcat <= 0) return null
+        // #213 — mirror the `ReplyContext.init` rule : reject only the SUBCAT_UNKNOWN
+        // sentinel (-1). `subcat = 0` is postable (cat without sub-category, e.g. IA).
+        if (subcat < 0) return null
         return ReplyContext(
             cat = snapshot.cat,
             subcat = subcat,

@@ -65,9 +65,15 @@ class ReplyContextTest {
         )
     }
 
-    @Test(expected = IllegalArgumentException::class)
-    fun `subcat zero is rejected as moderator-space wire shape`() {
-        ReplyContext(cat = 0, subcat = 0, topicId = 1, page = 1)
+    @Test
+    fun `subcat zero is accepted as a category without sub-category (cat IA)`() {
+        // #213 — `subcat = 0` is HFR's wire shape for a category WITHOUT a
+        // sub-category (e.g. cat=32 « Intelligence artificielle »). A live capture
+        // of the IA reply form proved HFR posts with `subcat=0` (see
+        // protocol-hfr.md § POST bddpost.php), so it must NOT throw : the reply
+        // form was present, the topic is postable.
+        val context = ReplyContext(cat = 32, subcat = 0, topicId = 1, page = 1)
+        assertEquals(0, context.subcat)
     }
 
     @Test(expected = IllegalArgumentException::class)

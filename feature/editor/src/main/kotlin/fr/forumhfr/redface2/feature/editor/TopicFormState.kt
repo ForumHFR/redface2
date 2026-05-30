@@ -76,6 +76,17 @@ data class TopicFormState(
      * the user has typed a non-blank subject AND content, the form was
      * successfully loaded, the session is not anonymous, and we are not
      * already submitting.
+     *
+     * #213 follow-up — **out of scope here**. The reply / quote / edit-post chain was
+     * relaxed to `subcat >= 0` (cat without sub-category, e.g. IA, is postable). The
+     * topic-level form keeps the strict `subcat > 0` / `selectedSubcat > 0` because :
+     *   - the EditFirstPost form contract in a cat WITHOUT sub-category is **not
+     *     captured** (only the REPLY IA form is) ; and
+     *   - the create-topic FP parser fail-fasts when « Aucune » (`<option value="">`)
+     *     is selected (`TopicFormParserTest`), so relaxing `selectedSubcat` here would
+     *     contradict an invariant the FP parser reaffirms elsewhere.
+     * Treat cat-0-subcat for EditFirstPost / New like the New mode : a separate
+     * follow-up under #213, once the FP form for a sub-category-less cat is captured.
      */
     val canSubmit: Boolean
         get() = when (mode) {
