@@ -22,6 +22,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,8 +51,12 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
+import coil3.compose.LocalPlatformContext
 import coil3.compose.SubcomposeAsyncImage
 import coil3.compose.SubcomposeAsyncImageContent
 import fr.forumhfr.redface2.core.ui.R
@@ -121,10 +126,38 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
         )
     }
     val imageAlt = stringResource(R.string.post_inline_image_alt)
+    // The AnnotatedString is INVARIANT — it carries only the U+FFFC markers + IDs (via MediaCounter),
+    // never a size — so it is never rebuilt when a measurement lands (#175 stability pivot).
     val annotated = remember(inlines, linkStyles, imageAlt) {
         buildInlineText(inlines, linkStyles, imageAlt)
     }
-    val inlineContent = remember(inlines) { collectInlineMedia(inlines) }
+
+    // #175 — adaptive smiley sizing. Read each smiley's measured native size from the URL cache;
+    // the reads are tracked snapshot reads, so when a measurement lands the SnapshotStateMap write
+    // recomposes this block and only the inline-content Map (not the AnnotatedString) is rebuilt at
+    // the final size. Cold/miss → a provisional fallback to minimise reflow (builtin ~16, perso 70×50).
+    val sizeCache = LocalIntrinsicMediaSizeCache.current
+    val smileyUrls = remember(inlines) { collectSmileyUrls(inlines) }
+    val measuredSizes: Map<String, IntSize?> = smileyUrls.associateWith { sizeCache.get(it) }
+    val inlineContent = remember(inlines, measuredSizes) {
+        collectInlineMedia(inlines) { smiley -> smileyDisplayBox(smiley, measuredSizes) }
+    }
+
+    // Measure the not-yet-known URLs. Coil's execute() is a main-safe suspend call (it dispatches its
+    // own I/O), and reuses the shared SingletonImageLoader caches the rendering AsyncImage hits — so
+    // no double network fetch. A dead URL is recorded as a failure (TTL) so it is not re-fetched.
+    val platformContext = LocalPlatformContext.current
+    LaunchedEffect(smileyUrls) {
+        val loader = SingletonImageLoader.get(platformContext)
+        smileyUrls.forEach { url ->
+            val now = System.currentTimeMillis()
+            if (sizeCache.get(url) == null && !sizeCache.isFailureFresh(url, now)) {
+                val size = measureIntrinsicMediaSize(url, platformContext, loader)
+                if (size != null) sizeCache.putSuccess(url, size) else sizeCache.putFailure(url, now)
+            }
+        }
+    }
+
     if (annotated.text.isBlank() && inlineContent.isEmpty()) {
         return
     }
@@ -491,10 +524,19 @@ private fun AnnotatedString.Builder.appendInline(
     }
 }
 
-internal fun collectInlineMedia(inlines: List<PostInline>): Map<String, InlineTextContent> {
+/**
+ * Builds the `InlineTextContent` map keyed by the same IDs [buildInlineText] emits (the MediaCounter
+ * symmetry invariant). [smileyBox] resolves the placeholder size for each smiley: the production
+ * caller ([ParagraphBlock]) passes a cache-backed resolver (#175 intrinsic sizing), while tests can
+ * pass a stub. The default keeps the legacy fixed buckets as the cold fallback.
+ */
+internal fun collectInlineMedia(
+    inlines: List<PostInline>,
+    smileyBox: (PostInline.Smiley) -> InlineMediaBox = { PostMediaDisplayPolicy.smileyBox(it) },
+): Map<String, InlineTextContent> {
     val out = mutableMapOf<String, InlineTextContent>()
     val media = MediaCounter()
-    walkInlinesForMedia(inlines, out, media)
+    walkInlinesForMedia(inlines, out, media, smileyBox)
     return out
 }
 
@@ -502,6 +544,7 @@ private fun walkInlinesForMedia(
     inlines: List<PostInline>,
     out: MutableMap<String, InlineTextContent>,
     media: MediaCounter,
+    smileyBox: (PostInline.Smiley) -> InlineMediaBox,
 ) {
     inlines.forEach { inline ->
         when (inline) {
@@ -510,18 +553,57 @@ private fun walkInlinesForMedia(
 
             is PostInline.Smiley -> {
                 if (inline.imageUrl == null) return@forEach
-                out += media.nextSmiley() to smileyInlineContent(inline)
+                out += media.nextSmiley() to smileyInlineContent(inline, smileyBox(inline))
             }
 
-            is PostInline.Strong -> walkInlinesForMedia(inline.children, out, media)
-            is PostInline.Emphasis -> walkInlinesForMedia(inline.children, out, media)
-            is PostInline.Underline -> walkInlinesForMedia(inline.children, out, media)
-            is PostInline.Strike -> walkInlinesForMedia(inline.children, out, media)
-            is PostInline.Color -> walkInlinesForMedia(inline.children, out, media)
-            is PostInline.Link -> walkInlinesForMedia(inline.children, out, media)
+            is PostInline.Strong -> walkInlinesForMedia(inline.children, out, media, smileyBox)
+            is PostInline.Emphasis -> walkInlinesForMedia(inline.children, out, media, smileyBox)
+            is PostInline.Underline -> walkInlinesForMedia(inline.children, out, media, smileyBox)
+            is PostInline.Strike -> walkInlinesForMedia(inline.children, out, media, smileyBox)
+            is PostInline.Color -> walkInlinesForMedia(inline.children, out, media, smileyBox)
+            is PostInline.Link -> walkInlinesForMedia(inline.children, out, media, smileyBox)
             else -> Unit
         }
     }
+}
+
+/** Collects the distinct (non-null) smiley image URLs of [inlines], for #175 measurement. */
+private fun collectSmileyUrls(inlines: List<PostInline>): Set<String> {
+    val urls = LinkedHashSet<String>()
+    fun walk(list: List<PostInline>) {
+        list.forEach { inline ->
+            when (inline) {
+                is PostInline.Smiley -> inline.imageUrl?.let { urls += it }
+                is PostInline.Strong -> walk(inline.children)
+                is PostInline.Emphasis -> walk(inline.children)
+                is PostInline.Underline -> walk(inline.children)
+                is PostInline.Strike -> walk(inline.children)
+                is PostInline.Color -> walk(inline.children)
+                is PostInline.Link -> walk(inline.children)
+                else -> Unit
+            }
+        }
+    }
+    walk(inlines)
+    return urls
+}
+
+/**
+ * #175 — resolve a smiley's placeholder box: measured native size (no-upscale + cap) when known,
+ * else a provisional fallback (pre-seeded builtin / dominant 70×50 perso) to minimise reflow while
+ * the measurement is in flight.
+ */
+private fun smileyDisplayBox(smiley: PostInline.Smiley, measured: Map<String, IntSize?>): InlineMediaBox {
+    val size = smiley.imageUrl?.let { measured[it] }
+    if (size != null) {
+        val display = intrinsicSmileyDisplaySize(PixelSize(size.width, size.height))
+        return InlineMediaBox(display.width.sp, display.height.sp)
+    }
+    val fallback = when (smiley.kind) {
+        is SmileyKind.Builtin -> builtinPreseedSize
+        is SmileyKind.Perso -> persoColdFallbackSize
+    }
+    return InlineMediaBox(fallback.width.sp, fallback.height.sp)
 }
 
 internal fun imageInlineContent(image: PostInline.InlineImage): InlineTextContent {
@@ -550,8 +632,7 @@ internal fun imageInlineContent(image: PostInline.InlineImage): InlineTextConten
     }
 }
 
-internal fun smileyInlineContent(smiley: PostInline.Smiley): InlineTextContent {
-    val box = PostMediaDisplayPolicy.smileyBox(smiley)
+internal fun smileyInlineContent(smiley: PostInline.Smiley, box: InlineMediaBox): InlineTextContent {
     val description = smiley.kind.token()
     return InlineTextContent(
         placeholder = Placeholder(

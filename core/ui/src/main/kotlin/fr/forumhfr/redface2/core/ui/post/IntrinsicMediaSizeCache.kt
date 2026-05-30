@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.unit.IntSize
 
 /**
@@ -79,4 +80,20 @@ internal class DefaultIntrinsicMediaSizeCache(
         const val DEFAULT_MAX_ENTRIES = 1024
         const val DEFAULT_FAILURE_TTL_MILLIS = 60_000L
     }
+}
+
+/**
+ * Process-wide default cache instance. Survives recomposition and LazyColumn recycling (it lives
+ * above the composition); NOT process death — the Coil disk cache makes a cold re-measure cheap.
+ */
+internal object ProcessIntrinsicMediaSizeCache :
+    IntrinsicMediaSizeCache by DefaultIntrinsicMediaSizeCache()
+
+/**
+ * Exposes the [IntrinsicMediaSizeCache] to the post renderer. Defaults to the process-wide singleton
+ * so no wiring is required at the app entry point; tests override it with a pre-filled fake via
+ * `CompositionLocalProvider` to assert measured sizing deterministically.
+ */
+internal val LocalIntrinsicMediaSizeCache = staticCompositionLocalOf<IntrinsicMediaSizeCache> {
+    ProcessIntrinsicMediaSizeCache
 }

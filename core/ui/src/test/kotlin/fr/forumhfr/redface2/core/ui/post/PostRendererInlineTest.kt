@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.unit.sp
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
 import org.junit.Assert.assertEquals
@@ -103,6 +104,25 @@ class PostRendererInlineTest {
                 annotated.inlineContentIds(),
             )
         }
+    }
+
+    @Test
+    fun `collectInlineMedia applies the provided smiley box resolver to the placeholder (175 seam)`() {
+        // #175 — the production caller passes a cache-backed resolver returning the measured size;
+        // here we pin that whatever box the resolver yields lands on the InlineTextContent placeholder
+        // (the seam through which intrinsic sizing flows). Default-resolver/bucket behaviour stays
+        // covered by the bucket tests below.
+        val inlines = listOf(
+            PostInline.Smiley(
+                kind = SmileyKind.Perso("measured"),
+                imageUrl = "https://forum-images.hardware.fr/images/perso/measured.gif",
+            ),
+        )
+        val media = collectInlineMedia(inlines) { InlineMediaBox(33.sp, 21.sp) }
+        val placeholder = media["post-smiley-0"]?.placeholder
+        assertNotNull("resolved smiley should yield an InlineTextContent", placeholder)
+        assertEquals(33.sp, placeholder!!.width)
+        assertEquals(21.sp, placeholder.height)
     }
 
     @Test
