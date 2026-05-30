@@ -46,6 +46,23 @@ class ReanchorStepTest {
     }
 
     @Test
+    fun `holding still before the minimum settle window keeps monitoring`() {
+        val frame = ReanchorFrame(target, 0)
+        val step = reanchorStep(
+            frame,
+            previous = frame,
+            target = target,
+            stableFrames = threshold,
+            stableThreshold = threshold,
+            canStop = false,
+        )
+        assertTrue(step is ReanchorStep.Continue)
+        step as ReanchorStep.Continue
+        assertEquals(threshold + 1, step.stableFrames)
+        assertFalse("already at the top → no re-pin, but keep watching for late decodes", step.repin)
+    }
+
+    @Test
     fun `a position change resets the stable counter and asks for a re-pin`() {
         // An image above the target decoded and grew: the target drifted from offset 0 to 60.
         val step = reanchorStep(

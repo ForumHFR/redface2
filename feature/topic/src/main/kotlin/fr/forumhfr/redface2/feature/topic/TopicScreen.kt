@@ -208,14 +208,18 @@ fun TopicScreen(
  * target scrolled off-screen. A warm image cache decodes synchronously before the first measure,
  * which is why #197 only reproduces on a cold cache.
  *
- * Each frame we re-pin the target to the top (when it has drifted) and stop once its position has
- * held still for [REANCHOR_STABLE_FRAMES] consecutive frames — *settled*, not *pinned at offset 0*.
+ * Each frame we re-pin the target to the top (when it has drifted) and stop once the minimum
+ * settle window has elapsed *and* its position has held still for [REANCHOR_STABLE_FRAMES]
+ * consecutive frames — *settled*, not *pinned at offset 0*.
  * Keying the stop on stillness rather than `offset == 0` handles two cases the #197 review flagged:
  *  - a tail post the list cannot scroll all the way up (not enough content below) rests at a
  *    non-zero offset; an `offset == 0` criterion would never be met and would churn the whole frame
  *    budget on no-op re-pins;
  *  - block images above the target that decode at staggered times keep moving the position, so we
  *    must not declare victory in the gap between two growth pushes.
+ * The [REANCHOR_MIN_FRAMES] guard prevents the opposite bug: declaring victory after only three
+ * stable frames (~50 ms) before a cold Coil decode has even had time to finish, then letting the
+ * target drift once the first image finally grows.
  * Bounded by [REANCHOR_MAX_FRAMES] so a never-resolving image cannot hold the list hostage, and we
  * bail the instant the user grabs the list (`isScrollInProgress`) so the settle window never fights
  * manual scrolling — extending the single-shot, no-focus-stealing contract on [TopicEffect]. Inline
@@ -228,11 +232,20 @@ fun TopicScreen(
 private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int) {
     var stableFrames = 0
     var previous: ReanchorFrame? = null
-    repeat(REANCHOR_MAX_FRAMES) {
+    repeat(REANCHOR_MAX_FRAMES) { frame ->
         withFrameNanos { }
         if (isScrollInProgress) return // user took over — never fight a manual scroll
         val current = ReanchorFrame(firstVisibleItemIndex, firstVisibleItemScrollOffset)
-        when (val step = reanchorStep(current, previous, target, stableFrames, REANCHOR_STABLE_FRAMES)) {
+        when (
+            val step = reanchorStep(
+                current = current,
+                previous = previous,
+                target = target,
+                stableFrames = stableFrames,
+                stableThreshold = REANCHOR_STABLE_FRAMES,
+                canStop = frame >= REANCHOR_MIN_FRAMES,
+            )
+        ) {
             ReanchorStep.Stop -> return
             is ReanchorStep.Continue -> {
                 stableFrames = step.stableFrames
@@ -259,16 +272,18 @@ internal sealed interface ReanchorStep {
  * Pure per-frame decision for [reanchorWhileMediaSettles] (#197), extracted so the state machine is
  * unit-testable without a frame clock or a live `LazyListState`.
  *
- * Stop once the target's position has held still ([current] equal to [previous]) for
- * [stableThreshold] consecutive frames. Otherwise carry the updated stable count and ask for a
- * re-pin whenever the target is not currently at the very top ([ReanchorFrame.index] != [target] or
- * a non-zero offset) — a no-op when it already is, harmless when the list cannot scroll it higher.
+ * Stop only when [canStop] is true and the target's position has held still ([current] equal to
+ * [previous]) for [stableThreshold] consecutive frames. Otherwise carry the updated stable count and
+ * ask for a re-pin whenever the target is not currently at the very top ([ReanchorFrame.index] !=
+ * [target] or a non-zero offset) — a no-op when it already is, harmless when the list cannot scroll
+ * it higher.
  *
  * @param current the target row's position this frame
  * @param previous the same reading from the previous frame, or `null` on the first frame
  * @param target the item index we want pinned to the top
  * @param stableFrames consecutive still frames observed so far
  * @param stableThreshold still frames required to consider the layout settled
+ * @param canStop false during the initial cold-decode guard window
  */
 internal fun reanchorStep(
     current: ReanchorFrame,
@@ -276,10 +291,11 @@ internal fun reanchorStep(
     target: Int,
     stableFrames: Int,
     stableThreshold: Int,
+    canStop: Boolean = true,
 ): ReanchorStep {
     val moved = previous == null || current != previous
     val nextStableFrames = if (moved) 0 else stableFrames + 1
-    if (nextStableFrames >= stableThreshold) return ReanchorStep.Stop
+    if (canStop && nextStableFrames >= stableThreshold) return ReanchorStep.Stop
     val repin = current.index != target || current.offset != 0
     return ReanchorStep.Continue(stableFrames = nextStableFrames, repin = repin)
 }
@@ -289,6 +305,13 @@ internal fun reanchorStep(
  * stuck/never-resolving image cannot pin the list indefinitely. Cf. [reanchorWhileMediaSettles].
  */
 private const val REANCHOR_MAX_FRAMES = 120
+
+/**
+ * ~1 s at 60 fps before stillness can stop the loop. This keeps the guard alive long enough for the
+ * first cold Coil decodes to start moving layout; otherwise three stable frames immediately after
+ * the initial scroll can stop the loop before any image above the target has resolved.
+ */
+private const val REANCHOR_MIN_FRAMES = 60
 
 /** Frames the target position must hold still before we treat the layout as settled. */
 private const val REANCHOR_STABLE_FRAMES = 3
