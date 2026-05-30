@@ -12,6 +12,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.sp
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
 import org.junit.Assert.assertEquals
@@ -119,63 +120,70 @@ class PostRendererInlineLayoutTest {
     }
 
     @Test
-    fun `perso smiley placeholder bottom sits on the text baseline for web parity`() {
-        // #203 — HFR serves smileys as bare <img> with no vertical-align, so the browser uses the
-        // CSS default `baseline` (the bottom of the sprite rests on the text baseline). RF2 must
-        // match that: `PlaceholderVerticalAlign.AboveBaseline` aligns the placeholder bottom with
-        // the baseline. The previous `Center` straddled the 50sp perso bucket across the line centre
-        // (≈15sp above AND below a 20sp body line), the "smiley au milieu de la ligne, par-dessus le
-        // texte" reported in #203. We mount the smiley between real text so the first baseline is
-        // anchored by the font metrics, then assert the placeholder bottom lands on it. A regression
-        // back to `Center` pushes the bottom well below the baseline and fails this assertion.
+    fun `perso smiley stays contained within its line under Center (no overflow)`() {
+        // #175 — Center grows the line to contain the placeholder (vs AboveBaseline, which extended a
+        // tall sprite upward out of the line — the franzhermann overlap). Mount a perso between text
+        // and assert it stays inside line 0's bounds: the zero-overlap contract that replaces the
+        // earlier #203 baseline assertion (cf. smileyInlineContent).
         val capture = LayoutCapture()
         mountInlineContent(
             capture,
-            listOf(
-                PostInline.Text("ab "),
-                persoSmileyInlines().first(),
-                PostInline.Text(" cd"),
-            ),
+            listOf(PostInline.Text("ab "), persoSmileyInlines().first(), PostInline.Text(" cd")),
         )
         capture.fontScale.value = 1f
         composeTestRule.waitForIdle()
-        val rect = requireSingleRect(capture, "perso smiley")
-        val baseline = requireNotNull(capture.layout.value?.firstBaseline) {
-            "perso smiley : no TextLayoutResult / firstBaseline captured"
-        }
-        assertCloseEnough(
-            label = "perso smiley placeholder bottom vs first baseline",
-            expected = baseline,
-            actual = rect.bottom,
-            tolerance = BASELINE_TOLERANCE_PX,
-        )
+        assertContainedInLine(capture, "perso smiley")
     }
 
     @Test
-    fun `builtin smiley placeholder bottom sits on the text baseline for web parity`() {
-        // #203 — same baseline rule as the perso case, on the 18sp builtin bucket (served from
-        // `/icones/…`). Builtin smileys are the most common path on HFR, so pin the geometry here
-        // too: a regression back to `Center` would push the bottom below the baseline and fail.
+    fun `builtin smiley stays contained within its line under Center (no overflow)`() {
         val capture = LayoutCapture()
         mountInlineContent(
             capture,
-            listOf(
-                PostInline.Text("ab "),
-                builtinSmileyInlines().first(),
-                PostInline.Text(" cd"),
-            ),
+            listOf(PostInline.Text("ab "), builtinSmileyInlines().first(), PostInline.Text(" cd")),
         )
         capture.fontScale.value = 1f
         composeTestRule.waitForIdle()
-        val rect = requireSingleRect(capture, "builtin smiley")
-        val baseline = requireNotNull(capture.layout.value?.firstBaseline) {
-            "builtin smiley : no TextLayoutResult / firstBaseline captured"
+        assertContainedInLine(capture, "builtin smiley")
+    }
+
+    @Test
+    fun `a tall inline smiley grows its own line and never overflows onto the line above`() {
+        // #175 — a tall perso (here 70sp) on the SECOND line must grow that line, not overflow upward
+        // onto line 0 (the overlap the maintainer reported: "grow the line if needed, ZERO overlap").
+        // We force a 70sp box via a stub resolver and assert the placeholder top sits at/below the
+        // bottom of line 0 (i.e. fully inside its own, grown, line).
+        val capture = LayoutCapture()
+        val inlines = listOf(
+            PostInline.Text("ligne du dessus\n"),
+            PostInline.Text("a "),
+            PostInline.Smiley(kind = SmileyKind.Perso("tall"), imageUrl = "https://hfr/tall.gif"),
+            PostInline.Text(" b"),
+        )
+        val annotated = buildInlineText(inlines, emptyLinkStyles, imageAlt = "img")
+        val media = collectInlineMedia(inlines) { InlineMediaBox(70.sp, 70.sp) }
+        composeTestRule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalDensity provides Density(density = 1f, fontScale = 1f)) {
+                    Text(
+                        text = annotated,
+                        inlineContent = media,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified,
+                        ),
+                        onTextLayout = { result -> capture.layout.value = result },
+                    )
+                }
+            }
         }
-        assertCloseEnough(
-            label = "builtin smiley placeholder bottom vs first baseline",
-            expected = baseline,
-            actual = rect.bottom,
-            tolerance = BASELINE_TOLERANCE_PX,
+        composeTestRule.waitForIdle()
+        val layout = requireNotNull(capture.layout.value) { "no TextLayoutResult captured" }
+        val rect = requireNotNull(layout.placeholderRects.firstOrNull()) { "no placeholder rect" }
+        val line0Bottom = layout.getLineBottom(0)
+        assertTrue(
+            "tall smiley overflows above its line onto line 0 — overlap! rect.top=${rect.top} " +
+                "line0.bottom=$line0Bottom rect.bottom=${rect.bottom} totalLines=${layout.lineCount}",
+            rect.top >= line0Bottom - 1f,
         )
     }
 
@@ -362,7 +370,9 @@ class PostRendererInlineLayoutTest {
                     Text(
                         text = annotated,
                         inlineContent = media,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified,
+                        ),
                         onTextLayout = { result -> capture.layout.value = result },
                     )
                 }
@@ -389,6 +399,26 @@ class PostRendererInlineLayoutTest {
         assertTrue(
             "$label : expected=$expected actual=$actual delta=$delta tolerance=$tolerance",
             delta <= tolerance,
+        )
+    }
+
+    /**
+     * #175 — asserts the single placeholder is fully contained within its own (first) line: no
+     * overflow above or below. This is the zero-overlap contract `Center` gives (the line grows to
+     * fit the placeholder), as opposed to `AboveBaseline` which overflowed upward.
+     */
+    private fun assertContainedInLine(capture: LayoutCapture, label: String) {
+        val rect = requireSingleRect(capture, label)
+        val layout = requireNotNull(capture.layout.value) { "$label : no TextLayoutResult captured" }
+        val lineTop = layout.getLineTop(0)
+        val lineBottom = layout.getLineBottom(0)
+        assertTrue(
+            "$label overflows ABOVE its line — top=${rect.top} lineTop=$lineTop",
+            rect.top >= lineTop - BASELINE_TOLERANCE_PX,
+        )
+        assertTrue(
+            "$label overflows BELOW its line — bottom=${rect.bottom} lineBottom=$lineBottom",
+            rect.bottom <= lineBottom + BASELINE_TOLERANCE_PX,
         )
     }
 

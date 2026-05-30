@@ -53,6 +53,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.SingletonImageLoader
@@ -157,21 +158,27 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
         }
     }
 
-    if (annotated.text.isBlank() && !hasInlineMedia(inlines)) {
+    val hasMedia = remember(inlines) { hasInlineMedia(inlines) }
+    if (annotated.text.isBlank() && !hasMedia) {
         return
     }
-    // #175 — cap each smiley to RF1's `img { max-width: 90% }`: never wider than 90% of the content
-    // width. BoxWithConstraints exposes that width (it shrinks with quote depth via QuoteFrame), so a
-    // large perso no longer overflows / overlaps the surrounding text in a narrow quote.
+    // #175 — two guards against a tall/large inline smiley overlapping the text:
+    //  - width: cap each smiley to RF1's `img { max-width: 90% }` of the content width (read from
+    //    BoxWithConstraints, which shrinks with quote depth) so it never overflows a narrow quote;
+    //  - height: for media paragraphs drop bodyMedium's fixed `lineHeight` so the LINE GROWS to
+    //    contain the placeholder. With the clamp + Center, a 70sp sprite still overflowed upward onto
+    //    the line above (measured top y=-22→+7); unspecified lineHeight lets the line expand → zero
+    //    overlap. Plain-text paragraphs keep the bodyMedium rhythm.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val maxSmileyWidthSp = (maxWidth.value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
         val inlineContent = remember(inlines, measuredSizes, maxSmileyWidthSp) {
             collectInlineMedia(inlines) { smiley -> smileyDisplayBox(smiley, measuredSizes, maxSmileyWidthSp) }
         }
+        val baseStyle = MaterialTheme.typography.bodyMedium
         Text(
             text = annotated,
             inlineContent = inlineContent,
-            style = MaterialTheme.typography.bodyMedium,
+            style = if (hasMedia) baseStyle.copy(lineHeight = TextUnit.Unspecified) else baseStyle,
             color = MaterialTheme.colorScheme.onSurface,
         )
     }
@@ -667,28 +674,21 @@ internal fun smileyInlineContent(smiley: PostInline.Smiley, box: InlineMediaBox)
         placeholder = Placeholder(
             width = box.placeholderWidth,
             height = box.placeholderHeight,
-            // #203 — web parity. HFR serves both builtin (`/icones/…`) and perso (`/images/perso/…`)
-            // smileys as bare `<img>` with no `vertical-align`, so the browser falls back to the CSS
-            // default `baseline`: the bottom of the sprite sits on the text baseline. `Center` (the
-            // previous value) instead straddled the placeholder across the line centre, which on a
-            // 50sp perso bucket overflowed ~15sp above AND below a 20sp body line — the "smiley au
-            // milieu de la ligne, par-dessus le texte" reported in #203. `AboveBaseline` reproduces
-            // the web baseline alignment. Verified against captured fixtures (no perso/builtin smiley
-            // carries a width/height/style attribute in a post body).
-            placeholderVerticalAlign = PlaceholderVerticalAlign.AboveBaseline,
+            // #175 — `Center`, deliberately NOT `AboveBaseline`. AboveBaseline anchors the sprite's
+            // bottom to the baseline and extends it UPWARD *without growing the line*, so a tall perso
+            // overflows onto the line above (measured: a 70sp sprite reaches y=-22 over a 28sp first
+            // line — the overlap reported on the franzhermann post). Only Center/Top/Bottom make the
+            // line grow to contain the placeholder; Center grows it symmetrically → the line gets
+            // taller and there is ZERO overlap. The #203 "straddle" that pushed us to AboveBaseline
+            // came from the old 50sp bucket blowing up tiny sprites; with #175 intrinsic sizing a
+            // small smiley is ~line height, so Center sits it naturally on the line instead.
+            placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
         ),
     ) {
         AsyncImage(
             model = smiley.imageUrl,
             contentDescription = description,
             contentScale = PostMediaDisplayPolicy.smileyContentScale,
-            // Bottom-align the sprite inside the placeholder so its *visible* bottom rests on the
-            // baseline (= the placeholder bottom, since AboveBaseline). With ContentScale.Fit a
-            // sprite that doesn't fill the 70×50 bucket's height is letterboxed; the default Center
-            // alignment then floats it ~1px above the baseline — off by that gap from HFR web, which
-            // sits the bare <img> bottom on the baseline. BottomCenter closes that gap for any aspect
-            // ratio (#131 web-parity polish; a no-op for sprites that already fill the bucket height).
-            alignment = Alignment.BottomCenter,
             modifier = Modifier.fillMaxSize(),
         )
     }

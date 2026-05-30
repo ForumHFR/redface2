@@ -157,7 +157,7 @@ class PostRendererInlineTest {
     }
 
     @Test
-    fun `builtin smiley with imageUrl uses the small bucket placeholder baseline-aligned`() {
+    fun `builtin smiley with imageUrl uses the small bucket placeholder centred`() {
         // Builtin smileys are typically 16x16 to 18x18 in HFR's icon set. The small bucket fits
         // them inline with body-medium text without a noticeable height bump on the line.
         val inlines = listOf(
@@ -182,11 +182,12 @@ class PostRendererInlineTest {
             placeholder.height,
         )
         assertEquals(
-            // #203 — HFR serves smileys as bare <img> (CSS default vertical-align: baseline), so RF2
-            // aligns the placeholder bottom with the text baseline for web parity instead of
-            // centring it across the line (which straddled tall perso buckets over the body line).
-            "smileys must align above the baseline to match HFR's web rendering",
-            PlaceholderVerticalAlign.AboveBaseline,
+            // #175 — Center, not AboveBaseline: Center grows the line to contain the placeholder so a
+            // tall perso never overflows onto the line above (AboveBaseline did — the franzhermann
+            // overlap). With intrinsic sizing small smileys are ~line height, so Center no longer
+            // straddles them (the #203 straddle came from the oversized 50sp bucket #175 removed).
+            "smileys must be Center-aligned so the line grows to contain them (zero overlap)",
+            PlaceholderVerticalAlign.Center,
             placeholder.placeholderVerticalAlign,
         )
     }
@@ -224,9 +225,9 @@ class PostRendererInlineTest {
             placeholder.width,
         )
         assertEquals(
-            // #203 — same web-parity rule as builtin: baseline-aligned, not centred on the line.
-            "perso smileys must align above the baseline to match HFR's web rendering",
-            PlaceholderVerticalAlign.AboveBaseline,
+            // #175 — same rule as builtin: Center so the line grows to contain a tall perso (zero overlap).
+            "perso smileys must be Center-aligned so the line grows to contain them (zero overlap)",
+            PlaceholderVerticalAlign.Center,
             placeholder.placeholderVerticalAlign,
         )
     }
