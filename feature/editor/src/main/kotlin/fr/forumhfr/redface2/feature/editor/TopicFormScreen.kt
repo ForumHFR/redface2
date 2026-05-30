@@ -155,12 +155,19 @@ internal fun TopicFormContent(
                 enabled = !state.isSubmitting,
                 label = { Text(stringResource(R.string.editor_topic_subject_label)) },
             )
-            SubcategoryDropdown(
-                choices = state.subcategoryChoices,
-                selectedSubcat = state.selectedSubcat,
-                enabled = !state.isSubmitting && !state.isLoadingForm,
-                onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
-            )
+            // #213 — a category WITHOUT a sub-category (e.g. IA, cat=32) renders no
+            // `<select name=subcat>` on HFR's form (`hasSubcategorySelect = false`), so
+            // posting there uses subcat=0. Hide the picker entirely in that case rather
+            // than showing an empty « choisir une sous-catégorie » dropdown the user
+            // cannot act on (dogfood feedback @XaaT). Categories WITH sub-categories keep it.
+            if (state.hasSubcategorySelect) {
+                SubcategoryDropdown(
+                    choices = state.subcategoryChoices,
+                    selectedSubcat = state.selectedSubcat,
+                    enabled = !state.isSubmitting && !state.isLoadingForm,
+                    onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
+                )
+            }
             BbcodeToolbar(
                 onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
                 onImageUrlRequested = { imageUrlDialogOpen = true },
