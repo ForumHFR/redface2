@@ -236,14 +236,18 @@ private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int) {
         withFrameNanos { }
         if (isScrollInProgress) return // user took over — never fight a manual scroll
         val current = ReanchorFrame(firstVisibleItemIndex, firstVisibleItemScrollOffset)
+        val stableThreshold = if (frame >= REANCHOR_MIN_FRAMES) {
+            REANCHOR_STABLE_FRAMES
+        } else {
+            Int.MAX_VALUE
+        }
         when (
             val step = reanchorStep(
                 current = current,
                 previous = previous,
                 target = target,
                 stableFrames = stableFrames,
-                stableThreshold = REANCHOR_STABLE_FRAMES,
-                canStop = frame >= REANCHOR_MIN_FRAMES,
+                stableThreshold = stableThreshold,
             )
         ) {
             ReanchorStep.Stop -> return
@@ -272,18 +276,18 @@ internal sealed interface ReanchorStep {
  * Pure per-frame decision for [reanchorWhileMediaSettles] (#197), extracted so the state machine is
  * unit-testable without a frame clock or a live `LazyListState`.
  *
- * Stop only when [canStop] is true and the target's position has held still ([current] equal to
- * [previous]) for [stableThreshold] consecutive frames. Otherwise carry the updated stable count and
- * ask for a re-pin whenever the target is not currently at the very top ([ReanchorFrame.index] !=
- * [target] or a non-zero offset) — a no-op when it already is, harmless when the list cannot scroll
- * it higher.
+ * Stop once the target's position has held still ([current] equal to [previous]) for
+ * [stableThreshold] consecutive frames. The caller passes `Int.MAX_VALUE` during the initial
+ * cold-decode guard window so the helper keeps monitoring even if the first frames are stable.
+ * Otherwise carry the updated stable count and ask for a re-pin whenever the target is not currently
+ * at the very top ([ReanchorFrame.index] != [target] or a non-zero offset) — a no-op when it already
+ * is, harmless when the list cannot scroll it higher.
  *
  * @param current the target row's position this frame
  * @param previous the same reading from the previous frame, or `null` on the first frame
  * @param target the item index we want pinned to the top
  * @param stableFrames consecutive still frames observed so far
  * @param stableThreshold still frames required to consider the layout settled
- * @param canStop false during the initial cold-decode guard window
  */
 internal fun reanchorStep(
     current: ReanchorFrame,
@@ -291,11 +295,10 @@ internal fun reanchorStep(
     target: Int,
     stableFrames: Int,
     stableThreshold: Int,
-    canStop: Boolean = true,
 ): ReanchorStep {
     val moved = previous == null || current != previous
     val nextStableFrames = if (moved) 0 else stableFrames + 1
-    if (canStop && nextStableFrames >= stableThreshold) return ReanchorStep.Stop
+    if (nextStableFrames >= stableThreshold) return ReanchorStep.Stop
     val repin = current.index != target || current.offset != 0
     return ReanchorStep.Continue(stableFrames = nextStableFrames, repin = repin)
 }

@@ -53,8 +53,7 @@ class ReanchorStepTest {
             previous = frame,
             target = target,
             stableFrames = threshold,
-            stableThreshold = threshold,
-            canStop = false,
+            stableThreshold = Int.MAX_VALUE,
         )
         assertTrue(step is ReanchorStep.Continue)
         step as ReanchorStep.Continue
