@@ -127,14 +127,19 @@ val MIGRATION_2_3: Migration = object : Migration(2, 3) {
  * from the topic page HTML (`input[name=subcat]`), the entity stores it next to
  * `cat`, `post`, `page`.
  *
- * Existing v3 rows are backfilled to `-1`, a sentinel that means "unknown, must be
- * refreshed before any write flow". Write paths refuse to POST when `subcat <= 0` —
- * the value is *never* transmitted to HFR. The strict `<= 0` (instead of `< 0`) also
- * excludes the `cat=0` / `cat=prive` moderator-space wire shape (HFR emits
- * `subcat=0` there) for which Phase 2C has no validated fixture. Setting the column
- * NOT NULL via the `-1` default keeps Room's schema verification happy without
- * forcing a row rewrite (topic pages are short-lived cache, the next live fetch
+ * Existing v3 rows are backfilled to `-1`, the `SUBCAT_UNKNOWN` sentinel meaning
+ * "unknown, must be refreshed before any write flow"; write paths refuse it and it is
+ * *never* transmitted to HFR. The `-1` default keeps Room's schema verification happy
+ * without forcing a row rewrite (topic pages are short-lived cache; the next live fetch
  * replaces the sentinel).
+ *
+ * NOTE (#213, superseded write contract): this migration's original Phase 2C rationale
+ * gated writes on `subcat > 0` and treated `subcat = 0` as a non-postable
+ * moderator-space wire shape. #213 later **validated** (live capture of the IA cat=32
+ * reply form, see `docs/specs/protocol-hfr.md` § POST `bddpost.php`) that `subcat = 0`
+ * IS postable for a category without sub-category. Postability is now driven by
+ * `Topic.canReply` (presence of the `bddpost` reply form), not by `subcat > 0`; only
+ * the `-1` sentinel stays non-postable. The `-1` backfill here is unaffected.
  */
 val MIGRATION_3_4: Migration = object : Migration(3, 4) {
     override fun migrate(db: SupportSQLiteDatabase) {
