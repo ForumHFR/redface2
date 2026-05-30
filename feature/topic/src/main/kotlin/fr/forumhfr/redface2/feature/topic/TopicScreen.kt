@@ -81,7 +81,7 @@ fun TopicScreen(
      * (locked topic special cases, anonymous fallback) keep the « Citer » button
      * hidden — we never reach this callback for those.
      */
-    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
+    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     /**
      * Open the editor in edit mode (Phase 2D, #147). HFR exposes the edit link on
      * the post's left toolbar only when the post belongs to the current user and
@@ -331,7 +331,7 @@ internal fun TopicContent(
     listState: LazyListState,
     onIntent: (TopicIntent) -> Unit,
     onReply: (subcat: Int, page: Int) -> Unit,
-    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
+    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -400,7 +400,7 @@ private fun TopicLoadedContent(
     state: TopicUiState,
     topic: Topic,
     onReply: (subcat: Int, page: Int) -> Unit,
-    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
+    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -458,13 +458,19 @@ private fun TopicLoadedContent(
             items = topic.posts,
             key = { post -> post.numreponse },
         ) { post ->
-            // « Citer » is enabled only when (a) the topic is postable — the
-            // `bddpost` reply form was present (#213, same gate as Reply) — and (b)
-            // HFR exposed a quote link for *this* post (locked topics,
-            // anonymous-fallback rows do not). Both go via the same
-            // `PostEditorRoute`, only the editor request shape differs.
-            val quoteAction: (() -> Unit)? = post.quoteRef?.takeIf { topic.canReply }
-                ?.let { ref -> { onQuote(topic.subcat, topic.page, post.numreponse, ref) } }
+            // « Citer » is enabled whenever the topic is postable — the `bddpost`
+            // reply form was present (#213, same gate as Reply). It does NOT depend
+            // on parsing a per-post quote link: HFR identifies the cited post by
+            // `numrep={numreponse}` alone (proven via hfr-mcp FetchQuote, which omits
+            // `ref` entirely), so an unparseable/obfuscated quote link (cat IA &
+            // pinned topics ship them as `md_noclass_cryptlink`, cf. #227) no longer
+            // hides Citer. `quoteRef` is forwarded when known (positional, cosmetic)
+            // and may be null — the whole quote chain tolerates it.
+            val quoteAction: (() -> Unit)? = if (topic.canReply) {
+                { onQuote(topic.subcat, topic.page, post.numreponse, post.quoteRef) }
+            } else {
+                null
+            }
             // Phase 2D (#147) — « Modifier » is exposed by HFR only on the
             // user's own posts of an unlocked topic. Same canReply gate as
             // Citer (#213) to refuse a read-only topic (no reply form).
