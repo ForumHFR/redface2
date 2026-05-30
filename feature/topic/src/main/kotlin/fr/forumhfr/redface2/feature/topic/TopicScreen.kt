@@ -74,12 +74,14 @@ fun TopicScreen(
     onReply: (subcat: Int, page: Int) -> Unit,
     /**
      * Open the editor in quote mode (Phase 2C, #146). Same destination as [onReply],
-     * but the editor will GET HFR's quote form (`?numrep=…&ref=…`) and hydrate the
-     * draft with the `[quotemsg=…]` block HFR prefills. The call-site supplies
-     * `quotedNumreponse = post.numreponse` and `quoteRef = post.quoteRef`, captured
-     * from the topic page HTML. Posts whose HTML did not expose a quote link
-     * (locked topic special cases, anonymous fallback) keep the « Citer » button
-     * hidden — we never reach this callback for those.
+     * but the editor GETs HFR's quote form and hydrates the draft with the
+     * `[quotemsg=…]` block HFR prefills. The call-site supplies
+     * `quotedNumreponse = post.numreponse` (always known) and `quoteRef = post.quoteRef`
+     * (forwarded when known, may be `null`). HFR identifies the cited post by
+     * `numrep={numreponse}` alone — `ref` is positional/optional (#227, proven live;
+     * `HfrClient.getReplyForm` omits `&ref=` when null) — so « Citer » is gated on
+     * `Topic.canReply` (cf. the per-post gate below), never on the presence of a
+     * parsed quote link. Obfuscated/cached rows with `quoteRef = null` are supported.
      */
     onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     /**

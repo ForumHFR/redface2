@@ -50,11 +50,11 @@ data class PostEntity(
     /**
      * `ref` parameter parsed from HFR's quote link href (Phase 2C, #146 — round
      * 2 fix). Persisted in Room v5 so the « Citer » button stays available on a
-     * cache hit ; without this column, a fresh cache load would reset all
-     * quoteRefs to `null` and the UI would suppress quote until the next live
-     * fetch. Nullable on disk : pre-v5 rows backfill to `NULL` (sentinel for
-     * « unknown, refresh required »), and posts whose HFR HTML did not expose a
-     * quote link (locked topic, anonymous read) keep `NULL` legitimately.
+     * cache hit. Nullable on disk : pre-v5 rows backfill to `NULL`, and posts whose
+     * HFR HTML exposed no *clear* quote link (obfuscated `md_*cryptlink` toolbar,
+     * locked topic, anonymous read) keep `NULL`. Since #227 « Citer » is gated on
+     * `Topic.canReply`, not on this column — a `null` quoteRef no longer hides the
+     * button (HFR quotes by `numrep={numreponse}` alone).
      */
     val quoteRef: Int? = null,
     /**
