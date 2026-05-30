@@ -1,11 +1,9 @@
-Redface 2 alpha v62 — logged-in quotes fixed.
+Redface 2 alpha v65 — topic reading polish.
 
 Fixes:
-- Quotes now render correctly while logged in.
-- HFR `citation` and `oldcitation` variants are both parsed.
-
-v61 recap:
-- "Clear topic cache" maintenance action.
-- Alpha "Ignore topic cache" option for cache bug diagnostics.
+- Inline smileys align better with text.
+- More reliable jump-to-post while images load.
+- Compact post header after profile links.
+- New-topic success and list highlight.
 
 Report bugs via alpha or GitHub.

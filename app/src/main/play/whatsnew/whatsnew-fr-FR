@@ -1,11 +1,9 @@
-Alpha Redface 2 v62 — citations connectées corrigées.
+Alpha Redface 2 v65 — polish lecture topic.
 
 Correctifs :
-- Les citations s’affichent correctement en étant connecté.
-- Les variantes HFR `citation` / `oldcitation` sont maintenant reconnues.
-
-Rappel v61 :
-- Bouton « Vider le cache des topics ».
-- Option alpha « Ignorer le cache topic » pour diagnostiquer les bugs de cache.
+- Smileys inline mieux alignés avec le texte.
+- Scroll vers un post plus fiable pendant le chargement des images.
+- Header de post compact après clic sur profil.
+- Création de topic : succès et mise en évidence dans la liste.
 
 Bugs : alpha ou GitHub.
