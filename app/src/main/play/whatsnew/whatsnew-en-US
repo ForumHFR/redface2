@@ -1,9 +1,9 @@
-Redface 2 alpha v67 — more robust replies and quotes.
+Redface 2 alpha v68 — write actions and flags polish.
 
 Changes:
-- Reply now works on categories without subcategories.
-- Quote stays available even when HFR hides the quote link.
-- Old topic caches are invalidated to avoid missing buttons after update.
-- Docs and tests now match real HFR fixtures.
+- Reply, quote and edit actions are no longer shown while logged out.
+- Flags: no more double loader during pull-to-refresh.
+- Flags: pull-to-refresh now works on empty and error states.
+- Targeted tests cover write gates and refresh behavior.
 
 Report bugs via alpha or GitHub.

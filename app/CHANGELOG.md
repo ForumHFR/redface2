@@ -21,6 +21,24 @@ Aucun changement applicatif non distribué.
 
 ---
 
+## v68 — `0.3.28` — 2026-05-31
+
+**Statut** : `closed`
+**Commit** : tag `app-v68` après merge de la PR #230
+**Fichier** : AAB uploadé sur le canal Play closed alpha + tag pour F-Droid
+
+Phase 2 finish — corrections de fin de dogfood sur les actions d'écriture et l'écran Drapeaux.
+
+### Fixed
+- **#220 — Actions d'écriture masquées hors connexion.** Répondre, Citer, Modifier et Modifier-FP sont maintenant gated sur `canReply && isAuthenticated`, afin d'éviter d'ouvrir un éditeur qui ne peut échouer qu'au submit après logout ou cache topic périmé.
+- **#225 — Drapeaux : suppression du double loader au swipe-to-refresh.** La liste reste affichée sous l'indicateur Material 3 au lieu de disparaître derrière un spinner central.
+- **#229 — Drapeaux : swipe-to-refresh sur état vide ou erreur.** Les états vides/erreur remplissent maintenant l'écran et restent scrollables pour que le geste de refresh soit capté.
+
+### Changed
+- **Build / release** : `app/build.gradle.kts` passe à `versionCode = 68`, `versionName = "0.3.28"`.
+
+---
+
 ## v67 — `0.3.27` — 2026-05-31
 
 **Statut** : `closed`
