@@ -134,7 +134,7 @@ class TopicViewModel @AssistedInject constructor(
         _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
         loadJob = viewModelScope.launch {
             topicRepository
-                .observeTopicPage(request.cat, request.post, request.page)
+                .observeTopicPage(request.cat, request.post, request.page, forceRefresh = request.forceRefresh)
                 .catch { error ->
                     if (error is CancellationException) throw error
                     // Cache-first UX: if we already showed a cached page, keep it on screen

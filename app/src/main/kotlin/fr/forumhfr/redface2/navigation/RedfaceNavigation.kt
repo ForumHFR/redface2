@@ -104,6 +104,13 @@ data class TopicRoute(
      * link) so the cache-first behaviour is preserved everywhere else.
      */
     val submitSignal: Long? = null,
+    /**
+     * #231 — `true` when this route is pushed from a drapeau/flag tap. The topic screen
+     * still shows the cached page instantly but always refreshes afterwards (bypassing the
+     * 60s snappy-cache TTL), so opening a followed topic to catch up never shows it stale.
+     * `false` on ordinary navigation (forum / deep link / back-nav) to keep the cache snappy.
+     */
+    val forceRefresh: Boolean = false,
 ) : RedfaceNavKey
 
 @Serializable
@@ -448,6 +455,10 @@ private fun RedfaceNavHost(
                                 scrollTo = flag.lastPostReadId
                                     ?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }
                                     ?.toInt(),
+                                // #231 — a flag open means « catch up on new posts » → refresh
+                                // past the 60s snappy-cache TTL (the cached page is still shown
+                                // instantly first). Avoids landing on a stale followed topic.
+                                forceRefresh = true,
                             ),
                         )
                     },
@@ -584,6 +595,7 @@ private fun RedfaceNavHost(
                         page = route.page,
                         scrollTo = route.scrollTo,
                         submitSignal = route.submitSignal,
+                        forceRefresh = route.forceRefresh,
                     ),
                     onOpenProfile = onOpenProfile,
                     onReply = { subcat, page ->
