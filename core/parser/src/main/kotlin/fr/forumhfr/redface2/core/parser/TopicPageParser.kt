@@ -17,6 +17,14 @@ class TopicPageParser(
 ) {
     fun parse(html: String): Topic {
         val document = Jsoup.parse(html)
+        // #227 — HFR obfuscates the per-post toolbar `message.php` links (quote + edit) in
+        // `md_*cryptlink` spans on many pages (anti-aspirateur, intermittent: cat IA, pinned
+        // topics, and — observed 2026-05-31 — most sections even logged-out). A no-JS client
+        // (Redface 2) then sees no clear `<a href>`, so « Modifier » (`parseHasEditLink`) would
+        // break. `materialize()` replays HFR's `md_forum_decryptlink.init()` to turn those spans
+        // back into anchors before any toolbar extraction. No-op on a clear page. Profile links
+        // (`/hfr/profil-`) ship in clear and are unaffected; « Citer » self-generates by `numrep`.
+        CryptlinkDecoder.materialize(document)
         val pageInfo = parsePageInfo(document)
         val posts = parsePosts(document)
         val replyForm = document.selectFirst(REPLY_FORM_SELECTOR)
@@ -126,20 +134,27 @@ class TopicPageParser(
     }
 
     /**
-     * Phase 2D (#147) — returns `true` when the post's left toolbar exposes an
-     * edit link of the shape `<a href="…message.php?…&numreponse={N}…">`. The
-     * quote link is at the same place but uses `numrep` (not `numreponse`), and
-     * the post body may carry unrelated `numreponse=` links (`viewbbcode.php`,
-     * `forum2.php?…&numreponse=0`, modo / addflag). Scoping the lookup to
-     * `POST_TOOLBAR_LEFT` + matching only `message.php` + `numreponse=` is what
-     * separates « this post is editable » from « this post happens to link to
-     * another post ».
+     * Phase 2D (#147) / #227 — returns `true` when the post's left toolbar exposes an
+     * edit link, i.e. HFR considers the post editable by the current session (own post,
+     * unlocked topic). HFR ships this link in **two URL shapes** depending on the render:
+     * - legacy / `message.php` form: `…message.php?…&numreponse={N}…` (the quote link is at
+     *   the same place but uses `numrep`, not `numreponse`).
+     * - **pretty form (authenticated pages, observed live 2026-05-31):**
+     *   `/hfr/<cat>/editer-<a>-<numreponse>-<page>.htm` — the `citer-`/`editer-`/`repondre-`
+     *   slugs HFR serves once logged in, instead of `message.php`.
+     *
+     * Both forms are obfuscated as `md_*cryptlink` spans and turned back into anchors by
+     * [CryptlinkDecoder.materialize] (called at the top of [parse]) before this runs. The
+     * lookup stays scoped to `POST_TOOLBAR_LEFT` so an inline `numreponse=`/`editer-` link a
+     * user pasted in the post body never promotes the host post to editable.
      */
     private fun parseHasEditLink(postTable: Element): Boolean {
         val toolbar = postTable.selectFirst(HfrSelectors.POST_TOOLBAR_LEFT) ?: return false
-        return toolbar
-            .select("a[href*=message.php]")
-            .any { EDIT_NUMREPONSE_REGEX.containsMatchIn(it.attr("href")) }
+        return toolbar.select("a[href]").any { anchor ->
+            val href = anchor.attr("href")
+            EDIT_PRETTY_REGEX.containsMatchIn(href) ||
+                ("message.php" in href && EDIT_NUMREPONSE_REGEX.containsMatchIn(href))
+        }
     }
 
     /**
@@ -306,5 +321,10 @@ private data class PageInfo(
 private const val REPLY_FORM_SELECTOR: String = "form[action*=bddpost.php]"
 private val QUOTE_REF_REGEX: Regex = Regex("""[?&]ref=(\d+)""")
 private val EDIT_NUMREPONSE_REGEX: Regex = Regex("""[?&]numreponse=(\d+)""")
+// #227 — authenticated pages serve the toolbar edit link as a pretty URL
+// `/hfr/<cat>/editer-<a>-<numreponse>-<page>.htm` instead of `message.php?numreponse=…`.
+// `/editer-\d` is distinctive (does NOT match `/user/editprofil.php`). The link is
+// recovered from its `md_*cryptlink` span by CryptlinkDecoder.materialize() beforehand.
+private val EDIT_PRETTY_REGEX: Regex = Regex("""/editer-\d""")
 // Matches `/hfr/profil-{userId}.htm` — the `\d+` captures the numeric user id.
 private val PROFILE_ID_REGEX: Regex = Regex("""/hfr/profil-(\d+)\.htm""")

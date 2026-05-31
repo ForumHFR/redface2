@@ -336,6 +336,23 @@ class TopicPageParserTest {
     }
 
     @Test
+    fun `parse materializes obfuscated md_cryptlink toolbar links so the message_php path resolves (#227)`() {
+        // `topic_page_single.html` is a raw logged-out capture whose per-post toolbar
+        // `message.php` links ship obfuscated in `md_*cryptlink` spans (14 quote links among
+        // them). Before #227 wired `CryptlinkDecoder.materialize()` into `parse()`, the toolbar
+        // selectors found no clear `<a href>` → `quoteRef` null, and « Modifier »
+        // (`parseHasEditLink`, the SAME toolbar `message.php` mechanism) broke on an
+        // authenticated obfuscated page. After materialize(), the quote links resolve — proving
+        // the toolbar `message.php` extraction (quote + edit) is restored on obfuscated pages.
+        val topic = parser.parse(fixture("topic_page_single.html"))
+
+        assertTrue(
+            "materialize() must restore obfuscated toolbar message.php links so quoteRef resolves",
+            topic.posts.any { it.quoteRef != null },
+        )
+    }
+
+    @Test
     fun `isFirstPostOwner is true on page 1 when the first post toolbar exposes an edit link`() {
         // Phase 2D #148 — the « Modifier le premier message » action only fires
         // when (a) we are on page 1 (HFR's FP lives there by definition) and
@@ -458,6 +475,67 @@ class TopicPageParserTest {
         val post = topic.posts.single()
         assertTrue("Owner post must surface isEditable=true", post.isEditable)
         assertTrue("Owner post must surface isOwnPost=true", post.isOwnPost)
+    }
+
+    @Test
+    fun `isEditable is true for a plain pretty editer- link (authenticated, #227)`() {
+        // #227 — once logged in, HFR serves the toolbar edit link as the pretty slug
+        // `/hfr/<cat>/editer-<a>-<numreponse>-<page>.htm` (observed live 2026-05-31), NOT
+        // message.php?numreponse=…. parseHasEditLink must recognize this shape.
+        val html = """
+            <html><body>
+              <input name="cat" value="32" /><input name="post" value="1" /><input name="subcat" value="0" />
+              <table><tbody>
+                <tr class="fondForum2Title"><th class="messCase1">Auteur</th><th><h3>IA</h3></th></tr>
+              </tbody></table>
+              <table class="messagetable"><tbody>
+                <tr class="message">
+                  <td class="messCase1"><a name="t55556"></a><b class="s2">XaTriX</b></td>
+                  <td class="messCase2">
+                    <div class="toolbar"><div class="left">
+                      Posté le 30-05-2026&nbsp;à&nbsp;10:31:06
+                      <a href="/hfr/ia/editer-1-55556-2.htm#formulaire">editer</a>
+                    </div></div>
+                    <div id="para55556"><p>own post</p></div>
+                  </td>
+                </tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        assertTrue("pretty editer- link must surface isEditable", parser.parse(html).posts.single().isEditable)
+    }
+
+    @Test
+    fun `isEditable resolves an obfuscated pretty editer- cryptlink via materialize (#227)`() {
+        // End-to-end #227: on an authenticated obfuscated page the edit link ships as a
+        // md_*cryptlink span (no clear <a>). CryptlinkDecoder.materialize() (wired in parse())
+        // decodes the class → /hfr/ia/editer-…htm, then parseHasEditLink recognizes the pretty
+        // slug → isEditable=true. The class suffix is the base16 encoding (alphabet
+        // "0A12B34C56D78E9F") of `/hfr/ia/editer-1-55555-2.htm#formulaire`.
+        val html = """
+            <html><body>
+              <input name="cat" value="32" /><input name="post" value="1" /><input name="subcat" value="0" />
+              <table><tbody>
+                <tr class="fondForum2Title"><th class="messCase1">Auteur</th><th><h3>IA</h3></th></tr>
+              </tbody></table>
+              <table class="messagetable"><tbody>
+                <tr class="message">
+                  <td class="messCase1"><a name="t55555"></a><b class="s2">XaTriX</b></td>
+                  <td class="messCase2">
+                    <div class="toolbar"><div class="left">
+                      Posté le 30-05-2026&nbsp;à&nbsp;10:31:06
+                      <span class="md_noclass_cryptlink1F4544C11F464A1F434B46CB43C11E2A1E23232323231E211945CB4E12444FC14EC3484A46C143"><img src="/edit.gif" /></span>
+                    </div></div>
+                    <div id="para55555"><p>own post</p></div>
+                  </td>
+                </tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        assertTrue(
+            "materialize() + pretty editer- detection must surface isEditable on an obfuscated page",
+            parser.parse(html).posts.single().isEditable,
+        )
     }
 
     @Test

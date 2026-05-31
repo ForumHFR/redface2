@@ -68,6 +68,42 @@ android {
         // a release build ; this just makes the icon legible on the device. Release keeps
         // `@string/app_name`.
         manifestPlaceholders["appLabel"] = "Redface 2 ADB"
+
+        // Stamp the exact build into versionName so a sideloaded dogfood APK is identifiable:
+        // every debug build otherwise shares the release versionName (e.g. 0.3.28), which made
+        // it impossible to tell which fix a tester was actually running. Git short SHA + a
+        // `.dirty` marker when built with uncommitted changes — traceable to the exact commit,
+        // automatic (no manual counter), and surfaced via BuildConfig.VERSION_NAME + the footer.
+        // Result e.g. `0.3.28+debug.f813453` (or `…+debug.f813453.dirty`). Release is untouched
+        // (clean SemVer for the stores / F-Droid reproducibility).
+        // `isIgnoreExitValue` so a failing git (e.g. CI's "dubious ownership", exit 128, where the
+        // checkout is owned by another uid) degrades to "" instead of failing the whole build —
+        // the ProcessOutputValueSource exception escapes a plain runCatching, so we must let the
+        // exec itself tolerate non-zero. In CI we prefer GITHUB_SHA (git refuses there anyway).
+        fun gitOutput(vararg args: String): String {
+            val exec = providers.exec {
+                commandLine(listOf("git", "-C", rootDir.absolutePath) + args)
+                isIgnoreExitValue = true
+            }
+            return if (exec.result.get().exitValue == 0) exec.standardOutput.asText.get().trim() else ""
+        }
+        val envSha = providers.environmentVariable("GITHUB_SHA").orNull?.trim()?.take(7)?.takeIf { it.isNotBlank() }
+        val gitSha = envSha ?: gitOutput("rev-parse", "--short", "HEAD")
+        val gitDirty = gitOutput("status", "--porcelain").isNotBlank()
+        // Optional per-build stamp, e.g. `-PbuildStamp=$(date -u +%y%m%d.%H%M%S)`. The git SHA
+        // alone cannot tell two builds of the SAME (uncommitted/dirty) tree apart, so when we
+        // sideload successive dogfood iterations without committing we pass a fresh stamp to make
+        // each APK distinguishable on-device. It is OFF by default (tests / lint / CI / clean
+        // dogfood) so those keep a warm Gradle configuration cache — only explicit dogfood APK
+        // builds opt in. Passing a new value each invocation invalidates the config cache, which
+        // is exactly what we want for a value that must be fresh per build.
+        val buildStamp = (project.findProperty("buildStamp") as String?)?.takeIf { it.isNotBlank() }
+        versionNameSuffix = buildString {
+            append("+debug")
+            if (gitSha.isNotEmpty()) append(".$gitSha")
+            if (gitDirty) append(".dirty")
+            if (buildStamp != null) append(".$buildStamp")
+        }
     }
 
     buildFeatures {

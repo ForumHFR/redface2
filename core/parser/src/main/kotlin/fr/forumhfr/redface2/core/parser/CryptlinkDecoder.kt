@@ -15,13 +15,16 @@ import org.jsoup.nodes.Element
  * replicate the decode to read those links. See `docs/specs/protocol-hfr.md` § Liens
  * obfusqués (md_*cryptlink) and issue #227.
  *
- * **Status — on-demand utility, NOT wired into [TopicPageParser].** « Citer » no longer
- * needs it: the cited post is identified by `numrep={numreponse}` alone (HFR ignores
- * `ref`, proven live — cf. #213/#227 and `HfrClient.getReplyForm`), so the quote action
- * is gated on `Topic.canReply` and never reads the quote link. This decoder is kept for
- * the toolbar links that still rely on parsing the HTML — « Modifier » ([isEditable]) and
- * the profile tap ([profileId]) — which break on the obfuscated variant. Call
- * [materialize] before toolbar extraction when those must work on an obfuscated page.
+ * **Status — wired into [TopicPageParser.parse], which calls [materialize] before any
+ * toolbar extraction** so the « Modifier » edit link resolves on an obfuscated page.
+ * Empirically (raw no-JS HTML, verified 2026-05-31 on cat=1/13/23 + the cat=32 capture),
+ * the obfuscation wraps the toolbar **`message.php`** links — quote (`numrep`+`ref`) and
+ * edit (`numreponse`) — while the profile link (`/hfr/profil-`) and the post body ship in
+ * **clear**, so [profileId] was never affected. « Citer » does not depend on this either:
+ * the cited post is identified by `numrep={numreponse}` alone (HFR ignores `ref`, proven
+ * live — cf. #213/#227 and `HfrClient.getReplyForm`), so the quote action is gated on
+ * `Topic.canReply`. [materialize] is generic — it also harmlessly recovers any other
+ * cryptlink span (PV, addflag, …) should HFR ever obfuscate them.
  *
  * ## Algorithm (verified against `common.js` and live fixtures)
  * A custom base-16 alphabet: each character of the class suffix is a hex "digit" whose
