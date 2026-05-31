@@ -336,6 +336,23 @@ class TopicPageParserTest {
     }
 
     @Test
+    fun `parse materializes obfuscated md_cryptlink toolbar links so the message_php path resolves (#227)`() {
+        // `topic_page_single.html` is a raw logged-out capture whose per-post toolbar
+        // `message.php` links ship obfuscated in `md_*cryptlink` spans (14 quote links among
+        // them). Before #227 wired `CryptlinkDecoder.materialize()` into `parse()`, the toolbar
+        // selectors found no clear `<a href>` → `quoteRef` null, and « Modifier »
+        // (`parseHasEditLink`, the SAME toolbar `message.php` mechanism) broke on an
+        // authenticated obfuscated page. After materialize(), the quote links resolve — proving
+        // the toolbar `message.php` extraction (quote + edit) is restored on obfuscated pages.
+        val topic = parser.parse(fixture("topic_page_single.html"))
+
+        assertTrue(
+            "materialize() must restore obfuscated toolbar message.php links so quoteRef resolves",
+            topic.posts.any { it.quoteRef != null },
+        )
+    }
+
+    @Test
     fun `isFirstPostOwner is true on page 1 when the first post toolbar exposes an edit link`() {
         // Phase 2D #148 — the « Modifier le premier message » action only fires
         // when (a) we are on page 1 (HFR's FP lives there by definition) and

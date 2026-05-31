@@ -17,6 +17,14 @@ class TopicPageParser(
 ) {
     fun parse(html: String): Topic {
         val document = Jsoup.parse(html)
+        // #227 — HFR obfuscates the per-post toolbar `message.php` links (quote + edit) in
+        // `md_*cryptlink` spans on many pages (anti-aspirateur, intermittent: cat IA, pinned
+        // topics, and — observed 2026-05-31 — most sections even logged-out). A no-JS client
+        // (Redface 2) then sees no clear `<a href>`, so « Modifier » (`parseHasEditLink`) would
+        // break. `materialize()` replays HFR's `md_forum_decryptlink.init()` to turn those spans
+        // back into anchors before any toolbar extraction. No-op on a clear page. Profile links
+        // (`/hfr/profil-`) ship in clear and are unaffected; « Citer » self-generates by `numrep`.
+        CryptlinkDecoder.materialize(document)
         val pageInfo = parsePageInfo(document)
         val posts = parsePosts(document)
         val replyForm = document.selectFirst(REPLY_FORM_SELECTOR)
