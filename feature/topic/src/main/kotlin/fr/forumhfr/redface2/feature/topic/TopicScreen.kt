@@ -434,21 +434,13 @@ private fun TopicLoadedContent(
             // editor that fails with MissingSubcat. Kept strict to avoid a
             // button-shows-but-submit-fails regression (FP-in-0-subcat = #213 follow-up).
             // `numreponse` of the FP comes from the first post, not `topic.post`.
-            @Suppress("ComplexCondition") // FP visibility = 6-way conjunction by design : auth (#220),
-            // ownership, postable topic, real subcat, page 1, non-empty posts. Extracting is unhelpful —
-            // each clause guards a different invariant (login, HFR permission, write contract, page scope).
-            val editFirstPostAction: (() -> Unit)? = if (
-                state.isAuthenticated &&
-                topic.isFirstPostOwner &&
-                topic.canReply &&
-                topic.subcat > 0 &&
-                topic.page == 1 &&
-                topic.posts.isNotEmpty()
-            ) {
-                { onEditFirstPost(topic.subcat, topic.page, topic.posts.first().numreponse) }
-            } else {
-                null
-            }
+            // #220 — the gate (incl. the auth clause) is the testable `shouldShowEditFirstPost`.
+            val editFirstPostAction: (() -> Unit)? =
+                if (shouldShowEditFirstPost(topic, state.isAuthenticated)) {
+                    { onEditFirstPost(topic.subcat, topic.page, topic.posts.first().numreponse) }
+                } else {
+                    null
+                }
             TopicHeaderCard(
                 topic = topic,
                 state = state,
@@ -905,6 +897,18 @@ internal fun shouldShowQuoteAction(topic: Topic, isAuthenticated: Boolean): Bool
 
 internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
     post.isEditable && topic.canReply && isAuthenticated
+
+// Phase 2D #148 / #220 — « Modifier le premier message ». 6-way conjunction by design: auth,
+// FP ownership, postable topic, a real sub-category (FP recategorise is NOT relaxed for subcat=0,
+// cf. #213), page 1 (the FP lives there), non-empty posts. Each clause guards a distinct invariant.
+@Suppress("ComplexCondition")
+internal fun shouldShowEditFirstPost(topic: Topic, isAuthenticated: Boolean): Boolean =
+    isAuthenticated &&
+        topic.isFirstPostOwner &&
+        topic.canReply &&
+        topic.subcat > 0 &&
+        topic.page == 1 &&
+        topic.posts.isNotEmpty()
 
 private const val PAGE_GRID_LIMIT = 40
 private const val JUMP_MAX_DIGITS = 4

@@ -52,18 +52,49 @@ class TopicActionGatesTest {
         assertFalse("logged-out (e.g. stale cache)", shouldEnableReply(topic(canReply = true), isAuthenticated = false))
     }
 
+    @Test
+    fun `edit-first-post needs auth, FP ownership, postable real-subcat topic on page 1 (#148, #220)`() {
+        val fp = post(isEditable = true)
+        val ready = topic(canReply = true, posts = listOf(fp), isFirstPostOwner = true, subcat = 550, page = 1)
+
+        assertTrue(shouldShowEditFirstPost(ready, isAuthenticated = true))
+        assertFalse(
+            "#220 — logged-out never sees Modifier-FP, even on a stale postable row",
+            shouldShowEditFirstPost(ready, isAuthenticated = false),
+        )
+        assertFalse(
+            "not the FP owner",
+            shouldShowEditFirstPost(ready.copy(isFirstPostOwner = false), isAuthenticated = true),
+        )
+        assertFalse(
+            "#213 — FP recategorise is not relaxed for subcat=0 (IA-style cat)",
+            shouldShowEditFirstPost(ready.copy(subcat = 0), isAuthenticated = true),
+        )
+        assertFalse(
+            "FP lives on page 1 only",
+            shouldShowEditFirstPost(ready.copy(page = 2, totalPages = 2), isAuthenticated = true),
+        )
+        assertFalse(
+            "read-only topic",
+            shouldShowEditFirstPost(ready.copy(canReply = false), isAuthenticated = true),
+        )
+    }
+
     private fun topic(
         canReply: Boolean,
         posts: List<Post> = listOf(post()),
+        isFirstPostOwner: Boolean = false,
+        subcat: Int = if (canReply) 0 else Topic.SUBCAT_UNKNOWN,
+        page: Int = 1,
     ): Topic = Topic(
         cat = 32,
         post = 7,
-        subcat = if (canReply) 0 else Topic.SUBCAT_UNKNOWN,
+        subcat = subcat,
         title = "Topic IA",
         posts = posts,
-        page = 1,
-        totalPages = 1,
-        isFirstPostOwner = false,
+        page = page,
+        totalPages = page.coerceAtLeast(1),
+        isFirstPostOwner = isFirstPostOwner,
         poll = null,
         canReply = canReply,
     )

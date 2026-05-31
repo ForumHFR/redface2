@@ -341,6 +341,23 @@ class TopicViewModelTest {
         assertEquals(false, anon.state.value.isAuthenticated)
     }
 
+    @Test
+    fun `isAuthenticated flips when the session changes while the topic is open (#220)`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val vm = TopicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = auth,
+        )
+        assertEquals(true, vm.state.value.isAuthenticated)
+
+        auth.emit(AuthState.Anonymous) // logout while the topic is on screen → gates must close
+        assertEquals(false, vm.state.value.isAuthenticated)
+
+        auth.emit(AuthState.Authenticated("xaat")) // log back in → gates reopen
+        assertEquals(true, vm.state.value.isAuthenticated)
+    }
+
     private fun topicRequest(
         page: Int,
         scrollTo: Int? = null,
@@ -572,6 +589,12 @@ class TopicViewModelTest {
 
 private class FakeAuthRepository(initial: AuthState) : AuthRepository {
     private val state = MutableStateFlow(initial)
+
+    /** Simulate a live auth change (login / logout) after the ViewModel has subscribed. */
+    fun emit(value: AuthState) {
+        state.value = value
+    }
+
     override fun observeAuthState() = state.asStateFlow()
     override suspend fun login(pseudo: String, password: String) =
         error("login is not exercised by TopicViewModelTest")
