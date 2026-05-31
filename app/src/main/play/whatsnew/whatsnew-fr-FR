@@ -1,9 +1,9 @@
-Alpha Redface 2 v67 — réponses et citations plus robustes.
+Alpha Redface 2 v68 — finitions écriture et drapeaux.
 
 Changements :
-- Répondre fonctionne sur les catégories sans sous-catégorie.
-- Citer reste disponible même quand HFR masque le lien de citation.
-- Les anciens caches topic sont invalidés pour éviter des boutons absents après mise à jour.
-- Documentation et tests alignés sur les fixtures HFR réelles.
+- Répondre, citer et modifier ne s'affichent plus hors connexion.
+- Drapeaux : plus de double loader pendant le swipe-to-refresh.
+- Drapeaux : le swipe-to-refresh fonctionne aussi sur liste vide ou erreur.
+- Tests ciblés ajoutés sur les gates d'écriture et le refresh.
 
 Bugs : alpha ou GitHub.
