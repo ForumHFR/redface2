@@ -270,9 +270,10 @@ class TopicRepositoryImplTest {
     @Test
     fun `observeTopicPage fresh cache preserves quoteRef without network refresh`() = runTest {
         // Phase 2C (#146 round 2) regression : before Room v5, Post.quoteRef was not
-        // persisted, so a fresh cache hit would emit posts with quoteRef = null and
-        // the « Citer » button would silently disappear. This test pins the
-        // contract — the warmup parses real HFR-quote hrefs from the topic_khakha
+        // persisted, so a fresh cache hit would lose HFR's best-effort positional
+        // `ref`. Since #227 this no longer controls « Citer » visibility, but the
+        // cache must still preserve the value when HFR exposed it. This test pins
+        // that contract — the warmup parses real HFR-quote hrefs from the topic_khakha
         // fixture (refs 0/1/2/3/4/5 on the first 6 quotable posts) and the cache
         // re-emission must keep at least one of them non-null.
         server.enqueue(MockResponse().setBody(fixtureHtml("topic_khakha_page_2.html")))

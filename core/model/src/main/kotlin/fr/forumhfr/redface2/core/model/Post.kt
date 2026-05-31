@@ -19,13 +19,16 @@ data class Post(
      * `ref` correlates with the post position inside the current topic page,
      * but the exact contract is undocumented (cf. `docs/specs/protocol-hfr.md`
      * § Quote). The app forwards whatever HFR shipped, never re-derives it.
-     * `null` means HFR did not expose a quote action for this post (locked
-     * topic, hidden post, anonymous read, future server-side change). The UI
-     * hides the « Citer » action in that case rather than guessing a default.
+     * `null` when HFR did not expose a *clear* quote link for this post (obfuscated
+     * `md_*cryptlink` toolbar, locked topic, anonymous read, future server-side
+     * change). Forwarded as-is when non-null; when `null` the quote GET omits `&ref=`
+     * (HFR identifies the cited post by `numrep={numreponse}` alone — #227, proven
+     * live). « Citer » visibility is driven by `Topic.canReply`, NOT by this field.
      *
-     * Persisted in Room v5 (cf. `MIGRATION_4_5`) so cache hits keep the
-     * « Citer » button available without a network refresh. Pre-v5 rows
-     * backfill to `NULL` and recover the real value on the next live fetch.
+     * Persisted in Room v5 (cf. `MIGRATION_4_5`) so cache hits preserve HFR's
+     * positional `ref` when it was parseable. Pre-v5 rows backfill to `NULL` and
+     * recover the real value on the next live fetch; since #227 this no longer
+     * controls « Citer » visibility.
      */
     val quoteRef: Int? = null,
     /**

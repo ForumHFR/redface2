@@ -265,7 +265,7 @@ data class PostEditorState(
     val page: Int?,                       // (Phase 2C) page topic en cours
     val subcat: Int?,                     // (Phase 2C) sous-cat HFR, requis pour reply
     val quotedNumreponse: Int? = null,    // (Phase 2C #146) numreponse cité ; null = reply, non-null = quote
-    val quoteRef: Int? = null,            // (Phase 2C #146) ref opaque parsé depuis le href quote
+    val quoteRef: Int? = null,            // (Phase 2C #146/#227) ref opaque parsé depuis le href quote quand disponible ; null accepté sur quote obfusquée
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,

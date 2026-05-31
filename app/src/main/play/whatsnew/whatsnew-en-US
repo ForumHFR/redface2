@@ -1,9 +1,9 @@
-Redface 2 alpha v66 — adaptive smileys.
+Redface 2 alpha v67 — more robust replies and quotes.
 
 Changes:
-- Perso smileys now render from their measured native size.
-- Tiny smileys stay tiny; large smileys are capped cleanly.
-- Text lines grow to avoid smiley overlap.
-- Builtin smileys keep their known small size.
+- Reply now works on categories without subcategories.
+- Quote stays available even when HFR hides the quote link.
+- Old topic caches are invalidated to avoid missing buttons after update.
+- Docs and tests now match real HFR fixtures.
 
 Report bugs via alpha or GitHub.

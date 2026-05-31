@@ -127,14 +127,19 @@ val MIGRATION_2_3: Migration = object : Migration(2, 3) {
  * from the topic page HTML (`input[name=subcat]`), the entity stores it next to
  * `cat`, `post`, `page`.
  *
- * Existing v3 rows are backfilled to `-1`, a sentinel that means "unknown, must be
- * refreshed before any write flow". Write paths refuse to POST when `subcat <= 0` —
- * the value is *never* transmitted to HFR. The strict `<= 0` (instead of `< 0`) also
- * excludes the `cat=0` / `cat=prive` moderator-space wire shape (HFR emits
- * `subcat=0` there) for which Phase 2C has no validated fixture. Setting the column
- * NOT NULL via the `-1` default keeps Room's schema verification happy without
- * forcing a row rewrite (topic pages are short-lived cache, the next live fetch
+ * Existing v3 rows are backfilled to `-1`, the `SUBCAT_UNKNOWN` sentinel meaning
+ * "unknown, must be refreshed before any write flow"; write paths refuse it and it is
+ * *never* transmitted to HFR. The `-1` default keeps Room's schema verification happy
+ * without forcing a row rewrite (topic pages are short-lived cache; the next live fetch
  * replaces the sentinel).
+ *
+ * NOTE (#213, superseded write contract): this migration's original Phase 2C rationale
+ * gated writes on `subcat > 0` and treated `subcat = 0` as a non-postable
+ * moderator-space wire shape. #213 later **validated** (live capture of the IA cat=32
+ * reply form, see `docs/specs/protocol-hfr.md` § POST `bddpost.php`) that `subcat = 0`
+ * IS postable for a category without sub-category. Postability is now driven by
+ * `Topic.canReply` (presence of the `bddpost` reply form), not by `subcat > 0`; only
+ * the `-1` sentinel stays non-postable. The `-1` backfill here is unaffected.
  */
 val MIGRATION_3_4: Migration = object : Migration(3, 4) {
     override fun migrate(db: SupportSQLiteDatabase) {
@@ -156,7 +161,7 @@ val MIGRATION_3_4: Migration = object : Migration(3, 4) {
  * - « Publicité » rows and anonymous reads legitimately carry no profile link;
  * - HFR may stop rendering the link for certain post types in the future.
  *
- * Pure DDL, no row rewrite — topic pages are short-lived cache.
+ * Pure DDL, no row rewrite — posts are short-lived cache.
  */
 val MIGRATION_5_6: Migration = object : Migration(5, 6) {
     override fun migrate(db: SupportSQLiteDatabase) {
@@ -168,21 +173,48 @@ val MIGRATION_5_6: Migration = object : Migration(5, 6) {
  * v4 → v5 (Phase 2C, #146 round 2):
  *
  * Adds `quoteRef` to `posts`. Without this column, every fresh cache hit (the
- * common case once a topic has been refreshed once) would reset `quoteRef` to
- * `null` because the mapper has no place to read it from — and the « Citer »
- * button vanishes from the UI until the user pulls the network again. The
- * column is nullable on disk for two reasons :
+ * common case once a topic has been refreshed once) would reset HFR's positional
+ * `ref` to `null` because the mapper has no place to read it from. Since #227
+ * that no longer controls « Citer » visibility (quote can use `numrep` alone),
+ * but preserving the server-provided value remains the best-effort clear-link
+ * contract. The column is nullable on disk for two reasons :
  *
  * - pre-v5 rows backfill to `NULL` (we never captured a `ref` for them; the
  *   next live fetch will set the real value),
  * - posts whose HFR HTML legitimately exposes no quote link (locked topic,
  *   anonymous read, future server-side change) keep `NULL` as the real value.
  *
- * Pure SQL, no row rewrite — topic pages are short-lived cache and the next
+ * Pure SQL, no row rewrite — posts are short-lived cache and the next
  * authenticated fetch overwrites every row with a parsed `quoteRef`.
  */
 val MIGRATION_4_5: Migration = object : Migration(4, 5) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE posts ADD COLUMN quoteRef INTEGER")
+    }
+}
+
+/**
+ * v6 → v7 (#213):
+ *
+ * Adds `canReply` to `topic_pages`. Postability is driven by the presence of the
+ * `bddpost` reply form on the topic page (rendered only on an authenticated,
+ * non-locked topic) — see `Topic.canReply`. Persisting it keeps the reply / quote /
+ * edit buttons enabled on a cache hit without a network round-trip.
+ *
+ * Backfilled to `0` (`false`) for pre-v7 rows : they were written before we observed
+ * the reply form, so they stay read-only until the next live authenticated fetch
+ * surfaces a real value. We also mark those rows stale (`fetchedAt = 0`) so an
+ * otherwise fresh authenticated cache row cannot keep the new write buttons hidden
+ * for the full topic-page TTL after an app upgrade. Stored as `INTEGER NOT NULL`
+ * (Room's Boolean encoding).
+ *
+ * One DDL step plus a deliberate cache invalidation row rewrite — topic pages are
+ * short-lived cache, and the next live fetch is the source of truth for write
+ * capability.
+ */
+val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE topic_pages ADD COLUMN canReply INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("UPDATE topic_pages SET fetchedAt = 0")
     }
 }

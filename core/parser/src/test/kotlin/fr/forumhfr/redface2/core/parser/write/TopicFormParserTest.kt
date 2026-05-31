@@ -253,6 +253,53 @@ class TopicFormParserTest {
     }
 
     @Test
+    fun `parseNewTopic accepts the IA create form that ships no subcat select (cat without sub-category)`() {
+        // #213 core — the « Intelligence artificielle » category (cat=32) has NO
+        // sub-category, so HFR serves the create-topic form WITHOUT any
+        // `<select name=subcat>` nor `<input name=subcat>` (verified on the real
+        // browser-save `write_ia_create_form.html`). Before the fix the permissive
+        // parser still fail-fasted because `parseSubcategories` returned `null`, and
+        // the caller treated that null as a fatal error — rejecting a perfectly valid
+        // HFR form. The contract : tolerate the missing select, expose
+        // `selectedSubcat = null`, `subcategoryChoices = emptyList()`, and signal the
+        // absence via `hasSubcategorySelect = false` so the UI can post `subcat=0`.
+        val form = parser.parseNewTopic(readFixture("write_ia_create_form.html")).getOrThrow()
+
+        assertFalse("Authenticated IA create form must not be flagged anonymous", form.isAnonymous)
+        assertEquals("SCRUBBED_HASH_CHECK", form.hashCheck)
+        assertEquals("", form.subject)
+        assertEquals("", form.initialContent)
+        assertNull("IA create form has no preselected subcat", form.selectedSubcat)
+        assertTrue("IA create form ships no subcat choices", form.subcategoryChoices.isEmpty())
+        assertFalse("IA cat has no <select name=subcat>", form.hasSubcategorySelect)
+        // The cat hidden field is the IA category.
+        assertEquals("32", form.hiddenFields["cat"])
+    }
+
+    @Test
+    fun `parseNewTopic keeps hasSubcategorySelect true when the form ships a subcat select`() {
+        // Symmetric guard : a cat WITH sub-categories must keep `hasSubcategorySelect`
+        // true so the UI still requires a `selectedSubcat > 0` before enabling submit.
+        val form = parser.parseNewTopic(readFixture("write_create_topic_form_android_cat.html")).getOrThrow()
+        assertTrue("a cat with sub-categories exposes a <select name=subcat>", form.hasSubcategorySelect)
+        assertTrue("subcategory choices must be present", form.subcategoryChoices.isNotEmpty())
+    }
+
+    @Test
+    fun `parseEditFirstPost still fails fast when no subcat select is present (strict mode)`() {
+        // The cat-without-subcat tolerance is create-only. Edit FP stays strict :
+        // a missing `<select name=subcat>` must still fail-fast so we never silently
+        // re-categorise an existing topic on submit.
+        val html = """<html><body><form action="/bdd.php">
+            <input name="hash_check" value="HASH" />
+            <input name="sujet" value="x" />
+            <textarea name="content_form">x</textarea>
+        </form></body></html>"""
+        val result = parser.parseEditFirstPost(html)
+        assertTrue("Edit FP must fail-fast on a missing subcat select", result.isFailure)
+    }
+
+    @Test
     fun `parseNewTopic flags the anonymous variant`() {
         val form = parser.parseNewTopic(readFixture("write_create_topic_anonymous_form.html")).getOrThrow()
         assertTrue("Anonymous form must surface isAnonymous = true", form.isAnonymous)

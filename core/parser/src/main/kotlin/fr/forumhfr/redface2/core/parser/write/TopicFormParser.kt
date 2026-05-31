@@ -50,6 +50,14 @@ class TopicFormParser {
      * create flow, so we accept `selectedSubcat = null` here ; the UI uses the
      * dropdown to capture the user's choice and refuses to submit while
      * `selectedSubcat <= 0`.
+     *
+     * #213 — a category WITHOUT any sub-category (e.g. cat=32 « Intelligence
+     * artificielle ») is served with NO `<select name=subcat>` at all. That is a
+     * valid form that posts with `subcat=0`, so the permissive create path
+     * tolerates the missing select : `selectedSubcat = null`,
+     * `subcategoryChoices = emptyList()`, `hasSubcategorySelect = false`. Only
+     * Edit FP (`requireSelectedSubcat = true`) still fail-fasts on a missing
+     * select to avoid silently re-categorising an existing topic.
      */
     fun parseNewTopic(html: String): Result<TopicForm> =
         parseTopicForm(html = html, actionSelector = "form[action*=bddpost.php]", requireSelectedSubcat = false)
@@ -79,13 +87,36 @@ class TopicFormParser {
         // would collapse whitespace and HTML-decode entities, breaking the round-trip.
         val initialContent = form.selectFirst("textarea[name=content_form]")?.wholeText().orEmpty()
 
-        val subcatOutcome = parseSubcategories(form, requireSelectedSubcat)
-            ?: return Result.failure(
+        // #213 — distinguish « no <select name=subcat> at all » (a category
+        // WITHOUT sub-category, e.g. cat IA : valid, posts with subcat=0) from
+        // « select present but no acceptable pre-selection » (strict-mode
+        // failure on Edit FP). The former is tolerated in permissive (create)
+        // mode ; the latter still fail-fasts.
+        val hasSubcategorySelect = form.selectFirst("select[name=subcat]") != null
+        if (!hasSubcategorySelect && requireSelectedSubcat) {
+            return Result.failure(
                 IllegalStateException(
-                    "topic form has no <select name=subcat> with a `selected` option carrying id > 0 — " +
-                        "refusing to guess to avoid silent re-categorisation on submit",
+                    "topic form has no <select name=subcat> — refusing to edit a first post " +
+                        "without an explicit sub-category to avoid silent re-categorisation on submit",
                 ),
             )
+        }
+        val subcatOutcome = parseSubcategories(form, requireSelectedSubcat)
+            ?: if (hasSubcategorySelect) {
+                // Select IS present but carries no `selected` option with id > 0
+                // in strict mode → genuine failure (Edit FP fail-safe).
+                return Result.failure(
+                    IllegalStateException(
+                        "topic form has a <select name=subcat> with no `selected` option carrying id > 0 — " +
+                            "refusing to guess to avoid silent re-categorisation on submit",
+                    ),
+                )
+            } else {
+                // No select : a category without sub-category (permissive mode
+                // only, the strict guard above already returned). Tolerate it :
+                // selectedSubcat = null, no choices, the UI posts subcat=0.
+                null to emptyList()
+            }
         val (selectedSubcat, subcategoryChoices) = subcatOutcome
         val options = ReplyFormOptions(
             signatureEnabled = form.optionCheckbox("signature"),
@@ -105,6 +136,7 @@ class TopicFormParser {
                 userId = SmileyUserIdExtractor.extract(html),
                 selectedSubcat = selectedSubcat,
                 subcategoryChoices = subcategoryChoices,
+                hasSubcategorySelect = hasSubcategorySelect,
                 hiddenFields = collection.fields,
                 options = options,
                 msgIcon = msgIcon,

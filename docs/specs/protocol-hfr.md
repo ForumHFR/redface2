@@ -149,7 +149,7 @@ Contrat recapturé sur HFR réel le 2026-05-17 avec le compte de test `XaTelitte
 | `verifrequet` | `"1100"` | **oui** | Constante anti-bot. String, pas entier. |
 | `cat` | ID catégorie | oui | ou `"prive"` pour MP |
 | `post` | ID topic | oui si reply | Vide si nouveau topic. |
-| `subcat` | ID sous-catégorie | oui | Observé `550` pour Android. |
+| `subcat` | ID sous-catégorie | oui | Observé `550` pour Android. **`subcat=0` est valide et postable** pour une catégorie sans sous-catégorie (cf. note ci-dessous, #213). |
 | `numreponse` | `""` | oui | Vide sur reply/quote/create. Ne pas confondre avec `numrep`. |
 | `numrep` | `""` ou numreponse cité | oui | Vide en reply simple. Renseigné en quote. |
 | `MsgIcon` | `"1"` | conventionnel | Icône du message (1 = défaut) |
@@ -169,6 +169,12 @@ Contrat recapturé sur HFR réel le 2026-05-17 avec le compte de test `XaTelitte
 | `password` | `""` en session loguée | présent dans le form | Champ legacy ; ne jamais stocker ni préremplir côté app. |
 | `from_subcat` | ID sous-catégorie | nouveau topic | Présent sur le formulaire de création topic. |
 | `toread1..5` | options visibles | nouveau topic | Présents sur le formulaire de création topic, à traiter comme opaques avant implémentation sondage/options. |
+
+> **Note `subcat=0` — catégorie sans sous-catégorie (#213)** : certaines catégories n'ont pas de sous-catégorie (ex. cat=32 « Intelligence artificielle »). Pour ces topics, HFR rend le formulaire `bddpost` avec `subcat=0` et le POST part bien avec `subcat=0`. **`0` est donc une valeur de POST légitime**, pas un sentinel. Seule la valeur `-1` (`SUBCAT_UNKNOWN`, attribuée côté app quand aucun formulaire de réponse n'est présent) est bloquante. La postabilité d'un topic est pilotée par la **présence du formulaire `bddpost`** dans la page (`form[action*=bddpost.php]`), rendu uniquement en session authentifiée sur un topic non verrouillé — c'est le drapeau `Topic.canReply`. Le `subcat` de POST est lu sur l'`input[name=subcat]` de ce formulaire, jamais sur le widget de recherche rapide qui embarque aussi un `subcat` sur la même page. Source : capture live du formulaire de réponse IA (session authentifiée, cat=32) ; le `hash_check` capturé n'a pas été committé (token de session). La fixture topic-page IA complète reste un *plus* de non-régression non bloquant à capturer plus tard ; le contrat `subcat=0` est couvert par des tests unitaires aval (`ReplyContext`/`EditPostContext`/`EditFirstPostContext`/`PostEditorState`) et par un test parser synthétique ciblé sur la seule branche `subcat=0` du formulaire `bddpost`.
+
+> **Note `ref` optionnel sur le quote (#146/#227)** : le GET quote `message.php?…&numrep={numreponse}&ref={ref}…` identifie le post cité par **`numrep={numreponse}` seul** ; `ref` est positionnel/cosmétique et **n'est pas requis**. Vérifié deux fois : (1) `hfr-mcp` (`FetchQuote`, `internal/hfr/reader.go`) cite via `message.php?…&numrep=…&page=1&p=1&new=0` **sans `ref`** ; (2) test live in-app sur cat=32 (le GET sans `ref` renvoie l'éditeur prérempli avec le bon `[quotemsg=…]`). Conséquence : « Citer » est piloté par `Topic.canReply` et **ne lit jamais le lien quote de la page** — `HfrClient.getReplyForm` omet `&ref=` quand il est `null`.
+
+> **Note liens obfusqués `md_*cryptlink` (#227)** : HFR rend les liens d'action de toolbar (quote, edit, profil, PV, addflag) **soit en clair** (`<a href="…&numrep=…&ref=…">`), **soit obfusqués** dans un `<span class="md_noclass_cryptlink{HEX}">` déchiffré côté client par son JS (`md_forum_decryptlink.init()`, `common.js`). Le choix est **intermittent / dépendant du topic** (anti-aspirateur) : cat=32 « Intelligence artificielle » et certains topics épinglés servent la variante obfusquée (aucun `<a>` en clair) ; cat 2/16 servent du clair, au même client. Un client sans JS doit décoder. Algorithme (alphabet base-16 custom `"0A12B34C56D78E9F"`, une paire de caractères = un octet) implémenté dans l'utilitaire **`CryptlinkDecoder`** (`:core:parser`, à la demande). « Citer » n'en a plus besoin (cf. note `ref` ci-dessus) ; le décodeur reste utile pour « Modifier » (`isEditable`) et le tap profil (`profileId`) quand HFR les sert obfusqués.
 
 #### Reply simple
 

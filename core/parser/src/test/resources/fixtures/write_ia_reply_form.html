@@ -1,0 +1,788 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="fr" lang="fr"><head><style class="vjs-styles-defaults">
+      .video-js {
+        width: 300px;
+        height: 150px;
+      }
+
+      .vjs-fluid:not(.vjs-audio-only-mode) {
+        padding-top: 56.25%
+      }
+    </style>
+	<title>FORUM HardWare.fr - Répondre / éditer un message</title><link type="text/css" rel="stylesheet" href="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/the_style1.css"><style type="text/css">
+<!--
+.fastsearchMain{ width: 330px; }
+.fastsearchInput{ width: 70px; border: 1px solid black; }
+.fastsearchSubmit{ background-color: ; border: 0px;}
+.header2 { background-image: url(/img/forum3_1.gif);background-repeat: repeat-x; }
+.menuExt { font-family: Arial, Helvetica, sans-serif; font-size: 10px; color:#000; }
+.menuExt a { color:#000;text-decoration:none; }
+.menuExt a:hover { color:#000;text-decoration:underline; }
+form { display: inline; }
+.header { background-image: url(//forum-images.hardware.fr/img/header-bg.gif); background-repeat: repeat-x; }
+.tdmenu { width: 1px;height: 1px;color: #000000; }
+.hfrheadmenu { font-family: Arial, Helvetica, sans-serif;font-size:13px;font-weight:bold; }
+.hfrheadmenu span {color:;}
+.hfrheadmenu a { color:;text-decoration: none; }
+.hfrheadmenu a:hover { color:;text-decoration: underline; }
+.concours { font-family: Arial, Helvetica, sans-serif;color:;font-size: 16px;text-decoration: none;font-weight: bold;}
+.concours:hover { font-family: Arial, Helvetica, sans-serif;color:;font-size: 16px;text-decoration: underline;font-weight: bold; }
+.searchmenu { font-family: Arial, Helvetica, sans-serif;color:;font-size: 13px;text-decoration: none;font-weight: bold; }
+.fastsearch { display: none; }
+.fastsearchHeader { font-family: Arial, Helvetica, sans-serif;color:;font-size: 13px;text-decoration: none;font-weight: bold; }
+.fastsearchHeader:hover { font-family: Arial, Helvetica, sans-serif;color:;font-size: 13px;text-decoration: underline;font-weight: bold; }
+-->
+</style>
+<script async="" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/matomo.js"></script><script type="text/javascript" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/hardware.js"></script><script async="" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/googletagservices_gpt.js"></script>
+<script>
+  window.googletag = window.googletag || {cmd: []};
+  googletag.cmd.push(function() {
+    googletag.defineSlot('/2172442/forum_discussions_carre_bas', [336, 280], 'div-gpt-ad-1511901001563-11').addService(googletag.pubads());
+    googletag.defineSlot('/2172442/forum_discussions_carre_haut', [336, 280], 'div-gpt-ad-1511901001563-12').addService(googletag.pubads());
+    googletag.defineSlot('/2172442/forum_discussions_carre_milieu', [336, 280], 'div-gpt-ad-1511901001563-13').addService(googletag.pubads());
+    googletag.pubads().enableSingleRequest();
+    googletag.enableServices();
+  });
+</script>
+<script type="text/javascript">
+     (function(){
+       var loc = window.location.href;
+       var dd = document.createElement('script');
+       dd.type = 'text/javascript'; dd.src = '//static.digidip.net/hardware.js?loc=' + loc;
+       var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(dd, s);
+     })();
+</script><script type="text/javascript">
+
+var hash_check = "&hash_check=SCRUBBED_HASH_CHECK";
+var _adresseRecherche = "/user/message-aj.php";
+var adresseFindSmiley = "/message-smi-mp-aj.php";
+var tempo_smilies= 0;
+
+var img_path= "https://forum-images.hardware.fr";
+
+function verif_join_form() {
+	if ((document.getElementById('submit_upload')) && (document.getElementById('submit_upload').style.fontWeight == 'bold')) {
+		return confirm('Attention : vous n\'avez pas joint l\'image que vous avez sélectionnée');
+	}
+	return true;
+}
+
+function verif_not_empty() {
+	if (document.getElementById('delete').checked == true) {
+		return true;
+	}
+	if (document.hop.sujet && trim(document.hop.sujet.value) =='') {
+		alert('Vous devez remplir tous les champs avant de poster ce message');
+		return false;
+	}
+	if (document.hop.content_form && trim(document.hop.content_form.value) == '') {
+		alert('Vous devez remplir tous les champs avant de poster ce message');
+		return false;
+	}
+	if (document.hop.codecaptcha && trim(document.hop.codecaptcha.value) == '') {
+		alert('Vous devez remplir tous les champs avant de poster ce message');
+		return false;
+	}
+	if (document.getElementById('have_sondage') && document.getElementById('have_sondage').checked == true && document.getElementById('annee').value && document.getElementById('annee').value.length != 4) {
+		alert('L\'année du sondage doit être sur 4 chiffres');
+		return false;
+	}
+
+	return true;
+}
+
+function trim(string) {
+	return string.replace(/(^\s*)|(\s*$)/g,"");
+}
+</script><script language="javascript" type="text/javascript">
+	<!--
+ var opera=0;
+	function putSmiley(tt,src) {
+TAinsert(" "+tt+" ","");
+}
+	//-->
+	</script><link type="text/css" rel="stylesheet" href="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/the_style.css">
+	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+	<meta http-equiv="Pragma" content="no-cache">
+	<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+	<meta http-equiv="Expires" content="0">
+	<meta http-equiv="Imagetoolbar" content="no">
+	<meta name="Robots" content="noindex, nofollow">
+<script language="Javascript" type="text/javascript" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/editPost.js"></script><script language="Javascript" type="text/javascript" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/message.js"></script><script language="Javascript" type="text/javascript" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/common.js"></script><link rel="stylesheet" href="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/video-js.css"><script src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/video.js"></script><script src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/index.js" type="module"></script><style>#ws_back{display:none;position:absolute;left:0px;top:0px;background-color:#242424;z-index:1000;}#ws_front{display:none;vertical-align:bottom;position:absolute;background-color:#F7F7F7;z-index:1001;border:1px dotted #000;padding:16px;text-align:right;font-family:Verdana,Arial,Sans-serif,Helvetica;font-size:14px;}#ws_front input[type=text]{text-align:center;border:1px solid black;}#ws_front div{margin:16px 0 0;}#ws_front div input{float:right;margin:0 0 0 8px;}#ws_front table{text-align:left;margin:16px 0 0;width:100%;font-size:smaller;font-weight:bold;border-collapse:collapse;}#ws_front_menu{margin:4px 0 0;padding:0;width:100%;text-align:left;}#ws_front_menu li{display:inline;list-style-type:none;padding:3px;margin-right:8px;border:1px solid black;font-size:smaller;background-color:#DEDFDF;cursor:pointer;}#ws_front_menu li.selected{font-weight:bold;font-style:italic;}</style><style></style><style type="text/css">div#mesdiscussions.mesdiscussions table.messagetable td.messCase2 div[id^='para'] a.cLink > img.gm_hfr_imgprev_preview_icon{vertical-align:text-bottom;padding:0;border:0;margin:0 5px !important}div#gm_hfr_imgprev_preview_id{position:fixed;top:10px;right:10px;background-color:#dedfdf;width:185px;padding:7.5px;border:1px solid #000000;font-family:Verdana,Arial,Sans-serif,Helvetica;font-size:16px;font-weight:bold;color:#000000;z-index:500;}div#gm_hfr_imgprev_preview_id > p{margin:20px 0 20px 50px;}div#gm_hfr_imgprev_preview_id > img{display:block;}#gm_hfr_imgprev_help_window{position:fixed;width:200px;height:auto;background-color:#e3ebf5;visibility:hidden;border:2px solid #6995c3;border-radius:8px;padding:4px 7px 5px;z-index:1003;font-family:Verdana,Arial,Sans-serif,Helvetica;font-size:11px;font-weight:bold;text-align:justify;}#gm_hfr_imgprev_config_window img.gm_hfr_imgprev_help_button{cursor:help;vertical-align:text-bottom;}#gm_hfr_imgprev_config_background{position:fixed;left:0;top:0;background-color:#242424;z-index:1001;visibility:hidden;opacity:0;transition:opacity 0.3s ease 0s;}#gm_hfr_imgprev_config_window{position:fixed;min-width:475px;height:auto;background:#ffffff;z-index:1002;visibility:hidden;opacity:0;transition:opacity 0.3s ease 0s;font-size:12px;padding:16px;font-family:Verdana,Arial,Sans-serif,Helvetica;border:1px solid #242424;color:#000000;}#gm_hfr_imgprev_config_window div.gm_hfr_imgprev_main_title{font-size:16px;text-align:center;font-weight:bold;margin:0 0 10px;cursor:default;cursor:default;}#gm_hfr_imgprev_config_window fieldset{margin:0 0 8px;border:1px solid #888888;padding:6px 10px 10px;background:linear-gradient(to bottom, #ffffff 20px, transparent);transition:background-color 0.3s ease 0s;}#gm_hfr_imgprev_config_window fieldset.gm_hfr_imgprev_red{background-color:#ffc0b0;}#gm_hfr_imgprev_config_window fieldset.gm_hfr_imgprev_green{background-color:#c0ffb0;}#gm_hfr_imgprev_config_window legend{font-size:14px;background-color:#ffffff;cursor:default;}#gm_hfr_imgprev_config_window p{margin:0;}#gm_hfr_imgprev_config_window p:not(:last-child){margin-bottom:4px;}#gm_hfr_imgprev_config_window p.gm_hfr_imgprev_left{padding-right:4px;text-align:right;}#gm_hfr_imgprev_config_window p.gm_hfr_imgprev_right{padding-left:4px;text-align:left;}#gm_hfr_imgprev_config_window p.gm_hfr_imgprev_p_flex{display:flex;justify-content:center;align-items:center;}#gm_hfr_imgprev_config_window p.gm_hfr_imgprev_p_flex > *{display:block;}#gm_hfr_imgprev_config_window div.gm_hfr_imgprev_table{display:table;width:100%;}#gm_hfr_imgprev_config_window div.gm_hfr_imgprev_cell{display:table-cell;width:50%;}#gm_hfr_imgprev_config_window img.gm_hfr_imgprev_test_img{margin:0 4px 0 0;}#gm_hfr_imgprev_config_window img.gm_hfr_imgprev_reset_img{cursor:pointer;margin:0 0 0 4px;}#gm_hfr_imgprev_config_window input[type="checkbox"]{margin:0 0 1px 1px;vertical-align:text-bottom;}#gm_hfr_imgprev_config_window input[type="radio"]{margin:0 0 2px;vertical-align:text-bottom;}#gm_hfr_imgprev_config_window input[type="text"]{padding:0 1px;border:1px solid #c0c0c0;height:16px;font-size:12px;font-family:Verdana,Arial,Sans-serif,Helvetica;text-align:right;}#gm_hfr_imgprev_config_window div.gm_hfr_imgprev_cell input[type="text"]{height:13px;}#gm_hfr_imgprev_config_window div.gm_hfr_imgprev_save_close_div{text-align:right;margin:16px 0 0;cursor:default;}#gm_hfr_imgprev_config_window div.gm_hfr_imgprev_save_close_div div.gm_hfr_imgprev_info_reload_div{float:left;}#gm_hfr_imgprev_config_window div.gm_hfr_imgprev_save_close_div img{vertical-align:text-bottom;}#gm_hfr_imgprev_config_window div.gm_hfr_imgprev_save_close_div > img{margin-left:8px;cursor:pointer;}</style><style type="text/css">a.cLink.gmhfrvlrr21_link::after{content:"\0020\25b6\fe0f";}div.gmhfrvlrr21_outer_div{display:inline-block;vertical-align:bottom;white-space:nowrap;position:relative;}iframe.gmhfrvlrr21_video{vertical-align:bottom;border:0;}img.gmhfrvlrr21_params{position:absolute;cursor:pointer;top:0;right:1px;}#gmhfrvlrr21_help_window{position:fixed;width:200px;height:auto;background-color:#e3ebf5;z-index:1003;visibility:hidden;border:2px solid #6995c3;border-radius:8px;padding:4px 7px 5px;font-family:Verdana,Arial,Sans-serif,Helvetica;font-size:11px;font-weight:bold;text-align:justify;}#gmhfrvlrr21_config_background{position:fixed;left:0;top:0;background-color:#242424;z-index:1001;visibility:hidden;opacity:0;transition:opacity 0.3s ease 0s;}#gmhfrvlrr21_config_window{position:fixed;width:350px;height:auto;background:#ffffff;z-index:1002;visibility:hidden;opacity:0;transition:opacity 0.3s ease 0s;font-size:12px;padding:16px;font-family:Verdana,Arial,Sans-serif,Helvetica;border:1px solid #242424;}#gmhfrvlrr21_config_window div.gmhfrvlrr21_main_title{font-size:16px;text-align:center;font-weight:bold;margin:0 0 10px;}#gmhfrvlrr21_config_window fieldset{margin:0 0 8px;border:1px solid #888888;padding:6px 10px 10px;}#gmhfrvlrr21_config_window legend{font-size:14px;}#gmhfrvlrr21_config_window div.gmhfrvlrr21_table{display:table;width:100%;}#gmhfrvlrr21_config_window div.gmhfrvlrr21_cell{display:table-cell;width:50%;}#gmhfrvlrr21_config_window div.gmhfrvlrr21_left{text-align:right;padding-right:4px;}#gmhfrvlrr21_config_window div.gmhfrvlrr21_right{text-align:left;padding-left:4px;}#gmhfrvlrr21_config_window p{margin:0 0 0 4px;}#gmhfrvlrr21_config_window p:not(:last-child){margin-bottom:4px;}#gmhfrvlrr21_config_window input[type="radio"]{margin:0 0 2px;vertical-align:text-bottom;}#gmhfrvlrr21_config_window input[type="text"]{padding:0 1px;border:1px solid #c0c0c0;height:14px;font-size:12px;font-family:Verdana,Arial,Sans-serif,Helvetica;text-align:right;}#gmhfrvlrr21_config_window input[type="checkbox"]{margin:0 0 1px;vertical-align:text-bottom;}#gmhfrvlrr21_config_window div.gmhfrvlrr21_save_close_div{text-align:right;margin:16px 0 0;}#gmhfrvlrr21_config_window div.gmhfrvlrr21_save_close_div div.gmhfrvlrr21_info_reload_div{float:left;}#gmhfrvlrr21_config_window div.gmhfrvlrr21_save_close_div div.gmhfrvlrr21_info_reload_div img{vertical-align:text-bottom;}#gmhfrvlrr21_config_window div.gmhfrvlrr21_save_close_div > img{margin-left:8px;cursor:pointer;}#gmhfrvlrr21_config_window img.gmhfrvlrr21_help_button{margin-right:1px;cursor:help;}</style><style type="text/css">img.hfr_gm_pdal_r21_white{background:transparent;border-radius:unset;box-shadow:unset;}img.hfr_gm_pdal_r21_green{background:#2ecc40;border-radius:8px;box-shadow:0 0 8px 0 #2ecc40;}img.hfr_gm_pdal_r21_red{background:#ff4136;border-radius:8px;box-shadow:0 0 8px 0 #ff4136;}</style></head><body id="category__redaction_form__form_message"> <table cellspacing="0" cellpadding="0" width="98%" bgcolor="#000000" border="0" align="center" class="hfrheadmenu" style="border:1px solid #000;border-top:0;">
+        <tbody><tr>
+          <td style="vertical-align: top">
+            <table cellspacing="0" cellpadding="0" width="100%" border="0">
+              <tbody><tr>
+                <td style="width: 100%" align="left" valign="middle" colspan="2" class="header2"><span class="md_cryptlink45CBCBC0C22D1F1FCCCCCC19454AC14BCC4AC1431944C1"><a href="https://www.hardware.fr/" rel="nofollow" class="cHeader"><a href="https://www.hardware.fr/" rel="nofollow" class="cHeader"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/forum_logo.gif" width="900" height="71" border="0" alt=""></a></a></span></td>
+              </tr>
+              <tr>
+                <td style="background-color:#d5e6e1">
+                  <table cellspacing="0" cellpadding="2" width="100%" border="0">
+                    <tbody><tr>
+                      <td>&nbsp;<a class="cHeader" href="https://forum.hardware.fr/">Forum</a>&nbsp;|&nbsp;
+<a class="cHeader" href="https://www.hardware.fr/">HardWare.fr</a>&nbsp;|&nbsp;<a class="cHeader" href="https://www.hardware.fr/html/news/">News</a>&nbsp;|&nbsp;<a class="cHeader" href="https://www.hardware.fr/html/articles/">Articles</a>&nbsp;|&nbsp;<a class="cHeader" href="https://www.hardware.fr/articles/786-1/guide-pc-hardware-fr.html">PC</a>&nbsp;|&nbsp;<span class="md_cryptlink1FC349484F4C19C045C02F424F4944464C2E454AC14BCC4AC14344C11946494214424F4B434543C52E2341434A21264B2A4A424B422625422B252122212C44204321442C2C2A2A2142"><a href="https://forum.hardware.fr/unlog.php?config=hardwarefr.inc&amp;codehex=SCRUBBED_CODEHEX" rel="nofollow" class="cHeader"><a href="https://forum.hardware.fr/unlog.php?config=hardwarefr.inc&amp;codehex=SCRUBBED_CODEHEX" rel="nofollow" class="cHeader">Se déconnecter</a></a></span>&nbsp;|&nbsp;<span class="md_cryptlink1FC3C243C11F434B46CBC0C14F44464819C045C02F424F4944464C2E454AC14BCC4AC14344C119464942"><a href="https://forum.hardware.fr/user/editprofil.php?config=hardwarefr.inc" rel="nofollow" class="cHeader"><a href="https://forum.hardware.fr/user/editprofil.php?config=hardwarefr.inc" rel="nofollow" class="cHeader">Profil</a></a></span>&nbsp;|&nbsp;<a class="cHeader" href="https://shop.hardware.fr/" target="_blank" style="position: relative; padding: 0 21px 0 0;display: inline-block;">Shop <img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/shop.png" style="height: 17px; display: inline; position: absolute; right: 0; top: -2px; "></a></td>
+<td align="right"><a class="cHeader" href="https://forum.hardware.fr/search.php?config=hardwarefr.inc&amp;cat=32&amp;subcat=0">Recherche <img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/ongletsearch.png"></a></td>
+                    </tr>
+                    </tbody></table></td></tr></tbody></table>
+</td></tr></tbody></table><div style="width: 99%" align="right">
+<span class="s2Ext menuExt"><span class="md_cryptlink1F4F494846494319C045C02F424F4944464C2E454AC14BCC4AC14344C119464942"><a href="https://forum.hardware.fr/online.php?config=hardwarefr.inc" rel="nofollow" class="cHeader"><a href="https://forum.hardware.fr/online.php?config=hardwarefr.inc" rel="nofollow" class="cHeader">6671 connectés&nbsp;</a></a></span></span></div><br><script language="javascript" type="text/javascript">
+    		<!--
+    		checkRes(1152, 648,'md_users_res');
+		    //-->
+    		</script><div class="container"><div class="mesdiscussions" id="mesdiscussions"><div class="arbo">
+<span id="md_arbo_tree_1"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/open.png" alt="">&nbsp;&nbsp;<a href="https://forum.hardware.fr/" class="Ext">FORUM HardWare.fr</a></span>
+<br>
+<span id="md_arbo_tree_2"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/tline.png" alt=""><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/open.png" alt="">&nbsp;&nbsp;<a href="https://forum.hardware.fr/forum1.php?config=hfr.inc&amp;cat=32&amp;page=1&amp;subcat=&amp;sondage=0&amp;owntopic=1&amp;trash=0&amp;trash_post=0&amp;moderation=0&amp;new=0&amp;nojs=0&amp;subcatgroup=0" class="Ext">Intelligence&nbsp;Artificielle</a></span>
+<br>
+<h1 id="md_arbo_tree_3"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/tline3.png" alt=""><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/open.png" alt="">&nbsp;&nbsp;<a href="https://forum.hardware.fr/forum2.php?config=hfr.inc&amp;cat=32&amp;post=7&amp;page=1&amp;p=1&amp;sondage=0&amp;owntopic=1&amp;trash=0&amp;trash_post=0&amp;print=0&amp;numreponse=0&amp;quote_only=0&amp;new=0&amp;nojs=0" class="Ext">[Topic Unique] Claude by Anthropic</a></h1>
+</div><div class="rightbutton fastsearch"><table class="main fastsearchMain" cellspacing="0" cellpadding="2"><tbody><tr class="cBackHeader fondForumDescription"><th><form method="post" id="fastsearch" action="/forum1.php"><input type="hidden" name="hash_check" value="SCRUBBED_HASH_CHECK"><label for="fastsearchinputid"><a rel="nofollow" href="https://forum.hardware.fr/search.php?config=hfr.inc&amp;cat=32&amp;subcat=0" class="cHeader fastsearchHeader">Recherche :</a>&nbsp;<input type="text" name="search" id="fastsearchinputid" class="fastsearchInput" alt="Search string"></label><input type="hidden" name="recherches" value="1"><input type="hidden" name="searchtype" value="1"><input type="hidden" name="titre" value="3"><input type="hidden" name="resSearch" value="200"><input type="hidden" name="orderSearch" value="1"><input type="hidden" name="config" value="hfr.inc"><input type="hidden" name="cat" value="32">&nbsp;<input type="image" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/ongletsearch.png" class="fastsearchSubmit" title="Lancer une recherche" alt="Lancer une recherche"></form></th></tr></tbody></table></div><div class="spacer">&nbsp;</div><br><div></div><br><table class="main" style="margin:auto;" cellspacing="0" cellpadding="4">
+				<tbody><tr class="cBackHeader">
+				<th colspan="2">Dernière réponse</th>
+			</tr>
+			<tr class="reponse">
+				<th colspan="2">
+					Sujet : [Topic Unique] Claude by Anthropic</th>
+			</tr><tr class="reponse">
+				<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+				<td>T'es dans le turfu mec<div style="clear: both;"> </div></td>
+			</tr>
+			</tbody></table><br><a name="formulaire"></a><form name="hop" id="hop" action="/bddpost.php?config=hfr.inc" method="post" onsubmit=" 
+	return verif_join_form();
+	document.hop.submit.style.visibility='hidden';"><input type="hidden" name="hash_check" value="SCRUBBED_HASH_CHECK">	<input type="hidden" name="subcat" value="0">
+<input type="hidden" name="parents" value="">
+<input type="hidden" name="post" value="7">
+<input type="hidden" name="stickold" value="0">
+<input type="hidden" name="new" value="0">
+<input type="hidden" name="cat" id="catid" value="32">
+<input type="hidden" name="numreponse" value="">
+<input type="hidden" name="numrep" value="">
+<input type="hidden" name="page" value="1">
+<input type="hidden" name="verifrequet" value="SCRUBBED_VERIFREQUET">
+<input type="hidden" name="p" value="1">
+<input type="hidden" name="sondage" value="0">
+<input type="hidden" name="sond" value="0">
+<input type="hidden" name="cache" value="cache">
+<input type="hidden" name="owntopic" value="1">
+<input type="hidden" name="config" id="configid" value="hfr.inc">
+<input type="hidden" name="sujet" value="[Topic Unique] Claude by Anthropic"><table class="main" cellspacing="0" cellpadding="4" width="100%">
+	<tbody><tr class="cBackHeader">
+		<th colspan="2" style="text-align:center">Votre réponse</th>
+	</tr>
+	<tr class="reponse pseudoform" id="pseudoform">
+		<th class="repCase1">Nom d'utilisateur</th>
+		<td class="repCase2">
+			<input maxlength="25" accesskey="p" size="25" name="pseudo" value="XaTriX" onfocus="passfocus()">		&nbsp;&nbsp; <a href="https://forum.hardware.fr/inscription.php?config=hfr.inc" class="Topic">Pour poster, vous devez être inscrit sur ce forum .... si ce n'est pas le cas, cliquez ici !</a>	</td>
+	</tr><tr class="reponse" style="display:none; display:none; " id="passf">
+		<th class="repCase1">Mot de passe</th>
+		<td class="repCase2">			<input type="password" maxlength="40" size="25" name="password" value="">
+			&nbsp;&nbsp; <a href="https://forum.hardware.fr/password.php?config=hfr.inc" class="Topic">Vous avez perdu votre mot de passe ? Cliquez ici !</a>
+		</td>
+	</tr><tr class="reponse">
+				<th class="repCase1">Le ton de votre message</th>
+					<td class="repCase2"><input id="icone1" type="radio" value="1" name="MsgIcon" checked="checked">
+					&nbsp;<label for="icone1"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon1.gif" alt=""></label>&nbsp;<input id="icone2" type="radio" value="2" name="MsgIcon">
+					&nbsp;<label for="icone2"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon2.gif" alt=""></label>&nbsp;<input id="icone3" type="radio" value="3" name="MsgIcon">
+					&nbsp;<label for="icone3"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon3.gif" alt=""></label>&nbsp;<input id="icone4" type="radio" value="4" name="MsgIcon">
+					&nbsp;<label for="icone4"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon4.gif" alt=""></label>&nbsp;<input id="icone5" type="radio" value="5" name="MsgIcon">
+					&nbsp;<label for="icone5"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon5.gif" alt=""></label>&nbsp;<input id="icone6" type="radio" value="6" name="MsgIcon">
+					&nbsp;<label for="icone6"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon6.gif" alt=""></label>&nbsp;<input id="icone7" type="radio" value="7" name="MsgIcon">
+					&nbsp;<label for="icone7"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon7.gif" alt=""></label>&nbsp;<input id="icone8" type="radio" value="8" name="MsgIcon">
+					&nbsp;<label for="icone8"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon8.gif" alt=""></label>&nbsp;<br><input id="icone9" type="radio" value="9" name="MsgIcon">
+					&nbsp;<label for="icone9"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon9.gif" alt=""></label>&nbsp;<input id="icone10" type="radio" value="10" name="MsgIcon">
+					&nbsp;<label for="icone10"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon10.gif" alt=""></label>&nbsp;<input id="icone11" type="radio" value="11" name="MsgIcon">
+					&nbsp;<label for="icone11"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon11.gif" alt=""></label>&nbsp;<input id="icone12" type="radio" value="12" name="MsgIcon">
+					&nbsp;<label for="icone12"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon12.gif" alt=""></label>&nbsp;<input id="icone13" type="radio" value="13" name="MsgIcon">
+					&nbsp;<label for="icone13"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon13.gif" alt=""></label>&nbsp;<input id="icone14" type="radio" value="14" name="MsgIcon">
+					&nbsp;<label for="icone14"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon14.gif" alt=""></label>&nbsp;<input id="icone15" type="radio" value="15" name="MsgIcon">
+					&nbsp;<label for="icone15"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon15.gif" alt=""></label>&nbsp;<input id="icone16" type="radio" value="16" name="MsgIcon">
+					&nbsp;<label for="icone16"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/icon16.gif" alt=""></label>&nbsp;</td>
+			</tr><tr class="reponse">
+		<th class="repCase1">Votre réponse
+			<div><div class="center">	<br><a target="_blank" href="https://forum.hardware.fr/smilies.php?config=hfr.inc" class="s1Topic">Smilies</a>
+				<br><br><div class="smiley">
+					<div>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/pfff.gif" alt=":pfff:" title=":pfff:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/ange.gif" alt=":ange:" title=":ange:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/non.gif" alt=":non:" title=":non:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/bounce.gif" alt=":bounce:" title=":bounce:" onclick="putSmiley(this.alt,this.src)">
+					</div>
+					<div>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/smile.gif" alt=":)" title=":)" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/frown.gif" alt=":(" title=":(" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/biggrin.gif" alt=":D" title=":D" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/wink.gif" alt=";)" title=";)" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/ouch.gif" alt=":ouch:" title=":ouch:" onclick="putSmiley(this.alt,this.src)">
+					</div>
+					<div>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/redface.gif" alt=":o" title=":o" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/confused.gif" alt=":??:" title=":??:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/tongue.gif" alt=":p" title=":p" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/na.gif" alt=":na:" title=":na:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/sarcastic.gif" alt=":sarcastic:" title=":sarcastic:" onclick="putSmiley(this.alt,this.src)">
+					</div>
+					<div>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/fou.gif" alt=":fou:" title=":fou:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/jap.gif" alt=":jap:" title=":jap:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/lol.gif" alt=":lol:" title=":lol:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/wahoo.gif" alt=":wahoo:" title=":wahoo:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/kaola.gif" alt=":kaola:" title=":kaola:" onclick="putSmiley(this.alt,this.src)">
+					</div>
+					<div>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/love.gif" alt=":love:" title=":love:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/heink.gif" alt=":heink:" title=":heink:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/cry.gif" alt=":cry:" title=":cry:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/whistle.gif" alt=":whistle:" title=":whistle:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/sol.gif" alt=":sol:" title=":sol:" onclick="putSmiley(this.alt,this.src)">
+					</div>
+					<div>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/pt1cable.gif" alt=":pt1cable:" title=":pt1cable:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/sleep.gif" alt=":sleep:" title=":sleep:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/sweat.gif" alt=":sweat:" title=":sweat:" onclick="putSmiley(this.alt,this.src)"><br>
+						<img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/hello.gif" alt=":hello:" title=":hello:" onclick="putSmiley(this.alt,this.src)">
+					</div>
+				</div>
+				<div class="spacer">&nbsp;</div>
+				<br><a href="https://forum.hardware.fr/wikismilies.php?config=hfr.inc&amp;threecol=1" target="_blank" class="s1Topic">Liste des smilies perso</a><br><a target="_blank" href="https://forum.hardware.fr/wikismilies.php?config=hfr.inc" class="s1Topic">Wiki smilies</a><br><span class="small">Chercher un smiley<br><input type="text" name="search_smilies" id="search_smilies" size="10" onkeyup="find_smilies_timer('hfr.inc',54596)"></span><br><div id="dynamic_smilies"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/barthaliastoxik.gif" alt="[:barthaliastoxik]" title="[:barthaliastoxik]" onclick="putSmiley(this.alt,this.src)"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/skylight.gif" alt="[:skylight]" title="[:skylight]" onclick="putSmiley(this.alt,this.src)"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/tibo2002.jpg" alt="[:tibo2002]" title="[:tibo2002]" onclick="putSmiley(this.alt,this.src)"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/calimefrog.gif" alt="[:calimefrog:5]" title="[:calimefrog:5]" onclick="putSmiley(this.alt,this.src)"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/pinkfloyd31.jpg" alt="[:pinkfloyd31:1]" title="[:pinkfloyd31:1]" onclick="putSmiley(this.alt,this.src)"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/xatrix.gif" alt="[:xatrix]" title="[:xatrix]" onclick="putSmiley(this.alt,this.src)"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/xatrix.jpg" alt="[:xatrix:1]" title="[:xatrix:1]" onclick="putSmiley(this.alt,this.src)"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/xatrix.png" alt="[:xatrix:2]" title="[:xatrix:2]" onclick="putSmiley(this.alt,this.src)"><br><a href="https://forum.hardware.fr/user/supprperso.php?config=hfr.inc" target="_blank" class="s1Topic">Supprimer des smilies favoris</a></div></div></div></th><td class="repCase2" valign="top" style="font-size: small;">		<div class="left">
+				<img style="cursor:pointer" class="text_bold" onclick="TAinsert('[b]','[/b]');" title="Mettre en gras le texte. Syntaxe : [b]texte[/b]" alt="[b]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/bold.gif" width="27" height="28"><img style="cursor:pointer" class="text_ita" onclick="TAinsert('[i]','[/i]');" title="Mettre en italique le texte. Syntaxe : [i]texte[/i]" alt="[i]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/italic.gif" width="25" height="28"><img style="cursor:pointer" class="text_under" onclick="TAinsert('[u]','[/u]');" title="Souligner le texte. Syntaxe : [u]texte[/u]" alt="[u]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/underline.gif" width="26" height="28"><img style="cursor:pointer" class="text_strike" onclick="TAinsert('[strike]','[/strike]');" title="Barrer le texte. Syntaxe : [strike]texte[/strike]" alt="[strike]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/strike.gif" width="26" height="28"><img style="cursor:pointer" class="text_spoiler" onclick="TAinsert('[spoiler]','[/spoiler]');" title="Masquer le texte. Syntaxe : [spoiler]texte[/spoiler]" alt="[spoiler]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/spoiler.gif" width="26" height="28"><img style="cursor:pointer" class="text_fixed" onclick="TAinsert('[fixed]','[/fixed]');" title="Ecrire avec une police de taille fixe. Syntaxe : [fixed]texte[/fixed]" alt="[fixed]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/fixe.gif" width="26" height="28"><img style="cursor:pointer" class="cpp" onclick="TAinsert('[cpp]','[/cpp]');" title="Insérer du code C/C++. Syntaxe : [cpp]texte[/cpp]" alt="[cpp]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/c.gif" width="26" height="28"><img style="cursor:pointer" class="text_url" onclick="TAinsert('[url]','[/url]');" title="Insérer une URL. Syntaxe : [url]texte[/url]" alt="[url]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/url.gif" width="26" height="28"><img style="cursor:pointer" class="text_email" onclick="TAinsert('[email]','[/email]');" title="Insérer une adresse email. Syntaxe : [email]email@hostname.com[/email]" alt="[email]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/email.gif" width="26" height="28"><img style="cursor:pointer" class="image" onclick="TAinsert('[img]','[/img]');" title="Insérer une image. Syntaxe : [img]http://www.exemple.com/exemple.jpg[/img]" alt="[img]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/image.gif" width="26" height="28"><img style="cursor:pointer" class="text_puce" onclick="TAinsert('[*]','');" title="Insérer une puce. Syntaxe : [*]texte" alt="[*]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/puce.gif" width="23" height="28">
+				&nbsp;&nbsp;
+			</div>
+			<div class="left" style="width:270px;">
+				<table class="none" style="margin-top:6px; border:0px" id="ColorPanel" cellspacing="0" cellpadding="0">
+					<tbody><tr>
+						<td style="margin:0; padding:0; line-height:10px; cursor:pointer; width:15px; border:1px solid #000000" id="ColorUsed" title="Dernière couleur sélectionnée"><img src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="15" height="17" onclick="TAinsert('['+document.getElementById('ColorUsed').bgColor+']','[/'+document.getElementById('ColorUsed').bgColor+']');" style="padding:0; margin:0"><input type="hidden" value="" name="ColorUsedMem" id="ColorUsedMem"></td>
+						<td width="5" style="margin:0; padding:0">&nbsp;
+							<script language="JavaScript" type="text/javascript">
+								rgb(0,col0,0,'https://forum-images.hardware.fr/icones/trans.gif','Mettre du texte en couleur');
+								rgb(18,col1,50,'https://forum-images.hardware.fr/icones/trans.gif','Mettre du texte en couleur');
+								rgb(36,col2,100,'https://forum-images.hardware.fr/icones/trans.gif','Mettre du texte en couleur');
+								rgb(0,col3,150,'https://forum-images.hardware.fr/icones/trans.gif','Mettre du texte en couleur');
+							</script></td><td style="cursor:pointer; padding:0px; width:3px; background-color:#FF0000" onclick="TAinsert('['+document.getElementById('tableId0').bgColor+']','[/'+document.getElementById('tableId0').bgColor+']');lightCase('tableId0');" onmouseover="highlightCase('tableId0');" onmouseout="backlightCase();" id="tableId0" bgcolor="#FF0000" width="3" height="17"><img title="Mettre du texte en couleur : [#FF0000]text[/#FF0000]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FF0E00" onclick="TAinsert('['+document.getElementById('tableId1').bgColor+']','[/'+document.getElementById('tableId1').bgColor+']');lightCase('tableId1');" onmouseover="highlightCase('tableId1');" onmouseout="backlightCase();" id="tableId1" bgcolor="#FF0E00" width="3" height="17"><img title="Mettre du texte en couleur : [#FF0E00]text[/#FF0E00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FF1C00" onclick="TAinsert('['+document.getElementById('tableId2').bgColor+']','[/'+document.getElementById('tableId2').bgColor+']');lightCase('tableId2');" onmouseover="highlightCase('tableId2');" onmouseout="backlightCase();" id="tableId2" bgcolor="#FF1C00" width="3" height="17"><img title="Mettre du texte en couleur : [#FF1C00]text[/#FF1C00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FF2A00" onclick="TAinsert('['+document.getElementById('tableId3').bgColor+']','[/'+document.getElementById('tableId3').bgColor+']');lightCase('tableId3');" onmouseover="highlightCase('tableId3');" onmouseout="backlightCase();" id="tableId3" bgcolor="#FF2A00" width="3" height="17"><img title="Mettre du texte en couleur : [#FF2A00]text[/#FF2A00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FF3800" onclick="TAinsert('['+document.getElementById('tableId4').bgColor+']','[/'+document.getElementById('tableId4').bgColor+']');lightCase('tableId4');" onmouseover="highlightCase('tableId4');" onmouseout="backlightCase();" id="tableId4" bgcolor="#FF3800" width="3" height="17"><img title="Mettre du texte en couleur : [#FF3800]text[/#FF3800]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FF4600" onclick="TAinsert('['+document.getElementById('tableId5').bgColor+']','[/'+document.getElementById('tableId5').bgColor+']');lightCase('tableId5');" onmouseover="highlightCase('tableId5');" onmouseout="backlightCase();" id="tableId5" bgcolor="#FF4600" width="3" height="17"><img title="Mettre du texte en couleur : [#FF4600]text[/#FF4600]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FF5500" onclick="TAinsert('['+document.getElementById('tableId6').bgColor+']','[/'+document.getElementById('tableId6').bgColor+']');lightCase('tableId6');" onmouseover="highlightCase('tableId6');" onmouseout="backlightCase();" id="tableId6" bgcolor="#FF5500" width="3" height="17"><img title="Mettre du texte en couleur : [#FF5500]text[/#FF5500]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FF6300" onclick="TAinsert('['+document.getElementById('tableId7').bgColor+']','[/'+document.getElementById('tableId7').bgColor+']');lightCase('tableId7');" onmouseover="highlightCase('tableId7');" onmouseout="backlightCase();" id="tableId7" bgcolor="#FF6300" width="3" height="17"><img title="Mettre du texte en couleur : [#FF6300]text[/#FF6300]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FF7100" onclick="TAinsert('['+document.getElementById('tableId8').bgColor+']','[/'+document.getElementById('tableId8').bgColor+']');lightCase('tableId8');" onmouseover="highlightCase('tableId8');" onmouseout="backlightCase();" id="tableId8" bgcolor="#FF7100" width="3" height="17"><img title="Mettre du texte en couleur : [#FF7100]text[/#FF7100]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FF7F00" onclick="TAinsert('['+document.getElementById('tableId9').bgColor+']','[/'+document.getElementById('tableId9').bgColor+']');lightCase('tableId9');" onmouseover="highlightCase('tableId9');" onmouseout="backlightCase();" id="tableId9" bgcolor="#FF7F00" width="3" height="17"><img title="Mettre du texte en couleur : [#FF7F00]text[/#FF7F00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FF8D00" onclick="TAinsert('['+document.getElementById('tableId10').bgColor+']','[/'+document.getElementById('tableId10').bgColor+']');lightCase('tableId10');" onmouseover="highlightCase('tableId10');" onmouseout="backlightCase();" id="tableId10" bgcolor="#FF8D00" width="3" height="17"><img title="Mettre du texte en couleur : [#FF8D00]text[/#FF8D00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FF9B00" onclick="TAinsert('['+document.getElementById('tableId11').bgColor+']','[/'+document.getElementById('tableId11').bgColor+']');lightCase('tableId11');" onmouseover="highlightCase('tableId11');" onmouseout="backlightCase();" id="tableId11" bgcolor="#FF9B00" width="3" height="17"><img title="Mettre du texte en couleur : [#FF9B00]text[/#FF9B00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FFAA00" onclick="TAinsert('['+document.getElementById('tableId12').bgColor+']','[/'+document.getElementById('tableId12').bgColor+']');lightCase('tableId12');" onmouseover="highlightCase('tableId12');" onmouseout="backlightCase();" id="tableId12" bgcolor="#FFAA00" width="3" height="17"><img title="Mettre du texte en couleur : [#FFAA00]text[/#FFAA00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FFB800" onclick="TAinsert('['+document.getElementById('tableId13').bgColor+']','[/'+document.getElementById('tableId13').bgColor+']');lightCase('tableId13');" onmouseover="highlightCase('tableId13');" onmouseout="backlightCase();" id="tableId13" bgcolor="#FFB800" width="3" height="17"><img title="Mettre du texte en couleur : [#FFB800]text[/#FFB800]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FFC600" onclick="TAinsert('['+document.getElementById('tableId14').bgColor+']','[/'+document.getElementById('tableId14').bgColor+']');lightCase('tableId14');" onmouseover="highlightCase('tableId14');" onmouseout="backlightCase();" id="tableId14" bgcolor="#FFC600" width="3" height="17"><img title="Mettre du texte en couleur : [#FFC600]text[/#FFC600]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FFD400" onclick="TAinsert('['+document.getElementById('tableId15').bgColor+']','[/'+document.getElementById('tableId15').bgColor+']');lightCase('tableId15');" onmouseover="highlightCase('tableId15');" onmouseout="backlightCase();" id="tableId15" bgcolor="#FFD400" width="3" height="17"><img title="Mettre du texte en couleur : [#FFD400]text[/#FFD400]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FFE200" onclick="TAinsert('['+document.getElementById('tableId16').bgColor+']','[/'+document.getElementById('tableId16').bgColor+']');lightCase('tableId16');" onmouseover="highlightCase('tableId16');" onmouseout="backlightCase();" id="tableId16" bgcolor="#FFE200" width="3" height="17"><img title="Mettre du texte en couleur : [#FFE200]text[/#FFE200]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FFF000" onclick="TAinsert('['+document.getElementById('tableId17').bgColor+']','[/'+document.getElementById('tableId17').bgColor+']');lightCase('tableId17');" onmouseover="highlightCase('tableId17');" onmouseout="backlightCase();" id="tableId17" bgcolor="#FFF000" width="3" height="17"><img title="Mettre du texte en couleur : [#FFF000]text[/#FFF000]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FFFF00" onclick="TAinsert('['+document.getElementById('tableId18').bgColor+']','[/'+document.getElementById('tableId18').bgColor+']');lightCase('tableId18');" onmouseover="highlightCase('tableId18');" onmouseout="backlightCase();" id="tableId18" bgcolor="#FFFF00" width="3" height="17"><img title="Mettre du texte en couleur : [#FFFF00]text[/#FFFF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FFFF00" onclick="TAinsert('['+document.getElementById('tableId50').bgColor+']','[/'+document.getElementById('tableId50').bgColor+']');lightCase('tableId50');" onmouseover="highlightCase('tableId50');" onmouseout="backlightCase();" id="tableId50" bgcolor="#FFFF00" width="3" height="17"><img title="Mettre du texte en couleur : [#FFFF00]text[/#FFFF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#F0FF00" onclick="TAinsert('['+document.getElementById('tableId51').bgColor+']','[/'+document.getElementById('tableId51').bgColor+']');lightCase('tableId51');" onmouseover="highlightCase('tableId51');" onmouseout="backlightCase();" id="tableId51" bgcolor="#F0FF00" width="3" height="17"><img title="Mettre du texte en couleur : [#F0FF00]text[/#F0FF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#E2FF00" onclick="TAinsert('['+document.getElementById('tableId52').bgColor+']','[/'+document.getElementById('tableId52').bgColor+']');lightCase('tableId52');" onmouseover="highlightCase('tableId52');" onmouseout="backlightCase();" id="tableId52" bgcolor="#E2FF00" width="3" height="17"><img title="Mettre du texte en couleur : [#E2FF00]text[/#E2FF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#D4FF00" onclick="TAinsert('['+document.getElementById('tableId53').bgColor+']','[/'+document.getElementById('tableId53').bgColor+']');lightCase('tableId53');" onmouseover="highlightCase('tableId53');" onmouseout="backlightCase();" id="tableId53" bgcolor="#D4FF00" width="3" height="17"><img title="Mettre du texte en couleur : [#D4FF00]text[/#D4FF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#C6FF00" onclick="TAinsert('['+document.getElementById('tableId54').bgColor+']','[/'+document.getElementById('tableId54').bgColor+']');lightCase('tableId54');" onmouseover="highlightCase('tableId54');" onmouseout="backlightCase();" id="tableId54" bgcolor="#C6FF00" width="3" height="17"><img title="Mettre du texte en couleur : [#C6FF00]text[/#C6FF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#B8FF00" onclick="TAinsert('['+document.getElementById('tableId55').bgColor+']','[/'+document.getElementById('tableId55').bgColor+']');lightCase('tableId55');" onmouseover="highlightCase('tableId55');" onmouseout="backlightCase();" id="tableId55" bgcolor="#B8FF00" width="3" height="17"><img title="Mettre du texte en couleur : [#B8FF00]text[/#B8FF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#AAFF00" onclick="TAinsert('['+document.getElementById('tableId56').bgColor+']','[/'+document.getElementById('tableId56').bgColor+']');lightCase('tableId56');" onmouseover="highlightCase('tableId56');" onmouseout="backlightCase();" id="tableId56" bgcolor="#AAFF00" width="3" height="17"><img title="Mettre du texte en couleur : [#AAFF00]text[/#AAFF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#9BFF00" onclick="TAinsert('['+document.getElementById('tableId57').bgColor+']','[/'+document.getElementById('tableId57').bgColor+']');lightCase('tableId57');" onmouseover="highlightCase('tableId57');" onmouseout="backlightCase();" id="tableId57" bgcolor="#9BFF00" width="3" height="17"><img title="Mettre du texte en couleur : [#9BFF00]text[/#9BFF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#8DFF00" onclick="TAinsert('['+document.getElementById('tableId58').bgColor+']','[/'+document.getElementById('tableId58').bgColor+']');lightCase('tableId58');" onmouseover="highlightCase('tableId58');" onmouseout="backlightCase();" id="tableId58" bgcolor="#8DFF00" width="3" height="17"><img title="Mettre du texte en couleur : [#8DFF00]text[/#8DFF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#7FFF00" onclick="TAinsert('['+document.getElementById('tableId59').bgColor+']','[/'+document.getElementById('tableId59').bgColor+']');lightCase('tableId59');" onmouseover="highlightCase('tableId59');" onmouseout="backlightCase();" id="tableId59" bgcolor="#7FFF00" width="3" height="17"><img title="Mettre du texte en couleur : [#7FFF00]text[/#7FFF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#71FF00" onclick="TAinsert('['+document.getElementById('tableId60').bgColor+']','[/'+document.getElementById('tableId60').bgColor+']');lightCase('tableId60');" onmouseover="highlightCase('tableId60');" onmouseout="backlightCase();" id="tableId60" bgcolor="#71FF00" width="3" height="17"><img title="Mettre du texte en couleur : [#71FF00]text[/#71FF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#63FF00" onclick="TAinsert('['+document.getElementById('tableId61').bgColor+']','[/'+document.getElementById('tableId61').bgColor+']');lightCase('tableId61');" onmouseover="highlightCase('tableId61');" onmouseout="backlightCase();" id="tableId61" bgcolor="#63FF00" width="3" height="17"><img title="Mettre du texte en couleur : [#63FF00]text[/#63FF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#55FF00" onclick="TAinsert('['+document.getElementById('tableId62').bgColor+']','[/'+document.getElementById('tableId62').bgColor+']');lightCase('tableId62');" onmouseover="highlightCase('tableId62');" onmouseout="backlightCase();" id="tableId62" bgcolor="#55FF00" width="3" height="17"><img title="Mettre du texte en couleur : [#55FF00]text[/#55FF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#46FF00" onclick="TAinsert('['+document.getElementById('tableId63').bgColor+']','[/'+document.getElementById('tableId63').bgColor+']');lightCase('tableId63');" onmouseover="highlightCase('tableId63');" onmouseout="backlightCase();" id="tableId63" bgcolor="#46FF00" width="3" height="17"><img title="Mettre du texte en couleur : [#46FF00]text[/#46FF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#38FF00" onclick="TAinsert('['+document.getElementById('tableId64').bgColor+']','[/'+document.getElementById('tableId64').bgColor+']');lightCase('tableId64');" onmouseover="highlightCase('tableId64');" onmouseout="backlightCase();" id="tableId64" bgcolor="#38FF00" width="3" height="17"><img title="Mettre du texte en couleur : [#38FF00]text[/#38FF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#2AFF00" onclick="TAinsert('['+document.getElementById('tableId65').bgColor+']','[/'+document.getElementById('tableId65').bgColor+']');lightCase('tableId65');" onmouseover="highlightCase('tableId65');" onmouseout="backlightCase();" id="tableId65" bgcolor="#2AFF00" width="3" height="17"><img title="Mettre du texte en couleur : [#2AFF00]text[/#2AFF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#1CFF00" onclick="TAinsert('['+document.getElementById('tableId66').bgColor+']','[/'+document.getElementById('tableId66').bgColor+']');lightCase('tableId66');" onmouseover="highlightCase('tableId66');" onmouseout="backlightCase();" id="tableId66" bgcolor="#1CFF00" width="3" height="17"><img title="Mettre du texte en couleur : [#1CFF00]text[/#1CFF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#0EFF00" onclick="TAinsert('['+document.getElementById('tableId67').bgColor+']','[/'+document.getElementById('tableId67').bgColor+']');lightCase('tableId67');" onmouseover="highlightCase('tableId67');" onmouseout="backlightCase();" id="tableId67" bgcolor="#0EFF00" width="3" height="17"><img title="Mettre du texte en couleur : [#0EFF00]text[/#0EFF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#00FF00" onclick="TAinsert('['+document.getElementById('tableId68').bgColor+']','[/'+document.getElementById('tableId68').bgColor+']');lightCase('tableId68');" onmouseover="highlightCase('tableId68');" onmouseout="backlightCase();" id="tableId68" bgcolor="#00FF00" width="3" height="17"><img title="Mettre du texte en couleur : [#00FF00]text[/#00FF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#00FF00" onclick="TAinsert('['+document.getElementById('tableId100').bgColor+']','[/'+document.getElementById('tableId100').bgColor+']');lightCase('tableId100');" onmouseover="highlightCase('tableId100');" onmouseout="backlightCase();" id="tableId100" bgcolor="#00FF00" width="3" height="17"><img title="Mettre du texte en couleur : [#00FF00]text[/#00FF00]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#00F00E" onclick="TAinsert('['+document.getElementById('tableId101').bgColor+']','[/'+document.getElementById('tableId101').bgColor+']');lightCase('tableId101');" onmouseover="highlightCase('tableId101');" onmouseout="backlightCase();" id="tableId101" bgcolor="#00F00E" width="3" height="17"><img title="Mettre du texte en couleur : [#00F00E]text[/#00F00E]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#00E21C" onclick="TAinsert('['+document.getElementById('tableId102').bgColor+']','[/'+document.getElementById('tableId102').bgColor+']');lightCase('tableId102');" onmouseover="highlightCase('tableId102');" onmouseout="backlightCase();" id="tableId102" bgcolor="#00E21C" width="3" height="17"><img title="Mettre du texte en couleur : [#00E21C]text[/#00E21C]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#00D42A" onclick="TAinsert('['+document.getElementById('tableId103').bgColor+']','[/'+document.getElementById('tableId103').bgColor+']');lightCase('tableId103');" onmouseover="highlightCase('tableId103');" onmouseout="backlightCase();" id="tableId103" bgcolor="#00D42A" width="3" height="17"><img title="Mettre du texte en couleur : [#00D42A]text[/#00D42A]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#00C638" onclick="TAinsert('['+document.getElementById('tableId104').bgColor+']','[/'+document.getElementById('tableId104').bgColor+']');lightCase('tableId104');" onmouseover="highlightCase('tableId104');" onmouseout="backlightCase();" id="tableId104" bgcolor="#00C638" width="3" height="17"><img title="Mettre du texte en couleur : [#00C638]text[/#00C638]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#00B846" onclick="TAinsert('['+document.getElementById('tableId105').bgColor+']','[/'+document.getElementById('tableId105').bgColor+']');lightCase('tableId105');" onmouseover="highlightCase('tableId105');" onmouseout="backlightCase();" id="tableId105" bgcolor="#00B846" width="3" height="17"><img title="Mettre du texte en couleur : [#00B846]text[/#00B846]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#00AA55" onclick="TAinsert('['+document.getElementById('tableId106').bgColor+']','[/'+document.getElementById('tableId106').bgColor+']');lightCase('tableId106');" onmouseover="highlightCase('tableId106');" onmouseout="backlightCase();" id="tableId106" bgcolor="#00AA55" width="3" height="17"><img title="Mettre du texte en couleur : [#00AA55]text[/#00AA55]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#009B63" onclick="TAinsert('['+document.getElementById('tableId107').bgColor+']','[/'+document.getElementById('tableId107').bgColor+']');lightCase('tableId107');" onmouseover="highlightCase('tableId107');" onmouseout="backlightCase();" id="tableId107" bgcolor="#009B63" width="3" height="17"><img title="Mettre du texte en couleur : [#009B63]text[/#009B63]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#008D71" onclick="TAinsert('['+document.getElementById('tableId108').bgColor+']','[/'+document.getElementById('tableId108').bgColor+']');lightCase('tableId108');" onmouseover="highlightCase('tableId108');" onmouseout="backlightCase();" id="tableId108" bgcolor="#008D71" width="3" height="17"><img title="Mettre du texte en couleur : [#008D71]text[/#008D71]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#007F7F" onclick="TAinsert('['+document.getElementById('tableId109').bgColor+']','[/'+document.getElementById('tableId109').bgColor+']');lightCase('tableId109');" onmouseover="highlightCase('tableId109');" onmouseout="backlightCase();" id="tableId109" bgcolor="#007F7F" width="3" height="17"><img title="Mettre du texte en couleur : [#007F7F]text[/#007F7F]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#00718D" onclick="TAinsert('['+document.getElementById('tableId110').bgColor+']','[/'+document.getElementById('tableId110').bgColor+']');lightCase('tableId110');" onmouseover="highlightCase('tableId110');" onmouseout="backlightCase();" id="tableId110" bgcolor="#00718D" width="3" height="17"><img title="Mettre du texte en couleur : [#00718D]text[/#00718D]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#00639B" onclick="TAinsert('['+document.getElementById('tableId111').bgColor+']','[/'+document.getElementById('tableId111').bgColor+']');lightCase('tableId111');" onmouseover="highlightCase('tableId111');" onmouseout="backlightCase();" id="tableId111" bgcolor="#00639B" width="3" height="17"><img title="Mettre du texte en couleur : [#00639B]text[/#00639B]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#0055AA" onclick="TAinsert('['+document.getElementById('tableId112').bgColor+']','[/'+document.getElementById('tableId112').bgColor+']');lightCase('tableId112');" onmouseover="highlightCase('tableId112');" onmouseout="backlightCase();" id="tableId112" bgcolor="#0055AA" width="3" height="17"><img title="Mettre du texte en couleur : [#0055AA]text[/#0055AA]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#0046B8" onclick="TAinsert('['+document.getElementById('tableId113').bgColor+']','[/'+document.getElementById('tableId113').bgColor+']');lightCase('tableId113');" onmouseover="highlightCase('tableId113');" onmouseout="backlightCase();" id="tableId113" bgcolor="#0046B8" width="3" height="17"><img title="Mettre du texte en couleur : [#0046B8]text[/#0046B8]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#0038C6" onclick="TAinsert('['+document.getElementById('tableId114').bgColor+']','[/'+document.getElementById('tableId114').bgColor+']');lightCase('tableId114');" onmouseover="highlightCase('tableId114');" onmouseout="backlightCase();" id="tableId114" bgcolor="#0038C6" width="3" height="17"><img title="Mettre du texte en couleur : [#0038C6]text[/#0038C6]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#002AD4" onclick="TAinsert('['+document.getElementById('tableId115').bgColor+']','[/'+document.getElementById('tableId115').bgColor+']');lightCase('tableId115');" onmouseover="highlightCase('tableId115');" onmouseout="backlightCase();" id="tableId115" bgcolor="#002AD4" width="3" height="17"><img title="Mettre du texte en couleur : [#002AD4]text[/#002AD4]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#001CE2" onclick="TAinsert('['+document.getElementById('tableId116').bgColor+']','[/'+document.getElementById('tableId116').bgColor+']');lightCase('tableId116');" onmouseover="highlightCase('tableId116');" onmouseout="backlightCase();" id="tableId116" bgcolor="#001CE2" width="3" height="17"><img title="Mettre du texte en couleur : [#001CE2]text[/#001CE2]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#000EF0" onclick="TAinsert('['+document.getElementById('tableId117').bgColor+']','[/'+document.getElementById('tableId117').bgColor+']');lightCase('tableId117');" onmouseover="highlightCase('tableId117');" onmouseout="backlightCase();" id="tableId117" bgcolor="#000EF0" width="3" height="17"><img title="Mettre du texte en couleur : [#000EF0]text[/#000EF0]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#0000FF" onclick="TAinsert('['+document.getElementById('tableId118').bgColor+']','[/'+document.getElementById('tableId118').bgColor+']');lightCase('tableId118');" onmouseover="highlightCase('tableId118');" onmouseout="backlightCase();" id="tableId118" bgcolor="#0000FF" width="3" height="17"><img title="Mettre du texte en couleur : [#0000FF]text[/#0000FF]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#0000FF" onclick="TAinsert('['+document.getElementById('tableId150').bgColor+']','[/'+document.getElementById('tableId150').bgColor+']');lightCase('tableId150');" onmouseover="highlightCase('tableId150');" onmouseout="backlightCase();" id="tableId150" bgcolor="#0000FF" width="3" height="17"><img title="Mettre du texte en couleur : [#0000FF]text[/#0000FF]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#0E00F0" onclick="TAinsert('['+document.getElementById('tableId151').bgColor+']','[/'+document.getElementById('tableId151').bgColor+']');lightCase('tableId151');" onmouseover="highlightCase('tableId151');" onmouseout="backlightCase();" id="tableId151" bgcolor="#0E00F0" width="3" height="17"><img title="Mettre du texte en couleur : [#0E00F0]text[/#0E00F0]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#1C00E2" onclick="TAinsert('['+document.getElementById('tableId152').bgColor+']','[/'+document.getElementById('tableId152').bgColor+']');lightCase('tableId152');" onmouseover="highlightCase('tableId152');" onmouseout="backlightCase();" id="tableId152" bgcolor="#1C00E2" width="3" height="17"><img title="Mettre du texte en couleur : [#1C00E2]text[/#1C00E2]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#2A00D4" onclick="TAinsert('['+document.getElementById('tableId153').bgColor+']','[/'+document.getElementById('tableId153').bgColor+']');lightCase('tableId153');" onmouseover="highlightCase('tableId153');" onmouseout="backlightCase();" id="tableId153" bgcolor="#2A00D4" width="3" height="17"><img title="Mettre du texte en couleur : [#2A00D4]text[/#2A00D4]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#3800C6" onclick="TAinsert('['+document.getElementById('tableId154').bgColor+']','[/'+document.getElementById('tableId154').bgColor+']');lightCase('tableId154');" onmouseover="highlightCase('tableId154');" onmouseout="backlightCase();" id="tableId154" bgcolor="#3800C6" width="3" height="17"><img title="Mettre du texte en couleur : [#3800C6]text[/#3800C6]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#4600B8" onclick="TAinsert('['+document.getElementById('tableId155').bgColor+']','[/'+document.getElementById('tableId155').bgColor+']');lightCase('tableId155');" onmouseover="highlightCase('tableId155');" onmouseout="backlightCase();" id="tableId155" bgcolor="#4600B8" width="3" height="17"><img title="Mettre du texte en couleur : [#4600B8]text[/#4600B8]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#5500AA" onclick="TAinsert('['+document.getElementById('tableId156').bgColor+']','[/'+document.getElementById('tableId156').bgColor+']');lightCase('tableId156');" onmouseover="highlightCase('tableId156');" onmouseout="backlightCase();" id="tableId156" bgcolor="#5500AA" width="3" height="17"><img title="Mettre du texte en couleur : [#5500AA]text[/#5500AA]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#63009B" onclick="TAinsert('['+document.getElementById('tableId157').bgColor+']','[/'+document.getElementById('tableId157').bgColor+']');lightCase('tableId157');" onmouseover="highlightCase('tableId157');" onmouseout="backlightCase();" id="tableId157" bgcolor="#63009B" width="3" height="17"><img title="Mettre du texte en couleur : [#63009B]text[/#63009B]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#71008D" onclick="TAinsert('['+document.getElementById('tableId158').bgColor+']','[/'+document.getElementById('tableId158').bgColor+']');lightCase('tableId158');" onmouseover="highlightCase('tableId158');" onmouseout="backlightCase();" id="tableId158" bgcolor="#71008D" width="3" height="17"><img title="Mettre du texte en couleur : [#71008D]text[/#71008D]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#7F007F" onclick="TAinsert('['+document.getElementById('tableId159').bgColor+']','[/'+document.getElementById('tableId159').bgColor+']');lightCase('tableId159');" onmouseover="highlightCase('tableId159');" onmouseout="backlightCase();" id="tableId159" bgcolor="#7F007F" width="3" height="17"><img title="Mettre du texte en couleur : [#7F007F]text[/#7F007F]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#8D0071" onclick="TAinsert('['+document.getElementById('tableId160').bgColor+']','[/'+document.getElementById('tableId160').bgColor+']');lightCase('tableId160');" onmouseover="highlightCase('tableId160');" onmouseout="backlightCase();" id="tableId160" bgcolor="#8D0071" width="3" height="17"><img title="Mettre du texte en couleur : [#8D0071]text[/#8D0071]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#9B0063" onclick="TAinsert('['+document.getElementById('tableId161').bgColor+']','[/'+document.getElementById('tableId161').bgColor+']');lightCase('tableId161');" onmouseover="highlightCase('tableId161');" onmouseout="backlightCase();" id="tableId161" bgcolor="#9B0063" width="3" height="17"><img title="Mettre du texte en couleur : [#9B0063]text[/#9B0063]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#AA0055" onclick="TAinsert('['+document.getElementById('tableId162').bgColor+']','[/'+document.getElementById('tableId162').bgColor+']');lightCase('tableId162');" onmouseover="highlightCase('tableId162');" onmouseout="backlightCase();" id="tableId162" bgcolor="#AA0055" width="3" height="17"><img title="Mettre du texte en couleur : [#AA0055]text[/#AA0055]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#B80046" onclick="TAinsert('['+document.getElementById('tableId163').bgColor+']','[/'+document.getElementById('tableId163').bgColor+']');lightCase('tableId163');" onmouseover="highlightCase('tableId163');" onmouseout="backlightCase();" id="tableId163" bgcolor="#B80046" width="3" height="17"><img title="Mettre du texte en couleur : [#B80046]text[/#B80046]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#C60038" onclick="TAinsert('['+document.getElementById('tableId164').bgColor+']','[/'+document.getElementById('tableId164').bgColor+']');lightCase('tableId164');" onmouseover="highlightCase('tableId164');" onmouseout="backlightCase();" id="tableId164" bgcolor="#C60038" width="3" height="17"><img title="Mettre du texte en couleur : [#C60038]text[/#C60038]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#D4002A" onclick="TAinsert('['+document.getElementById('tableId165').bgColor+']','[/'+document.getElementById('tableId165').bgColor+']');lightCase('tableId165');" onmouseover="highlightCase('tableId165');" onmouseout="backlightCase();" id="tableId165" bgcolor="#D4002A" width="3" height="17"><img title="Mettre du texte en couleur : [#D4002A]text[/#D4002A]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#E2001C" onclick="TAinsert('['+document.getElementById('tableId166').bgColor+']','[/'+document.getElementById('tableId166').bgColor+']');lightCase('tableId166');" onmouseover="highlightCase('tableId166');" onmouseout="backlightCase();" id="tableId166" bgcolor="#E2001C" width="3" height="17"><img title="Mettre du texte en couleur : [#E2001C]text[/#E2001C]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#F0000E" onclick="TAinsert('['+document.getElementById('tableId167').bgColor+']','[/'+document.getElementById('tableId167').bgColor+']');lightCase('tableId167');" onmouseover="highlightCase('tableId167');" onmouseout="backlightCase();" id="tableId167" bgcolor="#F0000E" width="3" height="17"><img title="Mettre du texte en couleur : [#F0000E]text[/#F0000E]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+<td style="cursor:pointer; padding:0px; width:3px; background-color:#FF0000" onclick="TAinsert('['+document.getElementById('tableId168').bgColor+']','[/'+document.getElementById('tableId168').bgColor+']');lightCase('tableId168');" onmouseover="highlightCase('tableId168');" onmouseout="backlightCase();" id="tableId168" bgcolor="#FF0000" width="3" height="17"><img title="Mettre du texte en couleur : [#FF0000]text[/#FF0000]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/trans.gif" alt="" width="3" height="17"></td>
+
+						
+					</tr>
+				</tbody></table>
+			</div>
+			<div class="left">
+				&nbsp;&nbsp;
+				<img style="cursor:pointer" onclick="TAinsert('[quote]','[/quote]');" title="Insérer une citation. Syntaxe : [quote]texte[/quote]" alt="[quote]" src="FORUM%20HardWare.fr%20-%20R%C3%A9pondre%20_%20%C3%A9diter%20un%20message_ia_formulaire_reponse_files/citation.gif" width="69" height="28">
+			</div>
+			<div class="spacer">&nbsp;</div>
+	<textarea cols="75" rows="14" class="contenu" name="content_form" id="content_form" accesskey="c" style="margin-top: 0px; margin-bottom: 2px; width: calc(100% - 6px); resize: vertical;"></textarea><input type="hidden" name="wysiwyg" value="0">
+<input onclick=" return verif_not_empty()" type="submit" accesskey="s" value="Valider votre message" name="submit"><input type="button" accesskey="a" value="Aperçu" onclick="apercevoir();">		<div style="display:inline;"> <input id="search_smilies_pouet" type="text" style="height:16px;width:100px;" accesskey="q" autocomplete="off"></div><div style="display:inline;"> <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAACnElEQVR42q2T3U%2BSYRjG%2FVvgT2it5mrVap3V1jjooAOn5ifQ1HK1DJazdJjTLCk1M50KauqcigJvAiKIJsqXIPBiIl%2FKx0B44VWz7eqNNZyb88hn%2B50912%2B77t13Xt5FPx15xNa6DwUa5wGp2qSpH%2FY0pbBR5JwlKZgx7bPPDaudNGfekQl5wkfY2qPhDlJZPLsZOAIZjC1HQyNLYc6ZYWIjzZFbU%2BntyAHMv%2BKQLvghmnCicWwTPcQWDI4oXCEK31T%2BdA%2Bxc1oiMydZ0%2BuJ4FaYxpIzhnom1E144I%2FR8MUymFgOoE5qhXI9BLsvifZpMtg66WLlBOMrUeGGP401TwLCYTue95mROTxm%2BPOfY9QPW1A3aMKiPQLtRgQNUqswJxhYCJEupmsvsY3aPhNqetfgj2YwsxqA2rYLmhGobUFwO3Von3HA6o3jRa%2BRzAm6FF7aHUxBKLGg%2BqsRvG4D81mPWaMPceoQe3Ea%2FfMulHdoUf1FD4dvHzyxns4J2iZdtCuQwsshC7hdelR%2B1qHikw4p%2Bjd2IhT4Yi1K2lR4zMAXa2D3J1DYoj4RvJHaSNtOAmKZC7xOAyrEiyj7uIDS9%2Bosxe8IFDcrUNQsR6N0FUZPBA8b5CcVmD5ChTEAvSOC6i5DLhhLHiCyT6NANJelWCQDse6DhKlzr27qZIh88RKr8sNicMUZgXLND26HBkUtSnRMmrL8Cxc2TWFU44bGEsDd2ong7afjrFO7UCCa5zxqItI6%2By7U1iDeSlZQ1ipHSfMsXvfroTR6oTL7cbPqe%2Fr6k5Gzt%2FGBUMa5%2F2o6NEBs4qc7DIs3lmXZuYcemQ35PGnoaqWEc%2B493Hk2zr5VMya4UTVKXuMPU%2FlcKXWlYoi8XD4ouFQ6wL7w6%2F0LXCsKj6bCqcQAAAAASUVORK5CYII%3D" alt="help" style="cursor: help; vertical-align: -3px; margin-right: 4px;" class="ws_toyo_help_icon" title="double-cliquez pour ouvrir
+la fenêtre de configuration"><a href="https://generateurs.super-h.fr/" target="_blank" class="s1Ext">Générateurs</a></div><div id="addCommentMessage"></div>
+		<br><div id="gif"><select><option value="giphy" selected="selected">Giphy</option><option value="tenor">Tenor</option></select><input type="text" style="vertical-align: bottom;"><div></div></div><div id="dynamic_smilies_pouet" style="text-align:center;" class="reponse"></div></td>
+	</tr>
+	<tr class="reponse">
+		<th class="repCase1">Options</th>
+		<td class="repCase2" style="font-weight:bold">	<input class="checkbox opt" type="checkbox" value="1" name="signature" checked="checked" id="signature"><label for="signature">Activer votre signature</label>
+	<br><input class="checkbox opt" type="checkbox" value="1" name="smiley" id="smiley"><label for="smiley">Désactiver les smilies</label>
+	<br><input class="checkbox opt" type="checkbox" value="1" name="emaill" id="emaill"><label for="emaill">Activer la notification par email du sujet</label>
+	&nbsp;</td></tr></tbody></table></form><table class="main" cellspacing="0" cellpadding="4" width="100%">		<tbody><tr style="display:none" id="apercu" class="reponse">
+			<th class="repCase1">Aperçu</th>
+			<th class="repCase2"><iframe name="apercu_frame" id="apercu_frame" style="border:0px" src=""></iframe></th>
+		</tr>
+	</tbody></table><form action="/apercu.php" target="apercu_frame" method="post" name="apercu_form" id="apercu_form">
+<input type="hidden" name="hash_check" value="SCRUBBED_HASH_CHECK"><input type="hidden" name="apercu_contenu" id="apercu_contenu" value="">
+<input type="hidden" name="apercu_smiley" id="apercu_smiley" value="">
+<input type="hidden" name="config" value="hfr.inc">
+</form>
+<a href="https://forum.hardware.fr/password.php?config=hfr.inc" class="s2Ext">Vous avez perdu votre mot de passe ?</a>
+<br>
+<br>
+
+<br><table class="main" cellspacing="0" cellpadding="4" width="100%">
+			<tbody><tr class="cBackHeader">
+				<th class="padding">Vue Rapide de la discussion</th>
+			</tr>
+		</tbody></table>		<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+			<td>T'es dans le turfu mec<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">Groody</td>
+			<td>Punaise tout fonctionne. En TCP/IP via Wifi, il me corrige les trucs que je lui indique qui ne vont pas.
+<br>&nbsp;<br>&nbsp;[:jubijub] <div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+			<td>ah ouais :D
+<br><a rel="nofollow" href="https://i.imgur.com/nrktFjE.png" target="_blank" class="cLink"></a><a rel="nofollow" href="https://i.imgur.com/nrktFjEl.png" target="_blank" class="cLink">https://i.imgur.com/nrktFjEl.png</a>
+<br>&nbsp;<br>j'ai fiat un topic claude code / codex aufait
+<br>je sais pa encorep oru un topic dev android via ia<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">Groody</td>
+			<td>Android Studio.<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+			<td>Dans Android Studio ou Claude Cowork/Desktop ? :D<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">Groody</td>
+			<td><p></p><div class="container"><table class="oldcitation"><tbody><tr class="none"><td><b class="s1"><a href="https://forum.hardware.fr/forum2.php?config=hfr.inc&amp;cat=32&amp;post=7&amp;page=1&amp;p=1&amp;sondage=0&amp;owntopic=1&amp;trash=0&amp;trash_post=0&amp;print=0&amp;numreponse=0&amp;quote_only=0&amp;new=0&amp;nojs=0#t35591" class="Topic">XaTriX a écrit :</a></b><hr size="1"><p>
+<br>&nbsp;:??: <br></p><hr size="1"></td></tr></tbody></table></div><p>
+<br>Ce sont les infos trouvées sur le net / Que Claude AI m'a indiquées de suivre.</p><div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+			<td><p></p><div class="container"><table class="oldcitation"><tbody><tr class="none"><td><b class="s1"><a href="https://forum.hardware.fr/forum2.php?config=hfr.inc&amp;cat=32&amp;post=7&amp;page=1&amp;p=1&amp;sondage=0&amp;owntopic=1&amp;trash=0&amp;trash_post=0&amp;print=0&amp;numreponse=0&amp;quote_only=0&amp;new=0&amp;nojs=0#t35590" class="Topic">Groody a écrit :</a></b><hr size="1"><p>Xat, t'as des infos pour connecter adb / lui faire exploiter la VM ?<br></p><hr size="1"></td></tr></tbody></table></div><p>
+<br>Oui. adb tu lui demandes de l'installer si tu ne l'as pas déjà. Sous
+ windows peut être avec Winget. adb gère la connection avec un android, 
+via USB ou TCP (wifi possible donc).
+<br>Mais déjà tu demandes à Claude en CLI de te faire une todolist et qu'il en fasse le plus possible :D
+<br>Mais en gros tu créé le device qu'il te demande de créer sur Android Studio / Virtual Devices Manager
+<br>Puis avec adb il trouve et se connecte tout seul à l'android émulé, 
+puis il peut faire ce qu'il fait : installer une APK, naviguer, prendre 
+des screenshots (et les analyser), etc.</p><div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+			<td><p></p><div class="container"><table class="oldcitation"><tbody><tr class="none"><td><b class="s1"><a href="https://forum.hardware.fr/forum2.php?config=hfr.inc&amp;cat=32&amp;post=7&amp;page=1&amp;p=1&amp;sondage=0&amp;owntopic=1&amp;trash=0&amp;trash_post=0&amp;print=0&amp;numreponse=0&amp;quote_only=0&amp;new=0&amp;nojs=0#t35587" class="Topic">Groody a écrit :</a></b><hr size="1"><p>Voici ce que j'ai dû faire pour installer claude code pour l'utiliser avec Android Studio :
+<br><strong> - dans android studio &gt; Paramètres &gt; Plugins &gt; Installer "claude Code (beta)"</strong>
+<br>&nbsp;- installer Node JS pour windows : <a rel="nofollow" href="https://nodejs.org/fr/download" target="_blank" class="cLink">https://nodejs.org/fr/download</a>
+<br>&nbsp;- installer GIT pour windows : <a rel="nofollow" href="https://git-scm.com/install/windows" target="_blank" class="cLink">https://git-scm.com/install/windows</a>
+<br>&nbsp;- ouvrir un invite de commande en Admin &nbsp;<br>&nbsp;- taper "npm install -g @anthropic-ai/claude-code"
+<br>&nbsp;- fermer puis rouvrir le terminal &nbsp;<br>&nbsp;- dans le terminal : cd c:\mon-dossier-projet\
+<br>&nbsp;- taper CLAUDE et répondre à quelques questions
+<br>&nbsp;- ça va demander de s'identifier (ouverture du navigateur, obetenir un code et le coller dans le terminal).
+<br>&nbsp;- ça va demander si vous avez confiance dans le dossier (faire
+ attention que c'est bien le chemin du projet et non pas 
+c:\windows\system32 par ex)
+<br>&nbsp;<br><br></p><hr size="1"></td></tr></tbody></table></div><p>
+<br>&nbsp;:??: </p><div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">Groody</td>
+			<td>Xat, t'as des infos pour connecter adb / lui faire exploiter la VM ?<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+			<td>Ah ouais fallait demander :D
+<br>&nbsp;<br>Installe plutôt WSL2 et fais tourner ça sous le sous-système linux. L'intégration avec Windows est devenu très bonne !<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">Groody</td>
+			<td>Voici ce que j'ai dû faire pour installer claude code pour l'utiliser avec Android Studio :<br>&nbsp;- dans android studio &gt; Paramètres &gt; Plugins &gt; Installer "claude Code (beta)"<br>&nbsp;- installer Node JS pour windows : <a rel="nofollow" href="https://nodejs.org/fr/download" target="_blank" class="cLink">https://nodejs.org/fr/download</a><br>&nbsp;- installer GIT pour windows : <a rel="nofollow" href="https://git-scm.com/install/windows" target="_blank" class="cLink">https://git-scm.com/install/windows</a><br>&nbsp;- ouvrir un invite de commande en Admin <br>&nbsp;- taper "npm install -g @anthropic-ai/claude-code"<br>&nbsp;- fermer puis rouvrir le terminal <br>&nbsp;- dans le terminal : cd c:\mon-dossier-projet\<br>&nbsp;- taper CLAUDE et répondre à quelques questions<br>&nbsp;- ça va demander de s'identifier (ouverture du navigateur, obetenir un code et le coller dans le terminal).<br>&nbsp;-
+ ça va demander si vous avez confiance dans le dossier (faire attention 
+que c'est bien le chemin du projet et non pas c:\windows\system32 par 
+ex)<br>&nbsp;- lui demander de créer un CLAUDE.md<p></p>&nbsp;<p>Voir : <a rel="nofollow" href="https://youtu.be/3I9WngFSiY0" target="_blank" class="cLink">https://youtu.be/3I9WngFSiY0</a></p>&nbsp;<p></p><div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">M300A</td>
+			<td> [:lardoncru:2] <div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">Groody</td>
+			<td>Déjà hier soir j'ai pris ma claque, quand je voyais le proto 
+s'afficher dans Claude, une app à laquelle je pensais depuis 10 ans sans
+ avoir les compétences ou le budget pour la réaliser ! Là c'est faisable
+ !<p></p>&nbsp;<p><br>Pour ceux que ça intéresse une vidéo qui présente Claude code.<br><a rel="nofollow" href="https://youtu.be/3I9WngFSiY0" target="_blank" class="cLink">https://youtu.be/3I9WngFSiY0</a></p><div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+			<td>Note bien ce jour comme le "jour d'avant" :o plus de retour possible après :D<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">Groody</td>
+			<td>J'ai vu mais mon tel n'a pas réussi à se connecter. J'avais pas le temps alors j'ai branché un câble usb.<p></p>&nbsp;<p>J'installe Claude code demain, j'ai vu que c'était compris avec Claude pro.</p>&nbsp;<p>:jap:</p><div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+			<td>Et depuis hier j'utilise aussi adb via wifi sur mon vrai téléphone :D c'est une tuerie <div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+			<td>Ah bah oui, dans Android Studio tu as un (Virtual) Device Manager : &nbsp;<br><a rel="nofollow" href="https://i.imgur.com/KfnUYXd.png" target="_blank" class="cLink"></a><a rel="nofollow" href="https://i.imgur.com/KfnUYXdl.png" target="_blank" class="cLink">https://i.imgur.com/KfnUYXdl.png</a>
+<br>&nbsp;<br>Tu peux même en héberger dans leur cloud :D (et autres que
+ des Pixel). Idéalement je ferais ça pour avoir accès au device depuis 
+n'importe où et sans pomper du compute/ram sur mon laptop :o<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">Groody</td>
+			<td>Il passe par un Android virtualisé j'imagine ? <div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+			<td>un topic dev android via IA ? &nbsp;<br>pour l'instant je sais pas :D
+<br>&nbsp;<br>pour la première partie c'est simple: installe claude 
+code, demande lui de se connecter via adb à android studio et il te dira
+ quoi faire :o et dès que c'est bon dis lui de prendre l'habitude 
+d'utiliser adb/android studio pour vérifier ce qu'il fait<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">Groody</td>
+			<td>Tu veux pas faire un topic unique pour expliquer le process?<p></p>&nbsp;<p>Surtout pour la 1ere partie de ta réponse. </p><div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+			<td>Oui aux deux, utilise aussi adb pour que CC se fasse sa boucle de feedback puis il pourra bosser en autonomie :D
+<br>&nbsp;<br>Je dev aussi une app android en ce moment : 
+github.com/ForumHFR/redface2 Claude Max5 et 2 comptes GPT Business avec 
+Claude Code et Codex en CLI<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">Groody</td>
+			<td>Je découvre un peu tout ça.<br>Hier soir j'ai interrogé Claude (pro / sonnet 4.6) si il est capable de créer une app Android.<p></p>&nbsp;<p>Et
+ vlan c'est parti... Échange d'idées, prototype, amélioration, 
+évolution, puis j'ai installé android studio et il me dicte quoi faire, 
+il corrige le code (qui n'est pas parfait du 1er code) , etc.</p>&nbsp;<p>Est-ce que Claude code serait plus performant ?<br>Ou Claude pro en opus 4.8 ? </p><div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">Rasthor</td>
+			<td>Il y a un reset de l'utilisation au passage. Cool! :D<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+			<td>abusé :D
+<br>&nbsp;<br>bon sinon j'ai pas suivi les denerieres updates de CC et 
+il m'a spawn des agents en background même sans tâche, ils restent même 
+apres l'arrêt de CC on dirait ! &nbsp;<br>bref j'ai des forks de session que j'ai pas demandé :D<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">libussa</td>
+			<td>et c'est reparti <a rel="nofollow" href="https://www.anthropic.com/news/claude-opus-4-8" target="_blank" class="cLink">https://www.anthropic.com/news/claude-opus-4-8</a>
+<br>&nbsp;<br><div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">gatsu35</td>
+			<td>Claude Max 5
+<br>&nbsp;<br>Activez agent teams
+<br>&nbsp;<br>et faites : &nbsp;<br><p></p><div class="container"><table class="oldquote"><tbody><tr class="none"><td><b class="s1">Citation :</b><hr size="1"><p>
+<br>/loop tu es agent lead, tu utilises agent teams pour créer 10 
+agents, 4 fronts, 2 backend, 1 architecte, 2 testeurs, un Product owner
+<br>Tous doivnet brainstormer et discuter entre eux
+<br>Voici le besoin : &nbsp;<br>&lt;coller le gros besoin complet et précis)
+<br><br></p><hr size="1"></td></tr></tbody></table></div><p>
+<br>et tu pars la nuit et le lendemain tu reviens il va encore travailler
+<br>Les agents vont discuter entre eux
+<br>le /loop permet de continuer et d'itérer, si par exemple on arrive 
+au bout d'une session de token, il va reprendre automatique dès qu'une 
+nouvelle session sera disponible (desactiver au passage l'option qui va 
+gratter sur votre forfait API)
+<br>&nbsp;<br>Tant qu'il n'a pas fini il va continuer</p><div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">XaTriX</td>
+			<td>Claude Code en Max5 c'est la base !<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">Rasthor</td>
+			<td>C'est pas faux. :D<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">TotalRecall</td>
+			<td>Mais, mais niveau tarification à l'usage c'est vachement dessus aussi :o
+<br>A la limite en fin de mois, on peut se lâcher un peu quand il reste du forfait [:caloub]<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">Rasthor</td>
+			<td><p></p><div class="container"><table class="oldcitation"><tbody><tr class="none"><td><b class="s1"><a href="https://forum.hardware.fr/forum2.php?config=hfr.inc&amp;cat=32&amp;post=7&amp;page=1&amp;p=1&amp;sondage=0&amp;owntopic=1&amp;trash=0&amp;trash_post=0&amp;print=0&amp;numreponse=0&amp;quote_only=0&amp;new=0&amp;nojs=0#t29892" class="Topic">TotalRecall a écrit :</a></b><hr size="1"><p>Drap, quand j'utilise l'IA je fais 90% de mes tâches de dev avec Haiku et Sonnet, via copilot ou copilot CLI.
+<br>Jamais pris d'abonnement directement chez anthropic par contre :o<br></p><hr size="1"></td></tr></tbody></table></div><p>
+<br>Opus, c'est quand même au dessus. Surtout pour le code.</p><div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">TotalRecall</td>
+			<td>Drap, quand j'utilise l'IA je fais 90% de mes tâches de dev avec Haiku et Sonnet, via copilot ou copilot CLI.
+<br>Jamais pris d'abonnement directement chez anthropic par contre :o<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">le canard nouveau</td>
+			<td>drap :o<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">benos</td>
+			<td>Drap, utilisateur de Claude team (standard &nbsp;[:la chancla:1] )<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">neo world</td>
+			<td>Drap :D<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">speedboyz30</td>
+			<td>Claude c'est bien.
+<br>Claude code c'est le GOAT.
+<br>&nbsp;<br>J'ai souvent 5/6 sessions qui tournent en parallèle :love:<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f7f7f7">
+						<td class="messCase1bis" width="160" valign="top">Groody</td>
+			<td>Je le découvre depuis 1 semaine et je suis sur les fesses.
+<br>Ca m'a aidé à avancer / régler des problèmes que je trainais depuis longtemps sans avoir eu le temps de vraiment m'y mettre.
+<br>&nbsp;<br>J'ai tenté le même genre de question sur Gemini, ce 
+dernier est à la rue, affirmant à chaque réponse des choses fausses ou 
+en partie, qu'il admettait quand je lui signalait. Ce qui n'arrive quasi
+ jamais avec Claude.<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+			<table cellspacing="0" cellpadding="4" width="100%">
+					<tbody><tr class="message" style="background-color:#f0eee9">
+						<td class="messCase1bis" width="160" valign="top">Rasthor</td>
+			<td>Et voila le topic unique sur Claude! &nbsp;<br>&nbsp;<br><strong>Présentation</strong>
+<br>&nbsp;<br><a rel="nofollow" href="https://www.anthropic.com/" target="_blank" class="cLink">Anthropic</a>
+ est une société américaine fondée en 2021 par Dario et Daniela Amodei, 
+anciens d'OpenAI. Elle développe Claude avec une approche centrée sur la
+ sûreté et l'alignement des modèles, et bénéficie d'investissements 
+significatifs de Google et Amazon.
+<br>&nbsp;<br><strong>La gamme</strong>
+<br>&nbsp;<br>- <strong>Opus</strong> : modèle haut de gamme pour les tâches complexes (raisonnement, code, rédaction longue)
+<br>- <strong>Sonnet</strong> : compromis perf/vitesse, adapté à la plupart des usages
+<br>- <strong>Haiku</strong> : modèle léger et rapide
+<br>&nbsp;<br>Accès via <a rel="nofollow" href="https://claude.ai/" target="_blank" class="cLink">claude.ai</a>, les applications <a rel="nofollow" href="https://apps.apple.com/app/claude-by-anthropic/id6473753684" target="_blank" class="cLink">iOS</a> / <a rel="nofollow" href="https://play.google.com/store/apps/details?id=com.anthropic.claude" target="_blank" class="cLink">Android</a> / <a rel="nofollow" href="https://claude.ai/download" target="_blank" class="cLink">desktop</a>, l'<a rel="nofollow" href="https://www.anthropic.com/api" target="_blank" class="cLink">API</a> via la <a rel="nofollow" href="https://console.anthropic.com/" target="_blank" class="cLink">console</a>, et <a rel="nofollow" href="https://www.anthropic.com/claude-code" target="_blank" class="cLink">Claude Code</a> en CLI.
+<br>&nbsp;<br><strong>Ressources utiles</strong>
+<br>&nbsp;<br>- <a rel="nofollow" href="https://docs.claude.com/" target="_blank" class="cLink">Documentation officielle</a>
+<br>- <a rel="nofollow" href="https://docs.claude.com/en/docs/build-with-claude/prompt-engineering/overview" target="_blank" class="cLink">Guide de prompt engineering</a> (balises XML, few-shot, etc.)
+<br>- <a rel="nofollow" href="https://support.claude.com/" target="_blank" class="cLink">Centre d'aide</a>
+<br>- <a rel="nofollow" href="https://www.anthropic.com/pricing" target="_blank" class="cLink">Tarifs</a> (Free, Pro, Max, Team)
+<br>- <a rel="nofollow" href="https://www.anthropic.com/news" target="_blank" class="cLink">Blog Anthropic</a>
+<br>&nbsp;<br><strong>Veille</strong>
+<br>&nbsp;<br>- X : <a rel="nofollow" href="https://x.com/AnthropicAI" target="_blank" class="cLink">@AnthropicAI</a> et <a rel="nofollow" href="https://x.com/claudeai" target="_blank" class="cLink">@claudeai</a>
+<br>- <a rel="nofollow" href="https://www.reddit.com/r/ClaudeAI/" target="_blank" class="cLink">r/ClaudeAI</a>
+<br>&nbsp;<br><strong>Quelques conseils</strong>
+<br>&nbsp;<br>- Un prompt précis (contexte, format attendu, ton) change radicalement la qualité de la réponse
+<br>- Pour les longs documents, préférer la pièce jointe au copier-coller
+<br>- Les Projets (offre Pro) permettent de conserver un contexte documentaire persistant entre conversations
+<br>- Les Artifacts facilitent l'itération sur code et documents structurés
+<br>- La recherche web est activable selon les besoins
+<br>&nbsp;<br><strong>Objet du topic</strong>
+<br>&nbsp;<br>Centraliser retours d'expérience, comparaisons avec la 
+concurrence (ChatGPT, Gemini, Mistral, DeepSeek), cas d'usage et 
+actualités. Les questions techniques sur l'API ou les fonctionnalités 
+sont bienvenues.
+<br>&nbsp;<br>N'hésitez pas à partager vos impressions.<div style="clear: both;"> </div></td>
+			</tr>
+		</tbody></table>
+	
+<div class="copyright">
+<br><a href="http://www.mesdiscussions.net/" target="_blank" class="copyright">Forum MesDiscussions.Net</a>, Version 2010.2 <br>(c) 2000-2011 Doctissimo<br></div>
+</div>
+</div>
+<center><font color="#000000" size="1" face="Arial, Helvetica, sans-serif"><br>Copyright © 1997-2025 Groupe <a href="https://www.ldlc.com/" title="Achat de materiel Informatique">LDLC</a> (<a href="https://www.hardware.fr/html/donnees_personnelles/">Signaler un contenu illicite / Données personnelles</a>)</font></center>
+<!-- Matomo -->
+<script>
+  var _paq = window._paq = window._paq || [];
+  /* tracker methods like "setCustomDimension" should be called before "trackPageView" */
+  _paq.push(['trackPageView']);
+  _paq.push(['enableLinkTracking']);
+  (function() {
+    var u="https://tracking.groupe-ldlc.com/";
+    _paq.push(['setTrackerUrl', u+'matomo.php']);
+    _paq.push(['setSiteId', '26']);
+    var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
+    g.async=true; g.src=u+'matomo.js'; s.parentNode.insertBefore(g,s);
+  })();
+</script>
+<noscript><p><img src="https://tracking.groupe-ldlc.com/matomo.php?idsite=26&rec=1" style="border:0;" alt="" /></p></noscript>
+<!-- End Matomo Code --><script type="text/javascript">
+md_forum_decryptlink.init();
+</script>
+<script type="text/javascript">
+md_forum_decryptlink.init();
+</script>
+<script type="text/javascript">
+var md_url_img_shadow= 'https://forum-images.hardware.fr';
+var md_tabs_menu_shadow= 1;
+</script>
+<script type="text/javascript">
+
+		window.onload = function(){aff_add_img_js();};
+		
+	function warning() {
+		if (alert('Vous devez spécifier une sous-catégorie !')) {
+			return false;
+		} else {
+			return false;
+		}
+	}
+	function add_join_img() {
+	var addform= 0;
+	for (i=0;i<10;i++) {
+		if ((!document.getElementById('add_image'+i)) && (addform == 0)) {
+			//var inner_add_form= document.getElementById('add_image_form').innerHTML;
+			//document.getElementById('add_image_form').innerHTML= inner_add_form+ '<br /><input type="file" name="add_image'+i+'" id="add_image'+i+'" onchange="document.join_form.sub.style.fontWeight=\'bold\'" />';
+			addform= 1;
+			var addFile=document.createElement("DIV");
+			addFile.innerHTML= '<input type="file" name="add_image'+i+'" id="add_image'+i+'" onchange="document.join_form.sub.style.fontWeight=\'bold\'" />';
+		    document.getElementById('add_image_form').appendChild(addFile)
+			if (i == 9) {
+				document.getElementById('add_img_js').style.display= 'none';
+			}
+		}
+	}
+}
+
+function aff_add_img_js() {
+	if (document.getElementById('add_img_js')) {
+		document.getElementById('add_img_js').style.display= 'block';
+	}
+}
+function message_upload_img() {
+	no_image= 1;
+	for (i=0;i<10;i++) {
+		if ((document.getElementById('add_image'+i)) && (document.getElementById('add_image'+i).value != '')) {
+			no_image= 0;
+		}
+	}
+	if (no_image == 1) {
+		alert('Vous n\'avez pas choisi d\'image à joindre');
+		return false;
+	}
+	document.getElementById('add_img_js').style.display= 'none';
+	document.getElementById('add_image_form').style.display= 'none';
+	document.getElementById('submit_upload').style.display= 'none';
+	document.getElementById('join_form').action= '/user/join_image_b.php?config=hfr.inc';
+	document.getElementById('upload_frame').style.display= '';
+	document.getElementById('join_form').target= 'upload_frame';
+	document.getElementById('img_wait_upload_img').style.display= '';
+	document.getElementById('join_form').submit();
+	document.getElementById('submit_upload').style.fontWeight= 'normal';
+}
+</script>
+
+
+<div id="ws_back"></div><div id="ws_front" style="width: 600px; height: auto;"><ul id="ws_front_menu"><li class="selected">Raccourcis clavier</li><li>Paramétrage divers</li></ul><table id="ws_front_rc" style="display: table;"><tr><td>[spoiler]<span style="font-weight:normal;">texte</span>[/spoiler]</td><td style="text-align: right;"><input id="ws_spoiler" type="text" size="10" key="83"></td></tr><tr><td>[b]<span style="font-weight:normal;">texte</span>[/b]</td><td style="text-align: right;"><input id="ws_b" type="text" size="10" key="66"></td></tr><tr><td>[i]<span style="font-weight:normal;">texte</span>[/i]</td><td style="text-align: right;"><input id="ws_i" type="text" size="10" key="73"></td></tr><tr><td>[u]<span style="font-weight:normal;">texte</span>[/u]</td><td style="text-align: right;"><input id="ws_u" type="text" size="10" key="85"></td></tr><tr><td>[img]<span style="font-weight:normal;">image</span>[/img]</td><td style="text-align: right;"><input id="ws_img" type="text" size="10" key="80"></td></tr><tr><td>[img]https://reho.st/<span style="font-weight:normal;">image</span>[/img]</td><td style="text-align: right;"><input id="ws_img_rehost" type="text" size="10" key="72"></td></tr><tr><td>[quote]<span style="font-weight:normal;">texte</span>[/quote]</td><td style="text-align: right;"><input id="ws_quote" type="text" size="10" key="81"></td></tr><tr><td>[url]<span style="font-weight:normal;">url</span>[/url]</td><td style="text-align: right;"><input id="ws_url" type="text" size="10" key="76"></td></tr><tr><td>[code]<span style="font-weight:normal;">code</span>[/code]</td><td style="text-align: right;"><input id="ws_code" type="text" size="10" key="67"></td></tr><tr><td>[fixed]<span style="font-weight:normal;">texte</span>[/fixed]</td><td style="text-align: right;"><input id="ws_fixed" type="text" size="10" key="70"></td></tr><tr><td>[strike]<span style="font-weight:normal;">texte</span>[/strike]</td><td style="text-align: right;"><input id="ws_strike" type="text" size="10" key="82"></td></tr><tr><td>[*]<span style="font-weight:normal;">texte</span></td><td style="text-align: right;"><input id="ws_puce" type="text" size="10" key="88"></td></tr><tr><td>[:<span style="font-weight:normal;">smiley</span>]</td><td style="text-align: right;"><input id="ws_smiley" type="text" size="10" key="77"></td></tr><tr><td>[#ff0000]<span style="font-weight:normal;"><span style="color:#ff0000;">texte</span></span>[/#ff0000]</td><td style="text-align: right;"><input id="ws_color_red" type="text" size="10" key="97"></td></tr><tr><td>[#0000ff]<span style="font-weight:normal;"><span style="color:#0000ff;">texte</span></span>[/#0000ff]</td><td style="text-align: right;"><input id="ws_color_blue" type="text" size="10" key="98"></td></tr><tr><td>[#ffff00]<span style="font-weight:normal;"><span style="color:#ffff00;">texte</span></span>[/#ffff00]</td><td style="text-align: right;"><input id="ws_color_yellow" type="text" size="10" key="99"></td></tr><tr><td>[#00ff00]<span style="font-weight:normal;"><span style="color:#00ff00;">texte</span></span>[/#00ff00]</td><td style="text-align: right;"><input id="ws_color_green" type="text" size="10" key="100"></td></tr><tr><td>[#ff7f00]<span style="font-weight:normal;"><span style="color:#ff7f00;">texte</span></span>[/#ff7f00]</td><td style="text-align: right;"><input id="ws_color_orange" type="text" size="10" key="101"></td></tr><tr><td>[#bf00ff]<span style="font-weight:normal;"><span style="color:#bf00ff;">texte</span></span>[/#bf00ff]</td><td style="text-align: right;"><input id="ws_color_purple" type="text" size="10" key="102"></td></tr></table><table id="ws_front_ps" style="display: none;"><tr><td rowspan="2">Template d'insertion du smiley <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAACnElEQVR42q2T3U%2BSYRjG%2FVvgT2it5mrVap3V1jjooAOn5ifQ1HK1DJazdJjTLCk1M50KauqcigJvAiKIJsqXIPBiIl%2FKx0B44VWz7eqNNZyb88hn%2B50912%2B77t13Xt5FPx15xNa6DwUa5wGp2qSpH%2FY0pbBR5JwlKZgx7bPPDaudNGfekQl5wkfY2qPhDlJZPLsZOAIZjC1HQyNLYc6ZYWIjzZFbU%2BntyAHMv%2BKQLvghmnCicWwTPcQWDI4oXCEK31T%2BdA%2Bxc1oiMydZ0%2BuJ4FaYxpIzhnom1E144I%2FR8MUymFgOoE5qhXI9BLsvifZpMtg66WLlBOMrUeGGP401TwLCYTue95mROTxm%2BPOfY9QPW1A3aMKiPQLtRgQNUqswJxhYCJEupmsvsY3aPhNqetfgj2YwsxqA2rYLmhGobUFwO3Von3HA6o3jRa%2BRzAm6FF7aHUxBKLGg%2BqsRvG4D81mPWaMPceoQe3Ea%2FfMulHdoUf1FD4dvHzyxns4J2iZdtCuQwsshC7hdelR%2B1qHikw4p%2Bjd2IhT4Yi1K2lR4zMAXa2D3J1DYoj4RvJHaSNtOAmKZC7xOAyrEiyj7uIDS9%2Bosxe8IFDcrUNQsR6N0FUZPBA8b5CcVmD5ChTEAvSOC6i5DLhhLHiCyT6NANJelWCQDse6DhKlzr27qZIh88RKr8sNicMUZgXLND26HBkUtSnRMmrL8Cxc2TWFU44bGEsDd2ong7afjrFO7UCCa5zxqItI6%2By7U1iDeSlZQ1ipHSfMsXvfroTR6oTL7cbPqe%2Fr6k5Gzt%2FGBUMa5%2F2o6NEBs4qc7DIs3lmXZuYcemQ35PGnoaqWEc%2B493Hk2zr5VMya4UTVKXuMPU%2FlcKXWlYoi8XD4ouFQ6wL7w6%2F0LXCsKj6bCqcQAAAAASUVORK5CYII%3D" alt="help" title="Caractères qui seront insérés avant et après un smiley lors d'un clic sur ce dernier" style="vertical-align: text-bottom; cursor: help;"></td><td style="text-align: right; font-weight: normal;"><input id="ws_template_smiley_left" type="text" size="2" maxlength="5">[:smiley]<input id="ws_template_smiley_right" type="text" size="2" maxlength="5"></td></tr><tr><td id="ws_template_smiley_exemple" style="text-align: right; font-style: italic; font-weight: normal;"></td></tr><tr><td>Zone de réponse flottante permanente ? <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAACnElEQVR42q2T3U%2BSYRjG%2FVvgT2it5mrVap3V1jjooAOn5ifQ1HK1DJazdJjTLCk1M50KauqcigJvAiKIJsqXIPBiIl%2FKx0B44VWz7eqNNZyb88hn%2B50912%2B77t13Xt5FPx15xNa6DwUa5wGp2qSpH%2FY0pbBR5JwlKZgx7bPPDaudNGfekQl5wkfY2qPhDlJZPLsZOAIZjC1HQyNLYc6ZYWIjzZFbU%2BntyAHMv%2BKQLvghmnCicWwTPcQWDI4oXCEK31T%2BdA%2Bxc1oiMydZ0%2BuJ4FaYxpIzhnom1E144I%2FR8MUymFgOoE5qhXI9BLsvifZpMtg66WLlBOMrUeGGP401TwLCYTue95mROTxm%2BPOfY9QPW1A3aMKiPQLtRgQNUqswJxhYCJEupmsvsY3aPhNqetfgj2YwsxqA2rYLmhGobUFwO3Von3HA6o3jRa%2BRzAm6FF7aHUxBKLGg%2BqsRvG4D81mPWaMPceoQe3Ea%2FfMulHdoUf1FD4dvHzyxns4J2iZdtCuQwsshC7hdelR%2B1qHikw4p%2Bjd2IhT4Yi1K2lR4zMAXa2D3J1DYoj4RvJHaSNtOAmKZC7xOAyrEiyj7uIDS9%2Bosxe8IFDcrUNQsR6N0FUZPBA8b5CcVmD5ChTEAvSOC6i5DLhhLHiCyT6NANJelWCQDse6DhKlzr27qZIh88RKr8sNicMUZgXLND26HBkUtSnRMmrL8Cxc2TWFU44bGEsDd2ong7afjrFO7UCCa5zxqItI6%2By7U1iDeSlZQ1ipHSfMsXvfroTR6oTL7cbPqe%2Fr6k5Gzt%2FGBUMa5%2F2o6NEBs4qc7DIs3lmXZuYcemQ35PGnoaqWEc%2B493Hk2zr5VMya4UTVKXuMPU%2FlcKXWlYoi8XD4ouFQ6wL7w6%2F0LXCsKj6bCqcQAAAAASUVORK5CYII%3D" alt="help" title="Activer en permance la zone de réponse flottante au chargement d'une page" style="vertical-align: text-bottom; cursor: help;"></td><td style="text-align: right;"><input id="ws_always_not_sticky" type="checkbox"></td></tr><tr><td>Zone de réponse flottante pour le multi-quotes ? <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAACnElEQVR42q2T3U%2BSYRjG%2FVvgT2it5mrVap3V1jjooAOn5ifQ1HK1DJazdJjTLCk1M50KauqcigJvAiKIJsqXIPBiIl%2FKx0B44VWz7eqNNZyb88hn%2B50912%2B77t13Xt5FPx15xNa6DwUa5wGp2qSpH%2FY0pbBR5JwlKZgx7bPPDaudNGfekQl5wkfY2qPhDlJZPLsZOAIZjC1HQyNLYc6ZYWIjzZFbU%2BntyAHMv%2BKQLvghmnCicWwTPcQWDI4oXCEK31T%2BdA%2Bxc1oiMydZ0%2BuJ4FaYxpIzhnom1E144I%2FR8MUymFgOoE5qhXI9BLsvifZpMtg66WLlBOMrUeGGP401TwLCYTue95mROTxm%2BPOfY9QPW1A3aMKiPQLtRgQNUqswJxhYCJEupmsvsY3aPhNqetfgj2YwsxqA2rYLmhGobUFwO3Von3HA6o3jRa%2BRzAm6FF7aHUxBKLGg%2BqsRvG4D81mPWaMPceoQe3Ea%2FfMulHdoUf1FD4dvHzyxns4J2iZdtCuQwsshC7hdelR%2B1qHikw4p%2Bjd2IhT4Yi1K2lR4zMAXa2D3J1DYoj4RvJHaSNtOAmKZC7xOAyrEiyj7uIDS9%2Bosxe8IFDcrUNQsR6N0FUZPBA8b5CcVmD5ChTEAvSOC6i5DLhhLHiCyT6NANJelWCQDse6DhKlzr27qZIh88RKr8sNicMUZgXLND26HBkUtSnRMmrL8Cxc2TWFU44bGEsDd2ong7afjrFO7UCCa5zxqItI6%2By7U1iDeSlZQ1ipHSfMsXvfroTR6oTL7cbPqe%2Fr6k5Gzt%2FGBUMa5%2F2o6NEBs4qc7DIs3lmXZuYcemQ35PGnoaqWEc%2B493Hk2zr5VMya4UTVKXuMPU%2FlcKXWlYoi8XD4ouFQ6wL7w6%2F0LXCsKj6bCqcQAAAAASUVORK5CYII%3D" alt="help" title="Activer la zone de réponse flottante par un double clic sur l'icône de multi-quotes" style="vertical-align: text-bottom; cursor: help;"></td><td style="text-align: right;"><input id="ws_active_on_mq" type="checkbox"></td></tr></table><div><input type="image" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAACEklEQVR42q1S%2FU9SYRhlbW13%2FQ0V5Woub05zfZkCXhUhpmmb8v3h5ZKoCQjcwVBi1Q%2B19Zf0d2lWxpeR3AuX93J8qGVjgK2tZ3u3d3t2znmecx6D4R%2BrsS5dGdiEnDXS4weCQ2Fe9QUSdafH3B%2Bc3UM7k4OeSPWQNIIi3xAjaG5u48fz1Y%2B1peU7PWAU3qBNT0%2FKaG3tnJOogXWe1NGKJYB8AZ3%2Fic2RqMxaL%2F0iSGe4dlLW23uvgPcfoOfyHQI0RYlX%2FSGe1KHtxAHqqyERJwtPWUWYv9w1oh5PcuxlnOlyFnj7DiydQSMcAalD244Buf2f%2F6rVTuA5rq9JregW15Q2WCu2S%2Bu8BvYLBMwD2RxUfxDVeRurzMxyF8cUFDnFG9CRo3V8QcDtA%2BQMqnMLetkicH%2FNWfH4O1EBlAacHmDVBeymaG87ipPT%2FMVgt49XvH5okSiQkgmYBuK0DhmorrlQMVnwdXyiP0nd5eUVjw%2BatAFQjIrbCzKLlabN%2BunSChDdRP3ZCor3H%2BJoeKSbhC6LJ3Vo4RekmoRCo5NZrDRl5oqPJrnjiQesZrUBYQmndgeOR8dweGPoDwldllB3uqGJEpQ1N8gsVnpiOjfsy%2Bg493nkLvtuEaA4FvFt7B4OrhmFrinosoTa4jLK5hmdzOpx%2B%2Bj2MPdp6BbrC%2F5dZZNFKD6eGhjVofEmd3D1umD4n3UGltFKFDkd60gAAAAASUVORK5CYII%3D" title="Annuler"><input type="image" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAACl0lEQVR42q2T60uTYRiH%2FTv2bnttAwlkRCGChFD7FCQSm2ZDMQ%2FL0nRnj7TNGDbTooychzFSSssstdqc8zB1anNrSpm47FVCzH3pQLVhdLBfzztoJlifvOEHz4fnuu7nGBe311XgOyLMnTmsz%2FakMBljB8OSEVFY4kpkJM5Efbp9v%2FC%2FcJ43VSrzJId0HhluBy3oW%2BmKpnOpGSWuExD30iFxDy3dFSZdpZkTSZHr80Y41%2Fphe3UDpvnKaNixY60PjbNVOGTjRZJtvJ2SHE%2BKINOdtMHC7MSaQBkq%2FCXQzJ6DjqScpNp3HvY3D3B5ugIiC3dDdJMriAlk7iSDajwr2pmFWVDlPQPFTCEU0wVQTxfCvT4Ig1cJB5Hk9hxDwjWuISbIGBExncFmWINNqPAVQ%2FlUTsB8KKdIPPmYeOsCW6HIOtpeNMI234j4ei4TExy3J2w%2BWr2L2oAGWm8RWckAlj4uQDVZiPH1oSj8c%2BsH2p5fgWGyGH3BTvCN1GZMIH5Ib%2FavdMPoV6HWr8Xnb5%2Bi0Iev72KwZa4ealc29O6z6A92gF%2Fzt6CHZm4tNKF98Sp0U3KYfdWIfP8Shbd%2BbcHy7BLKnFnQEEFLoA7tXjPoKmp7C6l3%2BAb5QBrsq%2FdRPSmH2n0adTPlWH6%2FiLa5BpQOnoTCcQo6Zw7sr7uRbj0KupLaPsRkK09wgFyN2aPBY%2BYeKkfzoB3OgWpIBqWDDQtn48lyF4xDxeCrORu0mhLseAuJTVxpfAMVMbnL4CCS1oAZ%2BtEiXBiWo5VswU5gvbMIvFJOhMC7v8Z9DVwpbaJCkg4x2v1m9L60onfBCovXhLSWVPAVnBCt%2Bgf8p%2BiLXCFtoPR0DcXwtZwwX8UJk44MiZ4upYR7%2Fnt%2FA%2Bw9sdKFchsrAAAAAElFTkSuQmCC" title="Valider"></div></div><div id="gm_hfr_imgprev_help_window"></div><div id="gm_hfr_imgprev_config_background"></div><div id="gm_hfr_imgprev_config_window"><div class="gm_hfr_imgprev_main_title">Conf du script [HFR] Image Preview</div><fieldset><legend><input id="gm_hfr_imgprev_display_icon_checkbox" type="checkbox"><label for="gm_hfr_imgprev_display_icon_checkbox"> Afficher l'image de signalement à côté des liens reconnus </label><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAACmUlEQVR42q2TX0haYRjGz8XYxW53s6sgbVQUiQ6i2IgxmIxgBDkKpAXRaCPZqFgsFhaFUrEoCIqkRDkjxTA0jEZSoigpiZKxMPzEKDwHQUnxz6Fo8exMhhFEV33wu%2FueHzwv70tR9%2F0s%2B5dCc%2FBCafKfE8Mel%2FvpzeV0nixZdqWVi44z4Z1ho5%2BTrfgKbCh%2BiYNTDsFYtkjopABftIDpDZadXI%2FLbg3TuzmZ1p3JHzLncP5OQr1KIJ%2F1o216D4P0AWw%2BFoHjLL4bSH6QProp0TjTgoWdFHMQ57DuT6CFDw3QIZAEh0iigNmNKKRqN%2FQ7x%2FBG0uhZ2Ge65gKCkmBmkx3ZJTlsh1JonvDi5bAThYsrHvznCi0TLkjHHFjzMjDvMmhVu0dKgtHVYxLguw7Rh2gadqBxaBuELWBxKwqj5wQcLzB6YhD1WdCz6IM7nMSrITspCfp1YS4Yy6BZ5ULDNzvEAzb%2BsxVL9giS2QucJjkoVwKo6TWj4asVvsgZxAorVxJ0zwW4QDSD1%2BMuiPqtqPtiQe1nCzLcHxwxWUgUZlR2G%2FCUR6IwwUtSKO80Xgtkag%2FxHKWg0AQg7rOhVrGG6k%2BrqPpgLFLxnkZFhw6CDi3a1Fuwhxg8btVeV%2BD7jOjsUVh9DBr6baVgIn0O5oxDmXy5SIVcA3onAhVf54F0%2FnqIEsW6oO7jGrPpZ6DfJhD1miDo1KN3zlHkX7i8fR5TpiBMriioplmGej4juLELZfIV2ZN2Om%2FxnsDojuGdahPVXVpUdizhrdIKvT0Mg5OAqv%2BRp55N3r6Nj5o1sodvFthReg%2B%2FgnG4wokiG%2F5TDGo8oMRqlqpTye6%2BphczQqpxWknVTxFKMpGjROocVTtOqJoxJVU1Krz36%2F0Lr2rVjUwVEAIAAAAASUVORK5CYII%3D" class="gm_hfr_imgprev_help_button"></legend><p class="gm_hfr_imgprev_p_flex"><img class="gm_hfr_imgprev_test_img"><input type="text" spellcheck="false" size="42" title="url de l'icône (http ou data)"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs%2B9AAABhklEQVQY0wXBT0iTcRjA8e%2Fz%2FN537%2FvamjVa7lSUhUbsEiQRQf%2BoQ3gL6hSskA5Bt%2FQSXTz0%2F2xBl7okZR6EqEgiAvFgCAW1SPLPlGluilubZsv29PmQe37SAUw2u75Swv%2F%2BeXt7R2ve3I27K8GTzoObf8RTF78kU8e4NtTrAGa9qL9GaFVhfrDzdOvibt23rMGrCtiMyABX3g7JARt3b1KZPX%2FAKoLVnI6VHTMVxJZ8ffb4fHYb514Umi58uxMArBOzNYdVBVsiqFd8yY2dOpra%2Fy6nPBg%2F67%2B%2FetkBTGzhUx3sl9Cogk3HwiMA2Q8PHY8u%2FfQApoOwpwYbNaGxBraAtwrQvbwjlh0eUd04cV8Wo3TX1r%2F12%2F8UJyAIjYiwafYmLQPJUYt3jChTiebjZbAavq2KFuckdq%2BM%2FK56NArivmLmBruGPQoufLkuWMkxlffjhwAWktGZkmq96HS072l3lJlfUT6md%2B3Ma9A%2Fp24vQC6f8TFzk4lN6ddtbS2HbUKvF2%2Fpf4cUlw8oMuVkAAAAAElFTkSuQmCC" class="gm_hfr_imgprev_reset_img" title="remettre l'icône par défaut"></p></fieldset><fieldset><legend>Tailles maximales de la preview</legend><div class="gm_hfr_imgprev_table"><div class="gm_hfr_imgprev_cell"><p class="gm_hfr_imgprev_left"><label for="gm_hfr_imgprev_preview_width_fixed_radio">largeur fixe </label><input type="text" size="3" maxlength="4" pattern="[1-9]([0-9])*"><label for="gm_hfr_imgprev_preview_width_fixed_radio"> px </label><input type="radio" id="gm_hfr_imgprev_preview_width_fixed_radio" name="gm_hfr_imgprev_preview_width_radios"></p><p class="gm_hfr_imgprev_left"><label for="gm_hfr_imgprev_preview_height_fixed_radio">hauteur fixe </label><input type="text" size="3" maxlength="4" pattern="[1-9]([0-9])*"><label for="gm_hfr_imgprev_preview_height_fixed_radio"> px </label><input type="radio" id="gm_hfr_imgprev_preview_height_fixed_radio" name="gm_hfr_imgprev_preview_height_radios"></p></div><div class="gm_hfr_imgprev_cell"><p class="gm_hfr_imgprev_right"><input type="radio" id="gm_hfr_imgprev_preview_width_window_radio" name="gm_hfr_imgprev_preview_width_radios"><label for="gm_hfr_imgprev_preview_width_window_radio"> largeur de la fenêtre / 4</label></p><p class="gm_hfr_imgprev_right"><input type="radio" id="gm_hfr_imgprev_preview_height_window_radio" name="gm_hfr_imgprev_preview_height_radios"><label for="gm_hfr_imgprev_preview_height_window_radio"> hauteur de la fenêtre</label></p></div></div></fieldset><div class="gm_hfr_imgprev_save_close_div"><div class="gm_hfr_imgprev_info_reload_div"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAABG0lEQVR42mNgoAZwrZy1C4jfAfFrIjFI7SpkAz4D8X907FEzF4yxyQHxC2QDPiBLupTP%2BO9Xv%2BD%2FjN2X%2Fs%2Fae%2Fm%2FX8MCsBiaAc9wGuBYNv1%2F9vQt%2F2Egb8ZWsBjRBoBscyqb8b9j3bH%2F03dd%2BB%2FQtJB4F4AUhrUu%2Bd%2B%2F5dT%2FvTde%2Fd917fn%2FxL41%2F52INQCkMGXiuv%2F3v8B98D99ykbSvOAOxIWztyMMmLQR6KXppAUiyNm%2FyDUApDiuZ9X%2F70DNf4E4qX8d6bEwC5gGYGDW7sukpQMXIC6Ytf3%2FpvOP%2Fm%2B68AjI3orNgKfIBnxxr5r9HxmDkrB37TwwBrHR5YGWvIQbIBJcvkc6ouatdFjVa6JwRM07kcCy1VTJyQAWb%2BM0%2Fl9lTAAAAABJRU5ErkJggg%3D%3D"> sans rechargement <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAACmUlEQVR42q2TX0haYRjGz8XYxW53s6sgbVQUiQ6i2IgxmIxgBDkKpAXRaCPZqFgsFhaFUrEoCIqkRDkjxTA0jEZSoigpiZKxMPzEKDwHQUnxz6Fo8exMhhFEV33wu%2FueHzwv70tR9%2F0s%2B5dCc%2FBCafKfE8Mel%2FvpzeV0nixZdqWVi44z4Z1ho5%2BTrfgKbCh%2BiYNTDsFYtkjopABftIDpDZadXI%2FLbg3TuzmZ1p3JHzLncP5OQr1KIJ%2F1o216D4P0AWw%2BFoHjLL4bSH6QProp0TjTgoWdFHMQ57DuT6CFDw3QIZAEh0iigNmNKKRqN%2FQ7x%2FBG0uhZ2Ge65gKCkmBmkx3ZJTlsh1JonvDi5bAThYsrHvznCi0TLkjHHFjzMjDvMmhVu0dKgtHVYxLguw7Rh2gadqBxaBuELWBxKwqj5wQcLzB6YhD1WdCz6IM7nMSrITspCfp1YS4Yy6BZ5ULDNzvEAzb%2BsxVL9giS2QucJjkoVwKo6TWj4asVvsgZxAorVxJ0zwW4QDSD1%2BMuiPqtqPtiQe1nCzLcHxwxWUgUZlR2G%2FCUR6IwwUtSKO80Xgtkag%2FxHKWg0AQg7rOhVrGG6k%2BrqPpgLFLxnkZFhw6CDi3a1Fuwhxg8btVeV%2BD7jOjsUVh9DBr6baVgIn0O5oxDmXy5SIVcA3onAhVf54F0%2FnqIEsW6oO7jGrPpZ6DfJhD1miDo1KN3zlHkX7i8fR5TpiBMriioplmGej4juLELZfIV2ZN2Om%2FxnsDojuGdahPVXVpUdizhrdIKvT0Mg5OAqv%2BRp55N3r6Nj5o1sodvFthReg%2B%2FgnG4wokiG%2F5TDGo8oMRqlqpTye6%2BphczQqpxWknVTxFKMpGjROocVTtOqJoxJVU1Krz36%2F0Lr2rVjUwVEAIAAAAASUVORK5CYII%3D" class="gm_hfr_imgprev_help_button"></div><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAACdklEQVR42q2TX0iTYRTGz1UXCRIMMWOIbKi4pJSU%2FWEbTpnQNowxYyYW1Ihwig4klGijDAtn1IaTqTTRiTbcaAqFCS4skUAkuuvPRxGCIypsoOz26XwftBZkVx544L14f8857znnJTrsqIyTUjFP3tIoCUWPaE82wQqTIAuRtzBAyv%2FC5TFyyKOUNkbluJFyY3jdK2lgtRO14WOgIUrTIDn%2BCXNWR%2FE07V9ZsiG06Uffi6uwLzVKEs%2FBzWF0LDSB%2Bmif9bdJWZQUxRHaEWHxYnOyHqZELfQLp2FkNbDM8TMIvL6LC3MmkJt26BopcgbyCPm0UyVSZhEWQW3sJNTzVVDPVUI3V4XI1iisMQ2CbKIYPAK6TL6cQdEECQOpTnhSLpjiNdA8VjFYAc0sK1qB6TdhZDIZvN3eQs%2BzDvQtdYDaSMgZHA1Q9v7GLbQk9TDEqrmSEax%2BXIZ2pgpTW2MS%2FGP3O3qeXoR1pgbDqQGQjbJ%2FmnCPsv51H2wJLVoSBnz%2B%2BkmCPqTf5WD3Yht04VJYIqfgT%2FWDmvMNBkm4vuxC78olGGdVcMbN2P72RYJ3f%2B7C%2FeQ86kMl0LNBV7IVvTEnqCnvCXSTfKqRAgQ27sA8o4IuokTrfAPW3q%2BgZ7EddaPHoQ6egDFUhsBLHwo9BGrMayJ5eCQ8GmdUjwevbqNxshyG8TJox%2BTQBEWJcCkernlhG6sB6XiMurwxSuHi5WinfXukHkE26U46YZmsxtlxFbr5CQGGLaFqUB0vku6AbWQDB9kpLesn9CacGHruwdCyB%2B6YHQVdXLaaV1l7EPw7zvGHsZKXuyyQgfYY2OOMAsvL2ZWH%2Fnt%2FATnRYAIAzln5AAAAAElFTkSuQmCC" title="Valider"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAABzElEQVR42p2Sz0sCURDHH%2BbiU9ToB4LiD8Iu8ihQKBI0WEEUwYMdOkiXLp0i69CpDkERUVBQRBAUHTp0MCEKCipJi37QD%2Bj%2FWZlmXhpKu0UNPHaWt5%2BZ73xnGftjXPn9NsPLh3g8gEcY3V%2F6%2FeLM6y0cu93DuvBTIgGPqgp3g4NCD74OBKASCsGhy3W0390d%2Bga%2FZrPy3A8NQbWv76vIuc8nsADcRiLwkskA5dudnYU1p9PUKMDvo9HaczoN7%2Fk8UDEsANiRJEu4Gg4D3ddhbdXhUFok3g4M8Gp%2Fv%2FYQi8FbLgf0LPf0AHaXxZ6SSZlvtrcTzHVNwvk4QhpJpVGoI4GkCJXABsIrRnCTWfzU6609p1JwgR0xBxwR1p3O2q8wxYnHQ3PLbWAOJTzoD80N81ar%2BBHGjwV1vOntlR4QiCuV7hfdbliy22FaUYQhTB3LwaAEqTOapS3a7TXcOVSEgAOXC2YtFhhnrLUI%2Flmi1ATjO6x8wnzOauUziqJtdXRIZTs4ymRbG4w2F8E%2FSyWI1laswws225dhCPAJk4nWB7tdXTBlNsMIY2qLCjRJ3UOpyygZzfrm9hhjPM%2BYpgs3Ak1S9eBGoGxuCP83PgCikeJyFDsSMAAAAABJRU5ErkJggg%3D%3D" title="Annuler"></div></div><div id="gmhfrvlrr21_help_window"></div><div id="gmhfrvlrr21_config_background"></div><div id="gmhfrvlrr21_config_window"><div class="gmhfrvlrr21_main_title">Configuration du script<br>[HFR] Video Link Replacer</div><fieldset><legend>Taille des vidéos</legend><div class="gmhfrvlrr21_table"><div class="gmhfrvlrr21_cell"><p><label for="gmhfrvlrr21_width_input">largeur </label><input type="text" id="gmhfrvlrr21_width_input" size="3" maxlength="4" pattern="[1-9]([0-9])*"><label for="gmhfrvlrr21_width_input"> px</label></p></div><div class="gmhfrvlrr21_cell"><p><label for="gmhfrvlrr21_height_input">hauteur </label><input type="text" id="gmhfrvlrr21_height_input" size="3" maxlength="4" pattern="[1-9]([0-9])*"><label for="gmhfrvlrr21_height_input"> px</label></p></div></div></fieldset><fieldset><legend>Mode d'affichage</legend><div class="gmhfrvlrr21_table"><div class="gmhfrvlrr21_cell gmhfrvlrr21_left"><label for="gmhfrvlrr21_display_auto_radio">automatique </label><input type="radio" id="gmhfrvlrr21_display_auto_radio" name="gmhfrvlrr21_display_radios"></div><div class="gmhfrvlrr21_cell  gmhfrvlrr21_right"><input type="radio" id="gmhfrvlrr21_display_click_radio" name="gmhfrvlrr21_display_radios"><label for="gmhfrvlrr21_display_click_radio"> en cliquant</label></div></div></fieldset><fieldset><legend>Hébergeurs autorisés</legend><div class="gmhfrvlrr21_table"><div class="gmhfrvlrr21_cell"><p><input type="checkbox" id="gmhfrvlrr21_youtube_checkbox"><label for="gmhfrvlrr21_youtube_checkbox"> youtube</label></p><p><input type="checkbox" id="gmhfrvlrr21_vimeo_checkbox"><label for="gmhfrvlrr21_vimeo_checkbox"> vimeo</label></p><p><input type="checkbox" id="gmhfrvlrr21_coub_checkbox"><label for="gmhfrvlrr21_coub_checkbox"> coub</label></p></div><div class="gmhfrvlrr21_cell"><p><input type="checkbox" id="gmhfrvlrr21_dailymotion_checkbox"><label for="gmhfrvlrr21_dailymotion_checkbox"> dailymotion</label></p><p><input type="checkbox" id="gmhfrvlrr21_twitch_checkbox"><label for="gmhfrvlrr21_twitch_checkbox"> twitch</label></p><p><input type="checkbox" id="gmhfrvlrr21_streamable_checkbox"><label for="gmhfrvlrr21_streamable_checkbox"> streamable</label></p></div></div></fieldset><div class="gmhfrvlrr21_save_close_div"><div class="gmhfrvlrr21_info_reload_div"><input type="checkbox" id="gmhfrvlrr21_info_reload_checkbox"><label for="gmhfrvlrr21_info_reload_checkbox"> recharger la page </label><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAACmUlEQVR42q2TX0haYRjGz8XYxW53s6sgbVQUiQ6i2IgxmIxgBDkKpAXRaCPZqFgsFhaFUrEoCIqkRDkjxTA0jEZSoigpiZKxMPzEKDwHQUnxz6Fo8exMhhFEV33wu%2FueHzwv70tR9%2F0s%2B5dCc%2FBCafKfE8Mel%2FvpzeV0nixZdqWVi44z4Z1ho5%2BTrfgKbCh%2BiYNTDsFYtkjopABftIDpDZadXI%2FLbg3TuzmZ1p3JHzLncP5OQr1KIJ%2F1o216D4P0AWw%2BFoHjLL4bSH6QProp0TjTgoWdFHMQ57DuT6CFDw3QIZAEh0iigNmNKKRqN%2FQ7x%2FBG0uhZ2Ge65gKCkmBmkx3ZJTlsh1JonvDi5bAThYsrHvznCi0TLkjHHFjzMjDvMmhVu0dKgtHVYxLguw7Rh2gadqBxaBuELWBxKwqj5wQcLzB6YhD1WdCz6IM7nMSrITspCfp1YS4Yy6BZ5ULDNzvEAzb%2BsxVL9giS2QucJjkoVwKo6TWj4asVvsgZxAorVxJ0zwW4QDSD1%2BMuiPqtqPtiQe1nCzLcHxwxWUgUZlR2G%2FCUR6IwwUtSKO80Xgtkag%2FxHKWg0AQg7rOhVrGG6k%2BrqPpgLFLxnkZFhw6CDi3a1Fuwhxg8btVeV%2BD7jOjsUVh9DBr6baVgIn0O5oxDmXy5SIVcA3onAhVf54F0%2FnqIEsW6oO7jGrPpZ6DfJhD1miDo1KN3zlHkX7i8fR5TpiBMriioplmGej4juLELZfIV2ZN2Om%2FxnsDojuGdahPVXVpUdizhrdIKvT0Mg5OAqv%2BRp55N3r6Nj5o1sodvFthReg%2B%2FgnG4wokiG%2F5TDGo8oMRqlqpTye6%2BphczQqpxWknVTxFKMpGjROocVTtOqJoxJVU1Krz36%2F0Lr2rVjUwVEAIAAAAASUVORK5CYII%3D" class="gmhfrvlrr21_help_button"></div><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAACdklEQVR42q2TX0iTYRTGz1UXCRIMMWOIbKi4pJSU%2FWEbTpnQNowxYyYW1Ihwig4klGijDAtn1IaTqTTRiTbcaAqFCS4skUAkuuvPRxGCIypsoOz26XwftBZkVx544L14f8857znnJTrsqIyTUjFP3tIoCUWPaE82wQqTIAuRtzBAyv%2FC5TFyyKOUNkbluJFyY3jdK2lgtRO14WOgIUrTIDn%2BCXNWR%2FE07V9ZsiG06Uffi6uwLzVKEs%2FBzWF0LDSB%2Bmif9bdJWZQUxRHaEWHxYnOyHqZELfQLp2FkNbDM8TMIvL6LC3MmkJt26BopcgbyCPm0UyVSZhEWQW3sJNTzVVDPVUI3V4XI1iisMQ2CbKIYPAK6TL6cQdEECQOpTnhSLpjiNdA8VjFYAc0sK1qB6TdhZDIZvN3eQs%2BzDvQtdYDaSMgZHA1Q9v7GLbQk9TDEqrmSEax%2BXIZ2pgpTW2MS%2FGP3O3qeXoR1pgbDqQGQjbJ%2FmnCPsv51H2wJLVoSBnz%2B%2BkmCPqTf5WD3Yht04VJYIqfgT%2FWDmvMNBkm4vuxC78olGGdVcMbN2P72RYJ3f%2B7C%2FeQ86kMl0LNBV7IVvTEnqCnvCXSTfKqRAgQ27sA8o4IuokTrfAPW3q%2BgZ7EddaPHoQ6egDFUhsBLHwo9BGrMayJ5eCQ8GmdUjwevbqNxshyG8TJox%2BTQBEWJcCkernlhG6sB6XiMurwxSuHi5WinfXukHkE26U46YZmsxtlxFbr5CQGGLaFqUB0vku6AbWQDB9kpLesn9CacGHruwdCyB%2B6YHQVdXLaaV1l7EPw7zvGHsZKXuyyQgfYY2OOMAsvL2ZWH%2Fnt%2FATnRYAIAzln5AAAAAElFTkSuQmCC" title="Valider"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8%2F9hAAABzElEQVR42p2Sz0sCURDHH%2BbiU9ToB4LiD8Iu8ihQKBI0WEEUwYMdOkiXLp0i69CpDkERUVBQRBAUHTp0MCEKCipJi37QD%2Bj%2FWZlmXhpKu0UNPHaWt5%2BZ73xnGftjXPn9NsPLh3g8gEcY3V%2F6%2FeLM6y0cu93DuvBTIgGPqgp3g4NCD74OBKASCsGhy3W0390d%2Bga%2FZrPy3A8NQbWv76vIuc8nsADcRiLwkskA5dudnYU1p9PUKMDvo9HaczoN7%2Fk8UDEsANiRJEu4Gg4D3ddhbdXhUFok3g4M8Gp%2Fv%2FYQi8FbLgf0LPf0AHaXxZ6SSZlvtrcTzHVNwvk4QhpJpVGoI4GkCJXABsIrRnCTWfzU6609p1JwgR0xBxwR1p3O2q8wxYnHQ3PLbWAOJTzoD80N81ar%2BBHGjwV1vOntlR4QiCuV7hfdbliy22FaUYQhTB3LwaAEqTOapS3a7TXcOVSEgAOXC2YtFhhnrLUI%2Flmi1ATjO6x8wnzOauUziqJtdXRIZTs4ymRbG4w2F8E%2FSyWI1laswws225dhCPAJk4nWB7tdXTBlNsMIY2qLCjRJ3UOpyygZzfrm9hhjPM%2BYpgs3Ak1S9eBGoGxuCP83PgCikeJyFDsSMAAAAABJRU5ErkJggg%3D%3D" title="Annuler"></div></div></body></html>

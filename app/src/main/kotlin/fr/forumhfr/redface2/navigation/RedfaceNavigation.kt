@@ -131,9 +131,10 @@ data class PostEditorRoute(
      */
     val quotedNumreponse: Int? = null,
     /**
-     * `ref` parameter extracted from HFR's quote link on the source post.
-     * Opaque positional id ; forwarded as-is to `HfrClient.getReplyForm`. `null`
-     * for a simple reply or for a post whose HTML did not expose a quote link.
+     * `ref` parameter extracted from HFR's quote link on the source post when HFR
+     * exposed it in clear HTML. Opaque positional id ; forwarded as-is to
+     * `HfrClient.getReplyForm`. `null` for a simple reply or for an obfuscated /
+     * absent quote link ; quote still works from `quotedNumreponse` alone.
      */
     val quoteRef: Int? = null,
 ) : RedfaceNavKey

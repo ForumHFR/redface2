@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.parser
 
+import fr.forumhfr.redface2.core.model.Topic
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
@@ -125,68 +126,150 @@ class TopicPageParserTest {
         assertNull(topic.posts.first().postIndex)
     }
 
+    // ─── canReply / subcat = bddpost reply form presence (#213) ─────────────────
+
     @Test
-    fun `parse extracts the subcat from the HFR topic page so Phase 2C can build a reply URL`() {
-        // `input[name=subcat]` appears multiple times on a HFR topic page (fast-search
-        // header + reply form). The parser must pick a real value, not the
-        // SUBCAT_UNKNOWN sentinel — Phase 2C's reply flow refuses to open the editor
-        // when the topic carries the sentinel (cache pre-dating MIGRATION_3_4).
+    fun `canReply true and subcat read from the bddpost reply form on an authenticated open topic`() {
+        // #213 — postability is driven by the presence of the `bddpost` reply form,
+        // which HFR renders only on an authenticated, non-locked topic. The POST
+        // subcat is the `input[name=subcat]` of THAT form (550 on this Android
+        // topic), not the fast-search widget value that also ships on the page.
+        val topic = parser.parse(fixture("topic_page_multipage.html"))
+
+        assertTrue("authenticated open topic carries the bddpost form", topic.canReply)
+        assertEquals(550, topic.subcat)
+    }
+
+    @Test
+    fun `canReply true and subcat read from the bddpost form on the posts page fixture`() {
+        // Same contract on a second real authenticated capture — the reply form
+        // subcat here is 553. Proves we read the value from the form, not a hard
+        // coded constant.
+        val topic = parser.parse(fixture("topic_posts_page.html"))
+
+        assertTrue(topic.canReply)
+        assertEquals(553, topic.subcat)
+    }
+
+    @Test
+    fun `canReply false and subcat SUBCAT_UNKNOWN on a locked topic without a reply form`() {
+        // #213 — `write_locked_topic_page.html` is a real topic page captured on a
+        // locked topic : HFR drops the `bddpost` reply form. The page still ships a
+        // fast-search `input[name=subcat]` (value 0), but that widget is NOT the
+        // reply form, so we must not treat it as a postable subcat. No form ⇒
+        // canReply=false and subcat falls back to the SUBCAT_UNKNOWN sentinel.
+        val topic = parser.parse(fixture("write_locked_topic_page.html"))
+
+        assertFalse("locked topic has no bddpost form", topic.canReply)
+        assertEquals(Topic.SUBCAT_UNKNOWN, topic.subcat)
+    }
+
+    @Test
+    fun `canReply false and subcat SUBCAT_UNKNOWN on a logged-out topic page`() {
+        // `topic_khakha_page_1.html` was captured logged-out : HFR returns a
+        // different HTML in anon vs auth (cf. memory reference_hfr_auth_vs_anon_html)
+        // and does not render the `bddpost` reply form. The page only carries the
+        // fast-search widget subcat (432), which #213 explicitly stops trusting :
+        // the widget value is useless for writing (you cannot post logged-out) and
+        // wrongly enabled the reply buttons. No form ⇒ read-only.
         val topic = parser.parse(fixture("topic_khakha_page_1.html"))
 
-        assertEquals(432, topic.subcat)
-        assertTrue(topic.hasSubcat)
+        assertFalse("logged-out topic page has no bddpost form", topic.canReply)
+        assertEquals(Topic.SUBCAT_UNKNOWN, topic.subcat)
     }
 
     @Test
-    fun `parse falls back to SUBCAT_UNKNOWN when the topic HTML drops the subcat input`() {
-        // Synthetic HTML is **explicitly** allowed for this regression check :
-        // CLAUDE.md § Fixtures HTML requires real HFR captures via hfr-mcp for
-        // anything that exercises the production parser path on a representative
-        // page. Here we only exercise the *missing-input fallback branch* of
-        // `optionalSubcat`, which by definition cannot be captured live (every
-        // real HFR topic ships a `subcat` input). Building the minimal valid
-        // shape locally is the cheapest way to pin the contract — if HFR ever
-        // changes the topic layout to drop subcat altogether, real fixtures will
-        // overtake this test.
+    fun `canReply false and subcat SUBCAT_UNKNOWN on the single-page logged-out fixture`() {
+        // `topic_page_single.html` (cat=1, subcat widget 253) is another logged-out
+        // capture with no `bddpost` form. Confirms we drop the old widget-fallback :
+        // the subcat is only meaningful for writing, which is impossible logged-out.
+        val topic = parser.parse(fixture("topic_page_single.html"))
+
+        assertFalse(topic.canReply)
+        assertEquals(Topic.SUBCAT_UNKNOWN, topic.subcat)
+    }
+
+    @Test
+    fun `canReply false when the page only ships a non-reply form action`() {
+        // Regression for the selector contract : the search widget action
+        // (`/forum1.php`) and the `bdd.php` edit endpoint must NOT be mistaken for a
+        // reply form. Only `form[action*=bddpost.php]` flips canReply. A page whose
+        // sole `subcat` input lives in a `/forum1.php` form is read-only.
         val html = """
             <html><body>
               <input type="hidden" name="cat" value="13" />
               <input type="hidden" name="post" value="84540" />
-              <table><tbody>
-                <tr class="fondForum2Title"><td><h3>Stripped topic</h3></td></tr>
-                <tr class="fondForum2PagesHaut"><td class="left"><b>1</b></td></tr>
-              </tbody></table>
-            </body></html>
-        """.trimIndent()
-        val topic = parser.parse(html)
-        assertEquals(fr.forumhfr.redface2.core.model.Topic.SUBCAT_UNKNOWN, topic.subcat)
-        assertFalse(topic.hasSubcat)
-    }
-
-    @Test
-    fun `parse picks the last subcat occurrence when multiple widgets share the field`() {
-        // HFR ships `input[name=subcat]` in several widgets on a single topic page
-        // (fast-search header + reply form). The reply form occurrence is the one
-        // we want — it's emitted after the search widget. This regression test
-        // synthesises two occurrences with different values to prove the
-        // `optionalSubcat` `last()` choice is wired the way the KDoc claims.
-        val html = """
-            <html><body>
-              <input type="hidden" name="cat" value="13" />
-              <input type="hidden" name="post" value="84540" />
-              <input type="hidden" name="subcat" value="111" />
-              <table><tbody>
-                <tr class="fondForum2Title"><td><h3>Topic with two subcat inputs</h3></td></tr>
-                <tr class="fondForum2PagesHaut"><td class="left"><b>1</b></td></tr>
-              </tbody></table>
-              <form action="/bddpost.php?config=hfr.inc">
-                <input type="hidden" name="subcat" value="432" />
+              <form action="/forum1.php">
+                <input type="hidden" name="subcat" value="111" />
               </form>
+              <table><tbody>
+                <tr class="fondForum2Title"><td><h3>Search-widget-only page</h3></td></tr>
+                <tr class="fondForum2PagesHaut"><td class="left"><b>1</b></td></tr>
+              </tbody></table>
             </body></html>
         """.trimIndent()
         val topic = parser.parse(html)
-        assertEquals(432, topic.subcat)
-        assertTrue(topic.hasSubcat)
+        assertFalse("forum1.php form must not enable canReply", topic.canReply)
+        assertEquals(Topic.SUBCAT_UNKNOWN, topic.subcat)
+    }
+
+    @Test
+    fun `canReply true with subcat zero when the bddpost form carries subcat zero (cat without subcat)`() {
+        // #213 core contract — a category WITHOUT a sub-category (e.g. cat=32
+        // « Intelligence artificielle ») renders the `bddpost` reply form with
+        // `subcat=0`. That value is postable (proven by a live capture of the IA
+        // reply form, see protocol-hfr.md § POST bddpost.php). The full real IA
+        // topic-page fixture is a follow-up `plus` ; until it is captured & cleaned
+        // we pin the `subcat=0` branch here so the parser keeps `0` instead of
+        // collapsing it to the SUBCAT_UNKNOWN sentinel. This is the only HTML this
+        // test synthesises ; the auth/locked branches above use real fixtures.
+        val html = """
+            <html><body>
+              <input type="hidden" name="cat" value="32" />
+              <input type="hidden" name="post" value="123456" />
+              <form name="hop" action="/bddpost.php?config=hfr.inc">
+                <input type="hidden" name="cat" value="32" />
+                <input type="hidden" name="subcat" value="0" />
+                <input type="hidden" name="owntopic" value="0" />
+              </form>
+              <table><tbody>
+                <tr class="fondForum2Title"><td><h3>IA topic without subcat</h3></td></tr>
+                <tr class="fondForum2PagesHaut"><td class="left"><b>1</b></td></tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        assertTrue("subcat=0 reply form is postable", topic.canReply)
+        assertEquals(0, topic.subcat)
+    }
+
+    @Test
+    fun `subcat is read from the bddpost form not the fast-search widget when they differ`() {
+        // Source-of-truth proof (the real auth fixtures carry the SAME value in both
+        // the fast-search widget and the bddpost form, so they cannot distinguish the
+        // source). Here the fast-search `/forum1.php` widget says subcat=999 while the
+        // `bddpost` reply form says subcat=550 : the parser MUST return 550, proving it
+        // reads `form[action*=bddpost.php] input[name=subcat]` and never the widget.
+        val html = """
+            <html><body>
+              <input type="hidden" name="cat" value="23" />
+              <input type="hidden" name="post" value="35395" />
+              <form action="/forum1.php">
+                <input type="hidden" name="subcat" value="999" />
+              </form>
+              <form name="hop" action="/bddpost.php?config=hfr.inc">
+                <input type="hidden" name="cat" value="23" />
+                <input type="hidden" name="subcat" value="550" />
+              </form>
+              <table><tbody>
+                <tr class="fondForum2Title"><td><h3>Mismatched subcat inputs</h3></td></tr>
+                <tr class="fondForum2PagesHaut"><td class="left"><b>1</b></td></tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        val topic = parser.parse(html)
+        assertTrue(topic.canReply)
+        assertEquals(550, topic.subcat)
     }
 
     @Test
@@ -208,6 +291,48 @@ class TopicPageParserTest {
         assertEquals(2, byNumreponse[16628106]?.quoteRef)
         // n°16628222 = Maverick (ref=5)
         assertEquals(5, byNumreponse[16628222]?.quoteRef)
+    }
+
+    // ─── cat IA (cat=32, no sub-category) — #213 / quote (#146) ─────────────────
+
+    @Test
+    fun `canReply and subcat zero are robust on the authenticated IA browser-saved topic page`() {
+        // #213 / #146 — `write_ia_topic_page.html` is a real authenticated capture of
+        // the cat=32 « Intelligence artificielle » topic (no sub-category : subcat=0).
+        // This fixture is a browser-save: Firefox already preserved/materialized toolbar
+        // links that the OkHttp app path may receive as raw `md_*cryptlink` spans. It is
+        // therefore valid to pin the topic write contract (reply form + subcat=0), but
+        // NOT valid to assert a non-null `quoteRef` here. The UI gate for « Citer » is
+        // covered in `TopicActionGatesTest` and no longer depends on `quoteRef`.
+        val topic = parser.parse(fixture("write_ia_topic_page.html"))
+
+        assertEquals("cat IA", 32, topic.cat)
+        assertEquals("topic id", 7, topic.post)
+        // The authenticated IA topic ships the bddpost reply form with subcat=0
+        // (postable) — canReply must be true and subcat kept verbatim at 0.
+        assertTrue("authenticated IA topic carries the bddpost form", topic.canReply)
+        assertEquals(0, topic.subcat)
+
+        assertTrue("IA topic must have posts", topic.posts.isNotEmpty())
+        assertEquals(16244, topic.posts.first().numreponse)
+    }
+
+    @Test
+    fun `existing topic fixtures keep their quoteRef after the IA capture is added`() {
+        // Regression guard for FIX 1 : whatever selector parses the IA quote link
+        // must NOT alter the quoteRef contract on the pre-existing real fixtures.
+        val khakha2 = parser.parse(fixture("topic_khakha_page_2.html"))
+        val byNumreponse = khakha2.posts.associateBy { it.numreponse }
+        assertEquals(0, byNumreponse[16628071]?.quoteRef)
+        assertEquals(2, byNumreponse[16628106]?.quoteRef)
+        assertEquals(5, byNumreponse[16628222]?.quoteRef)
+
+        // The multipage fixture is authenticated and must keep stable quoteRefs too.
+        val multipage = parser.parse(fixture("topic_page_multipage.html"))
+        assertTrue(
+            "authenticated multipage fixture must keep at least one non-null quoteRef",
+            multipage.posts.any { it.quoteRef != null },
+        )
     }
 
     @Test
@@ -450,7 +575,8 @@ class TopicPageParserTest {
         // Synthesised minimal page : one post table without any `a[href*=numrep=]`
         // entry. Mirrors HFR's locked-topic special pages where the toolbar drops
         // the quote action. The parser must keep the post readable AND leave
-        // `quoteRef` null so the UI suppresses the « Citer » button.
+        // `quoteRef` null; the UI decides visibility from `Topic.canReply`, not
+        // from this optional ref.
         //
         // The HFR selector requires a <table><tr class="fondForum2Title"><th><h3>
         // wrapper for the topic title and `td.messCase1 a[name^=t]` for the post

@@ -38,6 +38,7 @@ internal object TopicMappers {
             fetchedAt = fetchedAt,
             authMode = authMode,
             subcat = topic.subcat,
+            canReply = topic.canReply,
         )
         val postEntities = topic.posts.map { post ->
             post.toEntity(topic.cat, topic.post, fetchedAt, authMode)
@@ -58,6 +59,7 @@ internal object TopicMappers {
             isFirstPostOwner = topic.isFirstPostOwner,
             posts = orderedPosts,
             poll = topic.pollJson?.let(::decodePollOrNull),
+            canReply = topic.canReply,
         )
     }
 

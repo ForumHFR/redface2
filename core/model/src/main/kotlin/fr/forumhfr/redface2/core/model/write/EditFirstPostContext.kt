@@ -22,10 +22,12 @@ data class EditFirstPostContext(
 ) {
     init {
         require(cat >= 0) { "cat must be >= 0, was $cat" }
-        // Same `subcat > 0` rule as `ReplyContext` / `EditPostContext` : refuse
-        // both the SUBCAT_UNKNOWN sentinel and HFR's `cat=0` / `cat=prive`
-        // moderator-space wire shape. See `Topic.hasSubcat` for the rationale.
-        require(subcat > 0) { "subcat must be > 0 (sentinel or moderator space), was $subcat" }
+        // #213 — UNLIKE `ReplyContext` / `EditPostContext` (relaxed to `subcat >= 0`,
+        // so a category without sub-category, subcat=0, is postable), FP edit keeps
+        // `subcat > 0`: the FP recategorise flow is not relaxed for 0-subcat categories
+        // (its sub-category dropdown contract is not captured yet). FP-in-0-subcat is a
+        // #213 follow-up; the gate in `TopicScreen` mirrors this (`canReply && subcat > 0`).
+        require(subcat > 0) { "subcat must be > 0 (FP edit needs a real sub-category), was $subcat" }
         require(topicId > 0) { "topicId must be > 0, was $topicId" }
         require(page == 1) {
             "page must be 1 for the first post — FP lives on page 1 by definition, was $page"

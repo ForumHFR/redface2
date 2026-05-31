@@ -29,7 +29,11 @@ data class PostEditorState(
      * the draft with it on form load. Same surface as a simple reply otherwise.
      */
     val quotedNumreponse: Int? = null,
-    /** `ref` parameter HFR included in the quote link — opaque, forwarded as-is. */
+    /**
+     * `ref` parameter HFR included in the quote link when parseable — opaque,
+     * forwarded as-is. May be null on a quote: HFR still quotes from
+     * [quotedNumreponse] alone when the toolbar link was obfuscated.
+     */
     val quoteRef: Int? = null,
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),
@@ -93,9 +97,10 @@ data class PostEditorState(
     val canSubmit: Boolean
         get() = (mode == PostEditorMode.Reply || (mode == PostEditorMode.Edit && numreponse != null)) &&
             page != null &&
-            // Reject the `null` unknown, the `-1` SUBCAT_UNKNOWN sentinel and the `0`
-            // moderator-space wire shape (`Topic.hasSubcat` uses the same rule).
-            (subcat != null && subcat > 0) &&
+            // #213 — reject the `null` unknown and the `-1` SUBCAT_UNKNOWN sentinel.
+            // `subcat = 0` is postable (cat without sub-category, e.g. IA) — see
+            // `Topic.subcat` / `Topic.canReply`.
+            (subcat != null && subcat >= 0) &&
             topicId != null &&
             draft.text.isNotBlank() &&
             !isSubmitting &&

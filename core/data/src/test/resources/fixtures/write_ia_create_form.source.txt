@@ -1,0 +1,9 @@
+Copie de core/parser/src/test/resources/fixtures/write_ia_create_form.html
+(meme contenu, meme scrub) pour les tests repository de :data.
+
+Contrat subcat (lie a #213) : categorie IA (cat=32) sans sous-categorie, donc le
+formulaire ne contient NI <select name="subcat"> NI <input name="subcat"> — seulement
+<input name="cat" value="32">. Voir core/parser/.../write_ia_create_form.source.txt
+pour le detail complet et le rapport de scrub.
+
+Verification : grep -iE 'hash_check"? ?value="[0-9a-f]{8}|verifrequet"? ?value="[0-9]'  => 0 resultat.

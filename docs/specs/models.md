@@ -73,12 +73,14 @@ classDiagram
     class Topic {
         +Int cat
         +Int post
+        +Int subcat
         +String title
         +List~Post~ posts
         +Int page
         +Int totalPages
         +Boolean isFirstPostOwner
         +Poll? poll
+        +Boolean canReply
     }
 
     class Post {
@@ -249,17 +251,15 @@ enum class FlagType {
 data class Topic(
     val cat: Int,
     val post: Int,
-    val subcat: Int,                 // Phase 2C : sous-cat HFR, requis par message.php/bddpost.php. Sentinel SUBCAT_UNKNOWN=-1 pour les caches pré-MIGRATION_3_4 (lecture autorisée, écriture désactivée). Le wire shape moderator-space HFR (`cat=0`) émet aussi `subcat=0` sans fixture utilisateur valide pour Phase 2C — donc traité comme « unknown » côté écriture. Jamais transmis tel quel à HFR.
+    val subcat: Int,                 // #213 : sous-cat de POST, lue sur l'input[name=subcat] du formulaire bddpost. subcat=0 est VALIDE et postable (catégorie sans sous-cat, ex. cat IA — capture live à l'appui). Sentinel SUBCAT_UNKNOWN=-1 quand aucun formulaire reply n'est présent (logged-out / prefetch anon / topic verrouillé / cache pré-MIGRATION_3_4) → lecture seule. Écriture gate sur subcat >= 0. Jamais transmis tel quel à HFR quand =-1.
     val title: String,
     val posts: List<Post>,
     val page: Int,
     val totalPages: Int,
     val isFirstPostOwner: Boolean,   // Phase 1 : figé à false par TopicPageParser tant que parseEditPage n'est pas livrée (Phase 2). Renseigné côté serveur via la page d'édition du FP.
     val poll: Poll?,
+    val canReply: Boolean = false,   // #213 : postabilité = présence du formulaire bddpost dans la page topic (rendu uniquement en session authentifiée sur topic non verrouillé). Remplace l'ancien heuristique hasSubcat (subcat > 0), qui excluait à tort les cats IA postables (subcat=0) et faisait confiance au subcat du widget de recherche capturé logged-out. Persisté en Room v7 (MIGRATION_6_7). Défaut false : rows pré-v7 / prefetch anon en lecture seule jusqu'au prochain fetch authentifié. Gate Répondre/Citer/Modifier/Modifier-1er-message.
 ) {
-    // Strictement > 0 : exclut le sentinel (-1) ET la wire shape moderator-space (0).
-    val hasSubcat: Boolean get() = subcat > 0
-
     companion object { const val SUBCAT_UNKNOWN: Int = -1 }
 }
 
@@ -273,7 +273,7 @@ data class Post(
     val isOwnPost: Boolean,              // Phase 2D : équivalent à `isEditable` faute de signal HFR distinct au niveau topic page. Les deux champs restent séparés pour un futur raffinement (modo-can-edit, locked-but-own-post). Persisté en Room depuis v1.
     val quotedAuthors: List<String>,     // dérivé de PostContent pour recherche, filtres et décorateurs
     val postIndex: Int?,                 // (page-1) * postsPerPage + position — null quand le parser n'a pas le contexte page/postsPerPage (preview, fixtures isolées). postsPerPage vient des préférences HFR de l'utilisateur, PAS une constante (voir UserSettings)
-    val quoteRef: Int? = null,           // Phase 2C (#146) : `ref` opaque parsé depuis le href du lien quote HFR (`message.php?…&numrep=…&ref=N`). Null = post sans lien quote (locked, anonyme). Persisté en Room v5 (`MIGRATION_4_5`) — un cache hit garde le bouton « Citer » disponible sans round-trip réseau.
+    val quoteRef: Int? = null,           // Phase 2C (#146/#227) : `ref` opaque parsé depuis le href du lien quote HFR (`message.php?…&numrep=…&ref=N`) quand il est en clair. Null = ref absent/obfusqué/locked/anonyme. Persisté en Room v5 (`MIGRATION_4_5`) pour préserver le `ref` best-effort ; le bouton « Citer » dépend de `Topic.canReply`, pas de ce champ.
 )
 
 data class PostContent(
@@ -431,11 +431,11 @@ plus tard pour Edit / Quote / Edit FP / Create.
 ```kotlin
 data class ReplyContext(
     val cat: Int,
-    val subcat: Int,                 // requis > 0 ; `ReplyContext.init` refuse à la fois le sentinel `SUBCAT_UNKNOWN` (-1) et la wire shape moderator-space HFR (0, cat=0/cat=prive)
+    val subcat: Int,                 // requis >= 0 ; `ReplyContext.init` refuse seulement le sentinel `SUBCAT_UNKNOWN` (-1). `0` est valide pour une catégorie sans sous-catégorie (cat IA, #213).
     val topicId: Int,
     val page: Int,                   // page topic depuis laquelle l'utilisateur a cliqué "Répondre"
     val quotedNumreponse: Int? = null, // Phase 2C (#146) : numreponse cité ; null = reply simple, non-null = quote (HFR `numrep` query param + POST field)
-    val quoteRef: Int? = null,         // Phase 2C (#146) : ref opaque parsé depuis le href quote HFR ; null = reply simple ou post sans lien quote
+    val quoteRef: Int? = null,         // Phase 2C (#146/#227) : ref opaque parsé depuis le href quote HFR quand disponible ; null = reply simple ou quote sans ref (lien obfusqué), HFR cite via `numrep`
 ) {
     val isQuote: Boolean get() = quotedNumreponse != null
 }

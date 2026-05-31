@@ -74,14 +74,16 @@ fun TopicScreen(
     onReply: (subcat: Int, page: Int) -> Unit,
     /**
      * Open the editor in quote mode (Phase 2C, #146). Same destination as [onReply],
-     * but the editor will GET HFR's quote form (`?numrep=…&ref=…`) and hydrate the
-     * draft with the `[quotemsg=…]` block HFR prefills. The call-site supplies
-     * `quotedNumreponse = post.numreponse` and `quoteRef = post.quoteRef`, captured
-     * from the topic page HTML. Posts whose HTML did not expose a quote link
-     * (locked topic special cases, anonymous fallback) keep the « Citer » button
-     * hidden — we never reach this callback for those.
+     * but the editor GETs HFR's quote form and hydrates the draft with the
+     * `[quotemsg=…]` block HFR prefills. The call-site supplies
+     * `quotedNumreponse = post.numreponse` (always known) and `quoteRef = post.quoteRef`
+     * (forwarded when known, may be `null`). HFR identifies the cited post by
+     * `numrep={numreponse}` alone — `ref` is positional/optional (#227, proven live;
+     * `HfrClient.getReplyForm` omits `&ref=` when null) — so « Citer » is gated on
+     * `Topic.canReply` (cf. the per-post gate below), never on the presence of a
+     * parsed quote link. Obfuscated/cached rows with `quoteRef = null` are supported.
      */
-    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
+    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     /**
      * Open the editor in edit mode (Phase 2D, #147). HFR exposes the edit link on
      * the post's left toolbar only when the post belongs to the current user and
@@ -331,7 +333,7 @@ internal fun TopicContent(
     listState: LazyListState,
     onIntent: (TopicIntent) -> Unit,
     onReply: (subcat: Int, page: Int) -> Unit,
-    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
+    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -400,7 +402,7 @@ private fun TopicLoadedContent(
     state: TopicUiState,
     topic: Topic,
     onReply: (subcat: Int, page: Int) -> Unit,
-    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int) -> Unit,
+    onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -422,15 +424,23 @@ private fun TopicLoadedContent(
             // exposed only when (a) we are on page 1 (FP lives there by
             // definition), (b) HFR rendered the FP edit link in the toolbar
             // (`Topic.isFirstPostOwner`, parsed from the first post on the
-            // page) and (c) the topic has a usable `subcat`. `numreponse` of
-            // the FP comes from the first post, not from `topic.post` (which
-            // is the topic id, a different scope).
-            @Suppress("ComplexCondition") // FP visibility = 4-way conjunction by design : ownership,
-            // valid subcat, page 1, non-empty posts. Extracting is unhelpful — each clause guards a
-            // different invariant (HFR permission, write contract, page scope, fixture safety).
+            // page) and (c) the topic is postable WITH a real sub-category.
+            // #213 — unlike Reply/Quote/Edit-post (gated on `canReply` alone,
+            // subcat=0 OK for a category without sub-category), FP edit also
+            // requires `subcat > 0`: the FP recategorise flow
+            // (TopicFormViewModel/TopicFormState) is NOT relaxed for subcat=0
+            // (its sub-category dropdown contract for a 0-subcat category is not
+            // captured yet), so offering it on an IA-style topic would open an
+            // editor that fails with MissingSubcat. Kept strict to avoid a
+            // button-shows-but-submit-fails regression (FP-in-0-subcat = #213 follow-up).
+            // `numreponse` of the FP comes from the first post, not `topic.post`.
+            @Suppress("ComplexCondition") // FP visibility = 5-way conjunction by design : ownership,
+            // postable topic, real subcat, page 1, non-empty posts. Extracting is unhelpful — each
+            // clause guards a different invariant (HFR permission, write contract, page scope, fixture safety).
             val editFirstPostAction: (() -> Unit)? = if (
                 topic.isFirstPostOwner &&
-                topic.hasSubcat &&
+                topic.canReply &&
+                topic.subcat > 0 &&
                 topic.page == 1 &&
                 topic.posts.isNotEmpty()
             ) {
@@ -450,16 +460,23 @@ private fun TopicLoadedContent(
             items = topic.posts,
             key = { post -> post.numreponse },
         ) { post ->
-            // « Citer » is enabled only when (a) the topic has a usable subcat
-            // (same gate as Reply) and (b) HFR exposed a quote link for *this*
-            // post (locked topics, anonymous-fallback rows do not). Both go via
-            // the same `PostEditorRoute`, only the editor request shape differs.
-            val quoteAction: (() -> Unit)? = post.quoteRef?.takeIf { topic.hasSubcat }
-                ?.let { ref -> { onQuote(topic.subcat, topic.page, post.numreponse, ref) } }
+            // « Citer » is enabled whenever the topic is postable — the `bddpost`
+            // reply form was present (#213, same gate as Reply). It does NOT depend
+            // on parsing a per-post quote link: HFR identifies the cited post by
+            // `numrep={numreponse}` alone (proven via hfr-mcp FetchQuote, which omits
+            // `ref` entirely), so an unparseable/obfuscated quote link (cat IA &
+            // pinned topics ship them as `md_noclass_cryptlink`, cf. #227) no longer
+            // hides Citer. `quoteRef` is forwarded when known (positional, cosmetic)
+            // and may be null — the whole quote chain tolerates it.
+            val quoteAction: (() -> Unit)? = if (shouldShowQuoteAction(topic)) {
+                { onQuote(topic.subcat, topic.page, post.numreponse, post.quoteRef) }
+            } else {
+                null
+            }
             // Phase 2D (#147) — « Modifier » is exposed by HFR only on the
-            // user's own posts of an unlocked topic. Same hasSubcat gate as
-            // Citer to refuse the SUBCAT_UNKNOWN cache.
-            val editAction: (() -> Unit)? = if (post.isEditable && topic.hasSubcat) {
+            // user's own posts of an unlocked topic. Same canReply gate as
+            // Citer (#213) to refuse a read-only topic (no reply form).
+            val editAction: (() -> Unit)? = if (shouldShowEditAction(topic, post)) {
                 { onEdit(topic.subcat, topic.page, post.numreponse) }
             } else {
                 null
@@ -530,10 +547,13 @@ private fun TopicHeaderCard(
             }
             Button(
                 onClick = { onReply(topic.subcat, topic.page) },
-                // Topic pages cached before Phase 2C have `subcat = SUBCAT_UNKNOWN`. We
-                // refuse to open the editor in that state — the next live refresh of
-                // the topic will populate a real subcat and the button comes back.
-                enabled = topic.hasSubcat,
+                // #213 — the button is enabled only when HFR rendered the `bddpost`
+                // reply form (authenticated, non-locked topic). Read-only topics
+                // (logged-out / prefetch anon rows, locked topics, pre-#213 cache)
+                // carry `canReply = false` ; the button comes back after a live
+                // authenticated refresh surfaces the form. `subcat = 0` (cat without
+                // sub-category, e.g. IA) is a valid postable value and is forwarded.
+                enabled = topic.canReply,
             ) {
                 Text(text = stringResource(R.string.topic_reply))
             }
@@ -840,10 +860,12 @@ private fun TopicPostCard(
             if (onQuote != null || onEdit != null) {
                 // Actions row at the bottom of the post card, sober TextButtons
                 // so they stay subordinate to the post content. « Modifier »
-                // (Phase 2D, #147) appears only on the user's own editable posts.
-                // « Citer » (Phase 2C, #146) appears whenever HFR exposed a
-                // quote link. Either can be absent — we only render the row at
-                // all if at least one action is provided.
+                // (Phase 2D, #147) appears only on the user's own editable posts
+                // when the topic is still postable. « Citer » (Phase 2C, #146)
+                // appears whenever the topic is postable, even when the per-post
+                // `quoteRef` link was obfuscated and parsed as null (#227).
+                // Either can be absent — we only render the row at all if at least
+                // one action is provided.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
@@ -869,6 +891,10 @@ private val topicDateFormatter = DateTimeFormatter
     .withZone(ZoneId.of("Europe/Paris"))
 
 private fun java.time.Instant.asTopicDate(): String = topicDateFormatter.format(this)
+
+internal fun shouldShowQuoteAction(topic: Topic): Boolean = topic.canReply
+
+internal fun shouldShowEditAction(topic: Topic, post: Post): Boolean = post.isEditable && topic.canReply
 
 private const val PAGE_GRID_LIMIT = 40
 private const val JUMP_MAX_DIGITS = 4

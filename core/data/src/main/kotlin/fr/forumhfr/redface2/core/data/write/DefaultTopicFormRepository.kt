@@ -180,7 +180,14 @@ class DefaultTopicFormRepository @Inject constructor(
         form.hashCheck.isBlank() -> ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
         bbcodeContent.isBlank() -> ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
         subject.isBlank() -> ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
-        selectedSubcat <= 0 -> ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        // #213 — a category WITHOUT a sub-category (HFR served no <select name=subcat>,
+        // `hasSubcategorySelect = false`, e.g. cat IA) posts a legitimate `subcat=0`.
+        // A category WITH sub-categories must still carry a real `subcat > 0` : posting
+        // 0 there would silently drop the topic into « no sub-category ». Edit FP always
+        // has `hasSubcategorySelect = true` (the parser fail-fasts otherwise), so this
+        // keeps the strict `subcat > 0` requirement on the edit path.
+        selectedSubcat < 0 -> ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        selectedSubcat == 0 && form.hasSubcategorySelect -> ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         else -> null
     }
 
