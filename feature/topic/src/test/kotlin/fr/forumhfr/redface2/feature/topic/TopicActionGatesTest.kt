@@ -11,26 +11,45 @@ import org.junit.Test
 class TopicActionGatesTest {
 
     @Test
-    fun `quote action follows topic canReply and ignores missing quoteRef`() {
+    fun `quote action requires a postable topic AND an authenticated session`() {
         val postWithNoParsedQuoteLink = post(quoteRef = null)
+        val postable = topic(canReply = true, posts = listOf(postWithNoParsedQuoteLink))
+        val readOnly = topic(canReply = false, posts = listOf(postWithNoParsedQuoteLink))
 
         assertTrue(
-            "postable topics can quote by numreponse even when the toolbar quoteRef was obfuscated",
-            shouldShowQuoteAction(topic(canReply = true, posts = listOf(postWithNoParsedQuoteLink))),
+            "postable + authenticated can quote by numreponse even when the quoteRef was obfuscated",
+            shouldShowQuoteAction(postable, isAuthenticated = true),
         )
         assertFalse(
             "read-only topics must not expose quote, regardless of per-post data",
-            shouldShowQuoteAction(topic(canReply = false, posts = listOf(postWithNoParsedQuoteLink))),
+            shouldShowQuoteAction(readOnly, isAuthenticated = true),
+        )
+        assertFalse(
+            "#220 — logged-out must never see quote, even on a stale canReply=true row",
+            shouldShowQuoteAction(postable, isAuthenticated = false),
         )
     }
 
     @Test
-    fun `edit action still requires both edit link and postable topic`() {
+    fun `edit action requires edit link, a postable topic AND authentication`() {
         val editablePost = post(isEditable = true)
+        val postable = topic(canReply = true, posts = listOf(editablePost))
+        val readOnly = topic(canReply = false, posts = listOf(editablePost))
 
-        assertTrue(shouldShowEditAction(topic(canReply = true, posts = listOf(editablePost)), editablePost))
-        assertFalse(shouldShowEditAction(topic(canReply = false, posts = listOf(editablePost)), editablePost))
-        assertFalse(shouldShowEditAction(topic(canReply = true), post(isEditable = false)))
+        assertTrue(shouldShowEditAction(postable, editablePost, isAuthenticated = true))
+        assertFalse(shouldShowEditAction(readOnly, editablePost, isAuthenticated = true))
+        assertFalse(shouldShowEditAction(topic(canReply = true), post(isEditable = false), isAuthenticated = true))
+        assertFalse(
+            "#220 — logged-out must never see edit, even on a stale canReply=true row",
+            shouldShowEditAction(postable, editablePost, isAuthenticated = false),
+        )
+    }
+
+    @Test
+    fun `reply is enabled only when the topic is postable AND the session is authenticated (#220)`() {
+        assertTrue(shouldEnableReply(topic(canReply = true), isAuthenticated = true))
+        assertFalse("read-only topic", shouldEnableReply(topic(canReply = false), isAuthenticated = true))
+        assertFalse("logged-out (e.g. stale cache)", shouldEnableReply(topic(canReply = true), isAuthenticated = false))
     }
 
     private fun topic(
