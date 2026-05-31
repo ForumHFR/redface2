@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -38,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -154,6 +156,8 @@ internal fun TopicFormContent(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !state.isSubmitting,
                 label = { Text(stringResource(R.string.editor_topic_subject_label)) },
+                // #237 — sentence capitalization (parité RF1) like the body field.
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
             )
             // #213 — a category WITHOUT a sub-category (e.g. IA, cat=32) renders no
             // `<select name=subcat>` on HFR's form (`hasSubcategorySelect = false`), so
