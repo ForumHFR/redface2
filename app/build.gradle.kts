@@ -76,11 +76,19 @@ android {
         // automatic (no manual counter), and surfaced via BuildConfig.VERSION_NAME + the footer.
         // Result e.g. `0.3.28+debug.f813453` (or `…+debug.f813453.dirty`). Release is untouched
         // (clean SemVer for the stores / F-Droid reproducibility).
-        fun gitOutput(vararg args: String): String = runCatching {
-            providers.exec { commandLine(listOf("git", "-C", rootDir.absolutePath) + args) }
-                .standardOutput.asText.get().trim()
-        }.getOrDefault("")
-        val gitSha = gitOutput("rev-parse", "--short", "HEAD")
+        // `isIgnoreExitValue` so a failing git (e.g. CI's "dubious ownership", exit 128, where the
+        // checkout is owned by another uid) degrades to "" instead of failing the whole build —
+        // the ProcessOutputValueSource exception escapes a plain runCatching, so we must let the
+        // exec itself tolerate non-zero. In CI we prefer GITHUB_SHA (git refuses there anyway).
+        fun gitOutput(vararg args: String): String {
+            val exec = providers.exec {
+                commandLine(listOf("git", "-C", rootDir.absolutePath) + args)
+                isIgnoreExitValue = true
+            }
+            return if (exec.result.get().exitValue == 0) exec.standardOutput.asText.get().trim() else ""
+        }
+        val envSha = providers.environmentVariable("GITHUB_SHA").orNull?.trim()?.take(7)?.takeIf { it.isNotBlank() }
+        val gitSha = envSha ?: gitOutput("rev-parse", "--short", "HEAD")
         val gitDirty = gitOutput("status", "--porcelain").isNotBlank()
         // Optional per-build stamp, e.g. `-PbuildStamp=$(date -u +%y%m%d.%H%M%S)`. The git SHA
         // alone cannot tell two builds of the SAME (uncommitted/dirty) tree apart, so when we
