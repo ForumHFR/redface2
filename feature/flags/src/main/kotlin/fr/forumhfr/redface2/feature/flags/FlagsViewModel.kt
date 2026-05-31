@@ -92,6 +92,15 @@ class FlagsViewModel @Inject constructor(
                         ) { result, showRead ->
                             filterReadParticipatedIfNeeded(result, type, showRead)
                         }
+                            // #225 — keep the existing list anchored during a user refresh
+                            // instead of blanking it to a cold centered spinner under the
+                            // PullToRefreshBox indicator (double loader). Same pattern as
+                            // :feature:forum. Applied per-tab (inside flatMapLatest) so a
+                            // genuine tab switch still shows its own cold spinner.
+                            .keepContentDuringRefresh(
+                                isLoading = { it is FlagsResult.Loading },
+                                isContent = { it is FlagsResult.Success },
+                            )
                     }
                 }
             }

@@ -72,6 +72,31 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `flagsState keeps the list during a refresh instead of blanking to Loading (#225)`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags)
+
+        vm.flagsState.test {
+            awaitItem() // initial null before stateIn fires
+            // Cold load: the first Loading passes through so the screen shows its initial spinner.
+            flags.emit(FlagType.CYAN, FlagsResult.Loading)
+            assertEquals(FlagsResult.Loading, awaitItem())
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN))))
+            assertEquals(1, (awaitItem() as FlagsResult.Success).flags.single().topicId)
+
+            // A swipe refresh re-broadcasts Loading: it must be SUPPRESSED so the list stays
+            // anchored under the PullToRefreshBox indicator (no second centered spinner, #225).
+            flags.emit(FlagType.CYAN, FlagsResult.Loading)
+            // The next *visible* state is the refreshed Success — the intermediate Loading
+            // never surfaces (otherwise awaitItem() here would return Loading and fail the cast).
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(2, FlagType.CYAN))))
+            assertEquals(2, (awaitItem() as FlagsResult.Success).flags.single().topicId)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `selectTab switches the flagsState source`() = runTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
