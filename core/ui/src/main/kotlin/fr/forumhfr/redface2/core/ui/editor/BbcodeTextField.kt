@@ -1,10 +1,12 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 
 /**
@@ -29,5 +31,8 @@ fun BbcodeTextField(
         label = { Text(label) },
         placeholder = placeholder?.let { hint -> { Text(hint) } },
         minLines = 5,
+        // #237 — Compose ne capitalise rien par défaut (≠ EditText/RF1 en `textCapSentences`).
+        // `Sentences` rend la majuscule en début de message ET après `. ! ?`, parité RF1.
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
     )
 }
