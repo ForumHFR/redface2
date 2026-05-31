@@ -642,7 +642,7 @@ private fun TopicPageJumpField(
     ) {
         OutlinedTextField(
             value = input,
-            onValueChange = { raw -> input = raw.filter(Char::isDigit).take(JUMP_MAX_DIGITS) },
+            onValueChange = { raw -> input = coercePageJumpInput(raw, totalPages) },
             singleLine = true,
             label = { Text(stringResource(R.string.topic_page_jump_label)) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -910,5 +910,12 @@ internal fun shouldShowEditFirstPost(topic: Topic, isAuthenticated: Boolean): Bo
         topic.page == 1 &&
         topic.posts.isNotEmpty()
 
+// #235 — the page-jump field must accept any valid page. Binding the input width to the digit
+// count of [totalPages] (instead of a fixed 4-digit ceiling that made pages >= 10000 untypable)
+// lets very long topics — e.g. the ~16k-page Ukraine topic — reach their last pages, while a
+// small topic stays tight. The jump action already validates `target in 1..totalPages`, so the
+// cap only needs to mirror that bound. `maxOf(1, …)` guards a degenerate totalPages <= 0.
+internal fun coercePageJumpInput(raw: String, totalPages: Int): String =
+    raw.filter(Char::isDigit).take(maxOf(1, totalPages).toString().length)
+
 private const val PAGE_GRID_LIMIT = 40
-private const val JUMP_MAX_DIGITS = 4
