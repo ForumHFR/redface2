@@ -434,20 +434,13 @@ private fun TopicLoadedContent(
             // editor that fails with MissingSubcat. Kept strict to avoid a
             // button-shows-but-submit-fails regression (FP-in-0-subcat = #213 follow-up).
             // `numreponse` of the FP comes from the first post, not `topic.post`.
-            @Suppress("ComplexCondition") // FP visibility = 5-way conjunction by design : ownership,
-            // postable topic, real subcat, page 1, non-empty posts. Extracting is unhelpful — each
-            // clause guards a different invariant (HFR permission, write contract, page scope, fixture safety).
-            val editFirstPostAction: (() -> Unit)? = if (
-                topic.isFirstPostOwner &&
-                topic.canReply &&
-                topic.subcat > 0 &&
-                topic.page == 1 &&
-                topic.posts.isNotEmpty()
-            ) {
-                { onEditFirstPost(topic.subcat, topic.page, topic.posts.first().numreponse) }
-            } else {
-                null
-            }
+            // #220 — the gate (incl. the auth clause) is the testable `shouldShowEditFirstPost`.
+            val editFirstPostAction: (() -> Unit)? =
+                if (shouldShowEditFirstPost(topic, state.isAuthenticated)) {
+                    { onEditFirstPost(topic.subcat, topic.page, topic.posts.first().numreponse) }
+                } else {
+                    null
+                }
             TopicHeaderCard(
                 topic = topic,
                 state = state,
@@ -468,7 +461,7 @@ private fun TopicLoadedContent(
             // pinned topics ship them as `md_noclass_cryptlink`, cf. #227) no longer
             // hides Citer. `quoteRef` is forwarded when known (positional, cosmetic)
             // and may be null — the whole quote chain tolerates it.
-            val quoteAction: (() -> Unit)? = if (shouldShowQuoteAction(topic)) {
+            val quoteAction: (() -> Unit)? = if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
                 { onQuote(topic.subcat, topic.page, post.numreponse, post.quoteRef) }
             } else {
                 null
@@ -476,7 +469,7 @@ private fun TopicLoadedContent(
             // Phase 2D (#147) — « Modifier » is exposed by HFR only on the
             // user's own posts of an unlocked topic. Same canReply gate as
             // Citer (#213) to refuse a read-only topic (no reply form).
-            val editAction: (() -> Unit)? = if (shouldShowEditAction(topic, post)) {
+            val editAction: (() -> Unit)? = if (shouldShowEditAction(topic, post, state.isAuthenticated)) {
                 { onEdit(topic.subcat, topic.page, post.numreponse) }
             } else {
                 null
@@ -547,13 +540,12 @@ private fun TopicHeaderCard(
             }
             Button(
                 onClick = { onReply(topic.subcat, topic.page) },
-                // #213 — the button is enabled only when HFR rendered the `bddpost`
-                // reply form (authenticated, non-locked topic). Read-only topics
-                // (logged-out / prefetch anon rows, locked topics, pre-#213 cache)
-                // carry `canReply = false` ; the button comes back after a live
-                // authenticated refresh surfaces the form. `subcat = 0` (cat without
-                // sub-category, e.g. IA) is a valid postable value and is forwarded.
-                enabled = topic.canReply,
+                // #213 — enabled only when HFR rendered the `bddpost` reply form
+                // (authenticated, non-locked topic → `canReply`). #220 — also gated on the
+                // live auth state so a stale cached `canReply = true` row (the topic cache is
+                // not purged on logout) never offers Reply to a logged-out user. `subcat = 0`
+                // (cat without sub-category, e.g. IA) is a valid postable value and is forwarded.
+                enabled = shouldEnableReply(topic, state.isAuthenticated),
             ) {
                 Text(text = stringResource(R.string.topic_reply))
             }
@@ -892,9 +884,31 @@ private val topicDateFormatter = DateTimeFormatter
 
 private fun java.time.Instant.asTopicDate(): String = topicDateFormatter.format(this)
 
-internal fun shouldShowQuoteAction(topic: Topic): Boolean = topic.canReply
+// #220 — write affordances additionally require an authenticated session. A logged-out user
+// can still hold a stale cached `canReply = true` row (the topic page cache is intentionally
+// not purged on logout, cf. CacheInvalidator), so these gates consult auth explicitly instead
+// of trusting `canReply` alone — symmetric with the « Créer topic » FAB
+// (CategoryViewModel.canCreateTopic).
+internal fun shouldEnableReply(topic: Topic, isAuthenticated: Boolean): Boolean =
+    topic.canReply && isAuthenticated
 
-internal fun shouldShowEditAction(topic: Topic, post: Post): Boolean = post.isEditable && topic.canReply
+internal fun shouldShowQuoteAction(topic: Topic, isAuthenticated: Boolean): Boolean =
+    topic.canReply && isAuthenticated
+
+internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
+    post.isEditable && topic.canReply && isAuthenticated
+
+// Phase 2D #148 / #220 — « Modifier le premier message ». 6-way conjunction by design: auth,
+// FP ownership, postable topic, a real sub-category (FP recategorise is NOT relaxed for subcat=0,
+// cf. #213), page 1 (the FP lives there), non-empty posts. Each clause guards a distinct invariant.
+@Suppress("ComplexCondition")
+internal fun shouldShowEditFirstPost(topic: Topic, isAuthenticated: Boolean): Boolean =
+    isAuthenticated &&
+        topic.isFirstPostOwner &&
+        topic.canReply &&
+        topic.subcat > 0 &&
+        topic.page == 1 &&
+        topic.posts.isNotEmpty()
 
 private const val PAGE_GRID_LIMIT = 40
 private const val JUMP_MAX_DIGITS = 4

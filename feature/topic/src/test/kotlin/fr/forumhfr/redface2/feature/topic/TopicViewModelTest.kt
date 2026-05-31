@@ -1,7 +1,9 @@
 package fr.forumhfr.redface2.feature.topic
 
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.Topic
@@ -10,6 +12,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -42,6 +46,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 2),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         viewModel.state.test {
@@ -83,6 +88,7 @@ class TopicViewModelTest {
         val vm = TopicViewModel(
             request = topicRequest(page = 2),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         vm.state.test {
@@ -118,6 +124,7 @@ class TopicViewModelTest {
         TopicViewModel(
             request = topicRequest(page = 5),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         ).state.test {
             awaitItem()
             cancelAndIgnoreRemainingEvents()
@@ -140,6 +147,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         viewModel.state.test {
@@ -166,6 +174,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         val mode = assertMode<TopicUiState.Mode.Error>(viewModel.state.value)
@@ -187,6 +196,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         val mode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
@@ -206,6 +216,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 3, scrollTo = target),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         viewModel.effects.test {
@@ -223,6 +234,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 1, scrollTo = 999),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         viewModel.effects.test {
@@ -247,6 +259,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 2, scrollTo = target),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         viewModel.effects.test {
@@ -264,6 +277,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
         assertEquals(false, viewModel.state.value.canGoPrevious)
         assertEquals(true, viewModel.state.value.canGoNext)
@@ -276,6 +290,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 5),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
         assertEquals(true, viewModel.state.value.canGoPrevious)
         assertEquals(false, viewModel.state.value.canGoNext)
@@ -294,6 +309,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 2),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         assertMode<TopicUiState.Mode.Error>(viewModel.state.value)
@@ -306,6 +322,40 @@ class TopicViewModelTest {
             listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2), Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
             repository.calls,
         )
+    }
+
+    @Test
+    fun `state isAuthenticated reflects the auth repository (#220)`() = runTest {
+        val authed = TopicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        assertEquals(true, authed.state.value.isAuthenticated)
+
+        val anon = TopicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        assertEquals(false, anon.state.value.isAuthenticated)
+    }
+
+    @Test
+    fun `isAuthenticated flips when the session changes while the topic is open (#220)`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val vm = TopicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = auth,
+        )
+        assertEquals(true, vm.state.value.isAuthenticated)
+
+        auth.emit(AuthState.Anonymous) // logout while the topic is on screen → gates must close
+        assertEquals(false, vm.state.value.isAuthenticated)
+
+        auth.emit(AuthState.Authenticated("xaat")) // log back in → gates reopen
+        assertEquals(true, vm.state.value.isAuthenticated)
     }
 
     private fun topicRequest(
@@ -339,6 +389,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 2, submitSignal = 1_700_000_000_000L),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         viewModel.state.test {
@@ -377,6 +428,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 1, scrollTo = targetNumreponse, submitSignal = 42L),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         viewModel.effects.test {
@@ -403,6 +455,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 20, scrollTo = null, submitSignal = 99L),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         viewModel.effects.test {
@@ -422,6 +475,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 1, scrollTo = null, submitSignal = null),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         viewModel.state.test {
@@ -458,6 +512,7 @@ class TopicViewModelTest {
         val viewModel = TopicViewModel(
             request = topicRequest(page = 2, submitSignal = 7L),
             topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         // The first effect emitted on the failure path must be PostSubmitRefreshFailed so the
@@ -530,6 +585,21 @@ class TopicViewModelTest {
         private const val SAMPLE_SUBCAT = 432
         private const val CANCEL_TIMEOUT_MS = 2_000L
     }
+}
+
+private class FakeAuthRepository(initial: AuthState) : AuthRepository {
+    private val state = MutableStateFlow(initial)
+
+    /** Simulate a live auth change (login / logout) after the ViewModel has subscribed. */
+    fun emit(value: AuthState) {
+        state.value = value
+    }
+
+    override fun observeAuthState() = state.asStateFlow()
+    override suspend fun login(pseudo: String, password: String) =
+        error("login is not exercised by TopicViewModelTest")
+
+    override suspend fun logout() = error("logout is not exercised by TopicViewModelTest")
 }
 
 private class FakeTopicRepository(

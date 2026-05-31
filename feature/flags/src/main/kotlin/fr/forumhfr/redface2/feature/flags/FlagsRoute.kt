@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -326,8 +328,12 @@ private fun ColumnScope.AuthenticatedBody(
             }
 
             is FlagsResult.Failure -> Column(
+                // #229 — scrollable so the PullToRefreshBox still captures a swipe-to-refresh
+                // on this short, listless state (an un-scrollable body gives the pull gesture
+                // nothing to anchor on).
                 modifier = Modifier
                     .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
                     .padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -352,12 +358,23 @@ private fun ColumnScope.AuthenticatedBody(
 
             is FlagsResult.Success -> {
                 if (current.flags.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.flags_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(24.dp),
-                    )
+                    // #229 — the empty state must fill the box AND be scrollable, otherwise the
+                    // PullToRefreshBox has no scrollable child to anchor the pull gesture on and
+                    // the user can no longer swipe-to-refresh an empty list (e.g. Cyan with no
+                    // actionable topic). A `verticalScroll` Column provides the nested-scroll
+                    // connection the pull needs even though the content is short.
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(24.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.flags_empty),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 } else {
                     LazyColumn(
                         modifier = Modifier

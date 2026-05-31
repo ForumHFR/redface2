@@ -6,6 +6,17 @@ data class TopicUiState(
     val request: TopicRequest,
     val mode: Mode,
     val availablePages: List<Int>,
+    /**
+     * #220 — whether the current HFR session is authenticated. Drives the write
+     * affordances (Répondre / Citer / Modifier / Modifier-FP) so they are not offered
+     * to a logged-out user, symmetric with the « Créer topic » FAB
+     * (`CategoryViewModel.canCreateTopic`). Defaults `false` and flips on the first
+     * auth emission. The conservative default means an already-authenticated user may
+     * see a brief disabled→enabled transient on a cold open (we never momentarily
+     * *offer* a write action to a not-yet-known session) — same trade-off as the FAB;
+     * in practice the cookie jar is primed at nav-host start so the window rarely shows.
+     */
+    val isAuthenticated: Boolean = false,
 ) {
     /**
      * Helper used by the screen / ViewModel : `true` when the user has navigated to a
