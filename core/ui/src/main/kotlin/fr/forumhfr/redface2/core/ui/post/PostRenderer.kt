@@ -422,7 +422,8 @@ private fun ImageBlockError(description: String?) {
 
 @Composable
 private fun FixedBlock(block: PostBlock.Fixed) {
-    MonospaceContainer {
+    // [fixed] = column-aligned ASCII art/tables → keep no-wrap + horizontal scroll (#244).
+    MonospaceContainer(scrollHorizontally = true) {
         Text(
             text = block.text,
             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
@@ -434,7 +435,9 @@ private fun FixedBlock(block: PostBlock.Fixed) {
 
 @Composable
 private fun CodeBlockBlock(block: PostBlock.CodeBlock) {
-    MonospaceContainer {
+    // [code] = often prose / long pasted lines → WRAP within the card width so it stays readable on
+    // mobile (#244, dogfood). No horizontal scroll; the soft-wrapping Text flows in the full width.
+    MonospaceContainer(scrollHorizontally = false) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             block.language?.let { lang ->
                 Text(
@@ -447,36 +450,45 @@ private fun CodeBlockBlock(block: PostBlock.CodeBlock) {
                 text = block.text,
                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurface,
-                softWrap = false,
+                softWrap = true,
             )
         }
     }
 }
 
 /**
- * Wraps a `[fixed]` / `[code]` body in a tinted card with horizontal scroll. Long lines (raw URL,
- * indented snippets, syntax-highlighted source) must overflow horizontally instead of wrapping —
- * wrap would mangle indentation and break the visual contract of a monospace block.
+ * Wraps a `[fixed]` / `[code]` body in a tinted monospace card. [scrollHorizontally] picks the
+ * overflow behaviour per block kind (#244) :
  *
- * Modifier order matters here: the **outer** [Card] carries [Modifier.fillMaxWidth] so the card
- * itself spans the parent. The **inner** [Column] must NOT carry [Modifier.fillMaxWidth] before
- * [Modifier.horizontalScroll] — that would clamp the children's measured width to the card's
- * width and turn the scroll into a no-op. [Modifier.padding] sits before the scroll modifier so
- * the inset is fixed and the children scroll inside it (otherwise the left padding would slide
- * out of view on overflow). The monospace [Text] children opt out of soft wrap explicitly.
+ * - **`true` (`[fixed]`)** : long lines OVERFLOW horizontally (children opt out of soft wrap, the
+ *   inner [Column] scrolls). `[fixed]` is column-aligned ASCII art / tables, so wrapping would
+ *   mangle the alignment — horizontal scroll preserves it.
+ * - **`false` (`[code]`)** : the body WRAPS within the card width. HFR `[code]` is most often prose
+ *   or long pasted lines (e.g. articles), where a single horizontally-scrolling line is unreadable
+ *   on mobile (the original dogfood bug — RF1's WebView wraps it). The inner [Column] fills the
+ *   width so the soft-wrapping monospace [Text] flows.
+ *
+ * Modifier order (scroll mode): the **outer** [Card] carries [Modifier.fillMaxWidth] so the card
+ * spans the parent; the **inner** [Column] must NOT carry [Modifier.fillMaxWidth] before
+ * [Modifier.horizontalScroll] (that would clamp the children's measured width to the card's width
+ * and turn the scroll into a no-op). [Modifier.padding] sits before the scroll so the inset stays
+ * fixed and the children scroll inside it.
  */
 @Composable
-private fun MonospaceContainer(content: @Composable () -> Unit) {
+private fun MonospaceContainer(scrollHorizontally: Boolean, content: @Composable () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
         ),
         modifier = Modifier.fillMaxWidth(),
     ) {
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .padding(12.dp)
-                .horizontalScroll(rememberScrollState()),
+                .let { base ->
+                    if (scrollHorizontally) base.horizontalScroll(scrollState) else base.fillMaxWidth()
+                },
         ) {
             content()
         }
