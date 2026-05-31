@@ -478,6 +478,67 @@ class TopicPageParserTest {
     }
 
     @Test
+    fun `isEditable is true for a plain pretty editer- link (authenticated, #227)`() {
+        // #227 — once logged in, HFR serves the toolbar edit link as the pretty slug
+        // `/hfr/<cat>/editer-<a>-<numreponse>-<page>.htm` (observed live 2026-05-31), NOT
+        // message.php?numreponse=…. parseHasEditLink must recognize this shape.
+        val html = """
+            <html><body>
+              <input name="cat" value="32" /><input name="post" value="1" /><input name="subcat" value="0" />
+              <table><tbody>
+                <tr class="fondForum2Title"><th class="messCase1">Auteur</th><th><h3>IA</h3></th></tr>
+              </tbody></table>
+              <table class="messagetable"><tbody>
+                <tr class="message">
+                  <td class="messCase1"><a name="t55556"></a><b class="s2">XaTriX</b></td>
+                  <td class="messCase2">
+                    <div class="toolbar"><div class="left">
+                      Posté le 30-05-2026&nbsp;à&nbsp;10:31:06
+                      <a href="/hfr/ia/editer-1-55556-2.htm#formulaire">editer</a>
+                    </div></div>
+                    <div id="para55556"><p>own post</p></div>
+                  </td>
+                </tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        assertTrue("pretty editer- link must surface isEditable", parser.parse(html).posts.single().isEditable)
+    }
+
+    @Test
+    fun `isEditable resolves an obfuscated pretty editer- cryptlink via materialize (#227)`() {
+        // End-to-end #227: on an authenticated obfuscated page the edit link ships as a
+        // md_*cryptlink span (no clear <a>). CryptlinkDecoder.materialize() (wired in parse())
+        // decodes the class → /hfr/ia/editer-…htm, then parseHasEditLink recognizes the pretty
+        // slug → isEditable=true. The class suffix is the base16 encoding (alphabet
+        // "0A12B34C56D78E9F") of `/hfr/ia/editer-1-55555-2.htm#formulaire`.
+        val html = """
+            <html><body>
+              <input name="cat" value="32" /><input name="post" value="1" /><input name="subcat" value="0" />
+              <table><tbody>
+                <tr class="fondForum2Title"><th class="messCase1">Auteur</th><th><h3>IA</h3></th></tr>
+              </tbody></table>
+              <table class="messagetable"><tbody>
+                <tr class="message">
+                  <td class="messCase1"><a name="t55555"></a><b class="s2">XaTriX</b></td>
+                  <td class="messCase2">
+                    <div class="toolbar"><div class="left">
+                      Posté le 30-05-2026&nbsp;à&nbsp;10:31:06
+                      <span class="md_noclass_cryptlink1F4544C11F464A1F434B46CB43C11E2A1E23232323231E211945CB4E12444FC14EC3484A46C143"><img src="/edit.gif" /></span>
+                    </div></div>
+                    <div id="para55555"><p>own post</p></div>
+                  </td>
+                </tr>
+              </tbody></table>
+            </body></html>
+        """.trimIndent()
+        assertTrue(
+            "materialize() + pretty editer- detection must surface isEditable on an obfuscated page",
+            parser.parse(html).posts.single().isEditable,
+        )
+    }
+
+    @Test
     fun `isEditable is false when a numreponse link sits in the post body but not the toolbar`() {
         // Round-trip the same scope guard we already apply to `quoteRef` :
         // an inline link to another post's `message.php?…&numreponse=…` (which
