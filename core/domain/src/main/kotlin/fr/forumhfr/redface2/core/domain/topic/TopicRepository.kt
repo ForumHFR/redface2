@@ -9,11 +9,17 @@ interface TopicRepository {
      * only when the cached row is stale relative to the implementation's TTL
      * (cf. `CachePolicy.topicPage`) — a hot revisit returns the cache and stops.
      *
+     * [forceRefresh] (#231) bypasses that TTL skip: the cached page is still emitted
+     * instantly for a snappy first paint, but a network refresh **always** follows.
+     * Set it when the user's intent is to catch up on new posts (e.g. opening a topic
+     * from a drapeau/flag), so a followed topic that grew is never shown stale within
+     * the snappy-cache window.
+     *
      * Network errors after a cache emission are swallowed so the user keeps
      * seeing the last-known-good page; on a cold cache, errors are surfaced as
      * exceptions on the flow.
      */
-    fun observeTopicPage(cat: Int, post: Int, page: Int): Flow<Topic>
+    fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean = false): Flow<Topic>
 
     /**
      * Forces a network fetch, bypasses TTL, and writes the result to the cache.

@@ -55,7 +55,7 @@ class TopicRepositoryImpl @Inject constructor(
      * - Cache miss → fetch directly. A failure here propagates so the UI can
      *   show its error state.
      */
-    override fun observeTopicPage(cat: Int, post: Int, page: Int): Flow<Topic> = flow {
+    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<Topic> = flow {
         // Alpha "Ignorer le cache topic" toggle (Phase 2 finish): when enabled, skip the
         // Room read entirely and emit a fresh network fetch. The result is still persisted
         // so toggling back OFF later finds a cache coherent with the current parser. We
@@ -71,7 +71,13 @@ class TopicRepositoryImpl @Inject constructor(
         val cached = withContext(ioDispatcher) { loadFromCache(cat, post, page) }
         if (cached != null) {
             emit(cached.topic)
-            val canSkipRefresh = cached.authMode == FetchMode.AUTHENTICATED &&
+            // #231 — `forceRefresh` (set when opening a topic from a flag, where the user
+            // wants the latest posts) bypasses the snappy-cache TTL: the cached page was
+            // emitted instantly above, but we still always re-fetch below so a followed
+            // topic that grew is never shown stale within the 60s window. The TTL skip
+            // remains for ordinary back-nav (forceRefresh = false).
+            val canSkipRefresh = !forceRefresh &&
+                cached.authMode == FetchMode.AUTHENTICATED &&
                 CachePolicy.isFresh(cached.fetchedAt, CachePolicy.topicPage, clock)
             if (canSkipRefresh) {
                 return@flow

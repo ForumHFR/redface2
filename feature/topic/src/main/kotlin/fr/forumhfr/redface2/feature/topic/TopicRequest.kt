@@ -13,4 +13,12 @@ data class TopicRequest(
      * host — only its presence/absence matters, not its magnitude.
      */
     val submitSignal: Long? = null,
+    /**
+     * #231 — `true` when the topic is opened from a drapeau/flag (the user's intent is
+     * to catch up on new posts). The cache-aside path still shows the cached page
+     * instantly but **always** refreshes afterwards, bypassing the 60s snappy-cache TTL
+     * that would otherwise serve a followed topic stale. Ordinary in-app navigation
+     * leaves it `false` to keep back-nav snappy.
+     */
+    val forceRefresh: Boolean = false,
 )

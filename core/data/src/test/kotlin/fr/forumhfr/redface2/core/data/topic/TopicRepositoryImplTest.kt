@@ -110,6 +110,29 @@ class TopicRepositoryImplTest {
     }
 
     @Test
+    fun `observeTopicPage with forceRefresh re-fetches despite a fresh cache (#231)`() = runTest {
+        // Two responses: the warmup + the forced refresh that must fire even though the
+        // cache is fresh by TTL — the #231 « open from a flag = catch up on new posts » path.
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))
+        val repo = repository(now = Instant.parse("2026-04-26T18:00:00Z"))
+        repo.refreshTopicPage(1, 999_395, 1)
+        assertEquals("warmup should issue exactly one network request", 1, server.requestCount)
+
+        // Same fixed clock → cache fresh by TTL → without forceRefresh it would skip.
+        repo.observeTopicPage(1, 999_395, 1, forceRefresh = true).test {
+            awaitItem() // cached emission (instant)
+            awaitItem() // forced refresh emission
+            awaitComplete()
+        }
+        assertEquals(
+            "forceRefresh must re-fetch despite a fresh AUTHENTICATED cache",
+            2,
+            server.requestCount,
+        )
+    }
+
+    @Test
     fun `observeTopicPage on a stale cache emits cache then refreshes`() = runTest {
         // Warm cache as of T0.
         server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html")))

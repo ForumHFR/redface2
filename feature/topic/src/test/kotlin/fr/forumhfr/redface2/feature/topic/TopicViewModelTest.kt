@@ -358,6 +358,21 @@ class TopicViewModelTest {
         assertEquals(true, vm.state.value.isAuthenticated)
     }
 
+    @Test
+    fun `forceRefresh from the request is forwarded to observeTopicPage (#231)`() = runTest {
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) }))
+        TopicViewModel(
+            request = topicRequest(page = 1).copy(forceRefresh = true),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        assertEquals(
+            "a flag-open request must force the topic cache to refresh",
+            true,
+            repository.lastForceRefresh,
+        )
+    }
+
     private fun topicRequest(
         page: Int,
         scrollTo: Int? = null,
@@ -621,8 +636,12 @@ private class FakeTopicRepository(
      */
     var prefetchHook: (suspend (cat: Int, post: Int, page: Int) -> Unit)? = null
 
-    override fun observeTopicPage(cat: Int, post: Int, page: Int): Flow<Topic> {
+    var lastForceRefresh: Boolean? = null
+        private set
+
+    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<Topic> {
         calls += Triple(cat, post, page)
+        lastForceRefresh = forceRefresh
         return queue.removeFirstOrNull() ?: error("No more flows queued")
     }
 
@@ -642,7 +661,7 @@ private class FakeTopicRepository(
 private class FakeStreamingTopicRepository(
     private val source: Flow<Topic>,
 ) : TopicRepository {
-    override fun observeTopicPage(cat: Int, post: Int, page: Int): Flow<Topic> = source
+    override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<Topic> = source
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
         error("refreshTopicPage not used by ViewModel under test")
