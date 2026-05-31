@@ -27,6 +27,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -169,7 +171,8 @@ private fun WikiTabContent(
 @Composable
 private fun SmileyGrid(items: List<EditorSmiley>, onSmileyClicked: (String) -> Unit) {
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 64.dp),
+        // #236 — denser grid: smaller min cell (was 64.dp) packs more smileys per row.
+        columns = GridCells.Adaptive(minSize = 48.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
@@ -190,7 +193,8 @@ private fun SmileyCell(smiley: EditorSmiley, onClick: () -> Unit) {
     val description = stringResource(R.string.editor_smiley_insert_description, smiley.token)
     Box(
         modifier = Modifier
-            .size(56.dp)
+            // #236 — 48.dp keeps the Material minimum touch target while the grid gets denser.
+            .size(48.dp)
             .clickable(onClick = onClick)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
@@ -200,7 +204,12 @@ private fun SmileyCell(smiley: EditorSmiley, onClick: () -> Unit) {
             // contentDescription is on the parent Box so the click target carries it ;
             // null here keeps TalkBack from announcing the image twice.
             contentDescription = null,
-            modifier = Modifier.size(48.dp),
+            // #236 — render at 30.dp (was 48.dp): HFR builtins are ~16 px sprites, so a smaller
+            // box stops the ×3 upscale that looked huge and blurry. ContentScale.Fit preserves
+            // the aspect ratio of taller perso smileys; FilterQuality.None keeps pixel-art crisp.
+            modifier = Modifier.size(30.dp),
+            contentScale = ContentScale.Fit,
+            filterQuality = FilterQuality.None,
         )
     }
 }
