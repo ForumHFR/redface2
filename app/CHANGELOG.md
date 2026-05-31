@@ -21,6 +21,25 @@ Aucun changement applicatif non distribué.
 
 ---
 
+## v67 — `0.3.27` — 2026-05-31
+
+**Statut** : `closed`
+**Commit** : tag `app-v67` après merge de la PR #228
+**Fichier** : AAB uploadé sur le canal Play closed alpha + tag pour F-Droid
+
+Phase 2 finish — correction du flux écrire/citer sur les catégories HFR sans sous-catégorie, notamment Intelligence Artificielle (`subcat=0` réel). La version durcit aussi le cache topic pour éviter qu'une ancienne base Room masque les boutons Reply/Citer/Edit après mise à jour.
+
+### Fixed
+- **#213 — Répondre sur une catégorie sans sous-catégorie.** Les formulaires HFR dont `force_subcat=false` et `subcat=0` sont maintenant considérés comme valides : le topic expose `canReply`, l'éditeur accepte `subcat=0`, et les guards réseau n'assimilent plus cette valeur à une sous-catégorie inconnue.
+- **Citer sans `quoteRef` extrait du HTML topic.** L'action Citer dépend maintenant de `Topic.canReply`, pas de la présence d'un lien de citation dans chaque post. Le repository retombe sur le `numreponse` du post quand HFR ne fournit pas de `quoteRef` explicite.
+- **Migration cache topic v6→v7.** Les pages topic migrées sont marquées stale (`fetchedAt=0`) pour forcer un refresh post-upgrade et éviter que `canReply=false` injecté par défaut ne cache les actions d'écriture jusqu'à expiration TTL.
+
+### Changed
+- **Tests / docs** : les fixtures browser-save ne sont plus utilisées pour prétendre valider `quoteRef` brut ; elles restent utiles pour `canReply` et `subcat=0`. Les specs et KDocs documentent `quoteRef` comme une optimisation optionnelle, pas comme une condition d'affichage de Citer.
+- **Build / release** : `app/build.gradle.kts` passe à `versionCode = 67`, `versionName = "0.3.27"`.
+
+---
+
 ## v66 — `0.3.26` — 2026-05-30
 
 **Statut** : `closed`

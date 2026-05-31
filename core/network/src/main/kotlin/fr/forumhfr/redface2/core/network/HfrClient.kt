@@ -101,21 +101,17 @@ class HfrClient @Inject constructor(
     /**
      * Phase 2C — GET the HFR reply or quote form. The shape is the same in both
      * cases (`/message.php?cat=…&post=…&page=…&p=1&subcat=…&sondage=0&owntopic=0
-     * &new=0`); a quote additionally carries `numrep={quotedNumreponse}` and
-     * `ref={quoteRef}` so HFR prefills `<textarea name="content_form">` with the
-     * cited `[quotemsg=…]` block (cf. `docs/specs/protocol-hfr.md` § Quote, and
-     * the Phase 2A fixtures `write_reply_form_open_topic.html` /
-     * `write_quote_form_test_post.html`).
+     * &new=0`); a quote carries `numrep={quotedNumreponse}` and may additionally
+     * carry `ref={quoteRef}` when HFR exposed it in a clear toolbar link. HFR still
+     * prefills `<textarea name="content_form">` from `numrep` alone when `ref` is
+     * absent (cf. `docs/specs/protocol-hfr.md` § Quote / md_*cryptlink).
      *
-     * [quotedNumreponse] and [quoteRef] are both opaque — `numrep` is the cited
-     * post id and `ref` is HFR's per-page positional id (server-controlled). The
-     * caller must pass them through unchanged from the topic page HTML. Either
-     * may be null for a simple reply ; both null = reply, both non-null = quote.
-     * The mixed shape (one null, one set) is **not validated** — behaviour was
-     * never captured and we leave the API surface tolerant in case a future HFR
-     * change drops `ref` from the quote contract. Call sites in
-     * `DefaultReplyRepository` always feed the two fields together from a
-     * `ReplyContext`, so this looseness is contained to the network layer.
+     * [quotedNumreponse] and [quoteRef] are opaque — `numrep` is the cited post id
+     * and `ref` is HFR's per-page positional id (server-controlled). `quoteRef` is
+     * optional by design: obfuscated toolbar rows can still be quoted by sending
+     * only `numrep`. Simple reply = both null ; quote fallback = `quotedNumreponse`
+     * non-null and `quoteRef` null ; clear-link quote = both non-null. A lone
+     * `quoteRef` with no `quotedNumreponse` is rejected by `ReplyContext`.
      *
      * Always uses the authenticated client : a session-expired GET surfaces
      * [SessionExpiredException] via [executeAuthenticatedHtml] rather than

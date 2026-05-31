@@ -263,7 +263,7 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
     val page: Int? = null,                // page topic en cours, requis Reply (#145)
     val subcat: Int? = null,              // sous-cat HFR de POST, requis Reply (#145). subcat=0 valide (cat sans sous-cat, #213). TopicScreen ne pousse PostEditorRoute que si topic.canReply (présence du formulaire bddpost)
     val quotedNumreponse: Int? = null,    // Phase 2C (#146) : null = reply simple ; non-null = quote (numreponse du post cité)
-    val quoteRef: Int? = null,            // Phase 2C (#146) : ref opaque parsé depuis le href quote ; transmis verbatim à HFR
+    val quoteRef: Int? = null,            // Phase 2C (#146/#227) : ref opaque parsé depuis le href quote quand disponible ; null accepté (HFR cite via `numrep`)
 ) : RedfaceNavKey
 
 @Serializable data class TopicFormRoute(

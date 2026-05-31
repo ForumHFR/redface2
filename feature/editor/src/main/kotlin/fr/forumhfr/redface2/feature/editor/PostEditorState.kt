@@ -29,7 +29,11 @@ data class PostEditorState(
      * the draft with it on form load. Same surface as a simple reply otherwise.
      */
     val quotedNumreponse: Int? = null,
-    /** `ref` parameter HFR included in the quote link — opaque, forwarded as-is. */
+    /**
+     * `ref` parameter HFR included in the quote link when parseable — opaque,
+     * forwarded as-is. May be null on a quote: HFR still quotes from
+     * [quotedNumreponse] alone when the toolbar link was obfuscated.
+     */
     val quoteRef: Int? = null,
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),

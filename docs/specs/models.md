@@ -273,7 +273,7 @@ data class Post(
     val isOwnPost: Boolean,              // Phase 2D : équivalent à `isEditable` faute de signal HFR distinct au niveau topic page. Les deux champs restent séparés pour un futur raffinement (modo-can-edit, locked-but-own-post). Persisté en Room depuis v1.
     val quotedAuthors: List<String>,     // dérivé de PostContent pour recherche, filtres et décorateurs
     val postIndex: Int?,                 // (page-1) * postsPerPage + position — null quand le parser n'a pas le contexte page/postsPerPage (preview, fixtures isolées). postsPerPage vient des préférences HFR de l'utilisateur, PAS une constante (voir UserSettings)
-    val quoteRef: Int? = null,           // Phase 2C (#146) : `ref` opaque parsé depuis le href du lien quote HFR (`message.php?…&numrep=…&ref=N`). Null = post sans lien quote (locked, anonyme). Persisté en Room v5 (`MIGRATION_4_5`) — un cache hit garde le bouton « Citer » disponible sans round-trip réseau.
+    val quoteRef: Int? = null,           // Phase 2C (#146/#227) : `ref` opaque parsé depuis le href du lien quote HFR (`message.php?…&numrep=…&ref=N`) quand il est en clair. Null = ref absent/obfusqué/locked/anonyme. Persisté en Room v5 (`MIGRATION_4_5`) pour préserver le `ref` best-effort ; le bouton « Citer » dépend de `Topic.canReply`, pas de ce champ.
 )
 
 data class PostContent(
@@ -431,11 +431,11 @@ plus tard pour Edit / Quote / Edit FP / Create.
 ```kotlin
 data class ReplyContext(
     val cat: Int,
-    val subcat: Int,                 // requis > 0 ; `ReplyContext.init` refuse à la fois le sentinel `SUBCAT_UNKNOWN` (-1) et la wire shape moderator-space HFR (0, cat=0/cat=prive)
+    val subcat: Int,                 // requis >= 0 ; `ReplyContext.init` refuse seulement le sentinel `SUBCAT_UNKNOWN` (-1). `0` est valide pour une catégorie sans sous-catégorie (cat IA, #213).
     val topicId: Int,
     val page: Int,                   // page topic depuis laquelle l'utilisateur a cliqué "Répondre"
     val quotedNumreponse: Int? = null, // Phase 2C (#146) : numreponse cité ; null = reply simple, non-null = quote (HFR `numrep` query param + POST field)
-    val quoteRef: Int? = null,         // Phase 2C (#146) : ref opaque parsé depuis le href quote HFR ; null = reply simple ou post sans lien quote
+    val quoteRef: Int? = null,         // Phase 2C (#146/#227) : ref opaque parsé depuis le href quote HFR quand disponible ; null = reply simple ou quote sans ref (lien obfusqué), HFR cite via `numrep`
 ) {
     val isQuote: Boolean get() = quotedNumreponse != null
 }

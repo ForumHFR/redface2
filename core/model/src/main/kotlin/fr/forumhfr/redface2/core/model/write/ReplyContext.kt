@@ -28,8 +28,9 @@ data class ReplyContext(
      * 2C (#146) ships it through as-is: the value is opaque (it correlates with
      * post position on the topic page but the exact contract is undocumented), so
      * the model carries whatever the topic page HTML gave us and forbids guessing
-     * a default. `null` when the source post had no quote link — in that case the
-     * UI suppresses the « Citer » action upstream and we never reach this code path.
+     * a default. `null` is accepted for obfuscated toolbar rows: HFR identifies the
+     * cited post by `numrep={quotedNumreponse}` alone, and the network layer simply
+     * omits `&ref=` when this value is absent.
      */
     val quoteRef: Int? = null,
 ) {
@@ -53,8 +54,8 @@ data class ReplyContext(
         }
         // `quoteRef` is the per-page positional id of the *cited* post — only
         // meaningful in conjunction with `quotedNumreponse`. The reverse shape
-        // (`quotedNumreponse != null && quoteRef == null`) stays tolerated for
-        // forward compat in case HFR drops `ref` one day ; see
+        // (`quotedNumreponse != null && quoteRef == null`) is the expected fallback
+        // for obfuscated toolbar rows where the quote link could not be parsed ; see
         // `HfrClient.getReplyForm` KDoc.
         require(quotedNumreponse != null || quoteRef == null) {
             "quoteRef requires quotedNumreponse"

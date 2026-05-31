@@ -25,9 +25,10 @@ data class Post(
      * (HFR identifies the cited post by `numrep={numreponse}` alone — #227, proven
      * live). « Citer » visibility is driven by `Topic.canReply`, NOT by this field.
      *
-     * Persisted in Room v5 (cf. `MIGRATION_4_5`) so cache hits keep the
-     * « Citer » button available without a network refresh. Pre-v5 rows
-     * backfill to `NULL` and recover the real value on the next live fetch.
+     * Persisted in Room v5 (cf. `MIGRATION_4_5`) so cache hits preserve HFR's
+     * positional `ref` when it was parseable. Pre-v5 rows backfill to `NULL` and
+     * recover the real value on the next live fetch; since #227 this no longer
+     * controls « Citer » visibility.
      */
     val quoteRef: Int? = null,
     /**

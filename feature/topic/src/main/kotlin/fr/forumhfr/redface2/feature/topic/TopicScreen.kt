@@ -468,7 +468,7 @@ private fun TopicLoadedContent(
             // pinned topics ship them as `md_noclass_cryptlink`, cf. #227) no longer
             // hides Citer. `quoteRef` is forwarded when known (positional, cosmetic)
             // and may be null — the whole quote chain tolerates it.
-            val quoteAction: (() -> Unit)? = if (topic.canReply) {
+            val quoteAction: (() -> Unit)? = if (shouldShowQuoteAction(topic)) {
                 { onQuote(topic.subcat, topic.page, post.numreponse, post.quoteRef) }
             } else {
                 null
@@ -476,7 +476,7 @@ private fun TopicLoadedContent(
             // Phase 2D (#147) — « Modifier » is exposed by HFR only on the
             // user's own posts of an unlocked topic. Same canReply gate as
             // Citer (#213) to refuse a read-only topic (no reply form).
-            val editAction: (() -> Unit)? = if (post.isEditable && topic.canReply) {
+            val editAction: (() -> Unit)? = if (shouldShowEditAction(topic, post)) {
                 { onEdit(topic.subcat, topic.page, post.numreponse) }
             } else {
                 null
@@ -860,10 +860,12 @@ private fun TopicPostCard(
             if (onQuote != null || onEdit != null) {
                 // Actions row at the bottom of the post card, sober TextButtons
                 // so they stay subordinate to the post content. « Modifier »
-                // (Phase 2D, #147) appears only on the user's own editable posts.
-                // « Citer » (Phase 2C, #146) appears whenever HFR exposed a
-                // quote link. Either can be absent — we only render the row at
-                // all if at least one action is provided.
+                // (Phase 2D, #147) appears only on the user's own editable posts
+                // when the topic is still postable. « Citer » (Phase 2C, #146)
+                // appears whenever the topic is postable, even when the per-post
+                // `quoteRef` link was obfuscated and parsed as null (#227).
+                // Either can be absent — we only render the row at all if at least
+                // one action is provided.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
@@ -889,6 +891,10 @@ private val topicDateFormatter = DateTimeFormatter
     .withZone(ZoneId.of("Europe/Paris"))
 
 private fun java.time.Instant.asTopicDate(): String = topicDateFormatter.format(this)
+
+internal fun shouldShowQuoteAction(topic: Topic): Boolean = topic.canReply
+
+internal fun shouldShowEditAction(topic: Topic, post: Post): Boolean = post.isEditable && topic.canReply
 
 private const val PAGE_GRID_LIMIT = 40
 private const val JUMP_MAX_DIGITS = 4

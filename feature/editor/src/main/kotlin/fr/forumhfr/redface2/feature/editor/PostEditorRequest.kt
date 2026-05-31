@@ -26,9 +26,10 @@ data class PostEditorRequest(
      */
     val quotedNumreponse: Int? = null,
     /**
-     * `ref` parameter HFR included in the quote link of the source post. Opaque
-     * positional id, parsed from `Post.quoteRef`. Forwarded unchanged ; never
-     * synthesised. `null` when the source post had no quote link.
+     * `ref` parameter HFR included in the quote link of the source post when it was
+     * parseable. Opaque positional id, parsed from `Post.quoteRef`. Forwarded
+     * unchanged ; never synthesised. `null` when the source post had an obfuscated
+     * or absent quote link — HFR still quotes from [quotedNumreponse] alone.
      */
     val quoteRef: Int? = null,
 )

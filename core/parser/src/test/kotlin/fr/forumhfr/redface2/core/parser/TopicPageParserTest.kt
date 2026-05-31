@@ -296,18 +296,14 @@ class TopicPageParserTest {
     // ─── cat IA (cat=32, no sub-category) — #213 / quote (#146) ─────────────────
 
     @Test
-    fun `quoteRef and canReply are robust on the real authenticated IA topic page`() {
+    fun `canReply and subcat zero are robust on the authenticated IA browser-saved topic page`() {
         // #213 / #146 — `write_ia_topic_page.html` is a real authenticated capture of
         // the cat=32 « Intelligence artificielle » topic (no sub-category : subcat=0).
-        // The toolbar « Citer » link is double-nested inside a
-        // `<span class="md_noclass_cryptlink…"><a …numrep…><a …numrep…><img quote.gif></a></a>`,
-        // which Jsoup de-nests into two sibling `<a>`. The premise of the task was that
-        // this defeats `parseQuoteRef` — verified empirically (jsoup 1.22.2) it does NOT :
-        // `.toolbar .left` resolves, `a[href*=numrep=]` returns the de-nested anchors
-        // carrying `…&numrep=N&ref=M`, and the `[?&]ref=` filter correctly keeps the
-        // quote link while discarding `viewbbcode.php` (numreponse= only) and
-        // `addflag.php` (ref= but no numrep=). This test pins that contract on the real
-        // fixture so a future selector tweak cannot silently regress IA quoting.
+        // This fixture is a browser-save: Firefox already preserved/materialized toolbar
+        // links that the OkHttp app path may receive as raw `md_*cryptlink` spans. It is
+        // therefore valid to pin the topic write contract (reply form + subcat=0), but
+        // NOT valid to assert a non-null `quoteRef` here. The UI gate for « Citer » is
+        // covered in `TopicActionGatesTest` and no longer depends on `quoteRef`.
         val topic = parser.parse(fixture("write_ia_topic_page.html"))
 
         assertEquals("cat IA", 32, topic.cat)
@@ -318,14 +314,7 @@ class TopicPageParserTest {
         assertEquals(0, topic.subcat)
 
         assertTrue("IA topic must have posts", topic.posts.isNotEmpty())
-        val first = topic.posts.first()
-        assertEquals(16244, first.numreponse)
-        assertEquals("first IA post must expose a quoteRef (ref=1)", 1, first.quoteRef)
-        // Every real post on this page carries a quote link — none collapses to null.
-        assertTrue(
-            "every IA post must expose a non-null quoteRef",
-            topic.posts.all { it.quoteRef != null },
-        )
+        assertEquals(16244, topic.posts.first().numreponse)
     }
 
     @Test
@@ -586,7 +575,8 @@ class TopicPageParserTest {
         // Synthesised minimal page : one post table without any `a[href*=numrep=]`
         // entry. Mirrors HFR's locked-topic special pages where the toolbar drops
         // the quote action. The parser must keep the post readable AND leave
-        // `quoteRef` null so the UI suppresses the « Citer » button.
+        // `quoteRef` null; the UI decides visibility from `Topic.canReply`, not
+        // from this optional ref.
         //
         // The HFR selector requires a <table><tr class="fondForum2Title"><th><h3>
         // wrapper for the topic title and `td.messCase1 a[name^=t]` for the post

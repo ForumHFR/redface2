@@ -144,12 +144,11 @@ class TopicPageParser(
 
     /**
      * Phase 2C (#146) — extracts the `ref` query parameter from the post's quote
-     * link. HFR renders each post toolbar with an `<a href="…/message.php?…&numrep=
-     * {numreponse}&ref={N}…">` element. `ref` is opaque (correlates with the post's
-     * position on the current topic page, exact semantic undocumented), so we
-     * forward whatever HFR provided and never compute it client-side. When the
-     * link is absent (locked topic, special post types) we return `null` and the
-     * UI suppresses the « Citer » action for that post — never a magic default.
+     * link when HFR exposes it in clear HTML. `ref` is opaque (correlates with the
+     * post's position on the current topic page, exact semantic undocumented), so
+     * we forward whatever HFR provided and never compute it client-side. When the
+     * link is absent or obfuscated we return `null`; « Citer » still works on
+     * postable topics because the write flow quotes by `numrep={numreponse}` alone.
      */
     // The quote action lives on the post's left toolbar — HFR renders it as
     // an `<img src="…quote.gif">` wrapped in an `<a href="…message.php?…

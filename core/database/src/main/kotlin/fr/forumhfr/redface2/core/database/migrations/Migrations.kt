@@ -161,7 +161,7 @@ val MIGRATION_3_4: Migration = object : Migration(3, 4) {
  * - « Publicité » rows and anonymous reads legitimately carry no profile link;
  * - HFR may stop rendering the link for certain post types in the future.
  *
- * Pure DDL, no row rewrite — topic pages are short-lived cache.
+ * Pure DDL, no row rewrite — posts are short-lived cache.
  */
 val MIGRATION_5_6: Migration = object : Migration(5, 6) {
     override fun migrate(db: SupportSQLiteDatabase) {
@@ -173,17 +173,18 @@ val MIGRATION_5_6: Migration = object : Migration(5, 6) {
  * v4 → v5 (Phase 2C, #146 round 2):
  *
  * Adds `quoteRef` to `posts`. Without this column, every fresh cache hit (the
- * common case once a topic has been refreshed once) would reset `quoteRef` to
- * `null` because the mapper has no place to read it from — and the « Citer »
- * button vanishes from the UI until the user pulls the network again. The
- * column is nullable on disk for two reasons :
+ * common case once a topic has been refreshed once) would reset HFR's positional
+ * `ref` to `null` because the mapper has no place to read it from. Since #227
+ * that no longer controls « Citer » visibility (quote can use `numrep` alone),
+ * but preserving the server-provided value remains the best-effort clear-link
+ * contract. The column is nullable on disk for two reasons :
  *
  * - pre-v5 rows backfill to `NULL` (we never captured a `ref` for them; the
  *   next live fetch will set the real value),
  * - posts whose HFR HTML legitimately exposes no quote link (locked topic,
  *   anonymous read, future server-side change) keep `NULL` as the real value.
  *
- * Pure SQL, no row rewrite — topic pages are short-lived cache and the next
+ * Pure SQL, no row rewrite — posts are short-lived cache and the next
  * authenticated fetch overwrites every row with a parsed `quoteRef`.
  */
 val MIGRATION_4_5: Migration = object : Migration(4, 5) {
@@ -202,12 +203,18 @@ val MIGRATION_4_5: Migration = object : Migration(4, 5) {
  *
  * Backfilled to `0` (`false`) for pre-v7 rows : they were written before we observed
  * the reply form, so they stay read-only until the next live authenticated fetch
- * surfaces a real value. Stored as `INTEGER NOT NULL` (Room's Boolean encoding).
+ * surfaces a real value. We also mark those rows stale (`fetchedAt = 0`) so an
+ * otherwise fresh authenticated cache row cannot keep the new write buttons hidden
+ * for the full topic-page TTL after an app upgrade. Stored as `INTEGER NOT NULL`
+ * (Room's Boolean encoding).
  *
- * Pure DDL, no row rewrite — topic pages are short-lived cache.
+ * One DDL step plus a deliberate cache invalidation row rewrite — topic pages are
+ * short-lived cache, and the next live fetch is the source of truth for write
+ * capability.
  */
 val MIGRATION_6_7: Migration = object : Migration(6, 7) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE topic_pages ADD COLUMN canReply INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("UPDATE topic_pages SET fetchedAt = 0")
     }
 }

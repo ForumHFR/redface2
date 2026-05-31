@@ -281,9 +281,8 @@ class MigrationTest {
     /**
      * Phase 2C (#146 round 2) — proves `MIGRATION_4_5` adds `quoteRef` to `posts`
      * as a nullable column, backfills pre-v5 rows to `NULL`, and that the column
-     * is queryable. Without this migration, every fresh cache hit would reset
-     * `quoteRef` to null and the « Citer » button would vanish from the UI until
-     * the next live fetch — see `MIGRATION_4_5` KDoc.
+     * is queryable. This preserves HFR's positional `ref` on clear-link cache hits;
+     * since #227, a null value no longer hides « Citer ».
      */
     @Test
     fun migrate_4_to_5_adds_nullable_quoteRef_to_posts() {
@@ -503,8 +502,9 @@ class MigrationTest {
      * Verifies:
      * 1. The migration runs cleanly against the v6 fixture.
      * 2. Pre-existing topic rows survive the migration.
-     * 3. The new column defaults to `0` (read-only) on pre-v7 rows — they stay
-     *    read-only until the next live authenticated fetch surfaces the reply form.
+     * 3. The new column defaults to `0` (read-only) on pre-v7 rows.
+     * 4. The row is marked stale (`fetchedAt = 0`) so a fresh v6 authenticated cache hit
+     *    does not keep reply / quote / edit hidden for the full topic-page TTL.
      */
     @Test
     fun migrate_6_to_7_adds_canReply_with_false_default_to_topic_pages() {
@@ -542,13 +542,18 @@ class MigrationTest {
 
         try {
             migrated.openHelper.readableDatabase.query(
-                "SELECT canReply FROM topic_pages WHERE cat = 23 AND post = 35395 AND page = 1",
+                "SELECT canReply, fetchedAt FROM topic_pages WHERE cat = 23 AND post = 35395 AND page = 1",
             ).use { cursor ->
                 assertTrue("v6 row must survive MIGRATION_6_7", cursor.moveToFirst())
                 assertEquals(
                     "canReply must default to 0 (read-only) for pre-v7 rows",
                     0,
                     cursor.getInt(0),
+                )
+                assertEquals(
+                    "fetchedAt must be reset so the next observe refreshes canReply from live HTML",
+                    0L,
+                    cursor.getLong(1),
                 )
             }
         } finally {

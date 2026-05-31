@@ -49,12 +49,12 @@ data class PostEntity(
     val authMode: FetchMode,
     /**
      * `ref` parameter parsed from HFR's quote link href (Phase 2C, #146 — round
-     * 2 fix). Persisted in Room v5 so the « Citer » button stays available on a
-     * cache hit. Nullable on disk : pre-v5 rows backfill to `NULL`, and posts whose
-     * HFR HTML exposed no *clear* quote link (obfuscated `md_*cryptlink` toolbar,
-     * locked topic, anonymous read) keep `NULL`. Since #227 « Citer » is gated on
-     * `Topic.canReply`, not on this column — a `null` quoteRef no longer hides the
-     * button (HFR quotes by `numrep={numreponse}` alone).
+     * 2 fix). Persisted in Room v5 so clear-link cache hits keep HFR's best-effort
+     * positional quote ref. Nullable on disk : pre-v5 rows backfill to `NULL`, and
+     * posts whose HFR HTML exposed no *clear* quote link (obfuscated
+     * `md_*cryptlink` toolbar, locked topic, anonymous read) keep `NULL`. Since
+     * #227 « Citer » is gated on `Topic.canReply`, not on this column — a `null`
+     * quoteRef no longer hides the button (HFR quotes by `numrep={numreponse}` alone).
      */
     val quoteRef: Int? = null,
     /**
