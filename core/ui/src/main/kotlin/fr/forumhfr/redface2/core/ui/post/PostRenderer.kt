@@ -229,13 +229,16 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
         return
     }
     QuoteFrame(quoteDepth = quoteDepth, isBareQuote = block.author == null) {
-        block.author?.let { author ->
-            Text(
-                text = stringResource(R.string.post_quote_author, author),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(
+            // #252 — a bare quote still gets a "Citation" header (no author), mirroring the
+            // "Citation de X" header of a sourced citation, so the framed block always reads
+            // as a quotation and not as a stray indented paragraph.
+            text = block.author
+                ?.let { stringResource(R.string.post_quote_author, it) }
+                ?: stringResource(R.string.post_quote_bare),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         PostBlocksRenderer(
             blocks = block.content.blocks,
             quoteDepth = quoteDepth + 1,
@@ -348,13 +351,14 @@ private fun CollapsedQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
             )
         }
         if (revealed) {
-            block.author?.let { author ->
-                Text(
-                    text = stringResource(R.string.post_quote_author, author),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                // #252 — same "Citation"/"Citation de X" header rule as the expanded QuoteBlock.
+                text = block.author
+                    ?.let { stringResource(R.string.post_quote_author, it) }
+                    ?: stringResource(R.string.post_quote_bare),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             PostBlocksRenderer(
                 blocks = block.content.blocks,
                 quoteDepth = 0,
