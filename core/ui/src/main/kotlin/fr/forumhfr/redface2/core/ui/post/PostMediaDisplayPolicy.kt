@@ -25,9 +25,11 @@ import kotlin.math.roundToInt
  * Inline `[img]` ([inlineImage]) is now sized like smileys (#224 option A): measured intrinsic native
  * size (no-upscale + absolute cap [INLINE_IMAGE_MAX_WIDTH_SP]×[INLINE_IMAGE_MAX_HEIGHT_SP]) then the
  * relative `0.9 × contentWidth` cap, via the same `IntrinsicMediaSizeCache` + `imageDisplayBox` in
- * PostRenderer. The fixed 240×180 [inlineImage] bucket survives only as the cold-cache fallback while
- * the measurement is in flight (and as the default `collectInlineMedia` resolver in tests). This kills
- * both the empty frame around a small reaction image and the overflow in a narrow quote.
+ * PostRenderer. The **production cold fallback** (unmeasured `[img]`) is the one-line
+ * [INLINE_IMAGE_MIN_HEIGHT_SP] square in `imageDisplayBox` (#253, no giant Fit flash). The fixed
+ * 240×180 [inlineImage] bucket is now only the **default `collectInlineMedia` resolver** (legacy bucket
+ * exercised by tests), not the runtime fallback. This kills both the empty frame around a small reaction
+ * image and the overflow in a narrow quote.
  *
  * Why this took fixed buckets as a stopgap in #109: Compose `InlineTextContent` requires a **fixed**
  * `Placeholder` size when the `AnnotatedString` is built, so intrinsic sizing needs async-measure →
@@ -86,13 +88,13 @@ internal object PostMediaDisplayPolicy {
     )
 
     /**
-     * Inline `[img]` BBCode embedded inside a paragraph (`PostInline.InlineImage`). 240×180 is the
-     * historical HFR thumbnail aspect (4:3) that fits next to wrapped text on a phone without
-     * blowing the line height; landscape and portrait shots both downscale via
-     * [inlineImageContentScale]. The `:core:ui` parser already strips data:/javascript:/file:
-     * schemes so only http(s) URLs reach this bucket. Since #224 option A this is only the
-     * **cold-cache fallback** (and the test default): the production size is the measured intrinsic
-     * native size, no-upscale + capped, resolved by `imageDisplayBox`.
+     * Legacy 240×180 inline `[img]` bucket. 240×180 is the historical HFR thumbnail aspect (4:3); the
+     * `:core:ui` parser strips data:/javascript:/file: schemes so only http(s) URLs reach it.
+     *
+     * Since #224 option A this is **no longer the runtime sizing**: production `[img]` size is the
+     * measured intrinsic native size (no-upscale + capped) from `imageDisplayBox`, and the production
+     * cold fallback (unmeasured) is the [INLINE_IMAGE_MIN_HEIGHT_SP] square (#253). This bucket now only
+     * serves as the **default `collectInlineMedia` resolver** (the legacy value exercised by tests).
      */
     val inlineImage: InlineMediaBox = InlineMediaBox(
         placeholderWidth = 240.sp,
