@@ -1,9 +1,9 @@
-Alpha Redface 2 v68 — finitions écriture et drapeaux.
+Alpha Redface 2 v69 — lecture des blocs de code.
 
 Changements :
-- Répondre, citer et modifier ne s'affichent plus hors connexion.
-- Drapeaux : plus de double loader pendant le swipe-to-refresh.
-- Drapeaux : le swipe-to-refresh fonctionne aussi sur liste vide ou erreur.
-- Tests ciblés ajoutés sur les gates d'écriture et le refresh.
+- Les blocs [code] reviennent à la ligne au lieu de déborder hors écran.
+- Numéros de ligne à gauche des blocs [code], comme sur le web HFR.
+- Une ligne longue qui passe sur plusieurs lignes ne reçoit qu'un seul numéro.
+- [fixed] inchangé (alignement préservé pour l'ASCII art / tableaux).
 
 Bugs : alpha ou GitHub.

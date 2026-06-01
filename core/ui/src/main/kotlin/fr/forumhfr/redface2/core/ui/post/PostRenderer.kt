@@ -23,6 +23,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,22 +38,29 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -422,7 +430,8 @@ private fun ImageBlockError(description: String?) {
 
 @Composable
 private fun FixedBlock(block: PostBlock.Fixed) {
-    MonospaceContainer {
+    // [fixed] = column-aligned ASCII art/tables → keep no-wrap + horizontal scroll (#244).
+    MonospaceContainer(scrollHorizontally = true) {
         Text(
             text = block.text,
             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
@@ -434,7 +443,10 @@ private fun FixedBlock(block: PostBlock.Fixed) {
 
 @Composable
 private fun CodeBlockBlock(block: PostBlock.CodeBlock) {
-    MonospaceContainer {
+    // [code] = often prose / long pasted lines → WRAP within the card width so it stays readable on
+    // mobile (#244, dogfood). No horizontal scroll. A left line-number gutter (like HFR's web render)
+    // makes the wrap unambiguous: one number per LOGICAL line, wrapped continuations stay unnumbered.
+    MonospaceContainer(scrollHorizontally = false) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             block.language?.let { lang ->
                 Text(
@@ -443,40 +455,138 @@ private fun CodeBlockBlock(block: PostBlock.CodeBlock) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            CodeWithLineNumbers(
+                code = block.text,
+                codeStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                codeColor = MaterialTheme.colorScheme.onSurface,
+                gutterColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                dividerColor = MaterialTheme.colorScheme.outlineVariant,
+            )
+        }
+    }
+}
+
+/** Gap between the right edge of the line-number gutter and the start of the code text. */
+private val CodeGutterGap = 8.dp
+
+/**
+ * Renders `[code]` with a left line-number gutter that stays aligned when long lines soft-wrap.
+ *
+ * The whole block is a SINGLE soft-wrapping [Text] (so selection/copy stay contiguous and the
+ * composable count is O(1) regardless of line count). Numbers are PAINTED in [Modifier.drawBehind] —
+ * never part of the text content — by mapping each LOGICAL line's start offset to its first visual
+ * line via [TextLayoutResult.getLineForOffset] then [TextLayoutResult.getLineTop]. A wrapped
+ * continuation visual line is never visited, so it gets no number: that is what lets the reader tell
+ * a soft-wrap apart from a real newline.
+ *
+ * The gutter width comes from the digit count of the line total (monospace ⇒ fixed advance), so
+ * numbers are right-aligned and the code column never shifts. [layout] is read only in the draw phase
+ * to avoid a recomposition loop.
+ */
+@Composable
+private fun CodeWithLineNumbers(
+    code: String,
+    codeStyle: TextStyle,
+    codeColor: Color,
+    gutterColor: Color,
+    dividerColor: Color,
+) {
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val gutterStyle = remember(codeStyle, gutterColor) { codeStyle.copy(color = gutterColor) }
+
+    // Start offset of each LOGICAL line, computed from the raw source before layout.
+    val lineStartOffsets = remember(code) {
+        buildList {
+            add(0)
+            code.forEachIndexed { index, char -> if (char == '\n') add(index + 1) }
+            if (code.endsWith("\n")) removeAt(lastIndex)
+        }
+    }
+
+    val digitCount = lineStartOffsets.size.toString().length
+    val digitAdvancePx = remember(gutterStyle, density) { measurer.measure("0", gutterStyle).size.width }
+    val gutterTextWidthPx = digitCount * digitAdvancePx
+    val gapPx = with(density) { CodeGutterGap.toPx() }
+    val gutterWidthDp = with(density) { (gutterTextWidthPx + gapPx).toDp() }
+
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+    // Code is LTR by nature; force it so the painted gutter (absolute-left coords) and the Text's
+    // `start` padding agree under RTL locales (Codex review on the #244 PR) — otherwise `start` flips
+    // to the right while the gutter stays on the left and overlaps the code.
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .drawBehind {
+                    val result = layout ?: return@drawBehind
+                    val dividerX = gutterTextWidthPx + gapPx / 2f
+                    drawLine(
+                        color = dividerColor,
+                        start = Offset(dividerX, 0f),
+                        end = Offset(dividerX, size.height),
+                    )
+                    lineStartOffsets.forEachIndexed { index, offset ->
+                        val visualLine = result.getLineForOffset(offset).coerceIn(0, result.lineCount - 1)
+                        val label = (index + 1).toString()
+                        val x = (gutterTextWidthPx - label.length * digitAdvancePx).toFloat()
+                        drawText(
+                            textMeasurer = measurer,
+                            text = label,
+                            topLeft = Offset(x, result.getLineTop(visualLine)),
+                            style = gutterStyle,
+                        )
+                    }
+                },
+        ) {
             Text(
-                text = block.text,
-                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.onSurface,
-                softWrap = false,
+                text = code,
+                style = codeStyle,
+                color = codeColor,
+                softWrap = true,
+                onTextLayout = { layout = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = gutterWidthDp),
             )
         }
     }
 }
 
 /**
- * Wraps a `[fixed]` / `[code]` body in a tinted card with horizontal scroll. Long lines (raw URL,
- * indented snippets, syntax-highlighted source) must overflow horizontally instead of wrapping —
- * wrap would mangle indentation and break the visual contract of a monospace block.
+ * Wraps a `[fixed]` / `[code]` body in a tinted monospace card. [scrollHorizontally] picks the
+ * overflow behaviour per block kind (#244) :
  *
- * Modifier order matters here: the **outer** [Card] carries [Modifier.fillMaxWidth] so the card
- * itself spans the parent. The **inner** [Column] must NOT carry [Modifier.fillMaxWidth] before
- * [Modifier.horizontalScroll] — that would clamp the children's measured width to the card's
- * width and turn the scroll into a no-op. [Modifier.padding] sits before the scroll modifier so
- * the inset is fixed and the children scroll inside it (otherwise the left padding would slide
- * out of view on overflow). The monospace [Text] children opt out of soft wrap explicitly.
+ * - **`true` (`[fixed]`)** : long lines OVERFLOW horizontally (children opt out of soft wrap, the
+ *   inner [Column] scrolls). `[fixed]` is column-aligned ASCII art / tables, so wrapping would
+ *   mangle the alignment — horizontal scroll preserves it.
+ * - **`false` (`[code]`)** : the body WRAPS within the card width. HFR `[code]` is most often prose
+ *   or long pasted lines (e.g. articles), where a single horizontally-scrolling line is unreadable
+ *   on mobile (the original dogfood bug — RF1's WebView wraps it). The inner [Column] fills the
+ *   width so the soft-wrapping monospace [Text] flows.
+ *
+ * Modifier order (scroll mode): the **outer** [Card] carries [Modifier.fillMaxWidth] so the card
+ * spans the parent; the **inner** [Column] must NOT carry [Modifier.fillMaxWidth] before
+ * [Modifier.horizontalScroll] (that would clamp the children's measured width to the card's width
+ * and turn the scroll into a no-op). [Modifier.padding] sits before the scroll so the inset stays
+ * fixed and the children scroll inside it.
  */
 @Composable
-private fun MonospaceContainer(content: @Composable () -> Unit) {
+private fun MonospaceContainer(scrollHorizontally: Boolean, content: @Composable () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
         ),
         modifier = Modifier.fillMaxWidth(),
     ) {
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .padding(12.dp)
-                .horizontalScroll(rememberScrollState()),
+                .let { base ->
+                    if (scrollHorizontally) base.horizontalScroll(scrollState) else base.fillMaxWidth()
+                },
         ) {
             content()
         }

@@ -1,9 +1,9 @@
-Redface 2 alpha v68 — write actions and flags polish.
+Redface 2 alpha v69 — code block reading.
 
 Changes:
-- Reply, quote and edit actions are no longer shown while logged out.
-- Flags: no more double loader during pull-to-refresh.
-- Flags: pull-to-refresh now works on empty and error states.
-- Targeted tests cover write gates and refresh behavior.
+- [code] blocks now wrap instead of overflowing off-screen.
+- Line-number gutter on [code] blocks, like the HFR web render.
+- A long line that wraps onto several rows shows a single number.
+- [fixed] unchanged (alignment preserved for ASCII art / tables).
 
 Report bugs via alpha or GitHub.
