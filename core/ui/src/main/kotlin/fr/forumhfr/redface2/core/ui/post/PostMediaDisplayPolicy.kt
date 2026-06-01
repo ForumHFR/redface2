@@ -22,11 +22,12 @@ import kotlin.math.roundToInt
  * small size directly, while perso smileys use the 70×50 cold-cache fallback while measurement is
  * in flight (and as the default `collectInlineMedia` resolver in tests).
  *
- * Inline `[img]` ([inlineImage]) now borrows the #175 RELATIVE width cap (RF1's `img { max-width:90% }`,
- * #224 option E — see `imageDisplayBox` in PostRenderer) on top of its 240×180 bucket with
- * [inlineImageContentScale] (`Inside`), so it no longer overflows a narrow quote line. Full intrinsic
- * native sizing (no-upscale, like smileys — removing the empty frame around a small reaction image) is
- * a tracked follow-up on #224 (option A); until then 240×180 is the un-capped base size.
+ * Inline `[img]` ([inlineImage]) is now sized like smileys (#224 option A): measured intrinsic native
+ * size (no-upscale + absolute cap [INLINE_IMAGE_MAX_WIDTH_SP]×[INLINE_IMAGE_MAX_HEIGHT_SP]) then the
+ * relative `0.9 × contentWidth` cap, via the same `IntrinsicMediaSizeCache` + `imageDisplayBox` in
+ * PostRenderer. The fixed 240×180 [inlineImage] bucket survives only as the cold-cache fallback while
+ * the measurement is in flight (and as the default `collectInlineMedia` resolver in tests). This kills
+ * both the empty frame around a small reaction image and the overflow in a narrow quote.
  *
  * Why this took fixed buckets as a stopgap in #109: Compose `InlineTextContent` requires a **fixed**
  * `Placeholder` size when the `AnnotatedString` is built, so intrinsic sizing needs async-measure →
@@ -86,9 +87,9 @@ internal object PostMediaDisplayPolicy {
      * historical HFR thumbnail aspect (4:3) that fits next to wrapped text on a phone without
      * blowing the line height; landscape and portrait shots both downscale via
      * [inlineImageContentScale]. The `:core:ui` parser already strips data:/javascript:/file:
-     * schemes so only http(s) URLs reach this bucket. This is the BASE size: the renderer shrinks it
-     * to ≈0.9× the content width inside a narrow quote (#224 option E, `imageDisplayBox`), preserving
-     * the 4:3 aspect.
+     * schemes so only http(s) URLs reach this bucket. Since #224 option A this is only the
+     * **cold-cache fallback** (and the test default): the production size is the measured intrinsic
+     * native size, no-upscale + capped, resolved by `imageDisplayBox`.
      */
     val inlineImage: InlineMediaBox = InlineMediaBox(
         placeholderWidth = 240.sp,
@@ -194,7 +195,18 @@ internal val builtinPreseedSize = PixelSize(16, 16)
 internal val persoColdFallbackSize = PixelSize(70, 50)
 
 /**
- * #175 — the no-upscale + cap policy that replaces the fixed [InlineMediaBox] buckets for smileys.
+ * #224 (option A) — absolute caps for an inline `[img]`, in **sp** (intrinsic native px treated as
+ * logical/CSS px, like the smiley path). More generous than the smiley height cap: an inline reaction
+ * image or embedded photo can be taller than an emotive glyph, yet stays bounded so it never dominates
+ * the post (a genuinely large photo belongs in a standalone `PostBlock.Image`, [blockImageMaxHeight]).
+ * The real horizontal limit is the relative `0.9 × contentWidth` applied renderer-side via [capToWidth].
+ */
+internal const val INLINE_IMAGE_MAX_HEIGHT_SP = 200
+internal const val INLINE_IMAGE_MAX_WIDTH_SP = 240
+
+/**
+ * #175/#224 — the no-upscale + cap policy that replaces the fixed [InlineMediaBox] buckets for inline
+ * media (smileys and inline `[img]`; callers pass the per-kind caps — the defaults are the smiley caps).
  *
  * Given a smiley's intrinsic native size [nativePx] (raw bitmap px from Coil, treated as logical/CSS
  * px), returns the display size to feed the placeholder (as `.sp`):

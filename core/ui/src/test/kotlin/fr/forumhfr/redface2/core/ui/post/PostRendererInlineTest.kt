@@ -151,6 +151,26 @@ class PostRendererInlineTest {
     }
 
     @Test
+    fun `collectMeasurableImageUrls collects inline image urls including nested ones`() {
+        // #224 — inline [img] is now measured for intrinsic sizing; the collector must find images at
+        // top level and nested inside inline containers (here a [b]…[/b] wrapper).
+        val topUrl = "https://forum.hardware.fr/images/top.png"
+        val nestedUrl = "https://rehost.diberie.com/Image/x.gif"
+        val inlines = listOf(
+            PostInline.InlineImage(url = topUrl, description = "top"),
+            PostInline.Strong(
+                children = listOf(PostInline.InlineImage(url = nestedUrl, description = "nested")),
+            ),
+            PostInline.Smiley(
+                kind = SmileyKind.Perso("custom"),
+                imageUrl = "https://forum-images.hardware.fr/images/perso/custom.gif",
+            ),
+        )
+
+        assertEquals(setOf(topUrl, nestedUrl), collectMeasurableImageUrls(inlines))
+    }
+
+    @Test
     fun `inline image emits a post-image placeholder and a matching map entry`() {
         val inlines = listOf(
             PostInline.InlineImage(

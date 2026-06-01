@@ -162,16 +162,19 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     // write recomposes this block and only the inline-content Map (not the AnnotatedString) is rebuilt
     // at the final size. Cold/miss → a provisional fallback to minimise reflow (builtin ~16, perso 70×50).
     val sizeCache = LocalIntrinsicMediaSizeCache.current
-    val smileyUrls = remember(inlines) { collectMeasurableSmileyUrls(inlines) }
-    val measuredSizes: Map<String, IntSize?> = smileyUrls.associateWith { sizeCache.get(it) }
+    // #175 perso smileys + #224 (option A) inline images — both sized by their measured intrinsic size.
+    val measurableUrls = remember(inlines) {
+        collectMeasurableSmileyUrls(inlines) + collectMeasurableImageUrls(inlines)
+    }
+    val measuredSizes: Map<String, IntSize?> = measurableUrls.associateWith { sizeCache.get(it) }
 
     // Measure the not-yet-known URLs. Coil's execute() is a main-safe suspend call (it dispatches its
     // own I/O), and reuses the shared SingletonImageLoader caches the rendering AsyncImage hits — so no
     // double network fetch. A dead URL is recorded as a failure (TTL) so it is not re-fetched.
     val platformContext = LocalPlatformContext.current
-    LaunchedEffect(smileyUrls) {
+    LaunchedEffect(measurableUrls) {
         val loader = SingletonImageLoader.get(platformContext)
-        smileyUrls.forEach { url ->
+        measurableUrls.forEach { url ->
             val now = System.currentTimeMillis()
             if (sizeCache.get(url) == null && !sizeCache.isFailureFresh(url, now)) {
                 val size = measureIntrinsicMediaSize(url, platformContext, loader)
@@ -187,14 +190,14 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     //    placeholder. With the clamp a tall sprite overflowed UP off its line onto the line above
     //    (measured top y=-22 over a 28sp first line); unspecified lineHeight lets the ascent expand → zero overlap.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        // #175 (smileys) + #224 option E (inline images) — RF1's `img { max-width: 90% }` relative cap,
-        // read from the container width here (the only place it's known; it shrinks with quote depth).
+        // #175 (smileys) + #224 (inline images) — RF1's `img { max-width: 90% }` relative cap, read
+        // from the container width here (the only place it's known; it shrinks with quote depth).
         val maxMediaWidthSp = (maxWidth.value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
         val inlineContent = remember(inlines, measuredSizes, maxMediaWidthSp) {
             collectInlineMedia(
                 inlines,
                 smileyBox = { smiley -> smileyDisplayBox(smiley, measuredSizes, maxMediaWidthSp) },
-                imageBox = { imageDisplayBox(maxMediaWidthSp) },
+                imageBox = { image -> imageDisplayBox(image, measuredSizes, maxMediaWidthSp) },
             )
         }
         Text(
@@ -742,6 +745,35 @@ private fun collectMeasurableSmileyUrl(inline: PostInline, urls: MutableSet<Stri
 }
 
 /**
+ * #224 (option A) — collects distinct inline `[img]` URLs of [inlines], for intrinsic measurement
+ * (no-upscale native sizing, like #175 smileys). The `:core:ui` parser has already stripped
+ * non-http(s) schemes, so every collected URL is safe to hand to Coil. Recurses into inline
+ * containers (e.g. an `[img]` wrapped in a `[url=…]` link), mirroring [walkInlinesForMedia].
+ */
+internal fun collectMeasurableImageUrls(inlines: List<PostInline>): Set<String> {
+    val urls = LinkedHashSet<String>()
+    collectMeasurableImageUrlsInto(inlines, urls)
+    return urls
+}
+
+private fun collectMeasurableImageUrlsInto(inlines: List<PostInline>, urls: MutableSet<String>) {
+    inlines.forEach { inline -> collectMeasurableImageUrl(inline, urls) }
+}
+
+private fun collectMeasurableImageUrl(inline: PostInline, urls: MutableSet<String>) {
+    when (inline) {
+        is PostInline.InlineImage -> urls += inline.url
+        is PostInline.Strong -> collectMeasurableImageUrlsInto(inline.children, urls)
+        is PostInline.Emphasis -> collectMeasurableImageUrlsInto(inline.children, urls)
+        is PostInline.Underline -> collectMeasurableImageUrlsInto(inline.children, urls)
+        is PostInline.Strike -> collectMeasurableImageUrlsInto(inline.children, urls)
+        is PostInline.Color -> collectMeasurableImageUrlsInto(inline.children, urls)
+        is PostInline.Link -> collectMeasurableImageUrlsInto(inline.children, urls)
+        else -> Unit
+    }
+}
+
+/**
  * #175 — resolve a smiley's placeholder box: measured native size (no-upscale + absolute cap) when
  * known, else a provisional fallback (pre-seeded builtin / dominant 70×50 perso) to minimise reflow
  * while the measurement is in flight. Finally clamped to [maxWidthSp] (RF1's relative `max-width:90%`)
@@ -766,18 +798,31 @@ private fun smileyDisplayBox(
 }
 
 /**
- * #224 (option E) — resolve an inline `[img]` placeholder box. Start from the historical 240×180
- * bucket and shrink it to RF1's `img { max-width: 90% }` ([maxWidthSp], read from BoxWithConstraints)
- * preserving the 4:3 aspect, so an inline image never overflows a narrow quote line or at large
- * fontScale. Intrinsic native sizing (no-upscale, removing the empty frame around a small reaction
- * image) is the tracked follow-up on #224 (option A).
+ * #224 (option A) — resolve an inline `[img]` placeholder box from its measured intrinsic size:
+ * no-upscale + absolute cap ([INLINE_IMAGE_MAX_WIDTH_SP]×[INLINE_IMAGE_MAX_HEIGHT_SP]) via the shared
+ * [intrinsicSmileyDisplaySize] policy, then the relative `0.9 × contentWidth` cap ([maxWidthSp]). While
+ * the measurement is in flight (cold cache / miss) it falls back to the historical 240×180 bucket,
+ * still relative-capped so even the fallback never overflows a narrow quote. Mirrors [smileyDisplayBox];
+ * this is what removes the empty frame around a small reaction image (vs the old fixed 240×180 box).
  */
-internal fun imageDisplayBox(maxWidthSp: Int): InlineMediaBox {
-    val bucket = PostMediaDisplayPolicy.inlineImage
-    val capped = capToWidth(
-        PixelSize(bucket.placeholderWidth.value.roundToInt(), bucket.placeholderHeight.value.roundToInt()),
-        maxWidthSp,
-    )
+internal fun imageDisplayBox(
+    image: PostInline.InlineImage,
+    measured: Map<String, IntSize?>,
+    maxWidthSp: Int,
+): InlineMediaBox {
+    val size = measured[image.url]
+    val base = if (size != null) {
+        // Reuse the generic #175 no-upscale + cap policy with the inline-image caps (not smiley caps).
+        intrinsicSmileyDisplaySize(
+            PixelSize(size.width, size.height),
+            maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
+            maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
+        )
+    } else {
+        val bucket = PostMediaDisplayPolicy.inlineImage
+        PixelSize(bucket.placeholderWidth.value.roundToInt(), bucket.placeholderHeight.value.roundToInt())
+    }
+    val capped = capToWidth(base, maxWidthSp)
     return InlineMediaBox(capped.width.sp, capped.height.sp)
 }
 
