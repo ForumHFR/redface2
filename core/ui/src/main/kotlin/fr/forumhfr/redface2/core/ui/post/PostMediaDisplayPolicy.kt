@@ -45,10 +45,14 @@ internal object PostMediaDisplayPolicy {
     val smileyContentScale: ContentScale = ContentScale.Fit
 
     /**
-     * Inline `[img]` content is arbitrary user media, not an emotive glyph. Keep the no-upscale
-     * rule there so a tiny linked image is not blown up to the 240×180 inline bucket.
+     * Inline `[img]` uses [ContentScale.Fit] (like smileys) so the bitmap **fills** its placeholder box.
+     * The no-upscale decision now lives in the BOX sizing ([imageDisplayBox] : measured intrinsic, capped,
+     * floored to [INLINE_IMAGE_MIN_HEIGHT_SP]) — NOT in the content scale. With `Inside` a tiny 16×16
+     * cc-image emoji stayed 16×16 centred in its (floored) box, defeating the min-height floor; `Fit`
+     * scales it up to fill the box so it is legible like RF1, while a large photo still scales DOWN into
+     * its capped box.
      */
-    val inlineImageContentScale: ContentScale = ContentScale.Inside
+    val inlineImageContentScale: ContentScale = ContentScale.Fit
 
     /**
      * **Not the #175 production size** — since intrinsic sizing landed, this fixed box survives only

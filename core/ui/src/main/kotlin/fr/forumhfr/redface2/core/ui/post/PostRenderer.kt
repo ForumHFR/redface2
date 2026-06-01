@@ -862,8 +862,9 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
         ),
     ) {
         // The image fills the placeholder via fillMaxSize() so the rendered size tracks the
-        // sp-based placeholder under any fontScale. Inline [img] keeps a no-upscale content
-        // scale, unlike smileys: arbitrary small user images should not be blown up.
+        // sp-based placeholder under any fontScale. ContentScale.Fit makes the bitmap fill that box
+        // (the no-upscale rule lives in the BOX sizing, imageDisplayBox) — so a floored tiny emoji is
+        // actually drawn at the box size, not left 16×16 in the middle of it.
         AsyncImage(
             model = image.url,
             contentDescription = image.description,
