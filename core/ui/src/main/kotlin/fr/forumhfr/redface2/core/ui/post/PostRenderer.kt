@@ -203,9 +203,9 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     // Two guards against a tall/large inline smiley overlapping the text:
     //  - width: cap each smiley to RF1's `img { max-width: 90% }` of the content width (read from
     //    BoxWithConstraints, which shrinks with quote depth) so it never overflows a narrow quote;
-    //  - height: drop bodyMedium's fixed `lineHeight` so the LINE GROWS to contain the baseline-aligned
-    //    placeholder. With the clamp a tall sprite overflowed UP off its line onto the line above
-    //    (measured top y=-22 over a 28sp first line); unspecified lineHeight lets the ascent expand → zero overlap.
+    //  - height: drop bodyMedium's fixed `lineHeight` so the LINE GROWS to contain the placeholder
+    //    (now TextBottom-aligned, #224). With the fixed lineHeight a tall sprite overflowed off its line
+    //    onto the line above; unspecified lineHeight lets the line expand to the placeholder → zero overlap.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         // #175 (smileys) + #224 (inline images) — RF1's `img { max-width: 90% }` relative cap, read
         // from the container width here (the only place it's known; it shrinks with quote depth).
@@ -841,9 +841,10 @@ internal fun imageDisplayBox(
 ): InlineMediaBox {
     val size = measured[image.url]
     val base = if (size != null) {
-        // #175 no-upscale + cap with the inline-image caps, then a min-height floor so a tiny low-res
-        // source (cc-image emoji, 16×16) is upscaled to a legible size (native 16 reads too small in
-        // dogfood). NB: this only enlarges the BOX — the bitmap fills it via ContentScale.Fit.
+        // #175 no-upscale + cap with the inline-image caps, then a min-height floor so a SUB-16 low-res
+        // source can't render below ~one text line. A cc-image emoji (16×16) sits exactly at the floor
+        // → kept native (per @XaaT dogfood); only smaller sources get enlarged. NB: the floor only
+        // grows the BOX — the bitmap fills it via ContentScale.Fit.
         upscaleToMinHeight(
             intrinsicSmileyDisplaySize(
                 PixelSize(size.width, size.height),

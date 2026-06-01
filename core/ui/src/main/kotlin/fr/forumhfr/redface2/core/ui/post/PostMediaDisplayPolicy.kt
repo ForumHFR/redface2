@@ -210,10 +210,11 @@ internal const val INLINE_IMAGE_MAX_HEIGHT_SP = 200
 internal const val INLINE_IMAGE_MAX_WIDTH_SP = 240
 
 /**
- * #224 — minimum display **height** (sp) for an inline `[img]`. Tiny low-res sources — typically the
- * community "cc-image" emoji served as 16×16 PNGs — read too small at native size (dogfood vs RF1).
- * Floor the box height so they upscale to a legible size (filled by [inlineImageContentScale] = Fit);
- * images already taller are untouched (no photo blow-up). 20 ≈ the bodyMedium line height.
+ * #224/#253 — minimum display **height** (sp) for an inline `[img]`, so a sub-16 low-res source can't
+ * render below ~one text line. The community "cc-image" emoji (served as 16×16 PNGs) sits exactly at
+ * this floor → rendered at its native 16 (dogfood: the right size next to text, per @XaaT); anything
+ * smaller is floored up to 16 (filled by [inlineImageContentScale] = Fit), anything taller is untouched
+ * (no photo blow-up). 16 ≈ one text line (just under bodyMedium's 20sp lineHeight).
  */
 internal const val INLINE_IMAGE_MIN_HEIGHT_SP = 16
 
