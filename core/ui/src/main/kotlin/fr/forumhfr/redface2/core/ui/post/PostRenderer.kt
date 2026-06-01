@@ -94,6 +94,28 @@ internal const val MAX_VISIBLE_QUOTE_DEPTH = 3
  */
 internal fun isCollapsedQuoteDepth(depth: Int): Boolean = depth >= MAX_VISIBLE_QUOTE_DEPTH
 
+/**
+ * Which themed accent the [QuoteFrame] left bar uses. Issue #252 — a **bare** `[quote]` (typed by
+ * hand, no author) is the user formatting their own text, not citing a sourced post, so it must read
+ * differently from a real HFR citation (`[quotemsg=]`, author set) and from a nested citation:
+ *
+ *  - [BARE] → neutral `outline` accent, regardless of depth: "quoted text, no source".
+ *  - [SOURCED_EVEN] / [SOURCED_ODD] → the existing `primary` / `tertiary` alternation that keeps a
+ *    subtle hierarchy for nested real citations (cf. [QuoteFrame] KDoc).
+ *
+ * The author palette stays colored (red/gold) so a citation always looks "sourced"; the bare quote
+ * gets the muted neutral so the two are unambiguous in light, dark and AMOLED (where `secondary`
+ * would collide with `primary`). Pure decision so it is pinned in [PostRendererQuoteDepthTest]
+ * without entering Compose.
+ */
+internal enum class QuoteAccentRole { BARE, SOURCED_EVEN, SOURCED_ODD }
+
+internal fun quoteAccentRole(quoteDepth: Int, isBareQuote: Boolean): QuoteAccentRole = when {
+    isBareQuote -> QuoteAccentRole.BARE
+    quoteDepth % 2 == 0 -> QuoteAccentRole.SOURCED_EVEN
+    else -> QuoteAccentRole.SOURCED_ODD
+}
+
 @Composable
 fun PostRenderer(
     content: PostContent,
@@ -206,7 +228,7 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
         CollapsedQuoteBlock(block, quoteDepth)
         return
     }
-    QuoteFrame(quoteDepth = quoteDepth) {
+    QuoteFrame(quoteDepth = quoteDepth, isBareQuote = block.author == null) {
         block.author?.let { author ->
             Text(
                 text = stringResource(R.string.post_quote_author, author),
@@ -228,17 +250,22 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
  * theme `primary` / `tertiary` accent (alternating by depth) so nested quotes keep a
  * subtle hierarchy without redefining `quoteDepth` semantics — the existing N=3 collapse
  * rule still applies above this layer (cf. `isCollapsedQuoteDepth`).
+ *
+ * Issue #252 — a **bare** `[quote]` (`isBareQuote`, no author) instead gets a neutral `outline`
+ * accent so the user's own quoted text reads differently from a sourced HFR citation and from a
+ * nested citation. See [quoteAccentRole] for the (pure, tested) role decision.
  */
 @Composable
 private fun QuoteFrame(
     quoteDepth: Int,
+    isBareQuote: Boolean,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val accent = if (quoteDepth % 2 == 0) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.tertiary
+    val accent = when (quoteAccentRole(quoteDepth, isBareQuote)) {
+        QuoteAccentRole.BARE -> MaterialTheme.colorScheme.outline
+        QuoteAccentRole.SOURCED_EVEN -> MaterialTheme.colorScheme.primary
+        QuoteAccentRole.SOURCED_ODD -> MaterialTheme.colorScheme.tertiary
     }
     Card(
         modifier = modifier,
@@ -294,6 +321,7 @@ private fun CollapsedQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
     var revealed by rememberSaveable(block) { mutableStateOf(false) }
     QuoteFrame(
         quoteDepth = quoteDepth,
+        isBareQuote = block.author == null,
         modifier = Modifier.clickable { revealed = !revealed },
     ) {
         Row(
