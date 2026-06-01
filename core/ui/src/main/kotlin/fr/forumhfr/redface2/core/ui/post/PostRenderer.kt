@@ -116,6 +116,16 @@ internal fun quoteAccentRole(quoteDepth: Int, isBareQuote: Boolean): QuoteAccent
     else -> QuoteAccentRole.SOURCED_ODD
 }
 
+/**
+ * #252/#254 — a quote is "bare" (a hand-typed `[quote]`, no source) only when it carries **no source
+ * metadata at all**. Author alone is not enough: a sourced `[quotemsg=id,page,user]` parsed in the
+ * editor preview (`BbcodeContentParser`) yields `author == null` but a non-null `numreponse`, so an
+ * author-only test would wrongly paint a sourced citation with the bare neutral accent + "Citation"
+ * header. Reading-path citations always carry an author, so this only changes the editor-preview case.
+ */
+internal fun isBareQuote(quote: PostBlock.Quote): Boolean =
+    quote.author == null && quote.numreponse == null && quote.page == null
+
 @Composable
 fun PostRenderer(
     content: PostContent,
@@ -228,7 +238,7 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
         CollapsedQuoteBlock(block, quoteDepth)
         return
     }
-    QuoteFrame(quoteDepth = quoteDepth, isBareQuote = block.author == null) {
+    QuoteFrame(quoteDepth = quoteDepth, isBareQuote = isBareQuote(block)) {
         Text(
             // #252 — a bare quote still gets a "Citation" header (no author), mirroring the
             // "Citation de X" header of a sourced citation, so the framed block always reads
@@ -325,7 +335,7 @@ private fun CollapsedQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
     var revealed by rememberSaveable(block) { mutableStateOf(false) }
     QuoteFrame(
         quoteDepth = quoteDepth,
-        isBareQuote = block.author == null,
+        isBareQuote = isBareQuote(block),
         modifier = Modifier.clickable { revealed = !revealed },
     ) {
         Row(

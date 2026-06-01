@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.ui.post
 
+import fr.forumhfr.redface2.core.model.PostBlock
+import fr.forumhfr.redface2.core.model.PostContent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -64,6 +66,24 @@ class PostRendererQuoteDepthTest {
         assertEquals(QuoteAccentRole.BARE, quoteAccentRole(quoteDepth = 0, isBareQuote = true))
         assertEquals(QuoteAccentRole.BARE, quoteAccentRole(quoteDepth = 1, isBareQuote = true))
         assertEquals(QuoteAccentRole.BARE, quoteAccentRole(quoteDepth = 2, isBareQuote = true))
+    }
+
+    @Test
+    fun `isBareQuote is true only when a quote carries no source metadata`() {
+        fun quote(author: String?, numreponse: Int?, page: Int?) = PostBlock.Quote(
+            author = author,
+            numreponse = numreponse,
+            page = page,
+            content = PostContent(blocks = emptyList()),
+        )
+        // Hand-typed [quote]: no author, no numreponse, no page → bare.
+        assertTrue(isBareQuote(quote(author = null, numreponse = null, page = null)))
+        // #254 regression guard: a sourced [quotemsg=id,page,user] parsed in the editor preview has
+        // author == null but a non-null numreponse — it must NOT be treated as bare.
+        assertFalse(isBareQuote(quote(author = null, numreponse = 2523833, page = null)))
+        assertFalse(isBareQuote(quote(author = null, numreponse = 2523833, page = 1)))
+        // Reading-path sourced citation: author present → not bare.
+        assertFalse(isBareQuote(quote(author = "Lt Ripley", numreponse = 74749781, page = 8270)))
     }
 
     @Test
