@@ -118,7 +118,9 @@ class PostRendererInlineTest {
                 imageUrl = "https://forum-images.hardware.fr/images/perso/measured.gif",
             ),
         )
-        val media = collectInlineMedia(inlines) { InlineMediaBox(33.sp, 21.sp) }
+        // Named arg: collectInlineMedia now takes both `smileyBox` and `imageBox` resolvers (#224),
+        // so a trailing lambda would bind to the last param (imageBox) — pin the smiley seam explicitly.
+        val media = collectInlineMedia(inlines, smileyBox = { InlineMediaBox(33.sp, 21.sp) })
         val placeholder = media["post-smiley-0"]?.placeholder
         assertNotNull("resolved smiley should yield an InlineTextContent", placeholder)
         assertEquals(33.sp, placeholder!!.width)
@@ -162,6 +164,20 @@ class PostRendererInlineTest {
 
         assertEquals(setOf("post-image-0"), media.keys)
         assertEquals(setOf("post-image-0"), annotated.inlineContentIds())
+    }
+
+    @Test
+    fun `collectInlineMedia applies the provided image box resolver to the placeholder (224 seam)`() {
+        // #224 — the production caller (ParagraphBlock) passes a relative-cap resolver (imageDisplayBox);
+        // pin that whatever box the imageBox resolver yields lands on the inline image placeholder.
+        val inlines = listOf(
+            PostInline.InlineImage(url = "https://forum.hardware.fr/images/foo.png", description = "foo"),
+        )
+        val media = collectInlineMedia(inlines, imageBox = { InlineMediaBox(120.sp, 90.sp) })
+        val placeholder = media["post-image-0"]?.placeholder
+        assertNotNull("resolved inline image should yield an InlineTextContent", placeholder)
+        assertEquals(120.sp, placeholder!!.width)
+        assertEquals(90.sp, placeholder.height)
     }
 
     @Test

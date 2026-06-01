@@ -187,9 +187,15 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     //    placeholder. With the clamp a tall sprite overflowed UP off its line onto the line above
     //    (measured top y=-22 over a 28sp first line); unspecified lineHeight lets the ascent expand → zero overlap.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val maxSmileyWidthSp = (maxWidth.value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
-        val inlineContent = remember(inlines, measuredSizes, maxSmileyWidthSp) {
-            collectInlineMedia(inlines) { smiley -> smileyDisplayBox(smiley, measuredSizes, maxSmileyWidthSp) }
+        // #175 (smileys) + #224 option E (inline images) — RF1's `img { max-width: 90% }` relative cap,
+        // read from the container width here (the only place it's known; it shrinks with quote depth).
+        val maxMediaWidthSp = (maxWidth.value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+        val inlineContent = remember(inlines, measuredSizes, maxMediaWidthSp) {
+            collectInlineMedia(
+                inlines,
+                smileyBox = { smiley -> smileyDisplayBox(smiley, measuredSizes, maxMediaWidthSp) },
+                imageBox = { imageDisplayBox(maxMediaWidthSp) },
+            )
         }
         Text(
             text = annotated,
@@ -666,10 +672,11 @@ private fun AnnotatedString.Builder.appendInline(
 internal fun collectInlineMedia(
     inlines: List<PostInline>,
     smileyBox: (PostInline.Smiley) -> InlineMediaBox = { PostMediaDisplayPolicy.smileyBox(it) },
+    imageBox: (PostInline.InlineImage) -> InlineMediaBox = { PostMediaDisplayPolicy.inlineImage },
 ): Map<String, InlineTextContent> {
     val out = mutableMapOf<String, InlineTextContent>()
     val media = MediaCounter()
-    walkInlinesForMedia(inlines, out, media, smileyBox)
+    walkInlinesForMedia(inlines, out, media, smileyBox, imageBox)
     return out
 }
 
@@ -678,23 +685,24 @@ private fun walkInlinesForMedia(
     out: MutableMap<String, InlineTextContent>,
     media: MediaCounter,
     smileyBox: (PostInline.Smiley) -> InlineMediaBox,
+    imageBox: (PostInline.InlineImage) -> InlineMediaBox,
 ) {
     inlines.forEach { inline ->
         when (inline) {
             is PostInline.InlineImage ->
-                out += media.nextImage() to imageInlineContent(inline)
+                out += media.nextImage() to imageInlineContent(inline, imageBox(inline))
 
             is PostInline.Smiley -> {
                 if (inline.imageUrl == null) return@forEach
                 out += media.nextSmiley() to smileyInlineContent(inline, smileyBox(inline))
             }
 
-            is PostInline.Strong -> walkInlinesForMedia(inline.children, out, media, smileyBox)
-            is PostInline.Emphasis -> walkInlinesForMedia(inline.children, out, media, smileyBox)
-            is PostInline.Underline -> walkInlinesForMedia(inline.children, out, media, smileyBox)
-            is PostInline.Strike -> walkInlinesForMedia(inline.children, out, media, smileyBox)
-            is PostInline.Color -> walkInlinesForMedia(inline.children, out, media, smileyBox)
-            is PostInline.Link -> walkInlinesForMedia(inline.children, out, media, smileyBox)
+            is PostInline.Strong -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
+            is PostInline.Emphasis -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
+            is PostInline.Underline -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
+            is PostInline.Strike -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
+            is PostInline.Color -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
+            is PostInline.Link -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
             else -> Unit
         }
     }
@@ -757,6 +765,22 @@ private fun smileyDisplayBox(
     return InlineMediaBox(capped.width.sp, capped.height.sp)
 }
 
+/**
+ * #224 (option E) — resolve an inline `[img]` placeholder box. Start from the historical 240×180
+ * bucket and shrink it to RF1's `img { max-width: 90% }` ([maxWidthSp], read from BoxWithConstraints)
+ * preserving the 4:3 aspect, so an inline image never overflows a narrow quote line or at large
+ * fontScale. Intrinsic native sizing (no-upscale, removing the empty frame around a small reaction
+ * image) is the tracked follow-up on #224 (option A).
+ */
+internal fun imageDisplayBox(maxWidthSp: Int): InlineMediaBox {
+    val bucket = PostMediaDisplayPolicy.inlineImage
+    val capped = capToWidth(
+        PixelSize(bucket.placeholderWidth.value.roundToInt(), bucket.placeholderHeight.value.roundToInt()),
+        maxWidthSp,
+    )
+    return InlineMediaBox(capped.width.sp, capped.height.sp)
+}
+
 /** True when [inlines] contains at least one renderable inline media (a smiley with a URL, or an image). */
 private fun hasInlineMedia(inlines: List<PostInline>): Boolean = inlines.any { inline ->
     when (inline) {
@@ -772,8 +796,7 @@ private fun hasInlineMedia(inlines: List<PostInline>): Boolean = inlines.any { i
     }
 }
 
-internal fun imageInlineContent(image: PostInline.InlineImage): InlineTextContent {
-    val box = PostMediaDisplayPolicy.inlineImage
+internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaBox): InlineTextContent {
     return InlineTextContent(
         placeholder = Placeholder(
             width = box.placeholderWidth,

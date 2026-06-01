@@ -22,9 +22,11 @@ import kotlin.math.roundToInt
  * small size directly, while perso smileys use the 70×50 cold-cache fallback while measurement is
  * in flight (and as the default `collectInlineMedia` resolver in tests).
  *
- * Inline `[img]` ([inlineImage]) is OUT of #175 scope and still uses its fixed 240×180 bucket with
- * [inlineImageContentScale] (`Inside`) — a separate UX contract; revisit if dogfood shows it needs
- * the same intrinsic treatment.
+ * Inline `[img]` ([inlineImage]) now borrows the #175 RELATIVE width cap (RF1's `img { max-width:90% }`,
+ * #224 option E — see `imageDisplayBox` in PostRenderer) on top of its 240×180 bucket with
+ * [inlineImageContentScale] (`Inside`), so it no longer overflows a narrow quote line. Full intrinsic
+ * native sizing (no-upscale, like smileys — removing the empty frame around a small reaction image) is
+ * a tracked follow-up on #224 (option A); until then 240×180 is the un-capped base size.
  *
  * Why this took fixed buckets as a stopgap in #109: Compose `InlineTextContent` requires a **fixed**
  * `Placeholder` size when the `AnnotatedString` is built, so intrinsic sizing needs async-measure →
@@ -84,7 +86,9 @@ internal object PostMediaDisplayPolicy {
      * historical HFR thumbnail aspect (4:3) that fits next to wrapped text on a phone without
      * blowing the line height; landscape and portrait shots both downscale via
      * [inlineImageContentScale]. The `:core:ui` parser already strips data:/javascript:/file:
-     * schemes so only http(s) URLs reach this bucket.
+     * schemes so only http(s) URLs reach this bucket. This is the BASE size: the renderer shrinks it
+     * to ≈0.9× the content width inside a narrow quote (#224 option E, `imageDisplayBox`), preserving
+     * the 4:3 aspect.
      */
     val inlineImage: InlineMediaBox = InlineMediaBox(
         placeholderWidth = 240.sp,
