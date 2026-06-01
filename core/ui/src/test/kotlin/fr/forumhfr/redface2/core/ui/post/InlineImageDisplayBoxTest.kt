@@ -20,10 +20,20 @@ class InlineImageDisplayBoxTest {
 
     @Test
     fun `small reaction image keeps its native size (no upscale, no empty frame)`() {
-        // The whole point of A: an 80×60 reaction no longer sits in a 240×180 empty box.
+        // The whole point of A: an 80×60 reaction no longer sits in a 240×180 empty box. Above the
+        // min-height floor (24), so untouched by the upscale.
         val b = box(measured = IntSize(80, 60), maxWidthSp = 400)
         assertEquals(80f, b.placeholderWidth.value, TOLERANCE)
         assertEquals(60f, b.placeholderHeight.value, TOLERANCE)
+    }
+
+    @Test
+    fun `tiny cc-image emoji is upscaled to the min readable height (RF1 parity)`() {
+        // A 16×16 cc-image emoji is illegible at 1:1 (no-upscale) → floor to INLINE_IMAGE_MIN_HEIGHT_SP,
+        // aspect preserved (16×16 stays square).
+        val b = box(measured = IntSize(16, 16), maxWidthSp = 400)
+        assertEquals(INLINE_IMAGE_MIN_HEIGHT_SP.toFloat(), b.placeholderHeight.value, TOLERANCE)
+        assertEquals(INLINE_IMAGE_MIN_HEIGHT_SP.toFloat(), b.placeholderWidth.value, TOLERANCE)
     }
 
     @Test

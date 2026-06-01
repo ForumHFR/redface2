@@ -205,6 +205,14 @@ internal const val INLINE_IMAGE_MAX_HEIGHT_SP = 200
 internal const val INLINE_IMAGE_MAX_WIDTH_SP = 240
 
 /**
+ * #224 — minimum display **height** (sp) for an inline `[img]`. Tiny low-res sources — typically the
+ * community "cc-image" emoji served as 16×16 PNGs — are otherwise shown 1:1 by the no-upscale rule and
+ * become illegible (dogfood vs RF1, which upscales them to ~line height). Images already taller than
+ * this are untouched (no blow-up of real photos). Calibrated for RF1 parity (MotoGP topic emoji).
+ */
+internal const val INLINE_IMAGE_MIN_HEIGHT_SP = 24
+
+/**
  * #175/#224 — the no-upscale + cap policy that replaces the fixed [InlineMediaBox] buckets for inline
  * media (smileys and inline `[img]`; callers pass the per-kind caps — the defaults are the smiley caps).
  *
@@ -247,5 +255,20 @@ internal fun capToWidth(size: PixelSize, maxWidthSp: Int): PixelSize {
     return PixelSize(
         width = maxWidthSp,
         height = (size.height * scale).roundToInt().coerceAtLeast(1),
+    )
+}
+
+/**
+ * #224 — scale [size] UP so its height reaches [minHeightSp], preserving aspect ratio, when it is
+ * smaller (a no-op otherwise). Counterpart to [capToWidth] : makes tiny inline images (the cc-image
+ * emoji served as 16×16) legible like RF1, without enlarging images that are already comfortable.
+ * Clamped ≥ 1 per axis.
+ */
+internal fun upscaleToMinHeight(size: PixelSize, minHeightSp: Int): PixelSize {
+    if (minHeightSp <= 0 || size.height >= minHeightSp) return size
+    val scale = minHeightSp.toFloat() / size.height.toFloat()
+    return PixelSize(
+        width = (size.width * scale).roundToInt().coerceAtLeast(1),
+        height = minHeightSp,
     )
 }

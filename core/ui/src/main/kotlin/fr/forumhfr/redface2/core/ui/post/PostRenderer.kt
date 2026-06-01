@@ -800,7 +800,9 @@ private fun smileyDisplayBox(
 /**
  * #224 (option A) — resolve an inline `[img]` placeholder box from its measured intrinsic size:
  * no-upscale + absolute cap ([INLINE_IMAGE_MAX_WIDTH_SP]×[INLINE_IMAGE_MAX_HEIGHT_SP]) via the shared
- * [intrinsicSmileyDisplaySize] policy, then the relative `0.9 × contentWidth` cap ([maxWidthSp]). While
+ * [intrinsicSmileyDisplaySize] policy, then a min-height floor ([INLINE_IMAGE_MIN_HEIGHT_SP]) so a tiny
+ * low-res source (cc-image emoji, 16×16) is upscaled to a legible size like RF1, then the relative
+ * `0.9 × contentWidth` cap ([maxWidthSp]). While
  * the measurement is in flight (cold cache / miss) it falls back to the historical 240×180 bucket,
  * still relative-capped so even the fallback never overflows a narrow quote. Mirrors [smileyDisplayBox];
  * this is what removes the empty frame around a small reaction image (vs the old fixed 240×180 box).
@@ -812,11 +814,16 @@ internal fun imageDisplayBox(
 ): InlineMediaBox {
     val size = measured[image.url]
     val base = if (size != null) {
-        // Reuse the generic #175 no-upscale + cap policy with the inline-image caps (not smiley caps).
-        intrinsicSmileyDisplaySize(
-            PixelSize(size.width, size.height),
-            maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
-            maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
+        // Reuse the generic #175 no-upscale + cap policy with the inline-image caps (not smiley caps),
+        // then floor the height so a tiny low-res source (cc-image emoji, 16×16) is upscaled to a
+        // legible size like RF1 instead of staying microscopic.
+        upscaleToMinHeight(
+            intrinsicSmileyDisplaySize(
+                PixelSize(size.width, size.height),
+                maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
+                maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
+            ),
+            INLINE_IMAGE_MIN_HEIGHT_SP,
         )
     } else {
         val bucket = PostMediaDisplayPolicy.inlineImage
