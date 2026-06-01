@@ -45,10 +45,13 @@ internal object PostMediaDisplayPolicy {
     val smileyContentScale: ContentScale = ContentScale.Fit
 
     /**
-     * Inline `[img]` content is arbitrary user media, not an emotive glyph. Keep the no-upscale
-     * rule there so a tiny linked image is not blown up to the 240×180 inline bucket.
+     * Inline `[img]` uses [ContentScale.Fit] (like smileys) so the bitmap **fills** its placeholder
+     * box. The no-upscale decision lives in the BOX sizing ([imageDisplayBox]: measured intrinsic,
+     * capped, floored to [INLINE_IMAGE_MIN_HEIGHT_SP]) — not the content scale. With `Inside` a tiny
+     * 16×16 cc-image emoji stayed 16×16 centred in its floored box (illegible in dogfood); `Fit` scales
+     * it up to fill the box, while a large photo still scales DOWN into its capped box.
      */
-    val inlineImageContentScale: ContentScale = ContentScale.Inside
+    val inlineImageContentScale: ContentScale = ContentScale.Fit
 
     /**
      * **Not the #175 production size** — since intrinsic sizing landed, this fixed box survives only
@@ -205,6 +208,14 @@ internal const val INLINE_IMAGE_MAX_HEIGHT_SP = 200
 internal const val INLINE_IMAGE_MAX_WIDTH_SP = 240
 
 /**
+ * #224 — minimum display **height** (sp) for an inline `[img]`. Tiny low-res sources — typically the
+ * community "cc-image" emoji served as 16×16 PNGs — read too small at native size (dogfood vs RF1).
+ * Floor the box height so they upscale to a legible size (filled by [inlineImageContentScale] = Fit);
+ * images already taller are untouched (no photo blow-up). 20 ≈ the bodyMedium line height.
+ */
+internal const val INLINE_IMAGE_MIN_HEIGHT_SP = 20
+
+/**
  * #175/#224 — the no-upscale + cap policy that replaces the fixed [InlineMediaBox] buckets for inline
  * media (smileys and inline `[img]`; callers pass the per-kind caps — the defaults are the smiley caps).
  *
@@ -247,5 +258,20 @@ internal fun capToWidth(size: PixelSize, maxWidthSp: Int): PixelSize {
     return PixelSize(
         width = maxWidthSp,
         height = (size.height * scale).roundToInt().coerceAtLeast(1),
+    )
+}
+
+/**
+ * #224 — scale [size] UP so its height reaches [minHeightSp], preserving aspect ratio, when it is
+ * smaller (a no-op otherwise). Counterpart to [capToWidth]: makes a tiny inline `[img]` (cc-image
+ * emoji served as 16×16) legible instead of microscopic. The bitmap fills the resulting box via
+ * [PostMediaDisplayPolicy.inlineImageContentScale] = Fit. Clamped ≥ 1 per axis.
+ */
+internal fun upscaleToMinHeight(size: PixelSize, minHeightSp: Int): PixelSize {
+    if (minHeightSp <= 0 || size.height >= minHeightSp) return size
+    val scale = minHeightSp.toFloat() / size.height.toFloat()
+    return PixelSize(
+        width = (size.width * scale).roundToInt().coerceAtLeast(1),
+        height = minHeightSp,
     )
 }

@@ -241,11 +241,12 @@ class PostRendererInlineTest {
             placeholder.height,
         )
         assertEquals(
-            // #175 — AboveBaseline: the sprite bottom sits on the text baseline (web/RF1 parity, #203).
-            // Zero overlap for a tall perso comes from the unspecified lineHeight on media paragraphs
-            // (the line grows upward to contain it), NOT from the alignment — see smileyInlineContent.
-            "smileys must be baseline-aligned (AboveBaseline) for web parity",
-            PlaceholderVerticalAlign.AboveBaseline,
+            // TextBottom (dogfood choice): the sprite bottom sits at the bottom of the surrounding
+            // text so the smiley rides the line with the words, consistent with inline [img]. Zero
+            // overlap for a tall smiley comes from the unspecified lineHeight on media paragraphs
+            // (the line grows to contain it), NOT from the alignment — see smileyInlineContent.
+            "smileys must be TextBottom-aligned, consistent with inline images",
+            PlaceholderVerticalAlign.TextBottom,
             placeholder.placeholderVerticalAlign,
         )
     }
@@ -283,9 +284,9 @@ class PostRendererInlineTest {
             placeholder.width,
         )
         assertEquals(
-            // #175 — same rule as builtin: AboveBaseline (web parity); zero overlap via line growth.
-            "perso smileys must be baseline-aligned (AboveBaseline) for web parity",
-            PlaceholderVerticalAlign.AboveBaseline,
+            // Same rule as builtin: TextBottom (dogfood choice); zero overlap via line growth.
+            "perso smileys must be TextBottom-aligned, consistent with inline images",
+            PlaceholderVerticalAlign.TextBottom,
             placeholder.placeholderVerticalAlign,
         )
     }
@@ -429,11 +430,11 @@ class PostRendererInlineTest {
     }
 
     @Test
-    fun `inline image uses the bounded 240x180 placeholder above baseline`() {
+    fun `inline image uses the bounded 240x180 placeholder text-bottom aligned`() {
         // The placeholder pins the dimensions (default resolver = 240×180 cold-fallback bucket);
         // the inner Modifier.fillMaxSize() makes the AsyncImage track them under any fontScale.
-        // Alignment is AboveBaseline (same as smileys, #203): a small inline emoji rides the line
-        // just above the URL underline instead of floating centred.
+        // Alignment is TextBottom (same as smileys): a small inline emoji rides the line with the
+        // surrounding words instead of floating centred.
         val inlines = listOf(
             PostInline.InlineImage(
                 url = "https://forum.hardware.fr/images/foo.png",
@@ -454,7 +455,7 @@ class PostRendererInlineTest {
             placeholder.height,
         )
         assertEquals(
-            PlaceholderVerticalAlign.AboveBaseline,
+            PlaceholderVerticalAlign.TextBottom,
             placeholder.placeholderVerticalAlign,
         )
     }

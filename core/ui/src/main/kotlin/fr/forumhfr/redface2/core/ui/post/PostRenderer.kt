@@ -812,11 +812,16 @@ internal fun imageDisplayBox(
 ): InlineMediaBox {
     val size = measured[image.url]
     val base = if (size != null) {
-        // Reuse the generic #175 no-upscale + cap policy with the inline-image caps (not smiley caps).
-        intrinsicSmileyDisplaySize(
-            PixelSize(size.width, size.height),
-            maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
-            maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
+        // #175 no-upscale + cap with the inline-image caps, then a min-height floor so a tiny low-res
+        // source (cc-image emoji, 16×16) is upscaled to a legible size (native 16 reads too small in
+        // dogfood). NB: this only enlarges the BOX — the bitmap fills it via ContentScale.Fit.
+        upscaleToMinHeight(
+            intrinsicSmileyDisplaySize(
+                PixelSize(size.width, size.height),
+                maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
+                maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
+            ),
+            INLINE_IMAGE_MIN_HEIGHT_SP,
         )
     } else {
         val bucket = PostMediaDisplayPolicy.inlineImage
@@ -846,17 +851,16 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
         placeholder = Placeholder(
             width = box.placeholderWidth,
             height = box.placeholderHeight,
-            // AboveBaseline, same as smileys (#203): the image bottom sits on the text baseline so a
-            // small inline emoji (cc-image) rides the line just above the URL underline instead of
-            // floating in the middle (the old Center). Visual pass done on the MotoGP cc-image emoji
-            // (dogfood) — reads cleaner in a link and consistent with smileys. A taller inline image
-            // grows the line (lineHeight Unspecified on media paragraphs), same as a large perso smiley.
-            placeholderVerticalAlign = PlaceholderVerticalAlign.AboveBaseline,
+            // TextBottom (dogfood choice): the image bottom sits at the bottom of the surrounding
+            // text, so a small inline emoji (cc-image) rides the line with the words rather than
+            // floating in the middle (Center) — consistent with smileys, which use the same alignment.
+            // A taller inline image grows the line (lineHeight Unspecified on media paragraphs).
+            placeholderVerticalAlign = PlaceholderVerticalAlign.TextBottom,
         ),
     ) {
-        // The image fills the placeholder via fillMaxSize() so the rendered size tracks the
-        // sp-based placeholder under any fontScale. Inline [img] keeps a no-upscale content
-        // scale, unlike smileys: arbitrary small user images should not be blown up.
+        // The image fills the placeholder via fillMaxSize() (ContentScale.Fit) so the rendered size
+        // tracks the sp-based placeholder under any fontScale; the no-upscale rule lives in the BOX
+        // sizing (imageDisplayBox), not the content scale.
         AsyncImage(
             model = image.url,
             contentDescription = image.description,
@@ -872,15 +876,12 @@ internal fun smileyInlineContent(smiley: PostInline.Smiley, box: InlineMediaBox)
         placeholder = Placeholder(
             width = box.placeholderWidth,
             height = box.placeholderHeight,
-            // #175 — AboveBaseline: the sprite bottom sits on the text baseline, exactly like a bare
-            // <img> in the browser (web/RF1 parity, consistent with #203). The line's text stays on its
-            // baseline (aligned with neighbouring lines) and a tall smiley rises above it. This avoids
-            // overlap ONLY because media paragraphs drop bodyMedium's fixed lineHeight (see
-            // ParagraphBlock): with the clamp, AboveBaseline pushed a tall sprite UP off its line onto
-            // the line above (measured top y=-22 over a 28sp first line); letting the line grow lets the
-            // ascent expand to contain it → ZERO overlap. (Center was trialled — zero overlap too — but
-            // it floated the line's text at the smiley's mid-height, breaking its baseline vs neighbours.)
-            placeholderVerticalAlign = PlaceholderVerticalAlign.AboveBaseline,
+            // TextBottom (dogfood choice, same alignment as inline [img]): the sprite bottom sits at
+            // the bottom of the surrounding text so the smiley rides the line with the words. Media
+            // paragraphs drop bodyMedium's fixed lineHeight (see ParagraphBlock) so a tall smiley grows
+            // the line instead of overlapping the line above. (AboveBaseline / Center were trialled
+            // earlier; TextBottom chosen in dogfood for consistency with [img].)
+            placeholderVerticalAlign = PlaceholderVerticalAlign.TextBottom,
         ),
     ) {
         AsyncImage(
