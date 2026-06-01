@@ -276,7 +276,8 @@ private fun QuoteFrame(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
         ),
     ) {
-        // Quote accent bar (4dp, primary/tertiary alternated by depth).
+        // Quote accent bar (4dp): outline for a bare [quote] (#252), else primary/tertiary
+        // alternated by depth (#202). Colour resolved above via quoteAccentRole.
         //
         // History: the original `Row(height = IntrinsicSize.Min) + Box.fillMaxHeight()` crashes
         // on quotes containing `[img]` because `SubcomposeAsyncImage` (used by
