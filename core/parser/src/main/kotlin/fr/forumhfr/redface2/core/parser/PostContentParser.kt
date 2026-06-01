@@ -109,11 +109,13 @@ class PostContentParser {
 
     private fun classifyDiv(element: Element): NodeKind = when {
         element.selectFirst("table.spoiler") != null -> NodeKind.SPOILER
-        // HFR renders [quotemsg=...] as <table class="citation"> (with author anchor) and
-        // [quote] (anonymous) as <table class="quote"> — both map to the same Quote block.
-        // Logged-in users whose profile uses the classic citation style get <table
-        // class="oldcitation"> instead of "citation" — same structure, different class.
-        element.selectFirst("table.citation, table.oldcitation, table.quote") != null -> NodeKind.QUOTE
+        // HFR renders [quotemsg=...] as <table class="citation"> (with author anchor) and a bare
+        // [quote] as <table class="quote"> — both map to the same Quote block. Logged-in users whose
+        // profile uses the classic citation style get the "old"-prefixed classes instead:
+        // <table class="oldcitation"> for [quotemsg] and <table class="oldquote"> for a bare [quote]
+        // — same structure, different class. All four must be recognised or the quote is swallowed
+        // and rendered as plain text (real bug on the logged-in vélo topic, page 8270, post 74749781).
+        element.selectFirst("table.citation, table.oldcitation, table.quote, table.oldquote") != null -> NodeKind.QUOTE
         // Defensive wrapper support: every fixture captured so far emits [fixed] / [code] as a
         // <table> child direct of <div id="paraN"> (handled by classifyTable above), but quotes
         // use <div class="container"> wrappers. Synthetic tests pin this fallback so a future HFR
@@ -126,7 +128,8 @@ class PostContentParser {
 
     private fun classifyTable(element: Element): NodeKind = when {
         element.hasClass("spoiler") -> NodeKind.SPOILER
-        element.hasClass("citation") || element.hasClass("oldcitation") || element.hasClass("quote") -> NodeKind.QUOTE
+        element.hasClass("citation") || element.hasClass("oldcitation") ||
+            element.hasClass("quote") || element.hasClass("oldquote") -> NodeKind.QUOTE
         element.hasClass("fixed") -> NodeKind.FIXED_BLOCK
         element.hasClass("code") -> NodeKind.CODE_BLOCK
         else -> NodeKind.INLINE
@@ -145,13 +148,13 @@ class PostContentParser {
     }
 
     private fun parseQuote(element: Element): PostBlock.Quote? {
-        val table = resolveTable(element, "table.citation, table.oldcitation, table.quote")
+        val table = resolveTable(element, "table.citation, table.oldcitation, table.quote, table.oldquote")
         val cell = table?.selectFirst("td")?.clone()
         if (table == null || cell == null) return null
 
         val authorAnchor = table.selectFirst(HfrSelectors.POST_CITATION_AUTHOR)
-        // <table class="quote"> (anonymous [quote]) has no a.Topic, so author/page/numreponse
-        // stay null. The "Citation :" <b class="s1"> label is removed below for both shapes.
+        // <table class="quote"> / <table class="oldquote"> (a bare [quote]) has no a.Topic, so
+        // author/page/numreponse stay null. The "Citation :" <b class="s1"> label is removed below.
         val author = authorAnchor
             ?.text()
             ?.substringBefore(" a écrit")

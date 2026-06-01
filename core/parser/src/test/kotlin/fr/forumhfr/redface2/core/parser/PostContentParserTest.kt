@@ -135,6 +135,53 @@ class PostContentParserTest {
     }
 
     @Test
+    fun `logged-in oldquote table (bare quote) surfaces as a Quote block`() {
+        // Real fragment captured from the cyclisme topic page 8270 while LOGGED IN (post
+        // #74749781, Konovalov). A bare [quote] (no author) is served as <table class="quote">
+        // anonymously but as <table class="oldquote"> for accounts using the classic citation
+        // style — the "old"-prefixed sibling of oldcitation. Before adding "oldquote" to the
+        // selectors the parser only knew "quote" → the whole bare quote was swallowed and rendered
+        // as plain text (bug reported logged-in only, vélo topic).
+        val loggedInBareQuoteHtml = """
+            <div id="para74749781"><p></p><div class="container"><table class="oldquote">
+            <tr class="none"><td><b class="s1">Citation :</b><hr size="1" /><p>Saranno considerate Granfondo tutte le manifestazioni superiori a 120 Km. Totali.<br /></p>
+            <hr size="1" /></td></tr></table></div><p><br />Source : federciclismo.it</p></div>
+        """.trimIndent()
+        val contentElement = Jsoup.parse(loggedInBareQuoteHtml).selectFirst("div[id^=para]")
+
+        val ast = PostContentParser().parse(contentElement).ast
+
+        val quotes = ast.allBlocks().filterIsInstance<PostBlock.Quote>()
+        assertTrue(
+            "logged-in <table class=\"oldquote\"> must be parsed as a Quote, not swallowed",
+            quotes.isNotEmpty(),
+        )
+        // A bare [quote] has no a.Topic author anchor → author/page/numreponse stay null.
+        assertEquals("bare quote has no author", null, quotes.first().author)
+        // The quoted body is preserved inside the Quote block.
+        val quotedText = quotes.first().content.allInlines()
+            .filterIsInstance<PostInline.Text>()
+            .joinToString(" ") { it.value }
+        assertTrue(
+            "quoted body must be kept inside the Quote, got=$quotedText",
+            quotedText.contains("Saranno considerate Granfondo"),
+        )
+        // The reply text after the quote survives outside, and neither the quoted body nor the
+        // "Citation :" label leaks into the post's own rendered paragraph text.
+        val renderedText = ast.allInlines()
+            .filterIsInstance<PostInline.Text>()
+            .joinToString(" ") { it.value }
+        assertTrue(
+            "reply body after the quote must remain, got=$renderedText",
+            renderedText.contains("Source : federciclismo"),
+        )
+        assertFalse(
+            "bare-quote `Citation :` label must not leak into rendered text, got=$renderedText",
+            renderedText.contains("Citation :"),
+        )
+    }
+
+    @Test
     fun `spoiler block is recognised and not flattened into paragraph`() {
         val topic = pageParser.parse(fixture("topic_khakha_page_146.html"))
 
