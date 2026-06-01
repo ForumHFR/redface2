@@ -33,11 +33,25 @@ class InlineImagePromotionTest {
     }
 
     @Test
-    fun `a link-wrapped image is image-only (unwrapped)`() {
-        val result = imageOnlyParagraphImages(
-            listOf(PostInline.Link(url = "u", children = listOf(img("a")))),
+    fun `a link-wrapped image is NOT promoted (keeps its inline tap-through)`() {
+        // [url=…][img] — the block renderer has no click handling, so promoting it would drop the
+        // link. Stay inline (returns null) where the link annotation keeps the image clickable.
+        assertNull(
+            imageOnlyParagraphImages(
+                listOf(PostInline.Link(url = "u", children = listOf(img("a")))),
+            ),
         )
-        assertEquals(listOf("a"), result?.map { it.url })
+    }
+
+    @Test
+    fun `a bare image alongside a link-wrapped image is still not promoted`() {
+        // Mixed gallery where one image carries a link: don't promote the whole paragraph, or the
+        // linked one loses its tap-through. Conservative — keep the lot inline.
+        assertNull(
+            imageOnlyParagraphImages(
+                listOf(img("bare"), PostInline.Link(url = "u", children = listOf(img("linked")))),
+            ),
+        )
     }
 
     @Test

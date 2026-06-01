@@ -861,34 +861,41 @@ internal fun imageDisplayBox(
 }
 
 /**
- * #224 (option B) — if a paragraph's only meaningful content is image(s) (a single posted image that
+ * #224 (option B) — if a paragraph's only meaningful content is bare image(s) (a single posted image
  * the parser kept inline because of a stray sibling, or a gallery of several), return them in order so
- * they can be promoted to full-width centred blocks. Unwraps links/formatting; blank text and line
- * breaks are ignored. Returns null as soon as any other meaningful inline (non-blank text, a smiley) is
- * present — that paragraph is genuine inline prose and keeps its inline image treatment.
+ * they can be promoted to full-width centred blocks. Blank text and line breaks are ignored.
+ *
+ * Returns null when the paragraph has any other meaningful inline (non-blank text, a smiley) — genuine
+ * prose keeps its inline image treatment — OR when an image is wrapped in a link (`[url=…][img]`): the
+ * block renderer has no click handling, so promoting a linked image would drop its tap-through. Those
+ * stay inline where the link annotation keeps them clickable (RF2 has no image click-to-open yet, #182).
  */
 @Suppress("CyclomaticComplexMethod") // exhaustive when over the PostInline sealed type, like appendInline
 internal fun imageOnlyParagraphImages(inlines: List<PostInline>): List<PostInline.InlineImage>? {
     val images = mutableListOf<PostInline.InlineImage>()
     var hasOtherContent = false
-    fun walk(list: List<PostInline>) {
+    var hasLinkedImage = false
+    fun walk(list: List<PostInline>, insideLink: Boolean) {
         list.forEach { inline ->
             when (inline) {
-                is PostInline.InlineImage -> images += inline
+                is PostInline.InlineImage -> {
+                    images += inline
+                    if (insideLink) hasLinkedImage = true
+                }
                 is PostInline.Text -> if (inline.value.isNotBlank()) hasOtherContent = true
                 PostInline.LineBreak -> Unit
                 is PostInline.Smiley -> hasOtherContent = true
-                is PostInline.Strong -> walk(inline.children)
-                is PostInline.Emphasis -> walk(inline.children)
-                is PostInline.Underline -> walk(inline.children)
-                is PostInline.Strike -> walk(inline.children)
-                is PostInline.Color -> walk(inline.children)
-                is PostInline.Link -> walk(inline.children)
+                is PostInline.Strong -> walk(inline.children, insideLink)
+                is PostInline.Emphasis -> walk(inline.children, insideLink)
+                is PostInline.Underline -> walk(inline.children, insideLink)
+                is PostInline.Strike -> walk(inline.children, insideLink)
+                is PostInline.Color -> walk(inline.children, insideLink)
+                is PostInline.Link -> walk(inline.children, insideLink = true)
             }
         }
     }
-    walk(inlines)
-    return images.takeIf { it.isNotEmpty() && !hasOtherContent }
+    walk(inlines, insideLink = false)
+    return images.takeIf { it.isNotEmpty() && !hasOtherContent && !hasLinkedImage }
 }
 
 /**
