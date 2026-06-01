@@ -8,7 +8,8 @@ import org.junit.Test
 /**
  * #224 (option A) — pure unit coverage for [imageDisplayBox], the intrinsic sizing of inline `[img]`:
  * measured native size, no-upscale + absolute cap (INLINE_IMAGE_MAX_*), then the relative `0.9× width`
- * cap. While the measurement is in flight the box falls back to the 240×180 bucket, still relative-capped.
+ * cap. #253 — while the measurement is in flight the box falls back to a one-line square
+ * (INLINE_IMAGE_MIN_HEIGHT_SP), not the 240×180 bucket, so ContentScale.Fit can't flash a tiny emoji giant.
  */
 class InlineImageDisplayBoxTest {
 
@@ -61,18 +62,22 @@ class InlineImageDisplayBoxTest {
     }
 
     @Test
-    fun `cold cache falls back to the 240x180 bucket when wide enough`() {
+    fun `cold cache falls back to a one-line square (no giant Fit flash)`() {
+        // #253 — before measurement the box is INLINE_IMAGE_MIN_HEIGHT_SP square, not the 240×180
+        // bucket: ContentScale.Fit then can't upscale a 16×16 cc-image emoji into a giant 180×180
+        // flash. Once the size lands the box becomes the real (capped) intrinsic size.
         val b = box(measured = null, maxWidthSp = 400)
-        assertEquals(240f, b.placeholderWidth.value, TOLERANCE)
-        assertEquals(180f, b.placeholderHeight.value, TOLERANCE)
+        assertEquals(INLINE_IMAGE_MIN_HEIGHT_SP.toFloat(), b.placeholderWidth.value, TOLERANCE)
+        assertEquals(INLINE_IMAGE_MIN_HEIGHT_SP.toFloat(), b.placeholderHeight.value, TOLERANCE)
     }
 
     @Test
-    fun `cold cache fallback is still relative-capped in a narrow quote`() {
-        // 240×180 fallback, container relative cap 180 → 180×135 (no overflow even before measurement).
+    fun `cold cache fallback stays a small square even in a narrow quote`() {
+        // The one-line cold square is already far below any container width, so the relative cap is a
+        // no-op and it never overflows a deep quote.
         val b = box(measured = null, maxWidthSp = 180)
-        assertEquals(180f, b.placeholderWidth.value, TOLERANCE)
-        assertEquals(135f, b.placeholderHeight.value, TOLERANCE)
+        assertEquals(INLINE_IMAGE_MIN_HEIGHT_SP.toFloat(), b.placeholderWidth.value, TOLERANCE)
+        assertEquals(INLINE_IMAGE_MIN_HEIGHT_SP.toFloat(), b.placeholderHeight.value, TOLERANCE)
     }
 
     private companion object {
