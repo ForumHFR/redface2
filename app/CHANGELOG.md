@@ -21,6 +21,25 @@ Aucun changement applicatif non distribué.
 
 ---
 
+## v69 — `0.3.29` — 2026-06-01
+
+**Statut** : `closed`
+**Commit** : tag `app-v69` après merge de la PR #245
+**Fichier** : AAB uploadé sur le canal Play closed alpha + tag pour F-Droid
+
+Lecture topic — rendu des blocs `[code]` (suite du dogfood #244).
+
+### Fixed
+- **#244 — Blocs `[code]` illisibles sur mobile.** `[code]` wrappe désormais dans la largeur de la carte au lieu de scroller horizontalement (une ligne longue ne montrait que son début). `[fixed]` conserve le no-wrap + scroll horizontal pour l'ASCII art / tableaux alignés en colonnes.
+
+### Added
+- **Gouttière de numéros de ligne sur `[code]`** (parité avec le rendu web HFR). Un numéro par ligne logique, peint en `drawBehind` via `TextLayoutResult` ; une continuation de soft-wrap n'est pas numérotée, ce qui lève l'ambiguïté wrap ↔ nouvelle ligne. Bloc forcé en LTR (review Codex). Couvert par `PostRendererCodeBlockRoborazziTest` (ligne qui wrappe + cas >9 lignes).
+
+### Changed
+- **Build / release** : `app/build.gradle.kts` passe à `versionCode = 69`, `versionName = "0.3.29"`.
+
+---
+
 ## v68 — `0.3.28` — 2026-05-31
 
 **Statut** : `closed`
