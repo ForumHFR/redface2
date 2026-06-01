@@ -30,7 +30,10 @@ import kotlin.math.abs
  * What we pin :
  *  - at `density = 1f, fontScale = 1f`, the placeholder rect is **exactly** the bucket size
  *    declared in [PostMediaDisplayPolicy] for the three kinds we render inline (`18 × 18` for
- *    builtin smileys, `70 × 50` for perso smileys, `240 × 180` for inline images) ;
+ *    builtin smileys, `70 × 50` for perso smileys, `240 × 180` for inline images). Since #224
+ *    option A, `240 × 180` is only the **cold-cache fallback** for an `[img]` (production size is
+ *    the measured intrinsic size, cf. `imageDisplayBox`) — Coil can't resolve a real bitmap under
+ *    Robolectric, so the no-measurement fallback is exactly what this test pins ;
  *  - the bucket **ratio** is preserved at the baseline so a future refactor that swapped a
  *    rectangular bucket to a square would surface here (the regression #109 was specifically a
  *    ratio drift) — only checked for the non-square buckets, the builtin 18×18 is tautological ;
