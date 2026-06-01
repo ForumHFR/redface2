@@ -23,6 +23,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +39,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -58,6 +60,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -509,40 +512,45 @@ private fun CodeWithLineNumbers(
 
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .drawBehind {
-                val result = layout ?: return@drawBehind
-                val dividerX = gutterTextWidthPx + gapPx / 2f
-                drawLine(
-                    color = dividerColor,
-                    start = Offset(dividerX, 0f),
-                    end = Offset(dividerX, size.height),
-                )
-                lineStartOffsets.forEachIndexed { index, offset ->
-                    val visualLine = result.getLineForOffset(offset).coerceIn(0, result.lineCount - 1)
-                    val label = (index + 1).toString()
-                    val x = (gutterTextWidthPx - label.length * digitAdvancePx).toFloat()
-                    drawText(
-                        textMeasurer = measurer,
-                        text = label,
-                        topLeft = Offset(x, result.getLineTop(visualLine)),
-                        style = gutterStyle,
-                    )
-                }
-            },
-    ) {
-        Text(
-            text = code,
-            style = codeStyle,
-            color = codeColor,
-            softWrap = true,
-            onTextLayout = { layout = it },
+    // Code is LTR by nature; force it so the painted gutter (absolute-left coords) and the Text's
+    // `start` padding agree under RTL locales (Codex review on the #244 PR) — otherwise `start` flips
+    // to the right while the gutter stays on the left and overlaps the code.
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = gutterWidthDp),
-        )
+                .drawBehind {
+                    val result = layout ?: return@drawBehind
+                    val dividerX = gutterTextWidthPx + gapPx / 2f
+                    drawLine(
+                        color = dividerColor,
+                        start = Offset(dividerX, 0f),
+                        end = Offset(dividerX, size.height),
+                    )
+                    lineStartOffsets.forEachIndexed { index, offset ->
+                        val visualLine = result.getLineForOffset(offset).coerceIn(0, result.lineCount - 1)
+                        val label = (index + 1).toString()
+                        val x = (gutterTextWidthPx - label.length * digitAdvancePx).toFloat()
+                        drawText(
+                            textMeasurer = measurer,
+                            text = label,
+                            topLeft = Offset(x, result.getLineTop(visualLine)),
+                            style = gutterStyle,
+                        )
+                    }
+                },
+        ) {
+            Text(
+                text = code,
+                style = codeStyle,
+                color = codeColor,
+                softWrap = true,
+                onTextLayout = { layout = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = gutterWidthDp),
+            )
+        }
     }
 }
 
