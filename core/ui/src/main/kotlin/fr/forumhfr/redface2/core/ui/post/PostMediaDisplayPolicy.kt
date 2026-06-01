@@ -213,7 +213,7 @@ internal const val INLINE_IMAGE_MAX_WIDTH_SP = 240
  * Floor the box height so they upscale to a legible size (filled by [inlineImageContentScale] = Fit);
  * images already taller are untouched (no photo blow-up). 20 ≈ the bodyMedium line height.
  */
-internal const val INLINE_IMAGE_MIN_HEIGHT_SP = 20
+internal const val INLINE_IMAGE_MIN_HEIGHT_SP = 16
 
 /**
  * #175/#224 — the no-upscale + cap policy that replaces the fixed [InlineMediaBox] buckets for inline
