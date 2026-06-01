@@ -37,17 +37,22 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
@@ -436,7 +441,8 @@ private fun FixedBlock(block: PostBlock.Fixed) {
 @Composable
 private fun CodeBlockBlock(block: PostBlock.CodeBlock) {
     // [code] = often prose / long pasted lines → WRAP within the card width so it stays readable on
-    // mobile (#244, dogfood). No horizontal scroll; the soft-wrapping Text flows in the full width.
+    // mobile (#244, dogfood). No horizontal scroll. A left line-number gutter (like HFR's web render)
+    // makes the wrap unambiguous: one number per LOGICAL line, wrapped continuations stay unnumbered.
     MonospaceContainer(scrollHorizontally = false) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             block.language?.let { lang ->
@@ -446,13 +452,97 @@ private fun CodeBlockBlock(block: PostBlock.CodeBlock) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(
-                text = block.text,
-                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                color = MaterialTheme.colorScheme.onSurface,
-                softWrap = true,
+            CodeWithLineNumbers(
+                code = block.text,
+                codeStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                codeColor = MaterialTheme.colorScheme.onSurface,
+                gutterColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                dividerColor = MaterialTheme.colorScheme.outlineVariant,
             )
         }
+    }
+}
+
+/** Gap between the right edge of the line-number gutter and the start of the code text. */
+private val CodeGutterGap = 8.dp
+
+/**
+ * Renders `[code]` with a left line-number gutter that stays aligned when long lines soft-wrap.
+ *
+ * The whole block is a SINGLE soft-wrapping [Text] (so selection/copy stay contiguous and the
+ * composable count is O(1) regardless of line count). Numbers are PAINTED in [Modifier.drawBehind] —
+ * never part of the text content — by mapping each LOGICAL line's start offset to its first visual
+ * line via [TextLayoutResult.getLineForOffset] then [TextLayoutResult.getLineTop]. A wrapped
+ * continuation visual line is never visited, so it gets no number: that is what lets the reader tell
+ * a soft-wrap apart from a real newline.
+ *
+ * The gutter width comes from the digit count of the line total (monospace ⇒ fixed advance), so
+ * numbers are right-aligned and the code column never shifts. [layout] is read only in the draw phase
+ * to avoid a recomposition loop.
+ */
+@Composable
+private fun CodeWithLineNumbers(
+    code: String,
+    codeStyle: TextStyle,
+    codeColor: Color,
+    gutterColor: Color,
+    dividerColor: Color,
+) {
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val gutterStyle = remember(codeStyle, gutterColor) { codeStyle.copy(color = gutterColor) }
+
+    // Start offset of each LOGICAL line, computed from the raw source before layout.
+    val lineStartOffsets = remember(code) {
+        buildList {
+            add(0)
+            code.forEachIndexed { index, char -> if (char == '\n') add(index + 1) }
+            if (code.endsWith("\n")) removeAt(lastIndex)
+        }
+    }
+
+    val digitCount = lineStartOffsets.size.toString().length
+    val digitAdvancePx = remember(gutterStyle, density) { measurer.measure("0", gutterStyle).size.width }
+    val gutterTextWidthPx = digitCount * digitAdvancePx
+    val gapPx = with(density) { CodeGutterGap.toPx() }
+    val gutterWidthDp = with(density) { (gutterTextWidthPx + gapPx).toDp() }
+
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawBehind {
+                val result = layout ?: return@drawBehind
+                val dividerX = gutterTextWidthPx + gapPx / 2f
+                drawLine(
+                    color = dividerColor,
+                    start = Offset(dividerX, 0f),
+                    end = Offset(dividerX, size.height),
+                )
+                lineStartOffsets.forEachIndexed { index, offset ->
+                    val visualLine = result.getLineForOffset(offset).coerceIn(0, result.lineCount - 1)
+                    val label = (index + 1).toString()
+                    val x = (gutterTextWidthPx - label.length * digitAdvancePx).toFloat()
+                    drawText(
+                        textMeasurer = measurer,
+                        text = label,
+                        topLeft = Offset(x, result.getLineTop(visualLine)),
+                        style = gutterStyle,
+                    )
+                }
+            },
+    ) {
+        Text(
+            text = code,
+            style = codeStyle,
+            color = codeColor,
+            softWrap = true,
+            onTextLayout = { layout = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = gutterWidthDp),
+        )
     }
 }
 
