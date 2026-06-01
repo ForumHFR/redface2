@@ -107,13 +107,10 @@ class PostMediaDisplayPolicyTest {
     }
 
     @Test
-    fun `inline image content scale is Fit so it fills its sized box`() {
-        // #224/#253 — same fix the smiley scale got above: Inside left a tiny 16×16 cc-image emoji at
-        // native size, centred in its (min-height-floored) box → illegible. The no-upscale rule now
-        // lives entirely in the BOX sizing (imageDisplayBox: measured intrinsic, capped, floored to
-        // INLINE_IMAGE_MIN_HEIGHT_SP); Fit makes the bitmap FILL that box — a floored emoji is drawn at
-        // box size (legible, RF1 parity), while a large photo still scales DOWN into its capped box.
-        assertSame(ContentScale.Fit, PostMediaDisplayPolicy.inlineImageContentScale)
+    fun `inline image content scale is Inside so arbitrary small images are not upscaled`() {
+        // Unlike smileys, inline [img] content can be an arbitrary small picture; keep no-upscale
+        // there to avoid turning a tiny linked image into a 240×180 thumbnail.
+        assertSame(ContentScale.Inside, PostMediaDisplayPolicy.inlineImageContentScale)
     }
 
     @Test

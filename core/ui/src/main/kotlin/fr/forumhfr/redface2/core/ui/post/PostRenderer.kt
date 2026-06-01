@@ -800,9 +800,7 @@ private fun smileyDisplayBox(
 /**
  * #224 (option A) — resolve an inline `[img]` placeholder box from its measured intrinsic size:
  * no-upscale + absolute cap ([INLINE_IMAGE_MAX_WIDTH_SP]×[INLINE_IMAGE_MAX_HEIGHT_SP]) via the shared
- * [intrinsicSmileyDisplaySize] policy, then a min-height floor ([INLINE_IMAGE_MIN_HEIGHT_SP]) so a tiny
- * low-res source (cc-image emoji, 16×16) is upscaled to a legible size like RF1, then the relative
- * `0.9 × contentWidth` cap ([maxWidthSp]). While
+ * [intrinsicSmileyDisplaySize] policy, then the relative `0.9 × contentWidth` cap ([maxWidthSp]). While
  * the measurement is in flight (cold cache / miss) it falls back to the historical 240×180 bucket,
  * still relative-capped so even the fallback never overflows a narrow quote. Mirrors [smileyDisplayBox];
  * this is what removes the empty frame around a small reaction image (vs the old fixed 240×180 box).
@@ -814,16 +812,11 @@ internal fun imageDisplayBox(
 ): InlineMediaBox {
     val size = measured[image.url]
     val base = if (size != null) {
-        // Reuse the generic #175 no-upscale + cap policy with the inline-image caps (not smiley caps),
-        // then floor the height so a tiny low-res source (cc-image emoji, 16×16) is upscaled to a
-        // legible size like RF1 instead of staying microscopic.
-        upscaleToMinHeight(
-            intrinsicSmileyDisplaySize(
-                PixelSize(size.width, size.height),
-                maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
-                maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
-            ),
-            INLINE_IMAGE_MIN_HEIGHT_SP,
+        // Reuse the generic #175 no-upscale + cap policy with the inline-image caps (not smiley caps).
+        intrinsicSmileyDisplaySize(
+            PixelSize(size.width, size.height),
+            maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
+            maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
         )
     } else {
         val bucket = PostMediaDisplayPolicy.inlineImage
@@ -853,18 +846,17 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
         placeholder = Placeholder(
             width = box.placeholderWidth,
             height = box.placeholderHeight,
-            // Inline [img] deliberately keeps Center, unlike smileys (which moved to AboveBaseline
-            // for web parity in #203). An embedded image is a 240×180 block of user media, not an
-            // emotive glyph riding the text baseline: centring it on the line reads better and
-            // matches how a wrapped thumbnail sits next to text. Do not "unify" this with the
-            // smiley alignment without a visual pass — the two contracts are intentionally distinct.
-            placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
+            // AboveBaseline, same as smileys (#203): the image bottom sits on the text baseline so a
+            // small inline emoji (cc-image) rides the line just above the URL underline instead of
+            // floating in the middle (the old Center). Visual pass done on the MotoGP cc-image emoji
+            // (dogfood) — reads cleaner in a link and consistent with smileys. A taller inline image
+            // grows the line (lineHeight Unspecified on media paragraphs), same as a large perso smiley.
+            placeholderVerticalAlign = PlaceholderVerticalAlign.AboveBaseline,
         ),
     ) {
         // The image fills the placeholder via fillMaxSize() so the rendered size tracks the
-        // sp-based placeholder under any fontScale. ContentScale.Fit makes the bitmap fill that box
-        // (the no-upscale rule lives in the BOX sizing, imageDisplayBox) — so a floored tiny emoji is
-        // actually drawn at the box size, not left 16×16 in the middle of it.
+        // sp-based placeholder under any fontScale. Inline [img] keeps a no-upscale content
+        // scale, unlike smileys: arbitrary small user images should not be blown up.
         AsyncImage(
             model = image.url,
             contentDescription = image.description,

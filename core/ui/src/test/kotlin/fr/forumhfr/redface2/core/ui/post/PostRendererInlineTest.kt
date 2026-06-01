@@ -429,13 +429,11 @@ class PostRendererInlineTest {
     }
 
     @Test
-    fun `inline image uses the bounded 240x180 placeholder centred`() {
-        // Pre-#109 the inline image placeholder was 240×180 but the inner Modifier was
-        // fillMaxWidth() — meaningless inside InlineTextContent (the placeholder dictates the
-        // parent constraint), and the image stretched in unpredictable ways. The placeholder
-        // now pins the dimensions; the inner Modifier.fillMaxSize() makes the AsyncImage track
-        // them under any fontScale, while the inline image policy keeps small arbitrary images
-        // from being blown up to the full 240×180.
+    fun `inline image uses the bounded 240x180 placeholder above baseline`() {
+        // The placeholder pins the dimensions (default resolver = 240×180 cold-fallback bucket);
+        // the inner Modifier.fillMaxSize() makes the AsyncImage track them under any fontScale.
+        // Alignment is AboveBaseline (same as smileys, #203): a small inline emoji rides the line
+        // just above the URL underline instead of floating centred.
         val inlines = listOf(
             PostInline.InlineImage(
                 url = "https://forum.hardware.fr/images/foo.png",
@@ -456,7 +454,7 @@ class PostRendererInlineTest {
             placeholder.height,
         )
         assertEquals(
-            PlaceholderVerticalAlign.Center,
+            PlaceholderVerticalAlign.AboveBaseline,
             placeholder.placeholderVerticalAlign,
         )
     }
