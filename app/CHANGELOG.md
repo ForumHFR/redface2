@@ -21,6 +21,26 @@ Aucun changement applicatif non distribué.
 
 ---
 
+## v70 — `0.3.30` — 2026-06-02
+
+**Statut** : `closed`
+**Commit** : tag `app-v70` après merge des PR #248 / #254 / #246
+**Fichier** : AAB uploadé sur le canal Play closed alpha + tag pour F-Droid
+
+Phase 2 finish — rendu des `[quote]` / `[img]` (dogfood S25 + double review Claude/Codex).
+
+### Fixed
+- **#247 — `[quote]` nu non rendu en mode connecté.** Le parser reconnaît `table.oldquote` (variante servie au profil « classique » connecté, symétrique d'`oldcitation`) aux 3 sélecteurs de citation → le bloc est encadré au lieu de tomber en texte brut.
+
+### Added
+- **#252 — distinction visuelle du `[quote]` nu manuel.** Accent gris neutre `outline` + header « Citation » pour un `[quote]` tapé à la main (sans source), distinct de la citation sourcée (`[quotemsg=]`, accent rouge/or alterné par profondeur). `isBareQuote` dérive de l'absence de **toute** métadonnée source (author / numreponse / page) pour ne pas misclassifier un `[quotemsg]` de l'aperçu éditeur.
+- **#224 — dimensionnement intrinsèque des `[img]` inline + promotion en bloc.** Mesure native (no-upscale + caps absolus, cap relatif converti en sp donc fontScale-safe) au lieu de la box fixe 240×180 ; un paragraphe « galerie » (images seules) dont une image dépasse les caps inline est promu en blocs full-width centrés (les images dans un `[url=]` restent inline pour garder le tap-through). Cold-fallback réduit à un carré d'une ligne (#253, plus de flash d'emoji géant avant mesure). Alignement vertical `TextBottom` pour les `[img]` et les smileys.
+
+### Changed
+- **Build / release** : `app/build.gradle.kts` passe à `versionCode = 70`, `versionName = "0.3.30"`.
+
+---
+
 ## v69 — `0.3.29` — 2026-06-01
 
 **Statut** : `closed`
