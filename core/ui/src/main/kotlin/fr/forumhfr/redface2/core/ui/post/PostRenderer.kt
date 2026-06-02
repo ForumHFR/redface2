@@ -40,7 +40,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.Placeholder
@@ -69,6 +71,9 @@ import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
 import coil3.compose.SubcomposeAsyncImage
 import coil3.compose.SubcomposeAsyncImageContent
+import coil3.request.ImageRequest
+import coil3.size.Precision
+import coil3.size.Scale
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -227,7 +232,13 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            galleryImages.forEach { image -> BlockImage(url = image.url, description = image.description) }
+            galleryImages.forEach { promoted ->
+                BlockImage(
+                    url = promoted.image.url,
+                    description = promoted.image.description,
+                    linkUrl = promoted.linkUrl,
+                )
+            }
         }
         return
     }
@@ -461,19 +472,36 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
  * Full-width, centred, bounded image. The home of a standalone `PostBlock.Image`, and (since #224
  * option B) of a large image promoted out of an image-only paragraph.
  *
+ * When [linkUrl] is non-null the image was posted as `[url=…][img]` (the "click to enlarge" pattern):
+ * the whole block is tappable and opens that URL (#257), so a linked image gets the full-width
+ * treatment AND keeps its tap-through instead of being kept as a small inline thumbnail.
+ *
  * Bounded so a 4000×3000 RAW screenshot can't blow up the post and destroy the scroll position.
  * SubcomposeAsyncImage exposes loading/error slots so the user gets visual feedback when an HFR image
  * host (rehost.diberie.com, super-h.fr, …) is offline rather than a silent empty Box. Phase 1 keeps the
  * loading + error layout minimal — no material-icons-extended dependency just for a placeholder glyph.
  */
 @Composable
-private fun BlockImage(url: String, description: String?) {
+private fun BlockImage(url: String, description: String?, linkUrl: String? = null) {
+    val uriHandler = LocalUriHandler.current
+    val openLabel = stringResource(R.string.post_image_open_link)
     val containerModifier = Modifier
         .fillMaxWidth()
         .defaultMinSize(minHeight = PostMediaDisplayPolicy.blockImageMinHeight)
         .heightIn(max = PostMediaDisplayPolicy.blockImageMaxHeight)
         .clip(RoundedCornerShape(8.dp))
         .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+        .then(
+            if (linkUrl != null) {
+                // Role.Image (not Button): the element IS an image that opens its full version on tap;
+                // the localized onClickLabel carries the action for TalkBack ("Image, double-tap to …").
+                Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
+                    runCatching { uriHandler.openUri(linkUrl) }
+                }
+            } else {
+                Modifier
+            },
+        )
     SubcomposeAsyncImage(
         model = url,
         contentDescription = description,
@@ -918,42 +946,43 @@ internal fun imageDisplayBox(
     return InlineMediaBox(capped.width.sp, capped.height.sp)
 }
 
+/** #224/#257 — an image eligible for block promotion, paired with its enclosing `[url=…]` link (if any). */
+internal data class PromotedImage(val image: PostInline.InlineImage, val linkUrl: String?)
+
 /**
- * #224 (option B) — if a paragraph's only meaningful content is bare image(s) (a single posted image
- * the parser kept inline because of a stray sibling, or a gallery of several), return them in order so
- * they can be promoted to full-width centred blocks. Blank text and line breaks are ignored.
+ * #224 (option B) / #257 — if a paragraph's only meaningful content is image(s) (a single posted image
+ * the parser kept inline because of a stray sibling, or a gallery of several), return them in order,
+ * each paired with the URL of its enclosing `[url=…]` link if there is one, so they can be promoted to
+ * full-width centred blocks. Blank text and line breaks are ignored.
  *
- * Returns null when the paragraph has any other meaningful inline (non-blank text, a smiley) — genuine
- * prose keeps its inline image treatment — OR when an image is wrapped in a link (`[url=…][img]`): the
- * block renderer has no click handling, so promoting a linked image would drop its tap-through. Those
- * stay inline where the link annotation keeps them clickable (RF2 has no image click-to-open yet, #182).
+ * Returns null when the paragraph has any other meaningful inline (non-blank text, a smiley): genuine
+ * prose keeps its inline image treatment. A link wrapping ONLY an image is fine — #257 promotes it to a
+ * block that opens the link on tap, so the "click to enlarge" tap-through is preserved AND the image
+ * fills the width (before #257 a linked image was kept inline → small + the inline pixelation path).
+ * A link wrapping image **+** text still counts as other content → null (stays inline prose).
  */
 @Suppress("CyclomaticComplexMethod") // exhaustive when over the PostInline sealed type, like appendInline
-internal fun imageOnlyParagraphImages(inlines: List<PostInline>): List<PostInline.InlineImage>? {
-    val images = mutableListOf<PostInline.InlineImage>()
+internal fun imageOnlyParagraphImages(inlines: List<PostInline>): List<PromotedImage>? {
+    val images = mutableListOf<PromotedImage>()
     var hasOtherContent = false
-    var hasLinkedImage = false
-    fun walk(list: List<PostInline>, insideLink: Boolean) {
+    fun walk(list: List<PostInline>, linkUrl: String?) {
         list.forEach { inline ->
             when (inline) {
-                is PostInline.InlineImage -> {
-                    images += inline
-                    if (insideLink) hasLinkedImage = true
-                }
+                is PostInline.InlineImage -> images += PromotedImage(inline, linkUrl)
                 is PostInline.Text -> if (inline.value.isNotBlank()) hasOtherContent = true
                 PostInline.LineBreak -> Unit
                 is PostInline.Smiley -> hasOtherContent = true
-                is PostInline.Strong -> walk(inline.children, insideLink)
-                is PostInline.Emphasis -> walk(inline.children, insideLink)
-                is PostInline.Underline -> walk(inline.children, insideLink)
-                is PostInline.Strike -> walk(inline.children, insideLink)
-                is PostInline.Color -> walk(inline.children, insideLink)
-                is PostInline.Link -> walk(inline.children, insideLink = true)
+                is PostInline.Strong -> walk(inline.children, linkUrl)
+                is PostInline.Emphasis -> walk(inline.children, linkUrl)
+                is PostInline.Underline -> walk(inline.children, linkUrl)
+                is PostInline.Strike -> walk(inline.children, linkUrl)
+                is PostInline.Color -> walk(inline.children, linkUrl)
+                is PostInline.Link -> walk(inline.children, inline.url)
             }
         }
     }
-    walk(inlines, insideLink = false)
-    return images.takeIf { it.isNotEmpty() && !hasOtherContent && !hasLinkedImage }
+    walk(inlines, linkUrl = null)
+    return images.takeIf { it.isNotEmpty() && !hasOtherContent }
 }
 
 /**
@@ -964,10 +993,10 @@ internal fun imageOnlyParagraphImages(inlines: List<PostInline>): List<PostInlin
  * Returns false while every size is unknown (cold) so promotion only kicks in after measurement.
  */
 internal fun shouldPromoteImagesToBlocks(
-    images: List<PostInline.InlineImage>,
+    images: List<PromotedImage>,
     measured: Map<String, IntSize?>,
-): Boolean = images.any { img ->
-    val size = measured[img.url] ?: return@any false
+): Boolean = images.any { promoted ->
+    val size = measured[promoted.image.url] ?: return@any false
     size.width > INLINE_IMAGE_MAX_WIDTH_SP || size.height > INLINE_IMAGE_MAX_HEIGHT_SP
 }
 
@@ -1001,8 +1030,31 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
         // The image fills the placeholder via fillMaxSize() (ContentScale.Fit) so the rendered size
         // tracks the sp-based placeholder under any fontScale; the no-upscale rule lives in the BOX
         // sizing (imageDisplayBox), not the content scale.
+        //
+        // #257 — decode at a STABLE size (the inline display cap in px, bounded) instead of letting
+        // Coil resolve the size from the placeholder constraints. The box grows from the cold-fallback
+        // square to the measured size when the measurement lands; with constraint-driven sizing Coil
+        // re-decodes at the new size and, meanwhile, paints the previous tiny bitmap upscaled →
+        // pixelated. A fixed decode size keeps ONE sharp bitmap that Fit scales into whatever box (Coil
+        // never upscales the decode past the source, so a small image still decodes at native). The
+        // request is remembered so a measurement landing doesn't rebuild it. Smileys keep their own
+        // (much smaller) path — this cap is photo-sized.
+        val density = LocalDensity.current
+        val context = LocalPlatformContext.current
+        val widthPx = with(density) { INLINE_IMAGE_MAX_WIDTH_SP.sp.roundToPx() }
+            .coerceAtMost(INLINE_IMAGE_DECODE_CAP_PX)
+        val heightPx = with(density) { INLINE_IMAGE_MAX_HEIGHT_SP.sp.roundToPx() }
+            .coerceAtMost(INLINE_IMAGE_DECODE_CAP_PX)
+        val request = remember(image.url, widthPx, heightPx, context) {
+            ImageRequest.Builder(context)
+                .data(image.url)
+                .size(widthPx, heightPx)
+                .scale(Scale.FIT)
+                .precision(Precision.INEXACT)
+                .build()
+        }
         AsyncImage(
-            model = image.url,
+            model = request,
             contentDescription = image.description,
             contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
             modifier = Modifier.fillMaxSize(),

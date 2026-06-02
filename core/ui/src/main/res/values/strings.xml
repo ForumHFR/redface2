@@ -13,6 +13,7 @@
     <string name="post_image_loading">Chargement…</string>
     <string name="post_image_error">Image indisponible</string>
     <string name="post_image_error_with_alt">Image indisponible — %1$s</string>
+    <string name="post_image_open_link">Ouvrir l\'image</string>
     <string name="bbcode_action_bold">Gras</string>
     <string name="bbcode_action_italic">Italique</string>
     <string name="bbcode_action_underline">Souligné</string>
