@@ -94,6 +94,38 @@ internal const val MAX_VISIBLE_QUOTE_DEPTH = 3
  */
 internal fun isCollapsedQuoteDepth(depth: Int): Boolean = depth >= MAX_VISIBLE_QUOTE_DEPTH
 
+/**
+ * Which themed accent the [QuoteFrame] left bar uses. Issue #252 — a **bare** `[quote]` (typed by
+ * hand, no author) is the user formatting their own text, not citing a sourced post, so it must read
+ * differently from a real HFR citation (`[quotemsg=]`, author set) and from a nested citation:
+ *
+ *  - [BARE] → neutral `outline` accent, regardless of depth: "quoted text, no source".
+ *  - [SOURCED_EVEN] / [SOURCED_ODD] → the existing `primary` / `tertiary` alternation that keeps a
+ *    subtle hierarchy for nested real citations (cf. [QuoteFrame] KDoc).
+ *
+ * The author palette stays colored (red/gold) so a citation always looks "sourced"; the bare quote
+ * gets the muted neutral so the two are unambiguous in light, dark and AMOLED (where `secondary`
+ * would collide with `primary`). Pure decision so it is pinned in [PostRendererQuoteDepthTest]
+ * without entering Compose.
+ */
+internal enum class QuoteAccentRole { BARE, SOURCED_EVEN, SOURCED_ODD }
+
+internal fun quoteAccentRole(quoteDepth: Int, isBareQuote: Boolean): QuoteAccentRole = when {
+    isBareQuote -> QuoteAccentRole.BARE
+    quoteDepth % 2 == 0 -> QuoteAccentRole.SOURCED_EVEN
+    else -> QuoteAccentRole.SOURCED_ODD
+}
+
+/**
+ * #252/#254 — a quote is "bare" (a hand-typed `[quote]`, no source) only when it carries **no source
+ * metadata at all**. Author alone is not enough: a sourced `[quotemsg=id,page,user]` parsed in the
+ * editor preview (`BbcodeContentParser`) yields `author == null` but a non-null `numreponse`, so an
+ * author-only test would wrongly paint a sourced citation with the bare neutral accent + "Citation"
+ * header. Reading-path citations always carry an author, so this only changes the editor-preview case.
+ */
+internal fun isBareQuote(quote: PostBlock.Quote): Boolean =
+    quote.author == null && quote.numreponse == null && quote.page == null
+
 @Composable
 fun PostRenderer(
     content: PostContent,
@@ -206,14 +238,17 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
         CollapsedQuoteBlock(block, quoteDepth)
         return
     }
-    QuoteFrame(quoteDepth = quoteDepth) {
-        block.author?.let { author ->
-            Text(
-                text = stringResource(R.string.post_quote_author, author),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+    QuoteFrame(quoteDepth = quoteDepth, isBareQuote = isBareQuote(block)) {
+        Text(
+            // #252 — a bare quote still gets a "Citation" header (no author), mirroring the
+            // "Citation de X" header of a sourced citation, so the framed block always reads
+            // as a quotation and not as a stray indented paragraph.
+            text = block.author
+                ?.let { stringResource(R.string.post_quote_author, it) }
+                ?: stringResource(R.string.post_quote_bare),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         PostBlocksRenderer(
             blocks = block.content.blocks,
             quoteDepth = quoteDepth + 1,
@@ -228,17 +263,22 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
  * theme `primary` / `tertiary` accent (alternating by depth) so nested quotes keep a
  * subtle hierarchy without redefining `quoteDepth` semantics — the existing N=3 collapse
  * rule still applies above this layer (cf. `isCollapsedQuoteDepth`).
+ *
+ * Issue #252 — a **bare** `[quote]` (`isBareQuote`, no author) instead gets a neutral `outline`
+ * accent so the user's own quoted text reads differently from a sourced HFR citation and from a
+ * nested citation. See [quoteAccentRole] for the (pure, tested) role decision.
  */
 @Composable
 private fun QuoteFrame(
     quoteDepth: Int,
+    isBareQuote: Boolean,
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val accent = if (quoteDepth % 2 == 0) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.tertiary
+    val accent = when (quoteAccentRole(quoteDepth, isBareQuote)) {
+        QuoteAccentRole.BARE -> MaterialTheme.colorScheme.outline
+        QuoteAccentRole.SOURCED_EVEN -> MaterialTheme.colorScheme.primary
+        QuoteAccentRole.SOURCED_ODD -> MaterialTheme.colorScheme.tertiary
     }
     Card(
         modifier = modifier,
@@ -246,7 +286,8 @@ private fun QuoteFrame(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
         ),
     ) {
-        // Quote accent bar (4dp, primary/tertiary alternated by depth).
+        // Quote accent bar (4dp): outline for a bare [quote] (#252), else primary/tertiary
+        // alternated by depth (#202). Colour resolved above via quoteAccentRole.
         //
         // History: the original `Row(height = IntrinsicSize.Min) + Box.fillMaxHeight()` crashes
         // on quotes containing `[img]` because `SubcomposeAsyncImage` (used by
@@ -294,6 +335,7 @@ private fun CollapsedQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
     var revealed by rememberSaveable(block) { mutableStateOf(false) }
     QuoteFrame(
         quoteDepth = quoteDepth,
+        isBareQuote = isBareQuote(block),
         modifier = Modifier.clickable { revealed = !revealed },
     ) {
         Row(
@@ -320,13 +362,14 @@ private fun CollapsedQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
             )
         }
         if (revealed) {
-            block.author?.let { author ->
-                Text(
-                    text = stringResource(R.string.post_quote_author, author),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                // #252 — same "Citation"/"Citation de X" header rule as the expanded QuoteBlock.
+                text = block.author
+                    ?.let { stringResource(R.string.post_quote_author, it) }
+                    ?: stringResource(R.string.post_quote_bare),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             PostBlocksRenderer(
                 blocks = block.content.blocks,
                 quoteDepth = 0,

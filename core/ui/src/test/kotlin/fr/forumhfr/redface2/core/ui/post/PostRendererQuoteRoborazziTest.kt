@@ -104,6 +104,44 @@ class PostRendererQuoteRoborazziTest {
         )
     }
 
+    /**
+     * Issue #252 — a sourced citation (author set) immediately above a bare hand-typed `[quote]`
+     * (author == null). Confirms at a glance that the bare quote's neutral `outline` accent is
+     * distinct from the citation's colored `primary` accent. Captured in light + AMOLED.
+     */
+    @Test
+    fun postRendererQuoteBareVsSourcedLight() {
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                Surface(color = MaterialTheme.colorScheme.surface) {
+                    Box(
+                        modifier = Modifier
+                            .width(360.dp)
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(16.dp),
+                    ) {
+                        PostRenderer(content = bareVsSourcedContent())
+                    }
+                }
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(
+            filePath = "build/outputs/roborazzi/post_renderer_quote_bare_vs_sourced_light.png",
+        )
+    }
+
+    @Test
+    fun postRendererQuoteBareVsSourcedAmoled() {
+        composeTestRule.setContent {
+            AmoledHost {
+                PostRenderer(content = bareVsSourcedContent())
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(
+            filePath = "build/outputs/roborazzi/post_renderer_quote_bare_vs_sourced_amoled.png",
+        )
+    }
+
     @androidx.compose.runtime.Composable
     private fun AmoledHost(content: @androidx.compose.runtime.Composable () -> Unit) {
         RedfaceTheme(
@@ -166,6 +204,29 @@ class PostRendererQuoteRoborazziTest {
                 ),
             ),
             paragraph("OK on part là-dessus."),
+        ),
+    )
+
+    private fun bareVsSourcedContent(): PostContent = PostContent(
+        blocks = listOf(
+            paragraph("Citation sourcée (author renseigné) :"),
+            PostBlock.Quote(
+                author = "Lt Ripley",
+                numreponse = null,
+                page = null,
+                content = PostContent(
+                    blocks = listOf(paragraph("Le rendu intrinsèque des smileys est mergé.")),
+                ),
+            ),
+            paragraph("Quote nu tapé à la main (author == null) :"),
+            PostBlock.Quote(
+                author = null,
+                numreponse = null,
+                page = null,
+                content = PostContent(
+                    blocks = listOf(paragraph("Granfondo : épreuve cyclosportive de longue distance.")),
+                ),
+            ),
         ),
     )
 
