@@ -17,7 +17,7 @@
          parser / AST evolution makes the locally persisted PostContent stale ; forces a
          re-fetch + re-parse on the next topic open. Does NOT log the user out, drop the
          flag cache, or touch the proxy preferences. -->
-    <string name="settings_maintenance_title">Maintenance bêta</string>
+    <string name="settings_maintenance_title">Maintenance</string>
     <string name="settings_clear_topic_cache_intro">Supprime les pages de topics stockées localement. Les prochains topics ouverts seront retéléchargés depuis HFR. Les drapeaux, l\'authentification et les préférences proxy ne sont pas affectés.</string>
     <string name="settings_clear_topic_cache_button">Vider le cache des topics</string>
     <string name="settings_clear_topic_cache_confirm_title">Vider le cache des topics ?</string>
@@ -33,6 +33,6 @@
          change is observed on the next topic open without manually clearing the cache. Strictly
          an alpha dogfood tool — flags, auth, proxy preferences are untouched. -->
     <string name="settings_ignore_topic_cache_title">Ignorer le cache topic</string>
-    <string name="settings_ignore_topic_cache_description">Bêta : force le retéléchargement et le reparse des pages de topic. Utile après un changement de parser/rendu. Désactive le prefetch topic pour éviter de remplir Room inutilement.</string>
+    <string name="settings_ignore_topic_cache_description">Force le retéléchargement et le reparse des pages de topic. Utile après un changement de parser/rendu. Désactive le prefetch topic pour éviter de remplir Room inutilement.</string>
     <string name="settings_ignore_topic_cache_persist_failed">Impossible de mémoriser le réglage « Ignorer le cache topic ». Réessayez.</string>
 </resources>

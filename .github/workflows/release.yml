@@ -1,11 +1,16 @@
 name: Release
 
-# Channel-routed CD (#233). The TRIGGER decides the channel (Codex gpt-5.5 xhigh recommended this
-# release-event model over channel-encoding tags — one source of truth, the GitHub Release flag):
+# Track-routed CD (#233). ONE Play app (fr.forumhfr.redface2) distributed via TRACKS — the standard
+# Play model (one app, one applicationId, several tracks), not one Play app per channel. The TRIGGER
+# decides the Play TRACK (Codex gpt-5.5 xhigh recommended this release-event model over channel tags
+# — one source of truth, the GitHub Release flag):
 #
-#   GitHub Release published, prerelease = true   → beta  → fr.forumhfr.redface2.beta  → Play open testing + F-Droid beta
-#   GitHub Release published, prerelease = false  → prod  → fr.forumhfr.redface2       → Play production   + F-Droid release  (gated by the `production` Environment)
-#   workflow_dispatch                             → dev   → fr.forumhfr.redface2.dev   → Play internal     (no F-Droid)
+#   GitHub Release published, prerelease = true   → Play track "beta" (open testing) + F-Droid beta
+#   GitHub Release published, prerelease = false  → Play track "production"           + F-Droid release  (gated by the `production` Environment)
+#   workflow_dispatch                             → Play track "internal"             (no F-Droid)
+#
+# All three build + upload the SAME applicationId (fr.forumhfr.redface2). The .beta/.dev flavor
+# suffixes in app/build.gradle.kts are LOCAL-only (side-by-side dogfood sideload) and never reach Play.
 #
 # A `release: published` fires for BOTH stable and pre-release publications (NOT for drafts), so the
 # deploy only starts when you actually publish. To ship a beta, publish a GitHub Release with the
@@ -84,13 +89,16 @@ jobs:
             echo "::error::Unexpected release tag '${TAG_NAME}' — expected app-v[A-Za-z0-9._-]+."
             exit 1
           fi
+          # Single Play app (fr.forumhfr.redface2) distributed via TRACKS, not one app per channel.
+          # The trigger picks the Play TRACK (+ status / F-Droid channel / approval gate); the build
+          # is ALWAYS the prod applicationId. Distinct applicationId suffixes (.beta/.dev) only exist
+          # for LOCAL side-by-side dogfood installs (cf. app/build.gradle.kts) and never go to Play —
+          # Play tracks of one app share an applicationId, and only one install exists per device.
           if [[ "$EVENT_NAME" == "release" ]]; then
             if [[ "$PRERELEASE" == "true" ]]; then
-              channel=beta; flavor=Beta; dir=beta
-              pkg=fr.forumhfr.redface2.beta; track=beta;       status=completed; fdroid=beta
+              channel=beta; track=beta;       status=completed; fdroid=beta
             else
-              channel=prod; flavor=Prod; dir=prod
-              pkg=fr.forumhfr.redface2;      track=production; status=draft;     fdroid=release
+              channel=prod; track=production; status=draft;     fdroid=release
             fi
             # Fully-qualified tag ref (Codex P2): actions/checkout resolves a bare `app-v72` as a
             # BRANCH first, so a branch sharing the tag name would be built instead of the Release tag.
@@ -98,12 +106,15 @@ jobs:
             release_tag="$TAG_NAME"
             is_release_event=true
           else
-            channel=dev; flavor=Dev; dir=dev
-            pkg=fr.forumhfr.redface2.dev; track=internal; status=completed; fdroid=none
+            channel=dev; track=internal; status=completed; fdroid=none
             build_ref="$DISPATCH_REF"
             release_tag=""
             is_release_event=false
           fi
+          # Constant across every channel: build + upload the prod applicationId. The `beta` Play
+          # track = open testing, `production` = prod, `internal` = internal testing — all of app
+          # fr.forumhfr.redface2.
+          flavor=Prod; dir=prod; pkg=fr.forumhfr.redface2
           {
             echo "channel=$channel"
             echo "gradle_flavor=$flavor"
@@ -233,7 +244,7 @@ jobs:
           UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
           UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
           UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
-        # Build the resolved channel's flavor only (e.g. :app:bundleBetaRelease).
+        # GRADLE_FLAVOR is always Prod (single Play app, track-routed): builds :app:bundleProdRelease.
         run: ./gradlew ":app:bundle${GRADLE_FLAVOR}Release" ":app:assemble${GRADLE_FLAVOR}Release" --no-daemon --stacktrace
 
       - name: Verify AAB signature

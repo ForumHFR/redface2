@@ -25,15 +25,16 @@ Aucun changement applicatif non distribué.
 ## v72 — `0.4.0` — 2026-06-02
 
 **Statut** : `open`
-**Commit** : tag `app-v72` (Release GitHub cochée *pre-release* → canal beta de la CD)
-**Fichier** : AAB `bundleBetaRelease` (`fr.forumhfr.redface2.beta`) uploadé sur le canal Play **open testing** par la CD + tag pour F-Droid beta
+**Commit** : tag `app-v72` (Release GitHub cochée *pre-release* → track open testing)
+**Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) uploadé sur le **track open testing** de l'app unique par la CD + tag pour F-Droid beta
 
-**Passage en bêta.** Première release distribuée par la nouvelle CD routée par release-event (#233) : une Release GitHub *pre-release* déclenche le build du flavor `beta`, l'upload Play *open testing* et la notification F-Droid. Le bump mineur `0.3.x → 0.4.0` matérialise la sortie d'alpha. Pas de nouvelle fonctionnalité utilisateur depuis v71 (le rendu `[quote]`/`[img]` de v70/v71 est inclus) — la valeur de cette version est l'ouverture du canal bêta public et l'industrialisation de la livraison.
+**Passage en bêta.** Première release distribuée par la nouvelle CD routée par release-event (#233) : une Release GitHub *pre-release* déclenche le build prod + l'upload sur le **track open testing** de l'app `fr.forumhfr.redface2` + la notification F-Droid. Le bump mineur `0.3.x → 0.4.0` matérialise la sortie d'alpha. Pas de nouvelle fonctionnalité utilisateur depuis v71 (le rendu `[quote]`/`[img]` de v70/v71 est inclus) — la valeur de cette version est l'ouverture du canal bêta public et l'industrialisation de la livraison.
 
 ### Changed
-- **Canal de distribution** : alpha (closed testing de l'app unique) → **bêta (open testing)**, package dédié `fr.forumhfr.redface2.beta` coexistant avec une future prod et un canal dev (`.dev`). Les libellés visibles « alpha » de l'app passent à « bêta ».
-- **CD** : `release.yml` réécrit en routing par déclencheur — prerelease→beta (open testing), stable→prod (production, draft, après approbation manuelle via l'Environment GitHub `production`), `workflow_dispatch`→dev (internal). Durci par 5 passes de review Codex gpt-5.5 xhigh.
-- **Build** : `app/build.gradle.kts` passe à `versionCode = 72`, `versionName = "0.4.0"` ; 3 product flavors `channel` (prod/beta/dev) avec applicationId distincts.
+- **Canal de distribution** : alpha (closed testing) → **bêta (open testing)**, **tracks de la même app `fr.forumhfr.redface2`** (modèle Play standard, pas une app par canal — un seul applicationId, plusieurs tracks).
+- **Libellés in-app neutres** : « Paramètres bêta / Diagnostics bêta / Maintenance bêta » → « Paramètres / Diagnostics / Maintenance ». Le binaire est identique sur tous les tracks (promouvable open testing → production sans re-build), donc aucun marqueur de canal n'y est gravé ; l'indication « test » vient de la bannière testeur Play. (Le marqueur de phase éventuel reviendra/partira avec la 1.0.)
+- **CD** : `release.yml` route par déclencheur vers le **track Play** — prerelease→open testing (beta), stable→production (draft, après approbation via l'Environment GitHub `production`), `workflow_dispatch`→internal (dev). Tous buildent et uploadent le **package prod** ; seul le track diffère. Durci par 5 passes de review Codex gpt-5.5 xhigh.
+- **Build** : `app/build.gradle.kts` passe à `versionCode = 72`, `versionName = "0.4.0"`. Les 3 product flavors `channel` (prod/beta/dev, applicationId distincts) servent au **sideload dogfood local uniquement** — la CD n'uploade que `prod` sur Play.
 
 ---
 

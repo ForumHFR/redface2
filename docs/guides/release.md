@@ -7,11 +7,13 @@ nav_order: 5
 
 # Release et publication Play Console
 
-Comment construire un AAB signé et le publier sur le bon canal Play Console depuis GitHub Actions. **Depuis #233, le canal est déterminé par le déclencheur** (3 product flavors coexistants, applicationId distincts ; une seule source de vérité = la Release GitHub) :
+Comment construire un AAB signé et le publier sur le bon **track** Play Console depuis GitHub Actions. **Depuis #233, le track est déterminé par le déclencheur.** Modèle Play standard : **une seule app** (`fr.forumhfr.redface2`, un seul applicationId) distribuée via plusieurs **tracks** — pas une app Play par canal. Une seule source de vérité = la Release GitHub :
 
-1. **GitHub Release publiée + cochée « pre-release »** → canal **beta** (`fr.forumhfr.redface2.beta`) → Play **open testing** + F-Droid beta.
-2. **GitHub Release publiée, normale (stable)** → canal **prod** (`fr.forumhfr.redface2`) → Play **production** (statut `draft`) **après approbation manuelle** via l'Environment GitHub `production` + F-Droid release.
-3. **`workflow_dispatch` manuel** → canal **dev** (`fr.forumhfr.redface2.dev`) → Play **internal testing** (rapide, pas de F-Droid).
+1. **GitHub Release publiée + cochée « pre-release »** → track **open testing** (beta) + F-Droid beta.
+2. **GitHub Release publiée, normale (stable)** → track **production** (statut `draft`) **après approbation manuelle** via l'Environment GitHub `production` + F-Droid release.
+3. **`workflow_dispatch` manuel** → track **internal testing** (dev, rapide, pas de F-Droid).
+
+Les trois buildent et uploadent le **même package `fr.forumhfr.redface2`** ; seul le track diffère. Les suffixes `.beta`/`.dev` des product flavors (`app/build.gradle.kts`) servent **uniquement au sideload dogfood local** (installs côte-à-côte) et ne vont jamais sur Play.
 
 ⚠️ **Le tag `app-v<N>` seul ne déclenche plus la CD** : il faut **publier une GitHub Release** (sur ce tag) — pre-release pour beta, stable pour prod. Une Release dont le tag ne commence pas par `app-v` (ex. les `v0.x` specs/site) est **ignorée** (gate dans `resolve-target`).
 
@@ -20,7 +22,7 @@ Workflow source : [`.github/workflows/release.yml`](https://github.com/ForumHFR/
 ## Conventions
 
 - **Tag namespace** : les releases app utilisent `app-v<versionCode>` (ex: `app-v32`, `app-v33`). Cela évite de collisionner avec les tags `v0.x.0` du site / des specs.
-- **Canaux / tracks Play Console** : depuis #233, **le canal est dérivé du déclencheur** (cf. en-tête), pas d'input `play_track` libre. Mapping figé dans `resolve-target` : beta → `fr.forumhfr.redface2.beta` track **open testing** ; prod → `fr.forumhfr.redface2` track **production** ; dev → `fr.forumhfr.redface2.dev` track **internal**. Chaque `applicationId` est un listing Play distinct (coexistence sur l'appareil). L'alpha (closed testing de l'app unique) est **retiré** au profit de ces 3 canaux.
+- **Tracks Play Console** : depuis #233, **le track est dérivé du déclencheur** (cf. en-tête), pas d'input `play_track` libre. Mapping figé dans `resolve-target`, **tous sur l'app `fr.forumhfr.redface2`** : prerelease → track **`beta`** (open testing) ; stable → track **`production`** ; dispatch → track **`internal`**. L'ancien closed testing (alpha) est remplacé par l'open testing (bêta).
 
 ## Pré-requis (à faire une fois)
 
@@ -32,25 +34,25 @@ Le seul flux supporté en 2026 par Google pour les uploads CI est via **GCP IAM*
 2. **GCP Console → IAM → Service accounts** → créer `redface2-play-publisher`. Aucun rôle GCP n'est nécessaire — la création du compte de service suffit. Les droits applicatifs (publication AAB, gestion tracks) sont accordés exclusivement côté Play Console à l'étape 1.5. Le rôle GCP `Service Account User` n'est utile **que si** d'autres principals doivent impersonner ce SA via la CLI `gcloud` ; pour un upload CI direct depuis GitHub Actions avec la clé JSON, on peut le laisser vide.
 3. Onglet **Keys → Add Key → JSON** → télécharger le fichier `redface2-play-publisher.json`. **Ne le commit nulle part.**
 4. **Play Console → Settings → Developer API → API access** → **Link existing project** (le projet GCP de l'étape 1) → **Grant access** au service account.
-5. Permissions Play Console — à accorder sur **chacune** des 3 apps (`fr.forumhfr.redface2`, `fr.forumhfr.redface2.beta`, `fr.forumhfr.redface2.dev`), ou en accès **account-wide** (sinon les uploads beta/dev échouent en 403 / `package not found`) :
+5. Permissions Play Console — à accorder sur l'app **`fr.forumhfr.redface2`** (un seul applicationId, tous les tracks sont dessus) :
    - `View app information`
    - `Manage testing track and edit drafts`
    - `Manage testing track releases` (couvre `internal` + `beta` = open testing)
-   - `Release apps to production` (pour le canal prod)
+   - `Release apps to production` (pour le track production)
 
 Référence Google : [Use the Play Developer API with a service account](https://developers.google.com/android-publisher/getting_started).
 
-### 2. Premier upload manuel — **par package** (obligatoire)
+### 2. Premier upload manuel (obligatoire, une fois)
 
-Play Console exige **un premier AAB uploadé manuellement** par **`applicationId`** avant que l'API service account puisse pousser. Les 3 canaux étant 3 packages distincts, il faut le faire **pour chacun** (`…redface2`, `…redface2.beta`, `…redface2.dev`). Les AAB signés se génèrent localement (keystore sous `.gradle-user/signing/`, gitignored — à posséder/obtenir hors-repo) :
+Play Console exige **un premier AAB uploadé manuellement** sur l'app avant que l'API service account puisse pousser (sinon l'API répond `Package not found` — l'applicationId n'est fixé qu'au premier upload). Comme on n'a **qu'une seule app**, c'est à faire **une seule fois** (déjà fait historiquement : l'app `fr.forumhfr.redface2` a reçu les builds alpha v14…v71). Pour mémoire, l'AAB prod se génère localement (keystore sous `.gradle-user/signing/`, gitignored) :
 
 ```bash
-./scripts/docker-dev.sh ./gradlew :app:bundleProdRelease :app:bundleBetaRelease :app:bundleDevRelease \
+./scripts/docker-dev.sh ./gradlew :app:bundleProdRelease \
   --init-script .gradle-user/signing/signing.init.gradle
-# AAB : app/build/outputs/bundle/{prod,beta,dev}Release/app-{flavor}-release.aab
+# AAB : app/build/outputs/bundle/prodRelease/*.aab
 ```
 
-Puis dans **chaque** listing Play Console : **App → Test → \<track\> → Create new release** → upload manuel. Une fois ce premier upload fait par package, la CD prend le relais sur ce package.
+Puis Play Console : **App → Test → \<track\> → Create new release** → upload manuel. Ensuite la CD prend le relais sur tous les tracks.
 
 ### 3. Secrets GitHub Actions
 
@@ -78,7 +80,7 @@ git switch main && git pull --ff-only
 gh release create app-v72 --prerelease --title 'Redface 2 v72 (0.4.0-beta)' --notes '…'
 ```
 
-La CD résout **beta** : build `:app:bundleBetaRelease` (`fr.forumhfr.redface2.beta`), upload Play **open testing** (statut `completed`), attache l'AAB+APK à la Release, notifie F-Droid (beta).
+La CD résout **beta** : build `:app:bundleProdRelease` (`fr.forumhfr.redface2`), upload sur le **track `beta` (open testing)** en statut `completed`, attache l'AAB+APK à la Release, notifie F-Droid (beta).
 
 ## Flux prod — production
 
@@ -88,11 +90,13 @@ Idem mais **Release stable** (case « pre-release » décochée) :
 gh release create app-v73 --title 'Redface 2 v73 (1.0.0)' --notes '…'
 ```
 
-La CD résout **prod** et **attend l'approbation** dans l'Environment GitHub `production` (required reviewer) avant tout build/upload. Upload Play **production** en **statut `draft`** (double garde-fou : approbation GitHub + activation manuelle Play). Notifie F-Droid (release).
+La CD résout **prod** et **attend l'approbation** dans l'Environment GitHub `production` (required reviewer) avant tout build/upload. Build `:app:bundleProdRelease`, upload sur le **track `production`** en **statut `draft`** (double garde-fou : approbation GitHub + activation manuelle Play). Notifie F-Droid (release).
 
 ## Flux dev — internal testing (rapide)
 
-**GitHub → Actions → Release → Run workflow** (ou `gh workflow run release.yml -f ref=<branche>`). Pas de GitHub Release, pas de F-Droid. La CD résout **dev** : build `:app:bundleDevRelease` (`fr.forumhfr.redface2.dev`), upload Play **internal** (`completed`). Seul input : `ref` (défaut = ref courant). Artefacts du run téléchargeables 30 j.
+**GitHub → Actions → Release → Run workflow** (ou `gh workflow run release.yml -f ref=<branche>`). Pas de GitHub Release, pas de F-Droid. La CD résout **dev** : build `:app:bundleProdRelease` (`fr.forumhfr.redface2`), upload sur le **track `internal`** en statut `completed`. Seul input : `ref` (défaut = ref courant). Artefacts du run téléchargeables 30 j.
+
+⚠️ **Caveat versionCode (app unique)** : le track internal partage le namespace de versionCode de l'app `fr.forumhfr.redface2`. Un dispatch dev **consomme** le versionCode présent dans `app/build.gradle.kts` au ref buildé. Si tu dispatches dev avec un versionCode que tu publieras ensuite en Release (beta/prod), l'upload de la Release sera **rejeté** (`versionCode already used`). Discipline : soit tu dispatches dev sur un versionCode déjà bumpé que tu **promouvras** ensuite via Play Console (internal → open → production) au lieu de re-publier une Release, soit tu re-bumpes avant la Release. (Une numérotation dev dédiée — ex. offset run_number — est **incompatible** avec une app unique car Play exige des versionCode croissants : un code dev élevé bloquerait les Releases suivantes.) Le dogfood quotidien passe de toute façon par le sideload `.debug` (adb), pas par ce track.
 
 ## Bump de version : convention
 
@@ -104,13 +108,13 @@ Le `versionCode` est strictement croissant. Play Console rejette tout AAB dont l
 | Release intermédiaire dans la même phase | bump du suffixe (ex: `0.1.0-phase1.1` → `0.1.0-phase1.2`) |
 | Build dogfood non distribué | bumper malgré tout, marquer comme `burnt` dans `app/CHANGELOG.md` si jamais distribué |
 
-## Promotion entre canaux
+## Promotion entre tracks
 
-⚠️ **beta → prod n'est PAS une promotion Play.** beta est le package `…redface2.beta` et prod `…redface2` : Play Console ne promeut **qu'entre les tracks d'un MÊME package**, pas entre packages distincts. Donc :
+Comme tout est l'app unique `fr.forumhfr.redface2`, **la promotion native Play fonctionne** entre ses tracks (internal → open testing → production) — c'est l'intérêt principal du modèle 1-app. Deux façons d'amener un binaire en prod :
 
-- **beta → prod** = publier une **Release stable** (case pre-release décochée) sur un **nouveau tag `app-v<N>`** avec un `versionCode` neuf → la CD build/upload le package prod. C'est le seul chemin beta→prod.
-- **Promote release (même package)** reste valable *à l'intérieur* d'un package : ex. au sein de prod, promouvoir d'un track de test interne vers `production`, ou faire un rollout progressif. Via Play Console : Test → `<track>` → release → **Promote release** (ne traverse jamais une frontière de package).
-- Le `workflow_dispatch` ne sert qu'au canal **dev** (son seul input est `ref`) — pas un outil de promotion.
+- **Promotion Play (recommandé pour beta → prod)** : Play Console → Test → `<track source>` (ex. open testing) → la release concernée → **Promote release** → choisir `production`. Promeut **le même binaire** (même versionCode) sans re-build ni nouvelle Release GitHub. Idéal après validation en bêta.
+- **Nouvelle Release stable** : publier une Release GitHub **stable** (case pre-release décochée) sur un nouveau tag `app-v<N>` avec un versionCode neuf → la CD build/upload sur `production` (après la gate d'approbation). À utiliser quand le binaire prod doit différer du binaire bêta.
+- Le `workflow_dispatch` ne sert qu'au track **internal** (dev) — pas un outil de promotion.
 
 ## Pourquoi `r0adkll/upload-google-play` plutôt que `gradle-play-publisher`
 
