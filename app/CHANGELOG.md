@@ -21,6 +21,22 @@ Aucun changement applicatif non distribué.
 
 ---
 
+## v71 — `0.3.31` — 2026-06-02
+
+**Statut** : `closed`
+**Commit** : tag `app-v71` après merge de la PR #258
+**Fichier** : AAB uploadé sur le canal Play closed alpha + tag pour F-Droid
+
+Hotfix rendu des images (régression #224 remontée en dogfood).
+
+### Fixed
+- **#257 — grandes images lentes/pixelisées + images-liens rendues petites.** Trois causes corrigées : (1) une image dans un `[url=…][img]` (« cliquable pour agrandir ») est désormais promue en **bloc pleine largeur cliquable** (ouvre le lien) au lieu de rester une petite vignette inline ; (2) le décode des `[img]` inline se fait à une **taille stable** (cap inline en px, `FIT`+`INEXACT`, mémoïsé) → plus de bitmap upscalé pixelisé pendant la croissance cold→mesuré ; (3) `measureIntrinsicMediaSize` utilise une **sonde bornée 1024 + `Precision.INEXACT`** au lieu de `Size.ORIGINAL` → plus de décode pleine résolution juste pour mesurer (ni d'upscale des petits médias). Gate : Codex gpt-5.5 xhigh + review 4-flavor opus (re-review Codex a attrapé un P1 de précision, corrigé).
+
+### Changed
+- **Build / release** : `app/build.gradle.kts` passe à `versionCode = 71`, `versionName = "0.3.31"`.
+
+---
+
 ## v70 — `0.3.30` — 2026-06-02
 
 **Statut** : `closed`
