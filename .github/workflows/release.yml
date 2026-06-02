@@ -77,6 +77,13 @@ jobs:
             echo "::error::Invalid dispatch ref '${DISPATCH_REF}' — only [A-Za-z0-9._/-] allowed."
             exit 1
           fi
+          # Same hardening for the release tag (Codex P3): a git tag may legally contain shell
+          # metachars; release_tag flows into checkout (refs/tags/…), the F-Droid payload and the
+          # approval job, so pin it to the app-v naming and reject anything else before it propagates.
+          if [[ "$EVENT_NAME" == "release" && ! "$TAG_NAME" =~ ^app-v[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::Unexpected release tag '${TAG_NAME}' — expected app-v[A-Za-z0-9._-]+."
+            exit 1
+          fi
           if [[ "$EVENT_NAME" == "release" ]]; then
             if [[ "$PRERELEASE" == "true" ]]; then
               channel=beta; flavor=Beta; dir=beta
@@ -123,7 +130,9 @@ jobs:
     environment: production
     timeout-minutes: 4320
     steps:
-      - run: echo "Production deploy approved for ${{ needs.resolve-target.outputs.release_tag }}."
+      - env:
+          RELEASE_TAG: ${{ needs.resolve-target.outputs.release_tag }}
+        run: echo "Production deploy approved for ${RELEASE_TAG}."
 
   build:
     name: Build, sign and publish (${{ needs.resolve-target.outputs.channel }})
@@ -287,7 +296,10 @@ jobs:
         # Only for the release-triggered channels (beta/prod): the Release already exists (the
         # maintainer published it = the trigger), so we UPDATE it with the signed AAB+APK rather
         # than create one. dev (dispatch) has no Release — the workflow artefacts above are enough.
-        if: ${{ needs.resolve-target.outputs.is_release_event == 'true' }}
+        # always() + the artefacts-staged guard (Codex P2): attach even when the Play upload step
+        # failed, so the published Release still carries the signed AAB+APK (the recovery path the
+        # guide documents) instead of being skipped by the implicit success() check.
+        if: ${{ always() && needs.resolve-target.outputs.is_release_event == 'true' && steps.artefacts.outcome == 'success' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve-target.outputs.release_tag }}
