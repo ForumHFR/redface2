@@ -32,25 +32,25 @@ Le seul flux supporté en 2026 par Google pour les uploads CI est via **GCP IAM*
 2. **GCP Console → IAM → Service accounts** → créer `redface2-play-publisher`. Aucun rôle GCP n'est nécessaire — la création du compte de service suffit. Les droits applicatifs (publication AAB, gestion tracks) sont accordés exclusivement côté Play Console à l'étape 1.5. Le rôle GCP `Service Account User` n'est utile **que si** d'autres principals doivent impersonner ce SA via la CLI `gcloud` ; pour un upload CI direct depuis GitHub Actions avec la clé JSON, on peut le laisser vide.
 3. Onglet **Keys → Add Key → JSON** → télécharger le fichier `redface2-play-publisher.json`. **Ne le commit nulle part.**
 4. **Play Console → Settings → Developer API → API access** → **Link existing project** (le projet GCP de l'étape 1) → **Grant access** au service account.
-5. Permissions Play Console minimales pour l'app `fr.forumhfr.redface2` :
+5. Permissions Play Console — à accorder sur **chacune** des 3 apps (`fr.forumhfr.redface2`, `fr.forumhfr.redface2.beta`, `fr.forumhfr.redface2.dev`), ou en accès **account-wide** (sinon les uploads beta/dev échouent en 403 / `package not found`) :
    - `View app information`
    - `Manage testing track and edit drafts`
-   - `Manage testing track releases` (couvre `internal` + `alpha` + `beta`)
-   - `Release apps to production` quand la CD doit pouvoir promouvoir vers `production`
+   - `Manage testing track releases` (couvre `internal` + `beta` = open testing)
+   - `Release apps to production` (pour le canal prod)
 
 Référence Google : [Use the Play Developer API with a service account](https://developers.google.com/android-publisher/getting_started).
 
-### 2. Premier upload manuel (obligatoire)
+### 2. Premier upload manuel — **par package** (obligatoire)
 
-Play Console exige **un premier AAB uploadé manuellement** avant que l'API service account puisse pousser sur un track. Faire ça avec l'AAB le plus récent généré localement (le keystore vit sous `.gradle-user/signing/`, qui est gitignored — il faut soit le posséder déjà localement soit l'obtenir hors-repo) :
+Play Console exige **un premier AAB uploadé manuellement** par **`applicationId`** avant que l'API service account puisse pousser. Les 3 canaux étant 3 packages distincts, il faut le faire **pour chacun** (`…redface2`, `…redface2.beta`, `…redface2.dev`). Les AAB signés se génèrent localement (keystore sous `.gradle-user/signing/`, gitignored — à posséder/obtenir hors-repo) :
 
 ```bash
-./scripts/docker-dev.sh ./gradlew :app:bundleRelease \
+./scripts/docker-dev.sh ./gradlew :app:bundleProdRelease :app:bundleBetaRelease :app:bundleDevRelease \
   --init-script .gradle-user/signing/signing.init.gradle
-# AAB produit : app/build/outputs/bundle/release/redface2-v<N>-<date>-<sha>.aab
+# AAB : app/build/outputs/bundle/{prod,beta,dev}Release/app-{flavor}-release.aab
 ```
 
-Puis dans Play Console : **App → Test → \<le track ciblé\> → Create new release** → upload manuel. Une fois ce premier draft créé, la CD prend le relais.
+Puis dans **chaque** listing Play Console : **App → Test → \<track\> → Create new release** → upload manuel. Une fois ce premier upload fait par package, la CD prend le relais sur ce package.
 
 ### 3. Secrets GitHub Actions
 
@@ -104,12 +104,13 @@ Le `versionCode` est strictement croissant. Play Console rejette tout AAB dont l
 | Release intermédiaire dans la même phase | bump du suffixe (ex: `0.1.0-phase1.1` → `0.1.0-phase1.2`) |
 | Build dogfood non distribué | bumper malgré tout, marquer comme `burnt` dans `app/CHANGELOG.md` si jamais distribué |
 
-## Promotion entre tracks
+## Promotion entre canaux
 
-L'action n'auto-promote pas — c'est un choix de design pour ne pas livrer en prod par accident. Pour promouvoir un draft d'un track à l'autre :
+⚠️ **beta → prod n'est PAS une promotion Play.** beta est le package `…redface2.beta` et prod `…redface2` : Play Console ne promeut **qu'entre les tracks d'un MÊME package**, pas entre packages distincts. Donc :
 
-- **Manuellement via Play Console** : Test → `<track source>` → release concernée → **Promote release** → choisir le track cible. Flux nominal pour promouvoir un même binaire d'un track à l'autre (open testing → production), sans re-build.
-- **Via une nouvelle Release** : comme les canaux sont 3 `applicationId` distincts (pas des tracks d'une même app), « passer de beta à prod » = publier une **Release stable** (case pre-release décochée) sur un **nouveau tag `app-v<N>`** avec un `versionCode` neuf (Play rejette un versionCode déjà uploadé sur le listing). Le `workflow_dispatch` ne sert qu'au canal **dev** (son seul input est `ref`).
+- **beta → prod** = publier une **Release stable** (case pre-release décochée) sur un **nouveau tag `app-v<N>`** avec un `versionCode` neuf → la CD build/upload le package prod. C'est le seul chemin beta→prod.
+- **Promote release (même package)** reste valable *à l'intérieur* d'un package : ex. au sein de prod, promouvoir d'un track de test interne vers `production`, ou faire un rollout progressif. Via Play Console : Test → `<track>` → release → **Promote release** (ne traverse jamais une frontière de package).
+- Le `workflow_dispatch` ne sert qu'au canal **dev** (son seul input est `ref`) — pas un outil de promotion.
 
 ## Pourquoi `r0adkll/upload-google-play` plutôt que `gradle-play-publisher`
 

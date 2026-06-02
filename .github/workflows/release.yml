@@ -85,7 +85,9 @@ jobs:
               channel=prod; flavor=Prod; dir=prod
               pkg=fr.forumhfr.redface2;      track=production; status=draft;     fdroid=release
             fi
-            build_ref="$TAG_NAME"
+            # Fully-qualified tag ref (Codex P2): actions/checkout resolves a bare `app-v72` as a
+            # BRANCH first, so a branch sharing the tag name would be built instead of the Release tag.
+            build_ref="refs/tags/$TAG_NAME"
             release_tag="$TAG_NAME"
             is_release_event=true
           else
