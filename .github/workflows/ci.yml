@@ -29,4 +29,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v5
 
       - name: Verify
-        run: ./gradlew detektAll lintDebug test testDebugUnitTest :app:assembleDebug
+        # `:app` now has product flavors (#233 channels) so its variant tasks are flavored:
+        # the unqualified `lintDebug` / `:app:assembleDebug` no longer resolve for `:app`. Use the
+        # default `prod` flavor for the `:app` lint + APK; `lintDebug`/`test`/`testDebugUnitTest`
+        # still cover the (flavour-less) core/feature/jvm modules, and the unqualified `test`
+        # covers `:app`'s unit tests across variants (incl. the Konsist architecture test).
+        run: ./gradlew detektAll lintDebug test testDebugUnitTest :app:lintProdDebug :app:assembleProdDebug
