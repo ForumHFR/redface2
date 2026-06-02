@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.ui.post
 
+import fr.forumhfr.redface2.core.model.PostBlock
+import fr.forumhfr.redface2.core.model.PostContent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -54,5 +56,44 @@ class PostRendererQuoteDepthTest {
         )
         assertTrue("depth 4 must collapse", isCollapsedQuoteDepth(4))
         assertTrue("very deep quotes must keep collapsing", isCollapsedQuoteDepth(99))
+    }
+
+    @Test
+    fun `a bare quote always uses the neutral accent regardless of depth`() {
+        // Issue #252 — a hand-typed `[quote]` (author == null) is the user formatting their own
+        // text, never a sourced citation, so it must read with the neutral `outline` accent at
+        // every nesting level (it never alternates into the primary/tertiary citation palette).
+        assertEquals(QuoteAccentRole.BARE, quoteAccentRole(quoteDepth = 0, isBareQuote = true))
+        assertEquals(QuoteAccentRole.BARE, quoteAccentRole(quoteDepth = 1, isBareQuote = true))
+        assertEquals(QuoteAccentRole.BARE, quoteAccentRole(quoteDepth = 2, isBareQuote = true))
+    }
+
+    @Test
+    fun `isBareQuote is true only when a quote carries no source metadata`() {
+        fun quote(author: String?, numreponse: Int?, page: Int?) = PostBlock.Quote(
+            author = author,
+            numreponse = numreponse,
+            page = page,
+            content = PostContent(blocks = emptyList()),
+        )
+        // Hand-typed [quote]: no author, no numreponse, no page → bare.
+        assertTrue(isBareQuote(quote(author = null, numreponse = null, page = null)))
+        // #254 regression guard: a sourced [quotemsg=id,page,user] parsed in the editor preview has
+        // author == null but a non-null numreponse — it must NOT be treated as bare.
+        assertFalse(isBareQuote(quote(author = null, numreponse = 2523833, page = null)))
+        assertFalse(isBareQuote(quote(author = null, numreponse = 2523833, page = 1)))
+        // Reading-path sourced citation: author present → not bare.
+        assertFalse(isBareQuote(quote(author = "Lt Ripley", numreponse = 74749781, page = 8270)))
+    }
+
+    @Test
+    fun `a sourced citation keeps the primary-tertiary alternation by depth`() {
+        // A real HFR citation (`[quotemsg=]`, author set) keeps the issue #202 hierarchy: even
+        // depths get `primary`, odd depths `tertiary`, so nested citations stay visually layered
+        // and remain clearly distinct from the bare-quote neutral accent above.
+        assertEquals(QuoteAccentRole.SOURCED_EVEN, quoteAccentRole(quoteDepth = 0, isBareQuote = false))
+        assertEquals(QuoteAccentRole.SOURCED_ODD, quoteAccentRole(quoteDepth = 1, isBareQuote = false))
+        assertEquals(QuoteAccentRole.SOURCED_EVEN, quoteAccentRole(quoteDepth = 2, isBareQuote = false))
+        assertEquals(QuoteAccentRole.SOURCED_ODD, quoteAccentRole(quoteDepth = 3, isBareQuote = false))
     }
 }
