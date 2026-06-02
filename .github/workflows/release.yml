@@ -1,152 +1,191 @@
 name: Release
 
-# Hybrid trigger: tag push for shipping ("v32", "v33"…) and manual dispatch for ad-hoc
-# intermediate builds during dev. Both paths produce a signed AAB + signed APK and attach
-# them to a GitHub Release (or workflow artifacts when no tag is present); the manual path
-# may also push to Play Console depending on the input.
+# Channel-routed CD (#233). The TRIGGER decides the channel (Codex gpt-5.5 xhigh recommended this
+# release-event model over channel-encoding tags — one source of truth, the GitHub Release flag):
+#
+#   GitHub Release published, prerelease = true   → beta  → fr.forumhfr.redface2.beta  → Play open testing + F-Droid beta
+#   GitHub Release published, prerelease = false  → prod  → fr.forumhfr.redface2       → Play production   + F-Droid release  (gated by the `production` Environment)
+#   workflow_dispatch                             → dev   → fr.forumhfr.redface2.dev   → Play internal     (no F-Droid)
+#
+# A `release: published` fires for BOTH stable and pre-release publications (NOT for drafts), so the
+# deploy only starts when you actually publish. To ship a beta, publish a GitHub Release with the
+# "pre-release" box ticked; for prod, publish a normal Release (which then waits on the Environment
+# approval). dev never creates a Release — it's the fast internal channel via the manual dispatch.
 on:
-  push:
-    tags:
-      # Namespaced under `app-v*` to avoid colliding with the `v0.x.0` tags used for
-      # spec/site versions (e.g. v0.7.0, v0.8.0). An app release tag looks like `app-v32`,
-      # `app-v33`, etc., aligned on `versionCode`.
-      - 'app-v*'
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Branch or tag to build (default: current ref)'
-        required: false
-        default: ''
-        type: string
-      play_track:
-        description: |
-          Play Console track. For Redface 2 the closed testing track is `alpha` (lowercase).
-          Promotion pipeline: `alpha` → `beta` → `production`. Other valid values: `internal`
-          (standard internal testing) or the exact name of a custom closed track if one is
-          created later in the Play Console. `none` skips Play upload entirely (build + sign
-          only).
-        required: false
-        default: 'alpha'
-        type: string
-      attach_release:
-        description: 'Attach AAB+APK to a GitHub Release (only meaningful for tag-style runs)'
-        required: false
-        default: false
-        type: boolean
-      play_release_status:
-        description: |
-          Play Console release status. `completed` = publish immediately on the chosen track
-          (testers see it without manual intervention). `draft` = upload as draft, requires
-          manual activation in the Play Console UI (final guardrail before users see it).
-          `inProgress` = upload + start a staged rollout (rollout fraction is set via Play
-          Console UI afterwards). Leave empty to use the smart default: `completed` for
-          testing tracks (alpha/beta/internal/closed), `draft` for `production` (so an
-          accidental prod tag can never auto-publish to real users).
+        description: 'Branch/tag to build for the dev channel (default: current ref)'
         required: false
         default: ''
         type: string
 
 concurrency:
-  # Allow concurrent releases on different tags / refs but coalesce repeated dispatches on
-  # the same target to avoid double-uploading the same versionCode (Play Console rejects
-  # duplicates anyway, but the GH job would still consume secrets and time).
-  group: release-${{ github.ref }}
+  # Coalesce repeated runs for the same release tag / dispatch ref; never cancel a deploy in flight.
+  group: release-${{ github.event.release.tag_name || github.ref }}
   cancel-in-progress: false
 
 permissions:
-  # `contents: write` lets softprops/action-gh-release create the GitHub Release +
-  # upload assets via the REST API. `packages: read` is also required before checkout:
-  # the job itself runs inside a pinned GHCR container, and tag-triggered workflows do
-  # not get package read access once permissions are narrowed explicitly.
   contents: write
   packages: read
 
 jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  # Single source of truth for the per-channel routing. Runs on a plain runner
+  # (fast, no Android SDK) and feeds every downstream job via outputs.
+  # ──────────────────────────────────────────────────────────────────────
+  resolve-target:
+    name: Resolve channel target
+    # Gate (#233, Codex P1): `on: release` fires for EVERY published Release, but this repo also
+    # publishes `v0.x` Releases for the specs/site — those must NOT enter the app deploy path. Only
+    # proceed for app releases (tag `app-v*`); a dispatch (dev) always proceeds. A non-app release
+    # skips this job, which cascades to build + notify-fdroid being skipped (no-op deploy).
+    if: ${{ github.event_name != 'release' || startsWith(github.event.release.tag_name, 'app-v') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      channel: ${{ steps.r.outputs.channel }}
+      gradle_flavor: ${{ steps.r.outputs.gradle_flavor }}
+      flavor_dir: ${{ steps.r.outputs.flavor_dir }}
+      package_name: ${{ steps.r.outputs.package_name }}
+      play_track: ${{ steps.r.outputs.play_track }}
+      play_status: ${{ steps.r.outputs.play_status }}
+      fdroid_channel: ${{ steps.r.outputs.fdroid_channel }}
+      build_ref: ${{ steps.r.outputs.build_ref }}
+      release_tag: ${{ steps.r.outputs.release_tag }}
+      is_release_event: ${{ steps.r.outputs.is_release_event }}
+    steps:
+      - id: r
+        shell: bash
+        # Pass every GitHub-expression through env, NEVER interpolate into the script body
+        # (Codex P1): the dispatch `ref` is user-controlled, and `${{ … }}` substitution happens
+        # before bash runs, so a crafted ref could rewrite channel/flavor/track/status and route a
+        # prod upload outside the gate. As env vars bash treats them as inert literals.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          DISPATCH_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          # Validate the user-controlled dispatch ref against the git-ref charset BEFORE it ever
+          # reaches $GITHUB_OUTPUT (Codex P1): a value with a newline could otherwise inject extra
+          # output lines (e.g. play_track=production) and bypass the prod gate while channel stays dev.
+          if [[ -n "${DISPATCH_REF:-}" && ! "$DISPATCH_REF" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Invalid dispatch ref '${DISPATCH_REF}' — only [A-Za-z0-9._/-] allowed."
+            exit 1
+          fi
+          # Same hardening for the release tag (Codex P3): a git tag may legally contain shell
+          # metachars; release_tag flows into checkout (refs/tags/…), the F-Droid payload and the
+          # approval job, so pin it to the app-v naming and reject anything else before it propagates.
+          if [[ "$EVENT_NAME" == "release" && ! "$TAG_NAME" =~ ^app-v[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::Unexpected release tag '${TAG_NAME}' — expected app-v[A-Za-z0-9._-]+."
+            exit 1
+          fi
+          if [[ "$EVENT_NAME" == "release" ]]; then
+            if [[ "$PRERELEASE" == "true" ]]; then
+              channel=beta; flavor=Beta; dir=beta
+              pkg=fr.forumhfr.redface2.beta; track=beta;       status=completed; fdroid=beta
+            else
+              channel=prod; flavor=Prod; dir=prod
+              pkg=fr.forumhfr.redface2;      track=production; status=draft;     fdroid=release
+            fi
+            # Fully-qualified tag ref (Codex P2): actions/checkout resolves a bare `app-v72` as a
+            # BRANCH first, so a branch sharing the tag name would be built instead of the Release tag.
+            build_ref="refs/tags/$TAG_NAME"
+            release_tag="$TAG_NAME"
+            is_release_event=true
+          else
+            channel=dev; flavor=Dev; dir=dev
+            pkg=fr.forumhfr.redface2.dev; track=internal; status=completed; fdroid=none
+            build_ref="$DISPATCH_REF"
+            release_tag=""
+            is_release_event=false
+          fi
+          {
+            echo "channel=$channel"
+            echo "gradle_flavor=$flavor"
+            echo "flavor_dir=$dir"
+            echo "package_name=$pkg"
+            echo "play_track=$track"
+            echo "play_status=$status"
+            echo "fdroid_channel=$fdroid"
+            echo "build_ref=$build_ref"
+            echo "release_tag=$release_tag"
+            echo "is_release_event=$is_release_event"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice title=Release target::channel=$channel flavor=$flavor pkg=$pkg track=$track status=$status fdroid=$fdroid ref=${build_ref:-<current>}"
+
+  # prod-only manual-approval gate. A DEDICATED environment-gated job, not a conditional
+  # `environment:` on `build` — an expression yielding '' for beta/dev is an INVALID empty
+  # environment reference and fails those runs before any step (Codex P2). For prod this job pauses
+  # on the `production` Environment's required reviewer; for beta/dev it's skipped and build proceeds.
+  await-prod-approval:
+    name: Await production approval
+    needs: resolve-target
+    if: ${{ needs.resolve-target.outputs.channel == 'prod' }}
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 4320
+    steps:
+      - env:
+          RELEASE_TAG: ${{ needs.resolve-target.outputs.release_tag }}
+        run: echo "Production deploy approved for ${RELEASE_TAG}."
+
   build:
-    name: Build, sign and publish
+    name: Build, sign and publish (${{ needs.resolve-target.outputs.channel }})
+    needs: [resolve-target, await-prod-approval]
+    # await-prod-approval is skipped for beta/dev, so gate explicitly: run when resolve-target
+    # succeeded AND (channel is not prod OR the prod approval passed). always() lets build evaluate
+    # despite the (intentionally) skipped gate job on non-prod channels.
+    if: ${{ always() && needs.resolve-target.result == 'success' && (needs.resolve-target.outputs.channel != 'prod' || needs.await-prod-approval.result == 'success') }}
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31
     timeout-minutes: 30
-    # Exposed for the `notify-fdroid` job (which runs outside this Android-SDK container).
     outputs:
       version_code: ${{ steps.meta.outputs.version_code }}
+      version_name: ${{ steps.meta.outputs.version_name }}
       short_sha: ${{ steps.meta.outputs.short_sha }}
-      release_tag: ${{ steps.meta.outputs.release_tag }}
-      release_kind: ${{ steps.meta.outputs.release_kind }}
     env:
-      # Resolved Play track for the upload action below; defaults to alpha (closed testing).
-      # The historical comment here mentioned `gradle-play-publisher` which was retired in
-      # the initial Codex review on this PR — the upload now goes through r0adkll directly.
-      PLAY_TRACK: ${{ inputs.play_track || 'alpha' }}
-      # Smart default for the Play Console release status:
-      #   - explicit `play_release_status` input wins when non-empty
-      #   - otherwise: `draft` for production track (mandatory manual UI activation as a
-      #     final guardrail against accidental prod releases)
-      #   - otherwise: `completed` for any testing track (alpha/beta/internal/closed/none)
-      # On a tag push, `inputs.play_track` is empty so the default `completed` applies —
-      # tag = ship to alpha testers immediately. To target production, dispatch manually
-      # with `play_track: production` (which keeps the `draft` default unless overridden).
-      PLAY_RELEASE_STATUS: ${{ inputs.play_release_status != '' && inputs.play_release_status || (inputs.play_track == 'production' && 'draft' || 'completed') }}
-
+      PLAY_TRACK: ${{ needs.resolve-target.outputs.play_track }}
+      PLAY_STATUS: ${{ needs.resolve-target.outputs.play_status }}
+      GRADLE_FLAVOR: ${{ needs.resolve-target.outputs.gradle_flavor }}
+      FLAVOR_DIR: ${{ needs.resolve-target.outputs.flavor_dir }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          # workflow_dispatch may pass a ref; tag pushes use the tag automatically.
-          ref: ${{ inputs.ref || github.ref }}
+          # release event → build the Release's tag ; dispatch → the chosen ref (or current).
+          ref: ${{ needs.resolve-target.outputs.build_ref || github.ref }}
           fetch-depth: 0
 
       - name: Trust workspace for git
-        # `actions/checkout` configures `safe.directory` for the runner user, but this job
-        # runs inside the `cirruslabs/android-sdk` container under a different uid. Without
-        # this step, every subsequent `git` call (rev-parse here, plus implicit calls inside
-        # `gradle/actions/setup-gradle` for cache fingerprinting) fails with
-        # `fatal: detected dubious ownership in repository at '/__w/redface2/redface2'`.
-        # Scoped to GITHUB_WORKSPACE to avoid trusting unrelated paths.
+        # The job runs inside the cirruslabs/android-sdk container under a different uid than the
+        # checkout user; without this every later `git` call fails with "dubious ownership".
         shell: bash
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Resolve refs and version metadata
+      - name: Resolve version metadata
         id: meta
         shell: bash
         run: |
           set -euo pipefail
-          # Extract versionCode + versionName from app/build.gradle.kts so the release
-          # artefacts and the GitHub Release name stay aligned with the AAB they wrap.
           version_code=$(grep -E '^[[:space:]]+versionCode[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*= *([0-9]+).*/\1/')
           version_name=$(grep -E '^[[:space:]]+versionName[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*= *"(.*)".*/\1/')
           short_sha=$(git rev-parse --short HEAD)
-          # Fail-loud guards: a silent empty extraction would propagate to the GitHub Release
-          # name and Play Console upload metadata as ugly placeholders. Better to crash here.
-          if [[ -z "${version_code}" ]]; then
-            echo "::error::versionCode not found in app/build.gradle.kts (regex match failed)"
-            exit 1
-          fi
-          if [[ -z "${version_name}" ]]; then
-            echo "::error::versionName not found in app/build.gradle.kts (regex match failed)"
-            exit 1
-          fi
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            release_kind="tag"
-            release_tag="${GITHUB_REF_NAME}"
-          else
-            release_kind="dispatch"
-            release_tag="dispatch-v${version_code}-${short_sha}"
-          fi
-          echo "version_code=${version_code}" >>"$GITHUB_OUTPUT"
-          echo "version_name=${version_name}" >>"$GITHUB_OUTPUT"
-          echo "short_sha=${short_sha}" >>"$GITHUB_OUTPUT"
-          echo "release_kind=${release_kind}" >>"$GITHUB_OUTPUT"
-          echo "release_tag=${release_tag}" >>"$GITHUB_OUTPUT"
-          echo "::notice title=Release plan::kind=${release_kind} versionCode=${version_code} versionName=${version_name} sha=${short_sha} tag=${release_tag} track=${{ env.PLAY_TRACK }} status=${{ env.PLAY_RELEASE_STATUS }}"
+          if [[ -z "${version_code}" ]]; then echo "::error::versionCode not found in app/build.gradle.kts"; exit 1; fi
+          if [[ -z "${version_name}" ]]; then echo "::error::versionName not found in app/build.gradle.kts"; exit 1; fi
+          {
+            echo "version_code=${version_code}"
+            echo "version_name=${version_name}"
+            echo "short_sha=${short_sha}"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice title=Build::flavor=${GRADLE_FLAVOR} versionCode=${version_code} versionName=${version_name} sha=${short_sha} track=${PLAY_TRACK} status=${PLAY_STATUS}"
 
       - name: Setup Gradle
-        # Pinned to v5 in lockstep with .github/workflows/ci.yml to keep both workflows on
-        # the same Gradle action major. v6 (April 2025) extracted caching into a separate
-        # `gradle-actions-caching` library that is no longer MIT-licensed; bumping is a
-        # single coordinated change to do across both workflows when we deliberately opt
-        # into the new caching license.
         uses: gradle/actions/setup-gradle@v5
 
       - name: Decode upload keystore
@@ -162,11 +201,8 @@ jobs:
           fi
           path="${RUNNER_TEMP}/upload.jks"
           echo "${UPLOAD_KEYSTORE_BASE64}" | base64 -d > "${path}"
-          # Fail loudly if the decoded payload is not a real keystore (operator pasted base64
-          # of something else, encoding got mangled, etc.). keytool -list returns non-zero on
-          # malformed stores so this is the cheapest sanity check.
           if ! keytool -list -keystore "${path}" -storepass "${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}" >/dev/null 2>&1; then
-            echo "::error::Decoded keystore at ${path} is not a valid PKCS12/JKS or the password is wrong"
+            echo "::error::Decoded keystore is not a valid PKCS12/JKS or the password is wrong"
             exit 1
           fi
           echo "path=${path}" >>"$GITHUB_OUTPUT"
@@ -178,11 +214,6 @@ jobs:
           PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
         run: |
           set -euo pipefail
-          if [[ "${{ env.PLAY_TRACK }}" == "none" ]]; then
-            echo "Track=none — skipping service account provisioning."
-            echo "path=" >>"$GITHUB_OUTPUT"
-            exit 0
-          fi
           if [[ -z "${PLAY_SERVICE_ACCOUNT_JSON:-}" ]]; then
             echo "::warning::PLAY_SERVICE_ACCOUNT_JSON not set; build will run but Play Console upload will be skipped."
             echo "path=" >>"$GITHUB_OUTPUT"
@@ -190,7 +221,6 @@ jobs:
           fi
           path="${RUNNER_TEMP}/play-service-account.json"
           printf '%s' "${PLAY_SERVICE_ACCOUNT_JSON}" > "${path}"
-          # Light JSON sanity check — must contain at least the "client_email" field.
           if ! grep -q '"client_email"' "${path}"; then
             echo "::error::PLAY_SERVICE_ACCOUNT_JSON does not look like a service account JSON (missing client_email)"
             exit 1
@@ -203,25 +233,20 @@ jobs:
           UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
           UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
           UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
-        # Pinned to the `prod` flavor (#233 channels): prodRelease keeps the canonical
-        # applicationId `fr.forumhfr.redface2` + label "Redface 2", identical to the pre-flavor
-        # build. beta/dev routing arrives with the release-event trigger rework (PR-B).
-        run: ./gradlew :app:bundleProdRelease :app:assembleProdRelease --no-daemon --stacktrace
+        # Build the resolved channel's flavor only (e.g. :app:bundleBetaRelease).
+        run: ./gradlew ":app:bundle${GRADLE_FLAVOR}Release" ":app:assemble${GRADLE_FLAVOR}Release" --no-daemon --stacktrace
 
       - name: Verify AAB signature
         shell: bash
         run: |
           set -euo pipefail
-          aab=$(ls app/build/outputs/bundle/prodRelease/*.aab | head -1)
+          aab=$(ls "app/build/outputs/bundle/${FLAVOR_DIR}Release/"*.aab | head -1)
           if [[ -z "${aab}" ]]; then
-            echo "::error::No AAB produced under app/build/outputs/bundle/prodRelease/"
+            echo "::error::No AAB produced under app/build/outputs/bundle/${FLAVOR_DIR}Release/"
             exit 1
           fi
           echo "Built AAB: ${aab}"
-          # `jarsigner -verify` (without -strict) checks the signature without rejecting
-          # self-signed certs. The upload key IS self-signed by construction (Play Store
-          # re-signs the artefact with its own App Signing key on the way to users), so
-          # `-strict` would always exit 4 here even though the AAB is fully valid for Play.
+          # `-strict` would reject our self-signed upload key (Play re-signs for users), so plain verify.
           jarsigner -verify "${aab}" >/dev/null
 
       - name: Stage artefacts
@@ -230,101 +255,73 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-artefacts
-          aab=$(ls app/build/outputs/bundle/prodRelease/*.aab | head -1)
-          apk=$(ls app/build/outputs/apk/prod/release/*.apk | head -1)
-          aab_dest="release-artefacts/redface2-v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}.aab"
-          apk_dest="release-artefacts/redface2-v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}.apk"
+          aab=$(ls "app/build/outputs/bundle/${FLAVOR_DIR}Release/"*.aab | head -1)
+          apk=$(ls "app/build/outputs/apk/${FLAVOR_DIR}/release/"*.apk | head -1)
+          aab_dest="release-artefacts/redface2-${{ needs.resolve-target.outputs.channel }}-v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}.aab"
+          apk_dest="release-artefacts/redface2-${{ needs.resolve-target.outputs.channel }}-v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}.apk"
           cp "${aab}" "${aab_dest}"
           cp "${apk}" "${apk_dest}"
           echo "aab=${aab_dest}" >>"$GITHUB_OUTPUT"
           echo "apk=${apk_dest}" >>"$GITHUB_OUTPUT"
+          echo "apk_filename=$(basename "${apk_dest}")" >>"$GITHUB_OUTPUT"
           ls -la release-artefacts/
 
       - name: Upload workflow artefacts (always)
         uses: actions/upload-artifact@v5
         with:
-          name: redface2-v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}
+          name: redface2-${{ needs.resolve-target.outputs.channel }}-v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}
           path: release-artefacts/*
           retention-days: 30
           if-no-files-found: error
 
       - name: Publish to Play Console
-        # gradle-play-publisher 4.0.0 had broken compat with our AGP 9.2 (project in
-        # maintenance mode since April 2026), so we delegate the upload to the more focused
-        # r0adkll action that talks to the Play Developer API directly. The release status
-        # is configurable per run (`PLAY_RELEASE_STATUS`): `completed` publishes immediately
-        # on testing tracks (default for alpha/beta/internal), `draft` requires manual UI
-        # activation (default for production, override available via the dispatch input).
-        # `releaseFiles` points to the staged AAB; `whatsNewDirectory` pulls per-locale
-        # release-notes from the repo.
-        if: ${{ env.PLAY_TRACK != 'none' && steps.service_account.outputs.path != '' }}
-        # Pinned to a commit sha rather than the floating `v1` tag — this step pushes to
-        # Play Console using the project's service account credentials, so we want a
-        # supply-chain guarantee that the action code does not change under our feet.
-        # The sha below is `v1` resolved on 2026-05-09 → release v1.1.5
-        # (https://github.com/r0adkll/upload-google-play/releases/tag/v1.1.5). Bumping it
-        # is a deliberate review step, not a transparent floating-tag update.
+        # Skips cleanly when the service-account secret is absent (build+sign still validated).
+        # Pinned to the v1.1.5 commit sha (supply-chain): this step pushes with our credentials.
+        if: ${{ steps.service_account.outputs.path != '' }}
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5  # v1.1.5
         with:
           serviceAccountJson: ${{ steps.service_account.outputs.path }}
-          packageName: fr.forumhfr.redface2
+          packageName: ${{ needs.resolve-target.outputs.package_name }}
           releaseFiles: ${{ steps.artefacts.outputs.aab }}
-          # The action accepts both `track` (single) and `tracks` (comma-separated list);
-          # neither is deprecated as of v1.1.5 (verified against action.yml). We use `tracks`
-          # to leave the door open for multi-track promotion later without renaming the input.
           tracks: ${{ env.PLAY_TRACK }}
-          status: ${{ env.PLAY_RELEASE_STATUS }}
-          # Action expects `whatsnew-<LOCALE>` files placed flat in this directory.
+          status: ${{ env.PLAY_STATUS }}
           whatsNewDirectory: app/src/main/play/whatsnew
 
       - name: Cleanup keystore + service account
         if: always()
         shell: bash
-        run: |
-          rm -f "${RUNNER_TEMP}/upload.jks" "${RUNNER_TEMP}/play-service-account.json" || true
+        run: rm -f "${RUNNER_TEMP}/upload.jks" "${RUNNER_TEMP}/play-service-account.json" || true
 
-      - name: Create GitHub Release
-        # Tag push always creates a Release; manual dispatch only when explicitly opted-in.
-        if: ${{ steps.meta.outputs.release_kind == 'tag' || inputs.attach_release }}
+      - name: Attach artefacts to the GitHub Release
+        # Only for the release-triggered channels (beta/prod): the Release already exists (the
+        # maintainer published it = the trigger), so we UPDATE it with the signed AAB+APK rather
+        # than create one. dev (dispatch) has no Release — the workflow artefacts above are enough.
+        # always() + the artefacts-staged guard (Codex P2): attach even when the Play upload step
+        # failed, so the published Release still carries the signed AAB+APK (the recovery path the
+        # guide documents) instead of being skipped by the implicit success() check.
+        if: ${{ always() && needs.resolve-target.outputs.is_release_event == 'true' && steps.artefacts.outcome == 'success' }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.release_tag }}
-          name: 'Redface 2 v${{ steps.meta.outputs.version_code }} (${{ steps.meta.outputs.version_name }})'
-          body: |
-            **versionCode** : ${{ steps.meta.outputs.version_code }}
-            **versionName** : ${{ steps.meta.outputs.version_name }}
-            **commit** : ${{ steps.meta.outputs.short_sha }}
-            **Play Console track** : ${{ env.PLAY_TRACK }}
-
-            Détails dans [CHANGELOG.md](https://github.com/ForumHFR/redface2/blob/main/CHANGELOG.md) (specs) et [app/CHANGELOG.md](https://github.com/ForumHFR/redface2/blob/main/app/CHANGELOG.md) (binaire).
+          tag_name: ${{ needs.resolve-target.outputs.release_tag }}
           files: |
             release-artefacts/*.aab
             release-artefacts/*.apk
-          draft: ${{ steps.meta.outputs.release_kind != 'tag' }}
-          # Treat any versionName carrying a `phase` or `rc` qualifier as a pre-release on
-          # GitHub. Phase 1/2/… builds (e.g. `0.1.0-phase1.1`) are dogfood/closed-testing
-          # artefacts and should not be advertised as the latest stable release on the repo
-          # landing page. Once we ship a clean SemVer (e.g. `1.0.0`) the flag flips to false
-          # automatically without touching the workflow.
-          prerelease: ${{ contains(steps.meta.outputs.version_name, 'phase') || contains(steps.meta.outputs.version_name, 'rc') }}
+          # Preserve the pre-release flag on update (Codex P2): softprops defaults `prerelease` to
+          # false when updating an existing release, which would flip a published beta pre-release
+          # into a normal/latest release. beta stays pre-release; prod is a stable release.
+          prerelease: ${{ needs.resolve-target.outputs.channel == 'beta' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ──────────────────────────────────────────────────────────────────────
-  # Cross-repo trigger : signal redface2-fdroid to fetch the newly-published
-  # APK and rebuild its index. Runs on a PLAIN ubuntu runner (NOT the Android
-  # SDK container) — that container has no `gh` CLI, so the previous in-job
-  # `gh api` call failed with exit 127 on every release and was swallowed by
-  # `continue-on-error` (#219: F-Droid was never actually notified for v65 /
-  # v70 / v71). A dedicated job uses the runner's native `gh`. It does NOT undo
-  # the release (the build job already shipped Play + the GitHub Release); if the
-  # dispatch fails it now surfaces as a visible red run instead of a hidden one,
-  # and redface2-fdroid keeps its manual workflow_dispatch fallback.
+  # Notify redface2-fdroid (release/beta channels only — dev stays Play-internal).
+  # Plain ubuntu runner so `gh` is available (the Android SDK container has none — #219).
+  # Non-masked: a real failure shows as a red run; the release artefacts are already shipped.
   # ──────────────────────────────────────────────────────────────────────
   notify-fdroid:
     name: Notify F-Droid publisher
-    needs: build
-    if: ${{ needs.build.outputs.release_kind == 'tag' || inputs.attach_release }}
+    needs: [resolve-target, build]
+    if: ${{ needs.resolve-target.outputs.fdroid_channel != 'none' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -336,20 +333,21 @@ jobs:
           private-key: ${{ secrets.RF2_FDROID_APP_PRIVATE_KEY }}
           owner: ForumHFR
           repositories: redface2-fdroid
-
       - name: Trigger F-Droid publish
         env:
           GH_TOKEN: ${{ steps.fdroid_app_token.outputs.token }}
-          TAG: ${{ needs.build.outputs.release_tag }}
+          TAG: ${{ needs.resolve-target.outputs.release_tag }}
+          CHANNEL: ${{ needs.resolve-target.outputs.fdroid_channel }}
+          PACKAGE_NAME: ${{ needs.resolve-target.outputs.package_name }}
           VERSION_CODE: ${{ needs.build.outputs.version_code }}
           SHORT_SHA: ${{ needs.build.outputs.short_sha }}
         run: |
-          # APK filename follows app/build.gradle.kts' stamp convention:
-          # redface2-v<vc>-<short_sha>.apk — rebuilt from the build job outputs.
-          APK_FILENAME="redface2-v${VERSION_CODE}-${SHORT_SHA}.apk"
-          echo "Triggering F-Droid publish for tag ${TAG} (apk=${APK_FILENAME})"
+          APK_FILENAME="redface2-${{ needs.resolve-target.outputs.channel }}-v${VERSION_CODE}-${SHORT_SHA}.apk"
+          echo "Triggering F-Droid publish (channel=${CHANNEL}, pkg=${PACKAGE_NAME}, tag=${TAG}, apk=${APK_FILENAME})"
           gh api repos/ForumHFR/redface2-fdroid/dispatches \
             -f event_type=rf2_release \
+            -f "client_payload[channel]=${CHANNEL}" \
+            -f "client_payload[package_name]=${PACKAGE_NAME}" \
             -f "client_payload[tag]=${TAG}" \
             -f "client_payload[apk_filename]=${APK_FILENAME}" \
             -f "client_payload[version_code]=${VERSION_CODE}"
