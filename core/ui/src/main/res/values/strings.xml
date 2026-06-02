@@ -39,8 +39,8 @@
     <string name="account_menu_status_authenticated">Connecté en tant que %1$s</string>
     <string name="account_menu_login">Se connecter</string>
     <string name="account_menu_logout">Se déconnecter</string>
-    <string name="account_menu_settings">Paramètres bêta</string>
-    <string name="account_menu_diagnostics">Diagnostics bêta</string>
+    <string name="account_menu_settings">Paramètres</string>
+    <string name="account_menu_diagnostics">Diagnostics</string>
     <string name="account_menu_report_content">Signaler un contenu</string>
     <string name="account_menu_version_footer">Redface 2 — v%1$s (build %2$d)</string>
     <string name="account_menu_no_email_client">Aucune application e-mail trouvée pour envoyer le signalement.</string>

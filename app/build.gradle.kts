@@ -106,12 +106,14 @@ android {
         }
     }
 
-    // #233 — coexisting channels (prod / beta / dev) as a `channel` product-flavor dimension.
-    // A distinct applicationId per channel is what lets a user keep prod + beta + dev installed
-    // side by side (Play *tracks* of ONE app share an applicationId → a single install that swaps on
-    // track change). Code is 100% shared; only the applicationId suffix + launcher label differ.
-    // Release signing + Play-track / F-Droid routing live in the CD (release.yml). `prod` is the
-    // canonical app: base applicationId, default flavor, label @string/app_name ("Redface 2").
+    // #233 — `channel` product-flavor dimension (prod / beta / dev) for LOCAL side-by-side installs.
+    // Each suffixed applicationId lets a maintainer sideload a release-signed beta/dev build next to
+    // the Play prod build for dogfooding. IMPORTANT: Play distribution does NOT use these — the CD
+    // (release.yml) uploads ONLY the `prod` applicationId (fr.forumhfr.redface2) and routes by Play
+    // *track* (open testing / production / internal), because Play tracks of one app share an
+    // applicationId and only one install exists per device. So beta/dev flavors are a local tool,
+    // never a Play package. Code is 100% shared; only the applicationId suffix + launcher label differ.
+    // `prod` is the canonical app: base applicationId, default flavor, label @string/app_name.
     // NB: the `debug` buildType still forces label "Redface 2 ADB" + `.debug` suffix (it overrides
     // the flavor placeholder), so the local adb dogfood build remains `prodDebug` == today's debug
     // build (fr.forumhfr.redface2.debug). Only *release* builds surface the per-channel label.
