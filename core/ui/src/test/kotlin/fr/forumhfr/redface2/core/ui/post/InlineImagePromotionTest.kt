@@ -10,18 +10,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * #224 (option B) — pure coverage for the image-only-paragraph promotion decision: which paragraphs are
- * "just image(s)" ([imageOnlyParagraphImages]) and when they grow past the inline caps enough to deserve
- * the full-width centred block treatment ([shouldPromoteImagesToBlocks]). Keeping it pure means the
- * heuristic is pinned without driving Compose.
+ * #224 (option B) / #257 — pure coverage for the image-only-paragraph promotion decision: which
+ * paragraphs are "just image(s)" ([imageOnlyParagraphImages], with the enclosing `[url=…]` link per
+ * image) and when they grow past the inline caps enough to deserve the full-width centred block
+ * treatment ([shouldPromoteImagesToBlocks]). Keeping it pure means the heuristic is pinned without
+ * driving Compose.
  */
 class InlineImagePromotionTest {
 
     private fun img(url: String) = PostInline.InlineImage(url = url, description = null)
+    private fun promoted(url: String, linkUrl: String? = null) = PromotedImage(img(url), linkUrl)
 
     @Test
-    fun `a lone image paragraph is image-only`() {
-        assertEquals(listOf("a"), imageOnlyParagraphImages(listOf(img("a")))?.map { it.url })
+    fun `a lone image paragraph is image-only, with no link`() {
+        val result = imageOnlyParagraphImages(listOf(img("a")))
+        assertEquals(listOf("a"), result?.map { it.image.url })
+        assertNull(result?.single()?.linkUrl)
     }
 
     @Test
@@ -29,29 +33,27 @@ class InlineImagePromotionTest {
         val result = imageOnlyParagraphImages(
             listOf(img("a"), PostInline.Text("   "), PostInline.LineBreak, img("b"), img("c")),
         )
-        assertEquals(listOf("a", "b", "c"), result?.map { it.url })
+        assertEquals(listOf("a", "b", "c"), result?.map { it.image.url })
     }
 
     @Test
-    fun `a link-wrapped image is NOT promoted (keeps its inline tap-through)`() {
-        // [url=…][img] — the block renderer has no click handling, so promoting it would drop the
-        // link. Stay inline (returns null) where the link annotation keeps the image clickable.
-        assertNull(
-            imageOnlyParagraphImages(
-                listOf(PostInline.Link(url = "u", children = listOf(img("a")))),
-            ),
+    fun `a link-wrapped image is promoted, carrying its link url (#257)`() {
+        // [url=…][img] (the "click to enlarge" pattern). Since #257 it IS promoted to a full-width
+        // block that opens the link on tap — the linkUrl is captured so the block can wire the click.
+        val result = imageOnlyParagraphImages(
+            listOf(PostInline.Link(url = "https://full/size", children = listOf(img("thumb")))),
         )
+        assertEquals(listOf("thumb"), result?.map { it.image.url })
+        assertEquals("https://full/size", result?.single()?.linkUrl)
     }
 
     @Test
-    fun `a bare image alongside a link-wrapped image is still not promoted`() {
-        // Mixed gallery where one image carries a link: don't promote the whole paragraph, or the
-        // linked one loses its tap-through. Conservative — keep the lot inline.
-        assertNull(
-            imageOnlyParagraphImages(
-                listOf(img("bare"), PostInline.Link(url = "u", children = listOf(img("linked")))),
-            ),
+    fun `a bare image alongside a link-wrapped image are both promoted, each keeping its own link`() {
+        val result = imageOnlyParagraphImages(
+            listOf(img("bare"), PostInline.Link(url = "u", children = listOf(img("linked")))),
         )
+        assertEquals(listOf("bare", "linked"), result?.map { it.image.url })
+        assertEquals(listOf(null, "u"), result?.map { it.linkUrl })
     }
 
     @Test
@@ -85,7 +87,7 @@ class InlineImagePromotionTest {
 
     @Test
     fun `promotion needs a measured image larger than the inline caps`() {
-        val images = listOf(img("a"), img("b"))
+        val images = listOf(promoted("a"), promoted("b"))
         // cold (unknown size) → stay inline until measured
         assertFalse(shouldPromoteImagesToBlocks(images, emptyMap()))
         // emoji + small reaction → stay inline
@@ -106,6 +108,6 @@ class InlineImagePromotionTest {
 
     @Test
     fun `promotion also triggers on the height cap`() {
-        assertTrue(shouldPromoteImagesToBlocks(listOf(img("tall")), mapOf("tall" to IntSize(100, 600))))
+        assertTrue(shouldPromoteImagesToBlocks(listOf(promoted("tall")), mapOf("tall" to IntSize(100, 600))))
     }
 }

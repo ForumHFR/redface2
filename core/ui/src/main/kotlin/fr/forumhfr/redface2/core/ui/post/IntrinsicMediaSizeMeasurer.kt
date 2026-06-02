@@ -5,26 +5,27 @@ import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
-import coil3.size.Size
+import coil3.size.Scale
 
 /**
- * #175 — measure a media's **intrinsic** (native) pixel dimensions via Coil.
+ * #175/#257 — probe a media's dimensions via a **bounded** Coil decode (aspect ratio + size class).
  *
- * Requests `Size.ORIGINAL` so Coil decodes to the SOURCE dimensions (not the display target), then
- * reads `coil3.Image.width/height` (raw bitmap px, never screen-density scaled). `execute()` is a
- * main-safe suspend call (Coil dispatches its own I/O), so the caller invokes it directly from a
- * `LaunchedEffect` and caches the result by URL. Returns `null` on error / non-positive dimensions so
- * the caller can fall back to a provisional size.
- *
- * Caveat: `Size.ORIGINAL` sets the request *target*, not Coil's `maxBitmapSize` (default 4096) — so
- * the reported size equals the source only while the source is ≤ 4096 on each axis; a larger source
- * is reported at the clamped decode size. Irrelevant for smileys (all well under 4096); it would only
- * matter if this were reused to size arbitrary large inline images.
+ * Requests a [INTRINSIC_PROBE_SIZE_PX]-bounded `FIT` decode (NOT `Size.ORIGINAL`), then reads
+ * `coil3.Image.width/height`. `Size.ORIGINAL` fully decoded a large photo at source resolution **just
+ * to read its dimensions** — slow and memory-heavy on every measurable image, on top of the render
+ * decode (#257). A 1024-bounded decode is far cheaper and still answers everything the callers need:
+ *  - **aspect ratio** — preserved by Coil's uniform downsample, used by `imageDisplayBox`;
+ *  - **size class** ("larger than the inline caps?") — all inline caps (≤ 240×200 sp) are well below
+ *    1024, so a source exceeding them still reports a width/height past the cap after probing.
+ * A source ≤ 1024 px (every smiley, most inline images) decodes at native size, unchanged from before.
+ * `execute()` is main-safe (Coil dispatches its own I/O); the caller invokes it from a `LaunchedEffect`
+ * and caches the result by URL. Returns `null` on error / non-positive dimensions.
  *
  * NB (#175 conversion): the returned px are CSS/logical-pixel equivalents — fed to the placeholder as
- * `.sp` directly (`70px → 70.sp`), NOT divided by screen density (which would render smileys
- * ~`1/density` too small — the bug the design doc calls out).
+ * `.sp` directly (`70px → 70.sp`), NOT divided by screen density.
  */
+internal const val INTRINSIC_PROBE_SIZE_PX = 1024
+
 internal suspend fun measureIntrinsicMediaSize(
     url: String,
     context: PlatformContext,
@@ -33,7 +34,8 @@ internal suspend fun measureIntrinsicMediaSize(
     val result = imageLoader.execute(
         ImageRequest.Builder(context)
             .data(url)
-            .size(Size.ORIGINAL)
+            .size(INTRINSIC_PROBE_SIZE_PX)
+            .scale(Scale.FIT)
             .build(),
     )
     val image = (result as? SuccessResult)?.image ?: return null

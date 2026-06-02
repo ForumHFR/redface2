@@ -210,6 +210,14 @@ internal const val INLINE_IMAGE_MAX_HEIGHT_SP = 200
 internal const val INLINE_IMAGE_MAX_WIDTH_SP = 240
 
 /**
+ * #257 — upper bound (px) for the **decode** size of an inline `[img]`. The inline AsyncImage requests
+ * the inline cap converted to px (density × fontScale) clamped to this, so Coil decodes ONE stable
+ * bitmap that survives the cold→measured box growth without a re-decode + pixelated upscale. 1024 covers
+ * the 240×200 sp cap on any realistic density/fontScale while staying cheap to decode and cache.
+ */
+internal const val INLINE_IMAGE_DECODE_CAP_PX = 1024
+
+/**
  * #224/#253 — minimum display **height** (sp) for an inline `[img]`, so a sub-16 low-res source can't
  * render below ~one text line. The community "cc-image" emoji (served as 16×16 PNGs) sits exactly at
  * this floor → rendered at its native 16 (dogfood: the right size next to text, per @XaaT); anything
