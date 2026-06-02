@@ -7,8 +7,9 @@ Suivi des AAB générés (`./gradlew :app:bundleRelease`) avec le format inspir�
 Statuts possibles d'une release :
 
 - `local` — l'AAB existe sur une machine de dev, pas distribué
-- `internal` — uploadé sur le canal Play Console *internal testing*
-- `closed` — uploadé sur le canal Play Console *closed testing* (alpha / beta)
+- `internal` — uploadé sur le canal Play Console *internal testing* (canal `dev` de la CD)
+- `closed` — uploadé sur le canal Play Console *closed testing* (ancien canal alpha de l'app unique)
+- `open` — uploadé sur le canal Play Console *open testing* (canal `beta` de la CD, depuis #233)
 - `production` — disponible publiquement sur Play Store
 
 Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajouter une entrée ici, builder. Quand l'AAB part vers un canal Play Console, mettre à jour le statut de la version concernée.
@@ -18,6 +19,21 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 ## Unreleased
 
 Aucun changement applicatif non distribué.
+
+---
+
+## v72 — `0.4.0` — 2026-06-02
+
+**Statut** : `open`
+**Commit** : tag `app-v72` (Release GitHub cochée *pre-release* → canal beta de la CD)
+**Fichier** : AAB `bundleBetaRelease` (`fr.forumhfr.redface2.beta`) uploadé sur le canal Play **open testing** par la CD + tag pour F-Droid beta
+
+**Passage en bêta.** Première release distribuée par la nouvelle CD routée par release-event (#233) : une Release GitHub *pre-release* déclenche le build du flavor `beta`, l'upload Play *open testing* et la notification F-Droid. Le bump mineur `0.3.x → 0.4.0` matérialise la sortie d'alpha. Pas de nouvelle fonctionnalité utilisateur depuis v71 (le rendu `[quote]`/`[img]` de v70/v71 est inclus) — la valeur de cette version est l'ouverture du canal bêta public et l'industrialisation de la livraison.
+
+### Changed
+- **Canal de distribution** : alpha (closed testing de l'app unique) → **bêta (open testing)**, package dédié `fr.forumhfr.redface2.beta` coexistant avec une future prod et un canal dev (`.dev`). Les libellés visibles « alpha » de l'app passent à « bêta ».
+- **CD** : `release.yml` réécrit en routing par déclencheur — prerelease→beta (open testing), stable→prod (production, draft, après approbation manuelle via l'Environment GitHub `production`), `workflow_dispatch`→dev (internal). Durci par 5 passes de review Codex gpt-5.5 xhigh.
+- **Build** : `app/build.gradle.kts` passe à `versionCode = 72`, `versionName = "0.4.0"` ; 3 product flavors `channel` (prod/beta/dev) avec applicationId distincts.
 
 ---
 
