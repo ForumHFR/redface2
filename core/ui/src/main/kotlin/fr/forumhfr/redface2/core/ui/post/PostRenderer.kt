@@ -209,7 +209,12 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         // #175 (smileys) + #224 (inline images) — RF1's `img { max-width: 90% }` relative cap, read
         // from the container width here (the only place it's known; it shrinks with quote depth).
-        val maxMediaWidthSp = (maxWidth.value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+        // `maxWidth` is dp but the media placeholders are sized in sp, so convert to the sp-equivalent
+        // (Dp.toSp() divides by fontScale): without this, at fontScale > 1 a `0.9 × maxWidth` sp cap
+        // renders ~fontScale× wider than the container and overflows a narrow quote (Codex review #246).
+        val maxMediaWidthSp = with(LocalDensity.current) {
+            (maxWidth.toSp().value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+        }
         val inlineContent = remember(inlines, measuredSizes, maxMediaWidthSp) {
             collectInlineMedia(
                 inlines,
@@ -845,13 +850,22 @@ internal fun imageDisplayBox(
         // source can't render below ~one text line. A cc-image emoji (16×16) sits exactly at the floor
         // → kept native (per @XaaT dogfood); only smaller sources get enlarged. NB: the floor only
         // grows the BOX — the bitmap fills it via ContentScale.Fit.
-        upscaleToMinHeight(
-            intrinsicSmileyDisplaySize(
-                PixelSize(size.width, size.height),
-                maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
-                maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
+        //
+        // Re-apply the absolute caps AFTER the floor: a very wide/short source (e.g. 250×10) capped to
+        // 240×10 then floored to height 16 would grow to ~384×16 — past both the 240sp width cap and its
+        // native width. The second cap clamps that back (the floor simply doesn't apply when it can't fit
+        // the width cap), so the no-upscale/cap contract holds for every aspect ratio (Codex review #246).
+        intrinsicSmileyDisplaySize(
+            upscaleToMinHeight(
+                intrinsicSmileyDisplaySize(
+                    PixelSize(size.width, size.height),
+                    maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
+                    maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
+                ),
+                INLINE_IMAGE_MIN_HEIGHT_SP,
             ),
-            INLINE_IMAGE_MIN_HEIGHT_SP,
+            maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
+            maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
         )
     } else {
         // #253 cold-fallback: a one-line square, not the 240×180 bucket (no giant Fit upscale flash).

@@ -54,6 +54,16 @@ class InlineImageDisplayBoxTest {
     }
 
     @Test
+    fun `wide short banner stays within the width cap despite the min-height floor`() {
+        // #246 (Codex) — a 250×10 banner must not be blown past the 240sp width cap by the floor:
+        // cap→floor alone would reach ~384×16, the re-applied absolute cap clamps it back to ~240×10
+        // (the floor simply doesn't apply when it can't fit the width cap). No upscale past native.
+        val b = box(measured = IntSize(250, 10), maxWidthSp = 400)
+        assertEquals(240f, b.placeholderWidth.value, TOLERANCE)
+        assertEquals(10f, b.placeholderHeight.value, TOLERANCE)
+    }
+
+    @Test
     fun `relative cap shrinks even a small measured image in a narrow quote`() {
         // 80×60, container relative cap 40 → 40×30 (4:3 preserved).
         val b = box(measured = IntSize(80, 60), maxWidthSp = 40)
