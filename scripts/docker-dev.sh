@@ -42,7 +42,9 @@ inject_project_cache_dir() {
 }
 
 if [ "$#" -eq 0 ]; then
-  set -- ./gradlew :app:assembleDebug
+  # `:app` has product flavors (#233 channels); assembleDebug would build all three. Default to the
+  # canonical `prod` channel debug (== the historical local dogfood build, applicationId .debug).
+  set -- ./gradlew :app:assembleProdDebug
 fi
 
 case "$1" in

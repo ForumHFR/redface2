@@ -203,15 +203,18 @@ jobs:
           UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
           UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
           UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
-        run: ./gradlew :app:bundleRelease :app:assembleRelease --no-daemon --stacktrace
+        # Pinned to the `prod` flavor (#233 channels): prodRelease keeps the canonical
+        # applicationId `fr.forumhfr.redface2` + label "Redface 2", identical to the pre-flavor
+        # build. beta/dev routing arrives with the release-event trigger rework (PR-B).
+        run: ./gradlew :app:bundleProdRelease :app:assembleProdRelease --no-daemon --stacktrace
 
       - name: Verify AAB signature
         shell: bash
         run: |
           set -euo pipefail
-          aab=$(ls app/build/outputs/bundle/release/*.aab | head -1)
+          aab=$(ls app/build/outputs/bundle/prodRelease/*.aab | head -1)
           if [[ -z "${aab}" ]]; then
-            echo "::error::No AAB produced under app/build/outputs/bundle/release/"
+            echo "::error::No AAB produced under app/build/outputs/bundle/prodRelease/"
             exit 1
           fi
           echo "Built AAB: ${aab}"
@@ -227,8 +230,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-artefacts
-          aab=$(ls app/build/outputs/bundle/release/*.aab | head -1)
-          apk=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          aab=$(ls app/build/outputs/bundle/prodRelease/*.aab | head -1)
+          apk=$(ls app/build/outputs/apk/prodRelease/*.apk | head -1)
           aab_dest="release-artefacts/redface2-v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}.aab"
           apk_dest="release-artefacts/redface2-v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}.apk"
           cp "${aab}" "${aab_dest}"
