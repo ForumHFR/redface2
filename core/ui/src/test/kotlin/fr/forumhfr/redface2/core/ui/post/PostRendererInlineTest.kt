@@ -118,7 +118,9 @@ class PostRendererInlineTest {
                 imageUrl = "https://forum-images.hardware.fr/images/perso/measured.gif",
             ),
         )
-        val media = collectInlineMedia(inlines) { InlineMediaBox(33.sp, 21.sp) }
+        // Named arg: collectInlineMedia now takes both `smileyBox` and `imageBox` resolvers (#224),
+        // so a trailing lambda would bind to the last param (imageBox) — pin the smiley seam explicitly.
+        val media = collectInlineMedia(inlines, smileyBox = { InlineMediaBox(33.sp, 21.sp) })
         val placeholder = media["post-smiley-0"]?.placeholder
         assertNotNull("resolved smiley should yield an InlineTextContent", placeholder)
         assertEquals(33.sp, placeholder!!.width)
@@ -149,6 +151,26 @@ class PostRendererInlineTest {
     }
 
     @Test
+    fun `collectMeasurableImageUrls collects inline image urls including nested ones`() {
+        // #224 — inline [img] is now measured for intrinsic sizing; the collector must find images at
+        // top level and nested inside inline containers (here a [b]…[/b] wrapper).
+        val topUrl = "https://forum.hardware.fr/images/top.png"
+        val nestedUrl = "https://rehost.diberie.com/Image/x.gif"
+        val inlines = listOf(
+            PostInline.InlineImage(url = topUrl, description = "top"),
+            PostInline.Strong(
+                children = listOf(PostInline.InlineImage(url = nestedUrl, description = "nested")),
+            ),
+            PostInline.Smiley(
+                kind = SmileyKind.Perso("custom"),
+                imageUrl = "https://forum-images.hardware.fr/images/perso/custom.gif",
+            ),
+        )
+
+        assertEquals(setOf(topUrl, nestedUrl), collectMeasurableImageUrls(inlines))
+    }
+
+    @Test
     fun `inline image emits a post-image placeholder and a matching map entry`() {
         val inlines = listOf(
             PostInline.InlineImage(
@@ -162,6 +184,20 @@ class PostRendererInlineTest {
 
         assertEquals(setOf("post-image-0"), media.keys)
         assertEquals(setOf("post-image-0"), annotated.inlineContentIds())
+    }
+
+    @Test
+    fun `collectInlineMedia applies the provided image box resolver to the placeholder (224 seam)`() {
+        // #224 — the production caller (ParagraphBlock) passes a relative-cap resolver (imageDisplayBox);
+        // pin that whatever box the imageBox resolver yields lands on the inline image placeholder.
+        val inlines = listOf(
+            PostInline.InlineImage(url = "https://forum.hardware.fr/images/foo.png", description = "foo"),
+        )
+        val media = collectInlineMedia(inlines, imageBox = { InlineMediaBox(120.sp, 90.sp) })
+        val placeholder = media["post-image-0"]?.placeholder
+        assertNotNull("resolved inline image should yield an InlineTextContent", placeholder)
+        assertEquals(120.sp, placeholder!!.width)
+        assertEquals(90.sp, placeholder.height)
     }
 
     @Test
@@ -205,11 +241,12 @@ class PostRendererInlineTest {
             placeholder.height,
         )
         assertEquals(
-            // #175 — AboveBaseline: the sprite bottom sits on the text baseline (web/RF1 parity, #203).
-            // Zero overlap for a tall perso comes from the unspecified lineHeight on media paragraphs
-            // (the line grows upward to contain it), NOT from the alignment — see smileyInlineContent.
-            "smileys must be baseline-aligned (AboveBaseline) for web parity",
-            PlaceholderVerticalAlign.AboveBaseline,
+            // TextBottom (dogfood choice): the sprite bottom sits at the bottom of the surrounding
+            // text so the smiley rides the line with the words, consistent with inline [img]. Zero
+            // overlap for a tall smiley comes from the unspecified lineHeight on media paragraphs
+            // (the line grows to contain it), NOT from the alignment — see smileyInlineContent.
+            "smileys must be TextBottom-aligned, consistent with inline images",
+            PlaceholderVerticalAlign.TextBottom,
             placeholder.placeholderVerticalAlign,
         )
     }
@@ -247,9 +284,9 @@ class PostRendererInlineTest {
             placeholder.width,
         )
         assertEquals(
-            // #175 — same rule as builtin: AboveBaseline (web parity); zero overlap via line growth.
-            "perso smileys must be baseline-aligned (AboveBaseline) for web parity",
-            PlaceholderVerticalAlign.AboveBaseline,
+            // Same rule as builtin: TextBottom (dogfood choice); zero overlap via line growth.
+            "perso smileys must be TextBottom-aligned, consistent with inline images",
+            PlaceholderVerticalAlign.TextBottom,
             placeholder.placeholderVerticalAlign,
         )
     }
@@ -393,13 +430,11 @@ class PostRendererInlineTest {
     }
 
     @Test
-    fun `inline image uses the bounded 240x180 placeholder centred`() {
-        // Pre-#109 the inline image placeholder was 240×180 but the inner Modifier was
-        // fillMaxWidth() — meaningless inside InlineTextContent (the placeholder dictates the
-        // parent constraint), and the image stretched in unpredictable ways. The placeholder
-        // now pins the dimensions; the inner Modifier.fillMaxSize() makes the AsyncImage track
-        // them under any fontScale, while the inline image policy keeps small arbitrary images
-        // from being blown up to the full 240×180.
+    fun `inline image uses the bounded 240x180 placeholder text-bottom aligned`() {
+        // The placeholder pins the dimensions (default resolver = 240×180 cold-fallback bucket);
+        // the inner Modifier.fillMaxSize() makes the AsyncImage track them under any fontScale.
+        // Alignment is TextBottom (same as smileys): a small inline emoji rides the line with the
+        // surrounding words instead of floating centred.
         val inlines = listOf(
             PostInline.InlineImage(
                 url = "https://forum.hardware.fr/images/foo.png",
@@ -420,7 +455,7 @@ class PostRendererInlineTest {
             placeholder.height,
         )
         assertEquals(
-            PlaceholderVerticalAlign.Center,
+            PlaceholderVerticalAlign.TextBottom,
             placeholder.placeholderVerticalAlign,
         )
     }

@@ -180,12 +180,13 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     // bodyMedium rhythm and skip the whole #175 machinery — no cache reads, no measurement effect, no
     // BoxWithConstraints/SubcomposeLayout wrapper.
     if (!hasMedia) {
-        if (annotated.text.isBlank()) return
-        Text(
-            text = annotated,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
+        if (annotated.text.isNotBlank()) {
+            Text(
+                text = annotated,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
         return
     }
 
@@ -194,16 +195,19 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     // write recomposes this block and only the inline-content Map (not the AnnotatedString) is rebuilt
     // at the final size. Cold/miss → a provisional fallback to minimise reflow (builtin ~16, perso 70×50).
     val sizeCache = LocalIntrinsicMediaSizeCache.current
-    val smileyUrls = remember(inlines) { collectMeasurableSmileyUrls(inlines) }
-    val measuredSizes: Map<String, IntSize?> = smileyUrls.associateWith { sizeCache.get(it) }
+    // #175 perso smileys + #224 (option A) inline images — both sized by their measured intrinsic size.
+    val measurableUrls = remember(inlines) {
+        collectMeasurableSmileyUrls(inlines) + collectMeasurableImageUrls(inlines)
+    }
+    val measuredSizes: Map<String, IntSize?> = measurableUrls.associateWith { sizeCache.get(it) }
 
     // Measure the not-yet-known URLs. Coil's execute() is a main-safe suspend call (it dispatches its
     // own I/O), and reuses the shared SingletonImageLoader caches the rendering AsyncImage hits — so no
     // double network fetch. A dead URL is recorded as a failure (TTL) so it is not re-fetched.
     val platformContext = LocalPlatformContext.current
-    LaunchedEffect(smileyUrls) {
+    LaunchedEffect(measurableUrls) {
         val loader = SingletonImageLoader.get(platformContext)
-        smileyUrls.forEach { url ->
+        measurableUrls.forEach { url ->
             val now = System.currentTimeMillis()
             if (sizeCache.get(url) == null && !sizeCache.isFailureFresh(url, now)) {
                 val size = measureIntrinsicMediaSize(url, platformContext, loader)
@@ -212,16 +216,43 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
         }
     }
 
+    // #224 (option B) — a paragraph whose only content is image(s) (a gallery, or a lone posted image
+    // the parser kept inline because of a stray sibling) is promoted to full-width centred blocks once
+    // a measurement shows at least one is larger than the inline caps (a left-aligned 240sp thumbnail).
+    // cc-image emoji / small reactions never trip the threshold, so they keep their inline size. The
+    // measure LaunchedEffect above feeds the same cache the threshold reads.
+    val galleryImages = remember(inlines) { imageOnlyParagraphImages(inlines) }
+    if (galleryImages != null && shouldPromoteImagesToBlocks(galleryImages, measuredSizes)) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            galleryImages.forEach { image -> BlockImage(url = image.url, description = image.description) }
+        }
+        return
+    }
+
     // Two guards against a tall/large inline smiley overlapping the text:
     //  - width: cap each smiley to RF1's `img { max-width: 90% }` of the content width (read from
     //    BoxWithConstraints, which shrinks with quote depth) so it never overflows a narrow quote;
-    //  - height: drop bodyMedium's fixed `lineHeight` so the LINE GROWS to contain the baseline-aligned
-    //    placeholder. With the clamp a tall sprite overflowed UP off its line onto the line above
-    //    (measured top y=-22 over a 28sp first line); unspecified lineHeight lets the ascent expand → zero overlap.
+    //  - height: drop bodyMedium's fixed `lineHeight` so the LINE GROWS to contain the placeholder
+    //    (now TextBottom-aligned, #224). With the fixed lineHeight a tall sprite overflowed off its line
+    //    onto the line above; unspecified lineHeight lets the line expand to the placeholder → zero overlap.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val maxSmileyWidthSp = (maxWidth.value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
-        val inlineContent = remember(inlines, measuredSizes, maxSmileyWidthSp) {
-            collectInlineMedia(inlines) { smiley -> smileyDisplayBox(smiley, measuredSizes, maxSmileyWidthSp) }
+        // #175 (smileys) + #224 (inline images) — RF1's `img { max-width: 90% }` relative cap, read
+        // from the container width here (the only place it's known; it shrinks with quote depth).
+        // `maxWidth` is dp but the media placeholders are sized in sp, so convert to the sp-equivalent
+        // (Dp.toSp() divides by fontScale): without this, at fontScale > 1 a `0.9 × maxWidth` sp cap
+        // renders ~fontScale× wider than the container and overflows a narrow quote (Codex review #246).
+        val maxMediaWidthSp = with(LocalDensity.current) {
+            (maxWidth.toSp().value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
+        }
+        val inlineContent = remember(inlines, measuredSizes, maxMediaWidthSp) {
+            collectInlineMedia(
+                inlines,
+                smileyBox = { smiley -> smileyDisplayBox(smiley, measuredSizes, maxMediaWidthSp) },
+                imageBox = { image -> imageDisplayBox(image, measuredSizes, maxMediaWidthSp) },
+            )
         }
         Text(
             text = annotated,
@@ -424,12 +455,19 @@ private fun SpoilerBlock(block: PostBlock.Spoiler, quoteDepth: Int) {
 }
 
 @Composable
-private fun ImageBlock(block: PostBlock.Image) {
-    // Bounded so a 4000×3000 RAW screenshot can't blow up the post and destroy the scroll
-    // position. SubcomposeAsyncImage exposes loading/error slots so the user gets visual
-    // feedback when an HFR image host (rehost.diberie.com, super-h.fr, …) is offline rather
-    // than a silent empty Box. Phase 1 keeps the loading + error layout minimal — no
-    // material-icons-extended dependency just for a placeholder glyph.
+private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, description = block.description)
+
+/**
+ * Full-width, centred, bounded image. The home of a standalone `PostBlock.Image`, and (since #224
+ * option B) of a large image promoted out of an image-only paragraph.
+ *
+ * Bounded so a 4000×3000 RAW screenshot can't blow up the post and destroy the scroll position.
+ * SubcomposeAsyncImage exposes loading/error slots so the user gets visual feedback when an HFR image
+ * host (rehost.diberie.com, super-h.fr, …) is offline rather than a silent empty Box. Phase 1 keeps the
+ * loading + error layout minimal — no material-icons-extended dependency just for a placeholder glyph.
+ */
+@Composable
+private fun BlockImage(url: String, description: String?) {
     val containerModifier = Modifier
         .fillMaxWidth()
         .defaultMinSize(minHeight = PostMediaDisplayPolicy.blockImageMinHeight)
@@ -437,12 +475,12 @@ private fun ImageBlock(block: PostBlock.Image) {
         .clip(RoundedCornerShape(8.dp))
         .background(MaterialTheme.colorScheme.surfaceContainerHighest)
     SubcomposeAsyncImage(
-        model = block.url,
-        contentDescription = block.description,
+        model = url,
+        contentDescription = description,
         contentScale = ContentScale.Fit,
         modifier = containerModifier,
         loading = { ImageBlockLoading() },
-        error = { ImageBlockError(block.description) },
+        error = { ImageBlockError(description) },
         success = { SubcomposeAsyncImageContent() },
     )
 }
@@ -709,10 +747,11 @@ private fun AnnotatedString.Builder.appendInline(
 internal fun collectInlineMedia(
     inlines: List<PostInline>,
     smileyBox: (PostInline.Smiley) -> InlineMediaBox = { PostMediaDisplayPolicy.smileyBox(it) },
+    imageBox: (PostInline.InlineImage) -> InlineMediaBox = { PostMediaDisplayPolicy.inlineImage },
 ): Map<String, InlineTextContent> {
     val out = mutableMapOf<String, InlineTextContent>()
     val media = MediaCounter()
-    walkInlinesForMedia(inlines, out, media, smileyBox)
+    walkInlinesForMedia(inlines, out, media, smileyBox, imageBox)
     return out
 }
 
@@ -721,23 +760,24 @@ private fun walkInlinesForMedia(
     out: MutableMap<String, InlineTextContent>,
     media: MediaCounter,
     smileyBox: (PostInline.Smiley) -> InlineMediaBox,
+    imageBox: (PostInline.InlineImage) -> InlineMediaBox,
 ) {
     inlines.forEach { inline ->
         when (inline) {
             is PostInline.InlineImage ->
-                out += media.nextImage() to imageInlineContent(inline)
+                out += media.nextImage() to imageInlineContent(inline, imageBox(inline))
 
             is PostInline.Smiley -> {
                 if (inline.imageUrl == null) return@forEach
                 out += media.nextSmiley() to smileyInlineContent(inline, smileyBox(inline))
             }
 
-            is PostInline.Strong -> walkInlinesForMedia(inline.children, out, media, smileyBox)
-            is PostInline.Emphasis -> walkInlinesForMedia(inline.children, out, media, smileyBox)
-            is PostInline.Underline -> walkInlinesForMedia(inline.children, out, media, smileyBox)
-            is PostInline.Strike -> walkInlinesForMedia(inline.children, out, media, smileyBox)
-            is PostInline.Color -> walkInlinesForMedia(inline.children, out, media, smileyBox)
-            is PostInline.Link -> walkInlinesForMedia(inline.children, out, media, smileyBox)
+            is PostInline.Strong -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
+            is PostInline.Emphasis -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
+            is PostInline.Underline -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
+            is PostInline.Strike -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
+            is PostInline.Color -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
+            is PostInline.Link -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
             else -> Unit
         }
     }
@@ -777,6 +817,35 @@ private fun collectMeasurableSmileyUrl(inline: PostInline, urls: MutableSet<Stri
 }
 
 /**
+ * #224 (option A) — collects distinct inline `[img]` URLs of [inlines], for intrinsic measurement
+ * (no-upscale native sizing, like #175 smileys). The `:core:ui` parser has already stripped
+ * non-http(s) schemes, so every collected URL is safe to hand to Coil. Recurses into inline
+ * containers (e.g. an `[img]` wrapped in a `[url=…]` link), mirroring [walkInlinesForMedia].
+ */
+internal fun collectMeasurableImageUrls(inlines: List<PostInline>): Set<String> {
+    val urls = LinkedHashSet<String>()
+    collectMeasurableImageUrlsInto(inlines, urls)
+    return urls
+}
+
+private fun collectMeasurableImageUrlsInto(inlines: List<PostInline>, urls: MutableSet<String>) {
+    inlines.forEach { inline -> collectMeasurableImageUrl(inline, urls) }
+}
+
+private fun collectMeasurableImageUrl(inline: PostInline, urls: MutableSet<String>) {
+    when (inline) {
+        is PostInline.InlineImage -> urls += inline.url
+        is PostInline.Strong -> collectMeasurableImageUrlsInto(inline.children, urls)
+        is PostInline.Emphasis -> collectMeasurableImageUrlsInto(inline.children, urls)
+        is PostInline.Underline -> collectMeasurableImageUrlsInto(inline.children, urls)
+        is PostInline.Strike -> collectMeasurableImageUrlsInto(inline.children, urls)
+        is PostInline.Color -> collectMeasurableImageUrlsInto(inline.children, urls)
+        is PostInline.Link -> collectMeasurableImageUrlsInto(inline.children, urls)
+        else -> Unit
+    }
+}
+
+/**
  * #175 — resolve a smiley's placeholder box: measured native size (no-upscale + absolute cap) when
  * known, else a provisional fallback (pre-seeded builtin / dominant 70×50 perso) to minimise reflow
  * while the measurement is in flight. Finally clamped to [maxWidthSp] (RF1's relative `max-width:90%`)
@@ -800,6 +869,108 @@ private fun smileyDisplayBox(
     return InlineMediaBox(capped.width.sp, capped.height.sp)
 }
 
+/**
+ * #224 (option A) — resolve an inline `[img]` placeholder box from its measured intrinsic size:
+ * no-upscale + absolute cap ([INLINE_IMAGE_MAX_WIDTH_SP]×[INLINE_IMAGE_MAX_HEIGHT_SP]) via the shared
+ * [intrinsicSmileyDisplaySize] policy, then the relative `0.9 × contentWidth` cap ([maxWidthSp]).
+ *
+ * #253 — while the measurement is in flight (cold cache / miss) it falls back to a small square of
+ * [INLINE_IMAGE_MIN_HEIGHT_SP] (≈ one text line) rather than the old 240×180 bucket. With
+ * `ContentScale.Fit` filling the box, a 240×180 cold box upscaled a 16×16 cc-image emoji to a giant
+ * 180×180 flash until the measurement landed; a min-height square means the dominant cold case (the
+ * 16×16 emoji) is already at its final size — zero flash — and any larger image just grows from a
+ * one-line slot once measured instead of shrinking from a giant one. Still relative-capped so even
+ * the fallback never overflows a narrow quote. Mirrors [smileyDisplayBox].
+ */
+internal fun imageDisplayBox(
+    image: PostInline.InlineImage,
+    measured: Map<String, IntSize?>,
+    maxWidthSp: Int,
+): InlineMediaBox {
+    val size = measured[image.url]
+    val base = if (size != null) {
+        // #175 no-upscale + cap with the inline-image caps, then a min-height floor so a SUB-16 low-res
+        // source can't render below ~one text line. A cc-image emoji (16×16) sits exactly at the floor
+        // → kept native (per @XaaT dogfood); only smaller sources get enlarged. NB: the floor only
+        // grows the BOX — the bitmap fills it via ContentScale.Fit.
+        //
+        // Re-apply the absolute caps AFTER the floor: a very wide/short source (e.g. 250×10) capped to
+        // 240×10 then floored to height 16 would grow to ~384×16 — past both the 240sp width cap and its
+        // native width. The second cap clamps that back (the floor simply doesn't apply when it can't fit
+        // the width cap), so the no-upscale/cap contract holds for every aspect ratio (Codex review #246).
+        intrinsicSmileyDisplaySize(
+            upscaleToMinHeight(
+                intrinsicSmileyDisplaySize(
+                    PixelSize(size.width, size.height),
+                    maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
+                    maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
+                ),
+                INLINE_IMAGE_MIN_HEIGHT_SP,
+            ),
+            maxWidthSp = INLINE_IMAGE_MAX_WIDTH_SP,
+            maxHeightSp = INLINE_IMAGE_MAX_HEIGHT_SP,
+        )
+    } else {
+        // #253 cold-fallback: a one-line square, not the 240×180 bucket (no giant Fit upscale flash).
+        PixelSize(INLINE_IMAGE_MIN_HEIGHT_SP, INLINE_IMAGE_MIN_HEIGHT_SP)
+    }
+    val capped = capToWidth(base, maxWidthSp)
+    return InlineMediaBox(capped.width.sp, capped.height.sp)
+}
+
+/**
+ * #224 (option B) — if a paragraph's only meaningful content is bare image(s) (a single posted image
+ * the parser kept inline because of a stray sibling, or a gallery of several), return them in order so
+ * they can be promoted to full-width centred blocks. Blank text and line breaks are ignored.
+ *
+ * Returns null when the paragraph has any other meaningful inline (non-blank text, a smiley) — genuine
+ * prose keeps its inline image treatment — OR when an image is wrapped in a link (`[url=…][img]`): the
+ * block renderer has no click handling, so promoting a linked image would drop its tap-through. Those
+ * stay inline where the link annotation keeps them clickable (RF2 has no image click-to-open yet, #182).
+ */
+@Suppress("CyclomaticComplexMethod") // exhaustive when over the PostInline sealed type, like appendInline
+internal fun imageOnlyParagraphImages(inlines: List<PostInline>): List<PostInline.InlineImage>? {
+    val images = mutableListOf<PostInline.InlineImage>()
+    var hasOtherContent = false
+    var hasLinkedImage = false
+    fun walk(list: List<PostInline>, insideLink: Boolean) {
+        list.forEach { inline ->
+            when (inline) {
+                is PostInline.InlineImage -> {
+                    images += inline
+                    if (insideLink) hasLinkedImage = true
+                }
+                is PostInline.Text -> if (inline.value.isNotBlank()) hasOtherContent = true
+                PostInline.LineBreak -> Unit
+                is PostInline.Smiley -> hasOtherContent = true
+                is PostInline.Strong -> walk(inline.children, insideLink)
+                is PostInline.Emphasis -> walk(inline.children, insideLink)
+                is PostInline.Underline -> walk(inline.children, insideLink)
+                is PostInline.Strike -> walk(inline.children, insideLink)
+                is PostInline.Color -> walk(inline.children, insideLink)
+                is PostInline.Link -> walk(inline.children, insideLink = true)
+            }
+        }
+    }
+    walk(inlines, insideLink = false)
+    return images.takeIf { it.isNotEmpty() && !hasOtherContent && !hasLinkedImage }
+}
+
+/**
+ * #224 (option B) — promote an image-only paragraph to full-width blocks only once at least one image
+ * has measured larger than the inline display caps (so inline rendering would shrink it to a small
+ * left-aligned thumbnail). A cc-image emoji (16×16) or a small reaction never trips this, so they keep
+ * their inline size; a real posted photo / gallery does, and gets the centred full-width treatment.
+ * Returns false while every size is unknown (cold) so promotion only kicks in after measurement.
+ */
+internal fun shouldPromoteImagesToBlocks(
+    images: List<PostInline.InlineImage>,
+    measured: Map<String, IntSize?>,
+): Boolean = images.any { img ->
+    val size = measured[img.url] ?: return@any false
+    size.width > INLINE_IMAGE_MAX_WIDTH_SP || size.height > INLINE_IMAGE_MAX_HEIGHT_SP
+}
+
 /** True when [inlines] contains at least one renderable inline media (a smiley with a URL, or an image). */
 private fun hasInlineMedia(inlines: List<PostInline>): Boolean = inlines.any { inline ->
     when (inline) {
@@ -815,23 +986,21 @@ private fun hasInlineMedia(inlines: List<PostInline>): Boolean = inlines.any { i
     }
 }
 
-internal fun imageInlineContent(image: PostInline.InlineImage): InlineTextContent {
-    val box = PostMediaDisplayPolicy.inlineImage
+internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaBox): InlineTextContent {
     return InlineTextContent(
         placeholder = Placeholder(
             width = box.placeholderWidth,
             height = box.placeholderHeight,
-            // Inline [img] deliberately keeps Center, unlike smileys (which moved to AboveBaseline
-            // for web parity in #203). An embedded image is a 240×180 block of user media, not an
-            // emotive glyph riding the text baseline: centring it on the line reads better and
-            // matches how a wrapped thumbnail sits next to text. Do not "unify" this with the
-            // smiley alignment without a visual pass — the two contracts are intentionally distinct.
-            placeholderVerticalAlign = PlaceholderVerticalAlign.Center,
+            // TextBottom (dogfood choice): the image bottom sits at the bottom of the surrounding
+            // text, so a small inline emoji (cc-image) rides the line with the words rather than
+            // floating in the middle (Center) — consistent with smileys, which use the same alignment.
+            // A taller inline image grows the line (lineHeight Unspecified on media paragraphs).
+            placeholderVerticalAlign = PlaceholderVerticalAlign.TextBottom,
         ),
     ) {
-        // The image fills the placeholder via fillMaxSize() so the rendered size tracks the
-        // sp-based placeholder under any fontScale. Inline [img] keeps a no-upscale content
-        // scale, unlike smileys: arbitrary small user images should not be blown up.
+        // The image fills the placeholder via fillMaxSize() (ContentScale.Fit) so the rendered size
+        // tracks the sp-based placeholder under any fontScale; the no-upscale rule lives in the BOX
+        // sizing (imageDisplayBox), not the content scale.
         AsyncImage(
             model = image.url,
             contentDescription = image.description,
@@ -847,15 +1016,12 @@ internal fun smileyInlineContent(smiley: PostInline.Smiley, box: InlineMediaBox)
         placeholder = Placeholder(
             width = box.placeholderWidth,
             height = box.placeholderHeight,
-            // #175 — AboveBaseline: the sprite bottom sits on the text baseline, exactly like a bare
-            // <img> in the browser (web/RF1 parity, consistent with #203). The line's text stays on its
-            // baseline (aligned with neighbouring lines) and a tall smiley rises above it. This avoids
-            // overlap ONLY because media paragraphs drop bodyMedium's fixed lineHeight (see
-            // ParagraphBlock): with the clamp, AboveBaseline pushed a tall sprite UP off its line onto
-            // the line above (measured top y=-22 over a 28sp first line); letting the line grow lets the
-            // ascent expand to contain it → ZERO overlap. (Center was trialled — zero overlap too — but
-            // it floated the line's text at the smiley's mid-height, breaking its baseline vs neighbours.)
-            placeholderVerticalAlign = PlaceholderVerticalAlign.AboveBaseline,
+            // TextBottom (dogfood choice, same alignment as inline [img]): the sprite bottom sits at
+            // the bottom of the surrounding text so the smiley rides the line with the words. Media
+            // paragraphs drop bodyMedium's fixed lineHeight (see ParagraphBlock) so a tall smiley grows
+            // the line instead of overlapping the line above. (AboveBaseline / Center were trialled
+            // earlier; TextBottom chosen in dogfood for consistency with [img].)
+            placeholderVerticalAlign = PlaceholderVerticalAlign.TextBottom,
         ),
     ) {
         AsyncImage(

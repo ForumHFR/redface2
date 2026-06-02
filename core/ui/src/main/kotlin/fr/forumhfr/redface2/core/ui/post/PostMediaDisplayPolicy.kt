@@ -22,9 +22,14 @@ import kotlin.math.roundToInt
  * small size directly, while perso smileys use the 70×50 cold-cache fallback while measurement is
  * in flight (and as the default `collectInlineMedia` resolver in tests).
  *
- * Inline `[img]` ([inlineImage]) is OUT of #175 scope and still uses its fixed 240×180 bucket with
- * [inlineImageContentScale] (`Inside`) — a separate UX contract; revisit if dogfood shows it needs
- * the same intrinsic treatment.
+ * Inline `[img]` ([inlineImage]) is now sized like smileys (#224 option A): measured intrinsic native
+ * size (no-upscale + absolute cap [INLINE_IMAGE_MAX_WIDTH_SP]×[INLINE_IMAGE_MAX_HEIGHT_SP]) then the
+ * relative `0.9 × contentWidth` cap, via the same `IntrinsicMediaSizeCache` + `imageDisplayBox` in
+ * PostRenderer. The **production cold fallback** (unmeasured `[img]`) is the one-line
+ * [INLINE_IMAGE_MIN_HEIGHT_SP] square in `imageDisplayBox` (#253, no giant Fit flash). The fixed
+ * 240×180 [inlineImage] bucket is now only the **default `collectInlineMedia` resolver** (legacy bucket
+ * exercised by tests), not the runtime fallback. This kills both the empty frame around a small reaction
+ * image and the overflow in a narrow quote.
  *
  * Why this took fixed buckets as a stopgap in #109: Compose `InlineTextContent` requires a **fixed**
  * `Placeholder` size when the `AnnotatedString` is built, so intrinsic sizing needs async-measure →
@@ -42,10 +47,13 @@ internal object PostMediaDisplayPolicy {
     val smileyContentScale: ContentScale = ContentScale.Fit
 
     /**
-     * Inline `[img]` content is arbitrary user media, not an emotive glyph. Keep the no-upscale
-     * rule there so a tiny linked image is not blown up to the 240×180 inline bucket.
+     * Inline `[img]` uses [ContentScale.Fit] (like smileys) so the bitmap **fills** its placeholder
+     * box. The no-upscale decision lives in the BOX sizing ([imageDisplayBox]: measured intrinsic,
+     * capped, floored to [INLINE_IMAGE_MIN_HEIGHT_SP]) — not the content scale. With `Inside` a tiny
+     * 16×16 cc-image emoji stayed 16×16 centred in its floored box (illegible in dogfood); `Fit` scales
+     * it up to fill the box, while a large photo still scales DOWN into its capped box.
      */
-    val inlineImageContentScale: ContentScale = ContentScale.Inside
+    val inlineImageContentScale: ContentScale = ContentScale.Fit
 
     /**
      * **Not the #175 production size** — since intrinsic sizing landed, this fixed box survives only
@@ -80,11 +88,13 @@ internal object PostMediaDisplayPolicy {
     )
 
     /**
-     * Inline `[img]` BBCode embedded inside a paragraph (`PostInline.InlineImage`). 240×180 is the
-     * historical HFR thumbnail aspect (4:3) that fits next to wrapped text on a phone without
-     * blowing the line height; landscape and portrait shots both downscale via
-     * [inlineImageContentScale]. The `:core:ui` parser already strips data:/javascript:/file:
-     * schemes so only http(s) URLs reach this bucket.
+     * Legacy 240×180 inline `[img]` bucket. 240×180 is the historical HFR thumbnail aspect (4:3); the
+     * `:core:ui` parser strips data:/javascript:/file: schemes so only http(s) URLs reach it.
+     *
+     * Since #224 option A this is **no longer the runtime sizing**: production `[img]` size is the
+     * measured intrinsic native size (no-upscale + capped) from `imageDisplayBox`, and the production
+     * cold fallback (unmeasured) is the [INLINE_IMAGE_MIN_HEIGHT_SP] square (#253). This bucket now only
+     * serves as the **default `collectInlineMedia` resolver** (the legacy value exercised by tests).
      */
     val inlineImage: InlineMediaBox = InlineMediaBox(
         placeholderWidth = 240.sp,
@@ -190,7 +200,27 @@ internal val builtinPreseedSize = PixelSize(16, 16)
 internal val persoColdFallbackSize = PixelSize(70, 50)
 
 /**
- * #175 — the no-upscale + cap policy that replaces the fixed [InlineMediaBox] buckets for smileys.
+ * #224 (option A) — absolute caps for an inline `[img]`, in **sp** (intrinsic native px treated as
+ * logical/CSS px, like the smiley path). More generous than the smiley height cap: an inline reaction
+ * image or embedded photo can be taller than an emotive glyph, yet stays bounded so it never dominates
+ * the post (a genuinely large photo belongs in a standalone `PostBlock.Image`, [blockImageMaxHeight]).
+ * The real horizontal limit is the relative `0.9 × contentWidth` applied renderer-side via [capToWidth].
+ */
+internal const val INLINE_IMAGE_MAX_HEIGHT_SP = 200
+internal const val INLINE_IMAGE_MAX_WIDTH_SP = 240
+
+/**
+ * #224/#253 — minimum display **height** (sp) for an inline `[img]`, so a sub-16 low-res source can't
+ * render below ~one text line. The community "cc-image" emoji (served as 16×16 PNGs) sits exactly at
+ * this floor → rendered at its native 16 (dogfood: the right size next to text, per @XaaT); anything
+ * smaller is floored up to 16 (filled by [inlineImageContentScale] = Fit), anything taller is untouched
+ * (no photo blow-up). 16 ≈ one text line (just under bodyMedium's 20sp lineHeight).
+ */
+internal const val INLINE_IMAGE_MIN_HEIGHT_SP = 16
+
+/**
+ * #175/#224 — the no-upscale + cap policy that replaces the fixed [InlineMediaBox] buckets for inline
+ * media (smileys and inline `[img]`; callers pass the per-kind caps — the defaults are the smiley caps).
  *
  * Given a smiley's intrinsic native size [nativePx] (raw bitmap px from Coil, treated as logical/CSS
  * px), returns the display size to feed the placeholder (as `.sp`):
@@ -231,5 +261,20 @@ internal fun capToWidth(size: PixelSize, maxWidthSp: Int): PixelSize {
     return PixelSize(
         width = maxWidthSp,
         height = (size.height * scale).roundToInt().coerceAtLeast(1),
+    )
+}
+
+/**
+ * #224 — scale [size] UP so its height reaches [minHeightSp], preserving aspect ratio, when it is
+ * smaller (a no-op otherwise). Counterpart to [capToWidth]: makes a tiny inline `[img]` (cc-image
+ * emoji served as 16×16) legible instead of microscopic. The bitmap fills the resulting box via
+ * [PostMediaDisplayPolicy.inlineImageContentScale] = Fit. Clamped ≥ 1 per axis.
+ */
+internal fun upscaleToMinHeight(size: PixelSize, minHeightSp: Int): PixelSize {
+    if (minHeightSp <= 0 || size.height >= minHeightSp) return size
+    val scale = minHeightSp.toFloat() / size.height.toFloat()
+    return PixelSize(
+        width = (size.width * scale).roundToInt().coerceAtLeast(1),
+        height = minHeightSp,
     )
 }

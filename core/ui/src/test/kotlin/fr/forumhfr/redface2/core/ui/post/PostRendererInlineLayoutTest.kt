@@ -30,7 +30,10 @@ import kotlin.math.abs
  * What we pin :
  *  - at `density = 1f, fontScale = 1f`, the placeholder rect is **exactly** the bucket size
  *    declared in [PostMediaDisplayPolicy] for the three kinds we render inline (`18 × 18` for
- *    builtin smileys, `70 × 50` for perso smileys, `240 × 180` for inline images) ;
+ *    builtin smileys, `70 × 50` for perso smileys, `240 × 180` for inline images). Since #224
+ *    option A, `240 × 180` is only the **cold-cache fallback** for an `[img]` (production size is
+ *    the measured intrinsic size, cf. `imageDisplayBox`) — Coil can't resolve a real bitmap under
+ *    Robolectric, so the no-measurement fallback is exactly what this test pins ;
  *  - the bucket **ratio** is preserved at the baseline so a future refactor that swapped a
  *    rectangular bucket to a square would surface here (the regression #109 was specifically a
  *    ratio drift) — only checked for the non-square buckets, the builtin 18×18 is tautological ;
@@ -161,7 +164,11 @@ class PostRendererInlineLayoutTest {
             PostInline.Text(" b"),
         )
         val annotated = buildInlineText(inlines, emptyLinkStyles, imageAlt = "img")
-        val media = collectInlineMedia(inlines) { InlineMediaBox(70.sp, 70.sp) }
+        // NB: `smileyBox` MUST be named. `collectInlineMedia(inlines) { … }` would bind the trailing
+        // lambda to the LAST parameter (`imageBox`, added by #224), leaving the smiley on its default
+        // 70×50 perso bucket — the stubbed 70×70 box would never apply and this test would silently
+        // exercise the wrong size. The 70×70 assertion below pins that the stub is actually in effect.
+        val media = collectInlineMedia(inlines, smileyBox = { InlineMediaBox(70.sp, 70.sp) })
         composeTestRule.setContent {
             MaterialTheme {
                 CompositionLocalProvider(LocalDensity provides Density(density = 1f, fontScale = 1f)) {
@@ -179,6 +186,20 @@ class PostRendererInlineLayoutTest {
         composeTestRule.waitForIdle()
         val layout = requireNotNull(capture.layout.value) { "no TextLayoutResult captured" }
         val rect = requireNotNull(layout.placeholderRects.firstOrNull()) { "no placeholder rect" }
+        // Pin the stub actually took effect (density=1 ⇒ 70.sp == 70px). If the trailing lambda ever
+        // rebinds to imageBox again, the smiley falls back to the 70×50 default and this fails loudly.
+        assertCloseEnough(
+            label = "tall smiley placeholder width",
+            expected = 70f,
+            actual = rect.width,
+            tolerance = SIZE_TOLERANCE_PX,
+        )
+        assertCloseEnough(
+            label = "tall smiley placeholder height",
+            expected = 70f,
+            actual = rect.height,
+            tolerance = SIZE_TOLERANCE_PX,
+        )
         val line0Bottom = layout.getLineBottom(0)
         assertTrue(
             "tall smiley overflows above its line onto line 0 — overlap! rect.top=${rect.top} " +
