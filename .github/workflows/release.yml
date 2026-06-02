@@ -70,6 +70,13 @@ jobs:
           DISPATCH_REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
+          # Validate the user-controlled dispatch ref against the git-ref charset BEFORE it ever
+          # reaches $GITHUB_OUTPUT (Codex P1): a value with a newline could otherwise inject extra
+          # output lines (e.g. play_track=production) and bypass the prod gate while channel stays dev.
+          if [[ -n "${DISPATCH_REF:-}" && ! "$DISPATCH_REF" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Invalid dispatch ref '${DISPATCH_REF}' — only [A-Za-z0-9._/-] allowed."
+            exit 1
+          fi
           if [[ "$EVENT_NAME" == "release" ]]; then
             if [[ "$PRERELEASE" == "true" ]]; then
               channel=beta; flavor=Beta; dir=beta
@@ -285,6 +292,10 @@ jobs:
           files: |
             release-artefacts/*.aab
             release-artefacts/*.apk
+          # Preserve the pre-release flag on update (Codex P2): softprops defaults `prerelease` to
+          # false when updating an existing release, which would flip a published beta pre-release
+          # into a normal/latest release. beta stays pre-release; prod is a stable release.
+          prerelease: ${{ needs.resolve-target.outputs.channel == 'beta' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

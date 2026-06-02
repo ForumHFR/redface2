@@ -108,8 +108,8 @@ Le `versionCode` est strictement croissant. Play Console rejette tout AAB dont l
 
 L'action n'auto-promote pas — c'est un choix de design pour ne pas livrer en prod par accident. Pour promouvoir un draft d'un track à l'autre :
 
-- **Manuellement via Play Console** : Test → `<track source>` → release concernée → **Promote release** → choisir le track cible. C'est le flux nominal.
-- **Via la CD** : relancer `workflow_dispatch` avec le même `ref` et un nouveau `play_track`. **Attention** : le `versionCode` doit rester unique — Play Console rejette si une release du même `versionCode` est déjà sur le track cible. Cette voie sert surtout à "rejouer" la CD si le draft initial a été supprimé côté UI.
+- **Manuellement via Play Console** : Test → `<track source>` → release concernée → **Promote release** → choisir le track cible. Flux nominal pour promouvoir un même binaire d'un track à l'autre (open testing → production), sans re-build.
+- **Via une nouvelle Release** : comme les canaux sont 3 `applicationId` distincts (pas des tracks d'une même app), « passer de beta à prod » = publier une **Release stable** (case pre-release décochée) sur un **nouveau tag `app-v<N>`** avec un `versionCode` neuf (Play rejette un versionCode déjà uploadé sur le listing). Le `workflow_dispatch` ne sert qu'au canal **dev** (son seul input est `ref`).
 
 ## Pourquoi `r0adkll/upload-google-play` plutôt que `gradle-play-publisher`
 
@@ -127,8 +127,8 @@ Procédure : voir [docs Play Console — Reset upload key](https://support.googl
 
 Si l'étape `Publish to Play Console` du workflow échoue (auth Play, quota, track invalide…) **après** que la signature ait réussi, l'AAB et l'APK signés sont déjà stagés. Deux façons de les récupérer sans relancer le build :
 
-1. **Workflow artefacts** : aller sur la page Actions → run en échec → en bas du job, télécharger l'archive `redface2-v<N>-<sha>` (rétention 30 jours par défaut). C'est le chemin standard, qu'on parte d'un tag ou d'un dispatch.
-2. **GitHub Release** (chemin tag uniquement, ou `attach_release: true` en dispatch) : le step `Create GitHub Release` tourne **après** le step Play Console mais reste indépendant de son succès — si le build et la signature ont passé, l'AAB+APK sont attachés à la Release `app-v<N>` même si Play a refusé l'upload. Dans ce cas, après avoir corrigé la cause du refus (permissions Play, premier upload manuel, etc.), l'upload manuel via la Play Console UI à partir de l'AAB téléchargé évite de re-bumper inutilement le `versionCode`.
+1. **Workflow artefacts** : aller sur la page Actions → run en échec → en bas du job `build`, télécharger l'archive `redface2-<canal>-v<N>-<sha>` (rétention 30 jours). Chemin standard pour tous les canaux (beta/prod/dev).
+2. **GitHub Release** (canaux beta/prod uniquement) : le step `Attach artefacts to the GitHub Release` tourne **après** l'upload Play mais indépendamment de son succès — si le build + la signature ont passé, l'AAB+APK sont attachés à la Release `app-v<N>` (que tu as publiée) même si Play a refusé. Après avoir corrigé la cause (permissions Play, premier upload manuel du listing, etc.), l'upload manuel via la Play Console UI depuis l'AAB téléchargé évite de re-bumper le `versionCode`. (Le canal **dev** n'a pas de Release → utiliser les workflow artefacts.)
 
 Si la signature elle-même échoue (`keytool -list` ou `jarsigner -verify`), aucun artefact n'est produit — refixer le secret keystore avant de retenter.
 
