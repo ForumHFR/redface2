@@ -110,10 +110,10 @@ Le `versionCode` est strictement croissant. Play Console rejette tout AAB dont l
 
 ## Promotion entre tracks
 
-Comme tout est l'app unique `fr.forumhfr.redface2`, **la promotion native Play fonctionne** entre ses tracks (internal → open testing → production) — c'est l'intérêt principal du modèle 1-app. Deux façons d'amener un binaire en prod :
+Comme tout est l'app unique `fr.forumhfr.redface2`, **la promotion native Play fonctionne** entre ses tracks (internal → open testing → production). Mais attention à la **cohérence multi-canaux** (F-Droid + Release GitHub) :
 
-- **Promotion Play (recommandé pour beta → prod)** : Play Console → Test → `<track source>` (ex. open testing) → la release concernée → **Promote release** → choisir `production`. Promeut **le même binaire** (même versionCode) sans re-build ni nouvelle Release GitHub. Idéal après validation en bêta.
-- **Nouvelle Release stable** : publier une Release GitHub **stable** (case pre-release décochée) sur un nouveau tag `app-v<N>` avec un versionCode neuf → la CD build/upload sur `production` (après la gate d'approbation). À utiliser quand le binaire prod doit différer du binaire bêta.
+- **Voie recommandée beta → prod = publier une Release GitHub *stable*** (case pre-release décochée) sur un nouveau tag `app-v<N>`. Elle déclenche **toute** l'automatisation : gate d'approbation `production`, upload Play **production**, **notification F-Droid (release)**, et la Release GitHub passe en stable. C'est le seul chemin qui garde Play, F-Droid et les artefacts GitHub **alignés**. (Le binaire peut être identique à la bêta — bumper le versionCode et republier ; le rendu utilisateur ne change pas.)
+- **Promote release dans Play Console** (open testing → production) reste possible et pratique *côté Play uniquement*, mais ⚠️ **bypasse l'automatisation** : pas de passage par la gate GitHub, **F-Droid n'est pas notifié**, et la Release GitHub bêta reste *pre-release*. À réserver à un hotfix Play urgent ; sinon F-Droid et les métadonnées publiques restent en retard sur Play prod.
 - Le `workflow_dispatch` ne sert qu'au track **internal** (dev) — pas un outil de promotion.
 
 ## Pourquoi `r0adkll/upload-google-play` plutôt que `gradle-play-publisher`
