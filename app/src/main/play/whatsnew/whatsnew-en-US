@@ -1,9 +1,10 @@
-Redface 2 alpha v69 — code block reading.
+Redface 2 v0.4.0 — entering beta.
 
-Changes:
-- [code] blocks now wrap instead of overflowing off-screen.
-- Line-number gutter on [code] blocks, like the HFR web render.
-- A long line that wraps onto several rows shows a single number.
-- [fixed] unchanged (alignment preserved for ASCII art / tables).
+Redface 2 leaves alpha and opens its public beta channel (open testing).
 
-Report bugs via alpha or GitHub.
+Since alpha:
+- Reworked [quote] / [quotemsg] rendering (distinct bare quote, headers).
+- Large images now full-width and tappable, no more pixelation or slowness.
+- [code] blocks wrap and show line numbers.
+
+Report bugs via beta or GitHub.

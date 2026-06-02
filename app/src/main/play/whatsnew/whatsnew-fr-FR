@@ -1,9 +1,10 @@
-Alpha Redface 2 v69 — lecture des blocs de code.
+Redface 2 v0.4.0 — passage en bêta.
 
-Changements :
-- Les blocs [code] reviennent à la ligne au lieu de déborder hors écran.
-- Numéros de ligne à gauche des blocs [code], comme sur le web HFR.
-- Une ligne longue qui passe sur plusieurs lignes ne reçoit qu'un seul numéro.
-- [fixed] inchangé (alignement préservé pour l'ASCII art / tableaux).
+Redface 2 quitte l'alpha et ouvre son canal bêta public (test ouvert).
 
-Bugs : alpha ou GitHub.
+Inclus depuis l'alpha :
+- Rendu des citations [quote] / [quotemsg] revu (citation nue distincte, headers).
+- Grandes images en pleine largeur, cliquables, plus de pixellisation ni de lenteur.
+- Blocs de code [code] avec retour à la ligne et numéros de ligne.
+
+Signalez les bugs via la bêta ou GitHub.
