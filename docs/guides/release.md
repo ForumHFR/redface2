@@ -7,17 +7,20 @@ nav_order: 5
 
 # Release et publication Play Console
 
-Comment construire un AAB signé et le publier sur le canal de tests Play Console depuis GitHub Actions. Le workflow couvre deux flux :
+Comment construire un AAB signé et le publier sur le bon canal Play Console depuis GitHub Actions. **Depuis #233, le canal est déterminé par le déclencheur** (3 product flavors coexistants, applicationId distincts ; une seule source de vérité = la Release GitHub) :
 
-1. **Tag git `app-v<N>`** — release officielle alignée sur le `versionCode`. Build → AAB + APK signés → upload Play Console (track `alpha` = test fermé par défaut, statut `DRAFT`) → GitHub Release avec les artefacts attachés.
-2. **`workflow_dispatch` manuel** — release intermédiaire / dogfood en cours de dev. Choix de la branche, du track Play (`alpha` / `beta` / `production` / `internal` / nom de closed track custom / `none`) et de l'attachement à une GitHub Release. Track `none` = build + sign uniquement, pas d'upload Play.
+1. **GitHub Release publiée + cochée « pre-release »** → canal **beta** (`fr.forumhfr.redface2.beta`) → Play **open testing** + F-Droid beta.
+2. **GitHub Release publiée, normale (stable)** → canal **prod** (`fr.forumhfr.redface2`) → Play **production** (statut `draft`) **après approbation manuelle** via l'Environment GitHub `production` + F-Droid release.
+3. **`workflow_dispatch` manuel** → canal **dev** (`fr.forumhfr.redface2.dev`) → Play **internal testing** (rapide, pas de F-Droid).
+
+⚠️ **Le tag `app-v<N>` seul ne déclenche plus la CD** : il faut **publier une GitHub Release** (sur ce tag) — pre-release pour beta, stable pour prod. Une Release dont le tag ne commence pas par `app-v` (ex. les `v0.x` specs/site) est **ignorée** (gate dans `resolve-target`).
 
 Workflow source : [`.github/workflows/release.yml`](https://github.com/ForumHFR/redface2/blob/main/.github/workflows/release.yml).
 
 ## Conventions
 
 - **Tag namespace** : les releases app utilisent `app-v<versionCode>` (ex: `app-v32`, `app-v33`). Cela évite de collisionner avec les tags `v0.x.0` du site / des specs.
-- **Track Play Console** : pour Redface 2, le track de **test fermé** initial est `alpha` (lowercase, c'est le nom tel qu'il apparaît dans la Play Console). La CD utilise donc `alpha` par défaut. Pipeline cible de promotion : `alpha` → `beta` → `production`. Pour cibler un autre track depuis le `workflow_dispatch`, passer le nom **exact** tel qu'il apparaît dans la Play Console (la validation est faite côté Play API au moment de l'upload — un nom invalide fait échouer l'action avec une erreur claire).
+- **Canaux / tracks Play Console** : depuis #233, **le canal est dérivé du déclencheur** (cf. en-tête), pas d'input `play_track` libre. Mapping figé dans `resolve-target` : beta → `fr.forumhfr.redface2.beta` track **open testing** ; prod → `fr.forumhfr.redface2` track **production** ; dev → `fr.forumhfr.redface2.dev` track **internal**. Chaque `applicationId` est un listing Play distinct (coexistence sur l'appareil). L'alpha (closed testing de l'app unique) est **retiré** au profit de ces 3 canaux.
 
 ## Pré-requis (à faire une fois)
 
@@ -65,38 +68,31 @@ Le keystore (`.jks`) et son init-script Gradle vivent sous `.gradle-user/signing
 
 Le workflow refuse de tourner si `UPLOAD_KEYSTORE_BASE64` est manquant (un build non signé n'a pas de sens pour la CD). En revanche `PLAY_SERVICE_ACCOUNT_JSON` peut être absent : la CD construira et signera l'AAB, l'attachera comme artefact GitHub, et **skippera l'upload Play** avec un warning. Pratique pour valider le workflow avant que la partie Play Console soit prête.
 
-## Flux 1 — Release officielle par tag
+## Flux beta — open testing (public)
+
+1. Bumper `versionCode` + `versionName` dans `app/build.gradle.kts` (sur `main`), mettre à jour `app/CHANGELOG.md`, merger la PR de release.
+2. Sur `main`, **publier une GitHub Release pre-release** sur un tag `app-v<N>` :
 
 ```bash
-# 1. Bumper versionCode + versionName dans app/build.gradle.kts (sur main)
-# 2. Mettre à jour app/CHANGELOG.md et CHANGELOG.md (specs)
-# 3. Merger la PR de release
 git switch main && git pull --ff-only
-
-# 4. Tag aligné sur versionCode et push (namespace `app-v<N>`)
-git tag app-v32 -m 'v32 — Phase 1 close-out'
-git push --tags
+gh release create app-v72 --prerelease --title 'Redface 2 v72 (0.4.0-beta)' --notes '…'
 ```
 
-La CD démarre automatiquement. Output :
-- AAB signé attaché à un nouvel objet **Releases** GitHub `app-v32`
-- APK release signé attaché également (utile pour sideload, F-Droid, dogfood manuel)
-- Upload Play Console **track `alpha`** (test fermé) par défaut, **statut `DRAFT`** — aller dans Play Console pour activer le draft une fois testé en interne
+La CD résout **beta** : build `:app:bundleBetaRelease` (`fr.forumhfr.redface2.beta`), upload Play **open testing** (statut `completed`), attache l'AAB+APK à la Release, notifie F-Droid (beta).
 
-## Flux 2 — Build intermédiaire / dogfood manuel
+## Flux prod — production
 
-**GitHub → Actions → Release → Run workflow** :
+Idem mais **Release stable** (case « pre-release » décochée) :
 
-| Input | Choix typique |
-|---|---|
-| `ref` | `feat/ma-branche-en-cours` (vide = ref actuel) |
-| `play_track` | `alpha` (par défaut, test fermé Redface 2) ; `beta`, `production`, `internal` ; ou `none` pour ne pas pousser sur Play |
-| `attach_release` | `false` (artefacts uniquement comme Workflow artefacts, pas de GitHub Release) |
+```bash
+gh release create app-v73 --title 'Redface 2 v73 (1.0.0)' --notes '…'
+```
 
-Output :
-- Artefacts AAB+APK téléchargeables depuis l'onglet Actions du run pendant 30 jours
-- Si `play_track ≠ none` : upload Play Console en `DRAFT` sur le track choisi
-- Si `attach_release = true` : crée une **draft GitHub Release** `dispatch-v<N>-<sha>` (utile pour partager un build par lien)
+La CD résout **prod** et **attend l'approbation** dans l'Environment GitHub `production` (required reviewer) avant tout build/upload. Upload Play **production** en **statut `draft`** (double garde-fou : approbation GitHub + activation manuelle Play). Notifie F-Droid (release).
+
+## Flux dev — internal testing (rapide)
+
+**GitHub → Actions → Release → Run workflow** (ou `gh workflow run release.yml -f ref=<branche>`). Pas de GitHub Release, pas de F-Droid. La CD résout **dev** : build `:app:bundleDevRelease` (`fr.forumhfr.redface2.dev`), upload Play **internal** (`completed`). Seul input : `ref` (défaut = ref courant). Artefacts du run téléchargeables 30 j.
 
 ## Bump de version : convention
 

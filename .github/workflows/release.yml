@@ -59,23 +59,32 @@ jobs:
     steps:
       - id: r
         shell: bash
+        # Pass every GitHub-expression through env, NEVER interpolate into the script body
+        # (Codex P1): the dispatch `ref` is user-controlled, and `${{ … }}` substitution happens
+        # before bash runs, so a crafted ref could rewrite channel/flavor/track/status and route a
+        # prod upload outside the gate. As env vars bash treats them as inert literals.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          DISPATCH_REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "release" ]]; then
-            if [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
+          if [[ "$EVENT_NAME" == "release" ]]; then
+            if [[ "$PRERELEASE" == "true" ]]; then
               channel=beta; flavor=Beta; dir=beta
               pkg=fr.forumhfr.redface2.beta; track=beta;       status=completed; fdroid=beta
             else
               channel=prod; flavor=Prod; dir=prod
               pkg=fr.forumhfr.redface2;      track=production; status=draft;     fdroid=release
             fi
-            build_ref="${{ github.event.release.tag_name }}"
-            release_tag="${{ github.event.release.tag_name }}"
+            build_ref="$TAG_NAME"
+            release_tag="$TAG_NAME"
             is_release_event=true
           else
             channel=dev; flavor=Dev; dir=dev
             pkg=fr.forumhfr.redface2.dev; track=internal; status=completed; fdroid=none
-            build_ref="${{ inputs.ref }}"
+            build_ref="$DISPATCH_REF"
             release_tag=""
             is_release_event=false
           fi
@@ -93,16 +102,30 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "::notice title=Release target::channel=$channel flavor=$flavor pkg=$pkg track=$track status=$status fdroid=$fdroid ref=${build_ref:-<current>}"
 
+  # prod-only manual-approval gate. A DEDICATED environment-gated job, not a conditional
+  # `environment:` on `build` — an expression yielding '' for beta/dev is an INVALID empty
+  # environment reference and fails those runs before any step (Codex P2). For prod this job pauses
+  # on the `production` Environment's required reviewer; for beta/dev it's skipped and build proceeds.
+  await-prod-approval:
+    name: Await production approval
+    needs: resolve-target
+    if: ${{ needs.resolve-target.outputs.channel == 'prod' }}
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 4320
+    steps:
+      - run: echo "Production deploy approved for ${{ needs.resolve-target.outputs.release_tag }}."
+
   build:
     name: Build, sign and publish (${{ needs.resolve-target.outputs.channel }})
-    needs: resolve-target
+    needs: [resolve-target, await-prod-approval]
+    # await-prod-approval is skipped for beta/dev, so gate explicitly: run when resolve-target
+    # succeeded AND (channel is not prod OR the prod approval passed). always() lets build evaluate
+    # despite the (intentionally) skipped gate job on non-prod channels.
+    if: ${{ always() && needs.resolve-target.result == 'success' && (needs.resolve-target.outputs.channel != 'prod' || needs.await-prod-approval.result == 'success') }}
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31
-    # prod goes through the `production` GitHub Environment → manual-approval gate before any
-    # build/upload runs (final guardrail against an accidental production publish). beta/dev have
-    # no environment (empty string = none).
-    environment: ${{ needs.resolve-target.outputs.channel == 'prod' && 'production' || '' }}
     timeout-minutes: 30
     outputs:
       version_code: ${{ steps.meta.outputs.version_code }}
