@@ -5,6 +5,7 @@ import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
+import coil3.size.Precision
 import coil3.size.Scale
 
 /**
@@ -36,6 +37,11 @@ internal suspend fun measureIntrinsicMediaSize(
             .data(url)
             .size(INTRINSIC_PROBE_SIZE_PX)
             .scale(Scale.FIT)
+            // INEXACT is REQUIRED here (Codex review): Coil's default EXACT precision would UPSCALE a
+            // source smaller than the probe (a 16×16 emoji, a 70×50 smiley) up to 1024 before reporting
+            // image.width/height — measuring small media as huge and breaking imageDisplayBox sizing +
+            // the promotion threshold. INEXACT lets Coil report the native size for sources ≤ probe.
+            .precision(Precision.INEXACT)
             .build(),
     )
     val image = (result as? SuccessResult)?.image ?: return null
