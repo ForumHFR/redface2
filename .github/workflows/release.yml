@@ -38,6 +38,11 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────
   resolve-target:
     name: Resolve channel target
+    # Gate (#233, Codex P1): `on: release` fires for EVERY published Release, but this repo also
+    # publishes `v0.x` Releases for the specs/site — those must NOT enter the app deploy path. Only
+    # proceed for app releases (tag `app-v*`); a dispatch (dev) always proceeds. A non-app release
+    # skips this job, which cascades to build + notify-fdroid being skipped (no-op deploy).
+    if: ${{ github.event_name != 'release' || startsWith(github.event.release.tag_name, 'app-v') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
