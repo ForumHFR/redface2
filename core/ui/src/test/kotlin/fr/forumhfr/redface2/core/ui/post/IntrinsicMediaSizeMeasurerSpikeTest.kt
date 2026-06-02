@@ -16,7 +16,9 @@ import org.robolectric.RobolectricTestRunner
  * #175 SPIKE — compiler + runtime gate for the Coil intrinsic-measurement path.
  *
  * Confirms (the design study flagged these as NOT provable by docs, only by the compiler):
- *  - `coil3.Image.width/height` is the dimension API after `execute(... Size.ORIGINAL ...)` ;
+ *  - `coil3.Image.width/height` is the dimension API after `execute(...)` (#257: the request is now a
+ *    bounded `size(1024)` FIT probe, not `Size.ORIGINAL`; the `ColorImage` fixtures are ≤ 70px so the
+ *    bound is a no-op and these assertions are unchanged) ;
  *  - `coil3.test.ColorImage(width, height)` exists and propagates its dimensions to `image.width/height`
  *    (so Robolectric tests can pin sizes deterministically, no network/decode) ;
  *  - `FakeImageLoaderEngine` + `runTest` drive the suspend measurement.

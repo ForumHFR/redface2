@@ -214,6 +214,10 @@ internal const val INLINE_IMAGE_MAX_WIDTH_SP = 240
  * the inline cap converted to px (density × fontScale) clamped to this, so Coil decodes ONE stable
  * bitmap that survives the cold→measured box growth without a re-decode + pixelated upscale. 1024 covers
  * the 240×200 sp cap on any realistic density/fontScale while staying cheap to decode and cache.
+ *
+ * Distinct from `INTRINSIC_PROBE_SIZE_PX` (also 1024): that one bounds the **measure** probe in
+ * `IntrinsicMediaSizeMeasurer`, this one bounds the **render** decode here. Same value, different role —
+ * don't merge them.
  */
 internal const val INLINE_IMAGE_DECODE_CAP_PX = 1024
 

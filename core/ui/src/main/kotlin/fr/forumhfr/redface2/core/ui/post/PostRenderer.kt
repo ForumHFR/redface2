@@ -493,7 +493,9 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         .background(MaterialTheme.colorScheme.surfaceContainerHighest)
         .then(
             if (linkUrl != null) {
-                Modifier.clickable(role = Role.Button, onClickLabel = openLabel) {
+                // Role.Image (not Button): the element IS an image that opens its full version on tap;
+                // the localized onClickLabel carries the action for TalkBack ("Image, double-tap to …").
+                Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
                     runCatching { uriHandler.openUri(linkUrl) }
                 }
             } else {
