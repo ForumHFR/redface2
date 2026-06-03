@@ -157,6 +157,7 @@ jobs:
       version_code: ${{ steps.meta.outputs.version_code }}
       version_name: ${{ steps.meta.outputs.version_name }}
       short_sha: ${{ steps.meta.outputs.short_sha }}
+      full_sha: ${{ steps.meta.outputs.full_sha }}
       fdroid_apk: ${{ steps.artefacts.outputs.fdroid_apk_filename }}
     env:
       APP_LABEL: ${{ needs.resolve-target.outputs.app_label }}
@@ -192,12 +193,14 @@ jobs:
           fi
           version_name=$(grep -E '^[[:space:]]+versionName[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*"(.*)".*/\1/')
           short_sha=$(git rev-parse --short HEAD)
+          full_sha=$(git rev-parse HEAD)
           [[ -n "$version_code" ]] || { echo "::error::versionCode unresolved"; exit 1; }
           [[ -n "$version_name" ]] || { echo "::error::versionName unresolved"; exit 1; }
           {
             echo "version_code=$version_code"
             echo "version_name=$version_name"
             echo "short_sha=$short_sha"
+            echo "full_sha=$full_sha"
           } >> "$GITHUB_OUTPUT"
           echo "::notice title=Build::channel=${CHANNEL} versionCode=${version_code} versionName=${version_name} sha=${short_sha} label='${APP_LABEL:-<default>}'"
 
@@ -270,19 +273,26 @@ jobs:
           set -euo pipefail
           AAPT2="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -1 || true)"
           [[ -x "$AAPT2" ]] || { echo "::error::aapt2 not found under $ANDROID_HOME/build-tools"; exit 1; }
+          EXPECTED_VC="${{ steps.meta.outputs.version_code }}"
           # $1=apk $2=expected package $3=expected label (empty → don't assert label)
           check_apk() {
-            local apk="$1" want_pkg="$2" want_label="$3" badging
+            local apk="$1" want_pkg="$2" want_label="$3" badging vc
             jarsigner -verify "$apk" >/dev/null
             badging="$("$AAPT2" dump badging "$apk")"
             grep -q "package: name='${want_pkg}'" <<<"$badging" || {
               echo "::error::${apk}: package mismatch (want ${want_pkg})"; grep '^package:' <<<"$badging"; exit 1; }
+            # Assert the BUILT versionCode matches what we advertise (Codex P2): a dispatch on a ref
+            # without -PversionCodeOverride support would silently keep the checked-out code while we
+            # report run_number for naming + the F-Droid dispatch → duplicate/non-monotonic dev versions.
+            vc="$(sed -nE "s/.*versionCode='([0-9]+)'.*/\1/p" <<<"$badging" | head -1)"
+            [[ "$vc" == "$EXPECTED_VC" ]] || {
+              echo "::error::${apk}: versionCode mismatch (apk=${vc}, expected=${EXPECTED_VC}) — ref may lack -PversionCodeOverride support"; exit 1; }
             if [[ -n "$want_label" ]]; then
               # Tolerate both aapt2 forms: `application-label:'X'` and `application: label='X'`.
               grep -Eq "(application-label:|label=)'${want_label}'" <<<"$badging" || {
                 echo "::error::${apk}: label mismatch (want ${want_label})"; grep -E "label" <<<"$badging"; exit 1; }
             fi
-            echo "OK: ${apk} → ${want_pkg} / '${want_label:-<default>}'"
+            echo "OK: ${apk} → ${want_pkg} / vc=${vc} / '${want_label:-<default>}'"
           }
           fdroid_apk="$(ls app/build/outputs/apk/${FDROID_DIR}/release/*.apk | head -1)"
           check_apk "$fdroid_apk" "$FDROID_PACKAGE" "${APP_LABEL:-}"
@@ -347,7 +357,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve-target.outputs.release_tag }}
-          target_commitish: ${{ github.sha }}
+          # The COMMIT ACTUALLY BUILT (the checked-out HEAD), not github.sha — a dispatch with `ref`
+          # set to another branch/tag builds that ref, so tagging github.sha would break provenance.
+          target_commitish: ${{ steps.meta.outputs.full_sha }}
           name: Redface 2 dev (build ${{ steps.meta.outputs.version_code }})
           body: "Build dev automatique (canal interne). APK F-Droid `.dev` attaché. Non destiné au grand public."
           prerelease: true
