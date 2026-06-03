@@ -21,6 +21,16 @@ val hasCiSigningConfig =
         !ciKeyAlias.isNullOrBlank() &&
         !ciKeyPassword.isNullOrBlank()
 
+// #233 — CD-injected overrides (release.yml). Both are OPTIONAL: absent in local/dev builds, so
+// the per-flavor defaults below apply.
+//   -PappLabel="Redface 2 β"  → forces the launcher label for the build (lets the prod flavor /
+//                                base applicationId carry the β/dev label on the Play track build).
+//   -PversionCodeOverride=N   → overrides versionCode for the dev channel only (F-Droid `.dev` is
+//                                its own applicationId namespace, so a run_number-based code there
+//                                never collides with — nor blocks — the base/Play versionCode).
+val cliAppLabel = providers.gradleProperty("appLabel").orNull?.takeIf { it.isNotBlank() }
+val cliVersionCode = providers.gradleProperty("versionCodeOverride").orNull?.toIntOrNull()
+
 android {
     namespace = "fr.forumhfr.redface2"
 
@@ -38,13 +48,13 @@ android {
         // track (alpha) and in the GitHub Release flag, not in versionName itself.
         // versionName is also surfaced in the app footer via BuildConfig.VERSION_NAME so
         // dogfood builds advertise their lineage to the user.
-        versionCode = 72
+        versionCode = cliVersionCode ?: 72
         versionName = "0.4.0"
 
         // Manifest placeholder so a side-by-side install (dogfood/preview overlay)
         // can override the launcher label without touching tracked manifest/strings.
         // Defaults to the in-app string resource for production builds.
-        manifestPlaceholders["appLabel"] = "@string/app_name"
+        manifestPlaceholders["appLabel"] = cliAppLabel ?: "@string/app_name"
     }
 
     if (hasCiSigningConfig) {
@@ -106,17 +116,17 @@ android {
         }
     }
 
-    // #233 — `channel` product-flavor dimension (prod / beta / dev) for LOCAL side-by-side installs.
-    // Each suffixed applicationId lets a maintainer sideload a release-signed beta/dev build next to
-    // the Play prod build for dogfooding. IMPORTANT: Play distribution does NOT use these — the CD
-    // (release.yml) uploads ONLY the `prod` applicationId (fr.forumhfr.redface2) and routes by Play
-    // *track* (open testing / production / internal), because Play tracks of one app share an
-    // applicationId and only one install exists per device. So beta/dev flavors are a local tool,
-    // never a Play package. Code is 100% shared; only the applicationId suffix + launcher label differ.
-    // `prod` is the canonical app: base applicationId, default flavor, label @string/app_name.
-    // NB: the `debug` buildType still forces label "Redface 2 ADB" + `.debug` suffix (it overrides
-    // the flavor placeholder), so the local adb dogfood build remains `prodDebug` == today's debug
-    // build (fr.forumhfr.redface2.debug). Only *release* builds surface the per-channel label.
+    // #233 — `channel` product-flavor dimension (prod / beta / dev). The applicationId suffix decides
+    // WHERE the artifact goes; the launcher label is set per build (cliAppLabel ?: per-flavor default):
+    //   prod (base applicationId fr.forumhfr.redface2) → the PLAY artifact (one Play listing, label
+    //         set by -PappLabel per track: "Redface 2 β" on the beta track, "Redface 2" on production).
+    //   beta (.beta) / dev (.dev) → the F-DROID artifacts (distinct applicationId = distinct, coexisting
+    //         F-Droid apps "Redface 2 β" / "Redface 2 dev"; F-Droid indexes by package, has no tracks).
+    // Play = ONE applicationId (1 listing, label varies by track); F-Droid = packages per channel.
+    // The two stores are independent build artifacts, so a single channel can be base-appId on Play and
+    // suffixed on F-Droid at once. Code is 100% shared; only applicationId suffix + launcher label differ.
+    // NB: the `debug` buildType still forces label "Redface 2 ADB" + `.debug` suffix (it overrides the
+    // flavor placeholder), so the local adb dogfood build remains `prodDebug` (fr.forumhfr.redface2.debug).
     flavorDimensions += "channel"
     productFlavors {
         create("prod") {
@@ -126,12 +136,14 @@ android {
         create("beta") {
             dimension = "channel"
             applicationIdSuffix = ".beta"
-            manifestPlaceholders["appLabel"] = "Redface 2 β"
+            // Default label for a manual `assembleBetaRelease` (Codex: keep a per-flavor default so a
+            // build without -PappLabel still gets the right name); the CI `-PappLabel` overrides it.
+            manifestPlaceholders["appLabel"] = cliAppLabel ?: "Redface 2 β"
         }
         create("dev") {
             dimension = "channel"
             applicationIdSuffix = ".dev"
-            manifestPlaceholders["appLabel"] = "Redface 2 dev"
+            manifestPlaceholders["appLabel"] = cliAppLabel ?: "Redface 2 dev"
         }
     }
 
