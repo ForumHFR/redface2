@@ -33,6 +33,7 @@ import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.account.RedfaceAccountMenu
 import fr.forumhfr.redface2.feature.auth.LoginScreen
@@ -77,10 +78,6 @@ data object MessagesRoute : RedfaceNavKey
 @Serializable
 data class PrivateMessageThreadRoute(
     val threadId: Int,
-    // Correspondent + subject are carried from the inbox row so the thread screen shows a
-    // meaningful title instantly and the parser has an authoritative correspondent fallback.
-    val correspondent: String,
-    val subject: String,
     val page: Int = 1,
 ) : RedfaceNavKey
 
@@ -319,6 +316,21 @@ fun RedfaceApp(intent: Intent?) {
         val reportEmailSubject = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_report_email_subject)
         val reportNoEmailClient = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_no_email_client)
         val context = LocalContext.current
+        var readPrivateMessageThreadIds by remember { mutableStateOf(emptySet<Int>()) }
+
+        LaunchedEffect(authState) {
+            when (authState) {
+                null -> Unit
+                AuthState.Anonymous -> {
+                    readPrivateMessageThreadIds = emptySet()
+                    resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
+                }
+                is AuthState.Authenticated -> {
+                    readPrivateMessageThreadIds = emptySet()
+                    resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
+                }
+            }
+        }
 
         NavigationSuiteScaffold(
             navigationSuiteItems = {
@@ -351,6 +363,10 @@ fun RedfaceApp(intent: Intent?) {
                 RedfaceNavHost(
                     backStack = activeBackStack,
                     accountMenu = accountMenu,
+                    readPrivateMessageThreadIds = readPrivateMessageThreadIds,
+                    onPrivateMessageThreadLoaded = { threadId ->
+                        readPrivateMessageThreadIds = readPrivateMessageThreadIds + threadId
+                    },
                     onOpenProfile = { userId, pseudo, avatarUrl ->
                         // Review feedback I3: capture the **origin** tab so that
                         // « Voir le profil complet » lands on the correct back stack
@@ -435,6 +451,8 @@ private const val REPORT_EMAIL: String = "xat@azora.fr"
 private fun RedfaceNavHost(
     backStack: NavBackStack<NavKey>,
     accountMenu: @Composable () -> Unit,
+    readPrivateMessageThreadIds: Set<Int>,
+    onPrivateMessageThreadLoaded: (Int) -> Unit,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     NavDisplay(
@@ -532,12 +550,11 @@ private fun RedfaceNavHost(
             }
             entry<MessagesRoute> {
                 MessagesScreen(
-                    onOpenThread = { threadId, correspondent, subject ->
+                    readThreadIds = readPrivateMessageThreadIds,
+                    onOpenThread = { threadId ->
                         backStack.add(
                             PrivateMessageThreadRoute(
                                 threadId = threadId,
-                                correspondent = correspondent,
-                                subject = subject,
                             ),
                         )
                     },
@@ -548,10 +565,11 @@ private fun RedfaceNavHost(
                 PrivateMessageThreadScreen(
                     request = PrivateMessageThreadRequest(
                         threadId = route.threadId,
-                        correspondent = route.correspondent,
-                        subject = route.subject,
                         page = route.page,
                     ),
+                    onLoaded = {
+                        onPrivateMessageThreadLoaded(route.threadId)
+                    },
                     onBack = {
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)

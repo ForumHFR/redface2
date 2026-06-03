@@ -245,6 +245,10 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
 @Serializable data object ForumRoute : RedfaceNavKey
 @Serializable data object SearchRoute : RedfaceNavKey
 @Serializable data object MessagesRoute : RedfaceNavKey
+@Serializable data class PrivateMessageThreadRoute(
+    val threadId: Int,                     // id `post` HFR de la conversation `cat=prive`
+    val page: Int = 1,
+) : RedfaceNavKey                         // route opaque : pas de sujet/correspondant privé
 @Serializable data class CategoryRoute(
     val cat: Int,
     val subcat: Int? = null,
@@ -314,8 +318,9 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
             entry<SearchRoute> { SearchScreen(onOpenTopic = { /* ... */ }, topBarActions = accountMenu) }
             entry<MessagesRoute> {
                 MessagesScreen(
-                    onOpenThread = { threadId, correspondent, subject ->
-                        backStack.add(PrivateMessageThreadRoute(threadId, correspondent, subject))
+                    readThreadIds = readPrivateMessageThreadIds,
+                    onOpenThread = { threadId ->
+                        backStack.add(PrivateMessageThreadRoute(threadId))
                     },
                     topBarActions = accountMenu,
                 )
@@ -324,10 +329,9 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
                 PrivateMessageThreadScreen(
                     request = PrivateMessageThreadRequest(
                         threadId = route.threadId,
-                        correspondent = route.correspondent,
-                        subject = route.subject,
                         page = route.page,
                     ),
+                    onLoaded = { onPrivateMessageThreadLoaded(route.threadId) },
                     onBack = { backStack.removeAt(backStack.lastIndex) },
                     topBarActions = accountMenu,
                 )
@@ -551,7 +555,7 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 > **Statut Phase 5+** — multi-pane n'est pas livré en Phase 1. Dans le snippet ci-dessous :
 >
 > - le **pattern de composition** (`NavDisplay` + `ListDetailPaneScaffold` sur le même back stack, switch `WindowSizeClass`) est **illustratif** — c'est ce qui sera implémenté Phase 5+ ;
-> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested, topBarActions)`, `MessagesScreen(onOpenThread, topBarActions)`, `PrivateMessageThreadScreen(request, onBack, topBarActions)`, `SearchScreen(onOpenTopic, topBarActions)`, `ForumScreen(onOpenCategory, topBarActions)`, `TopicScreen(request: TopicRequest, onReply: (subcat, page) -> Unit, onQuote: (subcat, page, quotedNumreponse, quoteRef) -> Unit, onEdit: (subcat, page, numreponse) -> Unit, onEditFirstPost: (subcat, page, numreponse) -> Unit, onOpenPage)`, `PostEditorScreen(request: PostEditorRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`, `TopicFormScreen(request: TopicFormRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`) sont les signatures **réelles** livrées dans le repo (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../PostEditorScreen.kt`, `feature/editor/.../TopicFormScreen.kt`). Le slot `topBarActions: @Composable (() -> Unit)? = null` carrie le menu compte global depuis #198 — cf. § « Menu compte global ».
+> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested, topBarActions)`, `MessagesScreen(onOpenThread, readThreadIds, topBarActions)`, `PrivateMessageThreadScreen(request, onLoaded, onBack, topBarActions)`, `SearchScreen(onOpenTopic, topBarActions)`, `ForumScreen(onOpenCategory, topBarActions)`, `TopicScreen(request: TopicRequest, onReply: (subcat, page) -> Unit, onQuote: (subcat, page, quotedNumreponse, quoteRef) -> Unit, onEdit: (subcat, page, numreponse) -> Unit, onEditFirstPost: (subcat, page, numreponse) -> Unit, onOpenPage)`, `PostEditorScreen(request: PostEditorRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`, `TopicFormScreen(request: TopicFormRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`) sont les signatures **réelles** livrées dans le repo (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../PostEditorScreen.kt`, `feature/editor/.../TopicFormScreen.kt`). Le slot `topBarActions: @Composable (() -> Unit)? = null` carrie le menu compte global depuis #198 — cf. § « Menu compte global ».
 >
 > Le call-site `onOpenFlag = { flag -> backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = ...)) }` passe désormais le topic concerné — Phase 1B.4 a remplacé le placeholder mock par la liste réelle des drapeaux.
 

@@ -32,9 +32,10 @@ interface MessagesRepository {
     /**
      * Fetches one page of a private-message conversation (`forum2.php?cat=prive&post={threadId}`).
      *
-     * @param fallbackCorrespondent correspondent carried from the inbox row, used when the page
-     *   alone cannot reveal it (the user is the only sender so far). Throws on network / session
-     *   errors, like [getPrivateMessageList].
+     * @param fallbackCorrespondent optional caller-provided correspondent label, used only when
+     *   the page alone cannot reveal it (the user is the only sender so far). UI Navigation routes
+     *   must not carry it because it is private metadata that can outlive the session.
+     *   Throws on network / session errors, like [getPrivateMessageList].
      */
     suspend fun getPrivateMessageThread(
         threadId: Int,

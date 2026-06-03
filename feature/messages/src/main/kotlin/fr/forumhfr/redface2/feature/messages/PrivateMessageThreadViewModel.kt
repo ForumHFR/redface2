@@ -21,8 +21,8 @@ import kotlinx.coroutines.launch
 /**
  * ViewModel for one private-message conversation. Receives its route arguments via Hilt
  * assisted injection ([PrivateMessageThreadRequest]), mirroring [TopicViewModel]. Loads the
- * requested page once (no cache in the #298 MVP) and forwards the inbox-row correspondent as
- * the parser fallback.
+ * requested page once (no cache in the #298 MVP). Route arguments deliberately exclude
+ * subject/correspondent so stale Navigation state cannot expose private metadata after logout.
  */
 @HiltViewModel(assistedFactory = PrivateMessageThreadViewModel.Factory::class)
 class PrivateMessageThreadViewModel @AssistedInject constructor(
@@ -83,7 +83,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                 val thread = repository.getPrivateMessageThread(
                     threadId = request.threadId,
                     page = page,
-                    fallbackCorrespondent = request.correspondent,
+                    fallbackCorrespondent = null,
                 )
                 _state.update {
                     it.copy(

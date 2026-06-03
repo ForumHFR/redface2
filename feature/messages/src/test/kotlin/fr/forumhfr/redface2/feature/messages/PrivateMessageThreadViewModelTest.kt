@@ -39,17 +39,15 @@ class PrivateMessageThreadViewModelTest {
 
     private val request = PrivateMessageThreadRequest(
         threadId = 42,
-        correspondent = "Correspondant",
-        subject = "Sujet",
         page = 1,
     )
 
     @Test
-    fun `loads the thread on init and forwards the inbox correspondent as fallback`() = runTest {
+    fun `loads the thread on init without private route metadata fallback`() = runTest {
         val repository = mockk<MessagesRepository>()
         val thread = thread(page = 1, totalPages = 1)
         coEvery {
-            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = "Correspondant")
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } returns thread
 
         val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
@@ -57,9 +55,10 @@ class PrivateMessageThreadViewModelTest {
         val state = viewModel.state.value
         assertTrue(state.mode is PrivateMessageThreadUiState.Mode.Content)
         assertEquals(thread, (state.mode as PrivateMessageThreadUiState.Mode.Content).thread)
-        // The inbox-row correspondent must reach the repository (parser fallback contract).
+        // Route state deliberately excludes subject/correspondent so stale Navigation entries
+        // cannot expose private metadata after logout/process restore.
         coVerify(exactly = 1) {
-            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = "Correspondant")
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         }
     }
 
@@ -83,7 +82,7 @@ class PrivateMessageThreadViewModelTest {
     fun `surfaces a load failure as Error`() = runTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
-            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = "Correspondant")
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } throws IOException("offline")
 
         val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
@@ -97,10 +96,10 @@ class PrivateMessageThreadViewModelTest {
     fun `selectPage loads the requested page`() = runTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
-            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = "Correspondant")
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } returns thread(page = 1, totalPages = 2)
         coEvery {
-            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = "Correspondant")
+            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
         } returns thread(page = 2, totalPages = 2)
 
         val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
@@ -116,7 +115,7 @@ class PrivateMessageThreadViewModelTest {
         val repository = mockk<MessagesRepository>()
         val authRepository = FakeAuthRepository()
         coEvery {
-            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = "Correspondant")
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } returns thread(page = 1, totalPages = 1)
 
         val viewModel = PrivateMessageThreadViewModel(request, repository, authRepository)

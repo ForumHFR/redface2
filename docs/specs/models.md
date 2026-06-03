@@ -145,6 +145,7 @@ classDiagram
         +String subject
         +Instant date
         +Boolean hasUnread
+        +Boolean isMultiRecipient
     }
 
     class PrivateMessageListPage {
@@ -517,6 +518,7 @@ data class PrivateMessageSummary(
     val subject: String,
     val date: Instant,              // dernière activité
     val hasUnread: Boolean,         // marker `closedbp.gif`
+    val isMultiRecipient: Boolean = false, // "Interlocuteurs multiples" (MultiMP / DT)
 )
 
 data class PrivateMessageListPage(

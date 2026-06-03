@@ -6,6 +6,7 @@
     <string name="messages_login_required">Connexion requise</string>
     <string name="messages_login_required_body">Connectez-vous depuis le menu compte pour lire vos messages privés.</string>
     <string name="messages_error_load">Impossible de charger les messages privés.</string>
+    <string name="messages_thread_title">Conversation privée</string>
     <string name="messages_thread_error_load">Impossible de charger la conversation.</string>
     <string name="messages_retry">Réessayer</string>
     <string name="messages_state_read">Lu</string>

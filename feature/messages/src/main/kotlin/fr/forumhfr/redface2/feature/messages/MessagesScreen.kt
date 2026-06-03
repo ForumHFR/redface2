@@ -54,7 +54,8 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MessagesScreen(
-    onOpenThread: (threadId: Int, correspondent: String, subject: String) -> Unit,
+    onOpenThread: (threadId: Int) -> Unit,
+    readThreadIds: Set<Int> = emptySet(),
     topBarActions: @Composable (() -> Unit)? = null,
     viewModel: MessagesViewModel = hiltViewModel(),
 ) {
@@ -140,13 +141,12 @@ fun MessagesScreen(
 
                     is MessagesUiState.Mode.Content -> InboxContent(
                         conversations = mode.conversations,
+                        readThreadIds = readThreadIds,
                         page = state.page,
                         totalPages = state.totalPages,
                         onSelectPage = viewModel::selectPage,
-                        onConversationClick = { conversation, displayName ->
-                            // Optimistically mark read locally, then navigate to the thread.
-                            viewModel.openThread(conversation.threadId)
-                            onOpenThread(conversation.threadId, displayName, conversation.subject)
+                        onConversationClick = { conversation ->
+                            onOpenThread(conversation.threadId)
                         },
                     )
                 }
@@ -158,10 +158,11 @@ fun MessagesScreen(
 @Composable
 private fun InboxContent(
     conversations: List<PrivateMessageSummary>,
+    readThreadIds: Set<Int>,
     page: Int,
     totalPages: Int,
     onSelectPage: (Int) -> Unit,
-    onConversationClick: (PrivateMessageSummary, displayName: String) -> Unit,
+    onConversationClick: (PrivateMessageSummary) -> Unit,
 ) {
     // Always a LazyColumn (even when empty) so Material 3 pull-to-refresh — driven by nested
     // scroll — keeps working on an empty inbox; the empty message fills the viewport via
@@ -186,20 +187,23 @@ private fun InboxContent(
             }
         } else {
             items(conversations, key = { it.threadId }) { conversation ->
+                val effectiveConversation = if (conversation.threadId in readThreadIds) {
+                    conversation.copy(hasUnread = false)
+                } else {
+                    conversation
+                }
                 // Multi-recipient conversations carry no single pseudo (HFR shows
-                // "Interlocuteurs multiples"). Render the localized label and pass it as the
-                // thread screen's header subtitle (PrivateMessageThreadScreen uses
-                // request.correspondent). The thread-page parser may resolve a concrete
-                // participant for its own model; the header intentionally keeps the inbox label.
-                val displayName = if (conversation.isMultiRecipient) {
+                // "Interlocuteurs multiples"). The thread route remains opaque; this label is
+                // list-only and the thread screen reads its header from the fetched page.
+                val displayName = if (effectiveConversation.isMultiRecipient) {
                     stringResource(R.string.messages_multi_recipient)
                 } else {
-                    conversation.correspondent
+                    effectiveConversation.correspondent
                 }
                 ConversationRow(
-                    conversation = conversation,
+                    conversation = effectiveConversation,
                     displayName = displayName,
-                    onClick = { onConversationClick(conversation, displayName) },
+                    onClick = { onConversationClick(effectiveConversation) },
                 )
             }
             if (totalPages > 1) {

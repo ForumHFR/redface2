@@ -70,27 +70,6 @@ class MessagesViewModel @Inject constructor(
         load(_state.value.page, refreshing = true)
     }
 
-    /**
-     * HFR marks a private-message thread as read when it is opened. Reflect that immediately
-     * in the retained inbox list so returning from the thread does not show a stale unread dot.
-     */
-    fun openThread(threadId: Int) {
-        _state.update { current ->
-            val content = current.mode as? MessagesUiState.Mode.Content ?: return@update current
-            current.copy(
-                mode = MessagesUiState.Mode.Content(
-                    content.conversations.map { conversation ->
-                        if (conversation.threadId == threadId) {
-                            conversation.copy(hasUnread = false)
-                        } else {
-                            conversation
-                        }
-                    },
-                ),
-            )
-        }
-    }
-
     private fun clearPrivateState() {
         authenticatedPseudo = null
         loadJob?.cancel()

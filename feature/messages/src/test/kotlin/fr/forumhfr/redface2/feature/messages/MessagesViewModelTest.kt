@@ -150,19 +150,6 @@ class MessagesViewModelTest {
         assertTrue(viewModel.state.value.mode is MessagesUiState.Mode.Content)
     }
 
-    @Test
-    fun `opening an unread thread marks it read in the retained inbox`() = runTest {
-        val repository = mockk<MessagesRepository>()
-        coEvery { repository.getPrivateMessageList(page = 1) } returns
-            PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1, hasUnread = true)))
-
-        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
-        viewModel.openThread(threadId = 1)
-
-        val conversations = (viewModel.state.value.mode as MessagesUiState.Mode.Content).conversations
-        assertEquals(false, conversations.single().hasUnread)
-    }
-
     private fun summary(threadId: Int, hasUnread: Boolean = false) = PrivateMessageSummary(
         threadId = threadId,
         correspondent = "Correspondant$threadId",

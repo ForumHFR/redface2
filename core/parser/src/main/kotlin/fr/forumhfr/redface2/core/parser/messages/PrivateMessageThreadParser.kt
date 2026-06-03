@@ -20,9 +20,10 @@ class PrivateMessageThreadParser(
 ) {
     /**
      * @param html the raw `forum2.php?cat=prive` page.
-     * @param fallbackCorrespondent the correspondent carried from the inbox row, used when the
+     * @param fallbackCorrespondent optional caller-provided correspondent label, used when the
      *   thread page cannot reveal it on its own (the current user is the only sender, so no
-     *   message authored by the other participant is present on this page).
+     *   message authored by the other participant is present on this page). UI Navigation routes
+     *   must not persist it because it is private metadata.
      */
     fun parse(html: String, fallbackCorrespondent: String? = null): PrivateMessageThread {
         val document = Jsoup.parse(html)

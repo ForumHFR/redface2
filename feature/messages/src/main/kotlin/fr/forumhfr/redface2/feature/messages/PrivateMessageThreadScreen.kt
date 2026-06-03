@@ -22,6 +22,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +51,7 @@ import java.util.Locale
 @Composable
 fun PrivateMessageThreadScreen(
     request: PrivateMessageThreadRequest,
+    onLoaded: () -> Unit,
     onBack: () -> Unit,
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
@@ -57,25 +59,39 @@ fun PrivateMessageThreadScreen(
         creationCallback = { factory -> factory.create(request) },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val mode = state.mode
+
+    LaunchedEffect(mode) {
+        if (mode is PrivateMessageThreadUiState.Mode.Content) {
+            onLoaded()
+        }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
+                    val content = mode as? PrivateMessageThreadUiState.Mode.Content
                     Column {
                         Text(
-                            text = request.subject.ifBlank { request.correspondent },
+                            text = content?.thread?.subject
+                                ?.ifBlank { stringResource(R.string.messages_thread_title) }
+                                ?: stringResource(R.string.messages_thread_title),
                             style = MaterialTheme.typography.titleMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        Text(
-                            text = request.correspondent,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        content?.thread?.correspondent
+                            ?.takeIf { it.isNotBlank() }
+                            ?.let { correspondent ->
+                                Text(
+                                    text = correspondent,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                     }
                 },
                 navigationIcon = {
@@ -97,7 +113,7 @@ fun PrivateMessageThreadScreen(
                 .padding(innerPadding),
             contentAlignment = Alignment.Center,
         ) {
-            when (val mode = state.mode) {
+            when (mode) {
                 PrivateMessageThreadUiState.Mode.RequiresLogin -> Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
