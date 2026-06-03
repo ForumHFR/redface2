@@ -21,6 +21,10 @@ import fr.forumhfr.redface2.core.model.Post
  * @property page 1-based index of this page.
  * @property totalPages total number of pages in the conversation (>= 1).
  * @property canReply whether HFR rendered the `bddpost` reply form for the current session.
+ * @property isMultiRecipient `true` for a multi-recipient conversation (MultiMP / "DT"),
+ *   proven from this page when it carries at least two distinct other-than-current-user
+ *   authors. `false` does not rule out a MultiMP (the current page may show a single other
+ *   author); the UI complements this with an ephemeral hint carried from the inbox row.
  */
 data class PrivateMessageThread(
     val threadId: Int,
@@ -30,4 +34,5 @@ data class PrivateMessageThread(
     val page: Int,
     val totalPages: Int,
     val canReply: Boolean = false,
+    val isMultiRecipient: Boolean = false,
 )

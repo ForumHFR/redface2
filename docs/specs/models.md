@@ -162,6 +162,7 @@ classDiagram
         +Int page
         +Int totalPages
         +Boolean canReply
+        +Boolean isMultiRecipient
     }
 
     class AuthState {
@@ -535,6 +536,7 @@ data class PrivateMessageThread(
     val page: Int,
     val totalPages: Int,
     val canReply: Boolean = false,
+    val isMultiRecipient: Boolean = false, // prouvé si ≥2 auteurs non-own distincts sur la page
 )
 
 data class NewMP(

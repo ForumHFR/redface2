@@ -51,6 +51,18 @@ class PrivateMessageThreadParser(
             ?: messages.firstOrNull()?.author
             ?: ""
 
+        // Multi-recipient proof from the page itself: at least TWO distinct authors other than
+        // the current user. A normal 1:1 MP always has the current user + one correspondent, so
+        // we deliberately count only non-own authors (NOT total authors) to avoid flagging a 1:1
+        // as multi. A `false` here is not conclusive (a MultiMP page may currently show a single
+        // other author); the UI complements it with the inbox-row hint.
+        val isMultiRecipient = messages
+            .filterNot { it.isOwnPost }
+            .map { it.author.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .size >= MULTI_RECIPIENT_AUTHOR_THRESHOLD
+
         return PrivateMessageThread(
             threadId = threadId,
             subject = subject,
@@ -59,6 +71,7 @@ class PrivateMessageThreadParser(
             page = pageInfo.current,
             totalPages = pageInfo.total,
             canReply = canReply,
+            isMultiRecipient = isMultiRecipient,
         )
     }
 
@@ -66,5 +79,7 @@ class PrivateMessageThreadParser(
         // Mirrors TopicPageParser: the reply form posts to `/bddpost.php`. Its presence is the
         // signal that HFR rendered a writable thread for the current authenticated session.
         const val REPLY_FORM_SELECTOR = "form[action*=bddpost.php]"
+        // ≥ 2 distinct non-own authors on the page proves a multi-recipient conversation.
+        const val MULTI_RECIPIENT_AUTHOR_THRESHOLD = 2
     }
 }

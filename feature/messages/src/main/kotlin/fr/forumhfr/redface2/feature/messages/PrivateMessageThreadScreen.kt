@@ -51,6 +51,10 @@ import java.util.Locale
 @Composable
 fun PrivateMessageThreadScreen(
     request: PrivateMessageThreadRequest,
+    // Ephemeral UI hint from the inbox row (the route stays opaque, carrying only threadId/page).
+    // Complements the page-proven [PrivateMessageThread.isMultiRecipient] so a MultiMP/DT whose
+    // current page shows a single other author still reads "Interlocuteurs multiples".
+    isMultiRecipientHint: Boolean,
     onLoaded: () -> Unit,
     onBack: () -> Unit,
     topBarActions: @Composable (() -> Unit)? = null,
@@ -81,17 +85,23 @@ fun PrivateMessageThreadScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        content?.thread?.correspondent
-                            ?.takeIf { it.isNotBlank() }
-                            ?.let { correspondent ->
-                                Text(
-                                    text = correspondent,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
+                        // Multi-recipient if the page proved it OR the inbox hinted it; then show
+                        // the localized "Interlocuteurs multiples" label rather than a single
+                        // derived participant (which would misrepresent a group conversation).
+                        val isMulti = content?.thread?.isMultiRecipient == true || isMultiRecipientHint
+                        val subtitle = when {
+                            isMulti -> stringResource(R.string.messages_multi_recipient)
+                            else -> content?.thread?.correspondent?.takeIf { it.isNotBlank() }
+                        }
+                        subtitle?.let { subtitleText ->
+                            Text(
+                                text = subtitleText,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 },
                 navigationIcon = {

@@ -317,16 +317,24 @@ fun RedfaceApp(intent: Intent?) {
         val reportNoEmailClient = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_no_email_client)
         val context = LocalContext.current
         var readPrivateMessageThreadIds by remember { mutableStateOf(emptySet<Int>()) }
+        // Ephemeral, in-memory only (NOT persisted in any Navigation route): threads the user
+        // opened from the inbox as multi-recipient (MultiMP / "DT"). Lets the thread screen show
+        // "Interlocuteurs multiples" even when the current page reveals a single other author.
+        // Purged on every auth transition, exactly like readPrivateMessageThreadIds, so private
+        // metadata never outlives the session / account.
+        var multiRecipientThreadIds by remember { mutableStateOf(emptySet<Int>()) }
 
         LaunchedEffect(authState) {
             when (authState) {
                 null -> Unit
                 AuthState.Anonymous -> {
                     readPrivateMessageThreadIds = emptySet()
+                    multiRecipientThreadIds = emptySet()
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
                 }
                 is AuthState.Authenticated -> {
                     readPrivateMessageThreadIds = emptySet()
+                    multiRecipientThreadIds = emptySet()
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
                 }
             }
@@ -363,10 +371,16 @@ fun RedfaceApp(intent: Intent?) {
                 RedfaceNavHost(
                     backStack = activeBackStack,
                     accountMenu = accountMenu,
-                    readPrivateMessageThreadIds = readPrivateMessageThreadIds,
-                    onPrivateMessageThreadLoaded = { threadId ->
-                        readPrivateMessageThreadIds = readPrivateMessageThreadIds + threadId
-                    },
+                    privateMessageNavState = PrivateMessageNavState(
+                        readThreadIds = readPrivateMessageThreadIds,
+                        multiRecipientThreadIds = multiRecipientThreadIds,
+                        onThreadLoaded = { threadId ->
+                            readPrivateMessageThreadIds = readPrivateMessageThreadIds + threadId
+                        },
+                        onThreadOpenedAsMulti = { threadId ->
+                            multiRecipientThreadIds = multiRecipientThreadIds + threadId
+                        },
+                    ),
                     onOpenProfile = { userId, pseudo, avatarUrl ->
                         // Review feedback I3: capture the **origin** tab so that
                         // « Voir le profil complet » lands on the correct back stack
@@ -445,14 +459,33 @@ private fun startReportEmail(
 
 private const val REPORT_EMAIL: String = "xat@azora.fr"
 
+/**
+ * Ephemeral private-message navigation state, held in memory by the nav host and purged on every
+ * auth transition. NONE of it is serialized into a Navigation route: [PrivateMessageThreadRoute]
+ * stays opaque (threadId + page only) so private metadata never survives logout / account change
+ * / process restore in the back stack.
+ *
+ * @property readThreadIds threads already opened (optimistic read marking in the inbox list).
+ * @property multiRecipientThreadIds threads opened from the inbox as multi-recipient (MultiMP /
+ *   "DT") — a UI hint so the thread header reads "Interlocuteurs multiples" even when the current
+ *   page shows a single other author.
+ * @property onThreadLoaded marks a thread read once its first page has successfully loaded.
+ * @property onThreadOpenedAsMulti records that a thread was opened from a multi-recipient row.
+ */
+private data class PrivateMessageNavState(
+    val readThreadIds: Set<Int>,
+    val multiRecipientThreadIds: Set<Int>,
+    val onThreadLoaded: (Int) -> Unit,
+    val onThreadOpenedAsMulti: (Int) -> Unit,
+)
+
 @Composable
 @Suppress("CyclomaticComplexMethod") // One entry per top-level route + per-screen navigation callbacks ;
 // splitting the host would just push the same `when` shape one level deeper without reducing complexity.
 private fun RedfaceNavHost(
     backStack: NavBackStack<NavKey>,
     accountMenu: @Composable () -> Unit,
-    readPrivateMessageThreadIds: Set<Int>,
-    onPrivateMessageThreadLoaded: (Int) -> Unit,
+    privateMessageNavState: PrivateMessageNavState,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     NavDisplay(
@@ -550,8 +583,12 @@ private fun RedfaceNavHost(
             }
             entry<MessagesRoute> {
                 MessagesScreen(
-                    readThreadIds = readPrivateMessageThreadIds,
-                    onOpenThread = { threadId ->
+                    readThreadIds = privateMessageNavState.readThreadIds,
+                    onOpenThread = { threadId, isMultiRecipient ->
+                        // Record the multi-recipient hint in memory only; the route stays opaque.
+                        if (isMultiRecipient) {
+                            privateMessageNavState.onThreadOpenedAsMulti(threadId)
+                        }
                         backStack.add(
                             PrivateMessageThreadRoute(
                                 threadId = threadId,
@@ -567,8 +604,9 @@ private fun RedfaceNavHost(
                         threadId = route.threadId,
                         page = route.page,
                     ),
+                    isMultiRecipientHint = route.threadId in privateMessageNavState.multiRecipientThreadIds,
                     onLoaded = {
-                        onPrivateMessageThreadLoaded(route.threadId)
+                        privateMessageNavState.onThreadLoaded(route.threadId)
                     },
                     onBack = {
                         if (backStack.size > 1) {

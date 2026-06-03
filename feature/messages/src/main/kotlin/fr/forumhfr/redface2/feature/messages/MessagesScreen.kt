@@ -54,7 +54,9 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MessagesScreen(
-    onOpenThread: (threadId: Int) -> Unit,
+    // isMultiRecipient is an ephemeral UI hint forwarded to the thread screen (the route stays
+    // opaque — it never persists this private metadata in the back stack).
+    onOpenThread: (threadId: Int, isMultiRecipient: Boolean) -> Unit,
     readThreadIds: Set<Int> = emptySet(),
     topBarActions: @Composable (() -> Unit)? = null,
     viewModel: MessagesViewModel = hiltViewModel(),
@@ -148,7 +150,7 @@ fun MessagesScreen(
                         ),
                         onSelectPage = viewModel::selectPage,
                         onConversationClick = { conversation ->
-                            onOpenThread(conversation.threadId)
+                            onOpenThread(conversation.threadId, conversation.isMultiRecipient)
                         },
                     )
                 }

@@ -81,6 +81,44 @@ class PrivateMessageThreadParserTest {
         assertEquals("TestUser", thread.correspondent)
     }
 
+    @Test
+    fun `one-to-one thread is not flagged multi-recipient`() {
+        // Real fixture: 3 own messages + 1 from the correspondent = a SINGLE distinct non-own
+        // author. A 1:1 MP must never be flagged multi-recipient.
+        assertFalse(parser.parse(html).isMultiRecipient)
+    }
+
+    @Test
+    fun `thread with two distinct non-own authors is flagged multi-recipient`() {
+        // Inline stub (NOT a prod fixture): two messages from two different other-than-current
+        // users (no toolbar edit link → not own). Two distinct non-own authors prove a MultiMP.
+        val thread = parser.parse(multiRecipientThreadHtml())
+
+        assertTrue(thread.isMultiRecipient)
+    }
+
+    private fun multiRecipientThreadHtml(): String =
+        """
+        <html><body>
+        <input type="hidden" name="cat" value="prive" />
+        <input type="hidden" name="post" value="777" />
+        <table class="messagetable"><tr>
+          <td class="messCase1"><a name="t1"></a><b class="s2">Alpha</b></td>
+          <td>
+            <div class="toolbar"><div class="left">Posté le 01-02-2026 à 10:00:00</div></div>
+            <div id="para1">Message un.</div>
+          </td>
+        </tr></table>
+        <table class="messagetable"><tr>
+          <td class="messCase1"><a name="t2"></a><b class="s2">Beta</b></td>
+          <td>
+            <div class="toolbar"><div class="left">Posté le 01-02-2026 à 10:05:00</div></div>
+            <div id="para2">Message deux.</div>
+          </td>
+        </tr></table>
+        </body></html>
+        """.trimIndent()
+
     private fun ownOnlyThreadHtml(): String =
         """
         <html><body>
