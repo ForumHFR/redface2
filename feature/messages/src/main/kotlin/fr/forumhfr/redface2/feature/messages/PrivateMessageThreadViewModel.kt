@@ -8,6 +8,7 @@ import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,6 +30,10 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private val _state = MutableStateFlow(PrivateMessageThreadUiState.initial(request))
     val state: StateFlow<PrivateMessageThreadUiState> = _state.asStateFlow()
 
+    // A new page load (or retry) cancels the previous in-flight one so a stale result cannot
+    // overwrite the page the user is actually on.
+    private var loadJob: Job? = null
+
     init {
         load(request.page.coerceAtLeast(1))
     }
@@ -43,7 +48,8 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     }
 
     private fun load(page: Int) {
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             _state.update { it.copy(mode = PrivateMessageThreadUiState.Mode.Loading, page = page) }
             try {
                 val thread = repository.getPrivateMessageThread(

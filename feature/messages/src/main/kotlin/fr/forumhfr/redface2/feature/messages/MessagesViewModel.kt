@@ -6,6 +6,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +27,11 @@ class MessagesViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(MessagesUiState())
     val state: StateFlow<MessagesUiState> = _state.asStateFlow()
+
+    // Tracks the in-flight load so a new one (page change, retry, refresh) cancels the
+    // previous: otherwise a slow refresh could land after a page navigation and overwrite the
+    // newer page with its stale result.
+    private var loadJob: Job? = null
 
     init {
         load(page = 1)
@@ -48,7 +54,8 @@ class MessagesViewModel @Inject constructor(
     }
 
     private fun load(page: Int, refreshing: Boolean = false) {
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             _state.update { current ->
                 if (refreshing) {
                     current.copy(isRefreshing = true)

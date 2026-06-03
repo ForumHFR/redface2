@@ -135,36 +135,44 @@ private fun InboxContent(
     onOpenThread: (threadId: Int, correspondent: String, subject: String) -> Unit,
     onSelectPage: (Int) -> Unit,
 ) {
-    if (conversations.isEmpty()) {
-        CenteredBox {
-            Text(
-                text = stringResource(R.string.messages_empty),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        return
-    }
+    // Always a LazyColumn (even when empty) so Material 3 pull-to-refresh — driven by nested
+    // scroll — keeps working on an empty inbox; the empty message fills the viewport via
+    // fillParentMaxSize.
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(conversations, key = { it.threadId }) { conversation ->
-            ConversationRow(
-                conversation = conversation,
-                onClick = {
-                    onOpenThread(conversation.threadId, conversation.correspondent, conversation.subject)
-                },
-            )
-        }
-        if (totalPages > 1) {
+        if (conversations.isEmpty()) {
             item {
-                InboxPager(
-                    page = page,
-                    totalPages = totalPages,
-                    onSelectPage = onSelectPage,
+                Box(
+                    modifier = Modifier.fillParentMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.messages_empty),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        } else {
+            items(conversations, key = { it.threadId }) { conversation ->
+                ConversationRow(
+                    conversation = conversation,
+                    onClick = {
+                        onOpenThread(conversation.threadId, conversation.correspondent, conversation.subject)
+                    },
                 )
+            }
+            if (totalPages > 1) {
+                item {
+                    InboxPager(
+                        page = page,
+                        totalPages = totalPages,
+                        onSelectPage = onSelectPage,
+                    )
+                }
             }
         }
     }
