@@ -62,6 +62,40 @@ class MessagesViewModelTest {
     }
 
     @Test
+    fun `refresh reloads the current page and replaces the content on success`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageList(page = 1) } returnsMany listOf(
+            PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1))),
+            PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1), summary(2))),
+        )
+
+        val viewModel = MessagesViewModel(repository)
+        viewModel.refresh()
+
+        val state = viewModel.state.value
+        assertEquals(2, (state.mode as MessagesUiState.Mode.Content).conversations.size)
+        assertEquals(false, state.isRefreshing)
+    }
+
+    @Test
+    fun `a failed refresh keeps the already-loaded content`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageList(page = 1) } returns
+            PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1))) andThenThrows
+            IOException("offline")
+
+        val viewModel = MessagesViewModel(repository)
+        viewModel.refresh()
+
+        val state = viewModel.state.value
+        // A failed pull-to-refresh must not wipe the conversations already shown.
+        val mode = state.mode
+        assertTrue(mode is MessagesUiState.Mode.Content)
+        assertEquals(1, (mode as MessagesUiState.Mode.Content).conversations.size)
+        assertEquals(false, state.isRefreshing)
+    }
+
+    @Test
     fun `selectPage loads the requested page`() = runTest {
         val repository = mockk<MessagesRepository>()
         coEvery { repository.getPrivateMessageList(page = 1) } returns
