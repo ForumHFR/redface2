@@ -272,12 +272,16 @@ jobs:
         run: |
           set -euo pipefail
           AAPT2="$(ls "$ANDROID_HOME"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -1 || true)"
+          APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)"
           [[ -x "$AAPT2" ]] || { echo "::error::aapt2 not found under $ANDROID_HOME/build-tools"; exit 1; }
+          [[ -x "$APKSIGNER" ]] || { echo "::error::apksigner not found under $ANDROID_HOME/build-tools"; exit 1; }
           EXPECTED_VC="${{ steps.meta.outputs.version_code }}"
           # $1=apk $2=expected package $3=expected label (empty → don't assert label)
           check_apk() {
             local apk="$1" want_pkg="$2" want_label="$3" badging vc
-            jarsigner -verify "$apk" >/dev/null
+            # APKs use the APK Signature Scheme (v2/v3), NOT a v1/JAR signature at minSdk 29, so
+            # apksigner — not jarsigner — is the right verifier (Codex P1). jarsigner stays for the AAB.
+            "$APKSIGNER" verify "$apk" >/dev/null
             badging="$("$AAPT2" dump badging "$apk")"
             grep -q "package: name='${want_pkg}'" <<<"$badging" || {
               echo "::error::${apk}: package mismatch (want ${want_pkg})"; grep '^package:' <<<"$badging"; exit 1; }
