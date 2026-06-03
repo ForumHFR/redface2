@@ -140,10 +140,12 @@ fun MessagesScreen(
                     }
 
                     is MessagesUiState.Mode.Content -> InboxContent(
-                        conversations = mode.conversations,
-                        readThreadIds = readThreadIds,
-                        page = state.page,
-                        totalPages = state.totalPages,
+                        state = InboxContentState(
+                            conversations = mode.conversations,
+                            readThreadIds = readThreadIds,
+                            page = state.page,
+                            totalPages = state.totalPages,
+                        ),
                         onSelectPage = viewModel::selectPage,
                         onConversationClick = { conversation ->
                             onOpenThread(conversation.threadId)
@@ -155,12 +157,16 @@ fun MessagesScreen(
     }
 }
 
+private data class InboxContentState(
+    val conversations: List<PrivateMessageSummary>,
+    val readThreadIds: Set<Int>,
+    val page: Int,
+    val totalPages: Int,
+)
+
 @Composable
 private fun InboxContent(
-    conversations: List<PrivateMessageSummary>,
-    readThreadIds: Set<Int>,
-    page: Int,
-    totalPages: Int,
+    state: InboxContentState,
     onSelectPage: (Int) -> Unit,
     onConversationClick: (PrivateMessageSummary) -> Unit,
 ) {
@@ -172,7 +178,7 @@ private fun InboxContent(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (conversations.isEmpty()) {
+        if (state.conversations.isEmpty()) {
             item {
                 Box(
                     modifier = Modifier.fillParentMaxSize(),
@@ -186,8 +192,8 @@ private fun InboxContent(
                 }
             }
         } else {
-            items(conversations, key = { it.threadId }) { conversation ->
-                val effectiveConversation = if (conversation.threadId in readThreadIds) {
+            items(state.conversations, key = { it.threadId }) { conversation ->
+                val effectiveConversation = if (conversation.threadId in state.readThreadIds) {
                     conversation.copy(hasUnread = false)
                 } else {
                     conversation
@@ -206,11 +212,11 @@ private fun InboxContent(
                     onClick = { onConversationClick(effectiveConversation) },
                 )
             }
-            if (totalPages > 1) {
+            if (state.totalPages > 1) {
                 item {
                     InboxPager(
-                        page = page,
-                        totalPages = totalPages,
+                        page = state.page,
+                        totalPages = state.totalPages,
                         onSelectPage = onSelectPage,
                     )
                 }
