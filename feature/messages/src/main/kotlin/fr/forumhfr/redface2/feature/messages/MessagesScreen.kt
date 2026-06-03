@@ -30,6 +30,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -86,6 +89,25 @@ fun MessagesScreen(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 when (val mode = state.mode) {
+                    MessagesUiState.Mode.RequiresLogin -> CenteredBox {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(horizontal = 24.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.messages_login_required),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = stringResource(R.string.messages_login_required_body),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+
                     MessagesUiState.Mode.Loading -> CenteredBox {
                         CircularProgressIndicator()
                     }
@@ -120,6 +142,7 @@ fun MessagesScreen(
                         totalPages = state.totalPages,
                         onOpenThread = onOpenThread,
                         onSelectPage = viewModel::selectPage,
+                        onConversationOpened = viewModel::openThread,
                     )
                 }
             }
@@ -134,6 +157,7 @@ private fun InboxContent(
     totalPages: Int,
     onOpenThread: (threadId: Int, correspondent: String, subject: String) -> Unit,
     onSelectPage: (Int) -> Unit,
+    onConversationOpened: (Int) -> Unit,
 ) {
     // Always a LazyColumn (even when empty) so Material 3 pull-to-refresh — driven by nested
     // scroll — keeps working on an empty inbox; the empty message fills the viewport via
@@ -161,6 +185,7 @@ private fun InboxContent(
                 ConversationRow(
                     conversation = conversation,
                     onClick = {
+                        onConversationOpened(conversation.threadId)
                         onOpenThread(conversation.threadId, conversation.correspondent, conversation.subject)
                     },
                 )
@@ -183,10 +208,18 @@ private fun ConversationRow(
     conversation: PrivateMessageSummary,
     onClick: () -> Unit,
 ) {
+    val readState = stringResource(
+        if (conversation.hasUnread) {
+            R.string.messages_state_unread
+        } else {
+            R.string.messages_state_read
+        },
+    )
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .semantics { stateDescription = readState }
+            .clickable(role = Role.Button, onClick = onClick),
     ) {
         Row(
             modifier = Modifier

@@ -20,6 +20,7 @@ data class MessagesUiState(
     val canGoNext: Boolean get() = page < totalPages
 
     sealed interface Mode {
+        data object RequiresLogin : Mode
         data object Loading : Mode
         data class Content(val conversations: List<PrivateMessageSummary>) : Mode
         data class Error(val message: String?) : Mode

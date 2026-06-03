@@ -219,16 +219,25 @@ interface AuthRepository {
 interface MessagesRepository {
     /**
      * Compteur de MPs non lus : `null` quand anonyme ou avant la première résolution,
-     * Int sinon. Phase 1B.1 livre uniquement ce compteur (preuve d'auth sur l'écran d'accueil) ;
-     * la liste complète des MPs et la lecture de threads MP arrivent en Phase 3.
+     * Int sinon.
      */
     fun observeUnreadMpCount(): Flow<Int?>
+
+    /** Page inbox MP classique (`forum1.php?cat=prive`). */
+    suspend fun getPrivateMessageList(page: Int = 1): PrivateMessageListPage
+
+    /** Page conversation MP classique (`forum2.php?cat=prive&post={threadId}`). */
+    suspend fun getPrivateMessageThread(
+        threadId: Int,
+        page: Int = 1,
+        fallbackCorrespondent: String? = null,
+    ): PrivateMessageThread
 }
 ```
 
-`TopicRepository` est livré en Phase 1A (cf. [#88](https://github.com/ForumHFR/redface2/pull/88), [#89](https://github.com/ForumHFR/redface2/pull/89)). `prefetchNextPage` documenté dans la roadmap arrivera en Phase 1B sur `HfrClient` directement (avec `useAuth = false`), puis sera relayé par `TopicRepository.prefetchTopicPage(...)`. `MessagesRepository` est livré en Phase 1B.1 en bonus du login : `:core:data DefaultMessagesRepository` combine l'observation de `AuthState` avec un fetch de `forum1.php?cat=prive` (parser dédié `:core:parser/messages/PrivateMessageListParser`) déclenché à chaque transition vers `Authenticated`. Le full pipeline messagerie (liste + threads) viendra en Phase 3.
+`TopicRepository` est livré en Phase 1A (cf. [#88](https://github.com/ForumHFR/redface2/pull/88), [#89](https://github.com/ForumHFR/redface2/pull/89)). `prefetchNextPage` documenté dans la roadmap arrivera en Phase 1B sur `HfrClient` directement (avec `useAuth = false`), puis sera relayé par `TopicRepository.prefetchTopicPage(...)`. `MessagesRepository` est livré par étapes : Phase 1B.1 a ajouté `observeUnreadMpCount()` en bonus du login, puis le MVP Phase 3 #298 ajoute `getPrivateMessageList()` + `getPrivateMessageThread()` pour lire les MPs classiques. Les ViewModels de `:feature:messages` observent `AuthState` et purgent leur état privé en anonyme / logout / changement de session. Reply MP, nouveau MP, MultiMP et MPStorage restent à faire en Phase 3.
 
-`FlagRepository` + UI sont livrés en Phase 1B.2 → 1B.5, **migrés en REST en Phase 1D-1** (cf. ADR-003 et issue #110). `:core:data DefaultFlagRepository` itère sur les catégories publiques fournies par `ForumRepository.observeCategories()` (filtrant `id > 0` pour éviter le 403 sur d'éventuels `cat=0` modos) et appelle pour chacune `HfrApiClient.getCategoryFlagTopics(cat, bucket = HfrRestFlagBucket.{PARTICIPATED,READ,FAVORITES}, page, resultsPerPage, useAuth = true)`. Chaque page est désérialisée en `RestListEnvelope<RestTopic>` (forme plate, contrat prouvé par la fixture `rest_cat23_participated.json`) puis mappée via `RestFlagMappers.toFlags(envelope, defaultType, fallbackCat)` pour produire `List<Flag>` (cf. [`models.md`]({{ site.baseurl }}/specs/models)). Les résultats des N catégories sont concaténés puis triés globalement par `lastReplyAt` (REST `YYYY-MM-DD HH:mm`, donc tri lexicographique = chronologique inverse) ; sans ce tri global la liste serait groupée par cat au lieu d'être triée par activité comme l'attend l'écran. La voie globale `forums/hardwarefr/topics/{bucket}/` n'est **pas** exposée par `HfrApiClient` en Phase 1D-1 : son enveloppe groupée par catégorie n'a pas de fixture capturée et garder une API morte est un anti-pattern (cf. § "Le noyau avant l'écosystème" de l'AGENTS.md). Une PR de suivi pourra rajouter le helper et basculer la consommation une fois le payload capturé. Le scrape HTML `forum1f.php?owntopic=N` + `FlagsListParser` ont été retirés ; `getFlagsPage()` n'existe plus côté `HfrClient`. La séquence de flux reste identique : `flow { emit(Loading); emit(fetch); emitAll(refreshes) }` cold-collected — un `MutableSharedFlow<FlagsResult>` par `FlagType` rebroadcast les résultats des `refresh()` explicites. Cache mémoire par onglet pour la session HFR courante : revenir sur un onglet déjà chargé ne refetch pas implicitement, mais `refresh(type)` force toujours le réseau et `clearSessionCache()` vide tout au logout / changement de session. `FlagItem` rend une ligne dans `:core:ui`, et `:feature:flags FlagsRoute` compose les 3 onglets, le toggle « afficher les sujets participés déjà lus » (filtre client masquant les CYAN `hasUnread = false` par défaut, #154), et le bouton refresh. Les actions compte + outils alpha (pseudo, logout, version, Diagnostics, signalement CSAE) vivent depuis #198 dans le **menu compte global** (`RedfaceAccountMenu` dans `:core:ui`, alimenté par `AppAccountViewModel`) accessible depuis chaque écran principal via le slot `topBarActions` du header. Le placement temporaire sur `MessagesScreen` (polish #154) a été retiré ; `MessagesScreen` redevient un placeholder sobre en attendant la vraie surface MPs Phase 3. Pas de cache Room en 1D-1 — la persistance des drapeaux arrive avec #26.
+`FlagRepository` + UI sont livrés en Phase 1B.2 → 1B.5, **migrés en REST en Phase 1D-1** (cf. ADR-003 et issue #110). `:core:data DefaultFlagRepository` itère sur les catégories publiques fournies par `ForumRepository.observeCategories()` (filtrant `id > 0` pour éviter le 403 sur d'éventuels `cat=0` modos) et appelle pour chacune `HfrApiClient.getCategoryFlagTopics(cat, bucket = HfrRestFlagBucket.{PARTICIPATED,READ,FAVORITES}, page, resultsPerPage, useAuth = true)`. Chaque page est désérialisée en `RestListEnvelope<RestTopic>` (forme plate, contrat prouvé par la fixture `rest_cat23_participated.json`) puis mappée via `RestFlagMappers.toFlags(envelope, defaultType, fallbackCat)` pour produire `List<Flag>` (cf. [`models.md`]({{ site.baseurl }}/specs/models)). Les résultats des N catégories sont concaténés puis triés globalement par `lastReplyAt` (REST `YYYY-MM-DD HH:mm`, donc tri lexicographique = chronologique inverse) ; sans ce tri global la liste serait groupée par cat au lieu d'être triée par activité comme l'attend l'écran. La voie globale `forums/hardwarefr/topics/{bucket}/` n'est **pas** exposée par `HfrApiClient` en Phase 1D-1 : son enveloppe groupée par catégorie n'a pas de fixture capturée et garder une API morte est un anti-pattern (cf. § "Le noyau avant l'écosystème" de l'AGENTS.md). Une PR de suivi pourra rajouter le helper et basculer la consommation une fois le payload capturé. Le scrape HTML `forum1f.php?owntopic=N` + `FlagsListParser` ont été retirés ; `getFlagsPage()` n'existe plus côté `HfrClient`. La séquence de flux reste identique : `flow { emit(Loading); emit(fetch); emitAll(refreshes) }` cold-collected — un `MutableSharedFlow<FlagsResult>` par `FlagType` rebroadcast les résultats des `refresh()` explicites. Cache mémoire par onglet pour la session HFR courante : revenir sur un onglet déjà chargé ne refetch pas implicitement, mais `refresh(type)` force toujours le réseau et `clearSessionCache()` vide tout au logout / changement de session. `FlagItem` rend une ligne dans `:core:ui`, et `:feature:flags FlagsRoute` compose les 3 onglets, le toggle « afficher les sujets participés déjà lus » (filtre client masquant les CYAN `hasUnread = false` par défaut, #154), et le bouton refresh. Les actions compte + outils alpha (pseudo, logout, version, Diagnostics, signalement CSAE) vivent depuis #198 dans le **menu compte global** (`RedfaceAccountMenu` dans `:core:ui`, alimenté par `AppAccountViewModel`) accessible depuis chaque écran principal via le slot `topBarActions` du header. Le placement temporaire sur `MessagesScreen` (polish #154) a été retiré ; depuis #298, `MessagesScreen` porte la liste MP classique read-only. Pas de cache Room en 1D-1 — la persistance des drapeaux arrive avec #26.
 
 ### `:core:network` — HfrClient + HfrApiClient
 
@@ -250,6 +259,9 @@ class HfrClient @Inject constructor(
     // Phase 1B.1 — livrée
     suspend fun getPrivateMessageListPage(page: Int = 1): String
 
+    // Phase 3 MVP — livrée
+    suspend fun getPrivateMessageThreadPage(threadId: Int, page: Int = 1): String
+
     // Phase 2+ — à implémenter
     suspend fun postReply(cat: Int, post: Int, content: String): Result<Unit>
     suspend fun editPost(cat: Int, post: Int, numreponse: Int, content: String): Result<Unit>
@@ -265,7 +277,7 @@ Le login HFR est isolé dans `:core:network.auth.AuthRemoteDataSource`, pas dans
 
 Le parser transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine. Isolé de toute logique réseau et UI.
 
-> **Statut Phase 1D-1** : `parseTopicPage` (Phase 1A) reste actif, `PrivateMessageListParser` (Phase 1B.1) reste actif. Le parser drapeaux HTML `FlagsListParser` (Phase 1B.2) a été retiré avec la migration REST des drapeaux (#110, ADR-003). `PostContentParser` et `TopicPageParser` existent comme classes internes derrière `HfrParser`. Les autres méthodes ci-dessous arrivent feature par feature : `parseEditPage` Phase 2, `parseMessageList` Phase 3, `parsePostContentFromBbcode` Phase 2 (parser BBCode pour preview éditeur).
+> **Statut Phase 3 MVP #298** : `parseTopicPage` (Phase 1A) reste actif. Les MPs classiques utilisent `PrivateMessageListParser` pour l'inbox et `PrivateMessageThreadParser`, qui réutilise l'extracteur de posts commun (`PostsParser`) pour les messages d'une conversation. Le parser drapeaux HTML `FlagsListParser` (Phase 1B.2) a été retiré avec la migration REST des drapeaux (#110, ADR-003). `PostContentParser` et `TopicPageParser` existent comme classes internes derrière `HfrParser`. Les autres méthodes ci-dessous arrivent feature par feature : `parseEditPage` Phase 2, `parsePostContentFromBbcode` Phase 2 (parser BBCode pour preview éditeur), parsers d'écriture MP / MultiMP Phase 3.
 
 ```kotlin
 class HfrParser @Inject constructor() {
@@ -274,7 +286,8 @@ class HfrParser @Inject constructor() {
     fun parsePostContentFromBbcode(bbcode: String): PostContent // Phase 2 éditeur
     fun parseCategories(html: String): List<Category>       // Phase 1 fin
     fun parseEditPage(html: String): EditInfo               // Phase 2
-    fun parseMessageList(html: String): List<PrivateMessage> // Phase 3
+    fun parsePrivateMessageList(html: String): PrivateMessageListPage // Phase 3 MVP
+    fun parsePrivateMessageThread(html: String): PrivateMessageThread // Phase 3 MVP
     // ...
 }
 

@@ -139,25 +139,28 @@ classDiagram
         +List~TopicSummary~ topics
     }
 
-    class PrivateMessage {
-        +Int id
+    class PrivateMessageSummary {
+        +Int threadId
+        +String correspondent
         +String subject
-        +List~String~ participants
-        +String lastAuthor
-        +Instant lastDate
-        +Boolean isRead
-        +Boolean isMultiMP
-        +List~PMMessage~ messages
-        +Int page
-        +Int totalPages
+        +Instant date
+        +Boolean hasUnread
     }
 
-    class PMMessage {
-        +Int numreponse
-        +String author
-        +Instant date
-        +PostContent content
-        +Boolean isEditable
+    class PrivateMessageListPage {
+        +Int page
+        +Int totalPages
+        +List~PrivateMessageSummary~ items
+    }
+
+    class PrivateMessageThread {
+        +Int threadId
+        +String subject
+        +String correspondent
+        +List~Post~ messages
+        +Int page
+        +Int totalPages
+        +Boolean canReply
     }
 
     class AuthState {
@@ -172,8 +175,8 @@ classDiagram
 
     Topic --> Post : contient
     Post --> PostContent : rend
-    PrivateMessage --> PMMessage : contient
-    PMMessage --> PostContent : rend
+    PrivateMessageListPage --> PrivateMessageSummary : contient
+    PrivateMessageThread --> Post : contient
     Topic --> Poll : optionnel
     SubCategory --> Category : enfant de
     TopicListPage --> TopicSummary : contient
@@ -508,25 +511,28 @@ Le contrat HFR sous-jacent est documenté dans [`protocol-hfr.md` § POST `bddpo
 ## Messages privés
 
 ```kotlin
-data class PrivateMessage(
-    val id: Int,
+data class PrivateMessageSummary(
+    val threadId: Int,              // HFR `post` id de la conversation `cat=prive`
+    val correspondent: String,      // pseudo de l'autre participant
     val subject: String,
-    val participants: List<String>,
-    val lastAuthor: String,         // dernier expéditeur
-    val lastDate: Instant,
-    val isRead: Boolean,            // HFR natif (classic) ou MPStorage (multi)
-    val isMultiMP: Boolean,
-    val messages: List<PMMessage>,  // conversation chargée à l'ouverture, peut être vide dans les listes
-    val page: Int = 1,              // page courante dans la conversation
-    val totalPages: Int = 1,
+    val date: Instant,              // dernière activité
+    val hasUnread: Boolean,         // marker `closedbp.gif`
 )
 
-data class PMMessage(
-    val numreponse: Int,
-    val author: String,
-    val date: Instant,
-    val content: PostContent,       // AST sémantique, rendu par PostRenderer
-    val isEditable: Boolean,        // calculé client-side : author == currentUser
+data class PrivateMessageListPage(
+    val page: Int,
+    val totalPages: Int,
+    val items: List<PrivateMessageSummary>,
+)
+
+data class PrivateMessageThread(
+    val threadId: Int,
+    val subject: String,
+    val correspondent: String,
+    val messages: List<Post>,       // même structure HTML que les posts de topic
+    val page: Int,
+    val totalPages: Int,
+    val canReply: Boolean = false,
 )
 
 data class NewMP(
@@ -541,6 +547,10 @@ data class NewMultiMP(
     val content: String,
 )
 ```
+
+Le MVP Phase 3 #298 couvre uniquement `PrivateMessageSummary`, `PrivateMessageListPage`
+et `PrivateMessageThread` pour lire les MPs classiques. `NewMP`, `NewMultiMP`,
+reply/quote MP, MultiMP et MPStorage restent dans la suite Phase 3.
 
 ---
 

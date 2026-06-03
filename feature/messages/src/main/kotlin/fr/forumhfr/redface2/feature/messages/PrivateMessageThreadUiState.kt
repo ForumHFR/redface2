@@ -16,6 +16,7 @@ data class PrivateMessageThreadUiState(
     val canGoNext: Boolean get() = page < totalPages
 
     sealed interface Mode {
+        data object RequiresLogin : Mode
         data object Loading : Mode
         data class Content(val thread: PrivateMessageThread) : Mode
         data class Error(val message: String?) : Mode

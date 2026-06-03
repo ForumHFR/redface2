@@ -80,7 +80,7 @@ graph TB
     style TOPIC fill:#e74c3c,color:#fff
 ```
 
-> **Lecture du graphe** : ce diagramme décrit le **flow utilisateur**, pas le découpage en `NavKey`. Les routes typées réelles sont `FlagsListRoute`, `ForumRoute`, `CategoryRoute`, `TopicRoute`, `SearchRoute`, `MessagesRoute`, `PostEditorRoute`, `TopicFormRoute`, `ProfileFullRoute` (Phase 2 finish #208) (cf. § Implémentation ci-dessous). Plusieurs nœuds du graphe sont des **states internes au screen** plutôt que des routes distinctes : `TABMP` / `TABMULTI` correspondent à `MessageTab.CLASSIC` / `MessageTab.MULTI` dans le `MessagesState` ; `CATS` / `SUBCATS` / `TOPICLIST` sont couverts par la même `CategoryRoute(cat, subcat?, page)`. Le mapping flow → routes typées est explicite dans le code de `entryProvider` plus bas.
+> **Lecture du graphe** : ce diagramme décrit le **flow utilisateur**, pas le découpage en `NavKey`. Les routes typées réelles sont `FlagsListRoute`, `ForumRoute`, `CategoryRoute`, `TopicRoute`, `SearchRoute`, `MessagesRoute`, `PrivateMessageThreadRoute`, `PostEditorRoute`, `TopicFormRoute`, `ProfileFullRoute` (Phase 2 finish #208) (cf. § Implémentation ci-dessous). Plusieurs nœuds du graphe sont des **states internes au screen** plutôt que des routes distinctes : `TABMP` / `TABMULTI` représentent les surfaces MP classique / MultiMP (seul le MP classique read-only est livré dans le MVP #298) ; `CATS` / `SUBCATS` / `TOPICLIST` sont couverts par la même `CategoryRoute(cat, subcat?, page)`. Le mapping flow → routes typées est explicite dans le code de `entryProvider` plus bas.
 
 ---
 
@@ -188,16 +188,20 @@ Issue #198 — chaque écran principal (Drapeaux, Forum, Recherche, Messages) ac
 
 Le badge est un carré à coins arrondis (8dp), **pas un cercle**, cohérent avec [`RedfaceUserAvatar`]({{ site.baseurl }}/specs/models#post). L'anti-flicker auth est préservé : tant que `authState == null`, le badge montre `…` plutôt que `?` pour ne pas surfacer transitoirement un état « Anonyme ». La déconnexion (`AppAccountViewModel.logout`) vide d'abord `FlagRepository.clearSessionCache()` avant `AuthRepository.logout()` ; cet ordering est verrouillé par `AppAccountViewModelTest` côté `:app`.
 
-L'onglet `Messages` redevient un placeholder sobre « Les MPs arriveront en Phase 3 » jusqu'à l'arrivée du vrai écran inbox.
+Depuis le MVP Phase 3 (#298), l'onglet `Messages` affiche la liste des MP classiques et
+ouvre une conversation en lecture seule. L'écran observe l'état d'authentification : en
+anonyme ou après déconnexion, les données privées déjà chargées sont purgées et remplacées
+par un état « connexion requise ».
 
 ### Messages
 
 Deux onglets :
 
 **MPs classiques :**
-- Inbox : liste des conversations 1-to-1, triées par date
+- Inbox : liste des conversations 1-to-1, triées par date (`forum1.php?cat=prive`)
+- Lecture d'une conversation : `forum2.php?cat=prive&post={threadId}&page={page}`
 - Chaque MP affiche : sujet, correspondant, date, lu/non-lu
-- Nouveau MP : destinataire + sujet + contenu
+- Nouveau MP, réponse et quote MP : à faire en Phase 3 suivante
 
 **MultiMPs :**
 - Vue style drapeaux : fils de groupe triés par dernier message
@@ -224,9 +228,12 @@ Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
 | `forum.hardware.fr/forum2.php?config=hfr.inc&cat=X&subcat=Y` | Liste topics | Phase 1 |
 | `forum.hardware.fr/forum1f.php` | Drapeaux | Phase 1 |
 | `forum.hardware.fr/forum1.php?cat=X&post=Y#t12345` | Post spécifique (traitement custom, voir ci-dessous) | Phase 1 |
-| `forum.hardware.fr/forum2.php?config=hfr.inc&cat=prive&page=Z` ⚠️ pattern non vérifié | Inbox MP / conversation | Phase 3 — à confirmer sur MP réel |
+| `forum.hardware.fr/forum1.php?config=hfr.inc&cat=prive&page=Z` | Inbox MP page Z | Phase 3 MVP — contrat capturé, deep link non câblé |
+| `forum.hardware.fr/forum2.php?config=hfr.inc&cat=prive&post=Y&page=Z` | Conversation MP Y page Z | Phase 3 MVP — contrat capturé, deep link non câblé |
 
-> **Patterns Phase 3 — à valider sur HFR réel** : la ligne `cat=prive` ci-dessus est une **hypothèse à confirmer**, pas un contrat. Aucun MP réel n'a été observé sur HFR pour valider la forme exacte de l'URL (présence ou non de `&page`, encodage du `post={mp_id}`, comportement quand l'utilisateur n'est pas connecté, etc.). Le pattern sera capturé via `hfr-mcp` au démarrage du cycle `:feature:messages` (Phase 3) et la table mise à jour à ce moment-là. Le code de `parseHfrDeepLink` ignore aujourd'hui ces URLs — elles retombent sur le `else -> null` et l'app ouvre l'écran d'accueil par défaut.
+> **Deep links MP** : les contrats `cat=prive` ci-dessus sont confirmés par fixtures HFR
+> réelles, mais `parseHfrDeepLink` ne route pas encore ces URLs vers `MessagesRoute` /
+> `PrivateMessageThreadRoute`. Elles restent à câbler dans un suivi dédié.
 
 Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026). Les routes sont des types `@Serializable` qui implémentent un sealed interface marqueur `RedfaceNavKey : NavKey` :
 
@@ -305,7 +312,26 @@ private fun RedfaceNavHost(backStack: NavBackStack<NavKey>) {
             }
             entry<ForumRoute> { ForumScreen(onOpenCategory = { /* ... */ }, topBarActions = accountMenu) }
             entry<SearchRoute> { SearchScreen(onOpenTopic = { /* ... */ }, topBarActions = accountMenu) }
-            entry<MessagesRoute> { MessagesScreen(topBarActions = accountMenu) }
+            entry<MessagesRoute> {
+                MessagesScreen(
+                    onOpenThread = { threadId, correspondent, subject ->
+                        backStack.add(PrivateMessageThreadRoute(threadId, correspondent, subject))
+                    },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<PrivateMessageThreadRoute> { route ->
+                PrivateMessageThreadScreen(
+                    request = PrivateMessageThreadRequest(
+                        threadId = route.threadId,
+                        correspondent = route.correspondent,
+                        subject = route.subject,
+                        page = route.page,
+                    ),
+                    onBack = { backStack.removeAt(backStack.lastIndex) },
+                    topBarActions = accountMenu,
+                )
+            }
             entry<CategoryRoute> { route ->
                 ForumCategoryScreen(
                     request = CategoryRequest(
@@ -525,7 +551,7 @@ Manifest requis : `android:enableOnBackInvokedCallback="true"` sur `<application
 > **Statut Phase 5+** — multi-pane n'est pas livré en Phase 1. Dans le snippet ci-dessous :
 >
 > - le **pattern de composition** (`NavDisplay` + `ListDetailPaneScaffold` sur le même back stack, switch `WindowSizeClass`) est **illustratif** — c'est ce qui sera implémenté Phase 5+ ;
-> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested, topBarActions)`, `MessagesScreen(topBarActions)`, `SearchScreen(onOpenTopic, topBarActions)`, `ForumScreen(onOpenCategory, topBarActions)`, `TopicScreen(request: TopicRequest, onReply: (subcat, page) -> Unit, onQuote: (subcat, page, quotedNumreponse, quoteRef) -> Unit, onEdit: (subcat, page, numreponse) -> Unit, onEditFirstPost: (subcat, page, numreponse) -> Unit, onOpenPage)`, `PostEditorScreen(request: PostEditorRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`, `TopicFormScreen(request: TopicFormRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`) sont les signatures **réelles** livrées dans le repo (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../PostEditorScreen.kt`, `feature/editor/.../TopicFormScreen.kt`). Le slot `topBarActions: @Composable (() -> Unit)? = null` carrie le menu compte global depuis #198 — cf. § « Menu compte global ».
+> - les **signatures de screens** appelées (`FlagsRoute(onOpenFlag, onLoginRequested, topBarActions)`, `MessagesScreen(onOpenThread, topBarActions)`, `PrivateMessageThreadScreen(request, onBack, topBarActions)`, `SearchScreen(onOpenTopic, topBarActions)`, `ForumScreen(onOpenCategory, topBarActions)`, `TopicScreen(request: TopicRequest, onReply: (subcat, page) -> Unit, onQuote: (subcat, page, quotedNumreponse, quoteRef) -> Unit, onEdit: (subcat, page, numreponse) -> Unit, onEditFirstPost: (subcat, page, numreponse) -> Unit, onOpenPage)`, `PostEditorScreen(request: PostEditorRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`, `TopicFormScreen(request: TopicFormRequest, onSubmitSucceeded: (targetPage?, scrollTo?) -> Unit)`) sont les signatures **réelles** livrées dans le repo (cf. `feature/topic/.../TopicScreen.kt`, `feature/flags/.../FlagsRoute.kt`, `feature/messages/.../MessagesScreen.kt`, `feature/search/.../SearchScreen.kt`, `feature/editor/.../PostEditorScreen.kt`, `feature/editor/.../TopicFormScreen.kt`). Le slot `topBarActions: @Composable (() -> Unit)? = null` carrie le menu compte global depuis #198 — cf. § « Menu compte global ».
 >
 > Le call-site `onOpenFlag = { flag -> backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = ...)) }` passe désormais le topic concerné — Phase 1B.4 a remplacé le placeholder mock par la liste réelle des drapeaux.
 
@@ -591,7 +617,7 @@ fun AdaptiveNavHost(backStack: NavBackStack<NavKey>) {
 }
 ```
 
-Phase 1B.4 a livré `FlagsRoute` (dans `:feature:flags`) avec le vrai modèle `Flag` ; en Phase 1D-1 le scroll anchor est passé de `firstUnreadPostId` à `lastPostReadId` (REST `last_post_read_id`) : `backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.lastPostReadId?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()))`. Phase 1C-A a ensuite remplacé les placeholders Forum/Category par `ForumScreen` + `ForumCategoryScreen` alimentés par `ForumRepository` REST. Le polish pré-Phase 2 (#154) a retiré les constantes `DEMO_TOPIC_*` et leurs callbacks : `SearchScreen()` n'expose plus de bouton de navigation. La Phase 2 finish (#198) a hoisté les actions compte (login/logout) et outils alpha (Diagnostics, signalement, version) vers le **menu compte global** (`RedfaceAccountMenu` dans `:core:ui`, `AppAccountViewModel` dans `:app/navigation/`) injecté par `topBarActions` dans chaque écran principal — `MessagesScreen` redevient un placeholder « MPs Phase 3 » sobre.
+Phase 1B.4 a livré `FlagsRoute` (dans `:feature:flags`) avec le vrai modèle `Flag` ; en Phase 1D-1 le scroll anchor est passé de `firstUnreadPostId` à `lastPostReadId` (REST `last_post_read_id`) : `backStack.add(TopicRoute(flag.cat, flag.topicId, flag.lastReadPage, scrollTo = flag.lastPostReadId?.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()))`. Phase 1C-A a ensuite remplacé les placeholders Forum/Category par `ForumScreen` + `ForumCategoryScreen` alimentés par `ForumRepository` REST. Le polish pré-Phase 2 (#154) a retiré les constantes `DEMO_TOPIC_*` et leurs callbacks : `SearchScreen()` n'expose plus de bouton de navigation. La Phase 2 finish (#198) a hoisté les actions compte (login/logout) et outils alpha (Diagnostics, signalement, version) vers le **menu compte global** (`RedfaceAccountMenu` dans `:core:ui`, `AppAccountViewModel` dans `:app/navigation/`) injecté par `topBarActions` dans chaque écran principal. Le MVP Phase 3 #298 remplace ensuite le placeholder `MessagesScreen` par la liste MP classique + `PrivateMessageThreadRoute` en lecture seule.
 
 ---
 

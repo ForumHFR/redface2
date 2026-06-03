@@ -18,7 +18,12 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
 
 ## Unreleased
 
-Aucun changement applicatif non distribué.
+### Added
+- **#298 — Messages privés classiques en lecture.** L'onglet Messages affiche
+  maintenant l'inbox MP (`forum1.php?cat=prive`) et ouvre une conversation
+  (`forum2.php?cat=prive&post=...`) en lecture seule. Les états MP se purgent au
+  logout / changement de session et l'ouverture d'une conversation marque la ligne
+  comme lue côté UI pour éviter un indicateur stale au retour.
 
 ---
 

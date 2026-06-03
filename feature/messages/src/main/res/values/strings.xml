@@ -1,9 +1,13 @@
 <resources>
     <string name="messages_title">Messages</string>
     <string name="messages_empty">Aucun message privé.</string>
+    <string name="messages_login_required">Connexion requise</string>
+    <string name="messages_login_required_body">Connectez-vous depuis le menu compte pour lire vos messages privés.</string>
     <string name="messages_error_load">Impossible de charger les messages privés.</string>
     <string name="messages_thread_error_load">Impossible de charger la conversation.</string>
     <string name="messages_retry">Réessayer</string>
+    <string name="messages_state_read">Lu</string>
+    <string name="messages_state_unread">Non lu</string>
     <string name="messages_back">Retour</string>
     <string name="messages_pager_previous">Précédent</string>
     <string name="messages_pager_next">Suivant</string>

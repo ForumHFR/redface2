@@ -98,6 +98,23 @@ fun PrivateMessageThreadScreen(
             contentAlignment = Alignment.Center,
         ) {
             when (val mode = state.mode) {
+                PrivateMessageThreadUiState.Mode.RequiresLogin -> Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.messages_login_required),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = stringResource(R.string.messages_login_required_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
                 PrivateMessageThreadUiState.Mode.Loading -> CircularProgressIndicator()
 
                 is PrivateMessageThreadUiState.Mode.Error -> Column(

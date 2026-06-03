@@ -3,13 +3,16 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -23,6 +26,7 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class MessagesViewModel @Inject constructor(
     private val repository: MessagesRepository,
+    private val authRepository: AuthRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(MessagesUiState())
@@ -32,9 +36,22 @@ class MessagesViewModel @Inject constructor(
     // previous: otherwise a slow refresh could land after a page navigation and overwrite the
     // newer page with its stale result.
     private var loadJob: Job? = null
+    private var authenticatedPseudo: String? = null
 
     init {
-        load(page = 1)
+        viewModelScope.launch {
+            authRepository.observeAuthState()
+                .distinctUntilChanged()
+                .collect { authState ->
+                    when (authState) {
+                        AuthState.Anonymous -> clearPrivateState()
+                        is AuthState.Authenticated -> {
+                            authenticatedPseudo = authState.pseudo
+                            load(page = 1)
+                        }
+                    }
+                }
+        }
     }
 
     /** Navigates to another inbox page (pager). No-op for out-of-range pages. */
@@ -53,7 +70,38 @@ class MessagesViewModel @Inject constructor(
         load(_state.value.page, refreshing = true)
     }
 
+    /**
+     * HFR marks a private-message thread as read when it is opened. Reflect that immediately
+     * in the retained inbox list so returning from the thread does not show a stale unread dot.
+     */
+    fun openThread(threadId: Int) {
+        _state.update { current ->
+            val content = current.mode as? MessagesUiState.Mode.Content ?: return@update current
+            current.copy(
+                mode = MessagesUiState.Mode.Content(
+                    content.conversations.map { conversation ->
+                        if (conversation.threadId == threadId) {
+                            conversation.copy(hasUnread = false)
+                        } else {
+                            conversation
+                        }
+                    },
+                ),
+            )
+        }
+    }
+
+    private fun clearPrivateState() {
+        authenticatedPseudo = null
+        loadJob?.cancel()
+        _state.value = MessagesUiState(mode = MessagesUiState.Mode.RequiresLogin)
+    }
+
     private fun load(page: Int, refreshing: Boolean = false) {
+        if (authenticatedPseudo == null) {
+            clearPrivateState()
+            return
+        }
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             _state.update { current ->

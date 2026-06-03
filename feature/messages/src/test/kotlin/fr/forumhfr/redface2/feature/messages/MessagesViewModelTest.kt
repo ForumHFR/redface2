@@ -1,14 +1,21 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import java.io.IOException
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -38,7 +45,7 @@ class MessagesViewModelTest {
         coEvery { repository.getPrivateMessageList(page = 1) } returns
             PrivateMessageListPage(page = 1, totalPages = 3, items = listOf(summary(10), summary(20)))
 
-        val viewModel = MessagesViewModel(repository)
+        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
 
         val state = viewModel.state.value
         val mode = state.mode
@@ -50,11 +57,23 @@ class MessagesViewModelTest {
     }
 
     @Test
+    fun `anonymous state does not fetch the private inbox`() = runTest {
+        val repository = mockk<MessagesRepository>()
+
+        val viewModel = MessagesViewModel(repository, FakeAuthRepository(AuthState.Anonymous))
+
+        assertEquals(MessagesUiState.Mode.RequiresLogin, viewModel.state.value.mode)
+        coVerify(exactly = 0) {
+            repository.getPrivateMessageList(page = any())
+        }
+    }
+
+    @Test
     fun `surfaces a load failure as Error`() = runTest {
         val repository = mockk<MessagesRepository>()
         coEvery { repository.getPrivateMessageList(page = 1) } throws IOException("offline")
 
-        val viewModel = MessagesViewModel(repository)
+        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
 
         val mode = viewModel.state.value.mode
         assertTrue(mode is MessagesUiState.Mode.Error)
@@ -69,7 +88,7 @@ class MessagesViewModelTest {
             PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1), summary(2))),
         )
 
-        val viewModel = MessagesViewModel(repository)
+        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
         viewModel.refresh()
 
         val state = viewModel.state.value
@@ -84,7 +103,7 @@ class MessagesViewModelTest {
             PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1))) andThenThrows
             IOException("offline")
 
-        val viewModel = MessagesViewModel(repository)
+        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
         viewModel.refresh()
 
         val state = viewModel.state.value
@@ -103,7 +122,7 @@ class MessagesViewModelTest {
         coEvery { repository.getPrivateMessageList(page = 2) } returns
             PrivateMessageListPage(page = 2, totalPages = 2, items = listOf(summary(2), summary(3)))
 
-        val viewModel = MessagesViewModel(repository)
+        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
         viewModel.selectPage(2)
 
         val state = viewModel.state.value
@@ -112,11 +131,62 @@ class MessagesViewModelTest {
         assertTrue(state.canGoPrevious)
     }
 
-    private fun summary(threadId: Int) = PrivateMessageSummary(
+    @Test
+    fun `logout clears private inbox content and login reloads it`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        val authRepository = FakeAuthRepository()
+        coEvery { repository.getPrivateMessageList(page = 1) } returns
+            PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1)))
+
+        val viewModel = MessagesViewModel(repository, authRepository)
+        assertTrue(viewModel.state.value.mode is MessagesUiState.Mode.Content)
+
+        authRepository.emit(AuthState.Anonymous)
+        advanceUntilIdle()
+        assertEquals(MessagesUiState.Mode.RequiresLogin, viewModel.state.value.mode)
+
+        authRepository.emit(AuthState.Authenticated("other"))
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.mode is MessagesUiState.Mode.Content)
+    }
+
+    @Test
+    fun `opening an unread thread marks it read in the retained inbox`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageList(page = 1) } returns
+            PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1, hasUnread = true)))
+
+        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
+        viewModel.openThread(threadId = 1)
+
+        val conversations = (viewModel.state.value.mode as MessagesUiState.Mode.Content).conversations
+        assertEquals(false, conversations.single().hasUnread)
+    }
+
+    private fun summary(threadId: Int, hasUnread: Boolean = false) = PrivateMessageSummary(
         threadId = threadId,
         correspondent = "Correspondant$threadId",
         subject = "Sujet $threadId",
         date = Instant.EPOCH,
-        hasUnread = false,
+        hasUnread = hasUnread,
     )
+
+    private class FakeAuthRepository(
+        initial: AuthState = AuthState.Authenticated("xaat"),
+    ) : AuthRepository {
+        private val state = MutableStateFlow(initial)
+
+        override fun observeAuthState(): Flow<AuthState> = state.asStateFlow()
+
+        override suspend fun login(pseudo: String, password: String): Result<AuthState.Authenticated> =
+            Result.failure(IllegalStateException("not used"))
+
+        override suspend fun logout() {
+            state.value = AuthState.Anonymous
+        }
+
+        suspend fun emit(authState: AuthState) {
+            state.emit(authState)
+        }
+    }
 }
