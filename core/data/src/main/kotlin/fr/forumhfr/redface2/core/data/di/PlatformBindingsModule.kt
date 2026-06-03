@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.coroutines.MainDispatcher
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.parser.HfrParser
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageListParser
+import fr.forumhfr.redface2.core.parser.messages.PrivateMessageThreadParser
 import java.time.Clock
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
@@ -44,6 +45,10 @@ object PlatformBindingsModule {
     @Provides
     @Singleton
     fun providePrivateMessageListParser(): PrivateMessageListParser = PrivateMessageListParser()
+
+    @Provides
+    @Singleton
+    fun providePrivateMessageThreadParser(): PrivateMessageThreadParser = PrivateMessageThreadParser()
 
     @Provides
     @Singleton

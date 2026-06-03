@@ -149,7 +149,8 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 
 **Objectif :** les messages privés, classiques et multi.
 
-- [ ] Inbox MPs classiques — liste, lecture, reply
+- [x] Inbox MPs classiques — liste + lecture en read-only (#298)
+- [ ] Reply / quote MP classique
 - [ ] Nouveau MP — création
 - [ ] MultiMPs — liste avec vue drapeaux, lecture, reply, quote
 - [ ] Nouveau MultiMP — création (2+ destinataires)

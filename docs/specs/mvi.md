@@ -301,24 +301,31 @@ sealed interface PostEditorEffect {
 ## Écran Messages
 
 ```kotlin
-data class MessagesState(
-    val activeTab: MessageTab = MessageTab.CLASSIC,
-    val classicMPs: List<PrivateMessage> = emptyList(),
-    val multiMPs: List<PrivateMessage> = emptyList(),
-    val isLoading: Boolean = false,
-    val error: String? = null,
-)
-
-enum class MessageTab { CLASSIC, MULTI }
+data class MessagesUiState(
+    val mode: Mode = Mode.Loading,
+    val page: Int = 1,
+    val totalPages: Int = 1,
+    val isRefreshing: Boolean = false,
+) {
+    sealed interface Mode {
+        data object RequiresLogin : Mode
+        data object Loading : Mode
+        data class Content(val conversations: List<PrivateMessageSummary>) : Mode
+        data class Error(val message: String?) : Mode
+    }
+}
 
 sealed interface MessagesIntent {
-    data class SwitchTab(val tab: MessageTab) : MessagesIntent
     data object Refresh : MessagesIntent
-    data class OpenMP(val mp: PrivateMessage) : MessagesIntent
+    data class OpenThread(val threadId: Int) : MessagesIntent
     data object NewMP : MessagesIntent
     data object NewMultiMP : MessagesIntent
 }
 ```
+
+Le MVP Phase 3 #298 implémente uniquement la lecture des MPs classiques : liste
+`PrivateMessageSummary` + conversation `PrivateMessageThread`. Les onglets MultiMP,
+réponse, quote et création restent des intents de phase suivante.
 
 ---
 

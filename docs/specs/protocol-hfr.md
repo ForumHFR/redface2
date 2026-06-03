@@ -47,7 +47,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Suppression post/topic owned | POST | `/bdd.php?config=hfr.inc` avec `delete=1` | **oui** |
 | Nouveau topic | POST | `/bddpost.php?config=hfr.inc` | **oui** |
 | MP (envoi) | POST | `/bddpost.php?config=hfr.inc&cat=prive&pseudo={dest}` | **oui** |
-| Conversation MP | GET | `/message.php?config=hfr.inc&cat=prive&post={mp_id}&page={page}` | **oui** |
+| Conversation MP | GET | `/forum2.php?config=hfr.inc&cat=prive&post={mp_id}&page={page}` | **oui** |
 | Liste des MPs | GET | `/forum1.php?config=hfr.inc&cat=prive&page={page}&subcat=&sondage=0&owntopic=0&trash=0&trash_post=0&moderation=0&new=0&nojs=0&subcatgroup=0` | **oui** |
 | Ajouter aux drapeaux | GET | `/user/addflag.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Retirer un drapeau | GET | `/user/delflag.php?config=hfr.inc&cat={cat}&subcat={subcat}&post={topicId}&page={page}&p=1&sondage=0&owntopic={1,2,3}&new=0` | **oui** |

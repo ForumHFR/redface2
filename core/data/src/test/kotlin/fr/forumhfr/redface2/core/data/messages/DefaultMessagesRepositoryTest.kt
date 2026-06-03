@@ -5,9 +5,13 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.LoginError
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageListParser
+import fr.forumhfr.redface2.core.parser.messages.PrivateMessageThreadParser
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import java.io.IOException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -138,9 +142,52 @@ class DefaultMessagesRepositoryTest {
         }
     }
 
+    @Test
+    fun `getPrivateMessageList fetches the requested page and returns the parsed inbox`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageListPage(page = 2) } returns FAKE_HTML
+        val parser = mockk<PrivateMessageListParser>()
+        val parsed = PrivateMessageListPage(page = 2, totalPages = 3, items = emptyList())
+        coEvery { parser.parseList(FAKE_HTML) } returns parsed
+
+        val (repo, _) = buildRepository(hfrClient = hfrClient, parser = parser)
+
+        assertEquals(parsed, repo.getPrivateMessageList(page = 2))
+        coVerify(exactly = 1) { hfrClient.getPrivateMessageListPage(page = 2) }
+    }
+
+    @Test
+    fun `getPrivateMessageThread fetches the thread page and forwards the fallback correspondent`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageThreadPage(threadId = 42, page = 1) } returns FAKE_HTML
+        val threadParser = mockk<PrivateMessageThreadParser>()
+        val parsed = PrivateMessageThread(
+            threadId = 42,
+            subject = "Sujet",
+            correspondent = "Correspondant",
+            messages = emptyList(),
+            page = 1,
+            totalPages = 1,
+            canReply = true,
+        )
+        coEvery { threadParser.parse(FAKE_HTML, "Correspondant") } returns parsed
+
+        val (repo, _) = buildRepository(hfrClient = hfrClient, threadParser = threadParser)
+
+        val result = repo.getPrivateMessageThread(
+            threadId = 42,
+            page = 1,
+            fallbackCorrespondent = "Correspondant",
+        )
+
+        assertEquals(parsed, result)
+        coVerify(exactly = 1) { threadParser.parse(FAKE_HTML, "Correspondant") }
+    }
+
     private fun buildRepository(
         hfrClient: HfrClient = mockk(relaxed = true),
         parser: PrivateMessageListParser = mockk(relaxed = true),
+        threadParser: PrivateMessageThreadParser = mockk(relaxed = true),
     ): Pair<DefaultMessagesRepository, MutableSharedFlow<AuthState>> {
         val authStates = MutableSharedFlow<AuthState>(replay = 0)
         val authRepository = object : AuthRepository {
@@ -155,6 +202,7 @@ class DefaultMessagesRepositoryTest {
             authRepository = authRepository,
             hfrClient = hfrClient,
             parser = parser,
+            threadParser = threadParser,
             ioDispatcher = UnconfinedTestDispatcher(),
         )
         return repo to authStates

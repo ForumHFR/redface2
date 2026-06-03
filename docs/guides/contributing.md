@@ -266,8 +266,8 @@ core/parser/src/test/resources/fixtures/
 | `topic_list.html` | Liste topics d'une sous-catégorie | logué + non-logué | `forum2.php?cat=23&subcat=0` |
 | `profile_standard.html` | Profil utilisateur standard | non-logué | `hfr/profil-<id>.htm` (membre) |
 | `profile_admin.html` | Profil admin/modo | non-logué | `hfr/profil-<id>.htm` (modo) |
-| `mp_list.html` | Liste des MPs classiques | logué uniquement | `message.php` |
-| `mp_conversation.html` | Conversation MP | logué uniquement | `message.php?cat=prive&post=<mp_id>` |
+| `mp_list.html` | Liste des MPs classiques | logué uniquement | `forum1.php?cat=prive` |
+| `mp_conversation.html` | Conversation MP | logué uniquement | `forum2.php?cat=prive&post=<mp_id>` |
 | `smiley_search.html` | Résultats recherche de smileys | non-logué | `message-smi-mp-aj.php?search=X` |
 | `rehost_response.html` | Réponse reho.st | non-logué | `reho.st` HTML de réponse |
 

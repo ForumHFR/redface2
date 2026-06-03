@@ -43,7 +43,7 @@ BBCode éditeur  ─┘
 
 Les règles associées sont :
 
-- `Post.content` et `PMMessage.content` portent un `PostContent`, pas une chaîne HTML ou BBCode brute ;
+- `Post.content` porte un `PostContent` et les messages MP réutilisent `Post` via `PrivateMessageThread.messages`, pas une chaîne HTML ou BBCode brute ;
 - `:core:parser` transforme le HTML HFR réel en modèles domaine et en `PostContent` ;
 - le parser BBCode de l'éditeur transforme le BBCode HFR brut vers la même AST `PostContent` quand l'éditeur arrive en Phase 2 ;
 - `:core:ui` expose `PostRenderer` et ne dépend ni de Jsoup ni d'un parser BBCode ;

@@ -5,8 +5,11 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageListParser
+import fr.forumhfr.redface2.core.parser.messages.PrivateMessageThreadParser
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
@@ -35,6 +38,7 @@ class DefaultMessagesRepository @Inject constructor(
     private val authRepository: AuthRepository,
     private val hfrClient: HfrClient,
     private val parser: PrivateMessageListParser,
+    private val threadParser: PrivateMessageThreadParser,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : MessagesRepository {
 
@@ -59,6 +63,27 @@ class DefaultMessagesRepository @Inject constructor(
             // only keeps the happy path quiet.
             Log.w(LOG_TAG, "Unread MP count fetch failed", throwable)
         }.getOrNull()
+    }
+
+    // Unlike observeUnreadMpCount (a best-effort footer signal that swallows failures into
+    // null), the inbox list / thread reads PROPAGATE their errors: the Messages tab owns a real
+    // error state with a retry, so a network or session failure must reach the ViewModel rather
+    // than being hidden behind an empty screen. withContext(ioDispatcher) wraps the HfrClient
+    // call per the repository contract (cf. NetworkOnMainThreadException regression, PR #162).
+    override suspend fun getPrivateMessageList(page: Int): PrivateMessageListPage =
+        withContext(ioDispatcher) {
+            parser.parseList(hfrClient.getPrivateMessageListPage(page = page))
+        }
+
+    override suspend fun getPrivateMessageThread(
+        threadId: Int,
+        page: Int,
+        fallbackCorrespondent: String?,
+    ): PrivateMessageThread = withContext(ioDispatcher) {
+        threadParser.parse(
+            html = hfrClient.getPrivateMessageThreadPage(threadId = threadId, page = page),
+            fallbackCorrespondent = fallbackCorrespondent,
+        )
     }
 
     private companion object {
