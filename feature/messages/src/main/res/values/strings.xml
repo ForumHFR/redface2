@@ -1,6 +1,8 @@
 <resources>
     <string name="messages_title">Messages</string>
     <string name="messages_empty">Aucun message privé.</string>
+    <string name="messages_multi_recipient">Interlocuteurs multiples</string>
+    <string name="messages_avatar_group">Conversation de groupe</string>
     <string name="messages_login_required">Connexion requise</string>
     <string name="messages_login_required_body">Connectez-vous depuis le menu compte pour lire vos messages privés.</string>
     <string name="messages_error_load">Impossible de charger les messages privés.</string>

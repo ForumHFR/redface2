@@ -45,13 +45,19 @@ fun RedfaceUserAvatar(
     author: String,
     modifier: Modifier = Modifier,
     size: Dp = DEFAULT_SIZE,
+    // Overrides the TalkBack announcement when the avatar does not represent a single named
+    // person — e.g. a multi-recipient MP conversation, where `author` is a UI label like
+    // "Interlocuteurs multiples" and "Avatar de Interlocuteurs multiples" would read wrong.
+    // `null` keeps the default "Avatar de <author>" derivation.
+    contentDescriptionOverride: String? = null,
 ) {
     val shape = RoundedCornerShape(AVATAR_CORNER_RADIUS)
     val initial = author.firstOrNull()?.uppercaseChar()?.toString().orEmpty()
     // Same localized "Avatar de <pseudo>" string for both branches so TalkBack reads the
     // same sentence whether the avatar URL was provided or not (Codex rereview on PR #207
     // flagged that the loaded-image branch was leaking the raw pseudo into the announcement).
-    val avatarContentDescription = stringResource(R.string.avatar_content_description, author)
+    val avatarContentDescription = contentDescriptionOverride
+        ?: stringResource(R.string.avatar_content_description, author)
 
     if (avatarUrl.isNullOrBlank()) {
         // Standalone branch — no SubcomposeAsyncImage parent to carry a contentDescription,

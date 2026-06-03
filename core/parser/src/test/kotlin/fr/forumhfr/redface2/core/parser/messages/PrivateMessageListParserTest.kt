@@ -85,6 +85,8 @@ class PrivateMessageListParserTest {
         // All 50 MPs are read in this fixture — consistent with countUnread == 0.
         assertTrue(page.items.none { it.hasUnread })
         assertTrue(page.items.all { it.threadId > 0 })
+        // Every row in this (older) fixture is a one-to-one conversation (profile link).
+        assertTrue(page.items.none { it.isMultiRecipient })
     }
 
     @Test
@@ -125,6 +127,78 @@ class PrivateMessageListParserTest {
         assertEquals("Sujet de test", first.subject)
         assertTrue(first.hasUnread)
         assertEquals(Instant.parse("2026-02-10T08:05:00Z"), first.date)
+        // A one-to-one conversation (profile link present) is not multi-recipient.
+        assertEquals(false, first.isMultiRecipient)
+    }
+
+    @Test
+    fun `parseList flags a multi-recipient conversation and leaves its correspondent empty`() {
+        // MultiMP / "DT" row: the Interlocuteur cell is a "Interlocuteurs multiples" <span>
+        // (truncated participant list in its title), NOT a profile link. Hand-written stub with
+        // both a one-to-one row and a multi row — no real pseudos.
+        val html = """
+            <html><body><table>
+            <tr class="sujet ligne_booleen">
+              <td class="sujetCase1"><img src="/themes_static/images/silk/closedp.gif" /></td>
+              <td class="sujetCase3"><a href="/forum2.php?config=hfr.inc&cat=prive&post=111&page=1" class="cCatTopic">Sujet solo</a></td>
+              <td class="sujetCase6"><a href="/profilebdd.php?pseudo=Alice" class="Tableau">Alice</a></td>
+              <td class="sujetCase9"><a href="#bas">01-02-2026&nbsp;à&nbsp;10:00<br /><b>Alice</b></a></td>
+            </tr>
+            <tr class="sujet ligne_booleen">
+              <td class="sujetCase1"><img src="/themes_static/images/silk/closedbp.gif" /></td>
+              <td class="sujetCase3"><a href="/forum2.php?config=hfr.inc&cat=prive&post=222&page=1" class="cCatTopic">Sujet groupe</a></td>
+              <td class="sujetCase6"><span title="a, b, c, d">Interlocuteurs multiples</span></td>
+              <td class="sujetCase9"><a href="#bas">02-02-2026&nbsp;à&nbsp;11:00<br /><b>Bob</b></a></td>
+            </tr>
+            <tr class="sujet ligne_booleen">
+              <td class="sujetCase1"><img src="/themes_static/images/silk/closedp.gif" /></td>
+              <td class="sujetCase3"><a href="/forum2.php?config=hfr.inc&cat=prive&post=333&page=1" class="cCatTopic">Sujet banni</a></td>
+              <td class="sujetCase6"><span>BannedUser</span></td>
+              <td class="sujetCase9"><a href="#bas">03-02-2026&nbsp;à&nbsp;12:00<br /><b>BannedUser</b></a></td>
+            </tr>
+            </table></body></html>
+        """.trimIndent()
+
+        val items = parser.parseList(html).items
+
+        assertEquals(3, items.size)
+        val solo = items.first { it.threadId == 111 }
+        assertEquals(false, solo.isMultiRecipient)
+        assertEquals("Alice", solo.correspondent)
+
+        val group = items.first { it.threadId == 222 }
+        assertTrue(group.isMultiRecipient)
+        // The truncated participant list is private/unreliable — the model leaves it empty and
+        // the UI shows a localized "Interlocuteurs multiples" label instead.
+        assertEquals("", group.correspondent)
+        assertTrue(group.hasUnread)
+
+        // An anchor-less plain-text span (banned / anonymized correspondent) is a one-to-one
+        // conversation, NOT a group: keep the still-public pseudo, do not flag multi-recipient.
+        val banned = items.first { it.threadId == 333 }
+        assertEquals(false, banned.isMultiRecipient)
+        assertEquals("BannedUser", banned.correspondent)
+    }
+
+    @Test
+    fun `parseList recognizes multi-recipient rows against the real inbox fixture`() {
+        // Real captured inbox (scrubbed) mixing one-to-one conversations and MultiMP/DT — the
+        // structure the inline stub above is modeled on. Locks the parser against the genuine
+        // HFR DOM, per the real-fixture charter.
+        val html = readFixture("private_messages_list_multi.html")
+
+        val items = parser.parseList(html).items
+
+        assertEquals(50, items.size)
+        val multi = items.filter { it.isMultiRecipient }
+        val single = items.filterNot { it.isMultiRecipient }
+        assertEquals(16, multi.size)
+        assertEquals(34, single.size)
+        // Multi-recipient rows carry no single pseudo (UI shows a localized label); one-to-one
+        // rows always resolve a correspondent.
+        assertTrue(multi.all { it.correspondent.isEmpty() })
+        assertTrue(single.all { it.correspondent.isNotEmpty() })
+        assertTrue(items.all { it.threadId > 0 })
     }
 
     private fun readFixture(name: String): String {

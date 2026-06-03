@@ -41,6 +41,9 @@ object HfrSelectors {
     const val MP_LIST_ICON = "td.sujetCase1 img[src]"
     const val MP_LIST_SUBJECT_LINK = "td.sujetCase3 a.cCatTopic"
     const val MP_LIST_CORRESPONDENT = "td.sujetCase6 a"
+    // Multi-recipient (MultiMP / "DT") rows have no profile link: the Interlocuteur cell is a
+    // `<span title="…truncated participant list…">Interlocuteurs multiples</span>` instead.
+    const val MP_LIST_CORRESPONDENT_GROUP = "td.sujetCase6 span"
     const val MP_LIST_DATE = "td.sujetCase9 a"
     const val MP_LIST_TOP_PAGER = "tr.fondForum1PagesHaut"
 }

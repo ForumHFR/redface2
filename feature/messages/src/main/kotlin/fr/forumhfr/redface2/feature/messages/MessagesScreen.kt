@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
+import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -140,9 +142,12 @@ fun MessagesScreen(
                         conversations = mode.conversations,
                         page = state.page,
                         totalPages = state.totalPages,
-                        onOpenThread = onOpenThread,
                         onSelectPage = viewModel::selectPage,
-                        onConversationOpened = viewModel::openThread,
+                        onConversationClick = { conversation, displayName ->
+                            // Optimistically mark read locally, then navigate to the thread.
+                            viewModel.openThread(conversation.threadId)
+                            onOpenThread(conversation.threadId, displayName, conversation.subject)
+                        },
                     )
                 }
             }
@@ -155,9 +160,8 @@ private fun InboxContent(
     conversations: List<PrivateMessageSummary>,
     page: Int,
     totalPages: Int,
-    onOpenThread: (threadId: Int, correspondent: String, subject: String) -> Unit,
     onSelectPage: (Int) -> Unit,
-    onConversationOpened: (Int) -> Unit,
+    onConversationClick: (PrivateMessageSummary, displayName: String) -> Unit,
 ) {
     // Always a LazyColumn (even when empty) so Material 3 pull-to-refresh — driven by nested
     // scroll — keeps working on an empty inbox; the empty message fills the viewport via
@@ -182,12 +186,20 @@ private fun InboxContent(
             }
         } else {
             items(conversations, key = { it.threadId }) { conversation ->
+                // Multi-recipient conversations carry no single pseudo (HFR shows
+                // "Interlocuteurs multiples"). Render the localized label and pass it as the
+                // thread screen's header subtitle (PrivateMessageThreadScreen uses
+                // request.correspondent). The thread-page parser may resolve a concrete
+                // participant for its own model; the header intentionally keeps the inbox label.
+                val displayName = if (conversation.isMultiRecipient) {
+                    stringResource(R.string.messages_multi_recipient)
+                } else {
+                    conversation.correspondent
+                }
                 ConversationRow(
                     conversation = conversation,
-                    onClick = {
-                        onConversationOpened(conversation.threadId)
-                        onOpenThread(conversation.threadId, conversation.correspondent, conversation.subject)
-                    },
+                    displayName = displayName,
+                    onClick = { onConversationClick(conversation, displayName) },
                 )
             }
             if (totalPages > 1) {
@@ -206,6 +218,7 @@ private fun InboxContent(
 @Composable
 private fun ConversationRow(
     conversation: PrivateMessageSummary,
+    displayName: String,
     onClick: () -> Unit,
 ) {
     val readState = stringResource(
@@ -228,19 +241,28 @@ private fun ConversationRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (conversation.hasUnread) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape),
-                )
-            }
+            // Read-state dot, shown systematically: a filled primary dot for an unread
+            // conversation, a hollow outline ring for a read one (a11y carried by the Card's
+            // stateDescription above).
+            ReadStateDot(unread = conversation.hasUnread)
+            // Leading avatar — placeholder for now (the inbox listing does not expose the
+            // correspondent's avatar URL; a future pass can resolve it). Single conversations
+            // show the correspondent's initial, group ones the "Interlocuteurs multiples" initial.
+            RedfaceUserAvatar(
+                avatarUrl = null,
+                author = displayName,
+                contentDescriptionOverride = if (conversation.isMultiRecipient) {
+                    stringResource(R.string.messages_avatar_group)
+                } else {
+                    null
+                },
+            )
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Text(
-                    text = conversation.correspondent,
+                    text = displayName,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -261,6 +283,16 @@ private fun ConversationRow(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ReadStateDot(unread: Boolean) {
+    val dotModifier = Modifier.size(10.dp)
+    if (unread) {
+        Box(modifier = dotModifier.background(MaterialTheme.colorScheme.primary, CircleShape))
+    } else {
+        Box(modifier = dotModifier.border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape))
     }
 }
 

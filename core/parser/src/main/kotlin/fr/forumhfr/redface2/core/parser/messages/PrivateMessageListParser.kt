@@ -67,10 +67,24 @@ class PrivateMessageListParser(
         // trailing return (detekt ReturnCount).
         if (subjectLink == null || threadId == null || date == null) return null
 
-        val correspondent = row.selectFirst(HfrSelectors.MP_LIST_CORRESPONDENT)
-            ?.text()
-            ?.trim()
-            .orEmpty()
+        // Interlocuteur cell, three shapes:
+        // - profile link (`<a>`)               → one-to-one, correspondent = link text.
+        // - "Interlocuteurs multiples" `<span>` → multi-recipient (MultiMP / "DT"); HFR
+        //   truncates the participant list, so [correspondent] stays empty and the UI shows a
+        //   localized label. Keyed on the exact marker text, NOT on "any span", so an
+        //   anchor-less plain-text pseudo (banned / anonymized correspondent) is not misread.
+        // - bare text `<span>` (no link)        → one-to-one with a non-clickable pseudo,
+        //   correspondent = span text (the pseudo is already public in the listing).
+        val correspondentLink = row.selectFirst(HfrSelectors.MP_LIST_CORRESPONDENT)
+        val groupText = row.selectFirst(HfrSelectors.MP_LIST_CORRESPONDENT_GROUP)?.text()?.trim()
+        val isMultiRecipient = correspondentLink == null &&
+            groupText != null &&
+            groupText.equals(MULTI_RECIPIENT_MARKER, ignoreCase = true)
+        val correspondent = when {
+            correspondentLink != null -> correspondentLink.text().trim()
+            isMultiRecipient -> ""
+            else -> groupText.orEmpty()
+        }
         val hasUnread = row.selectFirst(HfrSelectors.MP_LIST_ICON)
             ?.attr("src")
             ?.let(::isUnreadIcon)
@@ -82,6 +96,7 @@ class PrivateMessageListParser(
             subject = subjectLink.text().trim(),
             date = date,
             hasUnread = hasUnread,
+            isMultiRecipient = isMultiRecipient,
         )
     }
 
@@ -109,6 +124,9 @@ class PrivateMessageListParser(
 
     private companion object {
         const val UNREAD_ICON = "closedbp"
+        // HFR's exact label shown in the Interlocuteur cell of a multi-recipient conversation
+        // (MultiMP / "DT"), in place of a profile link.
+        const val MULTI_RECIPIENT_MARKER = "Interlocuteurs multiples"
         val THREAD_ID_REGEX = Regex("""[?&]post=(\d+)""")
     }
 }
