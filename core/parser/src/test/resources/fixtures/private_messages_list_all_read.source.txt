@@ -2,3 +2,4 @@ Source: forum.hardware.fr (fixture publique reprise de ForumHFR/Redface)
 Original fixture: app/src/test/resources/hfr_private_messages_list.html
 Captured page: forum1.php?config=hfr.inc&cat=prive&page=1
 Notes: 50 MPs, tous lus (icone closedp.gif). Pas d'icone closedbp.gif dans la fixture, donc seul le cas "0 non lus" est testable a partir de cette fixture.
+Privacy (#298): pseudos correspondants, derniers posteurs, parametres auteur=/pseudo= et sujets remplaces par des placeholders (CorrespondantNN / "Sujet de test NN"). Seuls la structure DOM, les threadIds et les dates sont conserves (non sensibles).

@@ -62,6 +62,41 @@ class PrivateMessageThreadParserTest {
         assertEquals("Correspondant", thread.correspondent)
     }
 
+    @Test
+    fun `falls back to the inbox correspondent when every message is the user's own`() {
+        // Inline stub (NOT a prod fixture): a single own message (toolbar edit link present →
+        // isOwnPost). The correspondent has not replied, so `firstOrNull { !isOwnPost }` is null
+        // and the inbox-row value must win.
+        val thread = parser.parse(ownOnlyThreadHtml(), fallbackCorrespondent = "InboxOnly")
+
+        assertEquals("InboxOnly", thread.correspondent)
+    }
+
+    @Test
+    fun `falls back to the first author when own-only and no inbox correspondent`() {
+        // Deep-link directly to a thread (no inbox row) where the user is the only sender:
+        // last resort is the first message author.
+        val thread = parser.parse(ownOnlyThreadHtml(), fallbackCorrespondent = null)
+
+        assertEquals("TestUser", thread.correspondent)
+    }
+
+    private fun ownOnlyThreadHtml(): String =
+        """
+        <html><body>
+        <input type="hidden" name="cat" value="prive" />
+        <input type="hidden" name="post" value="555" />
+        <table class="messagetable"><tr>
+          <td class="messCase1"><a name="t1"></a><b class="s2">TestUser</b></td>
+          <td>
+            <div class="toolbar"><div class="left">Posté le 01-02-2026 à 10:01:00
+              <a href="/hfr/prive/editer-1-1-1.htm">Modifier</a></div></div>
+            <div id="para1">Message privé de test.</div>
+          </td>
+        </tr></table>
+        </body></html>
+        """.trimIndent()
+
     private fun readFixture(name: String): String {
         val resource = javaClass.classLoader.getResourceAsStream("fixtures/$name")
             ?: error("Missing fixture: fixtures/$name")

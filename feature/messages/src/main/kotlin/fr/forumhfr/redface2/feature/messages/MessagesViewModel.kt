@@ -69,11 +69,18 @@ class MessagesViewModel @Inject constructor(
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
-                _state.update {
-                    it.copy(
-                        mode = MessagesUiState.Mode.Error(error.message),
-                        isRefreshing = false,
-                    )
+                _state.update { current ->
+                    // A failed pull-to-refresh must not wipe the conversations already shown:
+                    // keep the existing Content and just drop the spinner. A failed initial /
+                    // page load (no content yet) surfaces the Error screen with a retry.
+                    if (refreshing && current.mode is MessagesUiState.Mode.Content) {
+                        current.copy(isRefreshing = false)
+                    } else {
+                        current.copy(
+                            mode = MessagesUiState.Mode.Error(error.message),
+                            isRefreshing = false,
+                        )
+                    }
                 }
             }
         }

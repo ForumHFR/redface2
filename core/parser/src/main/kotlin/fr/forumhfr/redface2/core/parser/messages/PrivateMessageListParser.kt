@@ -32,8 +32,10 @@ class PrivateMessageListParser(
      */
     fun countUnread(html: String): Int {
         val document = Jsoup.parse(html)
-        return document.select("tr.sujet img[src]")
-            .count { img -> isUnreadIcon(img.attr("src")) }
+        return document.select(HfrSelectors.MP_LIST_ROW)
+            .count { row ->
+                row.selectFirst(HfrSelectors.MP_LIST_ICON)?.attr("src")?.let(::isUnreadIcon) == true
+            }
     }
 
     /**
@@ -56,18 +58,19 @@ class PrivateMessageListParser(
             ?.let { THREAD_ID_REGEX.find(it.attr("href")) }
             ?.groupValues?.getOrNull(1)
             ?.toIntOrNull()
-        // A row without a subject link / parseable thread id is not an MP entry (header,
-        // separator, login redirect) — skip it. Both null-checks fold into one guard so the
-        // happy path keeps a single trailing return (detekt ReturnCount).
-        if (subjectLink == null || threadId == null) return null
+        val date = dateParser.parseListDateOrNull(
+            row.selectFirst(HfrSelectors.MP_LIST_DATE)?.text().orEmpty(),
+        )
+        // A row without a subject link / parseable thread id / parseable date is not a usable
+        // MP entry (header, separator, login redirect, DOM drift) — skip it rather than crash
+        // the whole inbox. The null-checks fold into one guard so the happy path keeps a single
+        // trailing return (detekt ReturnCount).
+        if (subjectLink == null || threadId == null || date == null) return null
 
         val correspondent = row.selectFirst(HfrSelectors.MP_LIST_CORRESPONDENT)
             ?.text()
             ?.trim()
             .orEmpty()
-        val date = dateParser.parseListDate(
-            row.selectFirst(HfrSelectors.MP_LIST_DATE)?.text().orEmpty(),
-        )
         val hasUnread = row.selectFirst(HfrSelectors.MP_LIST_ICON)
             ?.attr("src")
             ?.let(::isUnreadIcon)
