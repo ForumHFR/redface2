@@ -99,6 +99,26 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * Fetches one authenticated page of a private-message conversation. The endpoint is the
+     * topic page (`forum2.php?config=hfr.inc&cat=prive&post={threadId}&page={page}`) scoped to
+     * the private category — structurally identical to a topic, which is why the response is
+     * parsed by the shared post extractor. Always authenticated: HFR has no anonymous variant
+     * of a private conversation (it redirects to login).
+     */
+    suspend fun getPrivateMessageThreadPage(threadId: Int, page: Int = 1): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("forum2.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", "prive")
+            .addQueryParameter("post", threadId.toString())
+            .addQueryParameter("page", page.toString())
+            .build()
+
+        val request = Request.Builder().url(url).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Phase 2C — GET the HFR reply or quote form. The shape is the same in both
      * cases (`/message.php?cat=…&post=…&page=…&p=1&subcat=…&sondage=0&owntopic=0
      * &new=0`); a quote carries `numrep={quotedNumreponse}` and may additionally

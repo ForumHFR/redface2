@@ -1,20 +1,29 @@
 package fr.forumhfr.redface2.core.parser.messages
 
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
+import fr.forumhfr.redface2.core.parser.common.HfrDateParser
+import fr.forumhfr.redface2.core.parser.common.HfrSelectors
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 
 /**
- * Parses the HFR private message list page (`forum1.php?config=hfr.inc&cat=prive`) and
- * counts unread MPs.
+ * Parses the HFR private message list page (`forum1.php?config=hfr.inc&cat=prive`).
  *
- * Each MP is rendered as a `<tr class="sujet ligne_booleen ...">` row. The icon in the
- * first cell (`td.sujetCase1 img`) carries the read/unread state via its filename:
+ * Each MP is rendered as a `<tr class="sujet …">` row whose cells carry, in order, the
+ * read/unread icon (`td.sujetCase1`), the subject link embedding the thread `post` id
+ * (`td.sujetCase3 a.cCatTopic`), the correspondent (`td.sujetCase6`) and the last-activity
+ * date (`td.sujetCase9`). The icon filename encodes the read state:
  * - `closedp.gif`  → MP read by the current user
  * - `closedbp.gif` → MP unread by the current user (the `b` is the bold/new marker)
  *
  * Convention extracted from the legacy v1 client (`HTMLToPrivateMessageList.java:31-32`),
  * proven in production for ~10 years against forum.hardware.fr.
  */
-class PrivateMessageListParser {
+class PrivateMessageListParser(
+    private val dateParser: HfrDateParser = HfrDateParser(),
+) {
 
     /**
      * Counts unread MPs in the page HTML. Returns 0 when the page contains no MP rows
@@ -24,14 +33,79 @@ class PrivateMessageListParser {
     fun countUnread(html: String): Int {
         val document = Jsoup.parse(html)
         return document.select("tr.sujet img[src]")
-            .count { img ->
-                val src = img.attr("src")
-                val filename = src.substringAfterLast('/').substringBeforeLast('.')
-                filename == UNREAD_ICON
-            }
+            .count { img -> isUnreadIcon(img.attr("src")) }
     }
+
+    /**
+     * Parses the full inbox page into a [PrivateMessageListPage]: the conversations on this
+     * page plus the pagination read from the Forum1 pager. Rows that are not MP entries
+     * (no subject link / no thread id) are skipped, so an empty or login-redirect page yields
+     * an empty item list.
+     */
+    fun parseList(html: String): PrivateMessageListPage {
+        val document = Jsoup.parse(html)
+        val items = document.select(HfrSelectors.MP_LIST_ROW)
+            .mapNotNull { row -> parseRow(row) }
+        val (current, total) = parsePageInfo(document)
+        return PrivateMessageListPage(page = current, totalPages = total, items = items)
+    }
+
+    private fun parseRow(row: Element): PrivateMessageSummary? {
+        val subjectLink = row.selectFirst(HfrSelectors.MP_LIST_SUBJECT_LINK)
+        val threadId = subjectLink
+            ?.let { THREAD_ID_REGEX.find(it.attr("href")) }
+            ?.groupValues?.getOrNull(1)
+            ?.toIntOrNull()
+        // A row without a subject link / parseable thread id is not an MP entry (header,
+        // separator, login redirect) — skip it. Both null-checks fold into one guard so the
+        // happy path keeps a single trailing return (detekt ReturnCount).
+        if (subjectLink == null || threadId == null) return null
+
+        val correspondent = row.selectFirst(HfrSelectors.MP_LIST_CORRESPONDENT)
+            ?.text()
+            ?.trim()
+            .orEmpty()
+        val date = dateParser.parseListDate(
+            row.selectFirst(HfrSelectors.MP_LIST_DATE)?.text().orEmpty(),
+        )
+        val hasUnread = row.selectFirst(HfrSelectors.MP_LIST_ICON)
+            ?.attr("src")
+            ?.let(::isUnreadIcon)
+            ?: false
+
+        return PrivateMessageSummary(
+            threadId = threadId,
+            correspondent = correspondent,
+            subject = subjectLink.text().trim(),
+            date = date,
+            hasUnread = hasUnread,
+        )
+    }
+
+    private fun parsePageInfo(document: Document): Pair<Int, Int> {
+        val pagerLeft = document
+            .select(HfrSelectors.MP_LIST_TOP_PAGER)
+            .firstOrNull()
+            ?.selectFirst(HfrSelectors.TOP_PAGER_LEFT)
+
+        val current = pagerLeft
+            ?.select(HfrSelectors.TOP_PAGER_CURRENT)
+            ?.mapNotNull { it.text().trim().toIntOrNull() }
+            ?.lastOrNull()
+            ?: 1
+        val linkedPages = pagerLeft
+            ?.select(HfrSelectors.TOP_PAGER_LINK)
+            ?.mapNotNull { it.text().trim().toIntOrNull() }
+            .orEmpty()
+        val total = maxOf(current, linkedPages.maxOrNull() ?: current)
+        return current to total
+    }
+
+    private fun isUnreadIcon(src: String): Boolean =
+        src.substringAfterLast('/').substringBeforeLast('.') == UNREAD_ICON
 
     private companion object {
         const val UNREAD_ICON = "closedbp"
+        val THREAD_ID_REGEX = Regex("""[?&]post=(\d+)""")
     }
 }

@@ -47,6 +47,8 @@ import fr.forumhfr.redface2.feature.forum.CategoryRequest
 import fr.forumhfr.redface2.feature.forum.ForumCategoryScreen
 import fr.forumhfr.redface2.feature.forum.ForumScreen
 import fr.forumhfr.redface2.feature.messages.MessagesScreen
+import fr.forumhfr.redface2.feature.messages.PrivateMessageThreadRequest
+import fr.forumhfr.redface2.feature.messages.PrivateMessageThreadScreen
 import fr.forumhfr.redface2.feature.profile.ProfilePreviewSheet
 import fr.forumhfr.redface2.feature.profile.ProfileRoute
 import fr.forumhfr.redface2.feature.profile.ProfileViewModel
@@ -71,6 +73,16 @@ data object SearchRoute : RedfaceNavKey
 
 @Serializable
 data object MessagesRoute : RedfaceNavKey
+
+@Serializable
+data class PrivateMessageThreadRoute(
+    val threadId: Int,
+    // Correspondent + subject are carried from the inbox row so the thread screen shows a
+    // meaningful title instantly and the parser has an authoritative correspondent fallback.
+    val correspondent: String,
+    val subject: String,
+    val page: Int = 1,
+) : RedfaceNavKey
 
 @Serializable
 data class CategoryRoute(
@@ -519,7 +531,34 @@ private fun RedfaceNavHost(
                 )
             }
             entry<MessagesRoute> {
-                MessagesScreen(topBarActions = accountMenu)
+                MessagesScreen(
+                    onOpenThread = { threadId, correspondent, subject ->
+                        backStack.add(
+                            PrivateMessageThreadRoute(
+                                threadId = threadId,
+                                correspondent = correspondent,
+                                subject = subject,
+                            ),
+                        )
+                    },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<PrivateMessageThreadRoute> { route ->
+                PrivateMessageThreadScreen(
+                    request = PrivateMessageThreadRequest(
+                        threadId = route.threadId,
+                        correspondent = route.correspondent,
+                        subject = route.subject,
+                        page = route.page,
+                    ),
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    topBarActions = accountMenu,
+                )
             }
             entry<SettingsRoute> {
                 SettingsScreen()

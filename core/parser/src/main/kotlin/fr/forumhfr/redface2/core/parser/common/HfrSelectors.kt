@@ -31,4 +31,16 @@ object HfrSelectors {
     const val POLL_OPTION_BAR = ".sondageLeft"
     const val POLL_OPTION_LABEL = ".sondageRight"
     const val POLL_OPTION_PERCENT = ".sondageTop"
+
+    // Private-message inbox listing (forum1.php?cat=prive). Each conversation is a
+    // `tr.sujet` row whose cells carry the read/unread icon, the subject link (which embeds
+    // the thread `post` id), the correspondent and the last-activity date. The list pager has
+    // the same `.left > b (current) + a.cHeader (links)` shape as the topic pager, only the
+    // wrapping row class differs (Forum1 vs Forum2), so it reuses TOP_PAGER_LEFT/CURRENT/LINK.
+    const val MP_LIST_ROW = "tr.sujet"
+    const val MP_LIST_ICON = "td.sujetCase1 img[src]"
+    const val MP_LIST_SUBJECT_LINK = "td.sujetCase3 a.cCatTopic"
+    const val MP_LIST_CORRESPONDENT = "td.sujetCase6 a"
+    const val MP_LIST_DATE = "td.sujetCase9 a"
+    const val MP_LIST_TOP_PAGER = "tr.fondForum1PagesHaut"
 }
