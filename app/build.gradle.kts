@@ -25,9 +25,11 @@ val hasCiSigningConfig =
 // the per-flavor defaults below apply.
 //   -PappLabel="Redface 2 β"  → forces the launcher label for the build (lets the prod flavor /
 //                                base applicationId carry the β/dev label on the Play track build).
-//   -PversionCodeOverride=N   → overrides versionCode for the dev channel only. Dev now uploads to
-//                                Play internal under the base applicationId AND to F-Droid `.dev`, so
-//                                the workflow computes an explicit code above the current base code.
+//   -PversionCodeOverride=N   → overrides versionCode for BOTH ship channels (beta+dev). The CD
+//                                (release.yml) computes N from the canonical git tag ledger
+//                                (max(app-v* tags, the floor below) + 1) and injects it into the Play
+//                                base-appId build AND the F-Droid suffixed build, so beta and dev
+//                                share one strictly-increasing versionCode sequence.
 val cliAppLabel = providers.gradleProperty("appLabel").orNull?.takeIf { it.isNotBlank() }
 val cliVersionCode = providers.gradleProperty("versionCodeOverride").orNull?.toIntOrNull()
 
@@ -36,10 +38,12 @@ android {
 
     defaultConfig {
         applicationId = "fr.forumhfr.redface2"
-        // Bump versionCode + versionName at every release. Play Console rejects any AAB
-        // whose versionCode is already uploaded, so this is the canonical source of truth
-        // (the local signing init-script no longer overrides these — it only injects the
-        // upload signing config).
+        // versionCode: the CANONICAL source at ship time is the git `app-v<N>` tag ledger — the CD
+        // injects `-PversionCodeOverride=max(app-v* tags, this floor)+1` (release.yml). The literal
+        // below is therefore (a) the value used by LOCAL builds without the prop, and (b) a SAFETY
+        // FLOOR for the CD: it must stay ≥ nothing-special but bumping it can never lower a shipped
+        // code. versionName is the human marketing version, decoupled from versionCode.
+        // (The local signing init-script does not override these — it only injects the upload config.)
         //
         // Naming convention (effective v39 / 0.2.0): pure semver `MAJOR.MINOR.PATCH`,
         // detached from the spec/site version (`docs/_config.yml`). The previous
