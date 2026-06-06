@@ -70,6 +70,21 @@ class TopicSwipeTest {
     }
 
     @Test
+    fun `an armed leftward distance wins over a contradictory rightward fling`() {
+        // Dragged firmly left past the commit distance (armed: page-follow, glow and haptic all say
+        // "next page"), then the finger flicked back rightward at lift-off (positive velocity over the
+        // fling threshold). The armed distance must win → next page, matching the feedback the user
+        // already saw; the reverse fling must NOT open the previous page.
+        assertEquals(true, swipeCommitDirection(totalDx = -250f, velocityX = 1500f, commitDistance, flingThreshold))
+    }
+
+    @Test
+    fun `an armed rightward distance wins over a contradictory leftward fling`() {
+        // Symmetric: dragged firmly right past the commit distance, finger flicked back leftward.
+        assertEquals(false, swipeCommitDirection(totalDx = 250f, velocityX = -1500f, commitDistance, flingThreshold))
+    }
+
+    @Test
     fun `a degenerate zero orientation is a no-op`() {
         assertNull(swipeCommitDirection(totalDx = 0f, velocityX = 0f, commitDistancePx = 0f, flingThresholdPx = 0f))
     }

@@ -50,10 +50,14 @@ internal fun swipeTargetPage(currentPage: Int, totalPages: Int, forward: Boolean
  * without a gesture clock. Edge clamping is the caller's job (via [swipeTargetPage]).
  *
  * Commit when the drag crossed EITHER the distance ([commitDistancePx]) or the fling velocity
- * ([flingThresholdPx]) threshold. Direction follows the **velocity** when a fling carried the commit,
- * otherwise the **distance** — so a fast flick that happens to lift on the wrong side of its start
- * (finger reversed) still goes the way it was thrown, and a near-zero displacement never picks an
- * unstable sign. Negative = leftward drag = next page (geometric, see [topicPageSwipe]).
+ * ([flingThresholdPx]) threshold. Direction priority is **distance first, then velocity**: once the
+ * drag has travelled past [commitDistancePx] it is "armed" and the page-follow, edge glow and arming
+ * haptic have already committed the user to the direction of [totalDx] — so the commit MUST follow
+ * that direction even if the finger flicked back the other way at lift-off (a fast reverse on release
+ * would otherwise open the opposite page and contradict every bit of feedback the user just saw).
+ * Velocity decides ONLY for a short gesture that never crossed the distance threshold (a quick flick
+ * that lifts on the wrong side of its start still goes the way it was thrown). A near-zero orientation
+ * never picks an unstable sign. Negative = leftward drag = next page (geometric, see [topicPageSwipe]).
  */
 internal fun swipeCommitDirection(
     totalDx: Float,
@@ -61,10 +65,11 @@ internal fun swipeCommitDirection(
     commitDistancePx: Float,
     flingThresholdPx: Float,
 ): Boolean? {
+    val committedByDistance = abs(totalDx) >= commitDistancePx
     val committedByFling = abs(velocityX) >= flingThresholdPx
     val orientation = when {
+        committedByDistance -> totalDx
         committedByFling -> velocityX
-        abs(totalDx) >= commitDistancePx -> totalDx
         else -> return null
     }
     return if (orientation == 0f) null else orientation < 0f
@@ -262,10 +267,14 @@ internal fun Modifier.topicPageSwipe(
                     overSlop = slop
                 } ?: return@awaitEachGesture
                 // A new drag cancels any release animation still running from the previous swipe.
-                // `stop()` is idempotent (a no-op on an idle `Animatable`), so call it unconditionally
-                // rather than gate on a `release.isRunning` read that could flip between the check and
-                // the launched `stop()` actually running; the drag writes `dragOffset` synchronously
-                // each frame and supersedes any last tick of the cancelled release.
+                // It MUST be `launch`-ed: `awaitEachGesture` runs in a `@RestrictsSuspension`
+                // `AwaitPointerEventScope`, which can only await suspend members of that scope — never
+                // `Animatable.stop()` — so the stop is handed to the (unrestricted) `animationScope`.
+                // Unconditional, no `release.isRunning` gate: `stop()` is a no-op on an idle
+                // `Animatable`, so dropping the check removes a TOCTOU read; the drag then writes
+                // `dragOffset` synchronously each frame and supersedes any final tick of the cancelled
+                // spring-back (bounded to at most one frame, since synchronous await is impossible
+                // here). A committed slide-out never reaches here (the `committed` latch returned above).
                 animationScope.launch { release.stop() }
                 var totalDx = overSlop
                 var armed = false
