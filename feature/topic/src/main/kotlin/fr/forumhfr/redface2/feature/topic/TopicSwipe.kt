@@ -100,11 +100,15 @@ internal fun Modifier.topicPageSwipe(
         } ?: return@awaitEachGesture
         var totalDx = overSlop
         velocityTracker.addPosition(drag.uptimeMillis, drag.position)
-        horizontalDrag(drag.id) { change ->
+        // `horizontalDrag` returns false when the drag is CANCELLED — e.g. a descendant horizontal
+        // scroller (a wide `[fixed]` code block, the page grid) takes the pointer over after we crossed
+        // slop. Honour it: a taken-over gesture must NOT navigate the page (Codex gpt-5.5 P2).
+        val completed = horizontalDrag(drag.id) { change ->
             totalDx += change.positionChange().x
             velocityTracker.addPosition(change.uptimeMillis, change.position)
             change.consume()
         }
+        if (!completed) return@awaitEachGesture
         val velocityX = velocityTracker.calculateVelocity().x
         swipeCommitDirection(totalDx, velocityX, commitDistancePx, flingThresholdPx)?.let { forward ->
             swipeTargetPage(currentPage, totalPages, forward)?.let(onOpenPage)
