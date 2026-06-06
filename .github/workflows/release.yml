@@ -1,32 +1,43 @@
 name: Release
 
-# Channel-routed CD (#233). Design: drafts/claude-cd-channels-labels-fdroid-design.md (rev. 2, Codex).
+# Channel-routed CD (#233, #304). Dispatch-only model:
+# - The publish channel is chosen via the `channel` input (beta | dev). There is NO release-event
+#   trigger any more — beta no longer needs a hand-published GitHub Release; both channels ship from
+#   a single "Run workflow" dispatch.
 # - Play: ONE app fr.forumhfr.redface2, ONE listing; the launcher label is set per build (-PappLabel)
 #   and the channel routes only the Play TRACK.
 # - F-Droid: distinct applicationId per channel (.beta/.dev) = distinct, COEXISTING F-Droid apps.
-#   The two stores are independent artifacts, so one channel is base-appId on Play AND suffixed on F-Droid.
 #
-#   GitHub Release prerelease, tag app-v<N>  → BETA : Play open testing (base appId, label "Redface 2 β")
-#                                                     + F-Droid package fr.forumhfr.redface2.beta
-#   GitHub Release stable,    tag app-v<N>   → PROD (deferred, gated): Play production + F-Droid base
-#   workflow_dispatch                        → DEV  : Play internal (base appId, label "Redface 2 dev")
-#                                                     + F-Droid package fr.forumhfr.redface2.dev. The run
-#                                                     AUTO-CREATES a prerelease Release app-dev-v<run> that
-#                                                     carries the .dev APK, so the F-Droid publisher (which
-#                                                     downloads from a Release) has a source. → package …​.dev
+#   channel=beta → Play open testing (base appId, label "Redface 2 β")  + F-Droid fr.forumhfr.redface2.beta
+#   channel=dev  → Play internal     (base appId, label "Redface 2 dev") + F-Droid fr.forumhfr.redface2.dev
+#
+# versionCode (CANONICAL LEDGER): a single monotonic counter SHARED by beta and dev — the set of
+# `app-v<N>` git tags IS the ledger. Each ship computes `versionCode = max(app-v* tags, build.gradle
+# floor) + 1`, so beta and dev interleave on one strictly-increasing sequence (no manual bump, no
+# beta-vs-dev inversion). The run creates a prerelease `app-v<N>` carrying the signed artefacts, so
+# the F-Droid publisher (which downloads from a Release) has a source. `concurrency` serialises runs
+# so two dispatches never allocate the same code. Prod/stable is deferred (#302/#304) — set aside.
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
+      channel:
+        description: 'Canal de publication'
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - beta
       ref:
-        description: 'Branch/tag to build for the dev channel (default: current ref)'
+        description: 'Branch/tag à builder (défaut: ref courant)'
         required: false
         default: ''
         type: string
 
+# Single global group: serialise ALL ship runs so the tag-ledger versionCode allocation is atomic
+# (two parallel dispatches must not both read the same max and allocate the same code).
 concurrency:
-  group: release-${{ github.event.release.tag_name || github.ref }}
+  group: release
   cancel-in-progress: false
 
 permissions:
@@ -35,14 +46,11 @@ permissions:
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────
-  # Single source of truth for routing. The release-event gate requires tag `app-v*`, which EXCLUDES
-  # both the specs `v0.x` Releases and the auto-created `app-dev-v*` dev Releases (those start with
-  # "app-dev", not "app-v"): dev is handled wholly by the dispatch run that creates them, so their
-  # published event is a deliberate no-op. A dispatch always proceeds.
+  # Routing: map the `channel` input → Play track + F-Droid package + label. No versionCode here
+  # (it needs the checkout/tags, resolved in the build job's meta step).
   # ──────────────────────────────────────────────────────────────────────
   resolve-target:
     name: Resolve channel target
-    if: ${{ github.event_name != 'release' || startsWith(github.event.release.tag_name, 'app-v') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -56,65 +64,43 @@ jobs:
       fdroid_dir: ${{ steps.r.outputs.fdroid_dir }}
       fdroid_package: ${{ steps.r.outputs.fdroid_package }}
       fdroid_channel: ${{ steps.r.outputs.fdroid_channel }}
-      version_code_override: ${{ steps.r.outputs.version_code_override }}
-      creates_dev_release: ${{ steps.r.outputs.creates_dev_release }}
-      release_tag: ${{ steps.r.outputs.release_tag }}
       build_ref: ${{ steps.r.outputs.build_ref }}
-      is_release_event: ${{ steps.r.outputs.is_release_event }}
     steps:
       - id: r
         shell: bash
         # GitHub-expressions through env, NEVER interpolated into the script body (the dispatch ref is
         # user-controlled; `${{ }}` substitution happens before bash runs).
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          PRERELEASE: ${{ github.event.release.prerelease }}
-          TAG_NAME: ${{ github.event.release.tag_name }}
+          CHANNEL_INPUT: ${{ inputs.channel }}
           DISPATCH_REF: ${{ inputs.ref }}
-          RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          # Validate user-controlled values BEFORE they reach $GITHUB_OUTPUT (a newline could inject
+          # Validate the user-controlled ref BEFORE it reaches $GITHUB_OUTPUT (a newline could inject
           # extra output lines and reroute the deploy).
           if [[ -n "${DISPATCH_REF:-}" && ! "$DISPATCH_REF" =~ ^[A-Za-z0-9._/-]+$ ]]; then
             echo "::error::Invalid dispatch ref '${DISPATCH_REF}' — only [A-Za-z0-9._/-] allowed."
             exit 1
           fi
-          if [[ "$EVENT_NAME" == "release" && ! "$TAG_NAME" =~ ^app-v[A-Za-z0-9._-]+$ ]]; then
-            echo "::error::Unexpected release tag '${TAG_NAME}' — expected app-v[A-Za-z0-9._-]+."
-            exit 1
-          fi
           # The PLAY artifact is ALWAYS the base applicationId (prod flavor); only label + track vary.
           play_package=fr.forumhfr.redface2
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            channel=dev
-            app_label="Redface 2 dev"
-            play_upload=true; play_track=internal; play_status=completed
-            fdroid_flavor=Dev; fdroid_dir=dev; fdroid_package=fr.forumhfr.redface2.dev; fdroid_channel=dev
-            # Resolved after checkout from the tracked base versionCode + run_number. Play uses the base
-            # appId for dev too, so the code must be above the current beta/prod code, not just run_number.
-            version_code_override=""
-            creates_dev_release=true
-            release_tag="app-dev-v${RUN_NUMBER}"
-            build_ref="$DISPATCH_REF"
-            is_release_event=false
-          elif [[ "$PRERELEASE" == "true" ]]; then
-            channel=beta
-            app_label="Redface 2 β"
-            play_upload=true; play_track=beta; play_status=completed
-            fdroid_flavor=Beta; fdroid_dir=beta; fdroid_package=fr.forumhfr.redface2.beta; fdroid_channel=beta
-            version_code_override=""
-            creates_dev_release=false
-            release_tag="$TAG_NAME"; build_ref="refs/tags/$TAG_NAME"; is_release_event=true
-          else
-            channel=prod
-            app_label=""                          # default → @string/app_name ("Redface 2")
-            play_upload=true; play_track=production; play_status=draft
-            fdroid_flavor=Prod; fdroid_dir=prod; fdroid_package=fr.forumhfr.redface2; fdroid_channel=release
-            version_code_override=""
-            creates_dev_release=false
-            release_tag="$TAG_NAME"; build_ref="refs/tags/$TAG_NAME"; is_release_event=true
-          fi
+          case "$CHANNEL_INPUT" in
+            beta)
+              channel=beta
+              app_label="Redface 2 β"
+              play_upload=true; play_track=beta; play_status=completed
+              fdroid_flavor=Beta; fdroid_dir=beta; fdroid_package=fr.forumhfr.redface2.beta; fdroid_channel=beta
+              ;;
+            dev)
+              channel=dev
+              app_label="Redface 2 dev"
+              play_upload=true; play_track=internal; play_status=completed
+              fdroid_flavor=Dev; fdroid_dir=dev; fdroid_package=fr.forumhfr.redface2.dev; fdroid_channel=dev
+              ;;
+            *)
+              echo "::error::Unsupported channel '${CHANNEL_INPUT}' — expected 'beta' or 'dev'."
+              exit 1
+              ;;
+          esac
           {
             echo "channel=$channel"
             echo "app_label=$app_label"
@@ -126,32 +112,13 @@ jobs:
             echo "fdroid_dir=$fdroid_dir"
             echo "fdroid_package=$fdroid_package"
             echo "fdroid_channel=$fdroid_channel"
-            echo "version_code_override=$version_code_override"
-            echo "creates_dev_release=$creates_dev_release"
-            echo "release_tag=$release_tag"
-            echo "build_ref=$build_ref"
-            echo "is_release_event=$is_release_event"
+            echo "build_ref=$DISPATCH_REF"
           } >> "$GITHUB_OUTPUT"
-          echo "::notice title=Release target::channel=$channel label='${app_label:-<default>}' play=$play_upload track=${play_track:-none} fdroid=$fdroid_channel/$fdroid_package tag=$release_tag ref=${build_ref:-<current>}"
-
-  # prod-only manual approval gate (dedicated job so a non-prod channel doesn't hit an empty
-  # `environment:` reference). Skipped for beta/dev.
-  await-prod-approval:
-    name: Await production approval
-    needs: resolve-target
-    if: ${{ needs.resolve-target.outputs.channel == 'prod' }}
-    runs-on: ubuntu-24.04
-    environment: production
-    timeout-minutes: 4320
-    steps:
-      - env:
-          RELEASE_TAG: ${{ needs.resolve-target.outputs.release_tag }}
-        run: echo "Production deploy approved for ${RELEASE_TAG}."
+          echo "::notice title=Release target::channel=$channel label='${app_label}' play=$play_upload track=$play_track fdroid=$fdroid_channel/$fdroid_package ref=${DISPATCH_REF:-<current>}"
 
   build:
     name: Build, sign and publish (${{ needs.resolve-target.outputs.channel }})
-    needs: [resolve-target, await-prod-approval]
-    if: ${{ always() && needs.resolve-target.result == 'success' && (needs.resolve-target.outputs.channel != 'prod' || needs.await-prod-approval.result == 'success') }}
+    needs: [resolve-target]
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31
@@ -161,6 +128,7 @@ jobs:
       version_name: ${{ steps.meta.outputs.version_name }}
       short_sha: ${{ steps.meta.outputs.short_sha }}
       full_sha: ${{ steps.meta.outputs.full_sha }}
+      release_tag: ${{ steps.meta.outputs.release_tag }}
       fdroid_apk: ${{ steps.artefacts.outputs.fdroid_apk_filename }}
     env:
       APP_LABEL: ${{ needs.resolve-target.outputs.app_label }}
@@ -172,50 +140,52 @@ jobs:
       FDROID_DIR: ${{ needs.resolve-target.outputs.fdroid_dir }}
       FDROID_PACKAGE: ${{ needs.resolve-target.outputs.fdroid_package }}
       CHANNEL: ${{ needs.resolve-target.outputs.channel }}
-      VERSION_CODE_OVERRIDE: ${{ needs.resolve-target.outputs.version_code_override }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.resolve-target.outputs.build_ref || github.ref }}
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Trust workspace for git
         shell: bash
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Resolve version metadata
+      - name: Resolve version metadata (canonical tag ledger)
         id: meta
         shell: bash
-        env:
-          RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          base_version_code=$(grep -E '^[[:space:]]+versionCode[[:space:]]*=' app/build.gradle.kts | head -1 | grep -oE '[0-9]+' | tail -1)
-          [[ -n "$base_version_code" ]] || { echo "::error::base versionCode unresolved"; exit 1; }
-          if [[ -n "${VERSION_CODE_OVERRIDE:-}" ]]; then
-            version_code="$VERSION_CODE_OVERRIDE"
-          elif [[ "${CHANNEL}" == "dev" ]]; then
-            # Dev uploads to the Play `internal` track under the base applicationId, so it burns
-            # Play versionCodes from the same namespace as beta/prod. `run_number` alone was below
-            # the already-published beta code; base+run is monotonic for dev runs while keeping the
-            # value obvious. Next beta tag must be bumped above the latest dev code.
-            version_code=$((base_version_code + RUN_NUMBER))
-          else
-            version_code="$base_version_code"
-          fi
+          # CANONICAL versionCode = max(app-v* tag ledger, build.gradle.kts floor) + 1.
+          # The git `app-v<N>` tags are the running ledger (shared by beta+dev). The build.gradle.kts
+          # versionCode is a SAFETY FLOOR for the all-tags-missing case only.
+          # FAIL CLOSED on a fetch error: once the ledger has advanced past the floor, allocating from a
+          # stale/partial tag set would reuse or lower a code (Play rejects, F-Droid stops updating). The
+          # tags are the source of truth, so a refresh failure must abort, not silently fall back (Codex P2).
+          git fetch --tags --force --prune origin >/dev/null 2>&1 || {
+            echo "::error::tag ledger fetch failed — refusing to allocate a versionCode from possibly stale tags"
+            exit 1
+          }
+          base_code=$(grep -E '^[[:space:]]+versionCode[[:space:]]*=' app/build.gradle.kts | head -1 | grep -oE '[0-9]+' | tail -1)
+          [[ -n "$base_code" ]] || { echo "::error::base versionCode unresolved from build.gradle.kts"; exit 1; }
+          ledger_code=$(git tag -l 'app-v*' | sed -nE 's/^app-v([0-9]+)$/\1/p' | sort -n | tail -1)
+          ledger_code=${ledger_code:-0}
+          floor=$(( ledger_code > base_code ? ledger_code : base_code ))
+          version_code=$(( floor + 1 ))
           version_name=$(grep -E '^[[:space:]]+versionName[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*"(.*)".*/\1/')
           short_sha=$(git rev-parse --short HEAD)
           full_sha=$(git rev-parse HEAD)
-          [[ -n "$version_code" ]] || { echo "::error::versionCode unresolved"; exit 1; }
+          release_tag="app-v${version_code}"
           [[ -n "$version_name" ]] || { echo "::error::versionName unresolved"; exit 1; }
           {
             echo "version_code=$version_code"
             echo "version_name=$version_name"
             echo "short_sha=$short_sha"
             echo "full_sha=$full_sha"
+            echo "release_tag=$release_tag"
           } >> "$GITHUB_OUTPUT"
-          echo "::notice title=Build::channel=${CHANNEL} versionCode=${version_code} versionName=${version_name} sha=${short_sha} label='${APP_LABEL:-<default>}'"
+          echo "::notice title=Build::channel=${CHANNEL} versionCode=${version_code} (ledger=${ledger_code} floor=${base_code}) versionName=${version_name} tag=${release_tag} sha=${short_sha} label='${APP_LABEL:-<default>}'"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
@@ -269,21 +239,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          GRADLE_ARGS=(--no-daemon --stacktrace)
+          # Both channels now carry a ledger-allocated versionCode → always inject the override (into
+          # the F-Droid flavor AND the Play prod-flavor build, which share GRADLE_ARGS).
+          GRADLE_ARGS=(--no-daemon --stacktrace "-PversionCodeOverride=${EFFECTIVE_VERSION_CODE}")
           [[ -n "${APP_LABEL:-}" ]] && GRADLE_ARGS+=("-PappLabel=${APP_LABEL}")
-          if [[ "${CHANNEL}" == "dev" ]]; then
-            GRADLE_ARGS+=("-PversionCodeOverride=${EFFECTIVE_VERSION_CODE}")
-          fi
-          # F-Droid artefact: the channel flavor (suffixed appId, except prod=base). dev gets a
-          # computed override so each dispatch is a new F-Droid version and the Play internal
-          # artefact uses the same visible build number.
+          # F-Droid artefact: the channel flavor (suffixed appId .beta/.dev).
           ./gradlew ":app:assemble${FDROID_FLAVOR}Release" "${GRADLE_ARGS[@]}"
-          # Play artefact: base applicationId (prod flavor), only for channels that upload to Play.
+          # Play artefact: base applicationId (prod flavor), uploaded to the channel's track.
           if [[ "${PLAY_UPLOAD}" == "true" ]]; then
             ./gradlew ":app:bundleProdRelease" ":app:assembleProdRelease" "${GRADLE_ARGS[@]}"
           fi
 
-      - name: Verify signatures + package/label (CI check)
+      - name: Verify signatures + package/label/versionCode (CI check)
         shell: bash
         run: |
           set -euo pipefail
@@ -301,9 +268,9 @@ jobs:
             badging="$("$AAPT2" dump badging "$apk")"
             grep -q "package: name='${want_pkg}'" <<<"$badging" || {
               echo "::error::${apk}: package mismatch (want ${want_pkg})"; grep '^package:' <<<"$badging"; exit 1; }
-            # Assert the BUILT versionCode matches what we advertise (Codex P2): a dispatch on a ref
-            # without -PversionCodeOverride support would silently keep the checked-out code while we
-            # report run_number for naming + the F-Droid dispatch → duplicate/non-monotonic dev versions.
+            # Assert the BUILT versionCode matches the ledger code we advertise: a ref that lacks
+            # -PversionCodeOverride support would silently keep the checked-out code, diverging from the
+            # code we tag, upload to Play and tell F-Droid.
             vc="$(sed -nE "s/.*versionCode='([0-9]+)'.*/\1/p" <<<"$badging" | head -1)"
             [[ "$vc" == "$EXPECTED_VC" ]] || {
               echo "::error::${apk}: versionCode mismatch (apk=${vc}, expected=${EXPECTED_VC}) — ref may lack -PversionCodeOverride support"; exit 1; }
@@ -330,7 +297,7 @@ jobs:
           set -euo pipefail
           mkdir -p release-artefacts
           V="v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}"
-          # F-Droid APK (suffixed appId, except prod=base) — what redface2-fdroid downloads from the Release.
+          # F-Droid APK (suffixed appId) — what redface2-fdroid downloads from the Release.
           fdroid_apk="$(ls app/build/outputs/apk/${FDROID_DIR}/release/*.apk | head -1)"
           fdroid_dest="release-artefacts/redface2-fdroid-${CHANNEL}-${V}.apk"
           cp "$fdroid_apk" "$fdroid_dest"
@@ -352,8 +319,36 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
+      - name: Create GitHub Release (ledger tag + artifact source for F-Droid)
+        # LEDGER-FIRST (Codex P2): the app-v<N> tag IS the versionCode ledger, so it must be persisted
+        # BEFORE any Play side effect. If we tagged AFTER Play, a successful Play upload followed by a
+        # runner cancellation / GitHub API failure would consume the code on Play without recording it →
+        # the next dispatch recomputes the same code and Play rejects it. Creating the tag first makes
+        # failure safe: either the tag exists (code consumed, move on) or it doesn't (code free, clean
+        # retry), and Play runs only once the allocation is durably recorded. always() + staged guard so
+        # the signed artefacts are always attached. No `on: release` trigger exists → the published event
+        # cannot re-enter this workflow.
+        if: ${{ always() && steps.artefacts.outcome == 'success' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.release_tag }}
+          # The COMMIT ACTUALLY BUILT (the checked-out HEAD), not github.sha — a dispatch with `ref`
+          # set to another branch/tag builds that ref, so tagging github.sha would break provenance.
+          target_commitish: ${{ steps.meta.outputs.full_sha }}
+          name: ${{ needs.resolve-target.outputs.app_label }} (build ${{ steps.meta.outputs.version_code }})
+          body: |
+            Build automatique — canal **${{ needs.resolve-target.outputs.channel }}**.
+            Play track `${{ needs.resolve-target.outputs.play_track }}` + F-Droid `${{ needs.resolve-target.outputs.fdroid_package }}`.
+            versionCode ${{ steps.meta.outputs.version_code }} · versionName ${{ steps.meta.outputs.version_name }} · ${{ steps.meta.outputs.short_sha }}.
+            Non destiné au grand public.
+          prerelease: true
+          files: release-artefacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish to Play Console
-        # Only channels with play_upload (beta/dev/prod). Skips cleanly when the SA secret is absent.
+        # beta → track `beta`, dev → track `internal`. Runs AFTER the ledger tag is recorded (above), so
+        # a Play upload never consumes a code that isn't in the ledger. Skips cleanly when SA is absent.
         if: ${{ env.PLAY_UPLOAD == 'true' && steps.service_account.outputs.path != '' }}
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5  # v1.1.5
         with:
@@ -369,44 +364,9 @@ jobs:
         shell: bash
         run: rm -f "${RUNNER_TEMP}/upload.jks" "${RUNNER_TEMP}/play-service-account.json" || true
 
-      - name: Create dev pre-release (dev channel)
-        # dev has no Release of its own; create one (tag app-dev-v<run>) so the F-Droid publisher has a
-        # source. always() + staged guard so a Play hiccup never hides the signed artefacts. Its published event
-        # is a no-op (resolve-target requires app-v*, which app-dev-v* does not match).
-        if: ${{ always() && needs.resolve-target.outputs.creates_dev_release == 'true' && steps.artefacts.outcome == 'success' }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.resolve-target.outputs.release_tag }}
-          # The COMMIT ACTUALLY BUILT (the checked-out HEAD), not github.sha — a dispatch with `ref`
-          # set to another branch/tag builds that ref, so tagging github.sha would break provenance.
-          target_commitish: ${{ steps.meta.outputs.full_sha }}
-          name: Redface 2 dev (build ${{ steps.meta.outputs.version_code }})
-          body: "Build dev automatique (canal interne Play + F-Droid `.dev`). Non destiné au grand public."
-          prerelease: true
-          files: release-artefacts/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Attach artefacts to the GitHub Release (beta/prod)
-        # The Release already exists (the maintainer published it = the trigger); UPDATE it with the
-        # signed AAB+APK (Play base) and the F-Droid suffixed APK. always() + staged guard so the assets
-        # are attached even if the Play upload step failed (the documented recovery path).
-        if: ${{ always() && needs.resolve-target.outputs.is_release_event == 'true' && steps.artefacts.outcome == 'success' }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.resolve-target.outputs.release_tag }}
-          files: |
-            release-artefacts/*.aab
-            release-artefacts/*.apk
-          # Preserve the pre-release flag on update (softprops defaults it to false otherwise).
-          prerelease: ${{ needs.resolve-target.outputs.channel == 'beta' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   # ──────────────────────────────────────────────────────────────────────
-  # Notify redface2-fdroid (beta/dev/release — never 'none'). Plain ubuntu runner (native gh, #219).
-  # always() + explicit result checks: the skipped prod-gate job otherwise poisons the implicit
-  # success() through `build` and silently skips this job (the bug that left F-Droid stuck at v68).
+  # Notify redface2-fdroid (beta/dev). Plain ubuntu runner (native gh, #219).
+  # always() + explicit result checks so a transient skip upstream never silently drops the notify.
   # ──────────────────────────────────────────────────────────────────────
   notify-fdroid:
     name: Notify F-Droid publisher
@@ -426,7 +386,7 @@ jobs:
       - name: Trigger F-Droid publish
         env:
           GH_TOKEN: ${{ steps.fdroid_app_token.outputs.token }}
-          TAG: ${{ needs.resolve-target.outputs.release_tag }}
+          TAG: ${{ needs.build.outputs.release_tag }}
           CHANNEL: ${{ needs.resolve-target.outputs.fdroid_channel }}
           PACKAGE_NAME: ${{ needs.resolve-target.outputs.fdroid_package }}
           APK_FILENAME: ${{ needs.build.outputs.fdroid_apk }}

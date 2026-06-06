@@ -7,30 +7,41 @@ nav_order: 5
 
 # Release et publication Play Console
 
-Comment construire les artefacts signés et les publier sur le bon canal depuis GitHub Actions. **Depuis #233, le canal est déterminé par le déclencheur.** Deux modèles distincts car **Play et F-Droid sont des stores indépendants** (artefacts séparés) :
+Comment construire les artefacts signés et les publier sur le bon canal depuis GitHub Actions. **Depuis #304, un seul déclencheur : `workflow_dispatch` avec un input `channel` (`beta` | `dev`).** Plus de GitHub Release à publier à la main. Deux modèles de distribution distincts car **Play et F-Droid sont des stores indépendants** (artefacts séparés) :
 
 - **Play** : **une seule app** (`fr.forumhfr.redface2`, un seul applicationId), distribuée via **tracks**. Le **label du lanceur** change par build (`-PappLabel`), pas l'applicationId.
-- **F-Droid** : **un applicationId par canal** (`.beta`/`.dev`/base) → des **apps distinctes coexistantes** (F-Droid indexe par package, pas de tracks).
+- **F-Droid** : **un applicationId par canal** (`.beta`/`.dev`) → des **apps distinctes coexistantes** (F-Droid indexe par package, pas de tracks).
 
-| Déclencheur | Canal | Play | F-Droid |
-|---|---|---|---|
-| GitHub Release **pre-release** `app-v<N>` | **beta** | `fr.forumhfr.redface2`, label « Redface 2 β », track **open testing** | package `fr.forumhfr.redface2.beta` (« Redface 2 β ») |
-| **`workflow_dispatch`** | **dev** | `fr.forumhfr.redface2`, label « Redface 2 dev », track **internal testing** | package `fr.forumhfr.redface2.dev` (« Redface 2 dev ») |
-| GitHub Release **stable** `app-v<N>` *(différé)* | **prod** | track **production** (`draft`, après gate `production`) | package base `fr.forumhfr.redface2` |
+| Input `channel` | Play | F-Droid |
+|---|---|---|
+| **`beta`** | `fr.forumhfr.redface2`, label « Redface 2 β », track **open testing** | package `fr.forumhfr.redface2.beta` (« Redface 2 β ») |
+| **`dev`** | `fr.forumhfr.redface2`, label « Redface 2 dev », track **internal testing** | package `fr.forumhfr.redface2.dev` (« Redface 2 dev ») |
 
-En pratique pré-1.0, les canaux actifs sont **beta** et **dev**. Le canal **prod/release** reste codé et documenté, mais il est différé : ne pas publier de Release GitHub stable tant que la beta n'est pas jugée prête.
+Le canal **prod/stable** est **mis de côté pour l'instant** (#302/#304) : il n'est plus câblé dans le workflow. Sa conception (gate d'approbation `production` + track production) reste récupérable dans l'historique git.
 
-Le canal **dev** n'a pas de Release maintainer propre : le run dispatch **auto-crée une Release pre-release `app-dev-v<run_number>`** (avec les artefacts signés, dont l'APK F-Droid `.dev`) pour que le publisher F-Droid ait une source. Côté Play, dev utilise le **même applicationId** que beta/prod (`fr.forumhfr.redface2`) sur le track `internal`, donc il consomme aussi le namespace Play des `versionCode`.
+**Chaque dispatch crée lui-même une Release pre-release `app-v<N>`** portant les artefacts signés (AAB Play + APK F-Droid du canal), pour que le publisher F-Droid ait une source. Comme le workflow n'a plus de trigger `on: release`, cette Release auto-créée ne re-déclenche rien.
 
-⚠️ **Le tag `app-v<N>` seul ne déclenche plus la CD** : il faut **publier une GitHub Release** (pre-release pour beta, stable pour prod). Une Release dont le tag ne commence pas par `app-v` (les `v0.x` specs **et** les `app-dev-v*` auto-créées) est **ignorée** (gate `resolve-target`).
+### versionCode — registre canonique partagé (le cœur du modèle)
+
+Le `versionCode` est un **compteur unique, monotone, partagé par beta ET dev** : l'ensemble des tags git **`app-v<N>`** EST le registre. À chaque ship, la CD calcule :
+
+```
+versionCode = max( plus grand tag app-v<N> , plancher versionCode de build.gradle.kts ) + 1
+```
+
+Conséquences :
+- **Aucun bump manuel** : un dispatch beta ou dev alloue automatiquement le code suivant et tague `app-v<N>`.
+- **Pas d'inversion beta↔dev** : les deux canaux tirent du **même** registre, donc la suite est globalement croissante quel que soit l'ordre des ships. (Play partage le namespace `versionCode` entre tracks d'une même app → c'est exactement ce qu'il faut.)
+- **Plancher de sécurité** : le `versionCode` de `app/build.gradle.kts` sert de borne basse — si le fetch des tags échouait, on n'émet jamais un code inférieur au dernier shippé (qui ferait rejeter Play / bloquer F-Droid).
+- Le `versionName` (`app/build.gradle.kts`) reste la version « marketing » humaine, **découplée** du `versionCode`.
 
 Workflow source : [`.github/workflows/release.yml`](https://github.com/ForumHFR/redface2/blob/main/.github/workflows/release.yml).
 
 ## Conventions
 
-- **Tag namespace** : les releases app utilisent `app-v<versionCode>` (ex: `app-v32`, `app-v33`). Cela évite de collisionner avec les tags `v0.x.0` du site / des specs.
-- **Tag dev** : le canal dev utilise `app-dev-v<run_number>` (auto-créé par le run dispatch), distinct de `app-v<N>` pour ne pas re-déclencher la CD.
-- **Routing (figé dans `resolve-target`)** : prerelease → beta (Play track `beta` + F-Droid `.beta`) ; dispatch → dev (Play track `internal` + F-Droid `.dev`) ; stable → prod différé (Play track `production`, gate + F-Droid base). Le **label** (`-PappLabel`) et le **versionCode** (`-PversionCodeOverride`, dev seulement) sont injectés au build ; un **check CI** (`aapt2 dump badging`) vérifie package + label de chaque APK avant publication.
+- **Tag = registre** : chaque ship (beta ou dev) crée un tag `app-v<versionCode>` (ex: `app-v73`). Cet ensemble de tags est la source canonique du compteur. (Les `v0.x.0` du site/specs et les anciens `app-dev-v*` ne matchent pas `^app-v[0-9]+$` et sont ignorés du calcul.)
+- **Routing (`resolve-target`)** : `channel=beta` → Play track `beta` + F-Droid `.beta` ; `channel=dev` → Play track `internal` + F-Droid `.dev`. Le **label** (`-PappLabel`) et le **versionCode** (`-PversionCodeOverride`, calculé depuis le registre) sont injectés au build des deux artefacts ; un **check CI** (`aapt2 dump badging`) vérifie package + label + **versionCode** de chaque APK avant publication.
+- **Sérialisation** : le `concurrency: group: release` (sans `cancel-in-progress`) sérialise les runs pour que deux dispatches n'allouent jamais le même code.
 
 ## Pré-requis (à faire une fois)
 
@@ -80,55 +91,45 @@ Le workflow refuse de tourner si `UPLOAD_KEYSTORE_BASE64` est manquant (un build
 
 ## Flux beta — open testing (public)
 
-1. Bumper `versionCode` + `versionName` dans `app/build.gradle.kts` (sur `main`), mettre à jour `app/CHANGELOG.md`, merger la PR de release.
-2. Sur `main`, **publier une GitHub Release pre-release** sur un tag `app-v<N>` :
+**GitHub → Actions → Release → Run workflow → `channel = beta`** (ou `gh workflow run release.yml -f channel=beta`). La CD :
 
-```bash
-git switch main && git pull --ff-only
-gh release create app-v72 --prerelease --title 'Redface 2 v72 (0.4.0-beta)' --notes '…'
-```
+- alloue le `versionCode` depuis le registre de tags (`max(app-v*, plancher)+1`) ;
+- build `:app:bundleProdRelease -PappLabel="Redface 2 β" -PversionCodeOverride=<N>` (Play, base appId, label β) + `:app:assembleBetaRelease -PversionCodeOverride=<N>` (F-Droid, `fr.forumhfr.redface2.beta`) ;
+- upload Play sur le **track `beta` (open testing)** en `completed` ;
+- crée la Release pre-release `app-v<N>` avec AAB+APK Play **et** l'APK F-Droid `.beta` ;
+- notifie F-Droid (package `.beta`).
 
-La CD résout **beta** : build `:app:bundleProdRelease -PappLabel="Redface 2 β"` (Play, base appId, label β) + `:app:assembleBetaRelease` (F-Droid, `fr.forumhfr.redface2.beta`). Upload Play sur le **track `beta` (open testing)** `completed`, attache AAB+APK Play **et** l'APK F-Droid `.beta` à la Release, notifie F-Droid (package `.beta`).
-
-## Flux prod — production
-
-Idem mais **Release stable** (case « pre-release » décochée) :
-
-```bash
-gh release create app-v73 --title 'Redface 2 v73 (1.0.0)' --notes '…'
-```
-
-La CD résout **prod** et **attend l'approbation** dans l'Environment GitHub `production` (required reviewer) avant tout build/upload. Build `:app:bundleProdRelease` (label par défaut « Redface 2 »), upload sur le **track `production`** en **statut `draft`** (double garde-fou : approbation GitHub + activation manuelle Play). F-Droid : package base `fr.forumhfr.redface2`. **Différé** : aucune Release stable n'est publiée tant que la beta n'est pas validée.
+Plus besoin de bumper `versionCode` à la main ni de publier une Release : le dispatch fait tout. (Mettre à jour `app/CHANGELOG.md` + `versionName` reste utile pour une vraie montée de version marketing.)
 
 ## Flux dev — Play internal + F-Droid `.dev` (rapide)
 
-**GitHub → Actions → Release → Run workflow** (ou `gh workflow run release.yml -f ref=<branche>`). La CD résout **dev** :
+**GitHub → Actions → Release → Run workflow → `channel = dev`** (défaut ; ou `gh workflow run release.yml -f channel=dev -f ref=<branche>`). Identique au flux beta mais :
 
-- Play : build `:app:bundleProdRelease -PappLabel="Redface 2 dev" -PversionCodeOverride=<code_dev>` (`fr.forumhfr.redface2`), upload sur track **`internal`** en `completed`.
-- F-Droid : build `:app:assembleDevRelease -PappLabel="Redface 2 dev" -PversionCodeOverride=<code_dev>` (`fr.forumhfr.redface2.dev`), auto-crée une Release pre-release `app-dev-v<run_number>` avec les artefacts signés, puis notifie F-Droid (package `.dev`).
+- Play : track **`internal`** au lieu de `beta`, label « Redface 2 dev ».
+- F-Droid : `:app:assembleDevRelease` → package `fr.forumhfr.redface2.dev`.
 
-Seul input : `ref` (défaut = ref courant). Les artefacts sont aussi téléchargeables depuis le run Actions (30 j) pour le sideload.
+Inputs : `channel` (`dev` par défaut) et `ref` (défaut = ref courant, pour builder une branche). Les artefacts sont aussi téléchargeables depuis le run Actions (30 j) pour le sideload.
 
-ℹ️ **versionCode dev** : le track Play `internal` partage le namespace de `versionCode` avec `beta` et `production`, car c'est la même app `fr.forumhfr.redface2`. La CD calcule donc le code dev après checkout : `versionCode` suivi dans `app/build.gradle.kts` + `github.run_number`. Cela évite le cas réel où `run_number` seul était inférieur au dernier build Play. Conséquence assumée : un build dev **brûle** un `versionCode` Play ; le prochain tag beta `app-v<N>` doit avoir `N` strictement supérieur au dernier code dev publié.
+## Flux prod — production (différé)
+
+**Mis de côté pour l'instant** (#302/#304). Le workflow ne propose plus que `beta`/`dev`. Quand on voudra (re)brancher la production (gate d'approbation `production` + track `production` en `draft`), repartir de la conception conservée dans l'historique git du workflow et dans le draft `drafts/claude-cd-channels-labels-fdroid-design.md`.
 
 ## Bump de version : convention
 
-Le `versionCode` est strictement croissant. Play Console rejette tout AAB dont le `versionCode` a déjà été uploadé (sur n'importe quel track), même si la release a été archivée. Un slot consommé est consommé.
+Le `versionCode` est strictement croissant et **géré automatiquement** par le registre de tags `app-v<N>` (cf. § versionCode ci-dessus). Play Console rejette tout AAB dont le `versionCode` a déjà été uploadé (sur n'importe quel track) — le registre garantit qu'on n'en réutilise jamais un.
 
 | Cas | Action |
 |---|---|
-| Release officielle Phase N+1 | bump majeur du `versionName` (ex: `0.1.0-phase1.4` → `0.2.0-phase2.0`) |
-| Release intermédiaire dans la même phase | bump du suffixe (ex: `0.1.0-phase1.1` → `0.1.0-phase1.2`) |
-| Build dev Play internal | pas besoin de PR de bump avant le dispatch ; la CD injecte un code dev. En revanche, le prochain `app-v<N>` beta doit être supérieur au dernier code dev consommé. |
-| Build dogfood non distribué hors Play | bumper malgré tout si distribué publiquement, marquer comme `burnt` dans `app/CHANGELOG.md` si un slot Play a été consommé |
+| Ship beta ou dev | **rien à faire** côté `versionCode` : la CD alloue le suivant depuis le registre et tague `app-v<N>`. |
+| Montée de version marketing (Phase N+1, milestone) | bumper le `versionName` dans `app/build.gradle.kts` + `app/CHANGELOG.md` via PR. Le `versionCode` reste piloté par le registre. |
+| Plancher `versionCode` de `build.gradle.kts` | ne le baisser jamais ; il sert de borne basse de sécurité. Le bumper est inutile en régime normal (le registre est au-dessus). |
 
 ## Promotion entre tracks
 
-Comme tout est l'app unique `fr.forumhfr.redface2`, **la promotion native Play fonctionne** entre ses tracks (internal → open testing → production). Mais attention à la **cohérence multi-canaux** (F-Droid + Release GitHub) :
+Comme tout est l'app unique `fr.forumhfr.redface2`, **la promotion native Play fonctionne** entre ses tracks (internal → open testing → production). Le canal prod étant différé, en pré-1.0 on reste sur `internal` (dev) et `open testing` (beta), tous deux via dispatch.
 
-- **Voie recommandée beta → prod = publier une Release GitHub *stable*** (case pre-release décochée) sur un nouveau tag `app-v<N>`. Elle déclenche **toute** l'automatisation : gate d'approbation `production`, upload Play **production**, **notification F-Droid (release)**, et la Release GitHub passe en stable. C'est le seul chemin qui garde Play, F-Droid et les artefacts GitHub **alignés**. (Le binaire peut être identique à la bêta — bumper le versionCode et republier ; le rendu utilisateur ne change pas.)
-- **Promote release dans Play Console** (open testing → production) reste possible et pratique *côté Play uniquement*, mais ⚠️ **bypasse l'automatisation** : pas de passage par la gate GitHub, **F-Droid n'est pas notifié**, et la Release GitHub bêta reste *pre-release*. À réserver à un hotfix Play urgent ; sinon F-Droid et les métadonnées publiques restent en retard sur Play prod.
-- Le `workflow_dispatch` ne sert qu'au canal **dev** (Play internal + F-Droid `.dev`) — pas un outil de promotion beta/prod.
+- **Promote dans Play Console** (internal → open testing, ou open testing → production) reste possible *côté Play uniquement*, mais ⚠️ **bypasse l'automatisation** : **F-Droid n'est pas notifié** et la Release GitHub n'est pas mise à jour. À réserver à un cas Play urgent ; sinon re-dispatcher sur le bon canal garde Play + F-Droid + GitHub **alignés** (le binaire peut être identique — le registre alloue juste un nouveau `versionCode`).
+- Le `workflow_dispatch` est désormais l'**unique** porte d'entrée de la CD (canal choisi par l'input `channel`).
 
 ## Pourquoi `r0adkll/upload-google-play` plutôt que `gradle-play-publisher`
 
@@ -146,8 +147,8 @@ Procédure : voir [docs Play Console — Reset upload key](https://support.googl
 
 Si l'étape `Publish to Play Console` du workflow échoue (auth Play, quota, track invalide…) **après** que la signature ait réussi, l'AAB et l'APK signés sont déjà stagés. Deux façons de les récupérer sans relancer le build :
 
-1. **Workflow artefacts** : aller sur la page Actions → run en échec → en bas du job `build`, télécharger l'archive `redface2-<canal>-v<N>-<sha>` (rétention 30 jours). Chemin standard pour tous les canaux (beta/prod/dev).
-2. **GitHub Release** : pour beta/prod, le step `Attach artefacts to the GitHub Release` met à jour la Release `app-v<N>` existante. Pour dev, le workflow crée `app-dev-v<run_number>`. Dans les deux cas, si le build + la signature ont passé, les artefacts signés sont disponibles même si Play a refusé. Après avoir corrigé la cause (permissions Play, premier upload manuel du listing, etc.), l'upload manuel via la Play Console UI depuis l'AAB téléchargé évite de re-bumper le `versionCode`.
+1. **Workflow artefacts** : aller sur la page Actions → run en échec → en bas du job `build`, télécharger l'archive `redface2-<canal>-v<N>-<sha>` (rétention 30 jours). Chemin standard pour les deux canaux (beta/dev).
+2. **GitHub Release** : le step `Create GitHub Release` crée la Release pre-release `app-v<N>` (`always()` + garde sur la signature) **même si l'upload Play a échoué** ensuite — les artefacts signés y sont attachés. Après avoir corrigé la cause (permissions Play, premier upload manuel du listing, etc.), l'upload manuel via la Play Console UI depuis l'AAB téléchargé évite de consommer un nouveau `versionCode`.
 
 Si la signature elle-même échoue (`keytool -list` ou `jarsigner -verify`), aucun artefact n'est produit — refixer le secret keystore avant de retenter.
 
@@ -155,7 +156,7 @@ Si la signature elle-même échoue (`keytool -list` ou `jarsigner -verify`), auc
 
 | Symptôme | Cause probable | Fix |
 |---|---|---|
-| `versionCode XX has already been used` | Slot consommé sur un build local précédent | Bumper `versionCode` dans `app/build.gradle.kts` |
+| `versionCode XX has already been used` | Un build local/manuel a consommé un code hors registre, ou un tag `app-v<N>` a été supprimé | Vérifier le plus grand tag `app-v<N>` ; au besoin bumper le plancher `versionCode` de `app/build.gradle.kts` au-dessus du code consommé |
 | `403 Service account does not have permission` | Permissions Play Console pas accordées | Refaire l'étape 1.5 du pré-requis |
 | `INVALID_ARGUMENT: package fr.forumhfr.redface2 not found` | Premier upload manuel pas fait | Faire l'étape 2 du pré-requis |
 | AAB non signé en sortie de CD | Secret `UPLOAD_KEYSTORE_BASE64` manquant ou corrompu | Re-provisionner avec `base64 -w0` (pas de retours à la ligne) |

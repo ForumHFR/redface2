@@ -184,3 +184,26 @@ Contraintes assumées :
 - F-Droid garde des packages distincts `.beta` / `.dev` pour permettre l'installation côte à côte.
 - Dev Play internal partage le namespace de `versionCode` avec beta/prod. La CD calcule donc un `versionCode` dev après checkout (`base versionCode` + `github.run_number`) et l'injecte dans le build Play **et** F-Droid dev via `-PversionCodeOverride`.
 - Après un dispatch dev, le prochain tag beta `app-v<N>` doit utiliser un `N` strictement supérieur au dernier `versionCode` dev consommé sur Play.
+
+## 14. Révision 4 — déclencheur unique + registre de tags `app-v` comme compteur (#304)
+
+Décision @XaaT (2026-06-06, même journée que rev. 3) : la rev. 3 marchait mais laissait **deux pièges** — (a) le `versionCode` dev `base + run_number` est asymétrique vs beta (`base` nu), donc après un ship dev toute beta est rejetée par Play tant qu'on ne leapfrogue pas le `versionCode` à la main (cliquet) ; (b) beta exigeait encore de publier une GitHub Release à la main avec bump manuel. On veut : **un compteur unique qui augmente à chaque ship, beta comme dev, sans geste manuel**, et l'intention de canal exprimée explicitement.
+
+Modèle rev. 4 (implémenté dans `release.yml`, documenté dans `docs/guides/release.md`) :
+
+| Canal | Déclencheur | Play | F-Droid |
+|---|---|---|---|
+| **beta** | `workflow_dispatch` `channel=beta` | `fr.forumhfr.redface2`, label « Redface 2 β », track **beta** | package `fr.forumhfr.redface2.beta` |
+| **dev** | `workflow_dispatch` `channel=dev` | `fr.forumhfr.redface2`, label « Redface 2 dev », track **internal** | package `fr.forumhfr.redface2.dev` |
+| **prod** *(différé)* | — (retiré du workflow) | — | — |
+
+Décisions actées :
+
+- **Déclencheur unique** : `workflow_dispatch` avec input `channel` (`beta`|`dev`). Le trigger `on: release` est **retiré** → plus de Release à publier à la main, plus de re-déclenchement par les Releases auto-créées. (« Oublions les releases. »)
+- **versionCode = registre de tags canonique** : `versionCode = max(tags app-v<N>, plancher versionCode build.gradle.kts) + 1`. Les tags `app-v<N>` sont le registre partagé ; chaque ship (beta ou dev) crée `app-v<N>`. **Plus de cliquet** : beta et dev tirent du même compteur monotone, aucune inversion possible.
+- **Plancher de sécurité** : le `versionCode` de `build.gradle.kts` est une borne basse (jamais émettre un code inférieur si le fetch de tags échoue). Ce n'est plus la source canonique, juste un défaut local + filet CI.
+- **Sérialisation** : `concurrency: group: release` (sans `cancel-in-progress`) → allocation de code atomique entre dispatches.
+- **Override sur les deux artefacts** : `-PversionCodeOverride` injecté dans le build Play (base appId) ET F-Droid (suffixé), pour beta comme dev.
+- **prod retiré** (différé) : la conception gated-production (job `await-prod-approval`, track `production`) reste dans l'historique git pour resurrection. Les §8/§13 ci-dessus la décrivent.
+
+Pièges rev. 3 supersédés par rev. 4 : (a) cliquet `base+run_number` → registre `max+1` symétrique ; (b) Release manuelle beta → dispatch `channel=beta`.
