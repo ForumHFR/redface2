@@ -159,9 +159,14 @@ jobs:
           set -euo pipefail
           # CANONICAL versionCode = max(app-v* tag ledger, build.gradle.kts floor) + 1.
           # The git `app-v<N>` tags are the running ledger (shared by beta+dev). The build.gradle.kts
-          # versionCode is a SAFETY FLOOR: if the tag fetch ever returns nothing, we still never emit a
-          # code below the last shipped one (which would make Play reject and F-Droid stop updating).
-          git fetch --tags --force >/dev/null 2>&1 || true
+          # versionCode is a SAFETY FLOOR for the all-tags-missing case only.
+          # FAIL CLOSED on a fetch error: once the ledger has advanced past the floor, allocating from a
+          # stale/partial tag set would reuse or lower a code (Play rejects, F-Droid stops updating). The
+          # tags are the source of truth, so a refresh failure must abort, not silently fall back (Codex P2).
+          git fetch --tags --force --prune origin >/dev/null 2>&1 || {
+            echo "::error::tag ledger fetch failed — refusing to allocate a versionCode from possibly stale tags"
+            exit 1
+          }
           base_code=$(grep -E '^[[:space:]]+versionCode[[:space:]]*=' app/build.gradle.kts | head -1 | grep -oE '[0-9]+' | tail -1)
           [[ -n "$base_code" ]] || { echo "::error::base versionCode unresolved from build.gradle.kts"; exit 1; }
           ledger_code=$(git tag -l 'app-v*' | sed -nE 's/^app-v([0-9]+)$/\1/p' | sort -n | tail -1)
@@ -314,28 +319,15 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Publish to Play Console
-        # beta → track `beta`, dev → track `internal`. Skips cleanly when the SA secret is absent.
-        if: ${{ env.PLAY_UPLOAD == 'true' && steps.service_account.outputs.path != '' }}
-        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5  # v1.1.5
-        with:
-          serviceAccountJson: ${{ steps.service_account.outputs.path }}
-          packageName: ${{ env.PLAY_PACKAGE }}
-          releaseFiles: ${{ steps.artefacts.outputs.play_aab }}
-          tracks: ${{ env.PLAY_TRACK }}
-          status: ${{ env.PLAY_STATUS }}
-          whatsNewDirectory: app/src/main/play/whatsnew
-
-      - name: Cleanup keystore + service account
-        if: always()
-        shell: bash
-        run: rm -f "${RUNNER_TEMP}/upload.jks" "${RUNNER_TEMP}/play-service-account.json" || true
-
-      - name: Create GitHub Release (artifact source for F-Droid)
-        # The workflow OWNS the release now (no maintainer-published trigger). Always create the
-        # prerelease app-v<code> with the signed artefacts — always() + staged guard so a Play hiccup
-        # never hides them (the documented recovery path). No `on: release` trigger exists, so the
-        # published event is a deliberate no-op (it cannot re-enter this workflow).
+      - name: Create GitHub Release (ledger tag + artifact source for F-Droid)
+        # LEDGER-FIRST (Codex P2): the app-v<N> tag IS the versionCode ledger, so it must be persisted
+        # BEFORE any Play side effect. If we tagged AFTER Play, a successful Play upload followed by a
+        # runner cancellation / GitHub API failure would consume the code on Play without recording it →
+        # the next dispatch recomputes the same code and Play rejects it. Creating the tag first makes
+        # failure safe: either the tag exists (code consumed, move on) or it doesn't (code free, clean
+        # retry), and Play runs only once the allocation is durably recorded. always() + staged guard so
+        # the signed artefacts are always attached. No `on: release` trigger exists → the published event
+        # cannot re-enter this workflow.
         if: ${{ always() && steps.artefacts.outcome == 'success' }}
         uses: softprops/action-gh-release@v2
         with:
@@ -353,6 +345,24 @@ jobs:
           files: release-artefacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to Play Console
+        # beta → track `beta`, dev → track `internal`. Runs AFTER the ledger tag is recorded (above), so
+        # a Play upload never consumes a code that isn't in the ledger. Skips cleanly when SA is absent.
+        if: ${{ env.PLAY_UPLOAD == 'true' && steps.service_account.outputs.path != '' }}
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5  # v1.1.5
+        with:
+          serviceAccountJson: ${{ steps.service_account.outputs.path }}
+          packageName: ${{ env.PLAY_PACKAGE }}
+          releaseFiles: ${{ steps.artefacts.outputs.play_aab }}
+          tracks: ${{ env.PLAY_TRACK }}
+          status: ${{ env.PLAY_STATUS }}
+          whatsNewDirectory: app/src/main/play/whatsnew
+
+      - name: Cleanup keystore + service account
+        if: always()
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/upload.jks" "${RUNNER_TEMP}/play-service-account.json" || true
 
   # ──────────────────────────────────────────────────────────────────────
   # Notify redface2-fdroid (beta/dev). Plain ubuntu runner (native gh, #219).
