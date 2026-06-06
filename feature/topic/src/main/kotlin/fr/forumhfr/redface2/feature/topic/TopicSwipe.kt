@@ -1,23 +1,30 @@
 package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.horizontalDrag
+import androidx.compose.runtime.MutableFloatState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
+import kotlin.math.tanh
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
@@ -77,9 +84,12 @@ internal fun swipeCommitDistancePx(widthPx: Float, minCommitPx: Float): Float =
  * drag immediate feedback (#282 follow). The sign matches [rawDx] (leftward drag → negative offset).
  * Pure → unit-tested.
  *
- * - [hasTarget] = true (a page exists that way): track the finger 1:1 up to [commitDistancePx], then
- *   apply [OVERPULL_RESISTANCE] so the page keeps giving a little without sliding the whole way —
- *   reaching `commitDistancePx` is the visual "armed" point the edge hint mirrors.
+ * - [hasTarget] = true (a page exists that way): track the finger 1:1 up to [commitDistancePx]
+ *   (`commitDistancePx` is the visual "armed" point the edge hint mirrors), then a **bounded
+ *   overpull** — a `tanh` asymptote that lets the page keep giving a little while it can never drift
+ *   past `commitDistancePx + OVERPULL_MAX_FRACTION × commitDistancePx`. The old linear-with-resistance
+ *   ramp grew without bound on a long drag, pulling the page arbitrarily far off-screen; the asymptote
+ *   keeps the gesture readable as "armed, will commit" instead of "I am tearing the page off".
  * - [hasTarget] = false (first/last page): a damped "wall", capped at [EDGE_MAX_FRACTION] of the
  *   commit distance, so a swipe into the void barely moves and reads as a boundary.
  */
@@ -91,7 +101,9 @@ internal fun swipeFollowOffset(rawDx: Float, commitDistancePx: Float, hasTarget:
         if (magnitude <= commitDistancePx) {
             magnitude
         } else {
-            commitDistancePx + (magnitude - commitDistancePx) * OVERPULL_RESISTANCE
+            val overpull = commitDistancePx * OVERPULL_MAX_FRACTION
+            val excess = magnitude - commitDistancePx
+            commitDistancePx + overpull * tanh(excess / overpull)
         }
     } else {
         minOf(magnitude * EDGE_RESISTANCE, commitDistancePx * EDGE_MAX_FRACTION)
@@ -99,33 +111,83 @@ internal fun swipeFollowOffset(rawDx: Float, commitDistancePx: Float, hasTarget:
     return sign * travel
 }
 
+/**
+ * Whether the swipe has crossed the commit distance, i.e. releasing now would change page. Pure →
+ * unit-tested. Drives the haptic "armed" tick (fired once on the rising edge, see [topicPageSwipe]);
+ * the edge-hint mirrors the same threshold continuously via [swipeEdgeHintAlpha]. Mirrors the
+ * distance arm of [swipeCommitDirection]; the fling arm can still commit a shorter drag (no static
+ * "armed" state for a fling, which is decided only at release).
+ */
+internal fun swipeArmed(offsetPx: Float, commitDistancePx: Float): Boolean =
+    commitDistancePx > 0f && abs(offsetPx) >= commitDistancePx
+
+/**
+ * Edge-glow opacity for a swipe [progress] = `|offset| / commitDistance` (`0f` at rest, `1f` at the
+ * commit/armed point, up to ~`1.5f` in the bounded overpull region). Pure → unit-tested.
+ *
+ * Two segments, continuous at `progress = 1f` so the brighten is finger-driven (no separate
+ * animation primitive needed in the draw phase, which reads state synchronously without
+ * recomposition):
+ * - `0f..1f`: ramp to [EDGE_HINT_MAX_ALPHA] as the swipe approaches arming.
+ * - past `1f`: a quick further brighten to [EDGE_HINT_ARMED_ALPHA] over the
+ *   [EDGE_HINT_ARMED_RAMP] window, so crossing the threshold visibly intensifies the glow — the
+ *   user sees that releasing will validate, in lock-step with the arming haptic tick.
+ */
+internal fun swipeEdgeHintAlpha(progress: Float): Float =
+    if (progress <= 1f) {
+        progress.coerceAtLeast(0f) * EDGE_HINT_MAX_ALPHA
+    } else {
+        val armedProgress = ((progress - 1f) / EDGE_HINT_ARMED_RAMP).coerceAtMost(1f)
+        EDGE_HINT_MAX_ALPHA + (EDGE_HINT_ARMED_ALPHA - EDGE_HINT_MAX_ALPHA) * armedProgress
+    }
+
 // Commit thresholds: a swipe changes page only past a clear intent, never on the bare touch slop.
 private const val COMMIT_FRACTION = 0.20f
 internal val MIN_COMMIT_DISTANCE = 72.dp
 private val FLING_VELOCITY_THRESHOLD = 900.dp
 
 // Drag-follow feel (#282 (b)+(c)). All purely visual — they never affect the commit decision.
-private const val OVERPULL_RESISTANCE = 0.35f // diminishing follow past the commit point
+// Past the commit point the follow saturates: `tanh` asymptote bounded to this × commit distance so
+// the page can never drift arbitrarily far on a long drag.
+private const val OVERPULL_MAX_FRACTION = 0.5f
 private const val EDGE_RESISTANCE = 0.30f // damping into a blocked edge (first/last page)
 private const val EDGE_MAX_FRACTION = 0.4f // a blocked edge can travel at most this × commit distance
 private const val EDGE_HINT_WIDTH_FRACTION = 0.18f // edge-glow band width, as a fraction of the page
-private const val EDGE_HINT_MAX_ALPHA = 0.5f // edge-glow opacity once the swipe is fully armed
+private const val EDGE_HINT_MAX_ALPHA = 0.5f // edge-glow opacity right at the arming point
+private const val EDGE_HINT_ARMED_ALPHA = 0.7f // brighter edge-glow once the swipe is fully armed
+private const val EDGE_HINT_ARMED_RAMP = 0.15f // overpull-progress window over which the armed glow fills
+private const val COMMIT_SLIDE_OUT_MILLIS = 120 // page slide-out before navigation on commit
+
+// A committed page slides fully off-screen before navigating; the elevation lift sells "the page
+// leaves". Both are read at draw time from the same offset state the drag writes.
+private const val COMMIT_SHADOW_ELEVATION_DP = 8f
 
 private val SPRING_BACK = spring<Float>(
-    dampingRatio = Spring.DampingRatioLowBouncy,
-    stiffness = Spring.StiffnessMediumLow,
+    // Crisp, non-bouncy return when a drag does NOT commit (cancel / fling-less release): the page
+    // snaps back to rest without the soft overshoot used for a blocked edge, so a cancel reads as a
+    // deliberate "no" rather than a wobble.
+    dampingRatio = Spring.DampingRatioNoBouncy,
+    stiffness = Spring.StiffnessMedium,
 )
 
 /**
  * Horizontal swipe → change topic page (#282, Option A) with drag-follow feedback (b). A committed
- * left/right swipe calls [onOpenPage] (the existing route-driven navigation: pop+push of
- * `TopicRoute`), reusing the whole pagination/prefetch machinery — no neighbour page is composed, so
- * the « prefetch non authentifié » invariant is never touched.
+ * left/right swipe slides the current page off-screen then calls [onOpenPage] (the existing
+ * route-driven navigation: pop+push of `TopicRoute`), reusing the whole pagination/prefetch
+ * machinery — no neighbour page is composed, so the « prefetch non authentifié » invariant is never
+ * touched.
  *
- * While dragging, the current page follows the finger ([dragOffset] drives a `translationX`, shaped
- * by [swipeFollowOffset]); on commit it navigates, otherwise (no-commit, edge, or a child taking the
- * drag) it springs back to rest. The cross-page cut after a commit is unchanged (no shared-element
- * transition) — that is the optional follow-up (a) at the `NavDisplay` level.
+ * Per-frame follow is **synchronous and allocation-free**: the gesture writes the shaped offset into
+ * [dragOffset] (a [MutableFloatState]) directly in the `horizontalDrag` callback, and the draw phase
+ * reads it via `graphicsLayer { translationX = … }`. An [Animatable] is used ONLY for the two release
+ * transitions (spring-back on cancel/no-commit, slide-out on commit); it streams its value back into
+ * the same [dragOffset] so the draw phase never has to know which drives it. No `snapTo`/coroutine is
+ * launched per drag event.
+ *
+ * On commit the page first animates off-screen (translationX → ±width, a short [tween]) and only then
+ * navigates, killing the figé "flash" of the old instant cut. Otherwise (no-commit, edge, or a child
+ * taking the drag) it springs back to rest. Haptics: a tick when the swipe arms (crosses the commit
+ * distance, once per rising edge) and a confirm on commit.
  *
  * Coexistence (unchanged from the discrete version, validated with Codex gpt-5.5):
  * - it engages only on **horizontal** touch slop, so the vertical `LazyColumn` scroll is never stolen;
@@ -147,7 +209,8 @@ private val SPRING_BACK = spring<Float>(
 internal fun Modifier.topicPageSwipe(
     currentPage: Int,
     totalPages: Int,
-    dragOffset: Animatable<Float, AnimationVector1D>,
+    dragOffset: MutableFloatState,
+    haptics: HapticFeedback,
     onOpenPage: (Int) -> Unit,
 ): Modifier = this
     // `pointerInput` sits BEFORE `graphicsLayer` on purpose: the gesture must read finger deltas in
@@ -158,6 +221,10 @@ internal fun Modifier.topicPageSwipe(
     .pointerInput(currentPage, totalPages) {
         val commitDistancePx = swipeCommitDistancePx(size.width.toFloat(), MIN_COMMIT_DISTANCE.toPx())
         val flingThresholdPx = FLING_VELOCITY_THRESHOLD.toPx()
+        val widthPx = size.width.toFloat()
+        // Reserved for release transitions ONLY (spring-back / slide-out). The drag itself writes
+        // `dragOffset` synchronously; this `Animatable` streams its value back into the same state.
+        val release = Animatable(0f)
         coroutineScope {
             val animationScope = this
             awaitEachGesture {
@@ -171,43 +238,88 @@ internal fun Modifier.topicPageSwipe(
                     change.consume()
                     overSlop = slop
                 } ?: return@awaitEachGesture
+                // A new drag cancels any release animation still running from the previous swipe.
+                animationScope.launch { release.stop() }
                 var totalDx = overSlop
+                var armed = false
                 velocityTracker.addPosition(drag.uptimeMillis, drag.position)
-                // The first snapTo also cancels any spring-back still running from a previous swipe.
-                animationScope.launch {
-                    dragOffset.snapTo(followOffsetFor(totalDx, commitDistancePx, currentPage, totalPages))
-                }
+                dragOffset.floatValue = followOffsetFor(totalDx, commitDistancePx, currentPage, totalPages)
                 // `horizontalDrag` returns false when the drag is CANCELLED — e.g. a descendant
                 // horizontal scroller (a wide `[fixed]` code block, the page grid) takes the pointer
                 // over after we crossed slop. Honour it: a taken-over gesture must NOT navigate.
                 val completed = horizontalDrag(drag.id) { change ->
                     totalDx += change.positionChange().x
                     velocityTracker.addPosition(change.uptimeMillis, change.position)
-                    animationScope.launch {
-                        dragOffset.snapTo(followOffsetFor(totalDx, commitDistancePx, currentPage, totalPages))
-                    }
+                    val offset = followOffsetFor(totalDx, commitDistancePx, currentPage, totalPages)
+                    dragOffset.floatValue = offset // synchronous, no coroutine, no allocation
+                    val nowArmed = swipeArmed(offset, commitDistancePx)
+                    if (nowArmed && !armed) haptics.performHapticFeedback(ARMED_HAPTIC)
+                    armed = nowArmed
                     change.consume()
                 }
                 if (!completed) {
-                    animationScope.launch { dragOffset.animateTo(0f, SPRING_BACK) }
+                    springBackTo(animationScope, release, dragOffset)
                     return@awaitEachGesture
                 }
                 val velocityX = velocityTracker.calculateVelocity().x
-                val target = swipeCommitDirection(totalDx, velocityX, commitDistancePx, flingThresholdPx)
-                    ?.let { forward -> swipeTargetPage(currentPage, totalPages, forward) }
-                if (target != null) {
-                    // Navigation replaces the screen; the offset state is discarded with it.
-                    onOpenPage(target)
+                val forward = swipeCommitDirection(totalDx, velocityX, commitDistancePx, flingThresholdPx)
+                val target = forward?.let { swipeTargetPage(currentPage, totalPages, it) }
+                if (forward != null && target != null) {
+                    haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                    // Slide in the commit direction (forward = next = leftward = negative), not the
+                    // residual offset sign: a fast fling can commit with a near-zero/opposite offset.
+                    val targetX = if (forward) -widthPx else widthPx
+                    commitSlideOut(animationScope, release, dragOffset, targetX) { onOpenPage(target) }
                 } else {
-                    animationScope.launch { dragOffset.animateTo(0f, SPRING_BACK) }
+                    springBackTo(animationScope, release, dragOffset)
                 }
             }
         }
     }
-    // Draw-only translation of the page content. After `pointerInput` (see above) so the gesture is
-    // read in untranslated space; reading `dragOffset.value` here keeps the follow on the draw phase
-    // (no recomposition per frame).
-    .graphicsLayer { translationX = dragOffset.value }
+    // Draw-only translation of the page content + a slight elevation lift so a committed page reads as
+    // leaving. After `pointerInput` (see above) so the gesture is read in untranslated space; reading
+    // `dragOffset.floatValue` here keeps the follow on the draw phase (no recomposition per frame).
+    .graphicsLayer {
+        val offset = dragOffset.floatValue
+        translationX = offset
+        shadowElevation = if (offset == 0f) 0f else COMMIT_SHADOW_ELEVATION_DP.dp.toPx()
+    }
+
+/** Spring the page back to rest (cancel / no-commit), streaming the animation into [dragOffset]. */
+private fun springBackTo(
+    scope: CoroutineScope,
+    release: Animatable<Float, *>,
+    dragOffset: MutableFloatState,
+) {
+    scope.launch {
+        release.snapTo(dragOffset.floatValue)
+        release.animateTo(0f, SPRING_BACK) { dragOffset.floatValue = value }
+    }
+}
+
+/**
+ * Slide the committed page fully off-screen to [targetX] (±width, chosen by the commit direction) over
+ * [COMMIT_SLIDE_OUT_MILLIS], then navigate exactly once via [onCommitted]. The navigation replaces the
+ * screen (the offset state is discarded with it), so there is nothing to reset afterwards. Streaming
+ * into [dragOffset] keeps the draw phase agnostic of what drives the offset.
+ */
+private fun commitSlideOut(
+    scope: CoroutineScope,
+    release: Animatable<Float, *>,
+    dragOffset: MutableFloatState,
+    targetX: Float,
+    onCommitted: () -> Unit,
+) {
+    scope.launch {
+        release.snapTo(dragOffset.floatValue)
+        release.animateTo(targetX, tween(durationMillis = COMMIT_SLIDE_OUT_MILLIS)) {
+            dragOffset.floatValue = value
+        }
+        onCommitted()
+    }
+}
+
+private val ARMED_HAPTIC = HapticFeedbackType.GestureThresholdActivate
 
 private fun followOffsetFor(totalDx: Float, commitDistancePx: Float, currentPage: Int, totalPages: Int): Float {
     val hasTarget = swipeTargetPage(currentPage, totalPages, forward = totalDx < 0f) != null
@@ -217,9 +329,12 @@ private fun followOffsetFor(totalDx: Float, commitDistancePx: Float, currentPage
 /**
  * Edge hint for the topic page swipe (#282 (c)). Draws a glow on the edge the neighbour page is being
  * pulled in from — right edge for a leftward drag (next page), left edge for a rightward drag — whose
- * opacity ramps with the swipe's progress toward the commit distance and reaches [EDGE_HINT_MAX_ALPHA]
- * once the swipe is armed. It reads [dragOffset] at draw time only, so following the finger never
- * recomposes.
+ * opacity ramps with the swipe's progress toward the commit distance and brightens to an armed accent
+ * ([swipeEdgeHintAlpha]) once the swipe is armed, so the user sees that releasing will validate. It
+ * reads [dragOffset] at draw time only, so following the finger never recomposes.
+ *
+ * Only the edge band (a [EDGE_HINT_WIDTH_FRACTION] sub-rect of the page) is painted — not a
+ * full-screen `Brush` per frame.
  *
  * Must sit **before** [topicPageSwipe] in the modifier chain: it draws via `drawWithContent` in the
  * element's own (untranslated) space, so the glow stays pinned to the screen edge while the page
@@ -227,18 +342,19 @@ private fun followOffsetFor(totalDx: Float, commitDistancePx: Float, currentPage
  * [accent] is read from the theme by the (composable) caller and passed in, since a draw scope cannot.
  */
 internal fun Modifier.topicPageSwipeEdge(
-    dragOffset: Animatable<Float, AnimationVector1D>,
+    dragOffset: MutableFloatState,
     accent: Color,
 ): Modifier = drawWithContent {
     drawContent()
-    val offset = dragOffset.value
+    val offset = dragOffset.floatValue
     if (offset == 0f) return@drawWithContent
     val commitDistancePx = swipeCommitDistancePx(size.width, MIN_COMMIT_DISTANCE.toPx())
     if (commitDistancePx <= 0f) return@drawWithContent
-    val progress = (abs(offset) / commitDistancePx).coerceIn(0f, 1f)
-    val alpha = progress * EDGE_HINT_MAX_ALPHA
+    val progress = abs(offset) / commitDistancePx
+    val alpha = swipeEdgeHintAlpha(progress)
     val band = size.width * EDGE_HINT_WIDTH_FRACTION
-    val brush = if (offset < 0f) {
+    val leftward = offset < 0f
+    val brush = if (leftward) {
         Brush.horizontalGradient(
             colors = listOf(Color.Transparent, accent.copy(alpha = alpha)),
             startX = size.width - band,
@@ -251,5 +367,7 @@ internal fun Modifier.topicPageSwipeEdge(
             endX = band,
         )
     }
-    drawRect(brush = brush)
+    // Paint only the edge band, not the whole page, so the per-frame fill stays small.
+    val topLeft = if (leftward) Offset(size.width - band, 0f) else Offset.Zero
+    drawRect(brush = brush, topLeft = topLeft, size = Size(band, size.height))
 }

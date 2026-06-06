@@ -1,7 +1,10 @@
 package fr.forumhfr.redface2.feature.topic
 
+import kotlin.math.abs
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TopicSwipeTest {
@@ -99,15 +102,28 @@ class TopicSwipeTest {
     }
 
     @Test
-    fun `past the commit point the follow is damped (overpull resistance)`() {
-        // 200 + (400 - 200) * 0.35 = 270.
-        assertEquals(-270f, swipeFollowOffset(rawDx = -400f, commitDistancePx = commit, hasTarget = true), TOLERANCE)
+    fun `past the commit point the follow is a bounded tanh overpull`() {
+        // overpull = 200 * 0.5 = 100 ; excess = 400 - 200 = 200.
+        // 200 + 100 * tanh(200 / 100) = 200 + 100 * tanh(2) ≈ 296.4027.
+        val offset = swipeFollowOffset(rawDx = -400f, commitDistancePx = commit, hasTarget = true)
+        assertEquals(-296.4027f, offset, TOLERANCE)
     }
 
     @Test
-    fun `the follow is sign-symmetric for a rightward drag`() {
-        // 200 + (300 - 200) * 0.35 = 235.
-        assertEquals(235f, swipeFollowOffset(rawDx = 300f, commitDistancePx = commit, hasTarget = true), TOLERANCE)
+    fun `the overpull is sign-symmetric for a rightward drag`() {
+        // overpull = 100 ; excess = 300 - 200 = 100. 200 + 100 * tanh(1) ≈ 276.1594.
+        val offset = swipeFollowOffset(rawDx = 300f, commitDistancePx = commit, hasTarget = true)
+        assertEquals(276.1594f, offset, TOLERANCE)
+    }
+
+    @Test
+    fun `the overpull saturates to a bounded cap on a very long drag`() {
+        // As the drag grows the tanh saturates: travel → commit + overpull = 200 + 100 = 300,
+        // never beyond. A huge drag must not slide the page arbitrarily far off-screen.
+        val far = swipeFollowOffset(rawDx = -100_000f, commitDistancePx = commit, hasTarget = true)
+        assertEquals(-300f, far, 0.5f)
+        // At/under the asymptote (commit + overpull), never beyond a half-page extra past the commit.
+        assertTrue("overpull $far exceeded the bound", abs(far) <= commit + commit * 0.5f)
     }
 
     @Test
@@ -125,6 +141,64 @@ class TopicSwipeTest {
     @Test
     fun `a zero commit distance yields no offset`() {
         assertEquals(0f, swipeFollowOffset(rawDx = -100f, commitDistancePx = 0f, hasTarget = true), TOLERANCE)
+    }
+
+    // --- swipeArmed : franchissement du seuil (tick haptique + indice) ---
+
+    @Test
+    fun `the swipe is not armed below the commit distance`() {
+        assertFalse(swipeArmed(offsetPx = -150f, commitDistancePx = commit))
+    }
+
+    @Test
+    fun `the swipe arms exactly at the commit distance`() {
+        assertTrue(swipeArmed(offsetPx = -200f, commitDistancePx = commit))
+    }
+
+    @Test
+    fun `the swipe stays armed past the commit distance, both signs`() {
+        assertTrue(swipeArmed(offsetPx = -260f, commitDistancePx = commit))
+        assertTrue(swipeArmed(offsetPx = 260f, commitDistancePx = commit))
+    }
+
+    @Test
+    fun `a zero commit distance is never armed`() {
+        assertFalse(swipeArmed(offsetPx = 100f, commitDistancePx = 0f))
+    }
+
+    // --- swipeEdgeHintAlpha : opacite de l'indice de bord (rampe + bump d'armement) ---
+
+    @Test
+    fun `the edge hint is invisible at rest`() {
+        assertEquals(0f, swipeEdgeHintAlpha(progress = 0f), TOLERANCE)
+    }
+
+    @Test
+    fun `the edge hint ramps to the pre-armed ceiling at the commit point`() {
+        // progress 0.5 → 0.5 * 0.5 = 0.25 ; progress 1.0 → 0.5 (EDGE_HINT_MAX_ALPHA).
+        assertEquals(0.25f, swipeEdgeHintAlpha(progress = 0.5f), TOLERANCE)
+        assertEquals(0.5f, swipeEdgeHintAlpha(progress = 1f), TOLERANCE)
+    }
+
+    @Test
+    fun `the edge hint is continuous across the arming point`() {
+        // Just above 1.0 must equal just below 1.0 (no flicker jump).
+        val justBelow = swipeEdgeHintAlpha(progress = 0.999f)
+        val justAbove = swipeEdgeHintAlpha(progress = 1.001f)
+        assertEquals(justBelow, justAbove, 0.01f)
+    }
+
+    @Test
+    fun `the edge hint brightens to the armed accent past the threshold`() {
+        // ramp window 0.15 ; progress 1.075 is halfway → 0.5 + (0.7 - 0.5) * 0.5 = 0.6.
+        assertEquals(0.6f, swipeEdgeHintAlpha(progress = 1.075f), TOLERANCE)
+    }
+
+    @Test
+    fun `the edge hint saturates at the armed accent and never exceeds it`() {
+        // Full ramp at progress 1.15 → 0.7 ; deep overpull stays clamped at 0.7.
+        assertEquals(0.7f, swipeEdgeHintAlpha(progress = 1.15f), TOLERANCE)
+        assertEquals(0.7f, swipeEdgeHintAlpha(progress = 5f), TOLERANCE)
     }
 
     private companion object {

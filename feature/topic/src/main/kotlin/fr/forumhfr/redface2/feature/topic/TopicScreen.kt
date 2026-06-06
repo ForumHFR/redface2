@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.feature.topic
 
-import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -33,6 +32,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -411,9 +412,19 @@ private fun TopicLoadedContent(
     listState: LazyListState,
 ) {
     val highlight = state.request.scrollTo
-    // #282 — shared offset between the gesture (drives translationX) and the edge glow. Lives in the
+    // #282 — shared offset between the gesture (drives translationX) and the edge glow. A plain
+    // MutableFloatState: the gesture writes it synchronously per frame (no coroutine/alloc), the draw
+    // phase reads it; an Animatable inside the gesture handles only release transitions. Lives in the
     // Loaded composition only, so a committed swipe (which recreates the screen) starts back at rest.
-    val dragOffset = remember { Animatable(0f) }
+    val dragOffset = remember { mutableFloatStateOf(0f) }
+    // #282 — hoisted so the gesture can tick on arming and confirm on commit.
+    val haptics = LocalHapticFeedback.current
+    // #282 (P2-b) — if the pagination target re-keys while we stay Loaded (a force-refresh that lands
+    // the same screen on a new page/total, or the cache swapping the loaded page under the user mid
+    // or post-drag), drop any residual translation so the page is never left frozen off-centre.
+    LaunchedEffect(topic.page, topic.totalPages) {
+        dragOffset.floatValue = 0f
+    }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -430,6 +441,7 @@ private fun TopicLoadedContent(
                 currentPage = topic.page,
                 totalPages = topic.totalPages,
                 dragOffset = dragOffset,
+                haptics = haptics,
                 onOpenPage = onOpenPage,
             ),
         state = listState,
