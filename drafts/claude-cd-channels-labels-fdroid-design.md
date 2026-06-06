@@ -1,6 +1,7 @@
 # Design CD — canaux beta/dev, label par canal, Play 1-fiche + F-Droid 2-apps
 
-> Statut : **draft non normatif** (drafts/ ne gouverne rien tant que non promu). À faire relire par Codex gpt-5.5 xhigh avant implémentation.
+> Statut : **draft non normatif** (drafts/ ne gouverne rien tant que non promu). Historique de design ; la décision effective est documentée dans `docs/guides/release.md`.
+> Révision active : **rev. 3** (§13) — dev est distribué sur Play internal **et** F-Droid `.dev`.
 > Auteur : Claude Opus 4.8 (demandé par @XaaT). Contexte : #233 (umbrella release/distrib).
 
 ## 1. Objectif
@@ -93,7 +94,7 @@ Payload `repository_dispatch` (déjà supporté côté redface2-fdroid) : `chann
 
 - **F-Droid** : chaque `applicationId` (`.beta`, `.dev`, base) a son **propre** espace de versionCode → pas de collision inter-canaux. Builds successifs d'un même canal = versionCode croissant (le bump release suffit).
 - **Play** (base appId, beta + dev = tracks de la même fiche) : **espace de versionCode partagé**. Un build dev (internal) et un build beta (open testing) ne peuvent pas avoir le **même** versionCode. La beta prend le versionCode de release ; un build dev doit en prendre un **distinct et croissant**.
-  - ⚠️ **Question ouverte (cf. §10)** : un offset run_number pour dev est **incompatible** avec un appId unique (Play exige des codes croissants ; un code dev élevé bloquerait les beta/prod suivantes). Option pragmatique : dev sur Play reste **manuel/occasionnel** avec un versionCode bumpé exprès, ou on **retire dev de Play** (dev = F-Droid `.dev` + sideload uniquement), F-Droid n'ayant pas ce souci.
+  - ⚠️ **Question historique (résolue en rev. 3, cf. §13)** : dev sur Play partage le namespace de `versionCode` avec beta/prod. Décision finale : on assume ce coût et le workflow calcule un code dev explicite.
 
 ## 8. Prod différé
 
@@ -108,7 +109,7 @@ Payload `repository_dispatch` (déjà supporté côté redface2-fdroid) : `chann
 
 ## 10. Questions ouvertes pour Codex
 
-1. **dev sur Play** : vaut-il le coût du versionCode partagé (base appId), ou vaut-il mieux **dev = F-Droid `.dev` + sideload uniquement** (et Play = beta only en pré-1.0) ? Recommandation provisoire : retirer dev de Play, le garder F-Droid+sideload.
+1. **dev sur Play** : résolu en rev. 3 (§13) — dev est publié sur Play internal et F-Droid `.dev`, en assumant les `versionCode` consommés.
 2. **Double build par canal** (Play base + F-Droid suffixé) : acceptable en temps CI, ou faut-il une matrice/parallélisation ? Risque de divergence entre les 2 artefacts (même code, appId/label seuls diffèrent — a priori OK).
 3. **Label via propriété vs flavor** : la propriété `-PappLabel` est-elle la bonne source unique, ou garder un défaut par flavor (robustesse si build manuel sans la propriété) ? Proposition : propriété prioritaire, fallback `@string/app_name`.
 4. **Reproducibilité F-Droid** : notre dépôt publie des **APK prébuildés signés** (pas de build-from-source côté F-Droid). OK pour un dépôt privé ; à acter si on vise un jour le dépôt F-Droid officiel.
@@ -141,10 +142,10 @@ Le §4 disait « retirer les labels par flavor, source unique = propriété ». 
   ```
 - **Check CI obligatoire** : après build, vérifier le `package` + le `application-label` de l'APK produit (via `aapt dump badging`) contre l'attendu du canal. Garde-fou contre un mauvais appId/label poussé sur le mauvais store.
 
-### Fix 2 — source d'artefact pour le canal **dev** (le vrai trou)
-Le publisher F-Droid (`redface2-fdroid/publish.yml`) télécharge l'APK **depuis une GitHub Release** (tag + apk_filename). Or **dev est déclenché par `workflow_dispatch` → pas de Release/tag** → F-Droid ne peut pas servir dev avec le mécanisme actuel. Et dev sur **Play** partage l'espace versionCode de la base appId (risqué). **Décision (reco Codex + à valider @XaaT) :**
+### Fix 2 — source d'artefact pour le canal **dev** (historique, supersédé en rev. 3)
+Le publisher F-Droid (`redface2-fdroid/publish.yml`) télécharge l'APK **depuis une GitHub Release** (tag + apk_filename). Or **dev est déclenché par `workflow_dispatch` → pas de Release/tag** → F-Droid ne peut pas servir dev avec le mécanisme actuel. Et dev sur **Play** partage l'espace versionCode de la base appId (risqué). La recommandation ci-dessous était celle de la rev. 2 ; elle est remplacée par la rev. 3 (§13).
 
-> **dev = artefact Actions (sideload) uniquement** pour l'instant. **Pas de dev sur Play, pas de dev sur F-Droid.** Le canal public = **beta** (Play open testing + F-Droid `.beta`). Le dogfood dev reste le build `.debug` adb + l'APK `.dev` téléchargeable depuis les artefacts du run dispatch.
+> **Ancienne recommandation rev. 2, supersédée** : limiter dev à un artefact Actions sideload-only. Décision finale rev. 3 : dev part sur Play internal et F-Droid `.dev`.
 
 Si on veut **plus tard** dev sur F-Droid : introduire un **schéma de Release/tag dédié `app-dev-v<N>`** (prerelease) pour que le publisher ait une source — pas un dispatch.
 
@@ -162,4 +163,24 @@ Si on veut **plus tard** dev sur F-Droid : introduire un **schéma de Release/ta
 | **prod** *(différé)* | Release stable | production (gate) | package base |
 
 ### Reste à trancher avec @XaaT
-**dev = sideload-only (reco)** OU **dev sur F-Droid via un schéma de Release/tag `app-dev-v<N>`** (plus de cérémonie, mais dev devient installable F-Droid en « Redface 2 dev »).
+Résolu en rev. 3 (§13) : **dev sur Play internal + F-Droid `.dev` via Release auto `app-dev-v<N>`**.
+
+## 13. Révision 3 — décision maintainer : dev sur Play internal + F-Droid `.dev`
+
+Décision @XaaT (2026-06-06) : on assume de brûler des `versionCode` Play pour avoir un vrai canal **dev** sur les **deux** plateformes.
+
+La révision 2 est donc supersédée :
+
+| Canal | Déclencheur | Play | F-Droid |
+|---|---|---|---|
+| **beta** | Release *pre-release* `app-v<N>` | `fr.forumhfr.redface2`, label « Redface 2 β », track **beta/open testing** | package `fr.forumhfr.redface2.beta` « Redface 2 β » |
+| **dev** | `workflow_dispatch` | `fr.forumhfr.redface2`, label « Redface 2 dev », track **internal** | package `fr.forumhfr.redface2.dev` « Redface 2 dev » via Release auto `app-dev-v<run_number>` |
+| **prod** *(différé)* | Release stable | production (gate) | package base |
+
+Contraintes assumées :
+
+- Play reste **une seule fiche** et **un seul applicationId** ; beta/dev/prod sont des tracks du même package `fr.forumhfr.redface2`.
+- Le label change au build via `-PappLabel`.
+- F-Droid garde des packages distincts `.beta` / `.dev` pour permettre l'installation côte à côte.
+- Dev Play internal partage le namespace de `versionCode` avec beta/prod. La CD calcule donc un `versionCode` dev après checkout (`base versionCode` + `github.run_number`) et l'injecte dans le build Play **et** F-Droid dev via `-PversionCodeOverride`.
+- Après un dispatch dev, le prochain tag beta `app-v<N>` doit utiliser un `N` strictement supérieur au dernier `versionCode` dev consommé sur Play.

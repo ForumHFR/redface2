@@ -9,7 +9,8 @@ name: Release
 #   GitHub Release prerelease, tag app-v<N>  → BETA : Play open testing (base appId, label "Redface 2 β")
 #                                                     + F-Droid package fr.forumhfr.redface2.beta
 #   GitHub Release stable,    tag app-v<N>   → PROD (deferred, gated): Play production + F-Droid base
-#   workflow_dispatch                        → DEV  : NO Play (shared versionCode namespace risk). The run
+#   workflow_dispatch                        → DEV  : Play internal (base appId, label "Redface 2 dev")
+#                                                     + F-Droid package fr.forumhfr.redface2.dev. The run
 #                                                     AUTO-CREATES a prerelease Release app-dev-v<run> that
 #                                                     carries the .dev APK, so the F-Droid publisher (which
 #                                                     downloads from a Release) has a source. → package …​.dev
@@ -88,9 +89,11 @@ jobs:
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             channel=dev
             app_label="Redface 2 dev"
-            play_upload=false; play_track=""; play_status=""
+            play_upload=true; play_track=internal; play_status=completed
             fdroid_flavor=Dev; fdroid_dir=dev; fdroid_package=fr.forumhfr.redface2.dev; fdroid_channel=dev
-            version_code_override="$RUN_NUMBER"   # .dev is its own versionCode namespace (monotonic per run)
+            # Resolved after checkout from the tracked base versionCode + run_number. Play uses the base
+            # appId for dev too, so the code must be above the current beta/prod code, not just run_number.
+            version_code_override=""
             creates_dev_release=true
             release_tag="app-dev-v${RUN_NUMBER}"
             build_ref="$DISPATCH_REF"
@@ -184,12 +187,22 @@ jobs:
       - name: Resolve version metadata
         id: meta
         shell: bash
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
+          base_version_code=$(grep -E '^[[:space:]]+versionCode[[:space:]]*=' app/build.gradle.kts | head -1 | grep -oE '[0-9]+' | tail -1)
+          [[ -n "$base_version_code" ]] || { echo "::error::base versionCode unresolved"; exit 1; }
           if [[ -n "${VERSION_CODE_OVERRIDE:-}" ]]; then
             version_code="$VERSION_CODE_OVERRIDE"
+          elif [[ "${CHANNEL}" == "dev" ]]; then
+            # Dev uploads to the Play `internal` track under the base applicationId, so it burns
+            # Play versionCodes from the same namespace as beta/prod. `run_number` alone was below
+            # the already-published beta code; base+run is monotonic for dev runs while keeping the
+            # value obvious. Next beta tag must be bumped above the latest dev code.
+            version_code=$((base_version_code + RUN_NUMBER))
           else
-            version_code=$(grep -E '^[[:space:]]+versionCode[[:space:]]*=' app/build.gradle.kts | head -1 | grep -oE '[0-9]+' | tail -1)
+            version_code="$base_version_code"
           fi
           version_name=$(grep -E '^[[:space:]]+versionName[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/.*"(.*)".*/\1/')
           short_sha=$(git rev-parse --short HEAD)
@@ -252,16 +265,19 @@ jobs:
           UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
           UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
           UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+          EFFECTIVE_VERSION_CODE: ${{ steps.meta.outputs.version_code }}
         shell: bash
         run: |
           set -euo pipefail
           GRADLE_ARGS=(--no-daemon --stacktrace)
           [[ -n "${APP_LABEL:-}" ]] && GRADLE_ARGS+=("-PappLabel=${APP_LABEL}")
+          if [[ "${CHANNEL}" == "dev" ]]; then
+            GRADLE_ARGS+=("-PversionCodeOverride=${EFFECTIVE_VERSION_CODE}")
+          fi
           # F-Droid artefact: the channel flavor (suffixed appId, except prod=base). dev gets a
-          # run_number versionCode (its own namespace) so each dispatch is a new F-Droid version.
-          FDROID_ARGS=("${GRADLE_ARGS[@]}")
-          [[ -n "${VERSION_CODE_OVERRIDE:-}" ]] && FDROID_ARGS+=("-PversionCodeOverride=${VERSION_CODE_OVERRIDE}")
-          ./gradlew ":app:assemble${FDROID_FLAVOR}Release" "${FDROID_ARGS[@]}"
+          # computed override so each dispatch is a new F-Droid version and the Play internal
+          # artefact uses the same visible build number.
+          ./gradlew ":app:assemble${FDROID_FLAVOR}Release" "${GRADLE_ARGS[@]}"
           # Play artefact: base applicationId (prod flavor), only for channels that upload to Play.
           if [[ "${PLAY_UPLOAD}" == "true" ]]; then
             ./gradlew ":app:bundleProdRelease" ":app:assembleProdRelease" "${GRADLE_ARGS[@]}"
@@ -337,7 +353,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish to Play Console
-        # Only channels with play_upload (beta/prod). Skips cleanly when the SA secret is absent.
+        # Only channels with play_upload (beta/dev/prod). Skips cleanly when the SA secret is absent.
         if: ${{ env.PLAY_UPLOAD == 'true' && steps.service_account.outputs.path != '' }}
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5  # v1.1.5
         with:
@@ -355,7 +371,7 @@ jobs:
 
       - name: Create dev pre-release (dev channel)
         # dev has no Release of its own; create one (tag app-dev-v<run>) so the F-Droid publisher has a
-        # source. always() + staged guard so a Play hiccup elsewhere never skips it. Its published event
+        # source. always() + staged guard so a Play hiccup never hides the signed artefacts. Its published event
         # is a no-op (resolve-target requires app-v*, which app-dev-v* does not match).
         if: ${{ always() && needs.resolve-target.outputs.creates_dev_release == 'true' && steps.artefacts.outcome == 'success' }}
         uses: softprops/action-gh-release@v2
@@ -365,9 +381,9 @@ jobs:
           # set to another branch/tag builds that ref, so tagging github.sha would break provenance.
           target_commitish: ${{ steps.meta.outputs.full_sha }}
           name: Redface 2 dev (build ${{ steps.meta.outputs.version_code }})
-          body: "Build dev automatique (canal interne). APK F-Droid `.dev` attaché. Non destiné au grand public."
+          body: "Build dev automatique (canal interne Play + F-Droid `.dev`). Non destiné au grand public."
           prerelease: true
-          files: release-artefacts/*.apk
+          files: release-artefacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
