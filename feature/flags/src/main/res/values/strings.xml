@@ -22,6 +22,16 @@
     <string name="flags_super_placeholder_body">Les « super favoris » permettront d\'épingler les sujets les plus importants. Cette vue arrivera dans une prochaine version.</string>
 
     <string name="flags_empty">Aucun drapeau dans cette vue.</string>
+
+    <!-- #179 — Vue drapeaux groupée par catégorie (parité vue web par défaut). -->
+    <!-- Cyan (« Mes sujets ») : section de catégorie sans nouveau message non lu. Wording parité web. -->
+    <string name="flags_category_empty_cyan">Aucun nouveau message</string>
+    <!-- RED / FAVORITE : section de catégorie sans sujet suivi. « Aucun nouveau message » serait
+         trompeur ici (ces vues listent aussi les sujets lus). -->
+    <string name="flags_category_empty">Aucun sujet dans cette catégorie</string>
+    <!-- Fallback de libellé pour une catégorie absente du catalogue REST (anti-régression #251).
+         %1$d = identifiant de la catégorie. -->
+    <string name="flags_category_fallback">Catégorie %1$d</string>
     <string name="flags_error">Impossible de récupérer les drapeaux. Vérifie ta connexion ou réessaie.</string>
     <string name="flags_session_expired">Session HFR expirée. Reconnecte-toi pour recharger tes drapeaux.</string>
     <string name="flags_retry">Réessayer</string>

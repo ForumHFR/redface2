@@ -6,11 +6,15 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.forum.ForumRepository
+import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +23,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -36,6 +41,7 @@ import kotlinx.coroutines.launch
 class FlagsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val flagRepository: FlagRepository,
+    private val forumRepository: ForumRepository,
 ) : ViewModel() {
 
     private var observedPseudo: String? = null
@@ -68,39 +74,41 @@ class FlagsViewModel @Inject constructor(
         )
 
     /**
-     * Flag list for the currently selected tab. Anonymous → emits null (the home tab
-     * shows the login intro instead of an empty list); Authenticated → emits the result
-     * from FlagRepository for the current tab. Switching tabs (or auth state) cancels
-     * any in-flight observation via [flatMapLatest].
+     * Category-grouped UI state for the currently selected tab (#179). Replaces the former flat
+     * `FlagsResult?` exposure: the screen renders one section per forum category in canonical
+     * order (empty sections included for HFR web parity), grouping the already-loaded flat list
+     * client-side — no extra authenticated fetch (prefetch-non-auth invariant).
      *
-     * The [FlagTab.Super] tab is a placeholder (future « super favoris », no backend yet):
-     * selecting it maps to no [FlagType] and emits `null`, so the screen renders its
-     * placeholder body instead of a list and **no** repository observation is started.
+     * - Anonymous → `null` (the home tab shows the login intro instead of a list).
+     * - [FlagTab.Super] → `null` (placeholder body, no backend, **no** repository observation —
+     *   neither flags NOR categories are observed, cf. §5 « no double-fetch »).
+     * - Authenticated + a real [FlagType] → the per-tab flag flow (filtered cyan #154, then
+     *   [keepContentDuringRefresh] #225) is combined with [ForumRepository.observeCategories]
+     *   to build [FlagsListUiState]. Categories are observed **only** in this branch so we never
+     *   trigger a spurious public categories fetch for Anonymous/Super.
+     *
+     * Ordering of the mapping is load-bearing: cyan filter → `keepContentDuringRefresh` →
+     * combine with categories → map to sections. Reversing the first two would regress #225
+     * (the list blanks to a cold spinner during a pull-to-refresh).
+     *
+     * A [ForumResult.Failure]/[ForumResult.Loading] on the categories side NEVER turns a
+     * `FlagsResult.Success` into a [FlagsListUiState.Failure]: the hard-coded
+     * [FALLBACK_CATEGORY_ORDER] is used so the sections still render and no flag is lost.
+     *
+     * Empty sections are kept for **all** tabs (web parity, MVP); the per-tab empty wording is
+     * chosen in Compose. `refreshCategories()` is **never** called from here (the 24h memory
+     * cache of [ForumRepository] is enough; pull-to-refresh refreshes flags only).
      */
-    val flagsState: StateFlow<FlagsResult?> = authState
+    val flagsState: StateFlow<FlagsListUiState?> = authState
         .onEach(::clearFlagsCacheIfSessionChanged)
         .flatMapLatest { state ->
             when (state) {
-                null -> flowOf<FlagsResult?>(null)
-                AuthState.Anonymous -> flowOf<FlagsResult?>(null)
+                null -> flowOf<FlagsListUiState?>(null)
+                AuthState.Anonymous -> flowOf<FlagsListUiState?>(null)
                 is AuthState.Authenticated -> selectedTab.flatMapLatest { tab ->
                     when (val type = tab.flagType) {
-                        null -> flowOf<FlagsResult?>(null) // Super placeholder: no fetch.
-                        else -> combine(
-                            flagRepository.observe(type),
-                            _showReadParticipatedTopics,
-                        ) { result, showRead ->
-                            filterReadParticipatedIfNeeded(result, type, showRead)
-                        }
-                            // #225 — keep the existing list anchored during a user refresh
-                            // instead of blanking it to a cold centered spinner under the
-                            // PullToRefreshBox indicator (double loader). Same pattern as
-                            // :feature:forum. Applied per-tab (inside flatMapLatest) so a
-                            // genuine tab switch still shows its own cold spinner.
-                            .keepContentDuringRefresh(
-                                isLoading = { it is FlagsResult.Loading },
-                                isContent = { it is FlagsResult.Success },
-                            )
+                        null -> flowOf<FlagsListUiState?>(null) // Super placeholder: no fetch.
+                        else -> authenticatedFlagsListState(type)
                     }
                 }
             }
@@ -110,6 +118,39 @@ class FlagsViewModel @Inject constructor(
             started = SharingStarted.Eagerly,
             initialValue = null,
         )
+
+    /**
+     * Builds the grouped UI state for an authenticated tab with a real [type]. Kept as a
+     * dedicated method so the `flatMapLatest` chain stays readable. Both `observe(type)` and
+     * `observeCategories()` are subscribed here — and only here.
+     */
+    private fun authenticatedFlagsListState(type: FlagType): Flow<FlagsListUiState?> {
+        val filteredFlags = combine(
+            flagRepository.observe(type),
+            _showReadParticipatedTopics,
+        ) { result, showRead ->
+            filterReadParticipatedIfNeeded(result, type, showRead)
+        }
+            // #225 — keep the existing list anchored during a user refresh instead of blanking
+            // it to a cold centered spinner under the PullToRefreshBox indicator (double loader).
+            // MUST stay before the section mapping (cf. KDoc on flagsState).
+            .keepContentDuringRefresh(
+                isLoading = { it is FlagsResult.Loading },
+                isContent = { it is FlagsResult.Success },
+            )
+
+        // Prepend a synthetic Loading on the categories side so `combine` does not BLOCK the
+        // flags render until the categories flow has emitted (cf. test 10bis): on a cold start
+        // where Success(flags) lands before observeCategories emits, the screen must render
+        // immediately using FALLBACK_CATEGORY_ORDER, then re-derive when the real catalogue
+        // arrives. Without this onStart, `combine` waits for both sources and the list stalls.
+        val categories = forumRepository.observeCategories()
+            .onStart { emit(ForumResult.Loading) }
+
+        return combine(filteredFlags, categories) { flagsResult, catsResult ->
+            toFlagsListUiState(flagsResult, catsResult)
+        }
+    }
 
     /**
      * Drives the « Retirer le drapeau » interaction (#99). MVI-style explicit state so the
@@ -226,6 +267,30 @@ class FlagsViewModel @Inject constructor(
     // here was dead code that drifted at the first refactor; the matching invariant test was
     // moved to `AppAccountViewModelTest`.
 
+    /**
+     * Maps a (filtered) [FlagsResult] + a categories [ForumResult] into the single grouped UI
+     * state (#179). A `Loading`/`Failure` on the categories side is **non-fatal**: it only
+     * affects which canonical order is used, never whether the flags render. The hard-coded
+     * [FALLBACK_CATEGORY_ORDER] kicks in until the real catalogue arrives, so flags appear
+     * immediately on a cold start and no flag is ever lost (anti-regression #251).
+     */
+    private fun toFlagsListUiState(
+        flagsResult: FlagsResult,
+        categoriesResult: ForumResult<List<Category>>,
+    ): FlagsListUiState = when (flagsResult) {
+        FlagsResult.Loading -> FlagsListUiState.Loading
+        is FlagsResult.Failure -> FlagsListUiState.Failure(flagsResult.cause)
+        is FlagsResult.Success -> {
+            val order = when (categoriesResult) {
+                is ForumResult.Success -> categoriesResult.value.map {
+                    FlagCategoryOrderEntry(it.id, it.name)
+                }
+                else -> FALLBACK_CATEGORY_ORDER
+            }
+            FlagsListUiState.Success(groupFlagsByCategory(flagsResult.flags, order))
+        }
+    }
+
     private fun filterReadParticipatedIfNeeded(
         result: FlagsResult,
         type: FlagType,
@@ -292,6 +357,29 @@ sealed interface FlagTab {
     data object Super : FlagTab {
         override val flagType: FlagType? = null
     }
+}
+
+/**
+ * Single route-facing UI state for the category-grouped Drapeaux list (#179). Replaces a
+ * direct `FlagsResult` exposure so a `Loading`/`Failure` can never diverge from a stale set
+ * of sections (cf. impl prompt §4.1 correction #2).
+ *
+ * A `null` value (not a member of this interface) keeps its prior meaning « not applicable »:
+ * the Anonymous login intro or the [FlagTab.Super] placeholder.
+ */
+sealed interface FlagsListUiState {
+    /** Cold fetch in flight, no prior content to keep. */
+    data object Loading : FlagsListUiState
+
+    /**
+     * Grouped sections in canonical category order, empty sections included (web parity).
+     * [sections] is non-empty in practice — the fallback order guarantees at least the known
+     * categories even before the catalogue loads.
+     */
+    data class Success(val sections: List<FlagCategorySection>) : FlagsListUiState
+
+    /** A flags fetch failed; [cause] drives the reconnect/retry CTA (e.g. SessionExpiredException). */
+    data class Failure(val cause: Throwable) : FlagsListUiState
 }
 
 /**

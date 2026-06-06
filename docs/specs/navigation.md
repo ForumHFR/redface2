@@ -42,8 +42,8 @@ graph TB
         MSGS[Messages]
     end
 
-    FLAGS -->|"tri: date / catégorie"| FLAGS
-    FLAGS -->|"filtre: tous / cyan / favori / rouge"| FLAGS
+    FLAGS -->|"onglets: cyan / lu / favoris / super"| FLAGS
+    FLAGS -->|"groupé par catégorie (#179)"| FLAGS
     FLAGS --> TOPIC
 
     FORUM --> CATS[Catégories]
@@ -90,20 +90,21 @@ graph TB
 
 L'écran le plus important de l'app. Affiche les topics suivis par l'utilisateur.
 
-**Tri :**
-- **Par date** (défaut) : tous les topics mélangés, triés par dernier message
-- **Par catégorie** : groupes par cat/subcat, chaque groupe trie par date
+**Onglets** (`FlagTab`, un `FlagType` chacun sauf `Super`) :
+- **Mes sujets** (cyan) : topics où l'utilisateur a participé. Re-tap de l'onglet déjà sélectionné → toggle « +lus » (afficher/masquer les cyans déjà lus, #154).
+- **Lu** (rouge) : topics lus uniquement (drapeau de lecture sans participation).
+- **Favoris** : topics marqués d'une étoile jaune.
+- **Super** : placeholder « super favoris » (pas de backend, pas de fetch).
 
-**Filtres :**
-- **Tous** : tous les drapeaux confondus
-- **Cyan** : topics où l'utilisateur a participé
-- **Favori** : topics marqués d'une étoile jaune
-- **Rouge** : topics lus uniquement (drapeau de lecture sans participation)
+**Regroupement par catégorie (#179, vue par défaut)** :
+- À l'intérieur de chaque onglet réel, les topics sont **groupés par catégorie**, dans l'ordre canonique du forum (cf. `ForumRepository.observeCategories()` ; ordre de secours en dur si le catalogue n'est pas encore chargé). C'est la parité avec la vue web « Vos sujets ».
+- Chaque catégorie est une bande séparatrice (`stickyHeader`). Les **catégories vides sont conservées** (parité web) avec un placeholder par onglet (« Aucun nouveau message » pour cyan, « Aucun sujet dans cette catégorie » sinon).
+- Le regroupement est **purement client-side** : group-by sur `Flag.cat` de la liste plate déjà chargée, aucun fetch authentifié supplémentaire (invariant prefetch-non-auth). Une catégorie absente du catalogue n'est jamais filtrée : elle tombe en section « inconnue » en fin de liste (anti-régression #251).
+- Différé hors MVP #179 : toggle vue plate/groupée + préférence persistée, repli des catégories vides.
 
 **Actions sur un topic :**
 - Tap → ouvrir le topic à la dernière position non lue
-- Long press → menu contextuel (retirer drapeau, copier URL, partager)
-- Swipe → retirer le drapeau (avec undo)
+- Swipe (end-to-start) → ouvre le dialog de confirmation de retrait du drapeau (#99). Le retrait n'est **pas** annulable dans l'app (pas d'undo) ; la ligne revient en place tant que l'utilisateur n'a pas confirmé.
 
 ### Profil utilisateur (Phase 2 finish #208)
 
