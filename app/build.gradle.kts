@@ -25,9 +25,9 @@ val hasCiSigningConfig =
 // the per-flavor defaults below apply.
 //   -PappLabel="Redface 2 β"  → forces the launcher label for the build (lets the prod flavor /
 //                                base applicationId carry the β/dev label on the Play track build).
-//   -PversionCodeOverride=N   → overrides versionCode for the dev channel only (F-Droid `.dev` is
-//                                its own applicationId namespace, so a run_number-based code there
-//                                never collides with — nor blocks — the base/Play versionCode).
+//   -PversionCodeOverride=N   → overrides versionCode for the dev channel only. Dev now uploads to
+//                                Play internal under the base applicationId AND to F-Droid `.dev`, so
+//                                the workflow computes an explicit code above the current base code.
 val cliAppLabel = providers.gradleProperty("appLabel").orNull?.takeIf { it.isNotBlank() }
 val cliVersionCode = providers.gradleProperty("versionCodeOverride").orNull?.toIntOrNull()
 
@@ -119,7 +119,8 @@ android {
     // #233 — `channel` product-flavor dimension (prod / beta / dev). The applicationId suffix decides
     // WHERE the artifact goes; the launcher label is set per build (cliAppLabel ?: per-flavor default):
     //   prod (base applicationId fr.forumhfr.redface2) → the PLAY artifact (one Play listing, label
-    //         set by -PappLabel per track: "Redface 2 β" on the beta track, "Redface 2" on production).
+    //         set by -PappLabel per track: "Redface 2 β" on beta, "Redface 2 dev" on internal,
+    //         "Redface 2" on production).
     //   beta (.beta) / dev (.dev) → the F-DROID artifacts (distinct applicationId = distinct, coexisting
     //         F-Droid apps "Redface 2 β" / "Redface 2 dev"; F-Droid indexes by package, has no tracks).
     // Play = ONE applicationId (1 listing, label varies by track); F-Droid = packages per channel.
