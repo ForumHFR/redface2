@@ -9,8 +9,12 @@ import io.mockk.mockk
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -58,6 +62,34 @@ class DefaultForumRepositoryTest {
             assertEquals(19, cached.value.size)
             cancelAndIgnoreRemainingEvents()
         }
+        coVerify(exactly = 1) { apiClient.getCategories(any()) }
+    }
+
+    @Test
+    fun `concurrent cold observers coalesce into a single categories fetch`() = runTest {
+        // Two collectors subscribe before either fetch completes (the gate keeps the first
+        // getCategories suspended). Without the single-flight mutex both would see a cold
+        // cache and each fire getCategories — the classic #179 cold-start double-fetch
+        // (FlagsViewModel grouping + DefaultFlagRepository.loadCategories racing).
+        val gate = CompletableDeferred<Unit>()
+        val apiClient = mockk<HfrApiClient> {
+            coEvery { getCategories(any()) } coAnswers {
+                gate.await()
+                fixture("rest_categories.json")
+            }
+        }
+        val repo = repository(apiClient)
+
+        val first = async { repo.observeCategories().first { it is ForumResult.Success } }
+        val second = async { repo.observeCategories().first { it is ForumResult.Success } }
+        runCurrent() // let both collectors reach the (cold) fetch branch and the mutex
+
+        gate.complete(Unit)
+        val firstResult = first.await() as ForumResult.Success
+        val secondResult = second.await() as ForumResult.Success
+
+        assertEquals(19, firstResult.value.size)
+        assertEquals(19, secondResult.value.size)
         coVerify(exactly = 1) { apiClient.getCategories(any()) }
     }
 
