@@ -13,11 +13,12 @@ import kotlin.math.abs
 
 /**
  * Target page of a horizontal swipe while reading a topic (#282), or `null` when the gesture is
- * blocked by an edge. [forward] = true → next page (drag left), false → previous page (drag right).
- * Pure → unit-tested without Compose.
+ * blocked by an edge. [forward] = true → next page, false → previous page. Pure → unit-tested
+ * without Compose.
  *
- * Mirrors the exact bounds of `TopicUiState.canGoNext` / `canGoPrevious` (page in `1..totalPages`)
- * so the swipe and the Previous/Next buttons agree.
+ * Bounds the result to `1..totalPages` — the same range as `TopicUiState.canGoNext` /
+ * `canGoPrevious`. The page source is the rendered `Topic.page` (what the user is looking at), which
+ * matches the value the Previous/Next buttons pass to `onOpenPage`.
  */
 internal fun swipeTargetPage(currentPage: Int, totalPages: Int, forward: Boolean): Int? =
     if (forward) {
@@ -25,6 +26,32 @@ internal fun swipeTargetPage(currentPage: Int, totalPages: Int, forward: Boolean
     } else {
         (currentPage - 1).takeIf { it >= 1 }
     }
+
+/**
+ * Direction a finished horizontal drag committed to, or `null` for a no-op (drag too small AND too
+ * slow). `true` = next page (leftward drag), `false` = previous page (rightward). Pure → unit-tested
+ * without a gesture clock. Edge clamping is the caller's job (via [swipeTargetPage]).
+ *
+ * Commit when the drag crossed EITHER the distance ([commitDistancePx]) or the fling velocity
+ * ([flingThresholdPx]) threshold. Direction follows the **velocity** when a fling carried the commit,
+ * otherwise the **distance** — so a fast flick that happens to lift on the wrong side of its start
+ * (finger reversed) still goes the way it was thrown, and a near-zero displacement never picks an
+ * unstable sign. Negative = leftward drag = next page (geometric, see [topicPageSwipe]).
+ */
+internal fun swipeCommitDirection(
+    totalDx: Float,
+    velocityX: Float,
+    commitDistancePx: Float,
+    flingThresholdPx: Float,
+): Boolean? {
+    val committedByFling = abs(velocityX) >= flingThresholdPx
+    val orientation = when {
+        committedByFling -> velocityX
+        abs(totalDx) >= commitDistancePx -> totalDx
+        else -> return null
+    }
+    return if (orientation == 0f) null else orientation < 0f
+}
 
 // Commit thresholds: a swipe changes page only past a clear intent, never on the bare touch slop.
 private const val COMMIT_FRACTION = 0.20f
@@ -41,8 +68,13 @@ private val FLING_VELOCITY_THRESHOLD = 900.dp
  * - it engages only on **horizontal** touch slop, so the vertical `LazyColumn` scroll is never stolen;
  * - a child that consumes the horizontal drag first (the page-grid's `horizontalScroll`) cancels our
  *   slop detection, so it keeps its own gesture;
- * - at the edges ([swipeTargetPage] returns `null`) the gesture is a no-op (no navigation, no flash);
+ * - at the edges (target is `null`) the gesture is a no-op (no navigation, no flash);
  * - exactly one [onOpenPage] per gesture.
+ *
+ * Direction is **geometric**, not layout-direction aware: a physical leftward drag always opens the
+ * next page (rightward = previous), regardless of `LayoutDirection`. The forum content is LTR
+ * (French) so an RTL-mirrored mapping would only matter for a locale this app does not target;
+ * mirroring on `LayoutDirection` is a deliberate non-goal here (revisit if RTL becomes a use case).
  *
  * Primitive choice: low-level `awaitEachGesture` + `awaitHorizontalTouchSlopOrCancellation` rather
  * than `detectHorizontalDragGestures` (too blunt — auto-consumes and locks the axis) or
@@ -74,10 +106,8 @@ internal fun Modifier.topicPageSwipe(
             change.consume()
         }
         val velocityX = velocityTracker.calculateVelocity().x
-        val committed = abs(totalDx) >= commitDistancePx || abs(velocityX) >= flingThresholdPx
-        if (committed) {
-            // Drag left (negative dx) reveals the next page; drag right the previous one.
-            swipeTargetPage(currentPage, totalPages, forward = totalDx < 0f)?.let(onOpenPage)
+        swipeCommitDirection(totalDx, velocityX, commitDistancePx, flingThresholdPx)?.let { forward ->
+            swipeTargetPage(currentPage, totalPages, forward)?.let(onOpenPage)
         }
     }
 }
