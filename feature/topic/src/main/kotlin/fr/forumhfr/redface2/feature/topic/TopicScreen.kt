@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -410,17 +411,25 @@ private fun TopicLoadedContent(
     listState: LazyListState,
 ) {
     val highlight = state.request.scrollTo
+    // #282 — shared offset between the gesture (drives translationX) and the edge glow. Lives in the
+    // Loaded composition only, so a committed swipe (which recreates the screen) starts back at rest.
+    val dragOffset = remember { Animatable(0f) }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
-            // #282 — horizontal swipe changes page via the existing route-driven onOpenPage.
+            // #282 — horizontal swipe changes page via the existing route-driven onOpenPage, with
+            // drag-follow feedback: the page tracks the finger (graphicsLayer inside topicPageSwipe)
+            // and topicPageSwipeEdge paints an edge glow as the swipe arms. topicPageSwipeEdge must
+            // precede topicPageSwipe so the glow draws in untranslated (screen) space.
             // Engages on horizontal slop only, so vertical scroll and the page-grid's own
-            // horizontalScroll keep their gestures; edges are a no-op.
+            // horizontalScroll keep their gestures; edges are a damped no-op.
+            .topicPageSwipeEdge(dragOffset, MaterialTheme.colorScheme.primary)
             .topicPageSwipe(
                 currentPage = topic.page,
                 totalPages = topic.totalPages,
+                dragOffset = dragOffset,
                 onOpenPage = onOpenPage,
             ),
         state = listState,
