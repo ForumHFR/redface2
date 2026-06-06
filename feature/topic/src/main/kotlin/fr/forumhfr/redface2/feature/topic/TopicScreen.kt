@@ -414,7 +414,15 @@ private fun TopicLoadedContent(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .navigationBarsPadding(),
+            .navigationBarsPadding()
+            // #282 — horizontal swipe changes page via the existing route-driven onOpenPage.
+            // Engages on horizontal slop only, so vertical scroll and the page-grid's own
+            // horizontalScroll keep their gestures; edges are a no-op.
+            .topicPageSwipe(
+                currentPage = topic.page,
+                totalPages = topic.totalPages,
+                onOpenPage = onOpenPage,
+            ),
         state = listState,
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
