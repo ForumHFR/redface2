@@ -436,7 +436,12 @@ private fun TopicLoadedContent(
             // precede topicPageSwipe so the glow draws in untranslated (screen) space.
             // Engages on horizontal slop only, so vertical scroll and the page-grid's own
             // horizontalScroll keep their gestures; edges are a damped no-op.
-            .topicPageSwipeEdge(dragOffset, MaterialTheme.colorScheme.primary)
+            .topicPageSwipeEdge(
+                currentPage = topic.page,
+                totalPages = topic.totalPages,
+                dragOffset = dragOffset,
+                accent = MaterialTheme.colorScheme.primary,
+            )
             .topicPageSwipe(
                 currentPage = topic.page,
                 totalPages = topic.totalPages,

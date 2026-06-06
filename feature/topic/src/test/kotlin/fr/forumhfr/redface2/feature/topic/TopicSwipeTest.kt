@@ -201,6 +201,27 @@ class TopicSwipeTest {
         assertEquals(0.7f, swipeEdgeHintAlpha(progress = 5f), TOLERANCE)
     }
 
+    // --- blocked-edge glow suppression contract (feel-lens fix) ---
+    // topicPageSwipeEdge gates the glow on `swipeTargetPage(...) == null` for the dragged direction:
+    // at a wall the damped follow still moves the page (so the wall is felt) but no glow lights up,
+    // since no neighbour page is being brought in. These two pure functions are the gate's inputs.
+
+    @Test
+    fun `at a blocked edge the page still moves but the direction has no target`() {
+        // Last page dragged leftward (forward = next): damped wall produces a non-zero offset...
+        val offset = swipeFollowOffset(rawDx = -1000f, commitDistancePx = commit, hasTarget = false)
+        assertTrue("the wall should still give a little", abs(offset) > 0f)
+        // ...yet there is no target page that way, so the call-site suppresses the glow.
+        assertNull(swipeTargetPage(currentPage = 5, totalPages = 5, forward = true))
+    }
+
+    @Test
+    fun `away from a blocked edge the same drag direction has a target`() {
+        // From a middle page the forward direction has a target, so the glow is allowed.
+        assertEquals(3, swipeTargetPage(currentPage = 2, totalPages = 5, forward = true))
+        assertEquals(1, swipeTargetPage(currentPage = 2, totalPages = 5, forward = false))
+    }
+
     private companion object {
         const val TOLERANCE = 0.001f
     }
