@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -25,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 import kotlin.math.tanh
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
@@ -131,20 +133,28 @@ internal fun swipeArmed(offsetPx: Float, commitDistancePx: Float): Boolean =
  * commit/armed point, up to `1f + OVERPULL_MAX_FRACTION` — currently `1.5f` — in the bounded overpull
  * region). Pure → unit-tested.
  *
- * Two segments, continuous at `progress = 1f` so the brighten is finger-driven (no separate
- * animation primitive needed in the draw phase, which reads state synchronously without
- * recomposition):
- * - `0f..1f`: ramp to [EDGE_HINT_MAX_ALPHA] as the swipe approaches arming.
- * - past `1f`: a quick further brighten to [EDGE_HINT_ARMED_ALPHA] over the
- *   [EDGE_HINT_ARMED_RAMP] window, so crossing the threshold visibly intensifies the glow — the
- *   user sees that releasing will validate, in lock-step with the arming haptic tick.
+ * **Late-start** so the glow is a "you're about to commit" confirmation, not a decoration that
+ * occupies the screen from the first pixel: it stays fully invisible below [EDGE_HINT_START_PROGRESS]
+ * (the page already follows the finger, which conveys direction early). Three segments, continuous at
+ * `progress = 1f` so the brighten is finger-driven (no separate animation primitive in the draw phase,
+ * which reads state synchronously without recomposition):
+ * - `0f..EDGE_HINT_START_PROGRESS`: nothing (`0f`).
+ * - `EDGE_HINT_START_PROGRESS..1f`: ramp to [EDGE_HINT_MAX_ALPHA] as the swipe nears arming.
+ * - past `1f`: a quick further brighten to [EDGE_HINT_ARMED_ALPHA] over the [EDGE_HINT_ARMED_RAMP]
+ *   window, so crossing the threshold visibly intensifies the glow — the user sees that releasing will
+ *   validate, in lock-step with the arming haptic tick.
  */
 internal fun swipeEdgeHintAlpha(progress: Float): Float =
-    if (progress <= 1f) {
-        progress.coerceAtLeast(0f) * EDGE_HINT_MAX_ALPHA
-    } else {
-        val armedProgress = ((progress - 1f) / EDGE_HINT_ARMED_RAMP).coerceAtMost(1f)
-        EDGE_HINT_MAX_ALPHA + (EDGE_HINT_ARMED_ALPHA - EDGE_HINT_MAX_ALPHA) * armedProgress
+    when {
+        progress <= EDGE_HINT_START_PROGRESS -> 0f
+        progress <= 1f -> {
+            val ramp = (progress - EDGE_HINT_START_PROGRESS) / (1f - EDGE_HINT_START_PROGRESS)
+            ramp * EDGE_HINT_MAX_ALPHA
+        }
+        else -> {
+            val armedProgress = ((progress - 1f) / EDGE_HINT_ARMED_RAMP).coerceAtMost(1f)
+            EDGE_HINT_MAX_ALPHA + (EDGE_HINT_ARMED_ALPHA - EDGE_HINT_MAX_ALPHA) * armedProgress
+        }
     }
 
 // Commit thresholds: a swipe changes page only past a clear intent, never on the bare touch slop.
@@ -158,11 +168,13 @@ private val FLING_VELOCITY_THRESHOLD = 900.dp
 private const val OVERPULL_MAX_FRACTION = 0.5f
 private const val EDGE_RESISTANCE = 0.30f // damping into a blocked edge (first/last page)
 private const val EDGE_MAX_FRACTION = 0.4f // a blocked edge can travel at most this × commit distance
-private const val EDGE_HINT_WIDTH_FRACTION = 0.18f // edge-glow band width, as a fraction of the page
-private const val EDGE_HINT_MAX_ALPHA = 0.5f // edge-glow opacity right at the arming point
-private const val EDGE_HINT_ARMED_ALPHA = 0.7f // brighter edge-glow once the swipe is fully armed
+private const val EDGE_HINT_WIDTH_FRACTION = 0.10f // edge-glow band width, as a fraction of the page…
+private val EDGE_HINT_MAX_WIDTH = 40.dp // …but never wider than this, so it reads as an edge accent
+private const val EDGE_HINT_START_PROGRESS = 0.65f // glow stays invisible below this fraction of commit
+private const val EDGE_HINT_MAX_ALPHA = 0.2f // edge-glow opacity right at the arming point
+private const val EDGE_HINT_ARMED_ALPHA = 0.3f // brighter edge-glow once the swipe is fully armed
 private const val EDGE_HINT_ARMED_RAMP = 0.15f // overpull-progress window over which the armed glow fills
-private const val COMMIT_SLIDE_OUT_MILLIS = 120 // page slide-out before navigation on commit
+private const val COMMIT_SLIDE_OUT_MILLIS = 200 // page slide-out before navigation on commit (decelerated)
 
 // A committed page slides fully off-screen before navigating; the elevation lift sells "the page
 // leaves". Both are read at draw time from the same offset state the drag writes.
@@ -254,6 +266,14 @@ internal fun Modifier.topicPageSwipe(
             // gestures until this pointerInput is torn down by the route change — so `onOpenPage` fires
             // exactly once.
             var committed = false
+            // Tracks the in-flight release transition (spring-back / slide-out) so a new drag can
+            // cancel it DETERMINISTICALLY and SYNCHRONOUSLY (see the slop branch below). Replaces the
+            // former fire-and-forget `launch { release.stop() }`, whose dispatch order was not
+            // guaranteed: a late `stop()` could cancel the WRONG (newer) animation — including a commit
+            // slide-out before its `onOpenPage` fired, leaving `committed` latched true forever and the
+            // page frozen off-screen. Cancelling this exact job — and only behind the `committed` guard
+            // — means a committing slide-out is never interrupted, so navigation always completes.
+            var releaseJob: Job? = null
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 if (committed) return@awaitEachGesture
@@ -266,16 +286,16 @@ internal fun Modifier.topicPageSwipe(
                     change.consume()
                     overSlop = slop
                 } ?: return@awaitEachGesture
-                // A new drag cancels any release animation still running from the previous swipe.
-                // It MUST be `launch`-ed: `awaitEachGesture` runs in a `@RestrictsSuspension`
-                // `AwaitPointerEventScope`, which can only await suspend members of that scope — never
-                // `Animatable.stop()` — so the stop is handed to the (unrestricted) `animationScope`.
-                // Unconditional, no `release.isRunning` gate: `stop()` is a no-op on an idle
-                // `Animatable`, so dropping the check removes a TOCTOU read; the drag then writes
-                // `dragOffset` synchronously each frame and supersedes any final tick of the cancelled
-                // spring-back (bounded to at most one frame, since synchronous await is impossible
-                // here). A committed slide-out never reaches here (the `committed` latch returned above).
-                animationScope.launch { release.stop() }
+                // Cancel the previous release transition deterministically — AT slop crossing, not at
+                // `down` (a tap / vertical scroll that never crosses horizontal slop returned above and
+                // must NOT interrupt a running spring-back). `Job.cancel()` is not `suspend`, so it runs
+                // in-order right here, before this drag writes `dragOffset` below — there is no late,
+                // out-of-order `stop()` that could kill a newer animation. The drag then owns
+                // `dragOffset` synchronously each frame; the next release transition (set at gesture
+                // end) streams into it again. A committed slide-out never reaches this line (the
+                // `committed` latch returned at the top of the gesture), so a commit's `onOpenPage`
+                // always fires.
+                releaseJob?.cancel()
                 var totalDx = overSlop
                 var armed = false
                 velocityTracker.addPosition(drag.uptimeMillis, drag.position)
@@ -294,7 +314,7 @@ internal fun Modifier.topicPageSwipe(
                     change.consume()
                 }
                 if (!completed) {
-                    springBackTo(animationScope, release, dragOffset)
+                    releaseJob = springBackTo(animationScope, release, dragOffset)
                     return@awaitEachGesture
                 }
                 val velocityX = velocityTracker.calculateVelocity().x
@@ -308,9 +328,9 @@ internal fun Modifier.topicPageSwipe(
                     // Slide in the commit direction (forward = next = leftward = negative), not the
                     // residual offset sign: a fast fling can commit with a near-zero/opposite offset.
                     val targetX = if (forward) -widthPx else widthPx
-                    commitSlideOut(animationScope, release, dragOffset, targetX) { onOpenPage(target) }
+                    releaseJob = commitSlideOut(animationScope, release, dragOffset, targetX) { onOpenPage(target) }
                 } else {
-                    springBackTo(animationScope, release, dragOffset)
+                    releaseJob = springBackTo(animationScope, release, dragOffset)
                 }
             }
         }
@@ -333,11 +353,9 @@ private fun springBackTo(
     scope: CoroutineScope,
     release: Animatable<Float, *>,
     dragOffset: MutableFloatState,
-) {
-    scope.launch {
-        release.snapTo(dragOffset.floatValue)
-        release.animateTo(0f, SPRING_BACK) { dragOffset.floatValue = value }
-    }
+): Job = scope.launch {
+    release.snapTo(dragOffset.floatValue)
+    release.animateTo(0f, SPRING_BACK) { dragOffset.floatValue = value }
 }
 
 /**
@@ -352,14 +370,12 @@ private fun commitSlideOut(
     dragOffset: MutableFloatState,
     targetX: Float,
     onCommitted: () -> Unit,
-) {
-    scope.launch {
-        release.snapTo(dragOffset.floatValue)
-        release.animateTo(targetX, tween(durationMillis = COMMIT_SLIDE_OUT_MILLIS)) {
-            dragOffset.floatValue = value
-        }
-        onCommitted()
+): Job = scope.launch {
+    release.snapTo(dragOffset.floatValue)
+    release.animateTo(targetX, tween(durationMillis = COMMIT_SLIDE_OUT_MILLIS, easing = LinearOutSlowInEasing)) {
+        dragOffset.floatValue = value
     }
+    onCommitted()
 }
 
 private val ARMED_HAPTIC = HapticFeedbackType.GestureThresholdActivate
@@ -402,7 +418,7 @@ internal fun Modifier.topicPageSwipeEdge(
     // brushes. The per-frame opacity is applied via `drawRect`'s `alpha`, so neither brush nor the
     // colors `List` is re-allocated while the finger moves.
     val commitDistancePx = swipeCommitDistancePx(size.width, MIN_COMMIT_DISTANCE.toPx())
-    val band = size.width * EDGE_HINT_WIDTH_FRACTION
+    val band = minOf(size.width * EDGE_HINT_WIDTH_FRACTION, EDGE_HINT_MAX_WIDTH.toPx())
     val rightTopLeft = Offset(size.width - band, 0f)
     val bandSize = Size(band, size.height)
     val rightBrush = Brush.horizontalGradient(

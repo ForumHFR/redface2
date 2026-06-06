@@ -189,10 +189,19 @@ class TopicSwipeTest {
     }
 
     @Test
-    fun `the edge hint ramps to the pre-armed ceiling at the commit point`() {
-        // progress 0.5 → 0.5 * 0.5 = 0.25 ; progress 1.0 → 0.5 (EDGE_HINT_MAX_ALPHA).
-        assertEquals(0.25f, swipeEdgeHintAlpha(progress = 0.5f), TOLERANCE)
-        assertEquals(0.5f, swipeEdgeHintAlpha(progress = 1f), TOLERANCE)
+    fun `the edge hint stays invisible below the late-start threshold`() {
+        // Late-start (#282 glow pass): nothing shows until progress crosses EDGE_HINT_START_PROGRESS
+        // (0.65), so small exploratory drags never light the edge.
+        assertEquals(0f, swipeEdgeHintAlpha(progress = 0.5f), TOLERANCE)
+        assertEquals(0f, swipeEdgeHintAlpha(progress = 0.64f), TOLERANCE)
+        assertEquals(0f, swipeEdgeHintAlpha(progress = 0.65f), TOLERANCE)
+    }
+
+    @Test
+    fun `the edge hint ramps from the late start to the pre-armed ceiling`() {
+        // Ramp over 0.65..1.0 → EDGE_HINT_MAX_ALPHA (0.20). Midpoint 0.825 → 0.5 * 0.20 = 0.10.
+        assertEquals(0.10f, swipeEdgeHintAlpha(progress = 0.825f), TOLERANCE)
+        assertEquals(0.2f, swipeEdgeHintAlpha(progress = 1f), TOLERANCE)
     }
 
     @Test
@@ -205,15 +214,15 @@ class TopicSwipeTest {
 
     @Test
     fun `the edge hint brightens to the armed accent past the threshold`() {
-        // ramp window 0.15 ; progress 1.075 is halfway → 0.5 + (0.7 - 0.5) * 0.5 = 0.6.
-        assertEquals(0.6f, swipeEdgeHintAlpha(progress = 1.075f), TOLERANCE)
+        // ramp window 0.15 ; progress 1.075 is halfway → 0.20 + (0.30 - 0.20) * 0.5 = 0.25.
+        assertEquals(0.25f, swipeEdgeHintAlpha(progress = 1.075f), TOLERANCE)
     }
 
     @Test
     fun `the edge hint saturates at the armed accent and never exceeds it`() {
-        // Full ramp at progress 1.15 → 0.7 ; deep overpull stays clamped at 0.7.
-        assertEquals(0.7f, swipeEdgeHintAlpha(progress = 1.15f), TOLERANCE)
-        assertEquals(0.7f, swipeEdgeHintAlpha(progress = 5f), TOLERANCE)
+        // Full ramp at progress 1.15 → 0.30 ; deep overpull stays clamped at 0.30.
+        assertEquals(0.3f, swipeEdgeHintAlpha(progress = 1.15f), TOLERANCE)
+        assertEquals(0.3f, swipeEdgeHintAlpha(progress = 5f), TOLERANCE)
     }
 
     // --- blocked-edge glow suppression contract (feel-lens fix) ---

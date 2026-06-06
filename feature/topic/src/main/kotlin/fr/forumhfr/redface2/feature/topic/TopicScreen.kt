@@ -41,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -448,7 +449,13 @@ private fun TopicLoadedContent(
                 currentPage = topic.page,
                 totalPages = { currentTotalPages },
                 dragOffset = dragOffset,
-                accent = MaterialTheme.colorScheme.primary,
+                // #282 — desaturated edge-glow tint: mostly neutral (onSurfaceVariant) with a touch of
+                // primary, instead of full primary which read as an imposing pink/mauve panel.
+                accent = lerp(
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                    MaterialTheme.colorScheme.primary,
+                    0.3f,
+                ),
             )
             .topicPageSwipe(
                 currentPage = topic.page,
