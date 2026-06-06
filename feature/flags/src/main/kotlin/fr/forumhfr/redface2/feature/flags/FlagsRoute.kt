@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.flags
 
 import android.annotation.SuppressLint
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -364,6 +364,13 @@ private fun ColumnScope.AuthenticatedBody(
     }
 }
 
+// LazyColumn contentType tags (#179 compose-perf): one reuse pool per structurally distinct slot
+// kind so Compose recycles like-for-like across the header→row→header alternation of the grouped
+// list. Plain strings (the contentType is only ever compared for equality).
+private const val CONTENT_TYPE_HEADER = "category_header"
+private const val CONTENT_TYPE_EMPTY = "empty_section"
+private const val CONTENT_TYPE_ROW = "flag_row"
+
 /**
  * Category-grouped flag list (#179). Renders one sticky band per [FlagCategorySection] in the
  * canonical category order the ViewModel produced, with the rows under each band. Empty sections
@@ -377,7 +384,9 @@ private fun ColumnScope.AuthenticatedBody(
  * `@ExperimentalFoundationApi` in the locked stable Compose (verified via Context7), hence the
  * `@OptIn`. Keys are prefixed so headers, empty placeholders and rows never collide
  * (`key` throws on duplicates): `topicId` is unique per category only (cf. AGENTS.md), so rows
- * use `"${flag.cat}-${flag.topicId}"`.
+ * use `"${flag.cat}-${flag.topicId}"`. Each slot kind also carries a distinct `contentType`
+ * ([CONTENT_TYPE_HEADER]/[CONTENT_TYPE_EMPTY]/[CONTENT_TYPE_ROW]) so Compose keeps a separate
+ * reuse pool per kind across the header→row→header alternation.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -393,7 +402,10 @@ private fun CategorySectionedFlagList(
             .background(MaterialTheme.colorScheme.surface),
     ) {
         sections.forEach { section ->
-            stickyHeader(key = "cat-${section.catId}-header") {
+            // contentType groups the three structurally distinct slot kinds (band / placeholder /
+            // row) into separate reuse pools so scrolling across a header→rows→header boundary
+            // recycles a row slot for a row instead of recreating the node from a header slot.
+            stickyHeader(key = "cat-${section.catId}-header", contentType = CONTENT_TYPE_HEADER) {
                 CategoryHeaderBand(
                     label = section.catName
                         ?: stringResource(R.string.flags_category_fallback, section.catId),
@@ -401,7 +413,7 @@ private fun CategorySectionedFlagList(
             }
 
             if (section.topics.isEmpty()) {
-                item(key = "cat-${section.catId}-empty") {
+                item(key = "cat-${section.catId}-empty", contentType = CONTENT_TYPE_EMPTY) {
                     Text(
                         text = stringResource(emptySectionLabel(selectedTab)),
                         style = MaterialTheme.typography.labelMedium,
@@ -410,7 +422,11 @@ private fun CategorySectionedFlagList(
                     )
                 }
             } else {
-                items(items = section.topics, key = { "${it.cat}-${it.topicId}" }) { flag ->
+                items(
+                    items = section.topics,
+                    key = { "${it.cat}-${it.topicId}" },
+                    contentType = { CONTENT_TYPE_ROW },
+                ) { flag ->
                     // Anti double-tap (#99): while a removal is in flight, swipe is disabled
                     // across the list. `removeFlagState` is Removing only between confirm and the
                     // repository result (a brief window); the modal dialog already blocks the

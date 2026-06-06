@@ -91,9 +91,10 @@ class FlagsViewModel @Inject constructor(
      * combine with categories → map to sections. Reversing the first two would regress #225
      * (the list blanks to a cold spinner during a pull-to-refresh).
      *
-     * A [ForumResult.Failure]/[ForumResult.Loading] on the categories side NEVER turns a
-     * `FlagsResult.Success` into a [FlagsListUiState.Failure]: the hard-coded
-     * [FALLBACK_CATEGORY_ORDER] is used so the sections still render and no flag is lost.
+     * A [ForumResult.Failure]/[ForumResult.Loading] — or an EMPTY [ForumResult.Success] — on the
+     * categories side NEVER turns a `FlagsResult.Success` into a [FlagsListUiState.Failure]: the
+     * hard-coded [FALLBACK_CATEGORY_ORDER] is used so the sections still render and no flag is lost
+     * (an empty Success is treated as « no catalogue yet », guarding the double-empty blank body).
      *
      * Empty sections are kept for **all** tabs (web parity, MVP); the per-tab empty wording is
      * chosen in Compose. `refreshCategories()` is **never** called from here (the 24h memory
@@ -281,10 +282,17 @@ class FlagsViewModel @Inject constructor(
         FlagsResult.Loading -> FlagsListUiState.Loading
         is FlagsResult.Failure -> FlagsListUiState.Failure(flagsResult.cause)
         is FlagsResult.Success -> {
+            // A `Success` carrying an EMPTY catalogue is treated like « no catalogue yet »
+            // (falls back to FALLBACK_CATEGORY_ORDER), not like an empty order. Otherwise the
+            // double-empty case (zero flags AND zero categories) would render zero sections —
+            // a fully blank body with not even an « aucun drapeau » band. In prod the REST
+            // endpoint always returns the 19 categories, so this only guards the degenerate
+            // Success-but-empty edge; flags in unknown cats are still never lost either way.
             val order = when (categoriesResult) {
-                is ForumResult.Success -> categoriesResult.value.map {
-                    FlagCategoryOrderEntry(it.id, it.name)
-                }
+                is ForumResult.Success -> categoriesResult.value
+                    .takeIf { it.isNotEmpty() }
+                    ?.map { FlagCategoryOrderEntry(it.id, it.name) }
+                    ?: FALLBACK_CATEGORY_ORDER
                 else -> FALLBACK_CATEGORY_ORDER
             }
             FlagsListUiState.Success(groupFlagsByCategory(flagsResult.flags, order))

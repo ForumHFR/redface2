@@ -459,6 +459,35 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `an empty categories Success falls back to the hard-coded order, never a blank body`() = runTest {
+        // Guards the double-empty edge: zero flags AND a Success carrying an empty catalogue must
+        // NOT collapse to zero sections (a fully blank body). An empty Success is treated as
+        // « no catalogue yet » → FALLBACK_CATEGORY_ORDER drives the 19 known sections.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(autoEmit = false)
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = FlagsViewModel(auth, flags, forum)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            forum.emitCategories(ForumResult.Success(emptyList()))
+            // Double-empty: no flags + empty catalogue Success.
+            flags.emit(FlagType.CYAN, FlagsResult.Success(emptyList()))
+            val onEmptyCatalogue = awaitItem() as FlagsListUiState.Success
+            assertEquals(
+                "empty Success catalogue must use the 19-category fallback, not zero sections",
+                19,
+                onEmptyCatalogue.sections.size,
+            )
+            assertTrue(
+                "every fallback section is empty when there are no flags",
+                onEmptyCatalogue.sections.all { it.topics.isEmpty() },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `categories are observed once for the authenticated tab and never refreshed`() = runTest {
         // 11bis: exactly one categories subscription for the active authenticated tab, and the
         // flags screen never calls refreshCategories (the read path / 24h cache owns that).
