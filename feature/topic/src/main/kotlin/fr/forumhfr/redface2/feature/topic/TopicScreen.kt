@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -419,10 +420,17 @@ private fun TopicLoadedContent(
     val dragOffset = remember { mutableFloatStateOf(0f) }
     // #282 — hoisted so the gesture can tick on arming and confirm on commit.
     val haptics = LocalHapticFeedback.current
-    // #282 (P2-b) — if the pagination target re-keys while we stay Loaded (a force-refresh that lands
-    // the same screen on a new page/total, or the cache swapping the loaded page under the user mid
-    // or post-drag), drop any residual translation so the page is never left frozen off-centre.
-    LaunchedEffect(topic.page, topic.totalPages) {
+    // #282 — live page count for the swipe gesture, read through a lambda so the gesture sees the
+    // latest value WITHOUT re-keying its `pointerInput` (which would cancel an in-flight commit
+    // slide-out and drop the navigation — see `topicPageSwipe`). `rememberUpdatedState` keeps the
+    // State identity stable while its value tracks `topic.totalPages` across recompositions.
+    val currentTotalPages by rememberUpdatedState(topic.totalPages)
+    // #282 (P2-b) — if the loaded page re-keys while we stay Loaded (a force-refresh or page jump that
+    // lands the same screen on a new page), drop any residual translation so the page is never left
+    // frozen off-centre. Keyed on `topic.page` ONLY — never `topic.totalPages`: a page-count change
+    // landing during a commit's slide-out must not reset the offset mid-animation (it would yank the
+    // sliding page back); the gesture reads the live count via `currentTotalPages` instead.
+    LaunchedEffect(topic.page) {
         dragOffset.floatValue = 0f
     }
     LazyColumn(
@@ -438,13 +446,13 @@ private fun TopicLoadedContent(
             // horizontalScroll keep their gestures; edges are a damped no-op.
             .topicPageSwipeEdge(
                 currentPage = topic.page,
-                totalPages = topic.totalPages,
+                totalPages = { currentTotalPages },
                 dragOffset = dragOffset,
                 accent = MaterialTheme.colorScheme.primary,
             )
             .topicPageSwipe(
                 currentPage = topic.page,
-                totalPages = topic.totalPages,
+                totalPages = { currentTotalPages },
                 dragOffset = dragOffset,
                 haptics = haptics,
                 onOpenPage = onOpenPage,

@@ -213,7 +213,7 @@ private val SPRING_BACK = spring<Float>(
  */
 internal fun Modifier.topicPageSwipe(
     currentPage: Int,
-    totalPages: Int,
+    totalPages: () -> Int,
     dragOffset: MutableFloatState,
     haptics: HapticFeedback,
     onOpenPage: (Int) -> Unit,
@@ -223,7 +223,15 @@ internal fun Modifier.topicPageSwipe(
     // `positionChange()` would be `Δfinger − Δtranslation`, halving the tracking and doubling the
     // effective commit distance. `graphicsLayer` (draw-only) leaves the hit-test bounds put, so the
     // finger stays over the page while the page visibly follows.
-    .pointerInput(currentPage, totalPages) {
+    //
+    // Keyed on `currentPage` ONLY — never `totalPages`. A commit defers `onOpenPage` by
+    // COMMIT_SLIDE_OUT_MILLIS inside this block's `coroutineScope`; if `totalPages` were part of the
+    // key, a background refresh changing the page count (cache→network, or a new post) during that
+    // slide-out window would restart `pointerInput`, cancel the scope and drop `onOpenPage` — a silent
+    // nav failure with a snap-back. `totalPages` is instead read fresh through the `totalPages()`
+    // lambda (backed by `rememberUpdatedState` at the call site), so the gesture always sees the live
+    // count without ever re-keying.
+    .pointerInput(currentPage) {
         val commitDistancePx = swipeCommitDistancePx(size.width.toFloat(), MIN_COMMIT_DISTANCE.toPx())
         val flingThresholdPx = FLING_VELOCITY_THRESHOLD.toPx()
         val widthPx = size.width.toFloat()
@@ -254,20 +262,22 @@ internal fun Modifier.topicPageSwipe(
                     overSlop = slop
                 } ?: return@awaitEachGesture
                 // A new drag cancels any release animation still running from the previous swipe.
-                // Gated: `stop()` on an idle `Animatable` is a no-op, so skip the coroutine unless a
-                // release transition is actually in flight (the common case is none).
-                if (release.isRunning) animationScope.launch { release.stop() }
+                // `stop()` is idempotent (a no-op on an idle `Animatable`), so call it unconditionally
+                // rather than gate on a `release.isRunning` read that could flip between the check and
+                // the launched `stop()` actually running; the drag writes `dragOffset` synchronously
+                // each frame and supersedes any last tick of the cancelled release.
+                animationScope.launch { release.stop() }
                 var totalDx = overSlop
                 var armed = false
                 velocityTracker.addPosition(drag.uptimeMillis, drag.position)
-                dragOffset.floatValue = followOffsetFor(totalDx, commitDistancePx, currentPage, totalPages)
+                dragOffset.floatValue = followOffsetFor(totalDx, commitDistancePx, currentPage, totalPages())
                 // `horizontalDrag` returns false when the drag is CANCELLED — e.g. a descendant
                 // horizontal scroller (a wide `[fixed]` code block, the page grid) takes the pointer
                 // over after we crossed slop. Honour it: a taken-over gesture must NOT navigate.
                 val completed = horizontalDrag(drag.id) { change ->
                     totalDx += change.positionChange().x
                     velocityTracker.addPosition(change.uptimeMillis, change.position)
-                    val offset = followOffsetFor(totalDx, commitDistancePx, currentPage, totalPages)
+                    val offset = followOffsetFor(totalDx, commitDistancePx, currentPage, totalPages())
                     dragOffset.floatValue = offset // synchronous, no coroutine, no allocation
                     val nowArmed = swipeArmed(offset, commitDistancePx)
                     if (nowArmed && !armed) haptics.performHapticFeedback(ARMED_HAPTIC)
@@ -280,7 +290,7 @@ internal fun Modifier.topicPageSwipe(
                 }
                 val velocityX = velocityTracker.calculateVelocity().x
                 val forward = swipeCommitDirection(totalDx, velocityX, commitDistancePx, flingThresholdPx)
-                val target = forward?.let { swipeTargetPage(currentPage, totalPages, it) }
+                val target = forward?.let { swipeTargetPage(currentPage, totalPages(), it) }
                 if (forward != null && target != null) {
                     // Latch BEFORE the deferred slide-out so any gesture starting in the slide-out
                     // window is ignored (see `committed` declaration) — no second `onOpenPage`.
@@ -375,7 +385,7 @@ private fun followOffsetFor(totalDx: Float, commitDistancePx: Float, currentPage
  */
 internal fun Modifier.topicPageSwipeEdge(
     currentPage: Int,
-    totalPages: Int,
+    totalPages: () -> Int,
     dragOffset: MutableFloatState,
     accent: Color,
 ): Modifier = drawWithCache {
@@ -402,7 +412,7 @@ internal fun Modifier.topicPageSwipeEdge(
         if (offset == 0f || commitDistancePx <= 0f) return@onDrawWithContent
         val leftward = offset < 0f
         // Suppress the glow when this direction is a blocked edge (no neighbour page to bring in).
-        if (swipeTargetPage(currentPage, totalPages, forward = leftward) == null) return@onDrawWithContent
+        if (swipeTargetPage(currentPage, totalPages(), forward = leftward) == null) return@onDrawWithContent
         val alpha = swipeEdgeHintAlpha(abs(offset) / commitDistancePx)
         if (leftward) {
             drawRect(brush = rightBrush, topLeft = rightTopLeft, size = bandSize, alpha = alpha)
