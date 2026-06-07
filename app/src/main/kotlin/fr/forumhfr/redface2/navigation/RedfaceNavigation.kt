@@ -5,6 +5,13 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,6 +37,7 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
@@ -495,6 +503,13 @@ private fun RedfaceNavHost(
                 backStack.removeAt(backStack.lastIndex)
             }
         },
+        // #282 — a topic page change (swipe) replaces the top TopicRoute with the same route at a
+        // new page; our gesture already slides the outgoing page off-screen, so the default 700 ms
+        // NavDisplay cross-fade is redundant AND keeps the incoming entry below RESUMED for its whole
+        // duration — exactly the window the swipe is gated off. Skipping it for TopicRoute→TopicRoute
+        // collapses that dead-zone to ~one frame. Every other transition keeps nav3's default.
+        transitionSpec = { navContentTransform(initialState, targetState) },
+        popTransitionSpec = { navContentTransform(initialState, targetState) },
         entryDecorators = listOf(
             rememberSaveableStateHolderNavEntryDecorator(),
             rememberViewModelStoreNavEntryDecorator(),
@@ -682,7 +697,7 @@ private fun RedfaceNavHost(
                     },
                 )
             }
-            entry<TopicRoute> { route ->
+            entry<TopicRoute>(metadata = mapOf(TOPIC_SCENE_METADATA_KEY to true)) { route ->
                 TopicScreen(
                     request = TopicRequest(
                         cat = route.cat,
@@ -962,3 +977,30 @@ private fun resetStack(
         backStack.add(route)
     }
 }
+
+/** Default NavDisplay cross-fade duration, mirroring nav3 1.1.1 `defaultTransitionSpec` (700 ms). */
+private const val NAV_CROSSFADE_MILLIS = 700
+
+/**
+ * Marks a [TopicRoute] NavEntry so [navContentTransform] can recognise a topic page change without
+ * relying on the route type: nav3 1.1.1 exposes `Scene.key` as `route.toString()` (a String), not
+ * the route object, so an `is TopicRoute` test on the scene key would never match. The entry's
+ * public metadata is the stable signal instead.
+ */
+private const val TOPIC_SCENE_METADATA_KEY = "fr.forumhfr.redface2.topicScene"
+
+/** True when this scene's top entry is a [TopicRoute] (tagged via [TOPIC_SCENE_METADATA_KEY]). */
+private fun Scene<NavKey>.isTopicScene(): Boolean =
+    entries.lastOrNull()?.metadata?.get(TOPIC_SCENE_METADATA_KEY) == true
+
+/**
+ * ContentTransform for a NavDisplay transition: instant for a topic page change (see #282), and
+ * nav3's default 700 ms cross-fade for every other navigation (preserved verbatim). A page change
+ * is detected by both the outgoing and incoming scene being a topic scene.
+ */
+private fun navContentTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform =
+    if (from.isTopicScene() && to.isTopicScene()) {
+        EnterTransition.None togetherWith ExitTransition.None
+    } else {
+        fadeIn(tween(NAV_CROSSFADE_MILLIS)) togetherWith fadeOut(tween(NAV_CROSSFADE_MILLIS))
+    }
