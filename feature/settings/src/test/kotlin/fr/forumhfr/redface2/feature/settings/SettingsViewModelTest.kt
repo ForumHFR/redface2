@@ -434,6 +434,23 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `hide-read switch stays enabled under per-tab override even when global grouped is off`() = runTest {
+        // #309 Codex review: with the per-tab override on, the global hide-read still serves as the
+        // fallback for a tab grouped per-type, so the Settings switch must NOT be disabled just
+        // because the GLOBAL grouped toggle is off.
+        repository.emitFlagsPerTabOverride(true)
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.FlagsGroupByCategoryChanged(false))
+
+        assertFalse(viewModel.state.value.flagsGroupByCategory)
+        assertTrue(
+            "per-tab override keeps the global hide-read editable as a fallback",
+            viewModel.state.value.canToggleFlagsHideReadCategories,
+        )
+    }
+
+    @Test
     fun `FlagsGroupByCategoryChanged reverts and raises the error flag on persist failure`() = runTest {
         repository.failOnFlagsGroupByCategorySet = true
         val viewModel = newViewModel()

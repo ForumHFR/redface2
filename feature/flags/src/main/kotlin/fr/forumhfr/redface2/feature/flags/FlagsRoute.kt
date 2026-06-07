@@ -115,6 +115,13 @@ fun FlagsRoute(
     var showViewSettingsSheet by remember { mutableStateOf(false) }
     val canConfigureView = authState is AuthState.Authenticated && selectedTab.flagType != null
 
+    // If the screen stops being configurable while the sheet is open (session expired, or the user
+    // lands on the Super tab), clear the flag so the sheet can't silently reappear on the next
+    // configurable tab/re-auth.
+    LaunchedEffect(canConfigureView) {
+        if (!canConfigureView) showViewSettingsSheet = false
+    }
+
     // One-shot snackbar for the delflag outcome (#99). Keyed on the event instance so a
     // config change does not replay it ; consumed once shown so it never re-fires.
     val successMessage = stringResource(R.string.flags_remove_success)

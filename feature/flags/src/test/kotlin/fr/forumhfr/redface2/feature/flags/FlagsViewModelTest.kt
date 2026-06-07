@@ -944,6 +944,28 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `toggle routing uses the optimistic master value before the override write persists`() = runTest {
+        // #309 Codex review: routing must honour the just-flipped master even while its DataStore
+        // write is still in flight. Gate the persisted master write so `perTab` never updates, then
+        // assert the group write went to the PER-TYPE key (driven by the optimistic value), not the
+        // global one. (Resolution/display catches up once the master persists; routing must not.)
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository() // persisted override OFF
+        prefs.blockPerTabOverrideSetUntil = kotlinx.coroutines.CompletableDeferred()
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.setFlagsPerTabOverride(true) // optimistic ON; persisted write GATED (never commits here)
+        vm.setFlagsGroupByCategory(false)
+
+        assertTrue(
+            "the group write must hit the per-type key via the optimistic master",
+            prefs.lastGroupByWriteWasPerType == true,
+        )
+    }
+
+    @Test
     fun `flipping the override then a toggle in sequence routes per-type`() = runTest {
         // Regression guard for the write-routing fix: the toggle write must honour the master value
         // the user just flipped (read from flagsPerTabOverride.value, consistent with the rendered
@@ -1176,6 +1198,15 @@ class FlagsViewModelTest {
         private val perTypeHide: Map<FlagType, MutableStateFlow<Boolean?>> =
             FlagType.entries.associateWith { MutableStateFlow<Boolean?>(null) }
 
+        /** When set, holds the persisted master write so a test can prove routing uses the
+         * OPTIMISTIC value (the persisted `perTab` never updates while gated). */
+        var blockPerTabOverrideSetUntil: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
+        /** Records whether the most recent group-by write hit the per-type key (`true`) or the
+         * global key (`false`) — lets a test assert the routing decision directly. */
+        var lastGroupByWriteWasPerType: Boolean? = null
+            private set
+
         override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
         override suspend fun saveProxyConfig(config: ProxyConfig) = Unit
         override fun readProxyConfigForNetworkBootstrap(): ProxyConfig = ProxyConfig()
@@ -1185,6 +1216,7 @@ class FlagsViewModelTest {
         override fun observeFlagsGroupByCategory(): Flow<Boolean> = groupBy
         override suspend fun setFlagsGroupByCategory(enabled: Boolean) {
             groupBy.value = enabled
+            lastGroupByWriteWasPerType = false
         }
 
         override fun observeFlagsHideReadCategories(): Flow<Boolean> = hideRead
@@ -1194,6 +1226,7 @@ class FlagsViewModelTest {
 
         override fun observeFlagsPerTabOverride(): Flow<Boolean> = perTab
         override suspend fun setFlagsPerTabOverride(enabled: Boolean) {
+            blockPerTabOverrideSetUntil?.await()
             perTab.value = enabled
         }
 
@@ -1214,6 +1247,7 @@ class FlagsViewModelTest {
 
         override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) {
             perTypeGroup.getValue(type).value = enabled
+            lastGroupByWriteWasPerType = true
         }
 
         override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) {
