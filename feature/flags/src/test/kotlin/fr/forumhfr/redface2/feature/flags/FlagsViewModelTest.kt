@@ -758,6 +758,39 @@ class FlagsViewModelTest {
         }
     }
 
+    @Test
+    fun `hide-read with no unread flag collapses the grouped sections to empty`() = runTest {
+        // Codex review: when hide-read is on and NO category has an unread flag (all read, or CYAN
+        // all-read with +lus off), the grouped content must be Grouped(emptyList()). The screen
+        // renders a placeholder for this state so the body never blanks (anti #229 regression);
+        // this test pins the state contract the screen relies on.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1, 10))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            vm.selectTab(FlagTab.Red) // RED isn't read-filtered: the all-read flags reach grouping.
+            flags.emit(
+                FlagType.RED,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(1, FlagType.RED, hasUnread = false, cat = 1),
+                        stubFlag(2, FlagType.RED, hasUnread = false, cat = 10),
+                    ),
+                ),
+            )
+            val grouped = (awaitItem() as FlagsListUiState.Success).content as FlagsContent.Grouped
+            assertTrue(
+                "every category is fully read → hide-read collapses to zero sections",
+                grouped.sections.isEmpty(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     /**
      * Builds the ViewModel with a default (grouped-on, hide-read-off) [FakeUserPreferencesRepository]
      * so the existing tests keep asserting on the grouped sections. Tests that exercise the flat

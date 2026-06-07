@@ -34,6 +34,10 @@
          « catégorie » (il n'y a pas de regroupement dans cette vue). -->
     <string name="flags_list_empty_cyan">Aucun nouveau message</string>
     <string name="flags_list_empty">Aucun drapeau à afficher</string>
+    <!-- #179 follow-up — Vue groupée AVEC « masquer les catégories sans non-lu » : quand aucune
+         catégorie n'a de message non lu, toutes les sections sont masquées. Message + item unique
+         pour ne pas laisser un corps blanc et garder une cible scrollable au pull-to-refresh (#229). -->
+    <string name="flags_no_unread_category">Aucune catégorie avec un message non lu</string>
     <string name="flags_error">Impossible de récupérer les drapeaux. Vérifie ta connexion ou réessaie.</string>
     <string name="flags_session_expired">Session HFR expirée. Reconnecte-toi pour recharger tes drapeaux.</string>
     <string name="flags_retry">Réessayer</string>

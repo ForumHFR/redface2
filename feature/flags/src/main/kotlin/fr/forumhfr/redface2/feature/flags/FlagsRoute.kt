@@ -410,6 +410,21 @@ private fun CategorySectionedFlagList(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface),
     ) {
+        // « Masquer les catégories sans non-lu » can filter every section out (no unread anywhere,
+        // or all-read CYAN with « +lus » off). Without this guard the LazyColumn would render an
+        // empty body — a blank screen with no scrollable target for the PullToRefreshBox (#229).
+        // A single placeholder item keeps the body informative and the pull gesture anchored.
+        if (sections.isEmpty()) {
+            item(key = "grouped-empty", contentType = CONTENT_TYPE_EMPTY) {
+                Text(
+                    text = stringResource(R.string.flags_no_unread_category),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                )
+            }
+        }
+
         sections.forEach { section ->
             // contentType groups the three structurally distinct slot kinds (band / placeholder /
             // row) into separate reuse pools so scrolling across a header→rows→header boundary

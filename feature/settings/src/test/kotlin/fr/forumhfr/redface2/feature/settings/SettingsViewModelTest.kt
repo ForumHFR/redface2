@@ -436,6 +436,18 @@ class SettingsViewModelTest {
         assertEquals(1, repository.flagsHideReadCategoriesSetCalls)
     }
 
+    @Test
+    fun `FlagsHideReadCategoriesChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnFlagsHideReadCategoriesSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.FlagsHideReadCategoriesChanged(true))
+
+        assertFalse("must revert to the previous value on failure", viewModel.state.value.flagsHideReadCategories)
+        assertFalse(viewModel.state.value.isUpdatingFlagsHideReadCategories)
+        assertTrue(viewModel.state.value.flagsHideReadCategoriesError)
+    }
+
     private fun newViewModel(): SettingsViewModel =
         SettingsViewModel(repository, topicCacheMaintenance)
 
