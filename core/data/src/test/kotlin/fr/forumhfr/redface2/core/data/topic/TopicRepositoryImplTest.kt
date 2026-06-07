@@ -6,8 +6,10 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
+import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.HfrParser
 import java.time.Clock
@@ -479,5 +481,16 @@ class TopicRepositoryImplTest {
         override fun observeFlagsHideReadCategories(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setFlagsHideReadCategories(enabled: Boolean) = Unit
+
+        override fun observeFlagsPerTabOverride(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setFlagsPerTabOverride(enabled: Boolean) = Unit
+
+        override fun observeFlagsViewSettings(type: FlagType): Flow<FlagsViewSettings> =
+            MutableStateFlow(FlagsViewSettings())
+
+        override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) = Unit
+
+        override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
     }
 }

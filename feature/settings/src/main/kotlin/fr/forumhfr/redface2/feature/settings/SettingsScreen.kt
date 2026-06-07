@@ -231,6 +231,16 @@ private fun FlagsPreferencesCard(
             if (state.flagsHideReadCategoriesError) {
                 PreferencePersistError(R.string.settings_flags_hide_read_categories_persist_failed)
             }
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_flags_per_tab_override_title),
+                description = stringResource(R.string.settings_flags_per_tab_override_description),
+                checked = state.flagsPerTabOverride,
+                enabled = state.canToggleFlagsPerTabOverride,
+                onCheckedChange = { onIntent(SettingsIntent.FlagsPerTabOverrideChanged(it)) },
+            )
+            if (state.flagsPerTabOverrideError) {
+                PreferencePersistError(R.string.settings_flags_per_tab_override_persist_failed)
+            }
         }
     }
 }

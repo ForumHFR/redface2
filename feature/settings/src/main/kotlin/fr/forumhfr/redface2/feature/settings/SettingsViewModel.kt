@@ -67,6 +67,16 @@ class SettingsViewModel @Inject constructor(
                 }
             }
         }
+        viewModelScope.launch {
+            val perTab = userPreferencesRepository.observeFlagsPerTabOverride().first()
+            _state.update { current ->
+                if (current.flagsPerTabOverrideTouchedLocally || current.isUpdatingFlagsPerTabOverride) {
+                    current
+                } else {
+                    current.copy(flagsPerTabOverride = perTab)
+                }
+            }
+        }
     }
 
     fun submit(intent: SettingsIntent) {
@@ -95,6 +105,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.IgnoreTopicCacheChanged -> updateIgnoreTopicCache(intent.enabled)
             is SettingsIntent.FlagsGroupByCategoryChanged -> updateFlagsGroupByCategory(intent.enabled)
             is SettingsIntent.FlagsHideReadCategoriesChanged -> updateFlagsHideReadCategories(intent.enabled)
+            is SettingsIntent.FlagsPerTabOverrideChanged -> updateFlagsPerTabOverride(intent.enabled)
         }
     }
 
@@ -255,8 +266,35 @@ class SettingsViewModel @Inject constructor(
         )
     }
 
+    private fun updateFlagsPerTabOverride(desired: Boolean) {
+        val previous = _state.value.flagsPerTabOverride
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    flagsPerTabOverride = desired,
+                    isUpdatingFlagsPerTabOverride = true,
+                    flagsPerTabOverrideError = false,
+                    flagsPerTabOverrideTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(flagsPerTabOverride = desired, isUpdatingFlagsPerTabOverride = false)
+                } else {
+                    state.copy(
+                        flagsPerTabOverride = previous,
+                        isUpdatingFlagsPerTabOverride = false,
+                        flagsPerTabOverrideError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setFlagsPerTabOverride,
+        )
+    }
+
     /**
-     * Shared optimistic-flip machinery for a persisted boolean preference (the two Drapeaux view
+     * Shared optimistic-flip machinery for a persisted boolean preference (the Drapeaux view
      * toggles). Flips the field immediately via [optimistic] (which also sets the `*TouchedLocally`
      * guard so a late `init` hydration can't clobber it), persists [desired] on a background
      * coroutine, then reconciles the final state from the persist [Result] via [onSettled] (success
