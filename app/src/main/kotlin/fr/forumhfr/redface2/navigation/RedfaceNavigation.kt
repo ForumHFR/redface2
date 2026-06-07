@@ -1,7 +1,9 @@
 package fr.forumhfr.redface2.navigation
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -16,6 +18,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,12 +27,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.core.net.toUri
+import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -291,6 +296,23 @@ fun RedfaceApp(intent: Intent?) {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+    // #286 — keep the system bar ICON contrast in sync with the EFFECTIVE app theme, not the OS night
+    // mode. MainActivity calls enableEdgeToEdge() once, whose default SystemBarStyle derives bar icon
+    // contrast from the OS uiMode; once the user forces LIGHT/DARK against the OS, the status /
+    // navigation bar icons would otherwise keep the OS contrast (e.g. light icons on a forced-light
+    // background = invisible). SideEffect re-asserts it after each themed recomposition.
+    val view = LocalView.current
+    // Resolve the host Activity defensively (Context.findActivity) instead of casting view.context
+    // directly: RedfaceApp is mounted under MainActivity today, but a future ContextWrapper in the
+    // chain would make a hard `as Activity` cast crash. isInEditMode guards the @Preview path.
+    val window = view.context.findActivity()?.window
+    if (!view.isInEditMode && window != null) {
+        SideEffect {
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = !darkTheme
+            controller.isAppearanceLightNavigationBars = !darkTheme
+        }
     }
     RedfaceTheme(darkTheme = darkTheme, amoledTheme = amoledEnabled) {
         val flagsBackStack = rememberNavBackStack(FlagsListRoute)
@@ -990,6 +1012,16 @@ private fun resetStack(
     if (route != root) {
         backStack.add(route)
     }
+}
+
+/**
+ * #286 — walk the Context chain to the host [Activity] (or null), so the system-bar SideEffect never
+ * crashes on a non-Activity / ContextWrapper context. Tail-recursive over [ContextWrapper.baseContext].
+ */
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 /** Default NavDisplay cross-fade duration, mirroring nav3 1.1.1 `defaultTransitionSpec` (700 ms). */

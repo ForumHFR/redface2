@@ -589,6 +589,42 @@ class SettingsViewModelTest {
         assertTrue(viewModel.state.value.amoledError)
     }
 
+    @Test
+    fun `theme hydration race - a stale initial DataStore emission must not overwrite a local mode change`() =
+        runTest {
+            // Mirror of the ignoreTopicCache startup-race test for ThemeMode (#286, Codex nit): init
+            // subscribes to observeThemeMode() and suspends on .first() (override emits nothing yet),
+            // the user picks DARK locally (optimistic + write succeeds, touchedLocally = true), then the
+            // still-suspended init resumes with a stale SYSTEM — the guard must skip the apply.
+            val initialHydrationFlow = MutableSharedFlow<ThemeMode>(replay = 0)
+            repository.themeModeObserveOverride = initialHydrationFlow
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.ThemeModeChanged(ThemeMode.DARK))
+            assertEquals(
+                "optimistic flip must reach the state synchronously",
+                ThemeMode.DARK,
+                viewModel.state.value.themeMode,
+            )
+            assertTrue(viewModel.state.value.themeModeTouchedLocally)
+            assertFalse(viewModel.state.value.isUpdatingThemeMode)
+
+            // Late, stale hydration produces SYSTEM. On the buggy code this overwrites the local DARK;
+            // on the fixed code the touchedLocally guard skips the apply.
+            initialHydrationFlow.emit(ThemeMode.SYSTEM)
+
+            val finalState = viewModel.state.value
+            assertEquals(
+                "stale initial DataStore hydration must NOT overwrite the local mode change",
+                ThemeMode.DARK,
+                finalState.themeMode,
+            )
+            assertFalse(finalState.isUpdatingThemeMode)
+            assertFalse(finalState.themeModeError)
+            assertEquals(1, repository.themeModeSetCalls)
+            assertEquals(ThemeMode.DARK, repository.lastThemeModeSet)
+        }
+
     private fun newViewModel(): SettingsViewModel =
         SettingsViewModel(repository, topicCacheMaintenance)
 
@@ -696,7 +732,14 @@ class SettingsViewModelTest {
             private set
         var failOnAmoledSet: Boolean = false
 
-        override fun observeThemeMode(): Flow<ThemeMode> = themeMode
+        /**
+         * Test seam for the theme startup-race test (#286), mirroring [ignoreTopicCacheObserveOverride]:
+         * when non-null, `observeThemeMode()` returns this flow so the test can hold the init `.first()`
+         * suspension, perform a local mode change, then release a stale emission to prove the guard skips it.
+         */
+        var themeModeObserveOverride: Flow<ThemeMode>? = null
+
+        override fun observeThemeMode(): Flow<ThemeMode> = themeModeObserveOverride ?: themeMode
 
         override suspend fun setThemeMode(mode: ThemeMode) {
             themeModeSetCalls += 1

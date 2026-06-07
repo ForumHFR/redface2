@@ -16,9 +16,11 @@ import kotlinx.coroutines.flow.stateIn
  * only read `isSystemInDarkTheme()`).
  *
  * [SharingStarted.Eagerly] so the first DataStore read starts as soon as the ViewModel is created,
- * keeping the initial-frame window where the default ([ThemeMode.SYSTEM] / amoled off) is shown as
- * short as possible. Only a user who picked a non-SYSTEM mode differing from the OS could see a
- * one-frame flicker, which is acceptable for the default-SYSTEM majority.
+ * keeping the initial-default window as short as possible. The default ([ThemeMode.SYSTEM] / amoled
+ * off) is shown until that first read resolves — a brief flash (not a single frame) that only a user
+ * who forced a non-SYSTEM mode differing from the OS can perceive on a cold start. Acceptable for the
+ * default-SYSTEM majority; a dedicated `Loading` gate is the follow-up if that cold-start flash ever
+ * becomes a complaint.
  */
 @HiltViewModel
 class AppThemeViewModel @Inject constructor(
