@@ -128,6 +128,9 @@ class FlagsViewModel @Inject constructor(
         )
 
     // Re-tap Cyan déjà sélectionné → toggle du filtre via le setter (point de mutation unique).
+    // NB prod : le VM réel lit un `cyanUnreadOnly` dédié (StateFlow CYAN-scopé, shim optimiste +
+    // défaut eager `true`) plutôt que `flagsViewSettings.value`, pour éviter qu'un changement
+    // d'onglet ou un double re-tap rapide ne lise une valeur en retard sur DataStore (cf. #309/#317).
     fun selectTab(tab: FlagTab) {
         if (tab == FlagTab.Cyan && _selectedTab.value == FlagTab.Cyan) {
             setFlagsUnreadOnly(!flagsViewSettings.value.unreadOnly)

@@ -106,10 +106,11 @@ fun FlagsRoute(
     val flagsViewSettings by viewModel.flagsViewSettings.collectAsStateWithLifecycle()
     val flagsPerTabOverride by viewModel.flagsPerTabOverride.collectAsStateWithLifecycle()
 
-    // « +lus » suffix on the Cyan tab: shown when the Cyan tab is selected and its « non-lus
-    // uniquement » filter is off (read participated topics are visible). `flagsViewSettings` resolves
-    // the SELECTED tab, so this is meaningful while Cyan is the active tab (#317).
-    val cyanShowsRead = selectedTab == FlagTab.Cyan && !flagsViewSettings.unreadOnly
+    // « +lus » suffix on the Cyan tab: shown when the Cyan tab is selected and CYAN's « non-lus
+    // uniquement » filter is off (read participated topics are visible). The ViewModel derives this
+    // from [cyanUnreadOnly] (CYAN-specific, optimistic, eager `true`) so the suffix never flashes on
+    // a cold start or a tab switch before DataStore re-resolves the selected tab (#317).
+    val cyanShowsRead by viewModel.cyanShowsReadShortcut.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
 

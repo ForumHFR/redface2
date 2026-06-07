@@ -236,7 +236,7 @@ class FlagsViewModelTest {
     @Test
     fun `rapid double re-tap on Cyan flips twice via the optimistic value`() = runTest {
         // #317 review (cf. #309 shim): a re-tap reads the RESOLVED settings (an async DataStore
-        // flow). Without the optimistic [pendingUnreadOnly], a second rapid re-tap before the first
+        // flow). Without the optimistic [pendingCyanUnreadOnly], a second rapid re-tap before the first
         // write commits would read the SAME lagging value and lose the toggle. Gate the write so
         // both re-taps fire before either persists, then prove the value still ends at its start
         // (true → false → true) — i.e. the second tap flipped from the optimistic `false`.
@@ -256,6 +256,31 @@ class FlagsViewModelTest {
             true,
             vm.flagsViewSettings.value.unreadOnly,
         )
+    }
+
+    @Test
+    fun `an in-flight RED write never clobbers the CYAN re-tap shim`() = runTest {
+        // #317 Codex review: the optimistic shim is CYAN-scoped, so a concurrent (or late-completing)
+        // RED/FAVORITE write must never touch — let alone clear — CYAN's pending flip. Gate ONLY the
+        // RED write so it stays in flight while CYAN is re-tapped, then release it and assert CYAN
+        // kept its flip.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository() // CYAN default unreadOnly = true
+        prefs.blockUnreadOnlySetForType = FlagType.RED
+        prefs.blockUnreadOnlySetUntil = kotlinx.coroutines.CompletableDeferred()
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.selectTab(FlagTab.Red)
+        vm.setFlagsUnreadOnly(false) // RED write goes in flight (gated), must not touch the CYAN shim
+
+        vm.selectTab(FlagTab.Cyan) // select CYAN (first tap from RED)
+        vm.selectTab(FlagTab.Cyan) // re-tap CYAN → flips true → false via its own shim
+        assertEquals("CYAN re-tap flips regardless of the in-flight RED write", false, vm.cyanUnreadOnly.value)
+
+        prefs.blockUnreadOnlySetUntil!!.complete(Unit) // late RED completion
+        assertEquals("late RED completion must not disturb CYAN's value", false, vm.cyanUnreadOnly.value)
     }
 
     // Round-2 review (PR #207): the `logout clears the private flags cache before resetting
@@ -1340,11 +1365,15 @@ class FlagsViewModelTest {
         }
 
         /** When set, gates the unreadOnly write so a test can prove the re-tap uses the OPTIMISTIC
-         * value while the DataStore round-trip is still in flight. */
+         * value while the DataStore round-trip is still in flight. [blockUnreadOnlySetForType] scopes
+         * the gate to one type (null = gate every type). */
         var blockUnreadOnlySetUntil: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+        var blockUnreadOnlySetForType: FlagType? = null
 
         override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) {
-            blockUnreadOnlySetUntil?.await()
+            if (blockUnreadOnlySetForType == null || blockUnreadOnlySetForType == type) {
+                blockUnreadOnlySetUntil?.await()
+            }
             perTypeUnread.getValue(type).value = enabled
         }
 
