@@ -219,8 +219,10 @@ jobs:
           # Runs right after metadata resolution, BEFORE the build / ledger tag / Play upload, so a
           # failure aborts with no side effect. (dev is exempt: it carries a versionNameSuffix.)
           # Previous beta releases are the GitHub Releases whose name carries the "β" marker.
+          # test()+ltrimstr (not capture): capture() THROWS on a non-matching string, which would abort
+          # the whole jq under `set -e` and spuriously fail a legit beta ship. test() filters first.
           prev=$(gh release list --repo ForumHFR/redface2 --limit 100 --json tagName,name \
-                   --jq '[.[] | select(.name | contains("β")) | .tagName | capture("^app-v(?<n>[0-9]+)$") | .n | tonumber] | max // 0')
+                   --jq '[.[] | select(.name | contains("β")) | select(.tagName | test("^app-v[0-9]+$")) | (.tagName | ltrimstr("app-v") | tonumber)] | max // 0')
           if [[ "$prev" == "0" ]]; then
             echo "::notice::No previous beta release found — versionName bump guard is a no-op (first beta)."
             exit 0
