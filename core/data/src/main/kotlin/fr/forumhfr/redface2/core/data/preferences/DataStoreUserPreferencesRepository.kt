@@ -133,6 +133,14 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[flagsUnreadOnlyKey(type)] = enabled
+            }
+        }
+    }
+
     /**
      * Resolves the per-tab view settings (#309). With the override off, the global pair is
      * returned verbatim; with it on, each toggle reads the per-type key and falls back to the
@@ -147,14 +155,27 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     private fun resolveFlagsViewSettings(prefs: Preferences, type: FlagType): FlagsViewSettings {
         val globalGroup = prefs[KEY_FLAGS_GROUP_BY_CATEGORY] ?: true
         val globalHide = prefs[KEY_FLAGS_HIDE_READ_CATEGORIES] ?: false
+        // #317 — unreadOnly is always per-type with a type-aware default (CYAN actionable by default).
+        val unreadOnly = prefs[flagsUnreadOnlyKey(type)] ?: defaultUnreadOnly(type)
         if (prefs[KEY_FLAGS_PER_TAB_OVERRIDE] != true) {
-            return FlagsViewSettings(groupByCategory = globalGroup, hideReadCategories = globalHide)
+            return FlagsViewSettings(
+                groupByCategory = globalGroup,
+                hideReadCategories = globalHide,
+                unreadOnly = unreadOnly,
+            )
         }
         return FlagsViewSettings(
             groupByCategory = prefs[flagsGroupByCategoryKey(type)] ?: globalGroup,
             hideReadCategories = prefs[flagsHideReadCategoriesKey(type)] ?: globalHide,
+            unreadOnly = unreadOnly,
         )
     }
+
+    /**
+     * Type-aware default for the #317 « non-lus uniquement » filter: CYAN (« Mes sujets ») shows the
+     * actionable unread subset by default (legacy behaviour); RED / FAVORITE show everything.
+     */
+    private fun defaultUnreadOnly(type: FlagType): Boolean = type == FlagType.CYAN
 
     private fun toProxyConfig(prefs: Preferences): ProxyConfig =
         ProxyConfig(
@@ -184,5 +205,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         fun flagsHideReadCategoriesKey(type: FlagType) =
             booleanPreferencesKey("flags_hide_read_categories_${type.name.lowercase()}")
+
+        // #317 — per-type « non-lus uniquement » key (no global counterpart; type-aware default).
+        fun flagsUnreadOnlyKey(type: FlagType) =
+            booleanPreferencesKey("flags_unread_only_${type.name.lowercase()}")
     }
 }

@@ -198,18 +198,18 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `re-tapping the already selected Cyan tab toggles the read participated filter`() = runTest {
+    fun `re-tapping the already selected Cyan tab toggles its unread-only filter`() = runTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val vm = viewModel(auth, flags, forum)
 
-        // Cyan is selected by default; re-tapping it flips the toggle on, then off.
-        assertEquals(false, vm.showReadParticipatedTopics.value)
+        // CYAN defaults to unreadOnly = true (« +lus » off); re-tapping it flips it off, then on.
+        assertEquals(true, vm.flagsViewSettings.value.unreadOnly)
         vm.selectTab(FlagTab.Cyan)
-        assertEquals(true, vm.showReadParticipatedTopics.value)
+        assertEquals(false, vm.flagsViewSettings.value.unreadOnly)
         vm.selectTab(FlagTab.Cyan)
-        assertEquals(false, vm.showReadParticipatedTopics.value)
+        assertEquals(true, vm.flagsViewSettings.value.unreadOnly)
         // Re-tap must not switch the selected tab or trigger a refetch.
         assertEquals(FlagTab.Cyan, vm.selectedTab.value)
         assertTrue("re-tap must not refetch", flags.refreshCalls.isEmpty())
@@ -223,12 +223,14 @@ class FlagsViewModelTest {
         val vm = viewModel(auth, flags, forum)
 
         vm.selectTab(FlagTab.Red)
-        assertEquals(false, vm.showReadParticipatedTopics.value)
+        // RED defaults to unreadOnly = false (show all).
+        assertEquals(false, vm.flagsViewSettings.value.unreadOnly)
 
-        // First tap on Cyan from RED selects it without toggling the filter.
+        // First tap on Cyan from RED selects it WITHOUT toggling — CYAN keeps its default (true),
+        // it is not flipped off as a re-tap would do.
         vm.selectTab(FlagTab.Cyan)
         assertEquals(FlagTab.Cyan, vm.selectedTab.value)
-        assertEquals(false, vm.showReadParticipatedTopics.value)
+        assertEquals(true, vm.flagsViewSettings.value.unreadOnly)
     }
 
     // Round-2 review (PR #207): the `logout clears the private flags cache before resetting
@@ -300,7 +302,7 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `setShowReadParticipatedTopics true reveals read CYAN topics without refetch`() = runTest {
+    fun `setFlagsUnreadOnly false reveals read CYAN topics without refetch`() = runTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
@@ -318,11 +320,12 @@ class FlagsViewModelTest {
                     ),
                 ),
             )
+            // CYAN defaults to unreadOnly = true, so the read topic (2) is filtered out at first.
             assertEquals(listOf(1), flatTopics(awaitItem() as FlagsListUiState.Success).map { it.topicId })
 
-            vm.setShowReadParticipatedTopics(true)
-            // No new refresh() call — the toggle alone must re-emit the unfiltered list
-            // because flagsState combines the source flow with showReadParticipatedTopics.
+            vm.setFlagsUnreadOnly(false)
+            // No new refresh() call — the toggle alone must re-emit the unfiltered list because
+            // flagsState combines the source flow with the resolved unreadOnly value.
             val full = awaitItem() as FlagsListUiState.Success
             assertEquals(listOf(1, 2), flatTopics(full).map { it.topicId })
             assertTrue("toggle must not trigger a network refresh", flags.refreshCalls.isEmpty())
@@ -332,7 +335,9 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `RED and FAVORITE tabs are never filtered by the read participated toggle`() = runTest {
+    fun `RED and FAVORITE show every topic by default (unread-only off)`() = runTest {
+        // #317: unreadOnly is type-aware — RED and FAVORITE default to false (show all), unlike
+        // CYAN. With no toggle set, both list read and unread topics.
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
@@ -353,7 +358,7 @@ class FlagsViewModelTest {
             )
             val red = awaitItem() as FlagsListUiState.Success
             assertEquals(
-                "RED must include both read and unread regardless of the toggle",
+                "RED defaults to show all (unreadOnly false)",
                 listOf(10, 11),
                 flatTopics(red).map { it.topicId },
             )
@@ -370,10 +375,51 @@ class FlagsViewModelTest {
             )
             val favorite = awaitItem() as FlagsListUiState.Success
             assertEquals(
-                "FAVORITE must include both read and unread regardless of the toggle",
+                "FAVORITE defaults to show all (unreadOnly false)",
                 listOf(20, 21),
                 flatTopics(favorite).map { it.topicId },
             )
+
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsUnreadOnly true filters RED to unread topics only`() = runTest {
+        // #317: the filter now generalises to every type — toggling unreadOnly on RED keeps only
+        // the topics with an unread post, per the selected tab's own value.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, forum)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+
+            vm.selectTab(FlagTab.Red)
+            flags.emit(
+                FlagType.RED,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(10, FlagType.RED, hasUnread = true),
+                        stubFlag(11, FlagType.RED, hasUnread = false),
+                    ),
+                ),
+            )
+            assertEquals(
+                "RED shows all before the toggle",
+                listOf(10, 11),
+                flatTopics(awaitItem() as FlagsListUiState.Success).map { it.topicId },
+            )
+
+            vm.setFlagsUnreadOnly(true) // RED is selected → flips RED's per-type value.
+            val filtered = awaitItem() as FlagsListUiState.Success
+            assertEquals(
+                "RED now keeps only the unread topic, without a refetch",
+                listOf(10),
+                flatTopics(filtered).map { it.topicId },
+            )
+            assertTrue("toggle must not trigger a network refresh", flags.refreshCalls.isEmpty())
 
             cancelAndIgnoreRemainingEvents()
         }
@@ -704,8 +750,8 @@ class FlagsViewModelTest {
 
     @Test
     fun `cyan +lus override keeps a fully-read category visible under hide-read`() = runTest {
-        // The tension the user flagged: « +lus » (show read participated topics) must win over
-        // « masquer les catégories sans non-lu » so the read cyans stay reachable.
+        // The tension the user flagged: « +lus » (unreadOnly off → show read participated topics)
+        // must win over « masquer les catégories sans non-lu » so the read cyans stay reachable.
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
@@ -714,7 +760,7 @@ class FlagsViewModelTest {
 
         vm.flagsState.test {
             awaitItem() // initial null
-            vm.setShowReadParticipatedTopics(true)
+            vm.setFlagsUnreadOnly(false)
             flags.emit(
                 FlagType.CYAN,
                 FlagsResult.Success(
@@ -1180,10 +1226,12 @@ class FlagsViewModelTest {
 
     /**
      * Fake [UserPreferencesRepository] modelling the Drapeaux view preferences the ViewModel reads:
-     * the global group-by-category / hide-read pair, the #309 per-tab override master switch, and
-     * the per-type overrides — as writable hot flows. [observeFlagsViewSettings] resolves them the
-     * same way the real DataStore impl does (override off → global; on → per-type value, else global
-     * fallback). The proxy and topic-cache members are stubbed at their defaults (untouched here).
+     * the global group-by-category / hide-read pair, the #309 per-tab override master switch, the
+     * per-type layout overrides, and the #317 per-type « non-lus uniquement » value — as writable
+     * hot flows. [observeFlagsViewSettings] resolves them the same way the real DataStore impl does
+     * (layout: override off → global; on → per-type value, else global fallback; unreadOnly: ALWAYS
+     * per-type with a type-aware default — CYAN true, RED/FAVORITE false). The proxy and topic-cache
+     * members are stubbed at their defaults (untouched here).
      */
     private class FakeUserPreferencesRepository(
         groupByCategory: Boolean = true,
@@ -1196,6 +1244,9 @@ class FlagsViewModelTest {
         private val perTypeGroup: Map<FlagType, MutableStateFlow<Boolean?>> =
             FlagType.entries.associateWith { MutableStateFlow<Boolean?>(null) }
         private val perTypeHide: Map<FlagType, MutableStateFlow<Boolean?>> =
+            FlagType.entries.associateWith { MutableStateFlow<Boolean?>(null) }
+        // #317 — per-type « non-lus uniquement », null = unset → type-aware default applied at read.
+        private val perTypeUnread: Map<FlagType, MutableStateFlow<Boolean?>> =
             FlagType.entries.associateWith { MutableStateFlow<Boolean?>(null) }
 
         /** When set, holds the persisted master write so a test can prove routing uses the
@@ -1230,8 +1281,10 @@ class FlagsViewModelTest {
             perTab.value = enabled
         }
 
-        override fun observeFlagsViewSettings(type: FlagType): Flow<FlagsViewSettings> =
-            combine(
+        override fun observeFlagsViewSettings(type: FlagType): Flow<FlagsViewSettings> {
+            // Layout resolution (#309), then fold in the always-per-type unreadOnly (#317). Nested
+            // combine because the typed `combine` overload tops out at 5 sources.
+            val layout = combine(
                 groupBy,
                 hideRead,
                 perTab,
@@ -1239,11 +1292,18 @@ class FlagsViewModelTest {
                 perTypeHide.getValue(type),
             ) { global, globalHide, override, typeGroup, typeHide ->
                 if (override) {
-                    FlagsViewSettings(typeGroup ?: global, typeHide ?: globalHide)
+                    (typeGroup ?: global) to (typeHide ?: globalHide)
                 } else {
-                    FlagsViewSettings(global, globalHide)
+                    global to globalHide
                 }
             }
+            return combine(layout, perTypeUnread.getValue(type)) { (group, hide), unread ->
+                FlagsViewSettings(group, hide, unread ?: defaultUnreadOnly(type))
+            }
+        }
+
+        // Mirrors DataStoreUserPreferencesRepository.defaultUnreadOnly (CYAN actionable by default).
+        private fun defaultUnreadOnly(type: FlagType): Boolean = type == FlagType.CYAN
 
         override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) {
             perTypeGroup.getValue(type).value = enabled
@@ -1252,6 +1312,10 @@ class FlagsViewModelTest {
 
         override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) {
             perTypeHide.getValue(type).value = enabled
+        }
+
+        override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) {
+            perTypeUnread.getValue(type).value = enabled
         }
 
         fun setGroupBy(value: Boolean) {

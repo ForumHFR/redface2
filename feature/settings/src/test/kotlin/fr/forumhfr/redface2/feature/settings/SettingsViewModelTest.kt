@@ -622,6 +622,8 @@ class SettingsViewModelTest {
 
         override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
 
+        override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
+
         fun emit(value: ProxyConfig) {
             config.value = value
         }
