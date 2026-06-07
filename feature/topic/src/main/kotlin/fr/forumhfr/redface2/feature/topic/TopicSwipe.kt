@@ -203,11 +203,11 @@ private val SPRING_BACK = spring<Float>(
  * launched per drag event.
  *
  * On commit the page first animates off-screen (translationX → ±width, a short [tween]) and only then
- * navigates, softening the **departure** of the old instant cut (the incoming page still hard-appears
- * via the route change until the NavDisplay slide-in follow-up (a) lands — out of scope here, it would
- * touch `:app`/navigation). Otherwise (no-commit, edge, or a child taking the drag) it springs back to
- * rest. Haptics: a tick when the swipe arms (crosses the commit distance, once per rising edge) and a
- * confirm on commit.
+ * navigates, softening the **departure**. The incoming page then appears via an instant
+ * `TopicRoute → TopicRoute` NavDisplay transition wired in `:app` navigation (see #282), which also
+ * collapses the swipe dead-zone — not a generic slide-in. Otherwise (no-commit, edge, or a child taking
+ * the drag) it springs back to rest. Haptics: a tick when the swipe arms (crosses the commit distance,
+ * once per rising edge) and a confirm on commit.
  *
  * Coexistence (unchanged from the discrete version, validated with Codex gpt-5.5):
  * - it engages only on **horizontal** touch slop, so the vertical `LazyColumn` scroll is never stolen;
