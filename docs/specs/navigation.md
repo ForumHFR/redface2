@@ -98,9 +98,12 @@ L'écran le plus important de l'app. Affiche les topics suivis par l'utilisateur
 
 **Regroupement par catégorie (#179, vue par défaut)** :
 - À l'intérieur de chaque onglet réel, les topics sont **groupés par catégorie**, dans l'ordre canonique du forum (cf. `ForumRepository.observeCategories()` ; ordre de secours en dur si le catalogue n'est pas encore chargé). C'est la parité avec la vue web « Vos sujets ».
-- Chaque catégorie est une bande séparatrice (`stickyHeader`). Les **catégories vides sont conservées** (parité web) avec un placeholder par onglet (« Aucun nouveau message » pour cyan, « Aucun sujet dans cette catégorie » sinon).
+- Chaque catégorie est une bande séparatrice (`stickyHeader`). Par défaut, les **catégories vides sont conservées** (parité web) avec un placeholder par onglet (« Aucun nouveau message » pour cyan, « Aucun sujet dans cette catégorie » sinon).
 - Le regroupement est **purement client-side** : group-by sur `Flag.cat` de la liste plate déjà chargée, aucun fetch authentifié supplémentaire (invariant prefetch-non-auth). Une catégorie absente du catalogue n'est jamais filtrée : elle tombe en section « inconnue » en fin de liste (anti-régression #251).
-- Différé hors MVP #179 : toggle vue plate/groupée + préférence persistée, repli des catégories vides.
+
+**Préférences d'affichage (#179, persistées via `UserPreferencesRepository` / DataStore, réglées dans Réglages > Drapeaux)** :
+- **Grouper par catégorie** (défaut : activé) : désactivé, l'écran rend la **liste à plat** héritée (tous les drapeaux d'un coup, ordre dernière réponse, sans bandes de catégorie). Permet de conserver la lecture à plat des drapeaux.
+- **Masquer les catégories sans message non lu** (défaut : désactivé = parité web) : en vue groupée, cache les catégories qui n'ont aucun drapeau non lu. Le toggle cyan « +lus » **prime** sur ce filtre : afficher les sujets participés déjà lus garde leurs catégories visibles (sinon les deux réglages se contrediraient). Sans effet en vue à plat. Si le filtre vide toutes les sections, un placeholder « Aucune catégorie avec un message non lu » est affiché (corps jamais blanc, ancre pull-to-refresh préservée #229).
 
 **Actions sur un topic :**
 - Tap → ouvrir le topic à la dernière position non lue
