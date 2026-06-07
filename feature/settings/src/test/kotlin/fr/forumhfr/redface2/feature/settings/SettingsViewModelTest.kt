@@ -413,6 +413,25 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `hide-read categories switch is disabled while the flat flags view is selected`() = runTest {
+        val viewModel = newViewModel()
+        assertTrue(viewModel.state.value.canToggleFlagsHideReadCategories)
+
+        viewModel.submit(SettingsIntent.FlagsGroupByCategoryChanged(false))
+
+        assertFalse(viewModel.state.value.flagsGroupByCategory)
+        assertFalse(
+            "hide-read categories has no effect in flat view, so the Settings switch must be disabled",
+            viewModel.state.value.canToggleFlagsHideReadCategories,
+        )
+
+        viewModel.submit(SettingsIntent.FlagsGroupByCategoryChanged(true))
+
+        assertTrue(viewModel.state.value.flagsGroupByCategory)
+        assertTrue(viewModel.state.value.canToggleFlagsHideReadCategories)
+    }
+
+    @Test
     fun `FlagsGroupByCategoryChanged reverts and raises the error flag on persist failure`() = runTest {
         repository.failOnFlagsGroupByCategorySet = true
         val viewModel = newViewModel()

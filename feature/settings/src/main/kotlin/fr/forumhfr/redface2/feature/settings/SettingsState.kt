@@ -55,7 +55,7 @@ data class SettingsState(
         get() = !isUpdatingFlagsGroupByCategory
 
     val canToggleFlagsHideReadCategories: Boolean
-        get() = !isUpdatingFlagsHideReadCategories
+        get() = flagsGroupByCategory && !isUpdatingFlagsHideReadCategories
 }
 
 sealed interface SettingsError {
