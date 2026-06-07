@@ -50,6 +50,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
@@ -426,6 +428,13 @@ private fun TopicLoadedContent(
     // slide-out and drop the navigation — see `topicPageSwipe`). `rememberUpdatedState` keeps the
     // State identity stable while its value tracks `topic.totalPages` across recompositions.
     val currentTotalPages by rememberUpdatedState(topic.totalPages)
+    // #282 — the swipe must be INERT while this nav entry is not yet settled (mid NavDisplay
+    // transition, lifecycle < RESUMED). During the transition the incoming (cached) page is a fresh
+    // composition that would otherwise accept a swipe and commit a second onOpenPage mid-flight,
+    // interrupting the transition → frozen screen. The lambda reads `lifecycle.currentState` live, so
+    // the gesture (whose pointerInput does not re-key on this) always sees the current state.
+    val entryLifecycle = LocalLifecycleOwner.current.lifecycle
+    val swipeEnabled: () -> Boolean = { entryLifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) }
     // #282 (P2-b) — if the loaded page re-keys while we stay Loaded (a force-refresh or page jump that
     // lands the same screen on a new page), drop any residual translation so the page is never left
     // frozen off-centre. Keyed on `topic.page` ONLY — never `topic.totalPages`: a page-count change
@@ -456,13 +465,17 @@ private fun TopicLoadedContent(
                     MaterialTheme.colorScheme.primary,
                     0.3f,
                 ),
+                enabled = swipeEnabled,
             )
             .topicPageSwipe(
                 currentPage = topic.page,
                 totalPages = { currentTotalPages },
                 dragOffset = dragOffset,
-                haptics = haptics,
-                onOpenPage = onOpenPage,
+                handlers = TopicSwipeHandlers(
+                    haptics = haptics,
+                    onOpenPage = onOpenPage,
+                    enabled = swipeEnabled,
+                ),
             ),
         state = listState,
         contentPadding = PaddingValues(16.dp),

@@ -232,8 +232,7 @@ internal fun Modifier.topicPageSwipe(
     currentPage: Int,
     totalPages: () -> Int,
     dragOffset: MutableFloatState,
-    haptics: HapticFeedback,
-    onOpenPage: (Int) -> Unit,
+    handlers: TopicSwipeHandlers,
 ): Modifier = this
     // `pointerInput` sits BEFORE `graphicsLayer` on purpose: the gesture must read finger deltas in
     // the untranslated coordinate space. If it were inside the translated layer, each frame's
@@ -277,6 +276,15 @@ internal fun Modifier.topicPageSwipe(
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 if (committed) return@awaitEachGesture
+                // Ignore the gesture while this nav entry is NOT settled (lifecycle < RESUMED), i.e.
+                // mid NavDisplay transition. A freshly-Loaded incoming page (served from cache) would
+                // otherwise accept a swipe DURING the transition and commit a SECOND `onOpenPage`
+                // mid-flight, interrupting the transition and freezing the screen — the per-composition
+                // `committed` latch cannot span the inter-page transition (the incoming page is a fresh
+                // composition with its own latch). Gating at `down`, before the gesture arms/follows, is
+                // required: merely dropping `onOpenPage` after the slide-out would still park the page
+                // off-screen (the very freeze). See #282.
+                if (!handlers.enabled()) return@awaitEachGesture
                 val velocityTracker = VelocityTracker()
                 velocityTracker.addPosition(down.uptimeMillis, down.position)
                 var overSlop = 0f
@@ -309,7 +317,7 @@ internal fun Modifier.topicPageSwipe(
                     val offset = followOffsetFor(totalDx, commitDistancePx, currentPage, totalPages())
                     dragOffset.floatValue = offset // synchronous, no coroutine, no allocation
                     val nowArmed = swipeArmed(offset, commitDistancePx)
-                    if (nowArmed && !armed) haptics.performHapticFeedback(ARMED_HAPTIC)
+                    if (nowArmed && !armed) handlers.haptics.performHapticFeedback(ARMED_HAPTIC)
                     armed = nowArmed
                     change.consume()
                 }
@@ -324,11 +332,13 @@ internal fun Modifier.topicPageSwipe(
                     // Latch BEFORE the deferred slide-out so any gesture starting in the slide-out
                     // window is ignored (see `committed` declaration) — no second `onOpenPage`.
                     committed = true
-                    haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                    handlers.haptics.performHapticFeedback(HapticFeedbackType.Confirm)
                     // Slide in the commit direction (forward = next = leftward = negative), not the
                     // residual offset sign: a fast fling can commit with a near-zero/opposite offset.
                     val targetX = if (forward) -widthPx else widthPx
-                    releaseJob = commitSlideOut(animationScope, release, dragOffset, targetX) { onOpenPage(target) }
+                    releaseJob = commitSlideOut(animationScope, release, dragOffset, targetX) {
+                        handlers.onOpenPage(target)
+                    }
                 } else {
                     releaseJob = springBackTo(animationScope, release, dragOffset)
                 }
@@ -347,6 +357,18 @@ internal fun Modifier.topicPageSwipe(
         val commitDistancePx = swipeCommitDistancePx(size.width, MIN_COMMIT_DISTANCE.toPx())
         shadowElevation = if (swipeArmed(offset, commitDistancePx)) COMMIT_SHADOW_ELEVATION_DP.dp.toPx() else 0f
     }
+
+/**
+ * The non-per-frame inputs of [topicPageSwipe], bundled so the gesture's parameter list stays within
+ * the project's limit. [enabled] is read once per gesture (at `down`) and gates the whole gesture off
+ * while this nav entry is mid-transition (lifecycle < RESUMED, see #282); [haptics] fires on arm and
+ * commit; [onOpenPage] performs the route-driven page change exactly once per committed swipe.
+ */
+internal class TopicSwipeHandlers(
+    val haptics: HapticFeedback,
+    val onOpenPage: (Int) -> Unit,
+    val enabled: () -> Boolean,
+)
 
 /** Spring the page back to rest (cancel / no-commit), streaming the animation into [dragOffset]. */
 private fun springBackTo(
@@ -413,6 +435,7 @@ internal fun Modifier.topicPageSwipeEdge(
     totalPages: () -> Int,
     dragOffset: MutableFloatState,
     accent: Color,
+    enabled: () -> Boolean,
 ): Modifier = drawWithCache {
     // Cache (per size) what does not vary per frame: the band geometry and the two full-opacity edge
     // brushes. The per-frame opacity is applied via `drawRect`'s `alpha`, so neither brush nor the
@@ -433,6 +456,9 @@ internal fun Modifier.topicPageSwipeEdge(
     )
     onDrawWithContent {
         drawContent()
+        // No glow while this nav entry is mid-transition (lifecycle < RESUMED): the gesture is gated
+        // off then (see topicPageSwipe), and an exiting page parked off-screen must not keep its glow.
+        if (!enabled()) return@onDrawWithContent
         val offset = dragOffset.floatValue
         if (offset == 0f || commitDistancePx <= 0f) return@onDrawWithContent
         val leftward = offset < 0f

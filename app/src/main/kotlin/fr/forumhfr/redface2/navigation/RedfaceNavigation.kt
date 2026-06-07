@@ -756,14 +756,15 @@ private fun RedfaceNavHost(
                         )
                     },
                     onOpenPage = { targetPage ->
-                        backStack.removeAt(backStack.lastIndex)
-                        backStack.add(
-                            TopicRoute(
-                                cat = route.cat,
-                                post = route.post,
-                                page = targetPage,
-                                scrollTo = null,
-                            ),
+                        // #282 — replace the top entry IN PLACE rather than removeAt + add. The two-step
+                        // version briefly leaves the parent on top (size-1), an observable intermediate
+                        // state NavDisplay can start transitioning toward; an indexed set is a single
+                        // mutation straight from TopicRoute(page=N) to TopicRoute(page=target).
+                        backStack[backStack.lastIndex] = TopicRoute(
+                            cat = route.cat,
+                            post = route.post,
+                            page = targetPage,
+                            scrollTo = null,
                         )
                     },
                 )
