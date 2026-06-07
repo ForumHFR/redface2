@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v86 — `0.5.1` — 2026-06-07
+
+**Statut** : `open` (track open testing) + F-Droid `.beta`
+**Commit** : tag `app-v86` (versionCode alloué par le registre de tags, plancher 72)
+**Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) → **track open testing** + tag pour F-Droid beta
+
+**Bump `versionName` 0.5.0 → 0.5.1.** Aucun changement fonctionnel vs v85 : même code (MP lecture, swipe, drapeaux par catégorie/type/non-lus, fix vie privée). Le bump corrige l'historique de version : v84 et v85 avaient été shippés tous deux sous `0.5.0`, créant un doublon « 0.5.0 » sur F-Droid (qui affiche par `versionName`). L'APK v84 a été retiré du dépôt F-Droid (workflow `prune.yml` de redface2-fdroid) et la v86 repart proprement en `0.5.1`.
+
+### Changed
+- **`versionName` 0.5.0 → 0.5.1** (re-label, pas de changement de code).
+- **Guard CI anti-doublon** : `release.yml` refuse désormais un ship `channel=beta` dont le `versionName` n'a pas été bumpé vs la release beta précédente. Doc (guide release, instruction CHANGELOG) : bump `versionName` obligatoire avant un ship public.
+
+---
+
 ## v85 — `0.5.0` — 2026-06-07
 
 **Statut** : `open` (track open testing) + F-Droid `.beta`

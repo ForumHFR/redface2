@@ -1,8 +1,9 @@
-Redface 2 v0.5.0 — bêta.
+Redface 2 v0.5.1 — bêta.
 
 Nouveautés :
-- Messages privés en lecture : ta boîte de réception et tes conversations, directement dans l'onglet Messages.
-- Changement de page dans un sujet par swipe gauche/droite (la page suit le doigt, transition instantanée).
+- Messages privés en lecture : ta boîte de réception et tes conversations dans l'onglet Messages.
+- Swipe gauche/droite pour changer de page dans un sujet (la page suit le doigt).
+- Drapeaux : regroupement par catégorie, réglages d'affichage par type, filtre « non-lus uniquement ».
 
 Corrigé : un message d'erreur des MP pouvait laisser apparaître l'adresse d'une conversation privée.
 
