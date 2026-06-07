@@ -6,15 +6,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -135,127 +131,115 @@ internal fun TopicFormContent(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(state.mode.titleResId),
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            OutlinedTextField(
-                value = state.subject,
-                onValueChange = { onIntent(TopicFormIntent.SubjectChanged(it)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !state.isSubmitting,
-                label = { Text(stringResource(R.string.editor_topic_subject_label)) },
-                // #237 — sentence capitalization (parité RF1) like the body field.
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-            )
-            // #213 — a category WITHOUT a sub-category (e.g. IA, cat=32) renders no
-            // `<select name=subcat>` on HFR's form (`hasSubcategorySelect = false`), so
-            // posting there uses subcat=0. Hide the picker entirely in that case rather
-            // than showing an empty « choisir une sous-catégorie » dropdown the user
-            // cannot act on (dogfood feedback @XaaT). Categories WITH sub-categories keep it.
-            if (state.hasSubcategorySelect) {
-                SubcategoryDropdown(
-                    choices = state.subcategoryChoices,
-                    selectedSubcat = state.selectedSubcat,
-                    enabled = !state.isSubmitting && !state.isLoadingForm,
-                    onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
-                )
-            }
-            BbcodeToolbar(
-                onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
-                onImageUrlRequested = { imageUrlDialogOpen = true },
-            )
-            // Phase 2F-C (#11 partial) — quick access to the smiley picker. Same placement
-            // and rationale as `PostEditorScreen` : smileys are point-insertions, not
-            // wrappers, so they don't fit the wrap-only `BbcodeAction` toolbar model.
-            TextButton(
-                onClick = { onIntent(TopicFormIntent.SmileyPickerOpened) },
-                modifier = Modifier.semantics {
-                    contentDescription = openSmileyPickerDescription
-                },
+        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(text = stringResource(R.string.editor_smiley_open))
-            }
-            BbcodeTextField(
-                value = state.draft,
-                onValueChange = { onIntent(TopicFormIntent.ContentChanged(it)) },
-                label = stringResource(R.string.editor_field_label),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            TextButton(onClick = { onIntent(TopicFormIntent.TogglePreview) }) {
                 Text(
-                    text = if (state.isPreviewVisible) {
-                        stringResource(R.string.editor_preview_hide)
-                    } else {
-                        stringResource(R.string.editor_preview_show)
+                    text = stringResource(state.mode.titleResId),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                OutlinedTextField(
+                    value = state.subject,
+                    onValueChange = { onIntent(TopicFormIntent.SubjectChanged(it)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isSubmitting,
+                    label = { Text(stringResource(R.string.editor_topic_subject_label)) },
+                    // #237 — sentence capitalization (parité RF1) like the body field.
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                )
+                // #213 — a category WITHOUT a sub-category (e.g. IA, cat=32) renders no
+                // `<select name=subcat>` on HFR's form (`hasSubcategorySelect = false`), so
+                // posting there uses subcat=0. Hide the picker entirely in that case rather
+                // than showing an empty « choisir une sous-catégorie » dropdown the user
+                // cannot act on (dogfood feedback @XaaT). Categories WITH sub-categories keep it.
+                if (state.hasSubcategorySelect) {
+                    SubcategoryDropdown(
+                        choices = state.subcategoryChoices,
+                        selectedSubcat = state.selectedSubcat,
+                        enabled = !state.isSubmitting && !state.isLoadingForm,
+                        onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
+                    )
+                }
+                BbcodeToolbar(
+                    onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
+                    onImageUrlRequested = { imageUrlDialogOpen = true },
+                )
+                // Phase 2F-C (#11 partial) — quick access to the smiley picker. Same placement
+                // and rationale as `PostEditorScreen` : smileys are point-insertions, not
+                // wrappers, so they don't fit the wrap-only `BbcodeAction` toolbar model.
+                TextButton(
+                    onClick = { onIntent(TopicFormIntent.SmileyPickerOpened) },
+                    modifier = Modifier.semantics {
+                        contentDescription = openSmileyPickerDescription
                     },
-                )
-            }
-            if (state.isPreviewVisible) {
-                BbcodePreview(content = state.preview, modifier = Modifier.fillMaxWidth())
-            }
-            HorizontalDivider()
-            TopicFormOptionsBlock(
-                signatureEnabled = state.signatureEnabled,
-                smileyDisabled = state.smileyDisabled,
-                emailNotificationEnabled = state.emailNotificationEnabled,
-                enabled = !state.isSubmitting && !state.isLoadingForm,
-                onSignatureChanged = { onIntent(TopicFormIntent.ToggleSignature(it)) },
-                onSmileyDisabledChanged = { onIntent(TopicFormIntent.ToggleSmileyDisabled(it)) },
-                onEmailNotificationChanged = { onIntent(TopicFormIntent.ToggleEmailNotification(it)) },
-            )
-            if (state.pollPresent && !state.pollEditable) {
-                // Honest copy : the topic has a poll, but Phase 2D #148 does
-                // not edit poll fields — they are preserved verbatim on POST.
-                Text(
-                    text = stringResource(R.string.editor_topic_poll_readonly_note),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            state.submitError?.let { error ->
-                Text(
-                    text = stringResource(error.bannerResId),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                TextButton(onClick = { onIntent(TopicFormIntent.ErrorDismissed) }) {
-                    Text(text = stringResource(R.string.editor_error_dismiss))
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (state.isLoadingForm) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                }
-                Button(
-                    enabled = state.canSubmit,
-                    onClick = { onIntent(TopicFormIntent.SubmitClicked) },
                 ) {
-                    if (state.isSubmitting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-                    } else {
-                        Text(text = stringResource(R.string.editor_submit))
+                    Text(text = stringResource(R.string.editor_smiley_open))
+                }
+                BbcodeTextField(
+                    value = state.draft,
+                    onValueChange = { onIntent(TopicFormIntent.ContentChanged(it)) },
+                    label = stringResource(R.string.editor_field_label),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextButton(onClick = { onIntent(TopicFormIntent.TogglePreview) }) {
+                    Text(
+                        text = if (state.isPreviewVisible) {
+                            stringResource(R.string.editor_preview_hide)
+                        } else {
+                            stringResource(R.string.editor_preview_show)
+                        },
+                    )
+                }
+                if (state.isPreviewVisible) {
+                    BbcodePreview(content = state.preview, modifier = Modifier.fillMaxWidth())
+                }
+                HorizontalDivider()
+                TopicFormOptionsBlock(
+                    signatureEnabled = state.signatureEnabled,
+                    smileyDisabled = state.smileyDisabled,
+                    emailNotificationEnabled = state.emailNotificationEnabled,
+                    enabled = !state.isSubmitting && !state.isLoadingForm,
+                    onSignatureChanged = { onIntent(TopicFormIntent.ToggleSignature(it)) },
+                    onSmileyDisabledChanged = { onIntent(TopicFormIntent.ToggleSmileyDisabled(it)) },
+                    onEmailNotificationChanged = { onIntent(TopicFormIntent.ToggleEmailNotification(it)) },
+                )
+                if (state.pollPresent && !state.pollEditable) {
+                    // Honest copy : the topic has a poll, but Phase 2D #148 does
+                    // not edit poll fields — they are preserved verbatim on POST.
+                    Text(
+                        text = stringResource(R.string.editor_topic_poll_readonly_note),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                state.submitError?.let { error ->
+                    Text(
+                        text = stringResource(error.bannerResId),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TextButton(onClick = { onIntent(TopicFormIntent.ErrorDismissed) }) {
+                        Text(text = stringResource(R.string.editor_error_dismiss))
                     }
                 }
             }
+            // Send-button accessibility — pin « Envoyer » to the bottom, above the IME, so the user
+            // never has to dismiss the keyboard to submit a new topic / first-post edit (shared
+            // EditorSubmitBar with PostEditorScreen).
+            EditorSubmitBar(
+                canSubmit = state.canSubmit,
+                isSubmitting = state.isSubmitting,
+                isLoadingForm = state.isLoadingForm,
+                onSubmit = { onIntent(TopicFormIntent.SubmitClicked) },
+            )
         }
     }
     if (imageUrlDialogOpen) {
