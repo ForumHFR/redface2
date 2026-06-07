@@ -80,7 +80,7 @@ Quand `docs/specs/roadmap.md` tranche explicitement une phase, cette page s'alig
 
 ### Personnalisation
 
-- **Choisir un thème** — 3 thèmes v1 (seed `#A62C2C`, dynamic OFF, cf. [#9](https://github.com/ForumHFR/redface2/issues/9)). Phase 1.
+- **Choisir un thème** — sélecteur clair / sombre / système + thème AMOLED (seed `#A62C2C`, dynamic OFF, cf. [#9](https://github.com/ForumHFR/redface2/issues/9), [#286](https://github.com/ForumHFR/redface2/issues/286)). Livré (Phase 5).
 - **Régler les préférences** — `postsPerPage`, avatars, signatures, timezone, langue (lus depuis HFR). Phase 2.
 - **Mode data saver** — désactive le chargement auto des images lourdes. Phase 1.
 - **Gérer le cache** — purge manuelle. Phase 2.

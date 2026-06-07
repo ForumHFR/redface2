@@ -223,6 +223,10 @@ class TopicViewModel @AssistedInject constructor(
                 // carry a #t{N} scrollTo and are excluded), the fresh post lives on the last page, not
                 // here. Re-route there instead of scrolling this stale page. A same-page reply keeps
                 // totalPages == request.page and falls through to the #200 ScrollToEndOfPage path.
+                // Best-effort under concurrency: HFR's #bas success URL carries NO numreponse, so we
+                // cannot tell our own overflow from a concurrent poster's new page — we send the user
+                // to the last page either way (a reasonable landing). The redirect target route omits
+                // submitSignal precisely so we don't re-enter this guard and chase a moving tail.
                 if (request.scrollTo == null && topic.totalPages > request.page) {
                     _effects.send(TopicEffect.NavigateToLastPage(topic.totalPages))
                     return@launch

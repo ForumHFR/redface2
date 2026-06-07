@@ -1007,7 +1007,8 @@ private fun TopicPostCard(
                     }
                 }
             }
-            PostRenderer(content = post.content)
+            // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
+            PostRenderer(content = post.content, selectable = true)
             if (onQuote != null || onEdit != null) {
                 // Actions row at the bottom of the post card, sober TextButtons
                 // so they stay subordinate to the post content. « Modifier »

@@ -827,17 +827,18 @@ private fun RedfaceNavHost(
                         }
                     },
                     onNavigateToLastPage = { lastPage ->
-                        // #226 — the plain reply overflowed onto a freshly created page. Re-route IN
-                        // PLACE to that last page with a fresh submitSignal so its ViewModel force-
-                        // refreshes and anchors the new post at the bottom (ScrollToEndOfPage), instead
-                        // of leaving the user on the stale form page. Indexed set (not removeAt + add)
-                        // for the same single-mutation reason as onOpenPage (#282).
+                        // #226 — the plain reply overflowed onto a freshly created page; land the user
+                        // there (their reply lives on the last page, not the stale form page). We do
+                        // NOT carry a submitSignal here: a second force-refresh would re-run the overflow
+                        // guard and, if a concurrent post created yet another page during the refresh
+                        // window, keep chasing the moving tail (review finding). A plain cache-aside load
+                        // surfaces the reply without re-triggering the redirect. Indexed set (not
+                        // removeAt + add) for the same single-mutation reason as onOpenPage (#282).
                         backStack[backStack.lastIndex] = TopicRoute(
                             cat = route.cat,
                             post = route.post,
                             page = lastPage,
                             scrollTo = null,
-                            submitSignal = System.currentTimeMillis(),
                         )
                     },
                 )

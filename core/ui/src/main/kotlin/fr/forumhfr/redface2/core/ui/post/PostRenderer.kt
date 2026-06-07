@@ -136,7 +136,10 @@ internal fun isBareQuote(quote: PostBlock.Quote): Boolean =
 fun PostRenderer(
     content: PostContent,
     modifier: Modifier = Modifier,
-    selectable: Boolean = true,
+    // #281 — opt-in, default OFF so callers make the choice explicitly and we never silently change
+    // surfaces outside scope (the editor BBCode preview and private-message thread keep their prior
+    // non-selectable behaviour). Topic posts pass `selectable = true`.
+    selectable: Boolean = false,
 ) {
     if (selectable) {
         // #281 — allow selecting / copying a post's text. The SelectionContainer is wrapped at this
