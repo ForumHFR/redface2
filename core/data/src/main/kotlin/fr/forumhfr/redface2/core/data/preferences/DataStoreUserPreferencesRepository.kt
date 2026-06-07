@@ -114,8 +114,10 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             // per-type key, …); distinctUntilChanged keeps this flow quiet unless THIS type's
             // resolved settings actually change, so the Flags combine doesn't churn on unrelated edits.
             .distinctUntilChanged()
-            // Fall back to the #179 global defaults (grouped on, hide-read off) on a read error.
-            .catch { emit(FlagsViewSettings()) }
+            // Fall back to the defaults on a read error: #179 layout (grouped on, hide-read off) and
+            // the #317 type-aware unreadOnly — so CYAN still degrades to its actionable subset, not
+            // « show all », keeping the error path faithful to resolveFlagsViewSettings.
+            .catch { emit(FlagsViewSettings(unreadOnly = defaultUnreadOnly(type))) }
 
     override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) {
         withContext(ioDispatcher) {
@@ -142,10 +144,13 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     }
 
     /**
-     * Resolves the per-tab view settings (#309). With the override off, the global pair is
-     * returned verbatim; with it on, each toggle reads the per-type key and falls back to the
-     * matching global value when that tab key is unset. The global defaults (grouped on,
-     * hide-read off) are applied here so an empty DataStore yields the #179 behaviour.
+     * Resolves the per-tab view settings (#309 layout) plus the per-type unreadOnly (#317). For the
+     * LAYOUT pair: with the override off, the global pair is returned verbatim; with it on, each
+     * toggle reads the per-type key and falls back to the matching global value when that tab key is
+     * unset. The global defaults (grouped on, hide-read off) are applied here so an empty DataStore
+     * yields the #179 behaviour. The #317 [FlagsViewSettings.unreadOnly] is resolved independently of
+     * the override (always per-type, type-aware default via [defaultUnreadOnly]) and added to BOTH
+     * return paths.
      *
      * Per-type keys are intentionally **sticky**: turning the override off does not clear them, so
      * re-enabling it later restores each tab's previously customised values (rather than silently
