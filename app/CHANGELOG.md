@@ -16,6 +16,21 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v85 — `0.5.0` — 2026-06-07
+
+**Statut** : `open` (track open testing) + F-Droid `.beta`
+**Commit** : tag `app-v85` (versionCode alloué par le registre de tags, plancher 72)
+**Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) → **track open testing** + tag pour F-Droid beta
+
+**Affichage des drapeaux dans la bêta 0.5.0** — les trois fonctionnalités drapeaux, déjà éprouvées sur le canal dev (v81/v82/v83), rejoignent la bêta ouverte ; la v84 livrait 0.5.0 sans elles.
+
+### Added
+- **#179 — Drapeaux/favoris regroupés par catégorie** dans les 4 onglets (Cyan/Lu/Favoris/Super), vue groupée par défaut (parité web), en-têtes de catégorie collants. Toggle vue plate/groupée + masquage des catégories sans non-lu dans les Réglages.
+- **#309 — Affichage configurable par type de drapeau** : un menu « Affichage » (bottom sheet sur l'en-tête Drapeaux + miroir Réglages) permet à chaque onglet de résoudre son propre regroupement / masquage (master switch `flagsPerTabOverride`, fallback global).
+- **#317 — Filtre « non-lus uniquement » par type de drapeau** : défaut adapté au type (Cyan = non-lus, Lu/Favoris = tout afficher), toggle persistant par onglet ; le re-tap cyan « +lus » bascule désormais un réglage persistant.
+
+---
+
 ## v84 — `0.5.0` — 2026-06-07
 
 **Statut** : `open` (track open testing) + F-Droid `.beta`
