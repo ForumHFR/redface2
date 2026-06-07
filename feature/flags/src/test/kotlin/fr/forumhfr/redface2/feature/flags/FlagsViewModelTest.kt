@@ -233,6 +233,31 @@ class FlagsViewModelTest {
         assertEquals(true, vm.flagsViewSettings.value.unreadOnly)
     }
 
+    @Test
+    fun `rapid double re-tap on Cyan flips twice via the optimistic value`() = runTest {
+        // #317 review (cf. #309 shim): a re-tap reads the RESOLVED settings (an async DataStore
+        // flow). Without the optimistic [pendingUnreadOnly], a second rapid re-tap before the first
+        // write commits would read the SAME lagging value and lose the toggle. Gate the write so
+        // both re-taps fire before either persists, then prove the value still ends at its start
+        // (true → false → true) — i.e. the second tap flipped from the optimistic `false`.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository() // CYAN default unreadOnly = true
+        prefs.blockUnreadOnlySetUntil = kotlinx.coroutines.CompletableDeferred()
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.selectTab(FlagTab.Cyan) // re-tap: true → write(false) gated, pending = false
+        vm.selectTab(FlagTab.Cyan) // re-tap: reads optimistic false → write(true) gated, pending = true
+        prefs.blockUnreadOnlySetUntil!!.complete(Unit) // release both gated writes (FIFO)
+
+        assertEquals(
+            "two rapid re-taps must net back to the start, not lose the second flip",
+            true,
+            vm.flagsViewSettings.value.unreadOnly,
+        )
+    }
+
     // Round-2 review (PR #207): the `logout clears the private flags cache before resetting
     // auth state` test moved to `AppAccountViewModelTest`. `FlagsViewModel.logout()` is gone —
     // the global account menu (#198) now drives the logout from `AppAccountViewModel` which
@@ -1314,7 +1339,12 @@ class FlagsViewModelTest {
             perTypeHide.getValue(type).value = enabled
         }
 
+        /** When set, gates the unreadOnly write so a test can prove the re-tap uses the OPTIMISTIC
+         * value while the DataStore round-trip is still in flight. */
+        var blockUnreadOnlySetUntil: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
         override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) {
+            blockUnreadOnlySetUntil?.await()
             perTypeUnread.getValue(type).value = enabled
         }
 

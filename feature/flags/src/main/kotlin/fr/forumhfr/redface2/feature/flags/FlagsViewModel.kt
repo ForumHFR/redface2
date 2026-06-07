@@ -130,8 +130,22 @@ class FlagsViewModel @Inject constructor(
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
-            initialValue = FlagsViewSettings(),
+            // Seed the type-aware #317 default for the initial tab (CYAN → unread-only) so the
+            // cold-start frame (before observeFlagsViewSettings emits) matches the resolved value:
+            // otherwise the data-class default (unreadOnly=false) would flash the « +lus » suffix on
+            // Cyan and a re-tap in that window would read a stale value. Mirrors defaultUnreadOnly.
+            initialValue = FlagsViewSettings(unreadOnly = _selectedTab.value == FlagTab.Cyan),
         )
+
+    /**
+     * Optimistic shim for the per-type « non-lus uniquement » value (#317), mirroring
+     * [pendingPerTabOverride]. The CYAN re-tap shortcut computes its flip from the RESOLVED settings,
+     * an async DataStore flow; seeding this synchronously on each write keeps a rapid double re-tap
+     * flipping from the value the user last chose rather than one lagging the round-trip. It always
+     * describes the currently selected tab (reset on a real tab switch); cleared once the write
+     * persists. Read only by the re-tap path — the list/suffix read the resolved settings directly.
+     */
+    private val pendingUnreadOnly = MutableStateFlow<Boolean?>(null)
 
     /**
      * Optimistic shim for the per-tab master switch (#309 Codex review). `setFlagsPerTabOverride`
@@ -278,10 +292,15 @@ class FlagsViewModel @Inject constructor(
             // Re-tapping the already-selected Cyan tab toggles its « non-lus uniquement » filter
             // (the « +lus » shortcut). It flips the CYAN per-type value, persisted via
             // [setFlagsUnreadOnly] — the same write the bottom-sheet toggle uses (single mutation
-            // point). `flagsViewSettings.value` is the CYAN resolution while Cyan is selected.
-            setFlagsUnreadOnly(!flagsViewSettings.value.unreadOnly)
+            // point). Flip from the optimistic [pendingUnreadOnly] if a write is still in flight,
+            // else from the resolved CYAN settings — so a rapid double re-tap can't read a value
+            // lagging the DataStore round-trip and lose a toggle (cf. #309 shim rationale).
+            val current = pendingUnreadOnly.value ?: flagsViewSettings.value.unreadOnly
+            setFlagsUnreadOnly(!current)
             return
         }
+        // A real tab switch drops any pending optimistic value (it described the previous tab).
+        if (_selectedTab.value != tab) pendingUnreadOnly.value = null
         _selectedTab.value = tab
     }
 
@@ -336,8 +355,13 @@ class FlagsViewModel @Inject constructor(
      */
     fun setFlagsUnreadOnly(enabled: Boolean) {
         val type = _selectedTab.value.flagType ?: return
+        // Seed the optimistic value synchronously (instant, lag-free re-tap target), then persist
+        // and drop the shim only if no newer flip superseded this one (compareAndSet) — same pattern
+        // as [setFlagsPerTabOverride]. The resolved settings take over once DataStore commits.
+        pendingUnreadOnly.value = enabled
         viewModelScope.launch {
             userPreferencesRepository.setFlagsUnreadOnlyForType(type, enabled)
+            pendingUnreadOnly.compareAndSet(expect = enabled, update = null)
         }
     }
 

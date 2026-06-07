@@ -61,7 +61,8 @@ internal val FALLBACK_CATEGORY_ORDER: List<FlagCategoryOrderEntry> = listOf(
 )
 
 /**
- * Groups [flags] (already cyan-filtered, cf. #154) by category and orders the sections by the
+ * Groups [flags] (already unread-filtered per type when that tab's « non-lus uniquement » is on,
+ * cf. #154/#317) by category and orders the sections by the
  * canonical [orderedCategories]. Returns FIRST every known category (empty sections included,
  * for web parity), THEN at the end the categories present in the flags but absent from the
  * catalogue, as « unknown » sections (`catName == null`) sorted by `catId` ascending.

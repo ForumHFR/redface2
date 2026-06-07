@@ -54,7 +54,7 @@ Les exemples ViewModel ci-dessous sont **des squelettes illustratifs** — certa
 
 ## Écran Drapeaux (accueil)
 
-> **Statut Phase 2 finish livré** : le `FlagsViewModel` réel expose plusieurs `StateFlow` séparés (auth, onglet courant `FlagTab`, liste de drapeaux du tab, `isRefreshing`, `removeFlagState`/`removeFlagEvent`) plutôt qu'un seul `FlagsState` agrégé. Onglets via `FlagTab` (Cyan/Red/Favorite + **Super**, placeholder « super favoris » sans backend, `flagType == null`). Le filtre CYAN « afficher les cyans déjà lus » se pilote par **re-tap de l'onglet Cyan** (le `FilterChip` a été retiré). Le **retrait d'un drapeau** (#99, `delflag.php`, confirmation + pas d'undo optimiste) est livré. Le **pull-to-refresh** (`PullToRefreshBox` M3) a remplacé le bouton « Actualiser ». `logout()` ne vit plus ici (déplacé dans `AppAccountViewModel`, #198). Le squelette illustratif ci-dessous reflète la forme shippée.
+> **Statut Phase 2 finish livré** : le `FlagsViewModel` réel expose plusieurs `StateFlow` séparés (auth, onglet courant `FlagTab`, liste de drapeaux du tab, `isRefreshing`, `removeFlagState`/`removeFlagEvent`) plutôt qu'un seul `FlagsState` agrégé. Onglets via `FlagTab` (Cyan/Red/Favorite + **Super**, placeholder « super favoris » sans backend, `flagType == null`). Le filtre « non-lus uniquement » est désormais **par type de drapeau** (#317, persisté en préférences, défaut type-aware : CYAN activé, RED/FAVORITE non) ; il se pilote par le **bottom sheet d'affichage** et, pour CYAN, par **re-tap de l'onglet** (raccourci « +lus » ; le `FilterChip` a été retiré). Le **retrait d'un drapeau** (#99, `delflag.php`, confirmation + pas d'undo optimiste) est livré. Le **pull-to-refresh** (`PullToRefreshBox` M3) a remplacé le bouton « Actualiser ». `logout()` ne vit plus ici (déplacé dans `AppAccountViewModel`, #198). Le squelette illustratif ci-dessous reflète la forme shippée.
 
 ### ViewModel — forme livrée
 
@@ -64,6 +64,7 @@ Les exemples ViewModel ci-dessous sont **des squelettes illustratifs** — certa
 class FlagsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val flagRepository: FlagRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
 ) : ViewModel() {
 
     private var observedPseudo: String? = null
@@ -74,10 +75,10 @@ class FlagsViewModel @Inject constructor(
     private val _selectedTab = MutableStateFlow<FlagTab>(FlagTab.Cyan)
     val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
 
-    // CYAN-only client filter (default hides `hasUnread = false`). Le toggle est déclenché par un
-    // re-tap de l'onglet Cyan déjà sélectionné (le FilterChip a été retiré).
-    private val _showReadParticipatedTopics = MutableStateFlow(false)
-    val showReadParticipatedTopics: StateFlow<Boolean> = _showReadParticipatedTopics.asStateFlow()
+    // #317 — filtre « non-lus uniquement » par type de drapeau, persisté (DataStore) et résolu avec
+    // un défaut type-aware (CYAN → true = sous-ensemble actionnable, RED/FAVORITE → false). Le toggle
+    // est déclenché soit par le bottom sheet d'affichage, soit par un re-tap de l'onglet Cyan déjà
+    // sélectionné (raccourci « +lus »). Aucun état en mémoire : la valeur vit dans les préférences.
 
     // Anchored over the existing list during the user-driven pull-to-refresh round-trip
     // (Material 3 PullToRefreshBox a remplacé le bouton « Actualiser »). Même pattern que ForumViewModel.
@@ -103,23 +104,42 @@ class FlagsViewModel @Inject constructor(
                         null -> flowOf<FlagsResult?>(null) // Super placeholder : pas de fetch
                         else -> combine(
                             flagRepository.observe(type),
-                            _showReadParticipatedTopics,
-                        ) { result, showRead -> filterReadParticipatedIfNeeded(result, type, showRead) }
+                            userPreferencesRepository.observeFlagsViewSettings(type)
+                                .map { it.unreadOnly }
+                                .distinctUntilChanged(),
+                        ) { result, unreadOnly -> filterUnreadOnly(result, unreadOnly) }
                     }
                 }
             }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, initialValue = null)
 
+    // #317 — réglages d'affichage résolus pour l'onglet courant ; le re-tap y lit `unreadOnly`.
+    // initialValue type-aware (CYAN → true) pour éviter un flash « +lus » au démarrage à froid.
+    val flagsViewSettings: StateFlow<FlagsViewSettings> = selectedTab
+        .flatMapLatest { tab ->
+            tab.flagType?.let { userPreferencesRepository.observeFlagsViewSettings(it) }
+                ?: flowOf(FlagsViewSettings())
+        }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            FlagsViewSettings(unreadOnly = _selectedTab.value == FlagTab.Cyan),
+        )
+
     // Re-tap Cyan déjà sélectionné → toggle du filtre via le setter (point de mutation unique).
     fun selectTab(tab: FlagTab) {
         if (tab == FlagTab.Cyan && _selectedTab.value == FlagTab.Cyan) {
-            setShowReadParticipatedTopics(!_showReadParticipatedTopics.value)
+            setFlagsUnreadOnly(!flagsViewSettings.value.unreadOnly)
             return
         }
         _selectedTab.value = tab
     }
-    fun setShowReadParticipatedTopics(value: Boolean) { _showReadParticipatedTopics.value = value }
+    // Écrit la valeur per-type de l'onglet courant (toujours par type ; no-op sur Super).
+    fun setFlagsUnreadOnly(enabled: Boolean) {
+        val type = _selectedTab.value.flagType ?: return
+        viewModelScope.launch { userPreferencesRepository.setFlagsUnreadOnlyForType(type, enabled) }
+    }
 
     fun refresh() { // no-op sur Super (flagType == null)
         val type = _selectedTab.value.flagType ?: return
@@ -133,12 +153,10 @@ class FlagsViewModel @Inject constructor(
     // → one-shot event ; consumeRemoveFlagEvent() après affichage du snackbar.
     // NB : logout() ne vit plus ici — déplacé dans AppAccountViewModel (#198, menu compte global).
 
-    private fun filterReadParticipatedIfNeeded(
-        result: FlagsResult,
-        type: FlagType,
-        showReadParticipated: Boolean,
-    ): FlagsResult {
-        if (type != FlagType.CYAN || showReadParticipated) return result
+    // #317 — filtre générique : ne garde que les sujets non lus quand `unreadOnly` est actif (tout
+    // type ; CYAN l'active par défaut, RED/FAVORITE non — cf. défaut type-aware côté repository).
+    private fun filterUnreadOnly(result: FlagsResult, unreadOnly: Boolean): FlagsResult {
+        if (!unreadOnly) return result
         return when (result) {
             is FlagsResult.Success -> result.copy(flags = result.flags.filter { it.hasUnread })
             else -> result
@@ -195,7 +213,7 @@ Quand cette extension arrive, `FlagsState` agrégé peut redevenir préférable 
 
 ### Screen (Compose) — forme livrée
 
-`feature/flags/src/main/kotlin/.../FlagsRoute.kt` est l'entrée stateful (récupère `FlagsViewModel` via `hiltViewModel()`, collecte ses `StateFlow` via `collectAsStateWithLifecycle()`). Depuis le polish #154 et la refonte Phase 2 finish, `FlagsRoute` se concentre sur la liste : 4 onglets (Cyan / Lu / Favoris / **Super** placeholder), toggle « afficher les sujets participés déjà lus » (CYAN, via re-tap de l'onglet), pull-to-refresh `PullToRefreshBox` (plus de bouton Actualiser), retrait d'un drapeau par **swipe-to-remove** (`SwipeToDismissBox` M3, swipe end-to-start) qui ouvre le dialog de confirmation (#99) — le swipe ne supprime jamais la ligne seul (la ligne est ramenée à `Settled` via `reset()`, la suppression réelle n'a lieu qu'après confirmation, quand le repo évince l'item du cache), branche login si anonyme, branche reconnect si `SessionExpiredException`. Pas de footer alpha — les actions compte (pseudo / logout) et outils (Diagnostics, signalement, version) vivent depuis #198 dans le menu compte global injecté via `topBarActions: @Composable (() -> Unit)? = null`. Le découpage `<Name>Screen` / `<Name>Content` reste l'objectif quand la complexité justifie le coût (filtre, tri, undo) — cf. cible Phase 2.
+`feature/flags/src/main/kotlin/.../FlagsRoute.kt` est l'entrée stateful (récupère `FlagsViewModel` via `hiltViewModel()`, collecte ses `StateFlow` via `collectAsStateWithLifecycle()`). Depuis le polish #154 et la refonte Phase 2 finish, `FlagsRoute` se concentre sur la liste : 4 onglets (Cyan / Lu / Favoris / **Super** placeholder), filtre « non-lus uniquement » par type (#317, via le bottom sheet d'affichage ou, pour CYAN, le re-tap de l'onglet), pull-to-refresh `PullToRefreshBox` (plus de bouton Actualiser), retrait d'un drapeau par **swipe-to-remove** (`SwipeToDismissBox` M3, swipe end-to-start) qui ouvre le dialog de confirmation (#99) — le swipe ne supprime jamais la ligne seul (la ligne est ramenée à `Settled` via `reset()`, la suppression réelle n'a lieu qu'après confirmation, quand le repo évince l'item du cache), branche login si anonyme, branche reconnect si `SessionExpiredException`. Pas de footer alpha — les actions compte (pseudo / logout) et outils (Diagnostics, signalement, version) vivent depuis #198 dans le menu compte global injecté via `topBarActions: @Composable (() -> Unit)? = null`. Le découpage `<Name>Screen` / `<Name>Content` reste l'objectif quand la complexité justifie le coût (filtre, tri, undo) — cf. cible Phase 2.
 
 ---
 
