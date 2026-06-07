@@ -258,6 +258,46 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `unreadOnly defaults are type-aware on an empty store`() = runTest(dispatcher) {
+        // #317: unreadOnly is always per-type with a type-aware default — CYAN (« Mes sujets »)
+        // shows the actionable unread subset by default; RED / FAVORITE show everything.
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertTrue("CYAN defaults to unread-only", awaitItem().unreadOnly)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            assertFalse("RED defaults to show all", awaitItem().unreadOnly)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+            assertFalse("FAVORITE defaults to show all", awaitItem().unreadOnly)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsUnreadOnlyForType persists per type and ignores the per-tab override`() = runTest(dispatcher) {
+        // unreadOnly is always per-type: it overrides the type-aware default regardless of the
+        // layout per-tab override (which stays OFF here), and never leaks across types.
+        repository.setFlagsUnreadOnlyForType(FlagType.CYAN, false)
+        repository.setFlagsUnreadOnlyForType(FlagType.RED, true)
+
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertFalse("CYAN flipped off overrides its true default", awaitItem().unreadOnly)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            assertTrue("RED flipped on overrides its false default", awaitItem().unreadOnly)
+            cancelAndIgnoreRemainingEvents()
+        }
+        // FAVORITE untouched → still its type-aware default (false).
+        repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+            assertFalse("FAVORITE keeps its default, no cross-type leak", awaitItem().unreadOnly)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `saving disabled proxy removes optional fields from effective config`() = runTest(dispatcher) {
         repository.saveProxyConfig(
             ProxyConfig(

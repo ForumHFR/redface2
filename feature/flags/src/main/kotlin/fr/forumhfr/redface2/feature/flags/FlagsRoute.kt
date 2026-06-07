@@ -100,12 +100,17 @@ fun FlagsRoute(
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
     val flagsState by viewModel.flagsState.collectAsStateWithLifecycle()
-    val showReadParticipated by viewModel.showReadParticipatedTopics.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val removeFlagState by viewModel.removeFlagState.collectAsStateWithLifecycle()
     val removeFlagEvent by viewModel.removeFlagEvent.collectAsStateWithLifecycle()
     val flagsViewSettings by viewModel.flagsViewSettings.collectAsStateWithLifecycle()
     val flagsPerTabOverride by viewModel.flagsPerTabOverride.collectAsStateWithLifecycle()
+
+    // « +lus » suffix on the Cyan tab: shown when the Cyan tab is selected and CYAN's « non-lus
+    // uniquement » filter is off (read participated topics are visible). The ViewModel derives this
+    // from [cyanUnreadOnly] (CYAN-specific, optimistic, eager `true`) so the suffix never flashes on
+    // a cold start or a tab switch before DataStore re-resolves the selected tab (#317).
+    val cyanShowsRead by viewModel.cyanShowsReadShortcut.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -177,7 +182,7 @@ fun FlagsRoute(
                             state = FlagsBodyState(
                                 selectedTab = selectedTab,
                                 flagsState = flagsState,
-                                showReadParticipated = showReadParticipated,
+                                cyanShowsRead = cyanShowsRead,
                                 isRefreshing = isRefreshing,
                                 removeFlagState = removeFlagState,
                             ),
@@ -207,6 +212,7 @@ fun FlagsRoute(
                 onPerTabOverrideChange = viewModel::setFlagsPerTabOverride,
                 onGroupByCategoryChange = viewModel::setFlagsGroupByCategory,
                 onHideReadCategoriesChange = viewModel::setFlagsHideReadCategories,
+                onUnreadOnlyChange = viewModel::setFlagsUnreadOnly,
                 onDismiss = { showViewSettingsSheet = false },
             ),
         )
@@ -299,12 +305,14 @@ private fun FlagsHeader(
 }
 
 /**
- * Display-settings bottom sheet (#309). Three switches edit the active scope: the per-tab override
- * master switch, then « grouper par catégorie » and « masquer les catégories sans non-lu » (the
- * latter disabled in the flat view, mirroring Settings). A caption spells out the current scope so
- * the user knows whether a flip touches every tab or only [selectedTab]. Writes route through the
- * ViewModel ([onPerTabOverrideChange]/[onGroupByCategoryChange]/[onHideReadCategoriesChange]) so
- * they land on the right key; the sheet stays open so the list re-renders live underneath.
+ * Display-settings bottom sheet (#309 + #317). The first three switches edit the active LAYOUT
+ * scope: the per-tab override master switch, then « grouper par catégorie » and « masquer les
+ * catégories sans non-lu » (the latter disabled in the flat view, mirroring Settings). A caption
+ * spells out the current scope so the user knows whether a layout flip touches every tab or only
+ * [selectedTab]. The last switch, « non-lus uniquement » (#317), is ALWAYS per-tab (independent of
+ * the scope caption) — its description says so. Writes route through the ViewModel
+ * ([onPerTabOverrideChange]/[onGroupByCategoryChange]/[onHideReadCategoriesChange]/[onUnreadOnlyChange])
+ * so they land on the right key; the sheet stays open so the list re-renders live underneath.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -370,6 +378,15 @@ private fun FlagsViewSettingsSheet(
                 // Hiding read categories is only meaningful in the grouped view (mirrors Settings).
                 enabled = settings.groupByCategory,
                 onCheckedChange = actions.onHideReadCategoriesChange,
+            )
+            // #317 — « non-lus uniquement ». Always per-tab (not governed by the override above), so
+            // it's always enabled and its description says it applies to this tab only.
+            ViewSettingsSwitchRow(
+                title = stringResource(R.string.flags_view_settings_unread_only_title),
+                description = stringResource(R.string.flags_view_settings_unread_only_description),
+                checked = settings.unreadOnly,
+                enabled = true,
+                onCheckedChange = actions.onUnreadOnlyChange,
             )
 
             TextButton(
@@ -470,7 +487,7 @@ private fun ColumnScope.AuthenticatedBody(
     actions: AuthenticatedActions,
 ) {
     val selectedTab = state.selectedTab
-    val showReadParticipated = state.showReadParticipated
+    val cyanShowsRead = state.cyanShowsRead
     val tabs = listOf(
         FlagTab.Cyan to stringResource(R.string.flags_tab_my_topics),
         FlagTab.Red to stringResource(R.string.flags_tab_read_only),
@@ -484,7 +501,7 @@ private fun ColumnScope.AuthenticatedBody(
 
     PrimaryTabRow(selectedTabIndex = selectedIndex) {
         tabs.forEachIndexed { index, (tab, label) ->
-            val displayLabel = if (tab == FlagTab.Cyan && showReadParticipated) {
+            val displayLabel = if (tab == FlagTab.Cyan && cyanShowsRead) {
                 label + cyanReadSuffix
             } else {
                 label
@@ -890,7 +907,8 @@ private fun ColumnScope.SuperPlaceholderBody() {
 private data class FlagsBodyState(
     val selectedTab: FlagTab,
     val flagsState: FlagsListUiState?,
-    val showReadParticipated: Boolean,
+    /** Whether the Cyan tab currently shows read topics (« +lus » suffix), #317. */
+    val cyanShowsRead: Boolean,
     val isRefreshing: Boolean,
     val removeFlagState: RemoveFlagState,
 )
@@ -904,14 +922,16 @@ private data class AuthenticatedActions(
 )
 
 /**
- * Callback bundle for [FlagsViewSettingsSheet] (#309), grouped so the sheet stays under the detekt
- * parameter-count threshold. The three `*Change` writes route through the ViewModel (which decides
- * global vs per-type scope); [onDismiss] closes the sheet.
+ * Callback bundle for [FlagsViewSettingsSheet] (#309 + #317), grouped so the sheet stays under the
+ * detekt parameter-count threshold. The layout `*Change` writes route through the ViewModel (which
+ * decides global vs per-type scope); [onUnreadOnlyChange] is always per-type (#317); [onDismiss]
+ * closes the sheet.
  */
 private data class FlagsViewSettingsActions(
     val onPerTabOverrideChange: (Boolean) -> Unit,
     val onGroupByCategoryChange: (Boolean) -> Unit,
     val onHideReadCategoriesChange: (Boolean) -> Unit,
+    val onUnreadOnlyChange: (Boolean) -> Unit,
     val onDismiss: () -> Unit,
 )
 
