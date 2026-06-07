@@ -12,7 +12,7 @@ Statuts possibles d'une release :
 - `open` — uploadé sur le canal Play Console *open testing* (canal `beta` de la CD, depuis #233)
 - `production` — disponible publiquement sur Play Store
 
-Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la main** — il est alloué au dispatch par le **registre de tags git** (`max(app-v<N>, plancher build.gradle.kts) + 1`, partagé entre les canaux beta et dev). On bumpe seulement `versionName` dans `app/build.gradle.kts` si pertinent, on ajoute une entrée ici, puis on dispatche `gh workflow run release.yml --ref main -f channel=beta|dev`. Quand l'AAB part vers un canal Play Console, mettre à jour le statut de la version concernée.
+Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la main** — il est alloué au dispatch par le **registre de tags git** (`max(app-v<N>, plancher build.gradle.kts) + 1`, partagé entre les canaux beta et dev). **On DOIT bumper `versionName`** dans `app/build.gradle.kts` avant chaque ship **beta** (ou prod) — F-Droid affiche les versions par `versionName`, donc deux builds au même `versionName` = doublon « X.Y.Z » (cf. `app-v84`/`app-v85`, tous deux `0.5.0`). Un guard CI dans `release.yml` refuse un ship beta dont le `versionName` n'a pas été bumpé. On ajoute une entrée ici, puis on dispatche `gh workflow run release.yml --ref main -f channel=beta|dev`. Quand l'AAB part vers un canal Play Console, mettre à jour le statut de la version concernée.
 
 ---
 

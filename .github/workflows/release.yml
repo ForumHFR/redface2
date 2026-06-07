@@ -17,6 +17,12 @@ name: Release
 # beta-vs-dev inversion). The run creates a prerelease `app-v<N>` carrying the signed artefacts, so
 # the F-Droid publisher (which downloads from a Release) has a source. `concurrency` serialises runs
 # so two dispatches never allocate the same code. Prod/stable is deferred (#302/#304) — set aside.
+#
+# versionName (MARKETING, manual): decoupled from versionCode. MUST be bumped in app/build.gradle.kts
+# before EVERY public (beta) ship — F-Droid keys its version display on versionName, so two builds at
+# the same versionName show as duplicate "X.Y.Z" entries (happened with app-v84/v85, both 0.5.0). A
+# guard step (below) fails a beta ship whose versionName matches the previous beta release. dev is
+# exempt (it adds a versionNameSuffix).
 on:
   workflow_dispatch:
     inputs:
@@ -196,6 +202,43 @@ jobs:
             echo "release_tag=$release_tag"
           } >> "$GITHUB_OUTPUT"
           echo "::notice title=Build::channel=${CHANNEL} versionCode=${version_code} (ledger=${ledger_code} floor=${base_code}) versionName=${version_name} tag=${release_tag} sha=${short_sha} label='${APP_LABEL:-<default>}'"
+
+      - name: Guard — versionName must be bumped for a beta (public) ship
+        if: ${{ env.CHANNEL == 'beta' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_VN: ${{ steps.meta.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          # The beta track is PUBLIC (Play open testing + F-Droid). F-Droid keys its version display on
+          # versionName (not versionCode), so two beta builds at the same versionName show up as
+          # DUPLICATE "X.Y.Z" entries in the version history. versionCode is auto-allocated from the tag
+          # ledger; versionName is the ONLY manual knob — it MUST be bumped in app/build.gradle.kts before
+          # each beta ship. This guard refuses a beta whose versionName was already shipped to beta.
+          # Runs right after metadata resolution, BEFORE the build / ledger tag / Play upload, so a
+          # failure aborts with no side effect. (dev is exempt: it carries a versionNameSuffix.)
+          # Previous beta releases are the GitHub Releases whose name carries the "β" marker.
+          prev=$(gh release list --repo ForumHFR/redface2 --limit 100 --json tagName,name \
+                   --jq '[.[] | select(.name | contains("β")) | .tagName | capture("^app-v(?<n>[0-9]+)$") | .n | tonumber] | max // 0')
+          if [[ "$prev" == "0" ]]; then
+            echo "::notice::No previous beta release found — versionName bump guard is a no-op (first beta)."
+            exit 0
+          fi
+          prev_tag="app-v${prev}"
+          git fetch --depth=1 origin "refs/tags/${prev_tag}:refs/tags/${prev_tag}" >/dev/null 2>&1 || true
+          prev_vn=$(git show "${prev_tag}:app/build.gradle.kts" 2>/dev/null \
+                     | grep -E '^[[:space:]]+versionName[[:space:]]*=' | head -1 | sed -E 's/.*"(.*)".*/\1/' || true)
+          if [[ -z "$prev_vn" ]]; then
+            echo "::warning::Could not read versionName from ${prev_tag} (shallow history?); skipping the bump guard rather than blocking a legit ship."
+            exit 0
+          fi
+          echo "current versionName='${CURRENT_VN}' | previous beta ${prev_tag} versionName='${prev_vn}'"
+          if [[ "$CURRENT_VN" == "$prev_vn" ]]; then
+            echo "::error::versionName '${CURRENT_VN}' was already shipped to the public beta track (${prev_tag}). Bump versionName in app/build.gradle.kts before a beta ship — two builds at the same versionName produce duplicate entries on F-Droid."
+            exit 1
+          fi
+          echo "::notice::versionName bump OK for beta (${prev_vn} → ${CURRENT_VN})."
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5

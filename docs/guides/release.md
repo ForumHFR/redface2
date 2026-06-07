@@ -99,7 +99,9 @@ Le workflow refuse de tourner si `UPLOAD_KEYSTORE_BASE64` est manquant (un build
 - crée la Release pre-release `app-v<N>` avec AAB+APK Play **et** l'APK F-Droid `.beta` ;
 - notifie F-Droid (package `.beta`).
 
-Plus besoin de bumper `versionCode` à la main ni de publier une Release : le dispatch fait tout. (Mettre à jour `app/CHANGELOG.md` + `versionName` reste utile pour une vraie montée de version marketing.)
+Plus besoin de bumper `versionCode` à la main ni de publier une Release : le dispatch fait tout.
+
+> ⚠️ **Toujours bumper `versionName` avant un ship beta (ou prod).** F-Droid affiche les versions par `versionName` (pas `versionCode`) : deux builds beta au même `versionName` apparaissent comme deux entrées « X.Y.Z » identiques (c'est arrivé avec `app-v84`/`app-v85`, tous deux `0.5.0`). Bumper `versionName` dans `app/build.gradle.kts` (patch au minimum) + ajouter l'entrée `app/CHANGELOG.md`, via PR, **avant** de dispatcher `channel=beta`. Un guard CI (`release.yml`, step « Guard — versionName must be bumped ») **refuse** un ship beta dont le `versionName` est identique à celui de la release beta précédente. Le canal `dev` est exempté (il ajoute un `versionNameSuffix`).
 
 ## Flux dev — Play internal + F-Droid `.dev` (rapide)
 
