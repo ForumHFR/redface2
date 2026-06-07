@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.flags
 
 import android.annotation.SuppressLint
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,7 +16,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -41,7 +41,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
@@ -51,7 +50,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
-import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
@@ -318,7 +316,7 @@ private fun ColumnScope.AuthenticatedBody(
             .weight(1f),
     ) {
         when (val current = state.flagsState) {
-            null, FlagsResult.Loading -> Box(
+            null, FlagsListUiState.Loading -> Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(vertical = 32.dp),
@@ -327,7 +325,7 @@ private fun ColumnScope.AuthenticatedBody(
                 CircularProgressIndicator()
             }
 
-            is FlagsResult.Failure -> Column(
+            is FlagsListUiState.Failure -> Column(
                 // #229 — scrollable so the PullToRefreshBox still captures a swipe-to-refresh
                 // on this short, listless state (an un-scrollable body gives the pull gesture
                 // nothing to anchor on).
@@ -356,56 +354,206 @@ private fun ColumnScope.AuthenticatedBody(
                 }
             }
 
-            is FlagsResult.Success -> {
-                if (current.flags.isEmpty()) {
-                    // #229 — the empty state must fill the box AND be scrollable, otherwise the
-                    // PullToRefreshBox has no scrollable child to anchor the pull gesture on and
-                    // the user can no longer swipe-to-refresh an empty list (e.g. Cyan with no
-                    // actionable topic). A `verticalScroll` Column provides the nested-scroll
-                    // connection the pull needs even though the content is short.
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(24.dp),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.flags_empty),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(0.dp))
-                            .background(MaterialTheme.colorScheme.surface),
-                    ) {
-                        // Compose `key` rejects duplicates with IllegalArgumentException, but
-                        // HFR's `post=` topic id is only guaranteed unique within a category
-                        // (cf. AGENTS.md), not globally. Using "cat-topicId" eliminates the
-                        // latent crash if the listing ever returns the same topicId in two cats.
-                        items(items = current.flags, key = { "${it.cat}-${it.topicId}" }) { flag ->
-                            // Anti double-tap (#99): while a removal is in flight, swipe is
-                            // disabled across the list. `removeFlagState` is Removing only between
-                            // confirm and the repository result (a brief window); the modal dialog
-                            // already blocks the Confirming phase and the ViewModel rejects re-entry.
-                            val removalInFlight = state.removeFlagState is RemoveFlagState.Removing
-                            SwipeableFlagItem(
-                                flag = flag,
-                                metadata = flagMetadata(flag),
-                                removalInFlight = removalInFlight,
-                                onClick = { actions.onOpenFlag(flag) },
-                                onRequestRemove = { actions.onRequestRemoveFlag(flag) },
-                            )
-                            FlagItemDivider()
-                        }
-                    }
+            is FlagsListUiState.Success -> when (val content = current.content) {
+                is FlagsContent.Grouped -> CategorySectionedFlagList(
+                    sections = content.sections,
+                    selectedTab = selectedTab,
+                    removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
+                    actions = actions,
+                )
+
+                is FlagsContent.Flat -> FlatFlagList(
+                    flags = content.flags,
+                    selectedTab = selectedTab,
+                    removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
+                    actions = actions,
+                )
+            }
+        }
+    }
+}
+
+// LazyColumn contentType tags (#179 compose-perf): one reuse pool per structurally distinct slot
+// kind so Compose recycles like-for-like across the header→row→header alternation of the grouped
+// list. Plain strings (the contentType is only ever compared for equality).
+private const val CONTENT_TYPE_HEADER = "category_header"
+private const val CONTENT_TYPE_EMPTY = "empty_section"
+private const val CONTENT_TYPE_ROW = "flag_row"
+
+/**
+ * Category-grouped flag list (#179). Renders one sticky band per [FlagCategorySection] in the
+ * canonical category order the ViewModel produced, with the rows under each band. Empty sections
+ * are kept (HFR web parity) and show a per-tab placeholder instead of a row list.
+ *
+ * The whole list is a single [LazyColumn] so the surrounding `PullToRefreshBox` keeps a real
+ * scrollable child to anchor the pull gesture on (#229) — the former `verticalScroll(Column)`
+ * empty-state trick is no longer needed now that the body is always a lazy list.
+ *
+ * `stickyHeader` is the idiomatic foundation API for grouped lists; it is still annotated
+ * `@ExperimentalFoundationApi` in the locked stable Compose (verified via Context7), hence the
+ * `@OptIn`. Keys are prefixed so headers, empty placeholders and rows never collide
+ * (`key` throws on duplicates): `topicId` is unique per category only (cf. AGENTS.md), so rows
+ * use `"${flag.cat}-${flag.topicId}"`. Each slot kind also carries a distinct `contentType`
+ * ([CONTENT_TYPE_HEADER]/[CONTENT_TYPE_EMPTY]/[CONTENT_TYPE_ROW]) so Compose keeps a separate
+ * reuse pool per kind across the header→row→header alternation.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CategorySectionedFlagList(
+    sections: List<FlagCategorySection>,
+    selectedTab: FlagTab,
+    removalInFlight: Boolean,
+    actions: AuthenticatedActions,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
+        // « Masquer les catégories sans non-lu » can filter every section out (no unread anywhere,
+        // or all-read CYAN with « +lus » off). Without this guard the LazyColumn would render an
+        // empty body — a blank screen with no scrollable target for the PullToRefreshBox (#229).
+        // A single placeholder item keeps the body informative and the pull gesture anchored.
+        if (sections.isEmpty()) {
+            item(key = "grouped-empty", contentType = CONTENT_TYPE_EMPTY) {
+                Text(
+                    text = stringResource(R.string.flags_no_unread_category),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                )
+            }
+        }
+
+        sections.forEach { section ->
+            // contentType groups the three structurally distinct slot kinds (band / placeholder /
+            // row) into separate reuse pools so scrolling across a header→rows→header boundary
+            // recycles a row slot for a row instead of recreating the node from a header slot.
+            stickyHeader(key = "cat-${section.catId}-header", contentType = CONTENT_TYPE_HEADER) {
+                CategoryHeaderBand(
+                    label = section.catName
+                        ?: stringResource(R.string.flags_category_fallback, section.catId),
+                )
+            }
+
+            if (section.topics.isEmpty()) {
+                item(key = "cat-${section.catId}-empty", contentType = CONTENT_TYPE_EMPTY) {
+                    Text(
+                        text = stringResource(emptySectionLabel(selectedTab)),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                    )
+                }
+            } else {
+                items(
+                    items = section.topics,
+                    key = { "${it.cat}-${it.topicId}" },
+                    contentType = { CONTENT_TYPE_ROW },
+                ) { flag ->
+                    // Anti double-tap (#99): while a removal is in flight, swipe is disabled
+                    // across the list. `removeFlagState` is Removing only between confirm and the
+                    // repository result (a brief window); the modal dialog already blocks the
+                    // Confirming phase and the ViewModel rejects re-entry.
+                    SwipeableFlagItem(
+                        flag = flag,
+                        metadata = flagMetadata(flag),
+                        removalInFlight = removalInFlight,
+                        onClick = { actions.onOpenFlag(flag) },
+                        onRequestRemove = { actions.onRequestRemoveFlag(flag) },
+                    )
+                    FlagItemDivider()
                 }
             }
         }
     }
+}
+
+/**
+ * Opaque category separator band for the grouped list (#179). Uses `surfaceVariant` /
+ * `onSurfaceVariant` from the theme (no hardcoded color) so it reads as a sticky header over
+ * the scrolling rows without bleed-through.
+ */
+@Composable
+private fun CategoryHeaderBand(label: String) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 24.dp, vertical = 8.dp),
+    )
+}
+
+/**
+ * Empty-section wording per tab (#179). Cyan (« Mes sujets ») is the only bucket where « Aucun
+ * nouveau message » is literally true (web parity); RED/FAVORITE list read topics too, so a
+ * neutral « Aucun sujet dans cette catégorie » is used to avoid a misleading label.
+ */
+private fun emptySectionLabel(tab: FlagTab): Int = when (tab) {
+    FlagTab.Cyan -> R.string.flags_category_empty_cyan
+    else -> R.string.flags_category_empty
+}
+
+/**
+ * Flat flag list — the legacy pre-#179 view, kept reachable via the « grouper par catégorie »
+ * preference (Settings). Renders every [flags] entry in repository order (last reply descending)
+ * with no category bands. Like [CategorySectionedFlagList] it is a single [LazyColumn] so the
+ * surrounding `PullToRefreshBox` keeps a scrollable child to anchor the pull gesture on (#229);
+ * an empty list still emits one placeholder item so the « rien à afficher » wording is shown and
+ * the pull gesture has a target. Rows reuse [SwipeableFlagItem] so the #99 swipe-to-remove and
+ * accessibility action behave identically to the grouped view.
+ */
+@Composable
+private fun FlatFlagList(
+    flags: List<Flag>,
+    selectedTab: FlagTab,
+    removalInFlight: Boolean,
+    actions: AuthenticatedActions,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
+        if (flags.isEmpty()) {
+            item(key = "flat-empty", contentType = CONTENT_TYPE_EMPTY) {
+                Text(
+                    text = stringResource(flatEmptyLabel(selectedTab)),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                )
+            }
+        } else {
+            items(
+                items = flags,
+                key = { "${it.cat}-${it.topicId}" },
+                contentType = { CONTENT_TYPE_ROW },
+            ) { flag ->
+                SwipeableFlagItem(
+                    flag = flag,
+                    metadata = flagMetadata(flag),
+                    removalInFlight = removalInFlight,
+                    onClick = { actions.onOpenFlag(flag) },
+                    onRequestRemove = { actions.onRequestRemoveFlag(flag) },
+                )
+                FlagItemDivider()
+            }
+        }
+    }
+}
+
+/**
+ * Empty-list wording per tab for the FLAT view (#179 follow-up). Mirrors [emptySectionLabel] but
+ * without the « catégorie » noun, which would be misleading in a flat list. Cyan keeps the « aucun
+ * nouveau message » parity wording.
+ */
+private fun flatEmptyLabel(tab: FlagTab): Int = when (tab) {
+    FlagTab.Cyan -> R.string.flags_list_empty_cyan
+    else -> R.string.flags_list_empty
 }
 
 /**
@@ -541,7 +689,7 @@ private fun ColumnScope.SuperPlaceholderBody() {
  */
 private data class FlagsBodyState(
     val selectedTab: FlagTab,
-    val flagsState: FlagsResult?,
+    val flagsState: FlagsListUiState?,
     val showReadParticipated: Boolean,
     val isRefreshing: Boolean,
     val removeFlagState: RemoveFlagState,

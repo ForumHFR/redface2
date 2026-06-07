@@ -21,7 +21,23 @@
     <string name="flags_super_placeholder_title">Super favoris — à venir</string>
     <string name="flags_super_placeholder_body">Les « super favoris » permettront d\'épingler les sujets les plus importants. Cette vue arrivera dans une prochaine version.</string>
 
-    <string name="flags_empty">Aucun drapeau dans cette vue.</string>
+    <!-- #179 — Vue drapeaux groupée par catégorie (parité vue web par défaut). -->
+    <!-- Cyan (« Mes sujets ») : section de catégorie sans nouveau message non lu. Wording parité web. -->
+    <string name="flags_category_empty_cyan">Aucun nouveau message</string>
+    <!-- RED / FAVORITE : section de catégorie sans sujet suivi. « Aucun nouveau message » serait
+         trompeur ici (ces vues listent aussi les sujets lus). -->
+    <string name="flags_category_empty">Aucun sujet dans cette catégorie</string>
+    <!-- Fallback de libellé pour une catégorie absente du catalogue REST (anti-régression #251).
+         %1$d = identifiant de la catégorie. -->
+    <string name="flags_category_fallback">Catégorie %1$d</string>
+    <!-- #179 follow-up — Vue à plat (legacy) : message quand la liste est vide. Sans le mot
+         « catégorie » (il n'y a pas de regroupement dans cette vue). -->
+    <string name="flags_list_empty_cyan">Aucun nouveau message</string>
+    <string name="flags_list_empty">Aucun drapeau à afficher</string>
+    <!-- #179 follow-up — Vue groupée AVEC « masquer les catégories sans non-lu » : quand aucune
+         catégorie n'a de message non lu, toutes les sections sont masquées. Message + item unique
+         pour ne pas laisser un corps blanc et garder une cible scrollable au pull-to-refresh (#229). -->
+    <string name="flags_no_unread_category">Aucune catégorie avec un message non lu</string>
     <string name="flags_error">Impossible de récupérer les drapeaux. Vérifie ta connexion ou réessaie.</string>
     <string name="flags_session_expired">Session HFR expirée. Reconnecte-toi pour recharger tes drapeaux.</string>
     <string name="flags_retry">Réessayer</string>

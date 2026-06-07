@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
@@ -54,6 +56,15 @@ class DefaultForumRepository @Inject constructor(
     private val cachedSubcategories: MutableMap<Int, CachedEntry<List<SubCategory>>> = HashMap()
     private val subcategoriesLock = Any()
 
+    // Single-flight guard for the cold categories fetch. `observeCategories()` is a cold
+    // `flow {}` builder with no in-flight coalescing, so two concurrent first-collectors
+    // (e.g. `FlagsViewModel` grouping #179 + `DefaultFlagRepository.loadCategories()`, both
+    // observing on an authenticated cold start before the Forum tab has populated the cache)
+    // would each see `cachedCategories == null` and each fire `getCategories()` — two
+    // redundant public REST calls. The mutex serialises the fetch path and the second
+    // collector double-checks the now-warm cache instead of re-fetching.
+    private val categoriesFetchMutex = Mutex()
+
     private val categoriesRefresh: MutableSharedFlow<ForumResult<List<Category>>> =
         MutableSharedFlow(replay = 0, extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     private val subcategoriesRefresh: MutableMap<Int, MutableSharedFlow<ForumResult<List<SubCategory>>>> = HashMap()
@@ -68,7 +79,7 @@ class DefaultForumRepository @Inject constructor(
         } else {
             if (cached != null) emit(ForumResult.Success(cached.value))
             emit(ForumResult.Loading)
-            emit(fetchCategories())
+            emit(fetchCategoriesSingleFlight(now))
         }
         emitAll(categoriesRefresh.asSharedFlow())
     }
@@ -141,6 +152,26 @@ class DefaultForumRepository @Inject constructor(
             }
         }
     }
+
+    /**
+     * Coalesces concurrent cold category fetches behind [categoriesFetchMutex]. Whoever wins
+     * the lock first performs the single [fetchCategories] round-trip and warms
+     * [cachedCategories]; any collector that was waiting on the lock then double-checks the
+     * (now fresh) cache and returns it without a second network call. A still-cold cache after
+     * the lock (the previous fetch failed and left no entry) falls through to its own fetch.
+     *
+     * Note: only the **cold** fetch path is serialised. [refreshCategories] deliberately
+     * bypasses this guard — it is an explicit user/forced refresh and must always re-hit HFR.
+     */
+    private suspend fun fetchCategoriesSingleFlight(now: Instant): ForumResult<List<Category>> =
+        categoriesFetchMutex.withLock {
+            val cached = cachedCategories
+            if (cached != null && CachePolicy.isFresh(cached.fetchedAt, CachePolicy.categories, now)) {
+                ForumResult.Success(cached.value)
+            } else {
+                fetchCategories()
+            }
+        }
 
     private suspend fun fetchCategories(): ForumResult<List<Category>> = withContext(ioDispatcher) {
         runCatching {

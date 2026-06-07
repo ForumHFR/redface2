@@ -387,6 +387,86 @@ class SettingsViewModelTest {
         assertEquals(TopicCacheClearResult.Success, state.topicCacheClearResult)
     }
 
+    @Test
+    fun `init hydrates flags view preferences from storage`() = runTest {
+        repository.emitFlagsGroupByCategory(false)
+        repository.emitFlagsHideReadCategories(true)
+
+        val viewModel = newViewModel()
+        val state = viewModel.state.value
+
+        assertFalse(state.flagsGroupByCategory)
+        assertTrue(state.flagsHideReadCategories)
+    }
+
+    @Test
+    fun `FlagsGroupByCategoryChanged persists the flip and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertTrue("grouped is the default", viewModel.state.value.flagsGroupByCategory)
+
+        viewModel.submit(SettingsIntent.FlagsGroupByCategoryChanged(false))
+
+        assertFalse(viewModel.state.value.flagsGroupByCategory)
+        assertFalse(viewModel.state.value.isUpdatingFlagsGroupByCategory)
+        assertFalse(viewModel.state.value.flagsGroupByCategoryError)
+        assertEquals(1, repository.flagsGroupByCategorySetCalls)
+    }
+
+    @Test
+    fun `hide-read categories switch is disabled while the flat flags view is selected`() = runTest {
+        val viewModel = newViewModel()
+        assertTrue(viewModel.state.value.canToggleFlagsHideReadCategories)
+
+        viewModel.submit(SettingsIntent.FlagsGroupByCategoryChanged(false))
+
+        assertFalse(viewModel.state.value.flagsGroupByCategory)
+        assertFalse(
+            "hide-read categories has no effect in flat view, so the Settings switch must be disabled",
+            viewModel.state.value.canToggleFlagsHideReadCategories,
+        )
+
+        viewModel.submit(SettingsIntent.FlagsGroupByCategoryChanged(true))
+
+        assertTrue(viewModel.state.value.flagsGroupByCategory)
+        assertTrue(viewModel.state.value.canToggleFlagsHideReadCategories)
+    }
+
+    @Test
+    fun `FlagsGroupByCategoryChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnFlagsGroupByCategorySet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.FlagsGroupByCategoryChanged(false))
+
+        assertTrue("must revert to the previous value on failure", viewModel.state.value.flagsGroupByCategory)
+        assertFalse(viewModel.state.value.isUpdatingFlagsGroupByCategory)
+        assertTrue(viewModel.state.value.flagsGroupByCategoryError)
+    }
+
+    @Test
+    fun `FlagsHideReadCategoriesChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("hide-read is off by default (web parity)", viewModel.state.value.flagsHideReadCategories)
+
+        viewModel.submit(SettingsIntent.FlagsHideReadCategoriesChanged(true))
+
+        assertTrue(viewModel.state.value.flagsHideReadCategories)
+        assertFalse(viewModel.state.value.isUpdatingFlagsHideReadCategories)
+        assertEquals(1, repository.flagsHideReadCategoriesSetCalls)
+    }
+
+    @Test
+    fun `FlagsHideReadCategoriesChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnFlagsHideReadCategoriesSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.FlagsHideReadCategoriesChanged(true))
+
+        assertFalse("must revert to the previous value on failure", viewModel.state.value.flagsHideReadCategories)
+        assertFalse(viewModel.state.value.isUpdatingFlagsHideReadCategories)
+        assertTrue(viewModel.state.value.flagsHideReadCategoriesError)
+    }
+
     private fun newViewModel(): SettingsViewModel =
         SettingsViewModel(repository, topicCacheMaintenance)
 
@@ -438,12 +518,48 @@ class SettingsViewModelTest {
             ignoreTopicCache.value = enabled
         }
 
+        // Flags view preferences — same optimistic-flip seams as ignoreTopicCache so the Settings
+        // tests can gate the write and assert intermediate / revert states.
+        private val flagsGroupByCategory = MutableStateFlow(true)
+        var flagsGroupByCategorySetCalls: Int = 0
+            private set
+        var failOnFlagsGroupByCategorySet: Boolean = false
+
+        private val flagsHideReadCategories = MutableStateFlow(false)
+        var flagsHideReadCategoriesSetCalls: Int = 0
+            private set
+        var failOnFlagsHideReadCategoriesSet: Boolean = false
+
+        override fun observeFlagsGroupByCategory(): Flow<Boolean> = flagsGroupByCategory
+
+        override suspend fun setFlagsGroupByCategory(enabled: Boolean) {
+            flagsGroupByCategorySetCalls += 1
+            check(!failOnFlagsGroupByCategorySet) { "boom" }
+            flagsGroupByCategory.value = enabled
+        }
+
+        override fun observeFlagsHideReadCategories(): Flow<Boolean> = flagsHideReadCategories
+
+        override suspend fun setFlagsHideReadCategories(enabled: Boolean) {
+            flagsHideReadCategoriesSetCalls += 1
+            check(!failOnFlagsHideReadCategoriesSet) { "boom" }
+            flagsHideReadCategories.value = enabled
+        }
+
         fun emit(value: ProxyConfig) {
             config.value = value
         }
 
         fun emitIgnoreTopicCache(value: Boolean) {
             ignoreTopicCache.value = value
+        }
+
+        fun emitFlagsGroupByCategory(value: Boolean) {
+            flagsGroupByCategory.value = value
+        }
+
+        fun emitFlagsHideReadCategories(value: Boolean) {
+            flagsHideReadCategories.value = value
         }
     }
 

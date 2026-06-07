@@ -32,4 +32,27 @@ interface UserPreferencesRepository {
      * implementation; callers should not wrap this in another `withContext(ioDispatcher)`.
      */
     suspend fun setIgnoreTopicCache(enabled: Boolean)
+
+    /**
+     * Drapeaux screen layout (#179 follow-up): `true` (default) groups the flags by forum
+     * category with a sticky band per category; `false` renders the legacy flat list ordered
+     * by last reply (the pre-#179 behaviour the user must always be able to fall back to).
+     * Observed by the Flags screen so flipping it from Settings re-renders without a refetch.
+     */
+    fun observeFlagsGroupByCategory(): Flow<Boolean>
+
+    /** Persists [observeFlagsGroupByCategory]. Default `true` until the first call. */
+    suspend fun setFlagsGroupByCategory(enabled: Boolean)
+
+    /**
+     * Drapeaux category filter (#179 follow-up): when `true`, categories that have no UNREAD
+     * flag are hidden from the grouped view (along with empty ones). Default `false` = HFR web
+     * parity (every category band shown). Only meaningful in the grouped view. The cyan « +lus »
+     * toggle takes precedence: when the user opts to show already-read participated topics, their
+     * categories stay visible so this filter never makes them unreachable.
+     */
+    fun observeFlagsHideReadCategories(): Flow<Boolean>
+
+    /** Persists [observeFlagsHideReadCategories]. Default `false` until the first call. */
+    suspend fun setFlagsHideReadCategories(enabled: Boolean)
 }

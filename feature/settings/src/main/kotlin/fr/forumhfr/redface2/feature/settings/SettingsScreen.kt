@@ -171,6 +171,11 @@ internal fun SettingsContent(
                 }
             }
 
+            FlagsPreferencesCard(
+                state = state,
+                onIntent = onIntent,
+            )
+
             MaintenanceCard(
                 state = state,
                 onIntent = onIntent,
@@ -184,6 +189,101 @@ internal fun SettingsContent(
             onDismiss = { onIntent(SettingsIntent.ClearTopicCacheDismissed) },
         )
     }
+}
+
+/**
+ * Drapeaux display preferences (#179 follow-up): grouped-vs-flat layout and the « masquer les
+ * catégories sans non-lu » filter. Persisted via DataStore and observed live by the Flags screen,
+ * so a flip here re-renders the list without a refetch.
+ */
+@Composable
+private fun FlagsPreferencesCard(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_flags_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_flags_group_by_category_title),
+                description = stringResource(R.string.settings_flags_group_by_category_description),
+                checked = state.flagsGroupByCategory,
+                enabled = state.canToggleFlagsGroupByCategory,
+                onCheckedChange = { onIntent(SettingsIntent.FlagsGroupByCategoryChanged(it)) },
+            )
+            if (state.flagsGroupByCategoryError) {
+                PreferencePersistError(R.string.settings_flags_group_by_category_persist_failed)
+            }
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_flags_hide_read_categories_title),
+                description = stringResource(R.string.settings_flags_hide_read_categories_description),
+                checked = state.flagsHideReadCategories,
+                enabled = state.canToggleFlagsHideReadCategories,
+                onCheckedChange = { onIntent(SettingsIntent.FlagsHideReadCategoriesChanged(it)) },
+            )
+            if (state.flagsHideReadCategoriesError) {
+                PreferencePersistError(R.string.settings_flags_hide_read_categories_persist_failed)
+            }
+        }
+    }
+}
+
+/**
+ * One label + description + Material 3 [Switch] row. Generic so the two Drapeaux preference rows
+ * share the layout; the persist-failure message is rendered by the caller via
+ * [PreferencePersistError] so this stays a layout-only composable.
+ */
+@Composable
+private fun PreferenceSwitchRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = onCheckedChange,
+        )
+    }
+}
+
+/** Inline persist-failure message for a [PreferenceSwitchRow], shown below the row. */
+@Composable
+private fun PreferencePersistError(messageRes: Int) {
+    Text(
+        text = stringResource(messageRes),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error,
+    )
 }
 
 @Composable
