@@ -94,8 +94,13 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                 }
             } catch (cancellation: CancellationException) {
                 throw cancellation
-            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
-                _state.update { it.copy(mode = PrivateMessageThreadUiState.Mode.Error(error.message)) }
+            } catch (
+                // SwallowedException: the throwable message is intentionally NOT propagated to the
+                // UI state — it can embed the private forum2.php?cat=prive&post=<id> URL (#316), so
+                // it must reach neither the screen nor the exportable DiagnosticsLog. Generic Error.
+                @Suppress("TooGenericExceptionCaught", "SwallowedException") error: Exception,
+            ) {
+                _state.update { it.copy(mode = PrivateMessageThreadUiState.Mode.Error) }
             }
         }
     }

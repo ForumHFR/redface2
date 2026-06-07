@@ -137,6 +137,7 @@ L'écran central de l'app. Affiche les posts d'un topic avec pagination.
 **Navigation dans le topic :**
 - Scroll vertical pour lire les posts
 - Boutons page précédente / suivante
+- **Swipe horizontal gauche/droite pour changer de page (#282)** — geste « drag-follow » (la page suit le doigt, résistance amortie aux bords, retour haptique à l'armement et au commit, edge-glow discret). Implémenté par `Modifier.topicPageSwipe` (`feature/topic/.../TopicSwipe.kt`, helpers purs testés) ; il appelle le **même** callback `onOpenPage(targetPage)` que les boutons de pager — la navigation est donc route-driven (remplace la `TopicRoute` courante), et la transition Topic→Topic est rendue instantanée (`transitionSpec` dédié, cf. `RedfaceApp`) pour supprimer la fenêtre morte du cross-fade. Le geste est gaté tant que l'entrée nav n'est pas `RESUMED` (évite un double-commit pendant la transition) et ne déclenche jamais d'action destructive.
 - Saut direct à une page (champ numéro)
 - Saut au premier / dernier post
 - Indicateur de page courante / total

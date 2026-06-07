@@ -73,6 +73,7 @@ jobs:
         env:
           CHANNEL_INPUT: ${{ inputs.channel }}
           DISPATCH_REF: ${{ inputs.ref }}
+          GH_REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           # Validate the user-controlled ref BEFORE it reaches $GITHUB_OUTPUT (a newline could inject
@@ -81,10 +82,19 @@ jobs:
             echo "::error::Invalid dispatch ref '${DISPATCH_REF}' — only [A-Za-z0-9._/-] allowed."
             exit 1
           fi
+          # Effective ref actually built downstream = build_ref || github.ref (cf. checkout step).
+          effective_ref="${DISPATCH_REF:-$GH_REF_NAME}"
           # The PLAY artifact is ALWAYS the base applicationId (prod flavor); only label + track vary.
           play_package=fr.forumhfr.redface2
           case "$CHANNEL_INPUT" in
             beta)
+              # beta publishes to PUBLIC open testing → it must ship from `main` only. A dispatch on a
+              # feature branch (or a `ref` override pointing elsewhere) is refused, so a half-baked
+              # branch can never reach the public beta track (#316).
+              if [[ "$effective_ref" != "main" && "$effective_ref" != "refs/heads/main" ]]; then
+                echo "::error::channel=beta must build from 'main' (effective ref='${effective_ref}'). Dispatch with --ref main (and no 'ref' override, or ref=main)."
+                exit 1
+              fi
               channel=beta
               app_label="Redface 2 β"
               play_upload=true; play_track=beta; play_status=completed
@@ -217,7 +227,16 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${PLAY_SERVICE_ACCOUNT_JSON:-}" ]]; then
-            echo "::warning::PLAY_SERVICE_ACCOUNT_JSON not set; Play upload will be skipped."
+            # FAIL CLOSED before any side effect (#316): this step runs BEFORE the build, the ledger
+            # tag/Release and the F-Droid notify. On a channel that publishes to Play (beta/dev), a
+            # missing SA would otherwise let the run advance the versionCode ledger (create app-v<N>)
+            # and notify F-Droid while silently skipping Play — burning a code with no Play upload.
+            # So abort here when PLAY_UPLOAD=true; only a non-Play channel may skip cleanly.
+            if [[ "${PLAY_UPLOAD}" == "true" ]]; then
+              echo "::error::PLAY_SERVICE_ACCOUNT_JSON not set but channel '${CHANNEL}' publishes to Play — refusing to advance the versionCode ledger without a Play upload. Aborting before any side effect."
+              exit 1
+            fi
+            echo "::warning::PLAY_SERVICE_ACCOUNT_JSON not set; Play upload will be skipped (non-Play channel)."
             echo "path=" >>"$GITHUB_OUTPUT"
             exit 0
           fi
