@@ -70,13 +70,17 @@ interface UserPreferencesRepository {
     suspend fun setFlagsPerTabOverride(enabled: Boolean)
 
     /**
-     * Resolved Drapeaux view settings for [type] (#309), honouring [observeFlagsPerTabOverride]:
-     * - override off → the global [observeFlagsGroupByCategory] / [observeFlagsHideReadCategories].
-     * - override on → this [type]'s stored values, each falling back to the matching global value
-     *   when that tab has never been customised.
+     * Resolved Drapeaux view settings for [type], combining the #309 layout toggles and the #317
+     * unread filter:
+     * - layout ([FlagsViewSettings.groupByCategory] / [FlagsViewSettings.hideReadCategories]),
+     *   honouring [observeFlagsPerTabOverride]: override off → the global
+     *   [observeFlagsGroupByCategory] / [observeFlagsHideReadCategories]; override on → this
+     *   [type]'s stored values, each falling back to the matching global value when unset.
+     * - [FlagsViewSettings.unreadOnly] (#317): ALWAYS per-type, with a type-aware default
+     *   (CYAN → true, RED/FAVORITE → false) until [setFlagsUnreadOnlyForType] is called.
      *
-     * This is the single source the Flags screen list rendering reads; the global observers stay
-     * the editable defaults (and the per-tab fallback) the Settings mirror writes.
+     * This is the single source the Flags screen list rendering reads; the global layout observers
+     * stay the editable defaults (and the per-tab fallback) the Settings mirror writes.
      */
     fun observeFlagsViewSettings(type: FlagType): Flow<FlagsViewSettings>
 
@@ -93,4 +97,12 @@ interface UserPreferencesRepository {
      * set, that tab falls back to the global [setFlagsHideReadCategories] value.
      */
     suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean)
+
+    /**
+     * Persists the « non-lus uniquement » value for [type] (#317). Unlike the layout toggles this
+     * is ALWAYS per-type (no global key, not subject to [observeFlagsPerTabOverride]). Until set,
+     * [observeFlagsViewSettings] applies a type-aware default: `true` for [FlagType.CYAN] (the
+     * actionable « Mes sujets » subset), `false` for [FlagType.RED] / [FlagType.FAVORITE].
+     */
+    suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean)
 }

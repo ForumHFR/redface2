@@ -22,8 +22,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
@@ -52,23 +54,6 @@ class FlagsViewModel @Inject constructor(
     private val _selectedTab = MutableStateFlow<FlagTab>(FlagTab.Cyan)
     val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
 
-    /**
-     * User-controlled visibility of CYAN flags whose [fr.forumhfr.redface2.core.model.Flag.hasUnread]
-     * is `false` — i.e. topics the user already finished reading but still participated in.
-     * Default `false`: a fresh launch shows only actionable « Mes sujets » entries. Toggling this
-     * reactively re-emits the filtered list without a refetch (cf. [combine] in [flagsState]).
-     *
-     * Filter applies only when [selectedTab] == [FlagType.CYAN]. RED (« Lus uniquement » — topics
-     * the user reads without participating) and FAVORITE (bookmarks) keep their full content
-     * regardless — they don't have the « stale read flag » pollution problem CYAN does, where the
-     * user explicitly wants the actionable subset by default.
-     *
-     * In-memory only for now (#154 polish scope) — persisting the preference is deferred
-     * until a real settings surface exists.
-     */
-    private val _showReadParticipatedTopics = MutableStateFlow(false)
-    val showReadParticipatedTopics: StateFlow<Boolean> = _showReadParticipatedTopics.asStateFlow()
-
     val authState: StateFlow<AuthState?> = authRepository.observeAuthState()
         .stateIn(
             scope = viewModelScope,
@@ -87,12 +72,13 @@ class FlagsViewModel @Inject constructor(
      * - Anonymous → `null` (the home tab shows the login intro instead of a list).
      * - [FlagTab.Super] → `null` (placeholder body, no backend, **no** repository observation —
      *   neither flags NOR categories are observed, cf. §5 « no double-fetch »).
-     * - Authenticated + a real [FlagType] → the per-tab flag flow (filtered cyan #154, then
-     *   [keepContentDuringRefresh] #225) is combined with [ForumRepository.observeCategories]
-     *   to build [FlagsListUiState]. Categories are observed **only** in this branch so we never
-     *   trigger a spurious public categories fetch for Anonymous/Super.
+     * - Authenticated + a real [FlagType] → the per-tab flag flow (« non-lus uniquement » filter
+     *   #154/#317, then [keepContentDuringRefresh] #225) is combined with
+     *   [ForumRepository.observeCategories] to build [FlagsListUiState]. Categories are observed
+     *   **only** in this branch so we never trigger a spurious public categories fetch for
+     *   Anonymous/Super.
      *
-     * Ordering of the mapping is load-bearing: cyan filter → `keepContentDuringRefresh` →
+     * Ordering of the mapping is load-bearing: unread filter → `keepContentDuringRefresh` →
      * combine with categories → map to sections. Reversing the first two would regress #225
      * (the list blanks to a cold spinner during a pull-to-refresh).
      *
@@ -178,23 +164,30 @@ class FlagsViewModel @Inject constructor(
      * so the `flatMapLatest` chain stays readable. Both `observe(type)` and `observeCategories()`
      * are subscribed here — and only here.
      *
-     * The cyan « +lus » decision ([showReadParticipatedTopics]) travels INSIDE [FilteredFlags]
-     * rather than as a separate `combine` source. This is load-bearing: folding it into the same
-     * source the flags arrive on means toggling « +lus » re-emits exactly once (no transient
-     * intermediate state where the new toggle value meets the stale flag list), and lets the
-     * downstream section filter know whether read participated topics were opted in.
+     * The « non-lus uniquement » decision ([FlagsViewSettings.unreadOnly], #317) travels INSIDE
+     * [FilteredFlags] rather than only as part of the outer `combine` source. This is load-bearing:
+     * folding the topic filter into the same source the flags arrive on means toggling it re-emits
+     * exactly once (no transient intermediate state where the new toggle value meets the stale flag
+     * list), and lets the downstream section filter know whether read topics are being shown
+     * ([keepFullyReadSections]). It is sourced via a `distinctUntilChanged` projection of the
+     * resolved view settings so an unrelated layout change doesn't re-run the topic filter.
      */
     private fun authenticatedFlagsListState(type: FlagType): Flow<FlagsListUiState?> {
+        val unreadOnlyFlow = userPreferencesRepository.observeFlagsViewSettings(type)
+            .map { it.unreadOnly }
+            .distinctUntilChanged()
         val filteredFlags = combine(
             flagRepository.observe(type),
-            _showReadParticipatedTopics,
-        ) { result, showRead ->
+            unreadOnlyFlow,
+        ) { result, unreadOnly ->
             FilteredFlags(
-                result = filterReadParticipatedIfNeeded(result, type, showRead),
-                // The cyan « +lus » override for the hide-read-categories filter: only CYAN has a
-                // « show already-read participated topics » affordance, so it's the only tab where
-                // a fully-read category must survive the filter when the user opted in.
-                keepFullyReadSections = type == FlagType.CYAN && showRead,
+                result = filterUnreadOnly(result, unreadOnly),
+                // The « +lus » override: keep fully-read categories under « masquer les catégories
+                // sans non-lu » ONLY on CYAN when its unread filter is off — i.e. the user explicitly
+                // opted to see read participated topics, so this filter must not hide them right back.
+                // RED/FAVORITE default to showing read topics, but there hide-read keeps its literal
+                // meaning (drop categories without an unread flag), preserving the #179/#309 behaviour.
+                keepFullyReadSections = type == FlagType.CYAN && !unreadOnly,
             )
         }
             // #225 — keep the existing list anchored during a user refresh instead of blanking
@@ -232,9 +225,10 @@ class FlagsViewModel @Inject constructor(
     }
 
     /**
-     * Carries the cyan « +lus » override alongside the filtered [result] so it travels as one
-     * unit through [keepContentDuringRefresh] and the outer `combine` (cf.
-     * [authenticatedFlagsListState]).
+     * Carries the « +lus » decision ([keepFullyReadSections]) alongside the filtered [result] so it
+     * travels as one unit through [keepContentDuringRefresh] and the outer `combine` (cf.
+     * [authenticatedFlagsListState]). It is the CYAN-specific override (`type == CYAN && !unreadOnly`,
+     * #317) — RED/FAVORITE always pass `false` so hide-read keeps its literal meaning there.
      */
     private data class FilteredFlags(
         val result: FlagsResult,
@@ -274,17 +268,18 @@ class FlagsViewModel @Inject constructor(
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
     /**
-     * Tab selection. Re-tapping [FlagTab.Cyan] while it is **already** selected toggles
-     * [showReadParticipatedTopics] (show / hide the already-read participated topics) —
-     * the inline replacement for the former « Cyans lus » FilterChip. Selecting Cyan from
+     * Tab selection. Re-tapping [FlagTab.Cyan] while it is **already** selected toggles its
+     * « non-lus uniquement » filter (show / hide the already-read participated topics) — the « +lus »
+     * shortcut, inline replacement for the former « Cyans lus » FilterChip. Selecting Cyan from
      * another tab only switches to it (no toggle). Other tabs just switch.
      */
     fun selectTab(tab: FlagTab) {
         if (tab == FlagTab.Cyan && _selectedTab.value == FlagTab.Cyan) {
-            // Re-tapping the already-selected Cyan tab toggles the read-cyan filter. Route the
-            // mutation through [setShowReadParticipatedTopics] so that setter stays the single
-            // mutation point for `_showReadParticipatedTopics` (no second code path to drift).
-            setShowReadParticipatedTopics(!_showReadParticipatedTopics.value)
+            // Re-tapping the already-selected Cyan tab toggles its « non-lus uniquement » filter
+            // (the « +lus » shortcut). It flips the CYAN per-type value, persisted via
+            // [setFlagsUnreadOnly] — the same write the bottom-sheet toggle uses (single mutation
+            // point). `flagsViewSettings.value` is the CYAN resolution while Cyan is selected.
+            setFlagsUnreadOnly(!flagsViewSettings.value.unreadOnly)
             return
         }
         _selectedTab.value = tab
@@ -333,8 +328,17 @@ class FlagsViewModel @Inject constructor(
         _removeFlagEvent.value = null
     }
 
-    fun setShowReadParticipatedTopics(value: Boolean) {
-        _showReadParticipatedTopics.value = value
+    /**
+     * Bottom-sheet write (and CYAN re-tap shortcut) for « non-lus uniquement » (#317). Always writes
+     * the CURRENT tab's per-type value — unlike the layout toggles, this filter is never global, so
+     * there is no override routing. Super has no real [FlagType], so it is a no-op there (the sheet
+     * trigger is hidden on Super anyway).
+     */
+    fun setFlagsUnreadOnly(enabled: Boolean) {
+        val type = _selectedTab.value.flagType ?: return
+        viewModelScope.launch {
+            userPreferencesRepository.setFlagsUnreadOnlyForType(type, enabled)
+        }
     }
 
     /**
@@ -410,9 +414,11 @@ class FlagsViewModel @Inject constructor(
      * [FALLBACK_CATEGORY_ORDER] kicks in until the real catalogue arrives, so flags appear
      * immediately on a cold start and no flag is ever lost (anti-regression #251).
      *
-     * [groupByCategory] / [hideReadCategories] are the two persisted Drapeaux view preferences
+     * [groupByCategory] / [hideReadCategories] are the two persisted Drapeaux layout preferences
      * (#179 follow-up): flat vs grouped layout, and whether to hide categories without an unread
-     * flag. [keepFullyReadSections] is the cyan « +lus » override forwarded from [FilteredFlags].
+     * flag. [keepFullyReadSections] (the CYAN « +lus » override, #317) is forwarded from
+     * [FilteredFlags]: when CYAN explicitly shows read topics, its fully-read categories survive the
+     * hide filter so those topics stay reachable.
      */
     private fun toFlagsListUiState(
         flagsResult: FlagsResult,
@@ -476,17 +482,14 @@ class FlagsViewModel @Inject constructor(
         else -> FALLBACK_CATEGORY_ORDER
     }
 
-    private fun filterReadParticipatedIfNeeded(
-        result: FlagsResult,
-        type: FlagType,
-        showReadParticipated: Boolean,
-    ): FlagsResult {
-        // CYAN is the only bucket where « topics already finished reading » legitimately
-        // pollutes the actionable view (the user *participated*, then moved on). RED
-        // (« Lus uniquement » — topics watched without participation) and FAVORITE
-        // (bookmarks) are not filtered: their value comes from listing both read and
-        // unread entries.
-        if (type != FlagType.CYAN || showReadParticipated) return result
+    /**
+     * Applies the « non-lus uniquement » filter (#317) when [unreadOnly] is on: keeps only topics
+     * with [fr.forumhfr.redface2.core.model.Flag.hasUnread]. Generalises the former cyan-only
+     * actionable-subset filter to every type — RED and FAVORITE now honour the same toggle (off by
+     * default for them, on by default for CYAN, cf. the type-aware default in the repository).
+     */
+    private fun filterUnreadOnly(result: FlagsResult, unreadOnly: Boolean): FlagsResult {
+        if (!unreadOnly) return result
         return when (result) {
             is FlagsResult.Success -> result.copy(flags = result.flags.filter { it.hasUnread })
             else -> result

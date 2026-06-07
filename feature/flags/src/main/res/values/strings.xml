@@ -60,6 +60,10 @@
     <string name="flags_view_settings_group_description">Regroupe les drapeaux par catégorie de forum. Désactivé : liste à plat triée par dernière réponse.</string>
     <string name="flags_view_settings_hide_read_title">Masquer les catégories sans non-lu</string>
     <string name="flags_view_settings_hide_read_description">Cache les catégories sans message non lu. Sans effet en vue à plat.</string>
+    <!-- #317 — Filtre « non-lus uniquement », toujours propre à l'onglet (indépendant de « par
+         onglet » ci-dessus). Activé par défaut sur « Mes sujets », désactivé sur Lu et Favoris. -->
+    <string name="flags_view_settings_unread_only_title">Non-lus uniquement</string>
+    <string name="flags_view_settings_unread_only_description">N\'affiche que les sujets avec un message non lu. Propre à cet onglet.</string>
     <string name="flags_view_settings_done">Fermer</string>
 
     <!-- #99 — Retirer un drapeau (delflag). Action sur chaque ligne + dialog de confirmation

@@ -492,5 +492,7 @@ class TopicRepositoryImplTest {
         override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) = Unit
 
         override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
+
+        override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
     }
 }
