@@ -23,6 +23,13 @@ data class MessagesUiState(
         data object RequiresLogin : Mode
         data object Loading : Mode
         data class Content(val conversations: List<PrivateMessageSummary>) : Mode
-        data class Error(val message: String?) : Mode
+
+        /**
+         * A load/refresh failure. Carries NO raw throwable message on purpose (#316): a network or
+         * auth error can embed the private `forum2.php?cat=prive&post=<id>` URL, which would leak the
+         * conversation id on screen. The UI shows a generic message + retry; diagnostics belong to
+         * the DiagnosticsLog, never the screen.
+         */
+        data object Error : Mode
     }
 }

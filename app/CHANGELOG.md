@@ -12,11 +12,17 @@ Statuts possibles d'une release :
 - `open` — uploadé sur le canal Play Console *open testing* (canal `beta` de la CD, depuis #233)
 - `production` — disponible publiquement sur Play Store
 
-Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajouter une entrée ici, builder. Quand l'AAB part vers un canal Play Console, mettre à jour le statut de la version concernée.
+Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la main** — il est alloué au dispatch par le **registre de tags git** (`max(app-v<N>, plancher build.gradle.kts) + 1`, partagé entre les canaux beta et dev). On bumpe seulement `versionName` dans `app/build.gradle.kts` si pertinent, on ajoute une entrée ici, puis on dispatche `gh workflow run release.yml --ref main -f channel=beta|dev`. Quand l'AAB part vers un canal Play Console, mettre à jour le statut de la version concernée.
 
 ---
 
-## Unreleased
+## v84 — `0.5.0` — 2026-06-07
+
+**Statut** : `open` (track open testing) + F-Droid `.beta`
+**Commit** : tag `app-v84` (versionCode alloué par le registre de tags, plancher 72)
+**Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) → **track open testing** + tag pour F-Droid beta
+
+**Deuxième bêta — premières vraies fonctionnalités utilisateur depuis l'ouverture du canal** (la 0.4.0/v72 n'apportait que l'industrialisation de la livraison) : lecture des messages privés et navigation par swipe dans les topics.
 
 ### Added
 - **#298 — Messages privés classiques en lecture.** L'onglet Messages affiche
@@ -24,6 +30,27 @@ Workflow : bumper `versionCode` + `versionName` dans `app/build.gradle.kts`, ajo
   (`forum2.php?cat=prive&post=...`) en lecture seule. Les états MP se purgent au
   logout / changement de session et l'ouverture d'une conversation marque la ligne
   comme lue côté UI pour éviter un indicateur stale au retour.
+- **#282 — Swipe gauche/droite pour changer de page dans un topic.** Geste horizontal
+  « drag-follow » (la page suit le doigt, résistance amortie aux bords, retour haptique
+  à l'armement et au commit, edge-glow discret), transition Topic→Topic instantanée pour
+  supprimer la fenêtre morte. Le swipe ne déclenche jamais d'action destructive.
+
+### Fixed
+- **#316 — Fuite potentielle d'identifiant de conversation privée.** Les écrans MP
+  n'affichent plus le message d'erreur brut : un throwable réseau/auth pouvait contenir
+  l'URL `forum2.php?cat=prive&post=<id>`. Désormais message générique + « réessayer »
+  uniquement, et le détail brut ne transite plus par l'état UI ni par le journal de
+  diagnostics exportable.
+
+### Changed
+- **CD rev. 4 (#304)** : le `versionCode` n'est plus bumpé à la main — il est alloué au
+  dispatch par le **registre de tags git** (`max(app-v<N>, plancher) + 1`), partagé entre
+  les canaux beta et dev. Le dispatch se fait par canal (`workflow_dispatch -f channel=beta|dev`).
+- **Durcissement CD beta (#316)** : `release.yml` échoue désormais **avant tout effet de
+  bord** (création de tag/Release, notification F-Droid) si le secret Play est absent sur
+  un canal qui publie sur Play, pour ne pas « brûler » un versionCode sans publication ; et
+  un dispatch `channel=beta` exige `ref=main`.
+- **Build** : `versionName` `0.4.0 → 0.5.0`.
 
 ---
 

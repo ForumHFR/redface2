@@ -1,10 +1,9 @@
-Redface 2 v0.4.0 — passage en bêta.
+Redface 2 v0.5.0 — bêta.
 
-Redface 2 quitte l'alpha et ouvre son canal bêta public (test ouvert).
+Nouveautés :
+- Messages privés en lecture : ta boîte de réception et tes conversations, directement dans l'onglet Messages.
+- Changement de page dans un sujet par swipe gauche/droite (la page suit le doigt, transition instantanée).
 
-Inclus depuis l'alpha :
-- Rendu des citations [quote] / [quotemsg] revu (citation nue distincte, headers).
-- Grandes images en pleine largeur, cliquables, plus de pixellisation ni de lenteur.
-- Blocs de code [code] avec retour à la ligne et numéros de ligne.
+Corrigé : un message d'erreur des MP pouvait laisser apparaître l'adresse d'une conversation privée.
 
-Signalez les bugs via la bêta ou GitHub.
+Signale les bugs via la bêta ou GitHub.

@@ -75,9 +75,9 @@ class MessagesViewModelTest {
 
         val viewModel = MessagesViewModel(repository, FakeAuthRepository())
 
-        val mode = viewModel.state.value.mode
-        assertTrue(mode is MessagesUiState.Mode.Error)
-        assertEquals("offline", (mode as MessagesUiState.Mode.Error).message)
+        // #316: the Error mode carries NO raw throwable message (privacy — it can embed the private
+        // conversation URL). We only assert the generic Error state is reached, not its detail.
+        assertTrue(viewModel.state.value.mode is MessagesUiState.Mode.Error)
     }
 
     @Test

@@ -128,13 +128,8 @@ fun MessagesScreen(
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.error,
                             )
-                            mode.message?.let { detail ->
-                                Text(
-                                    text = detail,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                            // No raw error detail on screen (#316): it can embed the private
+                            // conversation URL. Generic message + retry only.
                             Button(onClick = viewModel::retry) {
                                 Text(text = stringResource(R.string.messages_retry))
                             }

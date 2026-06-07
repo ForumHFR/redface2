@@ -102,7 +102,13 @@ class MessagesViewModel @Inject constructor(
                 }
             } catch (cancellation: CancellationException) {
                 throw cancellation
-            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            } catch (
+                // SwallowedException: the throwable message is intentionally NOT propagated to the
+                // UI state — it can embed the private forum2.php?cat=prive&post=<id> URL (#316).
+                // It must not reach the screen, nor the exportable DiagnosticsLog. The Error state
+                // carries no detail; the user gets a generic message + retry.
+                @Suppress("TooGenericExceptionCaught", "SwallowedException") error: Exception,
+            ) {
                 _state.update { current ->
                     // A failed pull-to-refresh must not wipe the conversations already shown:
                     // keep the existing Content and just drop the spinner. A failed initial /
@@ -111,7 +117,7 @@ class MessagesViewModel @Inject constructor(
                         current.copy(isRefreshing = false)
                     } else {
                         current.copy(
-                            mode = MessagesUiState.Mode.Error(error.message),
+                            mode = MessagesUiState.Mode.Error,
                             isRefreshing = false,
                         )
                     }
