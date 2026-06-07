@@ -47,6 +47,19 @@ class DefaultAuthRepositoryTest {
     }
 
     @Test
+    fun `observeAuthState decodes a form-urlencoded pseudo with a space (#260)`() = runTest {
+        // HFR stores the pseudo in md_user form-urlencoded; a pseudo with a space arrives as
+        // `Dintr-un+lemn`. The repository must decode it at capture so the account menu shows the
+        // real pseudo, not the literal `+`.
+        val (repo, _) = buildRepository(initialCookies = listOf(cookie("md_user", "Dintr-un+lemn")))
+
+        repo.observeAuthState().test {
+            assertEquals(AuthState.Authenticated("Dintr-un lemn"), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeAuthState emits Anonymous when md_user value is blank`() = runTest {
         // Defensive: an md_user cookie with empty value can show up during a deletion-marker
         // Set-Cookie before the jar's merge runs. We don't want to flap to a phantom session.

@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -483,6 +484,9 @@ private fun TopicLoadedContent(
     listState: LazyListState,
 ) {
     val highlight = state.request.scrollTo
+    // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
+    // the « cité N fois » badge below. Pure + page-scoped (cf. citationCountsByNumreponse KDoc).
+    val citationCounts = remember(topic.posts) { citationCountsByNumreponse(topic.posts) }
     // #282 — shared offset between the gesture (drives translationX) and the edge glow. A plain
     // MutableFloatState: the gesture writes it synchronously per frame (no coroutine/alloc), the draw
     // phase reads it; an Animatable inside the gesture handles only release transitions. Lives in the
@@ -613,6 +617,7 @@ private fun TopicLoadedContent(
             TopicPostCard(
                 post = post,
                 highlighted = highlight == post.numreponse,
+                citedCount = citationCounts[post.numreponse] ?: 0,
                 onQuote = quoteAction,
                 onEdit = editAction,
                 onOpenProfile = profileAction,
@@ -859,9 +864,14 @@ private fun TopicPollCard(poll: Poll) {
 }
 
 @Composable
+@Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
 private fun TopicPostCard(
     post: Post,
     highlighted: Boolean,
+    /**
+     * #239 — number of posts on the current page that cite this one. 0 hides the badge.
+     */
+    citedCount: Int,
     onQuote: (() -> Unit)?,
     onEdit: (() -> Unit)?,
     /**
@@ -976,6 +986,25 @@ private fun TopicPostCard(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (citedCount > 0) {
+                        // #239 — sober pill: how many posts of THIS page cite this one. Page-scoped
+                        // (cf. citationCountsByNumreponse); jumping to the citing posts is a follow-up.
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text(
+                                text = pluralStringResource(
+                                    R.plurals.topic_post_cited_count,
+                                    citedCount,
+                                    citedCount,
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
                 }
             }
             PostRenderer(content = post.content)
