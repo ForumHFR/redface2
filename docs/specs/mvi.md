@@ -311,7 +311,9 @@ data class MessagesUiState(
         data object RequiresLogin : Mode
         data object Loading : Mode
         data class Content(val conversations: List<PrivateMessageSummary>) : Mode
-        data class Error(val message: String?) : Mode
+        // #316 : aucun message brut — un IOException/SessionExpiredException peut embarquer
+        // l'URL `forum2.php?cat=prive&post=<id>` et fuiter l'identifiant de conversation.
+        data object Error : Mode
     }
 }
 

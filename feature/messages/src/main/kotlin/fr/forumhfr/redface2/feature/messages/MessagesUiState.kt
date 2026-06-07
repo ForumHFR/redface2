@@ -27,8 +27,8 @@ data class MessagesUiState(
         /**
          * A load/refresh failure. Carries NO raw throwable message on purpose (#316): a network or
          * auth error can embed the private `forum2.php?cat=prive&post=<id>` URL, which would leak the
-         * conversation id on screen. The UI shows a generic message + retry; diagnostics belong to
-         * the DiagnosticsLog, never the screen.
+         * conversation id on screen. The UI shows a generic message + retry; the raw message must
+         * reach neither the screen nor the exportable DiagnosticsLog.
          */
         data object Error : Mode
     }

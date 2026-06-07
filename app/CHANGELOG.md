@@ -41,6 +41,10 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
   l'URL `forum2.php?cat=prive&post=<id>`. Désormais message générique + « réessayer »
   uniquement, et le détail brut ne transite plus par l'état UI ni par le journal de
   diagnostics exportable.
+- **Robustesse compteur de MP non lus** (relevé pendant la revue beta) : le fetch du
+  compteur « MPs non lus » n'avale plus `CancellationException` via `runCatching` —
+  l'annulation (changement de session, arrêt du collecteur) se propage désormais au lieu
+  d'être journalisée comme un échec réseau, préservant la concurrence structurée.
 
 ### Changed
 - **CD rev. 4 (#304)** : le `versionCode` n'est plus bumpé à la main — il est alloué au

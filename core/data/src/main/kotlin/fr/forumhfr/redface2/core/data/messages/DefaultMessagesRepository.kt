@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.parser.messages.PrivateMessageListParser
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageThreadParser
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
@@ -53,16 +54,21 @@ class DefaultMessagesRepository @Inject constructor(
         .flowOn(ioDispatcher)
 
     private suspend fun fetchUnreadCount(): Int? = withContext(ioDispatcher) {
-        runCatching {
+        try {
             val html = hfrClient.getPrivateMessageListPage(page = 1)
             parser.countUnread(html)
-        }.onFailure { throwable ->
+        } catch (cancellation: CancellationException) {
+            // Rethrow so transformLatest / collector cancellation propagates instead of being
+            // logged as a "fetch failed" and swallowed into null (structured concurrency).
+            throw cancellation
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
             // Surface fetch failures in logcat so a missing "MPs non lus" line in FlagsRoute's
             // footer can be debugged. Silent swallow would make a regression invisible (e.g.
             // HFR DOM change → parser returns 0 vs network failure → null). Logging on failure
             // only keeps the happy path quiet.
-            Log.w(LOG_TAG, "Unread MP count fetch failed", throwable)
-        }.getOrNull()
+            Log.w(LOG_TAG, "Unread MP count fetch failed", error)
+            null
+        }
     }
 
     // Unlike observeUnreadMpCount (a best-effort footer signal that swallows failures into
