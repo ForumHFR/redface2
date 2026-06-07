@@ -32,13 +32,17 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +50,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
@@ -410,11 +416,67 @@ private fun TopicLoadedContent(
     listState: LazyListState,
 ) {
     val highlight = state.request.scrollTo
+    // #282 — shared offset between the gesture (drives translationX) and the edge glow. A plain
+    // MutableFloatState: the gesture writes it synchronously per frame (no coroutine/alloc), the draw
+    // phase reads it; an Animatable inside the gesture handles only release transitions. Lives in the
+    // Loaded composition only, so a committed swipe (which recreates the screen) starts back at rest.
+    val dragOffset = remember { mutableFloatStateOf(0f) }
+    // #282 — hoisted so the gesture can tick on arming and confirm on commit.
+    val haptics = LocalHapticFeedback.current
+    // #282 — live page count for the swipe gesture, read through a lambda so the gesture sees the
+    // latest value WITHOUT re-keying its `pointerInput` (which would cancel an in-flight commit
+    // slide-out and drop the navigation — see `topicPageSwipe`). `rememberUpdatedState` keeps the
+    // State identity stable while its value tracks `topic.totalPages` across recompositions.
+    val currentTotalPages by rememberUpdatedState(topic.totalPages)
+    // #282 — the swipe must be INERT while this nav entry is not yet settled (mid NavDisplay
+    // transition, lifecycle < RESUMED). During the transition the incoming (cached) page is a fresh
+    // composition that would otherwise accept a swipe and commit a second onOpenPage mid-flight,
+    // interrupting the transition → frozen screen. The lambda reads `lifecycle.currentState` live, so
+    // the gesture (whose pointerInput does not re-key on this) always sees the current state.
+    val entryLifecycle = LocalLifecycleOwner.current.lifecycle
+    val swipeEnabled: () -> Boolean = { entryLifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) }
+    // #282 (P2-b) — if the loaded page re-keys while we stay Loaded (a force-refresh or page jump that
+    // lands the same screen on a new page), drop any residual translation so the page is never left
+    // frozen off-centre. Keyed on `topic.page` ONLY — never `topic.totalPages`: a page-count change
+    // landing during a commit's slide-out must not reset the offset mid-animation (it would yank the
+    // sliding page back); the gesture reads the live count via `currentTotalPages` instead.
+    LaunchedEffect(topic.page) {
+        dragOffset.floatValue = 0f
+    }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .navigationBarsPadding(),
+            .navigationBarsPadding()
+            // #282 — horizontal swipe changes page via the existing route-driven onOpenPage, with
+            // drag-follow feedback: the page tracks the finger (graphicsLayer inside topicPageSwipe)
+            // and topicPageSwipeEdge paints an edge glow as the swipe arms. topicPageSwipeEdge must
+            // precede topicPageSwipe so the glow draws in untranslated (screen) space.
+            // Engages on horizontal slop only, so vertical scroll and the page-grid's own
+            // horizontalScroll keep their gestures; edges are a damped no-op.
+            .topicPageSwipeEdge(
+                currentPage = topic.page,
+                totalPages = { currentTotalPages },
+                dragOffset = dragOffset,
+                // #282 — desaturated edge-glow tint: mostly neutral (onSurfaceVariant) with a touch of
+                // primary, instead of full primary which read as an imposing pink/mauve panel.
+                accent = lerp(
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                    MaterialTheme.colorScheme.primary,
+                    0.3f,
+                ),
+                enabled = swipeEnabled,
+            )
+            .topicPageSwipe(
+                currentPage = topic.page,
+                totalPages = { currentTotalPages },
+                dragOffset = dragOffset,
+                handlers = TopicSwipeHandlers(
+                    haptics = haptics,
+                    onOpenPage = onOpenPage,
+                    enabled = swipeEnabled,
+                ),
+            ),
         state = listState,
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
