@@ -61,8 +61,11 @@ data class SettingsState(
     val canToggleFlagsGroupByCategory: Boolean
         get() = !isUpdatingFlagsGroupByCategory
 
+    // The global hide-read toggle is meaningful when the global grouped view is on, OR when the
+    // per-tab override is on (it still serves as the fallback for a tab that is grouped per-type but
+    // has no per-type hide-read value). #309 Codex review.
     val canToggleFlagsHideReadCategories: Boolean
-        get() = flagsGroupByCategory && !isUpdatingFlagsHideReadCategories
+        get() = (flagsGroupByCategory || flagsPerTabOverride) && !isUpdatingFlagsHideReadCategories
 
     val canToggleFlagsPerTabOverride: Boolean
         get() = !isUpdatingFlagsPerTabOverride

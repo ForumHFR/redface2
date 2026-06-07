@@ -148,12 +148,25 @@ class FlagsViewModel @Inject constructor(
         )
 
     /**
+     * Optimistic shim for the per-tab master switch (#309 Codex review). `setFlagsPerTabOverride`
+     * seeds this synchronously so [flagsPerTabOverride] (hence both the rendered switch and the
+     * write routing) reflects a flip immediately, instead of waiting for the DataStore round-trip —
+     * otherwise a quick « master ON » then content-toggle could route to the wrong scope because the
+     * persisted value (and the switch) had not caught up. Cleared once the write persists.
+     */
+    private val pendingPerTabOverride = MutableStateFlow<Boolean?>(null)
+
+    /**
      * Per-tab override master switch (#309), surfaced so the bottom sheet can show + flip it and so
      * the write routing in [setFlagsGroupByCategory] / [setFlagsHideReadCategories] reads its
-     * `.value` (the value the master switch is rendered from) to decide global vs per-type — keeping
-     * the write scope consistent with what the user currently sees.
+     * `.value` to decide global vs per-type. The optimistic [pendingPerTabOverride] wins until the
+     * persisted value catches up, so the rendered switch and the routing scope agree with the user's
+     * latest tap even before DataStore commits.
      */
-    val flagsPerTabOverride: StateFlow<Boolean> = userPreferencesRepository.observeFlagsPerTabOverride()
+    val flagsPerTabOverride: StateFlow<Boolean> = combine(
+        userPreferencesRepository.observeFlagsPerTabOverride(),
+        pendingPerTabOverride,
+    ) { persisted, pending -> pending ?: persisted }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
@@ -357,10 +370,17 @@ class FlagsViewModel @Inject constructor(
         }
     }
 
-    /** Flips the per-tab override master switch (#309) from the bottom sheet. */
+    /**
+     * Flips the per-tab override master switch (#309) from the bottom sheet. Sets the optimistic
+     * [pendingPerTabOverride] synchronously (instant switch + routing scope), then persists. The
+     * shim is dropped only if no newer flip superseded this one (compareAndSet), so the persisted
+     * value — and any external change, e.g. the Settings mirror — takes over afterwards.
+     */
     fun setFlagsPerTabOverride(enabled: Boolean) {
+        pendingPerTabOverride.value = enabled
         viewModelScope.launch {
             userPreferencesRepository.setFlagsPerTabOverride(enabled)
+            pendingPerTabOverride.compareAndSet(expect = enabled, update = null)
         }
     }
 
