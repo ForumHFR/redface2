@@ -22,7 +22,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.onEach
@@ -150,8 +149,9 @@ class FlagsViewModel @Inject constructor(
 
     /**
      * Per-tab override master switch (#309), surfaced so the bottom sheet can show + flip it and so
-     * the write routing in [setFlagsGroupByCategory] / [setFlagsHideReadCategories] can read the
-     * authoritative current value before deciding global vs per-type.
+     * the write routing in [setFlagsGroupByCategory] / [setFlagsHideReadCategories] reads its
+     * `.value` (the value the master switch is rendered from) to decide global vs per-type — keeping
+     * the write scope consistent with what the user currently sees.
      */
     val flagsPerTabOverride: StateFlow<Boolean> = userPreferencesRepository.observeFlagsPerTabOverride()
         .stateIn(
@@ -327,13 +327,15 @@ class FlagsViewModel @Inject constructor(
     /**
      * Bottom-sheet write for « grouper par catégorie » (#309). Routes to the per-type key when the
      * per-tab master switch is on AND the active tab has a real [FlagType] (not Super); otherwise
-     * writes the global value. The override is re-read with `.first()` at write time so the routing
-     * always reflects the persisted truth even if the user just flipped it.
+     * writes the global value. The scope is decided from [flagsPerTabOverride]`.value` — the very
+     * StateFlow the sheet's master switch renders from — so the routing always matches what the
+     * user currently sees (reading a fresh `observeFlagsPerTabOverride().first()` instead would open
+     * an independent cold flow that can race the still-in-flight master write).
      */
     fun setFlagsGroupByCategory(enabled: Boolean) {
         val type = _selectedTab.value.flagType
         viewModelScope.launch {
-            if (type != null && userPreferencesRepository.observeFlagsPerTabOverride().first()) {
+            if (type != null && flagsPerTabOverride.value) {
                 userPreferencesRepository.setFlagsGroupByCategoryForType(type, enabled)
             } else {
                 userPreferencesRepository.setFlagsGroupByCategory(enabled)
@@ -342,11 +344,12 @@ class FlagsViewModel @Inject constructor(
     }
 
     /** Bottom-sheet write for « masquer les catégories sans non-lu » (#309). Same routing as
-     * [setFlagsGroupByCategory]: per-type when the override is on and the tab is real, else global. */
+     * [setFlagsGroupByCategory]: per-type when [flagsPerTabOverride] is on and the tab is real, else
+     * global. */
     fun setFlagsHideReadCategories(enabled: Boolean) {
         val type = _selectedTab.value.flagType
         viewModelScope.launch {
-            if (type != null && userPreferencesRepository.observeFlagsPerTabOverride().first()) {
+            if (type != null && flagsPerTabOverride.value) {
                 userPreferencesRepository.setFlagsHideReadCategoriesForType(type, enabled)
             } else {
                 userPreferencesRepository.setFlagsHideReadCategories(enabled)

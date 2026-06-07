@@ -308,6 +308,7 @@ private fun FlagsViewSettingsSheet(
     actions: FlagsViewSettingsActions,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
     ModalBottomSheet(
         onDismissRequest = actions.onDismiss,
         sheetState = sheetState,
@@ -365,7 +366,14 @@ private fun FlagsViewSettingsSheet(
             )
 
             TextButton(
-                onClick = actions.onDismiss,
+                // Animate the sheet out (M3 stable pattern) before removing it from composition,
+                // instead of an abrupt `if`-driven teardown. Swipe/scrim dismissals already animate
+                // via onDismissRequest.
+                onClick = {
+                    scope.launch { sheetState.hide() }.invokeOnCompletion {
+                        if (!sheetState.isVisible) actions.onDismiss()
+                    }
+                },
                 modifier = Modifier.align(Alignment.End),
             ) {
                 Text(stringResource(R.string.flags_view_settings_done))

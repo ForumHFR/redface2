@@ -906,6 +906,76 @@ class FlagsViewModelTest {
         }
     }
 
+    @Test
+    fun `setFlagsHideReadCategories writes the global scope when the override is off`() = runTest {
+        // hide-read routing mirror of the group-by tests; asserted via flagsViewSettings.value since
+        // the cross-tab value is identical (global), which a StateFlow would dedup out of a turbine.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository()
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        assertFalse(vm.flagsViewSettings.value.hideReadCategories)
+        vm.setFlagsHideReadCategories(true)
+        assertTrue("CYAN reflects the write", vm.flagsViewSettings.value.hideReadCategories)
+        vm.selectTab(FlagTab.Red)
+        assertTrue(
+            "RED is on too → the write landed on the global key",
+            vm.flagsViewSettings.value.hideReadCategories,
+        )
+    }
+
+    @Test
+    fun `setFlagsHideReadCategories writes the per-type scope when the override is on`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(perTabOverride = true)
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.setFlagsHideReadCategories(true) // CYAN selected
+        assertTrue("CYAN per-type hide-read on", vm.flagsViewSettings.value.hideReadCategories)
+        vm.selectTab(FlagTab.Red)
+        assertFalse(
+            "RED untouched → global false; the write did not leak across tabs",
+            vm.flagsViewSettings.value.hideReadCategories,
+        )
+    }
+
+    @Test
+    fun `flipping the override then a toggle in sequence routes per-type`() = runTest {
+        // Regression guard for the write-routing fix: the toggle write must honour the master value
+        // the user just flipped (read from flagsPerTabOverride.value, consistent with the rendered
+        // switch), so it routes per-type and leaves the global default (other tabs) untouched.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = true) // override OFF initially
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped)
+
+            vm.setFlagsPerTabOverride(true) // flip master…
+            vm.setFlagsGroupByCategory(false) // …then immediately flip group on CYAN
+            assertTrue(
+                "CYAN flips to flat via its per-type key",
+                (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Flat,
+            )
+
+            vm.selectTab(FlagTab.Red)
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED, cat = 1))))
+            assertTrue(
+                "RED stays grouped → the toggle honoured the just-flipped master and wrote per-type",
+                (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     /**
      * Builds the ViewModel with a default (grouped-on, hide-read-off) [FakeUserPreferencesRepository]
      * so the existing tests keep asserting on the grouped sections. Tests that exercise the flat
