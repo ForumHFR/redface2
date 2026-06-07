@@ -12,7 +12,21 @@ Statuts possibles d'une release :
 - `open` — uploadé sur le canal Play Console *open testing* (canal `beta` de la CD, depuis #233)
 - `production` — disponible publiquement sur Play Store
 
-Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la main** — il est alloué au dispatch par le **registre de tags git** (`max(app-v<N>, plancher build.gradle.kts) + 1`, partagé entre les canaux beta et dev). On bumpe seulement `versionName` dans `app/build.gradle.kts` si pertinent, on ajoute une entrée ici, puis on dispatche `gh workflow run release.yml --ref main -f channel=beta|dev`. Quand l'AAB part vers un canal Play Console, mettre à jour le statut de la version concernée.
+Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la main** — il est alloué au dispatch par le **registre de tags git** (`max(app-v<N>, plancher build.gradle.kts) + 1`, partagé entre les canaux beta et dev). **On DOIT bumper `versionName`** dans `app/build.gradle.kts` avant chaque ship **beta** (ou prod) — F-Droid affiche les versions par `versionName`, donc deux builds au même `versionName` = doublon « X.Y.Z » (cf. `app-v84`/`app-v85`, tous deux `0.5.0`). Un guard CI dans `release.yml` refuse un ship beta dont le `versionName` n'a pas été bumpé. On ajoute une entrée ici, puis on dispatche `gh workflow run release.yml --ref main -f channel=beta|dev`. Quand l'AAB part vers un canal Play Console, mettre à jour le statut de la version concernée.
+
+---
+
+## v86 — `0.5.1` — 2026-06-07
+
+**Statut** : `open` (track open testing) + F-Droid `.beta`
+**Commit** : tag `app-v86` (versionCode alloué par le registre de tags, plancher 72)
+**Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) → **track open testing** + tag pour F-Droid beta
+
+**Bump `versionName` 0.5.0 → 0.5.1.** Aucun changement fonctionnel vs v85 : même code (MP lecture, swipe, drapeaux par catégorie/type/non-lus, fix vie privée). Le bump corrige l'historique de version : v84 et v85 avaient été shippés tous deux sous `0.5.0`, créant un doublon « 0.5.0 » sur F-Droid (qui affiche par `versionName`). L'APK v84 a été retiré du dépôt F-Droid (workflow `prune.yml` de redface2-fdroid) et la v86 repart proprement en `0.5.1`.
+
+### Changed
+- **`versionName` 0.5.0 → 0.5.1** (re-label, pas de changement de code).
+- **Guard CI anti-doublon** : `release.yml` refuse désormais un ship `channel=beta` dont le `versionName` n'a pas été bumpé vs la release beta précédente. Doc (guide release, instruction CHANGELOG) : bump `versionName` obligatoire avant un ship public.
 
 ---
 

@@ -1,8 +1,9 @@
-Redface 2 v0.5.0 — beta.
+Redface 2 v0.5.1 — beta.
 
 New:
-- Private messages (read-only): your inbox and conversations right in the Messages tab.
-- Swipe left/right to change page within a topic (the page follows your finger, instant transition).
+- Private messages (read-only): your inbox and conversations in the Messages tab.
+- Swipe left/right to change page within a topic (the page follows your finger).
+- Flags: group by category, per-type display settings, "unread only" filter.
 
 Fixed: a private-message error message could reveal a private conversation's address.
 
