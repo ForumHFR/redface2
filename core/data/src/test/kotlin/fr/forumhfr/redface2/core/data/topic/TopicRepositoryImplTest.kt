@@ -470,5 +470,14 @@ class TopicRepositoryImplTest {
         override suspend fun setIgnoreTopicCache(enabled: Boolean) {
             ignoreTopicCache.value = enabled
         }
+
+        // Flags view preferences are irrelevant to TopicRepositoryImpl — stubbed at their defaults.
+        override fun observeFlagsGroupByCategory(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setFlagsGroupByCategory(enabled: Boolean) = Unit
+
+        override fun observeFlagsHideReadCategories(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setFlagsHideReadCategories(enabled: Boolean) = Unit
     }
 }

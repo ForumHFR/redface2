@@ -35,4 +35,14 @@
     <string name="settings_ignore_topic_cache_title">Ignorer le cache topic</string>
     <string name="settings_ignore_topic_cache_description">Force le retéléchargement et le reparse des pages de topic. Utile après un changement de parser/rendu. Désactive le prefetch topic pour éviter de remplir Room inutilement.</string>
     <string name="settings_ignore_topic_cache_persist_failed">Impossible de mémoriser le réglage « Ignorer le cache topic ». Réessayez.</string>
+
+    <!-- #179 follow-up — Préférences d'affichage de l'écran Drapeaux. Persistées (DataStore) et
+         observées en direct par l'écran Drapeaux : un changement ici se reflète sans refetch. -->
+    <string name="settings_flags_title">Drapeaux</string>
+    <string name="settings_flags_group_by_category_title">Grouper par catégorie</string>
+    <string name="settings_flags_group_by_category_description">Affiche les drapeaux regroupés par catégorie de forum, avec un en-tête par catégorie. Désactivé : une liste à plat triée par dernière réponse (comme avant).</string>
+    <string name="settings_flags_group_by_category_persist_failed">Impossible de mémoriser l\'affichage des drapeaux. Réessayez.</string>
+    <string name="settings_flags_hide_read_categories_title">Masquer les catégories sans non-lu</string>
+    <string name="settings_flags_hide_read_categories_description">Cache les catégories qui n\'ont aucun message non lu. Les cyans déjà lus restent accessibles en activant « +lus » sur l\'onglet Mes sujets. Sans effet en vue à plat.</string>
+    <string name="settings_flags_hide_read_categories_persist_failed">Impossible de mémoriser le filtre des catégories. Réessayez.</string>
 </resources>

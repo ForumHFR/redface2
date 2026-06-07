@@ -130,6 +130,49 @@ class FlagCategorySectionTest {
     }
 
     @Test
+    fun `groupFlagsByCategory dedups duplicate category ids in the catalogue order`() {
+        // A corrupt catalogue with two entries sharing the same id must not yield two sections
+        // with the same catId (duplicate LazyColumn keys → runtime crash). First occurrence wins.
+        val duplicatedOrder = listOf(
+            FlagCategoryOrderEntry(1, "Hardware"),
+            FlagCategoryOrderEntry(1, "Hardware (doublon)"),
+            FlagCategoryOrderEntry(10, "Programmation"),
+        )
+
+        val sections = groupFlagsByCategory(listOf(flag(topicId = 1, cat = 1)), duplicatedOrder)
+
+        assertEquals(listOf(1, 10), sections.map { it.catId })
+        assertEquals("first occurrence wins for the label", "Hardware", sections.first().catName)
+    }
+
+    @Test
+    fun `filterCategoriesWithUnread keeps unread sections and drops empty plus fully-read ones`() {
+        val sections = listOf(
+            FlagCategorySection(1, "A", listOf(flag(topicId = 1, cat = 1, hasUnread = true))),
+            FlagCategorySection(10, "B", listOf(flag(topicId = 2, cat = 10, hasUnread = false))),
+            FlagCategorySection(13, "C", emptyList()),
+        )
+
+        val filtered = filterCategoriesWithUnread(sections, keepFullyRead = false)
+
+        assertEquals("only the category with an unread survives", listOf(1), filtered.map { it.catId })
+    }
+
+    @Test
+    fun `filterCategoriesWithUnread with keepFullyRead keeps read sections but still drops empty ones`() {
+        // The cyan « +lus » override: a fully-read section is kept, but a truly empty section is
+        // always dropped (nothing to show).
+        val sections = listOf(
+            FlagCategorySection(1, "A", listOf(flag(topicId = 1, cat = 1, hasUnread = false))),
+            FlagCategorySection(10, "B", emptyList()),
+        )
+
+        val filtered = filterCategoriesWithUnread(sections, keepFullyRead = true)
+
+        assertEquals(listOf(1), filtered.map { it.catId })
+    }
+
+    @Test
     fun `the hard-coded fallback order has the 19 public categories in canonical sequence`() {
         // Pins FALLBACK_CATEGORY_ORDER against the documented HFR web layout (impl prompt §5).
         assertEquals(19, FALLBACK_CATEGORY_ORDER.size)
@@ -144,6 +187,7 @@ class FlagCategorySectionTest {
     private fun flag(
         topicId: Int,
         cat: Int,
+        hasUnread: Boolean = true,
     ): Flag = Flag(
         cat = cat,
         subcat = null,
@@ -152,7 +196,7 @@ class FlagCategorySectionTest {
         totalPages = 1,
         replyCount = 0,
         type = FlagType.CYAN,
-        hasUnread = true,
+        hasUnread = hasUnread,
         lastReadPage = 1,
         lastPostReadId = null,
         firstPostAuthor = "",

@@ -8,6 +8,8 @@ import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
@@ -51,7 +53,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Anonymous, flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             assertNull(awaitItem())
@@ -67,7 +69,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             // Initial value (null) before stateIn fires.
@@ -87,7 +89,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             awaitItem() // initial null before stateIn fires
@@ -113,7 +115,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -136,7 +138,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.selectTab(FlagTab.Favorite)
         vm.refresh()
@@ -151,7 +153,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         assertEquals(false, vm.isRefreshing.value)
         vm.refresh()
@@ -168,7 +170,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -197,7 +199,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         // Cyan is selected by default; re-tapping it flips the toggle on, then off.
         assertEquals(false, vm.showReadParticipatedTopics.value)
@@ -215,7 +217,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.selectTab(FlagTab.Red)
         assertEquals(false, vm.showReadParticipatedTopics.value)
@@ -243,7 +245,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
         val expired = SessionExpiredException("https://forum.hardware.fr/login.php")
 
         vm.flagsState.test {
@@ -268,7 +270,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -299,7 +301,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -331,7 +333,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -380,7 +382,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1, 10, 13))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -394,10 +396,10 @@ class FlagsViewModelTest {
                 ),
             )
             val success = awaitItem() as FlagsListUiState.Success
-            assertEquals(listOf(1, 10, 13), success.sections.map { it.catId })
-            assertEquals(listOf(200), success.sections.first { it.catId == 1 }.topics.map { it.topicId })
-            assertTrue(success.sections.first { it.catId == 10 }.topics.isEmpty())
-            assertEquals(listOf(100), success.sections.first { it.catId == 13 }.topics.map { it.topicId })
+            assertEquals(listOf(1, 10, 13), sections(success).map { it.catId })
+            assertEquals(listOf(200), sections(success).first { it.catId == 1 }.topics.map { it.topicId })
+            assertTrue(sections(success).first { it.catId == 10 }.topics.isEmpty())
+            assertEquals(listOf(100), sections(success).first { it.catId == 13 }.topics.map { it.topicId })
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -409,20 +411,20 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(autoEmit = false) // hold categories back
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             awaitItem() // initial null
             // observeCategories has emitted nothing yet → fallback order is used.
             flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
             val onFallback = awaitItem() as FlagsListUiState.Success
-            assertEquals("fallback exposes the 19 hard-coded categories", 19, onFallback.sections.size)
+            assertEquals("fallback exposes the 19 hard-coded categories", 19, sections(onFallback).size)
             assertEquals(listOf(1), flatTopics(onFallback).map { it.topicId })
 
             // Real catalogue arrives with a narrower set → sections re-derive, flag kept.
             forum.emitCategories(ForumResult.Success(categories(listOf(1, 10))))
             val onReal = awaitItem() as FlagsListUiState.Success
-            assertEquals(listOf(1, 10), onReal.sections.map { it.catId })
+            assertEquals(listOf(1, 10), sections(onReal).map { it.catId })
             assertEquals(listOf(1), flatTopics(onReal).map { it.topicId })
             cancelAndIgnoreRemainingEvents()
         }
@@ -435,14 +437,14 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(autoEmit = false)
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             awaitItem() // initial null
             forum.emitCategories(ForumResult.Loading)
             flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(7, FlagType.CYAN, cat = 1))))
             val onLoading = awaitItem() as FlagsListUiState.Success
-            assertEquals(19, onLoading.sections.size)
+            assertEquals(19, sections(onLoading).size)
             assertEquals(listOf(7), flatTopics(onLoading).map { it.topicId })
 
             // A Failure on the categories side must NOT turn the screen into a Failure. Because
@@ -452,7 +454,7 @@ class FlagsViewModelTest {
             forum.emitCategories(ForumResult.Failure(IllegalStateException("categories down")))
             flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(8, FlagType.CYAN, cat = 1))))
             val onFailure = awaitItem() as FlagsListUiState.Success
-            assertEquals(19, onFailure.sections.size)
+            assertEquals(19, sections(onFailure).size)
             assertEquals(listOf(8), flatTopics(onFailure).map { it.topicId })
             cancelAndIgnoreRemainingEvents()
         }
@@ -466,7 +468,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(autoEmit = false)
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -477,11 +479,11 @@ class FlagsViewModelTest {
             assertEquals(
                 "empty Success catalogue must use the 19-category fallback, not zero sections",
                 19,
-                onEmptyCatalogue.sections.size,
+                sections(onEmptyCatalogue).size,
             )
             assertTrue(
                 "every fallback section is empty when there are no flags",
-                onEmptyCatalogue.sections.all { it.topics.isEmpty() },
+                sections(onEmptyCatalogue).all { it.topics.isEmpty() },
             )
             cancelAndIgnoreRemainingEvents()
         }
@@ -494,7 +496,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -513,7 +515,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -532,7 +534,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
         val flag = stubFlag(1, FlagType.CYAN)
 
         vm.removeFlagState.test {
@@ -560,7 +562,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
 
         vm.requestRemoveFlag(stubFlag(1, FlagType.CYAN))
         vm.cancelRemoveFlag()
@@ -577,7 +579,7 @@ class FlagsViewModelTest {
         )
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
         val flag = stubFlag(2, FlagType.FAVORITE)
 
         vm.requestRemoveFlag(flag)
@@ -593,7 +595,7 @@ class FlagsViewModelTest {
         flags.removeFlagResult = kotlinx.coroutines.CompletableDeferred()
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
         val firstFlag = stubFlag(1, FlagType.CYAN)
 
         vm.requestRemoveFlag(firstFlag)
@@ -611,7 +613,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = FlagsViewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum)
         val flag = stubFlag(3, FlagType.RED)
 
         vm.requestRemoveFlag(flag)
@@ -622,9 +624,162 @@ class FlagsViewModelTest {
         assertNull(vm.removeFlagEvent.value)
     }
 
-    /** Flattens the grouped sections back to the topics order for assertions on flag content. */
+    @Test
+    fun `flat view preference yields a flat content preserving repository order`() = runTest {
+        // #179 follow-up: the legacy flat view must keep the repository order (last reply desc),
+        // NOT the category-grouped order — proven here with flags arriving cat 13 then cat 1.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1, 13))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = false)
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            flags.emit(
+                FlagType.CYAN,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(100, FlagType.CYAN, cat = 13),
+                        stubFlag(200, FlagType.CYAN, cat = 1),
+                    ),
+                ),
+            )
+            val flat = (awaitItem() as FlagsListUiState.Success).content as FlagsContent.Flat
+            assertEquals(listOf(100, 200), flat.flags.map { it.topicId })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `toggling group-by-category pref switches content shape without a refetch`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = true)
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped)
+
+            prefs.setGroupBy(false)
+            assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Flat)
+            assertTrue("a view-mode toggle must never trigger a network refresh", flags.refreshCalls.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `hide-read pref drops categories without an unread flag on RED`() = runTest {
+        // RED is not read-filtered, so both read and unread reach the grouping: hide-read must
+        // drop the all-read category (10) and the empty ones, keeping only the one with an unread.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1, 10))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            vm.selectTab(FlagTab.Red)
+            flags.emit(
+                FlagType.RED,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(1, FlagType.RED, hasUnread = true, cat = 1),
+                        stubFlag(2, FlagType.RED, hasUnread = false, cat = 10),
+                    ),
+                ),
+            )
+            val success = awaitItem() as FlagsListUiState.Success
+            assertEquals(listOf(1), sections(success).map { it.catId })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `cyan +lus override keeps a fully-read category visible under hide-read`() = runTest {
+        // The tension the user flagged: « +lus » (show read participated topics) must win over
+        // « masquer les catégories sans non-lu » so the read cyans stay reachable.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1, 10))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            vm.setShowReadParticipatedTopics(true)
+            flags.emit(
+                FlagType.CYAN,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(1, FlagType.CYAN, hasUnread = true, cat = 1),
+                        stubFlag(2, FlagType.CYAN, hasUnread = false, cat = 10),
+                    ),
+                ),
+            )
+            val success = awaitItem() as FlagsListUiState.Success
+            assertEquals(
+                "with +lus on, a category holding only a read cyan must survive hide-read",
+                listOf(1, 10),
+                sections(success).map { it.catId },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `cyan without +lus under hide-read shows only categories with an unread cyan`() = runTest {
+        // Without « +lus », the #154 filter removes the read cyan first, so its category becomes
+        // empty and hide-read drops it — leaving only the category with an actionable unread.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1, 10))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            flags.emit(
+                FlagType.CYAN,
+                FlagsResult.Success(
+                    listOf(
+                        stubFlag(1, FlagType.CYAN, hasUnread = true, cat = 1),
+                        stubFlag(2, FlagType.CYAN, hasUnread = false, cat = 10),
+                    ),
+                ),
+            )
+            val success = awaitItem() as FlagsListUiState.Success
+            assertEquals(listOf(1), sections(success).map { it.catId })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    /**
+     * Builds the ViewModel with a default (grouped-on, hide-read-off) [FakeUserPreferencesRepository]
+     * so the existing tests keep asserting on the grouped sections. Tests that exercise the flat
+     * view or the hide-read filter pass an explicit [prefs].
+     */
+    private fun viewModel(
+        auth: FakeAuthRepository,
+        flags: FakeFlagRepository,
+        forum: FakeForumRepository,
+        prefs: FakeUserPreferencesRepository = FakeUserPreferencesRepository(),
+    ): FlagsViewModel = FlagsViewModel(auth, flags, forum, prefs)
+
+    /** Flattens whatever content shape into the topics order for assertions on flag content. */
     private fun flatTopics(state: FlagsListUiState.Success): List<Flag> =
-        state.sections.flatMap { it.topics }
+        when (val content = state.content) {
+            is FlagsContent.Grouped -> content.sections.flatMap { it.topics }
+            is FlagsContent.Flat -> content.flags
+        }
+
+    /** Extracts the grouped sections, failing the cast if the content was flat (test misuse). */
+    private fun sections(state: FlagsListUiState.Success): List<FlagCategorySection> =
+        (state.content as FlagsContent.Grouped).sections
 
     private fun categories(ids: List<Int>): List<Category> =
         ids.map { Category(id = it, name = "Cat $it", forceSubcat = false, subcategoryCount = 0) }
@@ -781,5 +936,42 @@ class FlagsViewModelTest {
         override suspend fun refreshTopicList(cat: Int, subcat: Int?, page: Int) = Unit
 
         override suspend fun prefetchTopicList(cat: Int, subcat: Int?, page: Int) = Unit
+    }
+
+    /**
+     * Fake [UserPreferencesRepository] exposing only the two Drapeaux view preferences the
+     * ViewModel reads (group-by-category, hide-read-categories) as writable hot flows; the proxy
+     * and topic-cache members are stubbed at their defaults (the ViewModel never touches them).
+     */
+    private class FakeUserPreferencesRepository(
+        groupByCategory: Boolean = true,
+        hideReadCategories: Boolean = false,
+    ) : UserPreferencesRepository {
+        private val groupBy = MutableStateFlow(groupByCategory)
+        private val hideRead = MutableStateFlow(hideReadCategories)
+
+        override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
+        override suspend fun saveProxyConfig(config: ProxyConfig) = Unit
+        override fun readProxyConfigForNetworkBootstrap(): ProxyConfig = ProxyConfig()
+        override fun observeIgnoreTopicCache(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setIgnoreTopicCache(enabled: Boolean) = Unit
+
+        override fun observeFlagsGroupByCategory(): Flow<Boolean> = groupBy
+        override suspend fun setFlagsGroupByCategory(enabled: Boolean) {
+            groupBy.value = enabled
+        }
+
+        override fun observeFlagsHideReadCategories(): Flow<Boolean> = hideRead
+        override suspend fun setFlagsHideReadCategories(enabled: Boolean) {
+            hideRead.value = enabled
+        }
+
+        fun setGroupBy(value: Boolean) {
+            groupBy.value = value
+        }
+
+        fun setHideRead(value: Boolean) {
+            hideRead.value = value
+        }
     }
 }

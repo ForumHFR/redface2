@@ -7,6 +7,11 @@ complexity:
     active: false
   TooManyFunctions:
     active: false
+  # LargeClass stays enforced on production code, but an exhaustive test class (one method per
+  # behaviour + in-file fakes) legitimately grows past the threshold — that's coverage, not debt.
+  # Consistent with LongMethod/TooManyFunctions already disabled project-wide.
+  LargeClass:
+    excludes: ['**/src/test/**', '**/src/androidTest/**']
 
 naming:
   FunctionNaming:

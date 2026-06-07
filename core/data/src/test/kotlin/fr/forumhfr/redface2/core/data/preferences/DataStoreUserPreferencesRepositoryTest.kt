@@ -132,6 +132,60 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeFlagsGroupByCategory defaults to true on an empty store`() = runTest(dispatcher) {
+        // Grouped is the #179 default — an empty store must report `true`, not the boolean zero.
+        repository.observeFlagsGroupByCategory().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsGroupByCategory persists false and true`() = runTest(dispatcher) {
+        repository.setFlagsGroupByCategory(false)
+        repository.observeFlagsGroupByCategory().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setFlagsGroupByCategory(true)
+        repository.observeFlagsGroupByCategory().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeFlagsHideReadCategories defaults to false on an empty store`() = runTest(dispatcher) {
+        repository.observeFlagsHideReadCategories().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsHideReadCategories persists true and false independently of the grouped pref`() = runTest(dispatcher) {
+        repository.setFlagsGroupByCategory(false)
+
+        repository.setFlagsHideReadCategories(true)
+        repository.observeFlagsHideReadCategories().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        // Flipping one Drapeaux pref must not disturb the other (distinct keys).
+        repository.observeFlagsGroupByCategory().test {
+            assertFalse("grouped pref must stay false", awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setFlagsHideReadCategories(false)
+        repository.observeFlagsHideReadCategories().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `saving disabled proxy removes optional fields from effective config`() = runTest(dispatcher) {
         repository.saveProxyConfig(
             ProxyConfig(

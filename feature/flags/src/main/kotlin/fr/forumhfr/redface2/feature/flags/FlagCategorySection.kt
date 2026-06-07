@@ -84,7 +84,11 @@ fun groupFlagsByCategory(
     // preserves the input order of flags within a category (tie-break = original index).
     val byCat: Map<Int, List<Flag>> = flags.groupByTo(LinkedHashMap()) { it.cat }
 
-    val knownSections = orderedCategories.map { entry ->
+    // Defensive dedup: a corrupt catalogue with two entries sharing the same id would otherwise
+    // emit two sections with the same catId → duplicate LazyColumn keys (`cat-$catId-header`),
+    // which throws at runtime. The REST contract returns 19 distinct ids, so this is a guard,
+    // not an expected path; keep the FIRST occurrence (canonical order/label).
+    val knownSections = orderedCategories.distinctBy { it.id }.map { entry ->
         FlagCategorySection(
             catId = entry.id,
             catName = entry.name,
@@ -105,4 +109,28 @@ fun groupFlagsByCategory(
         }
 
     return knownSections + unknownSections
+}
+
+/**
+ * Filters [sections] for the « masquer les catégories sans message non lu » preference (#179
+ * follow-up). A section is KEPT when it has at least one unread flag; empty sections are always
+ * dropped.
+ *
+ * [keepFullyRead] is the cyan « +lus » override: when the user explicitly opted to show
+ * already-read participated topics, a section that holds only read flags is still kept (only
+ * truly empty sections are dropped) — otherwise the read topics the user just asked to see would
+ * be hidden by this very filter. For the RED/FAVORITE tabs (no « +lus » affordance) the caller
+ * passes `false`, so fully-read categories are dropped as the preference intends.
+ *
+ * Pure, testable without Android.
+ */
+fun filterCategoriesWithUnread(
+    sections: List<FlagCategorySection>,
+    keepFullyRead: Boolean,
+): List<FlagCategorySection> = sections.filter { section ->
+    when {
+        section.topics.isEmpty() -> false
+        keepFullyRead -> true
+        else -> section.topics.any { it.hasUnread }
+    }
 }

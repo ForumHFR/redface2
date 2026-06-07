@@ -28,6 +28,19 @@ data class SettingsState(
      * later and overwrite the optimistic flip with a stale snapshot. Never surfaced in the UI.
      */
     val ignoreTopicCacheTouchedLocally: Boolean = false,
+    // Drapeaux view preferences (#179 follow-up). Same optimistic-flip + startup-race-guard
+    // machinery as ignoreTopicCache: the field is the displayed value, `isUpdating*` gates the
+    // switch while DataStore writes, `*Error` surfaces a persist failure, and `*TouchedLocally`
+    // forbids a late hydration from clobbering a fast user flip. Defaults match the DataStore
+    // defaults (grouped on, hide-read off).
+    val flagsGroupByCategory: Boolean = true,
+    val isUpdatingFlagsGroupByCategory: Boolean = false,
+    val flagsGroupByCategoryError: Boolean = false,
+    val flagsGroupByCategoryTouchedLocally: Boolean = false,
+    val flagsHideReadCategories: Boolean = false,
+    val isUpdatingFlagsHideReadCategories: Boolean = false,
+    val flagsHideReadCategoriesError: Boolean = false,
+    val flagsHideReadCategoriesTouchedLocally: Boolean = false,
 ) {
     val canSave: Boolean
         get() = !isSaving
@@ -37,6 +50,12 @@ data class SettingsState(
 
     val canToggleIgnoreTopicCache: Boolean
         get() = !isUpdatingIgnoreTopicCache
+
+    val canToggleFlagsGroupByCategory: Boolean
+        get() = !isUpdatingFlagsGroupByCategory
+
+    val canToggleFlagsHideReadCategories: Boolean
+        get() = !isUpdatingFlagsHideReadCategories
 }
 
 sealed interface SettingsError {
@@ -74,4 +93,9 @@ sealed interface SettingsIntent {
     // ViewModel applies it optimistically, then reverts on DataStore failure so the UI never
     // shows a value that doesn't match what's persisted.
     data class IgnoreTopicCacheChanged(val enabled: Boolean) : SettingsIntent
+
+    // Drapeaux view preferences (#179 follow-up). Same optimistic-flip contract as
+    // IgnoreTopicCacheChanged: the boolean is the desired post-flip state.
+    data class FlagsGroupByCategoryChanged(val enabled: Boolean) : SettingsIntent
+    data class FlagsHideReadCategoriesChanged(val enabled: Boolean) : SettingsIntent
 }

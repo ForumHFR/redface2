@@ -47,6 +47,26 @@ class SettingsViewModel @Inject constructor(
                 }
             }
         }
+        viewModelScope.launch {
+            val grouped = userPreferencesRepository.observeFlagsGroupByCategory().first()
+            _state.update { current ->
+                if (current.flagsGroupByCategoryTouchedLocally || current.isUpdatingFlagsGroupByCategory) {
+                    current
+                } else {
+                    current.copy(flagsGroupByCategory = grouped)
+                }
+            }
+        }
+        viewModelScope.launch {
+            val hideRead = userPreferencesRepository.observeFlagsHideReadCategories().first()
+            _state.update { current ->
+                if (current.flagsHideReadCategoriesTouchedLocally || current.isUpdatingFlagsHideReadCategories) {
+                    current
+                } else {
+                    current.copy(flagsHideReadCategories = hideRead)
+                }
+            }
+        }
     }
 
     fun submit(intent: SettingsIntent) {
@@ -73,6 +93,8 @@ class SettingsViewModel @Inject constructor(
                 _state.update { it.copy(showClearTopicCacheConfirm = false) }
             SettingsIntent.ClearTopicCacheConfirmed -> clearTopicCache()
             is SettingsIntent.IgnoreTopicCacheChanged -> updateIgnoreTopicCache(intent.enabled)
+            is SettingsIntent.FlagsGroupByCategoryChanged -> updateFlagsGroupByCategory(intent.enabled)
+            is SettingsIntent.FlagsHideReadCategoriesChanged -> updateFlagsHideReadCategories(intent.enabled)
         }
     }
 
@@ -176,6 +198,82 @@ class SettingsViewModel @Inject constructor(
                         )
                     }
                 }
+        }
+    }
+
+    private fun updateFlagsGroupByCategory(desired: Boolean) {
+        val previous = _state.value.flagsGroupByCategory
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    flagsGroupByCategory = desired,
+                    isUpdatingFlagsGroupByCategory = true,
+                    flagsGroupByCategoryError = false,
+                    flagsGroupByCategoryTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(flagsGroupByCategory = desired, isUpdatingFlagsGroupByCategory = false)
+                } else {
+                    state.copy(
+                        flagsGroupByCategory = previous,
+                        isUpdatingFlagsGroupByCategory = false,
+                        flagsGroupByCategoryError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setFlagsGroupByCategory,
+        )
+    }
+
+    private fun updateFlagsHideReadCategories(desired: Boolean) {
+        val previous = _state.value.flagsHideReadCategories
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    flagsHideReadCategories = desired,
+                    isUpdatingFlagsHideReadCategories = true,
+                    flagsHideReadCategoriesError = false,
+                    flagsHideReadCategoriesTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(flagsHideReadCategories = desired, isUpdatingFlagsHideReadCategories = false)
+                } else {
+                    state.copy(
+                        flagsHideReadCategories = previous,
+                        isUpdatingFlagsHideReadCategories = false,
+                        flagsHideReadCategoriesError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setFlagsHideReadCategories,
+        )
+    }
+
+    /**
+     * Shared optimistic-flip machinery for a persisted boolean preference (the two Drapeaux view
+     * toggles). Flips the field immediately via [optimistic] (which also sets the `*TouchedLocally`
+     * guard so a late `init` hydration can't clobber it), persists [desired] on a background
+     * coroutine, then reconciles the final state from the persist [Result] via [onSettled] (success
+     * re-affirms the value, failure reverts and raises the error flag — both captured in the
+     * caller's closures). Mirrors the bespoke `updateIgnoreTopicCache` contract, factored because
+     * the two new toggles are identical bar their state fields.
+     */
+    private fun updateBooleanPreference(
+        desired: Boolean,
+        optimistic: (SettingsState) -> SettingsState,
+        onSettled: (SettingsState, Result<Unit>) -> SettingsState,
+        persist: suspend (Boolean) -> Unit,
+    ) {
+        _state.update(optimistic)
+        viewModelScope.launch {
+            val result = runCatching { persist(desired) }
+            _state.update { onSettled(it, result) }
         }
     }
 

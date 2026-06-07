@@ -354,12 +354,21 @@ private fun ColumnScope.AuthenticatedBody(
                 }
             }
 
-            is FlagsListUiState.Success -> CategorySectionedFlagList(
-                sections = current.sections,
-                selectedTab = selectedTab,
-                removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
-                actions = actions,
-            )
+            is FlagsListUiState.Success -> when (val content = current.content) {
+                is FlagsContent.Grouped -> CategorySectionedFlagList(
+                    sections = content.sections,
+                    selectedTab = selectedTab,
+                    removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
+                    actions = actions,
+                )
+
+                is FlagsContent.Flat -> FlatFlagList(
+                    flags = content.flags,
+                    selectedTab = selectedTab,
+                    removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
+                    actions = actions,
+                )
+            }
         }
     }
 }
@@ -471,6 +480,65 @@ private fun CategoryHeaderBand(label: String) {
 private fun emptySectionLabel(tab: FlagTab): Int = when (tab) {
     FlagTab.Cyan -> R.string.flags_category_empty_cyan
     else -> R.string.flags_category_empty
+}
+
+/**
+ * Flat flag list — the legacy pre-#179 view, kept reachable via the « grouper par catégorie »
+ * preference (Settings). Renders every [flags] entry in repository order (last reply descending)
+ * with no category bands. Like [CategorySectionedFlagList] it is a single [LazyColumn] so the
+ * surrounding `PullToRefreshBox` keeps a scrollable child to anchor the pull gesture on (#229);
+ * an empty list still emits one placeholder item so the « rien à afficher » wording is shown and
+ * the pull gesture has a target. Rows reuse [SwipeableFlagItem] so the #99 swipe-to-remove and
+ * accessibility action behave identically to the grouped view.
+ */
+@Composable
+private fun FlatFlagList(
+    flags: List<Flag>,
+    selectedTab: FlagTab,
+    removalInFlight: Boolean,
+    actions: AuthenticatedActions,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
+        if (flags.isEmpty()) {
+            item(key = "flat-empty", contentType = CONTENT_TYPE_EMPTY) {
+                Text(
+                    text = stringResource(flatEmptyLabel(selectedTab)),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                )
+            }
+        } else {
+            items(
+                items = flags,
+                key = { "${it.cat}-${it.topicId}" },
+                contentType = { CONTENT_TYPE_ROW },
+            ) { flag ->
+                SwipeableFlagItem(
+                    flag = flag,
+                    metadata = flagMetadata(flag),
+                    removalInFlight = removalInFlight,
+                    onClick = { actions.onOpenFlag(flag) },
+                    onRequestRemove = { actions.onRequestRemoveFlag(flag) },
+                )
+                FlagItemDivider()
+            }
+        }
+    }
+}
+
+/**
+ * Empty-list wording per tab for the FLAT view (#179 follow-up). Mirrors [emptySectionLabel] but
+ * without the « catégorie » noun, which would be misleading in a flat list. Cyan keeps the « aucun
+ * nouveau message » parity wording.
+ */
+private fun flatEmptyLabel(tab: FlagTab): Int = when (tab) {
+    FlagTab.Cyan -> R.string.flags_list_empty_cyan
+    else -> R.string.flags_list_empty
 }
 
 /**

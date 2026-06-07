@@ -62,6 +62,34 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeFlagsGroupByCategory(): Flow<Boolean> =
+        dataStore.data
+            // Default `true`: grouped view is the #179 default (cf. UserPreferencesRepository KDoc).
+            .map { prefs -> prefs[KEY_FLAGS_GROUP_BY_CATEGORY] ?: true }
+            .catch { emit(true) }
+
+    override suspend fun setFlagsGroupByCategory(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_GROUP_BY_CATEGORY] = enabled
+            }
+        }
+    }
+
+    override fun observeFlagsHideReadCategories(): Flow<Boolean> =
+        dataStore.data
+            // Default `false`: HFR web parity (every category band shown).
+            .map { prefs -> prefs[KEY_FLAGS_HIDE_READ_CATEGORIES] ?: false }
+            .catch { emit(false) }
+
+    override suspend fun setFlagsHideReadCategories(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_HIDE_READ_CATEGORIES] = enabled
+            }
+        }
+    }
+
     private fun toProxyConfig(prefs: Preferences): ProxyConfig =
         ProxyConfig(
             enabled = prefs[KEY_PROXY_ENABLED] ?: false,
@@ -78,5 +106,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_PROXY_USERNAME = stringPreferencesKey("proxy_username")
         val KEY_PROXY_PASSWORD = stringPreferencesKey("proxy_password")
         val KEY_IGNORE_TOPIC_CACHE = booleanPreferencesKey("ignore_topic_cache")
+        val KEY_FLAGS_GROUP_BY_CATEGORY = booleanPreferencesKey("flags_group_by_category")
+        val KEY_FLAGS_HIDE_READ_CATEGORIES = booleanPreferencesKey("flags_hide_read_categories")
     }
 }
