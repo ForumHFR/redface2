@@ -47,6 +47,21 @@
     <string name="flags_item_metadata_with_author">%1$s · %2$d rép. · p.%3$d/%4$d</string>
     <string name="flags_item_metadata_no_author">%1$d rép. · p.%2$d/%3$d</string>
 
+    <!-- #309 — Menu d'affichage des drapeaux (bottom sheet M3 ouvert depuis l'en-tête). Reflète et
+         modifie les réglages d'affichage de l'onglet courant (ou globaux selon « par onglet »). -->
+    <string name="flags_view_settings_action">Affichage</string>
+    <string name="flags_view_settings_title">Affichage des drapeaux</string>
+    <!-- Portée affichée sous le titre : globale, ou onglet courant. %1$s = libellé de l'onglet. -->
+    <string name="flags_view_settings_scope_global">S\'applique à tous les onglets</string>
+    <string name="flags_view_settings_scope_per_tab">S\'applique à l\'onglet « %1$s »</string>
+    <string name="flags_view_settings_per_tab_title">Réglages différents par onglet</string>
+    <string name="flags_view_settings_per_tab_description">Chaque onglet garde son propre affichage. Sinon, un réglage unique partagé par tous les onglets.</string>
+    <string name="flags_view_settings_group_title">Grouper par catégorie</string>
+    <string name="flags_view_settings_group_description">Regroupe les drapeaux par catégorie de forum. Désactivé : liste à plat triée par dernière réponse.</string>
+    <string name="flags_view_settings_hide_read_title">Masquer les catégories sans non-lu</string>
+    <string name="flags_view_settings_hide_read_description">Cache les catégories sans message non lu. Sans effet en vue à plat.</string>
+    <string name="flags_view_settings_done">Fermer</string>
+
     <!-- #99 — Retirer un drapeau (delflag). Action sur chaque ligne + dialog de confirmation
          obligatoire avant l'appel réseau, puis snackbar de résultat. -->
     <string name="flags_remove_action">Retirer</string>

@@ -41,6 +41,13 @@ data class SettingsState(
     val isUpdatingFlagsHideReadCategories: Boolean = false,
     val flagsHideReadCategoriesError: Boolean = false,
     val flagsHideReadCategoriesTouchedLocally: Boolean = false,
+    // #309 — per-tab display override master switch. Same optimistic-flip machinery; when on, each
+    // Drapeaux tab keeps its own view settings (tuned from the Drapeaux bottom sheet), the two
+    // toggles above acting as the shared fallback. Default false (global view for every tab).
+    val flagsPerTabOverride: Boolean = false,
+    val isUpdatingFlagsPerTabOverride: Boolean = false,
+    val flagsPerTabOverrideError: Boolean = false,
+    val flagsPerTabOverrideTouchedLocally: Boolean = false,
 ) {
     val canSave: Boolean
         get() = !isSaving
@@ -56,6 +63,9 @@ data class SettingsState(
 
     val canToggleFlagsHideReadCategories: Boolean
         get() = flagsGroupByCategory && !isUpdatingFlagsHideReadCategories
+
+    val canToggleFlagsPerTabOverride: Boolean
+        get() = !isUpdatingFlagsPerTabOverride
 }
 
 sealed interface SettingsError {
@@ -98,4 +108,7 @@ sealed interface SettingsIntent {
     // IgnoreTopicCacheChanged: the boolean is the desired post-flip state.
     data class FlagsGroupByCategoryChanged(val enabled: Boolean) : SettingsIntent
     data class FlagsHideReadCategoriesChanged(val enabled: Boolean) : SettingsIntent
+
+    // #309 — per-tab display override master switch.
+    data class FlagsPerTabOverrideChanged(val enabled: Boolean) : SettingsIntent
 }

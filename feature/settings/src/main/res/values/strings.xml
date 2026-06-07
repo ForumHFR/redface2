@@ -45,4 +45,11 @@
     <string name="settings_flags_hide_read_categories_title">Masquer les catégories sans non-lu</string>
     <string name="settings_flags_hide_read_categories_description">Cache les catégories qui n\'ont aucun message non lu. Les cyans déjà lus restent accessibles en activant « +lus » sur l\'onglet Mes sujets. Sans effet en vue à plat.</string>
     <string name="settings_flags_hide_read_categories_persist_failed">Impossible de mémoriser le filtre des catégories. Réessayez.</string>
+
+    <!-- #309 — Réglages d'affichage différents par type de drapeau (onglet). Quand activé, les deux
+         réglages ci-dessus servent de valeurs par défaut et chaque onglet (Mes sujets / Lu / Favoris)
+         garde son propre affichage, ajustable depuis le menu d'affichage de l'écran Drapeaux. -->
+    <string name="settings_flags_per_tab_override_title">Réglages différents par onglet</string>
+    <string name="settings_flags_per_tab_override_description">Chaque onglet (Mes sujets, Lu, Favoris) garde son propre affichage. Les réglages ci-dessus deviennent les valeurs par défaut ; ajustez chaque onglet depuis le menu d\'affichage de l\'écran Drapeaux.</string>
+    <string name="settings_flags_per_tab_override_persist_failed">Impossible de mémoriser le réglage par onglet. Réessayez.</string>
 </resources>

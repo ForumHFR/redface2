@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.onEach
@@ -125,6 +127,40 @@ class FlagsViewModel @Inject constructor(
         )
 
     /**
+     * Display-settings bottom sheet state (#309). Tracks the RESOLVED view settings for the
+     * currently selected tab so the sheet's two switches reflect what the list is actually using
+     * (global, or this tab's override). The [FlagTab.Super] placeholder has no real [FlagType], so
+     * it falls back to the global pair — the trigger is hidden there anyway (no list to configure).
+     */
+    val flagsViewSettings: StateFlow<FlagsViewSettings> = selectedTab
+        .flatMapLatest { tab ->
+            when (val type = tab.flagType) {
+                null -> combine(
+                    userPreferencesRepository.observeFlagsGroupByCategory(),
+                    userPreferencesRepository.observeFlagsHideReadCategories(),
+                ) { group, hide -> FlagsViewSettings(group, hide) }
+                else -> userPreferencesRepository.observeFlagsViewSettings(type)
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = FlagsViewSettings(),
+        )
+
+    /**
+     * Per-tab override master switch (#309), surfaced so the bottom sheet can show + flip it and so
+     * the write routing in [setFlagsGroupByCategory] / [setFlagsHideReadCategories] can read the
+     * authoritative current value before deciding global vs per-type.
+     */
+    val flagsPerTabOverride: StateFlow<Boolean> = userPreferencesRepository.observeFlagsPerTabOverride()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false,
+        )
+
+    /**
      * Builds the UI state for an authenticated tab with a real [type]. Kept as a dedicated method
      * so the `flatMapLatest` chain stays readable. Both `observe(type)` and `observeCategories()`
      * are subscribed here — and only here.
@@ -167,14 +203,16 @@ class FlagsViewModel @Inject constructor(
         return combine(
             filteredFlags,
             categories,
-            userPreferencesRepository.observeFlagsGroupByCategory(),
-            userPreferencesRepository.observeFlagsHideReadCategories(),
-        ) { filtered, catsResult, groupByCategory, hideReadCategories ->
+            // #309 — resolved per-tab view settings (global, or this tab's override when the
+            // per-tab master switch is on). Replaces the two separate global pref flows; the
+            // resolution lives in the repository so this combine stays a 3-source map.
+            userPreferencesRepository.observeFlagsViewSettings(type),
+        ) { filtered, catsResult, viewSettings ->
             toFlagsListUiState(
                 flagsResult = filtered.result,
                 categoriesResult = catsResult,
-                groupByCategory = groupByCategory,
-                hideReadCategories = hideReadCategories,
+                groupByCategory = viewSettings.groupByCategory,
+                hideReadCategories = viewSettings.hideReadCategories,
                 keepFullyReadSections = filtered.keepFullyReadSections,
             )
         }
@@ -284,6 +322,43 @@ class FlagsViewModel @Inject constructor(
 
     fun setShowReadParticipatedTopics(value: Boolean) {
         _showReadParticipatedTopics.value = value
+    }
+
+    /**
+     * Bottom-sheet write for « grouper par catégorie » (#309). Routes to the per-type key when the
+     * per-tab master switch is on AND the active tab has a real [FlagType] (not Super); otherwise
+     * writes the global value. The override is re-read with `.first()` at write time so the routing
+     * always reflects the persisted truth even if the user just flipped it.
+     */
+    fun setFlagsGroupByCategory(enabled: Boolean) {
+        val type = _selectedTab.value.flagType
+        viewModelScope.launch {
+            if (type != null && userPreferencesRepository.observeFlagsPerTabOverride().first()) {
+                userPreferencesRepository.setFlagsGroupByCategoryForType(type, enabled)
+            } else {
+                userPreferencesRepository.setFlagsGroupByCategory(enabled)
+            }
+        }
+    }
+
+    /** Bottom-sheet write for « masquer les catégories sans non-lu » (#309). Same routing as
+     * [setFlagsGroupByCategory]: per-type when the override is on and the tab is real, else global. */
+    fun setFlagsHideReadCategories(enabled: Boolean) {
+        val type = _selectedTab.value.flagType
+        viewModelScope.launch {
+            if (type != null && userPreferencesRepository.observeFlagsPerTabOverride().first()) {
+                userPreferencesRepository.setFlagsHideReadCategoriesForType(type, enabled)
+            } else {
+                userPreferencesRepository.setFlagsHideReadCategories(enabled)
+            }
+        }
+    }
+
+    /** Flips the per-tab override master switch (#309) from the bottom sheet. */
+    fun setFlagsPerTabOverride(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesRepository.setFlagsPerTabOverride(enabled)
+        }
     }
 
     fun refresh() {
