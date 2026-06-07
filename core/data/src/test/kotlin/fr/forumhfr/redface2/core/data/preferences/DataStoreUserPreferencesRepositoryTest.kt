@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -181,6 +182,77 @@ class DataStoreUserPreferencesRepositoryTest {
         repository.setFlagsHideReadCategories(false)
         repository.observeFlagsHideReadCategories().test {
             assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeFlagsPerTabOverride defaults to false on an empty store`() = runTest(dispatcher) {
+        repository.observeFlagsPerTabOverride().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeFlagsViewSettings returns the global pair when the per-tab override is off`() = runTest(dispatcher) {
+        // Global = flat + hide-read on; per-type values are set but must be IGNORED while the
+        // override is off, so every tab resolves to the global pair.
+        repository.setFlagsGroupByCategory(false)
+        repository.setFlagsHideReadCategories(true)
+        repository.setFlagsGroupByCategoryForType(FlagType.RED, true)
+        repository.setFlagsHideReadCategoriesForType(FlagType.RED, false)
+
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            val settings = awaitItem()
+            assertFalse("grouped must reflect the global value, not the RED override", settings.groupByCategory)
+            assertTrue("hide-read must reflect the global value, not the RED override", settings.hideReadCategories)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeFlagsViewSettings reads per-type values, falling back to global per toggle`() = runTest(dispatcher) {
+        repository.setFlagsPerTabOverride(true)
+        // Global defaults: grouped on, hide-read off.
+        // CYAN customises ONLY grouped (off); its hide-read must fall back to the global false.
+        repository.setFlagsGroupByCategoryForType(FlagType.CYAN, false)
+        // RED customises ONLY hide-read (on); its grouped must fall back to the global true.
+        repository.setFlagsHideReadCategoriesForType(FlagType.RED, true)
+
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            val cyan = awaitItem()
+            assertFalse("CYAN grouped is its own override", cyan.groupByCategory)
+            assertFalse("CYAN hide-read falls back to the global false", cyan.hideReadCategories)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            val red = awaitItem()
+            assertTrue("RED grouped falls back to the global true", red.groupByCategory)
+            assertTrue("RED hide-read is its own override", red.hideReadCategories)
+            cancelAndIgnoreRemainingEvents()
+        }
+        // FAVORITE never customised anything → full global fallback.
+        repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+            val fav = awaitItem()
+            assertTrue("FAVORITE grouped is the global default", fav.groupByCategory)
+            assertFalse("FAVORITE hide-read is the global default", fav.hideReadCategories)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsGroupByCategoryForType is isolated per type`() = runTest(dispatcher) {
+        repository.setFlagsPerTabOverride(true)
+        repository.setFlagsGroupByCategoryForType(FlagType.CYAN, false)
+
+        // CYAN is flat; RED keeps the global grouped default (its per-type key is unset).
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertFalse(awaitItem().groupByCategory)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            assertTrue(awaitItem().groupByCategory)
             cancelAndIgnoreRemainingEvents()
         }
     }

@@ -1,8 +1,10 @@
 package fr.forumhfr.redface2.feature.settings
 
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
+import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -432,6 +434,23 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `hide-read switch stays enabled under per-tab override even when global grouped is off`() = runTest {
+        // #309 Codex review: with the per-tab override on, the global hide-read still serves as the
+        // fallback for a tab grouped per-type, so the Settings switch must NOT be disabled just
+        // because the GLOBAL grouped toggle is off.
+        repository.emitFlagsPerTabOverride(true)
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.FlagsGroupByCategoryChanged(false))
+
+        assertFalse(viewModel.state.value.flagsGroupByCategory)
+        assertTrue(
+            "per-tab override keeps the global hide-read editable as a fallback",
+            viewModel.state.value.canToggleFlagsHideReadCategories,
+        )
+    }
+
+    @Test
     fun `FlagsGroupByCategoryChanged reverts and raises the error flag on persist failure`() = runTest {
         repository.failOnFlagsGroupByCategorySet = true
         val viewModel = newViewModel()
@@ -465,6 +484,40 @@ class SettingsViewModelTest {
         assertFalse("must revert to the previous value on failure", viewModel.state.value.flagsHideReadCategories)
         assertFalse(viewModel.state.value.isUpdatingFlagsHideReadCategories)
         assertTrue(viewModel.state.value.flagsHideReadCategoriesError)
+    }
+
+    @Test
+    fun `FlagsPerTabOverrideChanged persists the flip and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("per-tab override is off by default", viewModel.state.value.flagsPerTabOverride)
+
+        viewModel.submit(SettingsIntent.FlagsPerTabOverrideChanged(true))
+
+        assertTrue(viewModel.state.value.flagsPerTabOverride)
+        assertFalse(viewModel.state.value.isUpdatingFlagsPerTabOverride)
+        assertFalse(viewModel.state.value.flagsPerTabOverrideError)
+        assertEquals(1, repository.flagsPerTabOverrideSetCalls)
+    }
+
+    @Test
+    fun `FlagsPerTabOverrideChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnFlagsPerTabOverrideSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.FlagsPerTabOverrideChanged(true))
+
+        assertFalse("must revert to the previous value on failure", viewModel.state.value.flagsPerTabOverride)
+        assertFalse(viewModel.state.value.isUpdatingFlagsPerTabOverride)
+        assertTrue(viewModel.state.value.flagsPerTabOverrideError)
+    }
+
+    @Test
+    fun `per-tab override hydrates from the persisted value on init`() = runTest {
+        repository.emitFlagsPerTabOverride(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue("init must hydrate the per-tab override from DataStore", viewModel.state.value.flagsPerTabOverride)
     }
 
     private fun newViewModel(): SettingsViewModel =
@@ -546,6 +599,29 @@ class SettingsViewModelTest {
             flagsHideReadCategories.value = enabled
         }
 
+        // #309 — per-tab override master switch. Same optimistic-flip seam as the toggles above so
+        // the Settings mirror tests can gate the write and assert the intermediate / revert states.
+        private val flagsPerTabOverride = MutableStateFlow(false)
+        var flagsPerTabOverrideSetCalls: Int = 0
+            private set
+        var failOnFlagsPerTabOverrideSet: Boolean = false
+
+        override fun observeFlagsPerTabOverride(): Flow<Boolean> = flagsPerTabOverride
+
+        override suspend fun setFlagsPerTabOverride(enabled: Boolean) {
+            flagsPerTabOverrideSetCalls += 1
+            check(!failOnFlagsPerTabOverrideSet) { "boom" }
+            flagsPerTabOverride.value = enabled
+        }
+
+        // Per-type resolution / writes are exercised by the Flags ViewModel, not Settings; stubbed.
+        override fun observeFlagsViewSettings(type: FlagType): Flow<FlagsViewSettings> =
+            MutableStateFlow(FlagsViewSettings())
+
+        override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) = Unit
+
+        override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
+
         fun emit(value: ProxyConfig) {
             config.value = value
         }
@@ -560,6 +636,10 @@ class SettingsViewModelTest {
 
         fun emitFlagsHideReadCategories(value: Boolean) {
             flagsHideReadCategories.value = value
+        }
+
+        fun emitFlagsPerTabOverride(value: Boolean) {
+            flagsPerTabOverride.value = value
         }
     }
 

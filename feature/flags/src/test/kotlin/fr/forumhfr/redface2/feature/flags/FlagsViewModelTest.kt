@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -30,6 +32,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -791,6 +794,210 @@ class FlagsViewModelTest {
         }
     }
 
+    @Test
+    fun `per-tab override resolves a per-type flat view while another tab stays grouped`() = runTest {
+        // #309: with the override on, each tab reads its own settings. Here CYAN is customised flat
+        // while RED keeps the global grouped default — the resolution must be tab-scoped.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = true, perTabOverride = true)
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        prefs.setFlagsGroupByCategoryForType(FlagType.CYAN, false)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            assertTrue(
+                "CYAN's per-type override is flat",
+                (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Flat,
+            )
+
+            vm.selectTab(FlagTab.Red)
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED, cat = 1))))
+            assertTrue(
+                "RED has no override → falls back to the global grouped default",
+                (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsGroupByCategory writes the global scope when the override is off`() = runTest {
+        // Override off: the bottom-sheet write must hit the GLOBAL key, so every tab flips, not
+        // just the one currently selected.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = true)
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped)
+
+            vm.setFlagsGroupByCategory(false)
+            assertTrue(
+                "CYAN flips to flat after the global write",
+                (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Flat,
+            )
+
+            vm.selectTab(FlagTab.Red)
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED, cat = 1))))
+            assertTrue(
+                "RED is flat too → the write landed on the global key, not a per-type one",
+                (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Flat,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsGroupByCategory writes the per-type scope when the override is on`() = runTest {
+        // Override on: the write must hit only the SELECTED tab's per-type key, leaving the others
+        // (and the global default) untouched.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = true, perTabOverride = true)
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped)
+
+            vm.setFlagsGroupByCategory(false) // CYAN selected → CYAN per-type only.
+            assertTrue(
+                "CYAN flips to flat via its per-type key",
+                (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Flat,
+            )
+
+            vm.selectTab(FlagTab.Red)
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED, cat = 1))))
+            assertTrue(
+                "RED stays grouped → the write did NOT touch the global default",
+                (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `flagsViewSettings tracks the resolved settings of the selected tab`() = runTest {
+        // The bottom sheet reads flagsViewSettings to render its switches; under the override it
+        // must follow the selected tab's resolution.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = true, perTabOverride = true)
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        prefs.setFlagsGroupByCategoryForType(FlagType.RED, false)
+
+        vm.flagsViewSettings.test {
+            assertTrue("CYAN resolves to the global grouped default", awaitItem().groupByCategory)
+            vm.selectTab(FlagTab.Red)
+            assertFalse("RED resolves to its per-type flat override", awaitItem().groupByCategory)
+            vm.selectTab(FlagTab.Cyan)
+            assertTrue("back on CYAN, grouped again", awaitItem().groupByCategory)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsHideReadCategories writes the global scope when the override is off`() = runTest {
+        // hide-read routing mirror of the group-by tests; asserted via flagsViewSettings.value since
+        // the cross-tab value is identical (global), which a StateFlow would dedup out of a turbine.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository()
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        assertFalse(vm.flagsViewSettings.value.hideReadCategories)
+        vm.setFlagsHideReadCategories(true)
+        assertTrue("CYAN reflects the write", vm.flagsViewSettings.value.hideReadCategories)
+        vm.selectTab(FlagTab.Red)
+        assertTrue(
+            "RED is on too → the write landed on the global key",
+            vm.flagsViewSettings.value.hideReadCategories,
+        )
+    }
+
+    @Test
+    fun `setFlagsHideReadCategories writes the per-type scope when the override is on`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(perTabOverride = true)
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.setFlagsHideReadCategories(true) // CYAN selected
+        assertTrue("CYAN per-type hide-read on", vm.flagsViewSettings.value.hideReadCategories)
+        vm.selectTab(FlagTab.Red)
+        assertFalse(
+            "RED untouched → global false; the write did not leak across tabs",
+            vm.flagsViewSettings.value.hideReadCategories,
+        )
+    }
+
+    @Test
+    fun `toggle routing uses the optimistic master value before the override write persists`() = runTest {
+        // #309 Codex review: routing must honour the just-flipped master even while its DataStore
+        // write is still in flight. Gate the persisted master write so `perTab` never updates, then
+        // assert the group write went to the PER-TYPE key (driven by the optimistic value), not the
+        // global one. (Resolution/display catches up once the master persists; routing must not.)
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository() // persisted override OFF
+        prefs.blockPerTabOverrideSetUntil = kotlinx.coroutines.CompletableDeferred()
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.setFlagsPerTabOverride(true) // optimistic ON; persisted write GATED (never commits here)
+        vm.setFlagsGroupByCategory(false)
+
+        assertTrue(
+            "the group write must hit the per-type key via the optimistic master",
+            prefs.lastGroupByWriteWasPerType == true,
+        )
+    }
+
+    @Test
+    fun `flipping the override then a toggle in sequence routes per-type`() = runTest {
+        // Regression guard for the write-routing fix: the toggle write must honour the master value
+        // the user just flipped (read from flagsPerTabOverride.value, consistent with the rendered
+        // switch), so it routes per-type and leaves the global default (other tabs) untouched.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository(groupByCategory = true) // override OFF initially
+        val vm = FlagsViewModel(auth, flags, forum, prefs)
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(stubFlag(1, FlagType.CYAN, cat = 1))))
+            assertTrue((awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped)
+
+            vm.setFlagsPerTabOverride(true) // flip master…
+            vm.setFlagsGroupByCategory(false) // …then immediately flip group on CYAN
+            assertTrue(
+                "CYAN flips to flat via its per-type key",
+                (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Flat,
+            )
+
+            vm.selectTab(FlagTab.Red)
+            flags.emit(FlagType.RED, FlagsResult.Success(listOf(stubFlag(2, FlagType.RED, cat = 1))))
+            assertTrue(
+                "RED stays grouped → the toggle honoured the just-flipped master and wrote per-type",
+                (awaitItem() as FlagsListUiState.Success).content is FlagsContent.Grouped,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     /**
      * Builds the ViewModel with a default (grouped-on, hide-read-off) [FakeUserPreferencesRepository]
      * so the existing tests keep asserting on the grouped sections. Tests that exercise the flat
@@ -972,16 +1179,33 @@ class FlagsViewModelTest {
     }
 
     /**
-     * Fake [UserPreferencesRepository] exposing only the two Drapeaux view preferences the
-     * ViewModel reads (group-by-category, hide-read-categories) as writable hot flows; the proxy
-     * and topic-cache members are stubbed at their defaults (the ViewModel never touches them).
+     * Fake [UserPreferencesRepository] modelling the Drapeaux view preferences the ViewModel reads:
+     * the global group-by-category / hide-read pair, the #309 per-tab override master switch, and
+     * the per-type overrides — as writable hot flows. [observeFlagsViewSettings] resolves them the
+     * same way the real DataStore impl does (override off → global; on → per-type value, else global
+     * fallback). The proxy and topic-cache members are stubbed at their defaults (untouched here).
      */
     private class FakeUserPreferencesRepository(
         groupByCategory: Boolean = true,
         hideReadCategories: Boolean = false,
+        perTabOverride: Boolean = false,
     ) : UserPreferencesRepository {
         private val groupBy = MutableStateFlow(groupByCategory)
         private val hideRead = MutableStateFlow(hideReadCategories)
+        private val perTab = MutableStateFlow(perTabOverride)
+        private val perTypeGroup: Map<FlagType, MutableStateFlow<Boolean?>> =
+            FlagType.entries.associateWith { MutableStateFlow<Boolean?>(null) }
+        private val perTypeHide: Map<FlagType, MutableStateFlow<Boolean?>> =
+            FlagType.entries.associateWith { MutableStateFlow<Boolean?>(null) }
+
+        /** When set, holds the persisted master write so a test can prove routing uses the
+         * OPTIMISTIC value (the persisted `perTab` never updates while gated). */
+        var blockPerTabOverrideSetUntil: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
+        /** Records whether the most recent group-by write hit the per-type key (`true`) or the
+         * global key (`false`) — lets a test assert the routing decision directly. */
+        var lastGroupByWriteWasPerType: Boolean? = null
+            private set
 
         override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
         override suspend fun saveProxyConfig(config: ProxyConfig) = Unit
@@ -992,11 +1216,42 @@ class FlagsViewModelTest {
         override fun observeFlagsGroupByCategory(): Flow<Boolean> = groupBy
         override suspend fun setFlagsGroupByCategory(enabled: Boolean) {
             groupBy.value = enabled
+            lastGroupByWriteWasPerType = false
         }
 
         override fun observeFlagsHideReadCategories(): Flow<Boolean> = hideRead
         override suspend fun setFlagsHideReadCategories(enabled: Boolean) {
             hideRead.value = enabled
+        }
+
+        override fun observeFlagsPerTabOverride(): Flow<Boolean> = perTab
+        override suspend fun setFlagsPerTabOverride(enabled: Boolean) {
+            blockPerTabOverrideSetUntil?.await()
+            perTab.value = enabled
+        }
+
+        override fun observeFlagsViewSettings(type: FlagType): Flow<FlagsViewSettings> =
+            combine(
+                groupBy,
+                hideRead,
+                perTab,
+                perTypeGroup.getValue(type),
+                perTypeHide.getValue(type),
+            ) { global, globalHide, override, typeGroup, typeHide ->
+                if (override) {
+                    FlagsViewSettings(typeGroup ?: global, typeHide ?: globalHide)
+                } else {
+                    FlagsViewSettings(global, globalHide)
+                }
+            }
+
+        override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) {
+            perTypeGroup.getValue(type).value = enabled
+            lastGroupByWriteWasPerType = true
+        }
+
+        override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) {
+            perTypeHide.getValue(type).value = enabled
         }
 
         fun setGroupBy(value: Boolean) {
@@ -1005,6 +1260,10 @@ class FlagsViewModelTest {
 
         fun setHideRead(value: Boolean) {
             hideRead.value = value
+        }
+
+        fun setPerTabOverride(value: Boolean) {
+            perTab.value = value
         }
     }
 }

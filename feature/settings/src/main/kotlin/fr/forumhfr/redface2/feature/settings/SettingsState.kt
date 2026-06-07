@@ -41,6 +41,13 @@ data class SettingsState(
     val isUpdatingFlagsHideReadCategories: Boolean = false,
     val flagsHideReadCategoriesError: Boolean = false,
     val flagsHideReadCategoriesTouchedLocally: Boolean = false,
+    // #309 — per-tab display override master switch. Same optimistic-flip machinery; when on, each
+    // Drapeaux tab keeps its own view settings (tuned from the Drapeaux bottom sheet), the two
+    // toggles above acting as the shared fallback. Default false (global view for every tab).
+    val flagsPerTabOverride: Boolean = false,
+    val isUpdatingFlagsPerTabOverride: Boolean = false,
+    val flagsPerTabOverrideError: Boolean = false,
+    val flagsPerTabOverrideTouchedLocally: Boolean = false,
 ) {
     val canSave: Boolean
         get() = !isSaving
@@ -54,8 +61,14 @@ data class SettingsState(
     val canToggleFlagsGroupByCategory: Boolean
         get() = !isUpdatingFlagsGroupByCategory
 
+    // The global hide-read toggle is meaningful when the global grouped view is on, OR when the
+    // per-tab override is on (it still serves as the fallback for a tab that is grouped per-type but
+    // has no per-type hide-read value). #309 Codex review.
     val canToggleFlagsHideReadCategories: Boolean
-        get() = flagsGroupByCategory && !isUpdatingFlagsHideReadCategories
+        get() = (flagsGroupByCategory || flagsPerTabOverride) && !isUpdatingFlagsHideReadCategories
+
+    val canToggleFlagsPerTabOverride: Boolean
+        get() = !isUpdatingFlagsPerTabOverride
 }
 
 sealed interface SettingsError {
@@ -98,4 +111,7 @@ sealed interface SettingsIntent {
     // IgnoreTopicCacheChanged: the boolean is the desired post-flip state.
     data class FlagsGroupByCategoryChanged(val enabled: Boolean) : SettingsIntent
     data class FlagsHideReadCategoriesChanged(val enabled: Boolean) : SettingsIntent
+
+    // #309 — per-tab display override master switch.
+    data class FlagsPerTabOverrideChanged(val enabled: Boolean) : SettingsIntent
 }

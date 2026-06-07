@@ -22,6 +22,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -29,16 +30,20 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -50,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
@@ -98,8 +104,23 @@ fun FlagsRoute(
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val removeFlagState by viewModel.removeFlagState.collectAsStateWithLifecycle()
     val removeFlagEvent by viewModel.removeFlagEvent.collectAsStateWithLifecycle()
+    val flagsViewSettings by viewModel.flagsViewSettings.collectAsStateWithLifecycle()
+    val flagsPerTabOverride by viewModel.flagsPerTabOverride.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // #309 — display-settings bottom sheet. Opened from the header « Affichage » action; the trigger
+    // is only offered when there is a real list to configure (authenticated AND a real FlagType tab,
+    // i.e. not the Super placeholder).
+    var showViewSettingsSheet by remember { mutableStateOf(false) }
+    val canConfigureView = authState is AuthState.Authenticated && selectedTab.flagType != null
+
+    // If the screen stops being configurable while the sheet is open (session expired, or the user
+    // lands on the Super tab), clear the flag so the sheet can't silently reappear on the next
+    // configurable tab/re-auth.
+    LaunchedEffect(canConfigureView) {
+        if (!canConfigureView) showViewSettingsSheet = false
+    }
 
     // One-shot snackbar for the delflag outcome (#99). Keyed on the event instance so a
     // config change does not replay it ; consumed once shown so it never re-fires.
@@ -137,7 +158,14 @@ fun FlagsRoute(
                     .statusBarsPadding()
                     .navigationBarsPadding(),
             ) {
-                FlagsHeader(topBarActions = topBarActions)
+                FlagsHeader(
+                    topBarActions = topBarActions,
+                    onOpenViewSettings = if (canConfigureView) {
+                        { showViewSettingsSheet = true }
+                    } else {
+                        null
+                    },
+                )
 
                 // Render nothing while authState is null (cookie jar warming up). Same
                 // anti-flicker convention as PR #91; defaulting to "Anonymous" here would
@@ -165,6 +193,23 @@ fun FlagsRoute(
                 }
             }
         }
+    }
+
+    // #309 — display-settings bottom sheet. Reflects + edits the current tab's resolved view
+    // settings (or the global pair when « par onglet » is off). Writes route through the ViewModel
+    // so they land on the right scope; the sheet stays open so the user sees the list re-render live.
+    if (showViewSettingsSheet && canConfigureView) {
+        FlagsViewSettingsSheet(
+            selectedTab = selectedTab,
+            settings = flagsViewSettings,
+            perTabOverride = flagsPerTabOverride,
+            actions = FlagsViewSettingsActions(
+                onPerTabOverrideChange = viewModel::setFlagsPerTabOverride,
+                onGroupByCategoryChange = viewModel::setFlagsGroupByCategory,
+                onHideReadCategoriesChange = viewModel::setFlagsHideReadCategories,
+                onDismiss = { showViewSettingsSheet = false },
+            ),
+        )
     }
 
     // Confirmation gate before any network call (#99). The dialog renders only while the
@@ -222,6 +267,7 @@ private fun flagTypeLabel(type: FlagType): Int = when (type) {
 @Composable
 private fun FlagsHeader(
     topBarActions: @Composable (() -> Unit)?,
+    onOpenViewSettings: (() -> Unit)?,
 ) {
     Row(
         modifier = Modifier
@@ -235,10 +281,164 @@ private fun FlagsHeader(
             style = MaterialTheme.typography.headlineMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        // Refresh moved to a PullToRefreshBox (swipe down) on the list — the header now only
-        // carries the global account menu slot.
-        topBarActions?.invoke()
+        // Refresh moved to a PullToRefreshBox (swipe down) on the list — the header now carries the
+        // display-settings trigger (#309, text-only: the icons-extended dependency is not on this
+        // module's classpath) and the global account menu slot.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            onOpenViewSettings?.let { open ->
+                TextButton(onClick = open) {
+                    Text(stringResource(R.string.flags_view_settings_action))
+                }
+            }
+            topBarActions?.invoke()
+        }
     }
+}
+
+/**
+ * Display-settings bottom sheet (#309). Three switches edit the active scope: the per-tab override
+ * master switch, then « grouper par catégorie » and « masquer les catégories sans non-lu » (the
+ * latter disabled in the flat view, mirroring Settings). A caption spells out the current scope so
+ * the user knows whether a flip touches every tab or only [selectedTab]. Writes route through the
+ * ViewModel ([onPerTabOverrideChange]/[onGroupByCategoryChange]/[onHideReadCategoriesChange]) so
+ * they land on the right key; the sheet stays open so the list re-renders live underneath.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FlagsViewSettingsSheet(
+    selectedTab: FlagTab,
+    settings: FlagsViewSettings,
+    perTabOverride: Boolean,
+    actions: FlagsViewSettingsActions,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    ModalBottomSheet(
+        onDismissRequest = actions.onDismiss,
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = stringResource(R.string.flags_view_settings_title),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                val scope = if (perTabOverride) {
+                    stringResource(
+                        R.string.flags_view_settings_scope_per_tab,
+                        stringResource(flagTabLabel(selectedTab)),
+                    )
+                } else {
+                    stringResource(R.string.flags_view_settings_scope_global)
+                }
+                Text(
+                    text = scope,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            ViewSettingsSwitchRow(
+                title = stringResource(R.string.flags_view_settings_per_tab_title),
+                description = stringResource(R.string.flags_view_settings_per_tab_description),
+                checked = perTabOverride,
+                enabled = true,
+                onCheckedChange = actions.onPerTabOverrideChange,
+            )
+            ViewSettingsSwitchRow(
+                title = stringResource(R.string.flags_view_settings_group_title),
+                description = stringResource(R.string.flags_view_settings_group_description),
+                checked = settings.groupByCategory,
+                enabled = true,
+                onCheckedChange = actions.onGroupByCategoryChange,
+            )
+            ViewSettingsSwitchRow(
+                title = stringResource(R.string.flags_view_settings_hide_read_title),
+                description = stringResource(R.string.flags_view_settings_hide_read_description),
+                checked = settings.hideReadCategories,
+                // Hiding read categories is only meaningful in the grouped view (mirrors Settings).
+                enabled = settings.groupByCategory,
+                onCheckedChange = actions.onHideReadCategoriesChange,
+            )
+
+            TextButton(
+                // Animate the sheet out (M3 stable pattern) before removing it from composition,
+                // instead of an abrupt `if`-driven teardown. Swipe/scrim dismissals already animate
+                // via onDismissRequest.
+                onClick = {
+                    scope.launch { sheetState.hide() }.invokeOnCompletion {
+                        if (!sheetState.isVisible) actions.onDismiss()
+                    }
+                },
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text(stringResource(R.string.flags_view_settings_done))
+            }
+        }
+    }
+}
+
+/** One label + description + Material 3 [Switch] row for the display-settings sheet (#309). */
+@Composable
+private fun ViewSettingsSwitchRow(
+    title: String,
+    description: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = onCheckedChange,
+        )
+    }
+}
+
+/**
+ * Human label for a real [FlagTab], used in the display-settings sheet scope caption (#309). RED
+ * uses the full « Lus uniquement » (not the cramped « Lu » tab label) since the caption has room.
+ * [FlagTab.Super] has no list to configure (the trigger is hidden there), so its label is only a
+ * defensive fallback.
+ */
+private fun flagTabLabel(tab: FlagTab): Int = when (tab) {
+    FlagTab.Cyan -> R.string.flags_tab_my_topics
+    FlagTab.Red -> R.string.flags_type_read_only
+    FlagTab.Favorite -> R.string.flags_tab_favorite
+    FlagTab.Super -> R.string.flags_tab_super
 }
 
 @Composable
@@ -701,6 +901,18 @@ private data class AuthenticatedActions(
     val onRefresh: () -> Unit,
     val onLoginRequested: () -> Unit,
     val onRequestRemoveFlag: (Flag) -> Unit,
+)
+
+/**
+ * Callback bundle for [FlagsViewSettingsSheet] (#309), grouped so the sheet stays under the detekt
+ * parameter-count threshold. The three `*Change` writes route through the ViewModel (which decides
+ * global vs per-type scope); [onDismiss] closes the sheet.
+ */
+private data class FlagsViewSettingsActions(
+    val onPerTabOverrideChange: (Boolean) -> Unit,
+    val onGroupByCategoryChange: (Boolean) -> Unit,
+    val onHideReadCategoriesChange: (Boolean) -> Unit,
+    val onDismiss: () -> Unit,
 )
 
 @Composable
