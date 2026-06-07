@@ -818,6 +818,28 @@ private fun RedfaceNavHost(
                             scrollTo = null,
                         )
                     },
+                    onBack = {
+                        // #285 — explicit back affordance in the topic top bar. Pop to the screen that
+                        // opened the topic (list / flags). Guard size > 1 so we never pop a tab root
+                        // (mirrors the global back handling used across the other entries).
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    onNavigateToLastPage = { lastPage ->
+                        // #226 — the plain reply overflowed onto a freshly created page. Re-route IN
+                        // PLACE to that last page with a fresh submitSignal so its ViewModel force-
+                        // refreshes and anchors the new post at the bottom (ScrollToEndOfPage), instead
+                        // of leaving the user on the stale form page. Indexed set (not removeAt + add)
+                        // for the same single-mutation reason as onOpenPage (#282).
+                        backStack[backStack.lastIndex] = TopicRoute(
+                            cat = route.cat,
+                            post = route.post,
+                            page = lastPage,
+                            scrollTo = null,
+                            submitSignal = System.currentTimeMillis(),
+                        )
+                    },
                 )
             }
             entry<PostEditorRoute> { route ->

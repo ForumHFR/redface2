@@ -217,6 +217,16 @@ class TopicViewModel @AssistedInject constructor(
                     )
                 }
                 endFirstContentSectionIfNeeded()
+                // #226 — plain-reply overflow: the reply created a new page but HFR anchored the page
+                // the form was on (request.page). The force-refreshed page reports the up-to-date
+                // totalPages; if it now exceeds request.page (plain reply → scrollTo null; quote/edit
+                // carry a #t{N} scrollTo and are excluded), the fresh post lives on the last page, not
+                // here. Re-route there instead of scrolling this stale page. A same-page reply keeps
+                // totalPages == request.page and falls through to the #200 ScrollToEndOfPage path.
+                if (request.scrollTo == null && topic.totalPages > request.page) {
+                    _effects.send(TopicEffect.NavigateToLastPage(topic.totalPages))
+                    return@launch
+                }
                 maybeEmitScroll(topic.posts.map { it.numreponse })
                 // Skip the page+1 warmup here — the user just submitted and is unlikely to need
                 // page+1 immediately; the next normal navigation will trigger the warmup through

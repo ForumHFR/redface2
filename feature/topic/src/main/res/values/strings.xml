@@ -2,6 +2,10 @@
     <string name="topic_scroll_to">Scroll ciblé demandé vers le post %1$d.</string>
     <string name="topic_reply">Répondre depuis ce topic</string>
     <string name="topic_loading">Chargement…</string>
+    <!-- #285 — top app bar : back affordance (content description) + fallback title shown while
+         the topic page has not loaded yet (or errored), so the bar never reads blank. -->
+    <string name="topic_back">Retour</string>
+    <string name="topic_topbar_fallback_title">Sujet</string>
     <string name="topic_error_title">Erreur de chargement</string>
     <string name="topic_error_body">Impossible d’ouvrir la page %1$d.\n\n%2$s</string>
     <string name="topic_caption">post %1$d • page %2$d / %3$d</string>

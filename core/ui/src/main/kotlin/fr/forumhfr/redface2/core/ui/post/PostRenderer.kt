@@ -18,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
@@ -135,8 +136,20 @@ internal fun isBareQuote(quote: PostBlock.Quote): Boolean =
 fun PostRenderer(
     content: PostContent,
     modifier: Modifier = Modifier,
+    selectable: Boolean = true,
 ) {
-    PostBlocksRenderer(blocks = content.blocks, modifier = modifier, quoteDepth = 0)
+    if (selectable) {
+        // #281 — allow selecting / copying a post's text. The SelectionContainer is wrapped at this
+        // ENTRY POINT only, never inside the recursive PostBlocksRenderer (Quote/Spoiler): a nested
+        // SelectionContainer silently breaks selection. Links (LinkAnnotation.Url) stay tappable
+        // inside a SelectionContainer; inline media carry a U+FFFC placeholder that can pollute a
+        // copied selection spanning them (known, acceptable limitation).
+        SelectionContainer(modifier = modifier) {
+            PostBlocksRenderer(blocks = content.blocks, quoteDepth = 0)
+        }
+    } else {
+        PostBlocksRenderer(blocks = content.blocks, modifier = modifier, quoteDepth = 0)
+    }
 }
 
 @Composable

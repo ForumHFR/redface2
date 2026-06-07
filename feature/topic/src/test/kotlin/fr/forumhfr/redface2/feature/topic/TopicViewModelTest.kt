@@ -480,6 +480,35 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `submitSignal without scrollTo on an overflowed reply emits NavigateToLastPage (#226)`() = runTest {
+        // #226 — the plain reply was submitted from page 20's form, but it overflowed onto a freshly
+        // created page 21. HFR anchored the form's page (20) so the force refresh of page 20 reports
+        // an up-to-date totalPages = 21 > request.page = 20. The new post lives on page 21, not here,
+        // so the ViewModel must re-route there (NavigateToLastPage) rather than ScrollToEndOfPage on
+        // the stale page 20 (which would scroll to the pre-overflow last post and confuse the user).
+        val overflowedTopic = fakeTopic(
+            page = 20,
+            totalPages = 21,
+            posts = listOf(fakePost(1), fakePost(2), fakePost(3)),
+        )
+        val repository = FakeTopicRepository(
+            flowsToReturn = emptyList(),
+            refreshTopicsToReturn = listOf(overflowedTopic),
+        )
+
+        val viewModel = TopicViewModel(
+            request = topicRequest(page = 20, scrollTo = null, submitSignal = 123L),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.NavigateToLastPage(21), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `normal load without submitSignal does not emit ScrollToEndOfPage`() = runTest {
         // Regression guard: ScrollToEndOfPage is gated on submitSignal != null. A normal
         // deep-link navigation (cache-aside) must never emit it, even when scrollTo is null,
