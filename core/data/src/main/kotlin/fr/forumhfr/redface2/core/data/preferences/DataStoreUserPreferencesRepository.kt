@@ -16,6 +16,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
@@ -109,6 +110,10 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     override fun observeFlagsViewSettings(type: FlagType): Flow<FlagsViewSettings> =
         dataStore.data
             .map { prefs -> resolveFlagsViewSettings(prefs, type) }
+            // `dataStore.data` re-emits the whole snapshot on ANY write (proxy, another tab's
+            // per-type key, …); distinctUntilChanged keeps this flow quiet unless THIS type's
+            // resolved settings actually change, so the Flags combine doesn't churn on unrelated edits.
+            .distinctUntilChanged()
             // Fall back to the #179 global defaults (grouped on, hide-read off) on a read error.
             .catch { emit(FlagsViewSettings()) }
 
@@ -133,6 +138,11 @@ class DataStoreUserPreferencesRepository @Inject constructor(
      * returned verbatim; with it on, each toggle reads the per-type key and falls back to the
      * matching global value when that tab key is unset. The global defaults (grouped on,
      * hide-read off) are applied here so an empty DataStore yields the #179 behaviour.
+     *
+     * Per-type keys are intentionally **sticky**: turning the override off does not clear them, so
+     * re-enabling it later restores each tab's previously customised values (rather than silently
+     * re-inheriting the global pair). This is the "remember my per-tab tuning" contract; the keys
+     * simply sit dormant while the override is off.
      */
     private fun resolveFlagsViewSettings(prefs: Preferences, type: FlagType): FlagsViewSettings {
         val globalGroup = prefs[KEY_FLAGS_GROUP_BY_CATEGORY] ?: true

@@ -101,9 +101,17 @@ L'écran le plus important de l'app. Affiche les topics suivis par l'utilisateur
 - Chaque catégorie est une bande séparatrice (`stickyHeader`). Par défaut, les **catégories vides sont conservées** (parité web) avec un placeholder par onglet (« Aucun nouveau message » pour cyan, « Aucun sujet dans cette catégorie » sinon).
 - Le regroupement est **purement client-side** : group-by sur `Flag.cat` de la liste plate déjà chargée, aucun fetch authentifié supplémentaire (invariant prefetch-non-auth). Une catégorie absente du catalogue n'est jamais filtrée : elle tombe en section « inconnue » en fin de liste (anti-régression #251).
 
-**Préférences d'affichage (#179, persistées via `UserPreferencesRepository` / DataStore, réglées dans Réglages > Drapeaux)** :
+**Préférences d'affichage (#179, persistées via `UserPreferencesRepository` / DataStore)** :
 - **Grouper par catégorie** (défaut : activé) : désactivé, l'écran rend la **liste à plat** héritée (tous les drapeaux d'un coup, ordre dernière réponse, sans bandes de catégorie). Permet de conserver la lecture à plat des drapeaux.
 - **Masquer les catégories sans message non lu** (défaut : désactivé = parité web) : en vue groupée, cache les catégories qui n'ont aucun drapeau non lu. Le toggle cyan « +lus » **prime** sur ce filtre : afficher les sujets participés déjà lus garde leurs catégories visibles (sinon les deux réglages se contrediraient). Sans effet en vue à plat. Si le filtre vide toutes les sections, un placeholder « Aucune catégorie avec un message non lu » est affiché (corps jamais blanc, ancre pull-to-refresh préservée #229).
+
+**Réglages par type de drapeau (#309)** : un master **« Réglages différents par onglet »** (défaut : désactivé) contrôle la portée des deux préférences ci-dessus :
+- **désactivé** : un réglage **global** unique partagé par tous les onglets ;
+- **activé** : chaque type de drapeau (cyan / rouge / favoris) garde ses propres valeurs, avec **repli sur la valeur globale toggle par toggle** (`UserPreferencesRepository.observeFlagsViewSettings(type)` résout global vs per-type). Les clés per-type sont **sticky** : désactiver le master ne les efface pas, le réactiver restaure le réglage par onglet précédent.
+
+**Deux surfaces de réglage** (miroir) :
+- un **bottom sheet M3** (`ModalBottomSheet`, « Affichage ») ouvert depuis l'en-tête de l'écran Drapeaux — masqué sur l'onglet Super (placeholder) et en anonyme ; il édite la portée courante (globale, ou l'onglet sélectionné quand le master est activé) et affiche un libellé de portée explicite ;
+- le miroir dans **Réglages > Drapeaux** (master « Réglages différents par onglet » + les deux toggles globaux qui servent de valeurs par défaut/repli).
 
 **Actions sur un topic :**
 - Tap → ouvrir le topic à la dernière position non lue
