@@ -283,7 +283,8 @@ internal fun Modifier.topicPageSwipe(
                 // `committed` latch cannot span the inter-page transition (the incoming page is a fresh
                 // composition with its own latch). Gating at `down`, before the gesture arms/follows, is
                 // required: merely dropping `onOpenPage` after the slide-out would still park the page
-                // off-screen (the very freeze). See #282.
+                // off-screen (the very freeze). See #282. (A `down` that lands while still RESUMED but
+                // whose slop is crossed mid-transition is safe: the `committed` latch blocks a 2nd fire.)
                 if (!handlers.enabled()) return@awaitEachGesture
                 val velocityTracker = VelocityTracker()
                 velocityTracker.addPosition(down.uptimeMillis, down.position)

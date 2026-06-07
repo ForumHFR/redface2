@@ -503,13 +503,15 @@ private fun RedfaceNavHost(
                 backStack.removeAt(backStack.lastIndex)
             }
         },
-        // #282 — a topic page change (swipe) replaces the top TopicRoute with the same route at a
-        // new page; our gesture already slides the outgoing page off-screen, so the default 700 ms
-        // NavDisplay cross-fade is redundant AND keeps the incoming entry below RESUMED for its whole
-        // duration — exactly the window the swipe is gated off. Skipping it for TopicRoute→TopicRoute
-        // collapses that dead-zone to ~one frame. Every other transition keeps nav3's default.
+        // #282 — a topic page change (swipe) replaces the top TopicRoute with the same route at a new
+        // page; our gesture already slides the outgoing page off-screen, so the default 700 ms NavDisplay
+        // cross-fade is redundant AND keeps the incoming entry below RESUMED for its whole duration —
+        // exactly the window the swipe is gated off. Making the FORWARD topic→topic transition instant
+        // collapses that dead-zone to ~one frame. The pop direction ALWAYS cross-fades: a page change is
+        // always a forward in-place replace (never a pop), so a genuine back-pop never goes instant even
+        // if two TopicRoute entries ever coexist. Every other transition keeps nav3's default cross-fade.
         transitionSpec = { navContentTransform(initialState, targetState) },
-        popTransitionSpec = { navContentTransform(initialState, targetState) },
+        popTransitionSpec = { navCrossfade() },
         entryDecorators = listOf(
             rememberSaveableStateHolderNavEntryDecorator(),
             rememberViewModelStoreNavEntryDecorator(),
@@ -981,26 +983,40 @@ private fun resetStack(
 /** Default NavDisplay cross-fade duration, mirroring nav3 1.1.1 `defaultTransitionSpec` (700 ms). */
 private const val NAV_CROSSFADE_MILLIS = 700
 
+/** nav3 1.1.1 default transition: a 700 ms cross-fade (mirrors androidx `defaultTransitionSpec`). */
+private fun navCrossfade(): ContentTransform =
+    fadeIn(tween(NAV_CROSSFADE_MILLIS)) togetherWith fadeOut(tween(NAV_CROSSFADE_MILLIS))
+
 /**
- * Marks a [TopicRoute] NavEntry so [navContentTransform] can recognise a topic page change without
- * relying on the route type: nav3 1.1.1 exposes `Scene.key` as `route.toString()` (a String), not
- * the route object, so an `is TopicRoute` test on the scene key would never match. The entry's
- * public metadata is the stable signal instead.
+ * Marks a [TopicRoute] NavEntry so [isTopicScene] can recognise a topic scene without relying on the
+ * route type: nav3 1.1.1 exposes `Scene.key` as `route.toString()` (a String), not the route object,
+ * so an `is TopicRoute` test on the scene key would never match. The entry's public metadata is the
+ * stable signal instead.
  */
-private const val TOPIC_SCENE_METADATA_KEY = "fr.forumhfr.redface2.topicScene"
+internal const val TOPIC_SCENE_METADATA_KEY = "fr.forumhfr.redface2.topicScene"
+
+/**
+ * True iff [metadata] carries the topic-scene marker. Null/empty/other-keys/false → false. Extracted
+ * as a pure function so the marker contract (incl. the empty-`entries` → null case) is unit-testable
+ * without a Compose/nav3 runtime.
+ */
+internal fun isTopicSceneMetadata(metadata: Map<String, Any>?): Boolean =
+    metadata?.get(TOPIC_SCENE_METADATA_KEY) == true
 
 /** True when this scene's top entry is a [TopicRoute] (tagged via [TOPIC_SCENE_METADATA_KEY]). */
 private fun Scene<NavKey>.isTopicScene(): Boolean =
-    entries.lastOrNull()?.metadata?.get(TOPIC_SCENE_METADATA_KEY) == true
+    isTopicSceneMetadata(entries.lastOrNull()?.metadata)
 
 /**
- * ContentTransform for a NavDisplay transition: instant for a topic page change (see #282), and
- * nav3's default 700 ms cross-fade for every other navigation (preserved verbatim). A page change
- * is detected by both the outgoing and incoming scene being a topic scene.
+ * Forward ContentTransform for a NavDisplay transition: instant for a topic→topic FORWARD transition
+ * (the swipe page change is an in-place backStack replace — always forward, never a pop — collapsing
+ * the dead-zone, see #282), nav3's default 700 ms cross-fade otherwise. Only used for the forward
+ * direction; the pop direction always uses [navCrossfade]. A deep-link reset that swaps one topic for
+ * another while already in a topic would also be instant here, which is benign.
  */
 private fun navContentTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform =
     if (from.isTopicScene() && to.isTopicScene()) {
         EnterTransition.None togetherWith ExitTransition.None
     } else {
-        fadeIn(tween(NAV_CROSSFADE_MILLIS)) togetherWith fadeOut(tween(NAV_CROSSFADE_MILLIS))
+        navCrossfade()
     }
