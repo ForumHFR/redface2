@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.core.net.toUri
@@ -42,6 +43,7 @@ import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.account.RedfaceAccountMenu
 import fr.forumhfr.redface2.feature.auth.LoginScreen
@@ -280,7 +282,17 @@ private data class ProfileSheetRequest(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RedfaceApp(intent: Intent?) {
-    RedfaceTheme {
+    // #286 — resolve the persisted theme selection before applying RedfaceTheme. SYSTEM (default)
+    // keeps the historical isSystemInDarkTheme() behaviour; LIGHT/DARK force the app theme.
+    val themeViewModel: AppThemeViewModel = hiltViewModel()
+    val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
+    val amoledEnabled by themeViewModel.amoledEnabled.collectAsStateWithLifecycle()
+    val darkTheme = when (themeMode) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+    RedfaceTheme(darkTheme = darkTheme, amoledTheme = amoledEnabled) {
         val flagsBackStack = rememberNavBackStack(FlagsListRoute)
         val forumBackStack = rememberNavBackStack(ForumRoute)
         val searchBackStack = rememberNavBackStack(SearchRoute)

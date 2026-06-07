@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.settings
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.CompletableDeferred
@@ -520,6 +521,74 @@ class SettingsViewModelTest {
         assertTrue("init must hydrate the per-tab override from DataStore", viewModel.state.value.flagsPerTabOverride)
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Theme preferences (#286)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates theme preferences from storage`() = runTest {
+        repository.emitThemeMode(ThemeMode.DARK)
+        repository.emitAmoledEnabled(true)
+
+        val viewModel = newViewModel()
+        val state = viewModel.state.value
+
+        assertEquals(ThemeMode.DARK, state.themeMode)
+        assertTrue(state.amoledEnabled)
+    }
+
+    @Test
+    fun `ThemeModeChanged persists the new mode and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals("SYSTEM is the default", ThemeMode.SYSTEM, viewModel.state.value.themeMode)
+
+        viewModel.submit(SettingsIntent.ThemeModeChanged(ThemeMode.DARK))
+
+        val state = viewModel.state.value
+        assertEquals(ThemeMode.DARK, state.themeMode)
+        assertFalse(state.isUpdatingThemeMode)
+        assertFalse(state.themeModeError)
+        assertEquals(1, repository.themeModeSetCalls)
+        assertEquals(ThemeMode.DARK, repository.lastThemeModeSet)
+    }
+
+    @Test
+    fun `ThemeModeChanged reverts to the previous mode and raises the error flag on persist failure`() = runTest {
+        repository.failOnThemeModeSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ThemeModeChanged(ThemeMode.LIGHT))
+
+        val state = viewModel.state.value
+        assertEquals("must revert to the previous mode on failure", ThemeMode.SYSTEM, state.themeMode)
+        assertFalse(state.isUpdatingThemeMode)
+        assertTrue(state.themeModeError)
+    }
+
+    @Test
+    fun `AmoledEnabledChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("AMOLED is off by default", viewModel.state.value.amoledEnabled)
+
+        viewModel.submit(SettingsIntent.AmoledEnabledChanged(true))
+
+        assertTrue(viewModel.state.value.amoledEnabled)
+        assertFalse(viewModel.state.value.isUpdatingAmoled)
+        assertEquals(1, repository.amoledSetCalls)
+    }
+
+    @Test
+    fun `AmoledEnabledChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnAmoledSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.AmoledEnabledChanged(true))
+
+        assertFalse("must revert to the previous value on failure", viewModel.state.value.amoledEnabled)
+        assertFalse(viewModel.state.value.isUpdatingAmoled)
+        assertTrue(viewModel.state.value.amoledError)
+    }
+
     private fun newViewModel(): SettingsViewModel =
         SettingsViewModel(repository, topicCacheMaintenance)
 
@@ -612,6 +681,44 @@ class SettingsViewModelTest {
             flagsPerTabOverrideSetCalls += 1
             check(!failOnFlagsPerTabOverrideSet) { "boom" }
             flagsPerTabOverride.value = enabled
+        }
+
+        // #286 — theme preferences. Same optimistic-flip seams as the flags toggles.
+        private val themeMode = MutableStateFlow(ThemeMode.SYSTEM)
+        var themeModeSetCalls: Int = 0
+            private set
+        var lastThemeModeSet: ThemeMode? = null
+            private set
+        var failOnThemeModeSet: Boolean = false
+
+        private val amoledEnabled = MutableStateFlow(false)
+        var amoledSetCalls: Int = 0
+            private set
+        var failOnAmoledSet: Boolean = false
+
+        override fun observeThemeMode(): Flow<ThemeMode> = themeMode
+
+        override suspend fun setThemeMode(mode: ThemeMode) {
+            themeModeSetCalls += 1
+            check(!failOnThemeModeSet) { "boom" }
+            lastThemeModeSet = mode
+            themeMode.value = mode
+        }
+
+        override fun observeAmoledEnabled(): Flow<Boolean> = amoledEnabled
+
+        override suspend fun setAmoledEnabled(enabled: Boolean) {
+            amoledSetCalls += 1
+            check(!failOnAmoledSet) { "boom" }
+            amoledEnabled.value = enabled
+        }
+
+        fun emitThemeMode(value: ThemeMode) {
+            themeMode.value = value
+        }
+
+        fun emitAmoledEnabled(value: Boolean) {
+            amoledEnabled.value = value
         }
 
         // Per-type resolution / writes are exercised by the Flags ViewModel, not Settings; stubbed.

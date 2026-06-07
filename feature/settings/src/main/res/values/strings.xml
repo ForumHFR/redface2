@@ -52,4 +52,16 @@
     <string name="settings_flags_per_tab_override_title">Réglages différents par onglet</string>
     <string name="settings_flags_per_tab_override_description">Chaque onglet (Mes sujets, Lu, Favoris) garde son propre affichage. Les réglages ci-dessus deviennent les valeurs par défaut ; ajustez chaque onglet depuis le menu d\'affichage de l\'écran Drapeaux.</string>
     <string name="settings_flags_per_tab_override_persist_failed">Impossible de mémoriser le réglage par onglet. Réessayez.</string>
+
+    <!-- #286 — Thème. Sélecteur Clair/Système/Sombre (Système = suit l'OS) + thème AMOLED (vrai
+         noir), persistés en DataStore et appliqués à toute l'app en direct. -->
+    <string name="settings_theme_title">Thème</string>
+    <string name="settings_theme_intro">Choisissez l\'apparence de l\'app. « Système » suit le réglage clair/sombre du téléphone.</string>
+    <string name="settings_theme_light">Clair</string>
+    <string name="settings_theme_system">Système</string>
+    <string name="settings_theme_dark">Sombre</string>
+    <string name="settings_theme_persist_failed">Impossible de mémoriser le thème. Réessayez.</string>
+    <string name="settings_theme_amoled_title">Thème AMOLED (vrai noir)</string>
+    <string name="settings_theme_amoled_description">Fond noir pur pour les écrans OLED. S\'applique uniquement en thème sombre.</string>
+    <string name="settings_theme_amoled_persist_failed">Impossible de mémoriser le réglage AMOLED. Réessayez.</string>
 </resources>

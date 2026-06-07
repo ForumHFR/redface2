@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -77,8 +78,29 @@ class SettingsViewModel @Inject constructor(
                 }
             }
         }
+        viewModelScope.launch {
+            val mode = userPreferencesRepository.observeThemeMode().first()
+            _state.update { current ->
+                if (current.themeModeTouchedLocally || current.isUpdatingThemeMode) {
+                    current
+                } else {
+                    current.copy(themeMode = mode)
+                }
+            }
+        }
+        viewModelScope.launch {
+            val amoled = userPreferencesRepository.observeAmoledEnabled().first()
+            _state.update { current ->
+                if (current.amoledTouchedLocally || current.isUpdatingAmoled) {
+                    current
+                } else {
+                    current.copy(amoledEnabled = amoled)
+                }
+            }
+        }
     }
 
+    @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the SettingsIntent variants ; flat by design.
     fun submit(intent: SettingsIntent) {
         when (intent) {
             is SettingsIntent.ProxyEnabledChanged ->
@@ -106,6 +128,8 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FlagsGroupByCategoryChanged -> updateFlagsGroupByCategory(intent.enabled)
             is SettingsIntent.FlagsHideReadCategoriesChanged -> updateFlagsHideReadCategories(intent.enabled)
             is SettingsIntent.FlagsPerTabOverrideChanged -> updateFlagsPerTabOverride(intent.enabled)
+            is SettingsIntent.ThemeModeChanged -> updateThemeMode(intent.mode)
+            is SettingsIntent.AmoledEnabledChanged -> updateAmoled(intent.enabled)
         }
     }
 
@@ -290,6 +314,58 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setFlagsPerTabOverride,
+        )
+    }
+
+    // #286 — theme mode is an enum, so it uses the bespoke optimistic-flip shape (like
+    // updateIgnoreTopicCache) rather than updateBooleanPreference. previous is captured for revert.
+    private fun updateThemeMode(desired: ThemeMode) {
+        val previous = _state.value.themeMode
+        _state.update {
+            it.copy(
+                themeMode = desired,
+                isUpdatingThemeMode = true,
+                themeModeError = false,
+                themeModeTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setThemeMode(desired) }
+                .onSuccess {
+                    _state.update { it.copy(themeMode = desired, isUpdatingThemeMode = false) }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            themeMode = previous,
+                            isUpdatingThemeMode = false,
+                            themeModeError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun updateAmoled(desired: Boolean) {
+        val previous = _state.value.amoledEnabled
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    amoledEnabled = desired,
+                    isUpdatingAmoled = true,
+                    amoledError = false,
+                    amoledTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(amoledEnabled = desired, isUpdatingAmoled = false)
+                } else {
+                    state.copy(amoledEnabled = previous, isUpdatingAmoled = false, amoledError = true)
+                }
+            },
+            persist = userPreferencesRepository::setAmoledEnabled,
         )
     }
 
