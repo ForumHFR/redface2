@@ -32,7 +32,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -284,7 +288,7 @@ private data class ProfileSheetRequest(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3AdaptiveApi::class)
 @Composable
 fun RedfaceApp(intent: Intent?) {
     // #286 — resolve the persisted theme selection before applying RedfaceTheme. SYSTEM (default)
@@ -382,7 +386,20 @@ fun RedfaceApp(intent: Intent?) {
             }
         }
 
+        // #624 — the post/topic editor pins an « Envoyer » bar above the keyboard. Inside the bottom-nav
+        // scaffold that bar sat ABOVE the navigation component, so the window-relative IME inset overshot
+        // it by the nav bar height (the bar floated mid-screen with a gap). Hiding the navigation for editor
+        // routes makes the editor full-screen: its submit bar then sits at the window bottom and the IME
+        // inset lands exactly on the keyboard. Bonus UX: no tab switching mid-compose (would drop the draft).
+        val topRoute = backStacks.getValue(currentDestination).lastOrNull()
+        val navLayoutType = if (topRoute is PostEditorRoute || topRoute is TopicFormRoute) {
+            NavigationSuiteType.None
+        } else {
+            NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
+        }
+
         NavigationSuiteScaffold(
+            layoutType = navLayoutType,
             navigationSuiteItems = {
                 TopLevelDestination.entries.forEach { destination ->
                     item(
