@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.network.auth.AuthRemoteDataSource
 import fr.forumhfr.redface2.core.network.cookie.PersistentCookieJar
+import java.net.URLDecoder
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
@@ -38,7 +39,7 @@ class DefaultAuthRepository @Inject constructor(
         .filterNotNull()
         .map { cookies ->
             val mdUser = cookies.firstOrNull { it.name == COOKIE_MD_USER && it.value.isNotBlank() }
-            if (mdUser != null) AuthState.Authenticated(mdUser.value) else AuthState.Anonymous
+            if (mdUser != null) AuthState.Authenticated(decodePseudo(mdUser.value)) else AuthState.Anonymous
         }
         .distinctUntilChanged()
 
@@ -68,5 +69,17 @@ class DefaultAuthRepository @Inject constructor(
 
     private companion object {
         const val COOKIE_MD_USER = "md_user"
+
+        /**
+         * #260 — HFR stores the pseudo in the `md_user` cookie form-urlencoded, so a pseudo with a
+         * space arrives as e.g. `Dintr-un+lemn`. Decode it here, at the single capture point for the
+         * displayed session pseudo, so every consumer (account menu, …) sees the real pseudo rather
+         * than each display site having to decode. `URLDecoder` also handles `%XX`; the runCatching
+         * fallback (just `+` → space) guards a malformed `%` sequence — HFR's pseudo charset
+         * `[a-zA-Z0-9 _-]` never form-encodes anything but the space, so this is belt-and-braces.
+         */
+        fun decodePseudo(raw: String): String =
+            runCatching { URLDecoder.decode(raw, Charsets.UTF_8.name()) }
+                .getOrDefault(raw.replace('+', ' '))
     }
 }

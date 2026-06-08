@@ -57,11 +57,13 @@ sealed interface PostEditorIntent {
 sealed interface PostEditorEffect {
     /**
      * The reply / quote / edit was accepted by HFR. The receiver navigates back
-     * to the topic and refreshes the page if [targetPage] is known. For Phase 2D
-     * edit, [scrollTo] additionally tells the topic screen which `numreponse` to
-     * scroll to after the refresh — reply / quote always leave it null (HFR's
-     * refresh URL anchors `#bas`, scrolling to the bottom of the page, which is
-     * already what `TopicScreen` does by default for an unanchored navigation).
+     * to the topic and refreshes the page if [targetPage] is known. [scrollTo] tells
+     * the topic screen which `numreponse` to scroll to after the refresh: HFR's success
+     * URL anchors `#t{numreponse}` for **quote and edit** (the parser exposes it as
+     * `result.numreponse`), so those carry a non-null [scrollTo]; a **plain reply** anchors
+     * `#bas` (no numreponse), so [scrollTo] stays null and `TopicScreen` scrolls to the
+     * bottom by default. The #226 overflow guard relies on this: only the null-[scrollTo]
+     * (plain-reply) path can re-route to a freshly created last page.
      */
     data class SubmitSucceeded(
         val targetPage: Int?,

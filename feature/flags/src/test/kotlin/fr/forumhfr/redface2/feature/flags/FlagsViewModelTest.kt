@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
@@ -1376,6 +1377,15 @@ class FlagsViewModelTest {
             }
             perTypeUnread.getValue(type).value = enabled
         }
+
+        // #286 — theme prefs are irrelevant to FlagsViewModel; stubbed at their defaults.
+        override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
+
+        override suspend fun setThemeMode(mode: ThemeMode) = Unit
+
+        override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setAmoledEnabled(enabled: Boolean) = Unit
 
         fun setGroupBy(value: Boolean) {
             groupBy.value = value

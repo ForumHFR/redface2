@@ -8,9 +8,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -22,12 +20,16 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,8 +45,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -109,6 +114,18 @@ fun TopicScreen(
      */
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
+    /**
+     * #285 — leave the topic and go back to the screen that opened it (topic list / flags).
+     * Wired to a back-stack pop in `:app`. Surfaced as an explicit back arrow in the top app
+     * bar so the user never has to rely on the system / gesture back to exit a topic.
+     */
+    onBack: () -> Unit,
+    /**
+     * #226 — after a plain reply that overflowed onto a freshly created page, re-route to that
+     * last page : the post the user just published lives there, not on the page the reply form
+     * was anchored to. `:app` replaces the current TopicRoute in place with the target page.
+     */
+    onNavigateToLastPage: (page: Int) -> Unit,
     /**
      * Phase 2 finish (#208) — emitted when the user taps on a post avatar or author name.
      * Carries the numeric user id (canonical key for profile navigation) plus display hints
@@ -189,6 +206,13 @@ fun TopicScreen(
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
+                is TopicEffect.NavigateToLastPage -> {
+                    // #226 — the plain reply overflowed onto a freshly created last page. Hand the
+                    // target page to `:app`, which replaces the current TopicRoute in place so the
+                    // user lands on the page that actually holds their new post (the ViewModel for
+                    // that route then anchors #bas → ScrollToEndOfPage as usual).
+                    onNavigateToLastPage(effect.page)
+                }
             }
         }
     }
@@ -197,6 +221,7 @@ fun TopicScreen(
         state = state,
         listState = lazyListState,
         onIntent = viewModel::send,
+        onBack = onBack,
         onReply = onReply,
         onQuote = onQuote,
         onEdit = onEdit,
@@ -332,12 +357,14 @@ private const val REANCHOR_MIN_FRAMES = 60
 /** Frames the target position must hold still before we treat the layout as settled. */
 private const val REANCHOR_STABLE_FRAMES = 3
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 @Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
 internal fun TopicContent(
     state: TopicUiState,
     listState: LazyListState,
     onIntent: (TopicIntent) -> Unit,
+    onBack: () -> Unit,
     onReply: (subcat: Int, page: Int) -> Unit,
     onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
@@ -345,58 +372,99 @@ internal fun TopicContent(
     onOpenPage: (Int) -> Unit,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.surface,
-    ) {
-        when (val mode = state.mode) {
-            TopicUiState.Mode.Loading -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                        .navigationBarsPadding()
-                        .padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    CircularProgressIndicator()
-                    Text(
-                        text = stringResource(R.string.topic_loading),
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                }
-            }
-
-            is TopicUiState.Mode.Error -> {
-                RedfacePlaceholderScreen(
-                    title = stringResource(R.string.topic_error_title),
-                    body = stringResource(R.string.topic_error_body, state.request.page, mode.message),
-                ) {
-                    TopicPageNavigation(
-                        currentPage = state.request.page,
-                        availablePages = state.availablePages,
-                        canGoPrevious = state.canGoPrevious,
-                        canGoNext = state.canGoNext,
-                        onOpenPage = onOpenPage,
-                    )
-                    OutlinedButton(onClick = { onIntent(TopicIntent.Retry) }) {
-                        Text(text = stringResource(R.string.topic_retry))
+    // #285 — the topic title and #284 — the page counter live in a persistent top app bar so they
+    // stay visible while the user scrolls (the in-card title/caption scrolls away). When the page
+    // is still loading / errored, fall back to a generic title and the requested page.
+    val loaded = state.mode as? TopicUiState.Mode.Loaded
+    val barTitle = loaded?.topic?.title?.takeIf { it.isNotBlank() }
+        ?: stringResource(R.string.topic_topbar_fallback_title)
+    val barCurrentPage = loaded?.topic?.page ?: state.request.page
+    val barTotalPages = loaded?.topic?.totalPages
+        ?: state.availablePages.lastOrNull()
+        ?: state.request.page
+    val backLabel = stringResource(R.string.topic_back)
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            text = barTitle,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = stringResource(R.string.topic_page_indicator, barCurrentPage, barTotalPages),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.semantics { contentDescription = backLabel },
+                    ) {
+                        Text("←")
+                    }
+                },
+            )
+        },
+    ) { innerPadding ->
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            when (val mode = state.mode) {
+                TopicUiState.Mode.Loading -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        CircularProgressIndicator()
+                        Text(
+                            text = stringResource(R.string.topic_loading),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
                     }
                 }
-            }
 
-            is TopicUiState.Mode.Loaded -> {
-                TopicLoadedContent(
-                    state = state,
-                    topic = mode.topic,
-                    onReply = onReply,
-                    onQuote = onQuote,
-                    onEdit = onEdit,
-                    onEditFirstPost = onEditFirstPost,
-                    onOpenPage = onOpenPage,
-                    onOpenProfile = onOpenProfile,
-                    listState = listState,
-                )
+                is TopicUiState.Mode.Error -> {
+                    RedfacePlaceholderScreen(
+                        title = stringResource(R.string.topic_error_title),
+                        body = stringResource(R.string.topic_error_body, state.request.page, mode.message),
+                    ) {
+                        TopicPageNavigation(
+                            currentPage = state.request.page,
+                            availablePages = state.availablePages,
+                            canGoPrevious = state.canGoPrevious,
+                            canGoNext = state.canGoNext,
+                            onOpenPage = onOpenPage,
+                        )
+                        OutlinedButton(onClick = { onIntent(TopicIntent.Retry) }) {
+                            Text(text = stringResource(R.string.topic_retry))
+                        }
+                    }
+                }
+
+                is TopicUiState.Mode.Loaded -> {
+                    TopicLoadedContent(
+                        state = state,
+                        topic = mode.topic,
+                        onReply = onReply,
+                        onQuote = onQuote,
+                        onEdit = onEdit,
+                        onEditFirstPost = onEditFirstPost,
+                        onOpenPage = onOpenPage,
+                        onOpenProfile = onOpenProfile,
+                        listState = listState,
+                    )
+                }
             }
         }
     }
@@ -416,6 +484,9 @@ private fun TopicLoadedContent(
     listState: LazyListState,
 ) {
     val highlight = state.request.scrollTo
+    // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
+    // the « cité N fois » badge below. Pure + page-scoped (cf. citationCountsByNumreponse KDoc).
+    val citationCounts = remember(topic.posts) { citationCountsByNumreponse(topic.posts) }
     // #282 — shared offset between the gesture (drives translationX) and the edge glow. A plain
     // MutableFloatState: the gesture writes it synchronously per frame (no coroutine/alloc), the draw
     // phase reads it; an Animatable inside the gesture handles only release transitions. Lives in the
@@ -446,8 +517,9 @@ private fun TopicLoadedContent(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
+            // #285 — system-bar insets (status + navigation) are now consumed by the Scaffold/TopAppBar
+            // in TopicContent and applied via the content Surface's padding(innerPadding); the list no
+            // longer adds statusBarsPadding()/navigationBarsPadding() here to avoid double-insetting.
             // #282 — horizontal swipe changes page via the existing route-driven onOpenPage, with
             // drag-follow feedback: the page tracks the finger (graphicsLayer inside topicPageSwipe)
             // and topicPageSwipeEdge paints an edge glow as the swipe arms. topicPageSwipeEdge must
@@ -545,6 +617,7 @@ private fun TopicLoadedContent(
             TopicPostCard(
                 post = post,
                 highlighted = highlight == post.numreponse,
+                citedCount = citationCounts[post.numreponse] ?: 0,
                 onQuote = quoteAction,
                 onEdit = editAction,
                 onOpenProfile = profileAction,
@@ -791,9 +864,14 @@ private fun TopicPollCard(poll: Poll) {
 }
 
 @Composable
+@Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
 private fun TopicPostCard(
     post: Post,
     highlighted: Boolean,
+    /**
+     * #239 — number of posts on the current page that cite this one. 0 hides the badge.
+     */
+    citedCount: Int,
     onQuote: (() -> Unit)?,
     onEdit: (() -> Unit)?,
     /**
@@ -908,9 +986,29 @@ private fun TopicPostCard(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (citedCount > 0) {
+                        // #239 — sober pill: how many posts of THIS page cite this one. Page-scoped
+                        // (cf. citationCountsByNumreponse); jumping to the citing posts is a follow-up.
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text(
+                                text = pluralStringResource(
+                                    R.plurals.topic_post_cited_count,
+                                    citedCount,
+                                    citedCount,
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
                 }
             }
-            PostRenderer(content = post.content)
+            // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
+            PostRenderer(content = post.content, selectable = true)
             if (onQuote != null || onEdit != null) {
                 // Actions row at the bottom of the post card, sober TextButtons
                 // so they stay subordinate to the post content. « Modifier »

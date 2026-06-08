@@ -1,14 +1,21 @@
 package fr.forumhfr.redface2.feature.settings
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -19,6 +26,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -33,6 +43,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 
 @Composable
 fun SettingsScreen(
@@ -61,7 +72,14 @@ internal fun SettingsContent(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .navigationBarsPadding()
+                // Applied OUTSIDE verticalScroll so the keyboard inset shrinks the scroll viewport: a
+                // focused proxy field then stays above the IME (adjustNothing means the OEM no longer
+                // resizes the window for us, cf. #624). union() keeps navBar clearance when closed.
+                .windowInsetsPadding(
+                    WindowInsets.navigationBars
+                        .union(WindowInsets.ime)
+                        .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
+                )
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -171,6 +189,11 @@ internal fun SettingsContent(
                 }
             }
 
+            ThemePreferencesCard(
+                state = state,
+                onIntent = onIntent,
+            )
+
             FlagsPreferencesCard(
                 state = state,
                 onIntent = onIntent,
@@ -188,6 +211,73 @@ internal fun SettingsContent(
             onConfirm = { onIntent(SettingsIntent.ClearTopicCacheConfirmed) },
             onDismiss = { onIntent(SettingsIntent.ClearTopicCacheDismissed) },
         )
+    }
+}
+
+/**
+ * Theme preferences (#286): a 3-way Clair / Système / Sombre selector (SYSTEM follows the OS),
+ * plus an AMOLED true-black toggle that only applies when the effective theme is dark. Persisted via
+ * DataStore; the selection is observed at the app root ([fr.forumhfr.redface2.navigation.RedfaceApp])
+ * so a change here re-themes the whole app live.
+ */
+@Composable
+private fun ThemePreferencesCard(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    // The AMOLED toggle is only meaningful when the app will actually render dark — forced DARK, or
+    // SYSTEM while the OS is in dark mode. Computed here so the switch is disabled otherwise.
+    val effectiveDark = when (state.themeMode) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+    val options = listOf(
+        ThemeMode.LIGHT to stringResource(R.string.settings_theme_light),
+        ThemeMode.SYSTEM to stringResource(R.string.settings_theme_system),
+        ThemeMode.DARK to stringResource(R.string.settings_theme_dark),
+    )
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_theme_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.settings_theme_intro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                options.forEachIndexed { index, (mode, label) ->
+                    SegmentedButton(
+                        selected = state.themeMode == mode,
+                        enabled = state.canChangeThemeMode,
+                        onClick = { onIntent(SettingsIntent.ThemeModeChanged(mode)) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                    ) {
+                        Text(label)
+                    }
+                }
+            }
+            if (state.themeModeError) {
+                PreferencePersistError(R.string.settings_theme_persist_failed)
+            }
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_theme_amoled_title),
+                description = stringResource(R.string.settings_theme_amoled_description),
+                checked = state.amoledEnabled,
+                enabled = state.canToggleAmoled && effectiveDark,
+                onCheckedChange = { onIntent(SettingsIntent.AmoledEnabledChanged(it)) },
+            )
+            if (state.amoledError) {
+                PreferencePersistError(R.string.settings_theme_amoled_persist_failed)
+            }
+        }
     }
 }
 
