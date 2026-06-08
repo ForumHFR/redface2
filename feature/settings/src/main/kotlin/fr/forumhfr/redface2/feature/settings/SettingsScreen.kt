@@ -89,6 +89,16 @@ internal fun SettingsContent(
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
+            // #288 — distinguish local (DataStore) preferences from HFR-account settings, and frame the
+            // screen as the full catalogue: shipped settings are interactive, planned ones are shown
+            // greyed with a phase/issue tag (a showcase of the roadmap, cf. the issue's design notes).
+            Text(
+                text = stringResource(R.string.settings_intro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            SettingsSectionHeader(stringResource(R.string.settings_section_network))
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(16.dp),
@@ -189,24 +199,102 @@ internal fun SettingsContent(
                 }
             }
 
+            MaintenanceCard(
+                state = state,
+                onIntent = onIntent,
+            )
+            FutureSettingsCard(
+                items = listOf(
+                    R.string.settings_future_data_saver to issueTag(310),
+                    R.string.settings_future_clear_image_cache to issueTag(314),
+                ),
+            )
+
+            SettingsSectionHeader(stringResource(R.string.settings_section_display))
             ThemePreferencesCard(
                 state = state,
                 onIntent = onIntent,
             )
+            FutureSettingsCard(
+                items = listOf(
+                    R.string.settings_future_reading_density to issueTag(287),
+                    R.string.settings_future_ui_colors to issueTag(296),
+                    R.string.settings_future_material_you to stringResource(R.string.settings_phase_future),
+                    R.string.settings_future_classic_theme to stringResource(R.string.settings_phase_future_far),
+                ),
+            )
 
+            SettingsSectionHeader(stringResource(R.string.settings_section_flags))
             FlagsPreferencesCard(
                 state = state,
                 onIntent = onIntent,
             )
+            FutureSettingsCard(
+                items = listOf(
+                    R.string.settings_future_flags_on_listing to issueTag(297),
+                ),
+            )
 
+            SettingsSectionHeader(stringResource(R.string.settings_section_topic))
             TopicPreferencesCard(
                 state = state,
                 onIntent = onIntent,
             )
+            FutureSettingsCard(
+                items = listOf(
+                    R.string.settings_future_scroll_memory to issueTag(307),
+                    R.string.settings_future_prefetch to stringResource(R.string.settings_phase_future),
+                ),
+            )
 
-            MaintenanceCard(
-                state = state,
-                onIntent = onIntent,
+            SettingsSectionHeader(stringResource(R.string.settings_section_editing))
+            FutureSettingsCard(
+                items = listOf(
+                    R.string.settings_future_submit_confirm to issueTag(312),
+                    R.string.settings_future_signature to stringResource(R.string.settings_phase_planned),
+                ),
+            )
+
+            SettingsSectionHeader(stringResource(R.string.settings_section_mp))
+            FutureSettingsCard(
+                items = listOf(
+                    R.string.settings_future_mp_write to issueTag(301),
+                    R.string.settings_future_mp_notifications to issueTag(313),
+                ),
+            )
+
+            SettingsSectionHeader(stringResource(R.string.settings_section_hfr_account))
+            Text(
+                text = stringResource(R.string.settings_hfr_account_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FutureSettingsCard(
+                items = listOf(
+                    R.string.settings_future_hfr_profile to issueTag(311),
+                ),
+            )
+
+            SettingsSectionHeader(stringResource(R.string.settings_section_notifications))
+            FutureSettingsCard(
+                items = listOf(
+                    R.string.settings_future_notifications to stringResource(R.string.settings_phase_5),
+                ),
+            )
+
+            SettingsSectionHeader(stringResource(R.string.settings_section_accessibility))
+            FutureSettingsCard(
+                items = listOf(
+                    R.string.settings_future_timezone to stringResource(R.string.settings_phase_future),
+                    R.string.settings_future_multilang to stringResource(R.string.settings_phase_future),
+                ),
+            )
+
+            SettingsSectionHeader(stringResource(R.string.settings_section_extensions))
+            FutureSettingsCard(
+                items = listOf(
+                    R.string.settings_future_extensions to issueTag(7),
+                ),
             )
         }
     }
@@ -216,6 +304,79 @@ internal fun SettingsContent(
             onConfirm = { onIntent(SettingsIntent.ClearTopicCacheConfirmed) },
             onDismiss = { onIntent(SettingsIntent.ClearTopicCacheDismissed) },
         )
+    }
+}
+
+/**
+ * #288 — a section header that structures the catalogue by area (Affichage, Drapeaux, …).
+ */
+@Composable
+private fun SettingsSectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 8.dp),
+    )
+}
+
+/**
+ * #288 — formats the tag pill for a planned setting backed by a GitHub issue (e.g. `#310`). The
+ * issue number is a technical identifier, but the `#` prefix still goes through a string resource to
+ * keep all displayed text localizable. Phase words ("À venir", "Phase 5", …) are passed directly.
+ */
+@Composable
+private fun issueTag(number: Int): String = stringResource(R.string.settings_future_issue_tag, number)
+
+/**
+ * #288 — a card grouping planned (not-yet-shipped) settings as non-interactive, greyed rows so the
+ * screen shows the full roadmap "for free". Each [items] entry pairs a title string-res with a tag
+ * (an issue reference via [issueTag], or a localized phase word resolved at the call site). Renders
+ * nothing for an empty list so callers never produce a stray empty card.
+ */
+@Composable
+private fun FutureSettingsCard(items: List<Pair<Int, String>>) {
+    if (items.isEmpty()) return
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items.forEach { (titleRes, tag) ->
+                FutureSettingRow(title = stringResource(titleRes), tag = tag)
+            }
+        }
+    }
+}
+
+/**
+ * One planned setting: title in the muted `onSurfaceVariant` colour (the M3 idiom for "not active",
+ * preferred over a blanket `Modifier.alpha`) and a small tag pill. Non-interactive by design.
+ */
+@Composable
+private fun FutureSettingRow(title: String, tag: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            shape = MaterialTheme.shapes.small,
+        ) {
+            Text(
+                text = tag,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        }
     }
 }
 
