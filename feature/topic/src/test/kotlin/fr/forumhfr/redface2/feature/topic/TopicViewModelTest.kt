@@ -2,8 +2,17 @@ package fr.forumhfr.redface2.feature.topic
 
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
+import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.write.EditPostContext
+import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.Topic
@@ -43,7 +52,7 @@ class TopicViewModelTest {
         val topic = fakeTopic(page = 2, totalPages = 5)
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 2),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -85,7 +94,7 @@ class TopicViewModelTest {
                 throw cancellation
             }
         }
-        val vm = TopicViewModel(
+        val vm = topicViewModel(
             request = topicRequest(page = 2),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -121,7 +130,7 @@ class TopicViewModelTest {
         val topic = fakeTopic(page = 5, totalPages = 5)
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
-        TopicViewModel(
+        topicViewModel(
             request = topicRequest(page = 5),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -144,7 +153,7 @@ class TopicViewModelTest {
         val controlled = MutableSharedFlow<Topic>(replay = 0)
         val repository = FakeStreamingTopicRepository(controlled)
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -171,7 +180,7 @@ class TopicViewModelTest {
             flowsToReturn = listOf(flow { throw IOException("network") }),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -193,7 +202,7 @@ class TopicViewModelTest {
             ),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -213,7 +222,7 @@ class TopicViewModelTest {
         )
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 3, scrollTo = target),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -231,7 +240,7 @@ class TopicViewModelTest {
         val topic = fakeTopic(page = 1, totalPages = 1, posts = listOf(fakePost(numreponse = 555)))
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1, scrollTo = 999),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -256,7 +265,7 @@ class TopicViewModelTest {
             }),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 2, scrollTo = target),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -274,7 +283,7 @@ class TopicViewModelTest {
     fun `canGoPrevious is false on page 1 and true otherwise`() = runTest {
         val topic = fakeTopic(page = 1, totalPages = 3)
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -287,7 +296,7 @@ class TopicViewModelTest {
     fun `canGoNext is false on the last page`() = runTest {
         val topic = fakeTopic(page = 5, totalPages = 5)
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 5),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -306,7 +315,7 @@ class TopicViewModelTest {
             ),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 2),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -326,14 +335,14 @@ class TopicViewModelTest {
 
     @Test
     fun `state isAuthenticated reflects the auth repository (#220)`() = runTest {
-        val authed = TopicViewModel(
+        val authed = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
         assertEquals(true, authed.state.value.isAuthenticated)
 
-        val anon = TopicViewModel(
+        val anon = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
             authRepository = FakeAuthRepository(AuthState.Anonymous),
@@ -344,7 +353,7 @@ class TopicViewModelTest {
     @Test
     fun `isAuthenticated flips when the session changes while the topic is open (#220)`() = runTest {
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
-        val vm = TopicViewModel(
+        val vm = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
             authRepository = auth,
@@ -359,9 +368,199 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `state topBarAutoHide reflects the user preference (build 89)`() = runTest {
+        val on = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicTopBarAutoHide = true),
+        )
+        assertEquals(true, on.state.value.topBarAutoHide)
+
+        val off = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicTopBarAutoHide = false),
+        )
+        assertEquals(false, off.state.value.topBarAutoHide)
+    }
+
+    @Test
+    fun `DeletePost success emits PostDeleted and force-refreshes the current page (#292)`() = runTest {
+        // Page 2 so the editable post 777 is NOT the first post (the FP lives on page 1 and is
+        // excluded from deletion). Editable + authenticated + canReply → the VM gate lets it through.
+        val loaded = fakeTopic(
+            page = 2,
+            totalPages = 3,
+            posts = listOf(fakePost(numreponse = 777, isEditable = true)),
+        )
+        val refreshed = fakeTopic(page = 2, totalPages = 3, title = "refreshed")
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+        val deleteRepo = FakeDeletePostRepository(DeletePostResult.Success(deletedWholeTopic = false))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            deletePostRepository = deleteRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.DeletePost(777))
+            assertEquals(TopicEffect.PostDeleted, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(1, deleteRepo.calls.size)
+        assertEquals(777, deleteRepo.calls.single().numreponse)
+        assertEquals(SAMPLE_SUBCAT, deleteRepo.calls.single().subcat)
+        assertEquals(
+            "a successful delete force-refreshes the current page so the post disappears",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+            repository.refreshCalls,
+        )
+    }
+
+    @Test
+    fun `DeletePost failure emits PostDeleteFailed with the mapped reason and does not refresh (#292)`() =
+        runTest {
+            val loaded = fakeTopic(
+                page = 2,
+                totalPages = 3,
+                posts = listOf(fakePost(numreponse = 777, isEditable = true)),
+            )
+            val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(loaded) }))
+            val deleteRepo = FakeDeletePostRepository(
+                DeletePostResult.Failure(ReplyFailureReason.TopicLocked),
+            )
+            val viewModel = topicViewModel(
+                request = topicRequest(page = 2),
+                topicRepository = repository,
+                authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+                deletePostRepository = deleteRepo,
+            )
+
+            viewModel.effects.test {
+                viewModel.send(TopicIntent.DeletePost(777))
+                val effect = awaitItem() as TopicEffect.PostDeleteFailed
+                assertEquals(DeleteFailureReason.TopicLocked, effect.reason)
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertTrue("a failed delete must not force-refresh", repository.refreshCalls.isEmpty())
+        }
+
+    @Test
+    fun `DeletePost refuses the first post and never POSTs (#292)`() = runTest {
+        // Page 1, single post → it IS the first post. Even editable, the VM must refuse (deleting the
+        // FP removes the whole topic, out of scope) and never reach the repository.
+        val loaded = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(numreponse = 100, isEditable = true)),
+        )
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(loaded) }))
+        val deleteRepo = FakeDeletePostRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            deletePostRepository = deleteRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.DeletePost(100))
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertTrue("the first post must never be deleted", deleteRepo.calls.isEmpty())
+    }
+
+    @Test
+    fun `DeletePost refuses a non-editable post and never POSTs (#292)`() = runTest {
+        val loaded = fakeTopic(
+            page = 2,
+            totalPages = 3,
+            posts = listOf(fakePost(numreponse = 777, isEditable = false)),
+        )
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(loaded) }))
+        val deleteRepo = FakeDeletePostRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            deletePostRepository = deleteRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.DeletePost(777))
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertTrue("a non-editable post must never be deleted", deleteRepo.calls.isEmpty())
+    }
+
+    @Test
+    fun `DeletePost refuses when the session is not authenticated and never POSTs (#292)`() = runTest {
+        val loaded = fakeTopic(
+            page = 2,
+            totalPages = 3,
+            posts = listOf(fakePost(numreponse = 777, isEditable = true)),
+        )
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(loaded) }))
+        val deleteRepo = FakeDeletePostRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            deletePostRepository = deleteRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.DeletePost(777))
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertTrue("a logged-out session must never delete", deleteRepo.calls.isEmpty())
+    }
+
+    @Test
+    fun `DeletePost proceeds for a subcat-0 topic (cat without sub-category) (#292)`() = runTest {
+        // #292 Codex review: subcat=0 is a valid HFR value (cat without sub-category), so the VM must
+        // NOT block it — only the SUBCAT_UNKNOWN sentinel (-1) is rejected.
+        val loaded = fakeTopic(
+            page = 2,
+            totalPages = 3,
+            posts = listOf(fakePost(numreponse = 777, isEditable = true)),
+            subcat = 0,
+        )
+        val refreshed = fakeTopic(page = 2, totalPages = 3, subcat = 0, title = "refreshed")
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+        val deleteRepo = FakeDeletePostRepository(DeletePostResult.Success(deletedWholeTopic = false))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            deletePostRepository = deleteRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.DeletePost(777))
+            assertEquals(TopicEffect.PostDeleted, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals("subcat=0 must reach the repository", 1, deleteRepo.calls.size)
+        assertEquals(0, deleteRepo.calls.single().subcat)
+    }
+
+    @Test
     fun `forceRefresh from the request is forwarded to observeTopicPage (#231)`() = runTest {
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) }))
-        TopicViewModel(
+        topicViewModel(
             request = topicRequest(page = 1).copy(forceRefresh = true),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -373,16 +572,35 @@ class TopicViewModelTest {
         )
     }
 
+    // Construction seam: the ViewModel now also takes a UserPreferencesRepository (for the build 89
+    // top-bar auto-hide preference) which none of these tests exercise, so it defaults to a no-op
+    // fake. Keeps every existing call site unchanged bar the constructor → helper rename.
+    private fun topicViewModel(
+        request: TopicRequest,
+        topicRepository: TopicRepository,
+        authRepository: AuthRepository,
+        userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
+        deletePostRepository: DeletePostRepository = FakeDeletePostRepository(),
+    ): TopicViewModel = TopicViewModel(
+        request = request,
+        topicRepository = topicRepository,
+        authRepository = authRepository,
+        userPreferencesRepository = userPreferencesRepository,
+        deletePostRepository = deletePostRepository,
+    )
+
     private fun topicRequest(
         page: Int,
         scrollTo: Int? = null,
         submitSignal: Long? = null,
+        postSubmitOverflowLanding: Boolean = false,
     ): TopicRequest = TopicRequest(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
         page = page,
         scrollTo = scrollTo,
         submitSignal = submitSignal,
+        postSubmitOverflowLanding = postSubmitOverflowLanding,
     )
 
     // ──────────────────────────────────────────────────────────────────────
@@ -401,7 +619,7 @@ class TopicViewModelTest {
             refreshTopicsToReturn = listOf(freshTopic),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 2, submitSignal = 1_700_000_000_000L),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -440,7 +658,7 @@ class TopicViewModelTest {
             refreshTopicsToReturn = listOf(freshTopic),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1, scrollTo = targetNumreponse, submitSignal = 42L),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -467,7 +685,7 @@ class TopicViewModelTest {
             refreshTopicsToReturn = listOf(freshTopic),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 20, scrollTo = null, submitSignal = 99L),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -480,6 +698,103 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `submitSignal without scrollTo on an overflowed reply emits NavigateToLastPage (#226)`() = runTest {
+        // #226 — the plain reply was submitted from page 20's form, but it overflowed onto a freshly
+        // created page 21. HFR anchored the form's page (20) so the force refresh of page 20 reports
+        // an up-to-date totalPages = 21 > request.page = 20. The new post lives on page 21, not here,
+        // so the ViewModel must re-route there (NavigateToLastPage) rather than ScrollToEndOfPage on
+        // the stale page 20 (which would scroll to the pre-overflow last post and confuse the user).
+        val overflowedTopic = fakeTopic(
+            page = 20,
+            totalPages = 21,
+            posts = listOf(fakePost(1), fakePost(2), fakePost(3)),
+        )
+        val repository = FakeTopicRepository(
+            flowsToReturn = emptyList(),
+            refreshTopicsToReturn = listOf(overflowedTopic),
+        )
+
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 20, scrollTo = null, submitSignal = 123L),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.NavigateToLastPage(21), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `overflow landing force-refreshes and scrolls to end without re-redirecting (#226)`() = runTest {
+        // #226 — the host re-routed us onto the freshly created last page (21) with a fresh
+        // submitSignal AND postSubmitOverflowLanding = true. The force refresh still runs (submitSignal
+        // != null) so the page is never a stale cache-aside row — the original #226 failure — but the
+        // landing flag means we stop here: emit ScrollToEndOfPage to surface the new reply, NOT another
+        // NavigateToLastPage. (totalPages == request.page, the normal post-overflow shape.)
+        val landedTopic = fakeTopic(
+            page = 21,
+            totalPages = 21,
+            posts = listOf(fakePost(40), fakePost(41)),
+        )
+        val repository = FakeTopicRepository(
+            flowsToReturn = emptyList(),
+            refreshTopicsToReturn = listOf(landedTopic),
+        )
+
+        val viewModel = topicViewModel(
+            request = topicRequest(
+                page = 21,
+                scrollTo = null,
+                submitSignal = 456L,
+                postSubmitOverflowLanding = true,
+            ),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToEndOfPage, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `overflow landing does not chase a moving tail when a concurrent post grows totalPages (#226)`() =
+        runTest {
+            // #226 anti-chase — on the overflow landing (page 21, flag set), a concurrent poster
+            // created page 22 during our refresh, so the fresh page reports totalPages = 22 >
+            // request.page = 21. Without the flag the ViewModel would NavigateToLastPage(22) and keep
+            // chasing the moving tail. The flag pins us here: ScrollToEndOfPage, never NavigateToLastPage.
+            val landedTopic = fakeTopic(
+                page = 21,
+                totalPages = 22,
+                posts = listOf(fakePost(40), fakePost(41)),
+            )
+            val repository = FakeTopicRepository(
+                flowsToReturn = emptyList(),
+                refreshTopicsToReturn = listOf(landedTopic),
+            )
+
+            val viewModel = topicViewModel(
+                request = topicRequest(
+                    page = 21,
+                    scrollTo = null,
+                    submitSignal = 789L,
+                    postSubmitOverflowLanding = true,
+                ),
+                topicRepository = repository,
+                authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            )
+
+            viewModel.effects.test {
+                assertEquals(TopicEffect.ScrollToEndOfPage, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
     fun `normal load without submitSignal does not emit ScrollToEndOfPage`() = runTest {
         // Regression guard: ScrollToEndOfPage is gated on submitSignal != null. A normal
         // deep-link navigation (cache-aside) must never emit it, even when scrollTo is null,
@@ -487,7 +802,7 @@ class TopicViewModelTest {
         val topic = fakeTopic(page = 1, totalPages = 1, posts = listOf(fakePost(1)))
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1, scrollTo = null, submitSignal = null),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -524,7 +839,7 @@ class TopicViewModelTest {
             refreshErrorToThrow = IOException("force refresh transient failure"),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 2, submitSignal = 7L),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -564,25 +879,29 @@ class TopicViewModelTest {
         totalPages: Int,
         title: String = "fake",
         posts: List<Post> = emptyList(),
+        subcat: Int = SAMPLE_SUBCAT,
     ): Topic = Topic(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
-        subcat = SAMPLE_SUBCAT,
+        subcat = subcat,
         title = title,
         posts = posts,
         page = page,
         totalPages = totalPages,
         isFirstPostOwner = false,
+        // Postable by default: the #292 delete gate requires it, and no VM test exercises a
+        // read-only topic (the previous default was the Topic model's `false`, never asserted here).
+        canReply = true,
         poll = null,
     )
 
-    private fun fakePost(numreponse: Int): Post = Post(
+    private fun fakePost(numreponse: Int, isEditable: Boolean = false): Post = Post(
         numreponse = numreponse,
         author = "tester",
         date = java.time.Instant.parse("2026-05-04T12:00:00Z"),
         content = PostContent(blocks = emptyList()),
         avatarUrl = null,
-        isEditable = false,
+        isEditable = isEditable,
         isOwnPost = false,
         quotedAuthors = emptyList(),
         postIndex = null,
@@ -658,6 +977,17 @@ private class FakeTopicRepository(
     }
 }
 
+private class FakeDeletePostRepository(
+    private val result: DeletePostResult = DeletePostResult.Success(deletedWholeTopic = false),
+) : DeletePostRepository {
+    val calls = mutableListOf<EditPostContext>()
+
+    override suspend fun deletePost(context: EditPostContext): DeletePostResult {
+        calls += context
+        return result
+    }
+}
+
 private class FakeStreamingTopicRepository(
     private val source: Flow<Topic>,
 ) : TopicRepository {
@@ -670,4 +1000,57 @@ private class FakeStreamingTopicRepository(
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {
         // no-op for streaming tests
     }
+}
+
+/**
+ * No-op preferences fake for the topic ViewModel tests. Only [observeTopicTopBarAutoHide] is read by
+ * [TopicViewModel] (build 89 follow-up) — everything else returns the DataStore default so the fake
+ * stays a thin stand-in. The single relevant value is constructor-injectable for any future test that
+ * wants to assert the auto-hide flag reaches state.
+ */
+private class FakeUserPreferencesRepository(
+    private val topicTopBarAutoHide: Boolean = false,
+) : UserPreferencesRepository {
+    override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
+
+    override suspend fun saveProxyConfig(config: ProxyConfig) = Unit
+
+    override fun readProxyConfigForNetworkBootstrap(): ProxyConfig = ProxyConfig()
+
+    override fun observeIgnoreTopicCache(): Flow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun setIgnoreTopicCache(enabled: Boolean) = Unit
+
+    override fun observeFlagsGroupByCategory(): Flow<Boolean> = MutableStateFlow(true)
+
+    override suspend fun setFlagsGroupByCategory(enabled: Boolean) = Unit
+
+    override fun observeFlagsHideReadCategories(): Flow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun setFlagsHideReadCategories(enabled: Boolean) = Unit
+
+    override fun observeFlagsPerTabOverride(): Flow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun setFlagsPerTabOverride(enabled: Boolean) = Unit
+
+    override fun observeFlagsViewSettings(type: FlagType): Flow<FlagsViewSettings> =
+        MutableStateFlow(FlagsViewSettings())
+
+    override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) = Unit
+
+    override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
+
+    override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
+
+    override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
+
+    override suspend fun setThemeMode(mode: ThemeMode) = Unit
+
+    override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun setAmoledEnabled(enabled: Boolean) = Unit
+
+    override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(topicTopBarAutoHide)
+
+    override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
 }

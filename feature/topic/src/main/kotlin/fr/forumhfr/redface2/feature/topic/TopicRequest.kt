@@ -21,4 +21,23 @@ data class TopicRequest(
      * leaves it `false` to keep back-nav snappy.
      */
     val forceRefresh: Boolean = false,
+    /**
+     * Display-only fallback title for the top app bar while a freshly-navigated page is still
+     * loading. A page change replaces the `TopicRoute` (new nav entry → new ViewModel → `Loading`
+     * with no topic yet), which would otherwise flash the generic « Sujet » fallback. `:app` keeps
+     * a per-topic title cache and feeds the last known title here so the bar stays stable. Never
+     * used once the page is `Loaded` (the real `Topic.title` wins).
+     */
+    val titleHint: String? = null,
+    /**
+     * #226 — `true` only on the route the navigation host re-pushes after a plain reply overflowed
+     * onto a freshly created last page (see `TopicEffect.NavigateToLastPage`). It is paired with a
+     * fresh [submitSignal] so the ViewModel force-fetches that page (never a stale cache-aside row —
+     * the original #226 failure), but it marks this as the overflow **landing**: the ViewModel must
+     * NOT re-emit `NavigateToLastPage` even if a concurrent post pushed `totalPages` further while we
+     * refreshed (that would chase a moving tail). It scrolls to the end instead, surfacing the freshly
+     * published reply. `false` on every other path — including the initial post-submit refresh, which
+     * is the route allowed to redirect once.
+     */
+    val postSubmitOverflowLanding: Boolean = false,
 )

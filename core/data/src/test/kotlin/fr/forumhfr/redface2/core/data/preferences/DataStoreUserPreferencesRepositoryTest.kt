@@ -3,8 +3,11 @@ package fr.forumhfr.redface2.core.data.preferences
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -293,6 +296,76 @@ class DataStoreUserPreferencesRepositoryTest {
         // FAVORITE untouched → still its type-aware default (false).
         repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
             assertFalse("FAVORITE keeps its default, no cross-type leak", awaitItem().unreadOnly)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeThemeMode defaults to SYSTEM on an empty store`() = runTest(dispatcher) {
+        // #286 — SYSTEM is the default (follow the OS), never the enum's first ordinal.
+        repository.observeThemeMode().test {
+            assertEquals(ThemeMode.SYSTEM, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setThemeMode persists and round-trips DARK then LIGHT`() = runTest(dispatcher) {
+        repository.setThemeMode(ThemeMode.DARK)
+        repository.observeThemeMode().test {
+            assertEquals(ThemeMode.DARK, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setThemeMode(ThemeMode.LIGHT)
+        repository.observeThemeMode().test {
+            assertEquals(ThemeMode.LIGHT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt theme_mode value falls back to SYSTEM instead of crashing`() = runTest(dispatcher) {
+        // A value from an older build / manual edit that no longer maps to a ThemeMode must not
+        // crash observeThemeMode on ThemeMode.valueOf — it degrades to SYSTEM.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("theme_mode")] = "PURPLE" }
+
+        repository.observeThemeMode().test {
+            assertEquals(ThemeMode.SYSTEM, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeAmoledEnabled defaults to false then persists true`() = runTest(dispatcher) {
+        repository.observeAmoledEnabled().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setAmoledEnabled(true)
+        repository.observeAmoledEnabled().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeTopicTopBarAutoHide defaults to false then persists true and false`() = runTest(dispatcher) {
+        repository.observeTopicTopBarAutoHide().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setTopicTopBarAutoHide(true)
+        repository.observeTopicTopBarAutoHide().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setTopicTopBarAutoHide(false)
+        repository.observeTopicTopBarAutoHide().test {
+            assertFalse(awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

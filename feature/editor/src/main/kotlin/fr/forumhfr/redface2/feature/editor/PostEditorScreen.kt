@@ -4,12 +4,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -78,122 +86,120 @@ private fun PostEditorContent(
 ) {
     val openSmileyPickerDescription = stringResource(R.string.editor_smiley_open_description)
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
+    // Reply (#145), Quote (#146) and Edit (#147) submit through HFR's reply/edit form ; the other
+    // (defensive) modes show a disabled note instead of a submit bar.
+    val showSubmitBar = state.mode == PostEditorMode.Reply || state.mode == PostEditorMode.Edit
     Surface(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(state.mode.titleResId),
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-
-            BbcodeToolbar(
-                onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
-                onImageUrlRequested = { imageUrlDialogOpen = true },
-            )
-
-            // Phase 2F-B (#11) — quick access to the smiley picker. Lives next to the BBCode
-            // toolbar rather than inside it because smileys are point-insertions, not wrappers,
-            // and the underlying `BbcodeAction` model is wrap-only.
-            TextButton(
-                onClick = { onIntent(PostEditorIntent.SmileyPickerOpened) },
-                modifier = Modifier.semantics {
-                    contentDescription = openSmileyPickerDescription
-                },
+        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(text = stringResource(R.string.editor_smiley_open))
-            }
+                Text(
+                    text = stringResource(state.mode.titleResId),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
 
-            BbcodeTextField(
-                value = state.draft,
-                onValueChange = { value -> onIntent(PostEditorIntent.ContentChanged(value)) },
-                label = stringResource(R.string.editor_field_label),
-                placeholder = stringResource(R.string.editor_field_placeholder),
-            )
+                BbcodeToolbar(
+                    onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
+                    onImageUrlRequested = { imageUrlDialogOpen = true },
+                )
 
-            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                TextButton(onClick = { onIntent(PostEditorIntent.TogglePreview) }) {
+                // Phase 2F-B (#11) — quick access to the smiley picker. Lives next to the BBCode
+                // toolbar rather than inside it because smileys are point-insertions, not wrappers,
+                // and the underlying `BbcodeAction` model is wrap-only.
+                TextButton(
+                    onClick = { onIntent(PostEditorIntent.SmileyPickerOpened) },
+                    modifier = Modifier.semantics {
+                        contentDescription = openSmileyPickerDescription
+                    },
+                ) {
+                    Text(text = stringResource(R.string.editor_smiley_open))
+                }
+
+                BbcodeTextField(
+                    value = state.draft,
+                    onValueChange = { value -> onIntent(PostEditorIntent.ContentChanged(value)) },
+                    label = stringResource(R.string.editor_field_label),
+                    placeholder = stringResource(R.string.editor_field_placeholder),
+                )
+
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                    TextButton(onClick = { onIntent(PostEditorIntent.TogglePreview) }) {
+                        Text(
+                            text = stringResource(
+                                if (state.isPreviewVisible) {
+                                    R.string.editor_preview_hide
+                                } else {
+                                    R.string.editor_preview_show
+                                },
+                            ),
+                        )
+                    }
+                }
+
+                if (state.isPreviewVisible) {
+                    HorizontalDivider()
+                    BbcodePreview(content = state.preview)
+                }
+
+                state.submitError?.let { error ->
                     Text(
-                        text = stringResource(
-                            if (state.isPreviewVisible) R.string.editor_preview_hide else R.string.editor_preview_show,
-                        ),
+                        text = stringResource(error.bannerResId),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TextButton(onClick = { onIntent(PostEditorIntent.ErrorDismissed) }) {
+                        Text(text = stringResource(R.string.editor_error_dismiss))
+                    }
+                }
+
+                if (showSubmitBar) {
+                    // HFR per-post option toggles. Defaults come from `ReplyForm.options`
+                    // (the `checked` attribute of each HTML checkbox HFR rendered for
+                    // this user / topic). The repository only adds the matching POST
+                    // field when the toggle is on — mirroring how a browser submits.
+                    // Phase 2D (#147) — Edit shares the same options surface as Reply:
+                    // both toggles live in `PostEditorState` and the matching
+                    // repository reads them at submit time, so the UI stays identical.
+                    PostEditorOptions(
+                        signatureEnabled = state.signatureEnabled,
+                        smileyDisabled = state.smileyDisabled,
+                        emailNotificationEnabled = state.emailNotificationEnabled,
+                        enabled = !state.isSubmitting && !state.isLoadingForm,
+                        onSignatureChanged = { onIntent(PostEditorIntent.ToggleSignature(it)) },
+                        onSmileyDisabledChanged = { onIntent(PostEditorIntent.ToggleSmileyDisabled(it)) },
+                        onEmailNotificationChanged = { onIntent(PostEditorIntent.ToggleEmailNotification(it)) },
+                    )
+                } else {
+                    // Defensive fallback for future post-level modes. Reply (#145),
+                    // Quote (#146) and Edit (#147) all go through the branch above ;
+                    // topic-level create/edit flows are handled by TopicFormScreen.
+                    Text(
+                        text = stringResource(R.string.editor_submit_disabled),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-
-            if (state.isPreviewVisible) {
-                HorizontalDivider()
-                BbcodePreview(content = state.preview)
-            }
-
-            state.submitError?.let { error ->
-                Text(
-                    text = stringResource(error.bannerResId),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                TextButton(onClick = { onIntent(PostEditorIntent.ErrorDismissed) }) {
-                    Text(text = stringResource(R.string.editor_error_dismiss))
-                }
-            }
-
-            if (state.mode == PostEditorMode.Reply || state.mode == PostEditorMode.Edit) {
-                // HFR per-post option toggles. Defaults come from `ReplyForm.options`
-                // (the `checked` attribute of each HTML checkbox HFR rendered for
-                // this user / topic). The repository only adds the matching POST
-                // field when the toggle is on — mirroring how a browser submits.
-                // Phase 2D (#147) — Edit shares the same options surface as Reply:
-                // both toggles live in `PostEditorState` and the matching
-                // repository reads them at submit time, so the UI stays identical.
-                PostEditorOptions(
-                    signatureEnabled = state.signatureEnabled,
-                    smileyDisabled = state.smileyDisabled,
-                    emailNotificationEnabled = state.emailNotificationEnabled,
-                    enabled = !state.isSubmitting && !state.isLoadingForm,
-                    onSignatureChanged = { onIntent(PostEditorIntent.ToggleSignature(it)) },
-                    onSmileyDisabledChanged = { onIntent(PostEditorIntent.ToggleSmileyDisabled(it)) },
-                    onEmailNotificationChanged = { onIntent(PostEditorIntent.ToggleEmailNotification(it)) },
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (state.isLoadingForm) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                    }
-                    Button(
-                        enabled = state.canSubmit,
-                        onClick = { onIntent(PostEditorIntent.SubmitClicked) },
-                    ) {
-                        if (state.isSubmitting) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                color = MaterialTheme.colorScheme.onPrimary,
-                            )
-                        } else {
-                            Text(text = stringResource(R.string.editor_submit))
-                        }
-                    }
-                }
-            } else {
-                // Defensive fallback for future post-level modes. Reply (#145),
-                // Quote (#146) and Edit (#147) all go through the branch above ;
-                // topic-level create/edit flows are handled by TopicFormScreen.
-                Text(
-                    text = stringResource(R.string.editor_submit_disabled),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // Send-button accessibility — the submit action is pinned to the bottom of the screen
+            // (not buried at the end of the scrolled column) and lifted above the IME so the user
+            // never has to dismiss the keyboard to reach « Envoyer ». Only Reply / Edit submit here;
+            // the defensive fallback mode keeps its disabled note inside the scroll.
+            if (showSubmitBar) {
+                EditorSubmitBar(
+                    canSubmit = state.canSubmit,
+                    isSubmitting = state.isSubmitting,
+                    isLoadingForm = state.isLoadingForm,
+                    onSubmit = { onIntent(PostEditorIntent.SubmitClicked) },
                 )
             }
         }
@@ -216,6 +222,62 @@ private fun PostEditorContent(
                 onDismiss = { imageUrlDialogOpen = false },
                 onInsert = { url -> onIntent(PostEditorIntent.ImageUrlInserted(url)) },
             )
+        }
+    }
+}
+
+/**
+ * Submit action pinned to the bottom of an editor screen, lifted above the IME so the user never has
+ * to dismiss the keyboard to reach « Envoyer ». Shared by [PostEditorContent] and `TopicFormContent`.
+ */
+@Composable
+internal fun EditorSubmitBar(
+    canSubmit: Boolean,
+    isSubmitting: Boolean,
+    isLoadingForm: Boolean,
+    onSubmit: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 3.dp,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            HorizontalDivider()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // Single bottom inset = max(navBar, ime); union() takes the larger so the two never
+                    // stack into a phantom gap. Keyboard closed → bar clears the gesture nav bar; keyboard
+                    // open → bar rides exactly on top of the IME. Requires windowSoftInputMode=adjustNothing
+                    // (AndroidManifest) so the OEM does NOT also resize the window — the resize+imePadding
+                    // double-shift was the Samsung One UI bug (#624).
+                    .windowInsetsPadding(
+                        WindowInsets.navigationBars
+                            .union(WindowInsets.ime)
+                            .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
+                    )
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (isLoadingForm) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
+                Button(
+                    enabled = canSubmit,
+                    onClick = onSubmit,
+                ) {
+                    if (isSubmitting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    } else {
+                        Text(text = stringResource(R.string.editor_submit))
+                    }
+                }
+            }
         }
     }
 }

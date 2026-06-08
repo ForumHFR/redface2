@@ -2,11 +2,20 @@
     <string name="topic_scroll_to">Scroll ciblé demandé vers le post %1$d.</string>
     <string name="topic_reply">Répondre depuis ce topic</string>
     <string name="topic_loading">Chargement…</string>
+    <!-- #285 — top app bar : back affordance (content description) + fallback title shown while
+         the topic page has not loaded yet (or errored), so the bar never reads blank. -->
+    <string name="topic_back">Retour</string>
+    <string name="topic_topbar_fallback_title">Sujet</string>
     <string name="topic_error_title">Erreur de chargement</string>
     <string name="topic_error_body">Impossible d’ouvrir la page %1$d.\n\n%2$s</string>
     <string name="topic_caption">post %1$d • page %2$d / %3$d</string>
     <string name="topic_post_index_prefix">#%1$d • </string>
     <string name="topic_post_numreponse_suffix"> • n°%1$d</string>
+    <!-- #239 — badge on a post showing how many posts of the CURRENT page cite it. -->
+    <plurals name="topic_post_cited_count">
+        <item quantity="one">cité %1$d fois</item>
+        <item quantity="other">cité %1$d fois</item>
+    </plurals>
     <string name="topic_poll_option">%1$s — %2$.1f%% (%3$d votes)</string>
     <string name="topic_poll_summary">%1$d votes au total • %2$s</string>
     <string name="topic_poll_multiple_choices">multi-choix</string>
@@ -24,4 +33,15 @@
     <string name="topic_edit_first_post">Modifier le premier message</string>
     <string name="topic_post_submit_refresh_failed">Message envoyé, mais le rafraîchissement de la page a échoué. Tirez pour réessayer.</string>
     <string name="topic_open_profile_action">Voir le profil</string>
+
+    <!-- #292 — suppression d'un de ses propres posts (post normal). -->
+    <string name="topic_post_delete">Supprimer</string>
+    <string name="topic_post_delete_confirm_title">Effacer ce message ?</string>
+    <string name="topic_post_delete_confirm_message">Cette action est irréversible.</string>
+    <string name="topic_post_delete_confirm_action">Supprimer</string>
+    <string name="topic_post_delete_confirm_cancel">Annuler</string>
+    <string name="topic_post_delete_success">Message supprimé</string>
+    <string name="topic_post_delete_failed_login">Vous devez être connecté pour supprimer ce message.</string>
+    <string name="topic_post_delete_failed_locked">Ce sujet est fermé : suppression impossible.</string>
+    <string name="topic_post_delete_failed_generic">La suppression a échoué. Réessayez.</string>
 </resources>

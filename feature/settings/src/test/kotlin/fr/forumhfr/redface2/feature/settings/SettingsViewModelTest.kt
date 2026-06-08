@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.settings
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.CompletableDeferred
@@ -520,6 +521,134 @@ class SettingsViewModelTest {
         assertTrue("init must hydrate the per-tab override from DataStore", viewModel.state.value.flagsPerTabOverride)
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Theme preferences (#286)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates theme preferences from storage`() = runTest {
+        repository.emitThemeMode(ThemeMode.DARK)
+        repository.emitAmoledEnabled(true)
+
+        val viewModel = newViewModel()
+        val state = viewModel.state.value
+
+        assertEquals(ThemeMode.DARK, state.themeMode)
+        assertTrue(state.amoledEnabled)
+    }
+
+    @Test
+    fun `ThemeModeChanged persists the new mode and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals("SYSTEM is the default", ThemeMode.SYSTEM, viewModel.state.value.themeMode)
+
+        viewModel.submit(SettingsIntent.ThemeModeChanged(ThemeMode.DARK))
+
+        val state = viewModel.state.value
+        assertEquals(ThemeMode.DARK, state.themeMode)
+        assertFalse(state.isUpdatingThemeMode)
+        assertFalse(state.themeModeError)
+        assertEquals(1, repository.themeModeSetCalls)
+        assertEquals(ThemeMode.DARK, repository.lastThemeModeSet)
+    }
+
+    @Test
+    fun `ThemeModeChanged reverts to the previous mode and raises the error flag on persist failure`() = runTest {
+        repository.failOnThemeModeSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ThemeModeChanged(ThemeMode.LIGHT))
+
+        val state = viewModel.state.value
+        assertEquals("must revert to the previous mode on failure", ThemeMode.SYSTEM, state.themeMode)
+        assertFalse(state.isUpdatingThemeMode)
+        assertTrue(state.themeModeError)
+    }
+
+    @Test
+    fun `AmoledEnabledChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("AMOLED is off by default", viewModel.state.value.amoledEnabled)
+
+        viewModel.submit(SettingsIntent.AmoledEnabledChanged(true))
+
+        assertTrue(viewModel.state.value.amoledEnabled)
+        assertFalse(viewModel.state.value.isUpdatingAmoled)
+        assertEquals(1, repository.amoledSetCalls)
+    }
+
+    @Test
+    fun `AmoledEnabledChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnAmoledSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.AmoledEnabledChanged(true))
+
+        assertFalse("must revert to the previous value on failure", viewModel.state.value.amoledEnabled)
+        assertFalse(viewModel.state.value.isUpdatingAmoled)
+        assertTrue(viewModel.state.value.amoledError)
+    }
+
+    @Test
+    fun `TopicTopBarAutoHideChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("auto-hide is off by default", viewModel.state.value.topicTopBarAutoHide)
+
+        viewModel.submit(SettingsIntent.TopicTopBarAutoHideChanged(true))
+
+        assertTrue(viewModel.state.value.topicTopBarAutoHide)
+        assertFalse(viewModel.state.value.isUpdatingTopicTopBarAutoHide)
+        assertEquals(1, repository.topicTopBarAutoHideSetCalls)
+    }
+
+    @Test
+    fun `TopicTopBarAutoHideChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnTopicTopBarAutoHideSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.TopicTopBarAutoHideChanged(true))
+
+        assertFalse("must revert to the previous value on failure", viewModel.state.value.topicTopBarAutoHide)
+        assertFalse(viewModel.state.value.isUpdatingTopicTopBarAutoHide)
+        assertTrue(viewModel.state.value.topicTopBarAutoHideError)
+    }
+
+    @Test
+    fun `theme hydration race - a stale initial DataStore emission must not overwrite a local mode change`() =
+        runTest {
+            // Mirror of the ignoreTopicCache startup-race test for ThemeMode (#286, Codex nit): init
+            // subscribes to observeThemeMode() and suspends on .first() (override emits nothing yet),
+            // the user picks DARK locally (optimistic + write succeeds, touchedLocally = true), then the
+            // still-suspended init resumes with a stale SYSTEM — the guard must skip the apply.
+            val initialHydrationFlow = MutableSharedFlow<ThemeMode>(replay = 0)
+            repository.themeModeObserveOverride = initialHydrationFlow
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.ThemeModeChanged(ThemeMode.DARK))
+            assertEquals(
+                "optimistic flip must reach the state synchronously",
+                ThemeMode.DARK,
+                viewModel.state.value.themeMode,
+            )
+            assertTrue(viewModel.state.value.themeModeTouchedLocally)
+            assertFalse(viewModel.state.value.isUpdatingThemeMode)
+
+            // Late, stale hydration produces SYSTEM. On the buggy code this overwrites the local DARK;
+            // on the fixed code the touchedLocally guard skips the apply.
+            initialHydrationFlow.emit(ThemeMode.SYSTEM)
+
+            val finalState = viewModel.state.value
+            assertEquals(
+                "stale initial DataStore hydration must NOT overwrite the local mode change",
+                ThemeMode.DARK,
+                finalState.themeMode,
+            )
+            assertFalse(finalState.isUpdatingThemeMode)
+            assertFalse(finalState.themeModeError)
+            assertEquals(1, repository.themeModeSetCalls)
+            assertEquals(ThemeMode.DARK, repository.lastThemeModeSet)
+        }
+
     private fun newViewModel(): SettingsViewModel =
         SettingsViewModel(repository, topicCacheMaintenance)
 
@@ -612,6 +741,69 @@ class SettingsViewModelTest {
             flagsPerTabOverrideSetCalls += 1
             check(!failOnFlagsPerTabOverrideSet) { "boom" }
             flagsPerTabOverride.value = enabled
+        }
+
+        // #286 — theme preferences. Same optimistic-flip seams as the flags toggles.
+        private val themeMode = MutableStateFlow(ThemeMode.SYSTEM)
+        var themeModeSetCalls: Int = 0
+            private set
+        var lastThemeModeSet: ThemeMode? = null
+            private set
+        var failOnThemeModeSet: Boolean = false
+
+        private val amoledEnabled = MutableStateFlow(false)
+        var amoledSetCalls: Int = 0
+            private set
+        var failOnAmoledSet: Boolean = false
+
+        /**
+         * Test seam for the theme startup-race test (#286), mirroring [ignoreTopicCacheObserveOverride]:
+         * when non-null, `observeThemeMode()` returns this flow so the test can hold the init `.first()`
+         * suspension, perform a local mode change, then release a stale emission to prove the guard skips it.
+         */
+        var themeModeObserveOverride: Flow<ThemeMode>? = null
+
+        override fun observeThemeMode(): Flow<ThemeMode> = themeModeObserveOverride ?: themeMode
+
+        override suspend fun setThemeMode(mode: ThemeMode) {
+            themeModeSetCalls += 1
+            check(!failOnThemeModeSet) { "boom" }
+            lastThemeModeSet = mode
+            themeMode.value = mode
+        }
+
+        override fun observeAmoledEnabled(): Flow<Boolean> = amoledEnabled
+
+        override suspend fun setAmoledEnabled(enabled: Boolean) {
+            amoledSetCalls += 1
+            check(!failOnAmoledSet) { "boom" }
+            amoledEnabled.value = enabled
+        }
+
+        // Build 89 follow-up — topic top-bar auto-hide. Same optimistic-flip seam as amoled.
+        private val topicTopBarAutoHide = MutableStateFlow(false)
+        var topicTopBarAutoHideSetCalls: Int = 0
+            private set
+        var failOnTopicTopBarAutoHideSet: Boolean = false
+
+        override fun observeTopicTopBarAutoHide(): Flow<Boolean> = topicTopBarAutoHide
+
+        override suspend fun setTopicTopBarAutoHide(enabled: Boolean) {
+            topicTopBarAutoHideSetCalls += 1
+            check(!failOnTopicTopBarAutoHideSet) { "boom" }
+            topicTopBarAutoHide.value = enabled
+        }
+
+        fun emitThemeMode(value: ThemeMode) {
+            themeMode.value = value
+        }
+
+        fun emitAmoledEnabled(value: Boolean) {
+            amoledEnabled.value = value
+        }
+
+        fun emitTopicTopBarAutoHide(value: Boolean) {
+            topicTopBarAutoHide.value = value
         }
 
         // Per-type resolution / writes are exercised by the Flags ViewModel, not Settings; stubbed.

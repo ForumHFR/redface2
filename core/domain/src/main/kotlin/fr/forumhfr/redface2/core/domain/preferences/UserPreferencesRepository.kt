@@ -105,4 +105,36 @@ interface UserPreferencesRepository {
      * actionable « Mes sujets » subset), `false` for [FlagType.RED] / [FlagType.FAVORITE].
      */
     suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean)
+
+    /**
+     * App theme selection (#286): [ThemeMode.SYSTEM] (default) follows the OS dark-mode setting;
+     * [ThemeMode.LIGHT] / [ThemeMode.DARK] force the app theme regardless of the OS. Observed at the
+     * app root ([fr.forumhfr.redface2.navigation.RedfaceApp]) to compute the effective dark theme
+     * passed to `RedfaceTheme`, and mirrored in Settings.
+     */
+    fun observeThemeMode(): Flow<ThemeMode>
+
+    /** Persists [observeThemeMode]. Default [ThemeMode.SYSTEM] until the first call. */
+    suspend fun setThemeMode(mode: ThemeMode)
+
+    /**
+     * AMOLED (true-black) theme toggle (#286): only takes effect when the effective theme is dark
+     * (forced [ThemeMode.DARK] or [ThemeMode.SYSTEM] while the OS is in dark mode). Default `false`.
+     */
+    fun observeAmoledEnabled(): Flow<Boolean>
+
+    /** Persists [observeAmoledEnabled]. Default `false` until the first call. */
+    suspend fun setAmoledEnabled(enabled: Boolean)
+
+    /**
+     * Topic top app bar auto-hide (build 89 follow-up): when `true`, the topic top bar (title +
+     * page counter) collapses while the user scrolls down through the posts and re-appears as soon
+     * as they scroll back toward the top — Material3 `enterAlways` behaviour — freeing reading
+     * space. Default `false` (the bar stays pinned). Observed by `:feature:topic`, toggled in
+     * Settings.
+     */
+    fun observeTopicTopBarAutoHide(): Flow<Boolean>
+
+    /** Persists [observeTopicTopBarAutoHide]. Default `false` until the first call. */
+    suspend fun setTopicTopBarAutoHide(enabled: Boolean)
 }

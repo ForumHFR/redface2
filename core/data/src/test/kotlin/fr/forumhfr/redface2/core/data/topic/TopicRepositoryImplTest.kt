@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.network.HfrClient
@@ -494,5 +495,18 @@ class TopicRepositoryImplTest {
         override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
 
         override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
+
+        // #286 — theme prefs are irrelevant to TopicRepositoryImpl; stubbed at their defaults.
+        override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
+
+        override suspend fun setThemeMode(mode: ThemeMode) = Unit
+
+        override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setAmoledEnabled(enabled: Boolean) = Unit
+
+        override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
     }
 }

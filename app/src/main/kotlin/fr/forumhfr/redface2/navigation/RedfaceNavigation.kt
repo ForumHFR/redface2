@@ -1,7 +1,9 @@
 package fr.forumhfr.redface2.navigation
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -16,6 +18,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,11 +27,18 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.core.net.toUri
+import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -42,6 +52,7 @@ import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.account.RedfaceAccountMenu
 import fr.forumhfr.redface2.feature.auth.LoginScreen
@@ -128,6 +139,16 @@ data class TopicRoute(
      * `false` on ordinary navigation (forum / deep link / back-nav) to keep the cache snappy.
      */
     val forceRefresh: Boolean = false,
+    /**
+     * #226 — `true` only on the route re-pushed by [onNavigateToLastPage] after a plain reply
+     * overflowed onto a freshly created last page. Forwarded to `TopicRequest.postSubmitOverflowLanding`.
+     * Always paired with a fresh [submitSignal] (force-fetch, no stale cache) and tells the ViewModel
+     * this is the overflow *landing*: scroll to the end of the fresh page, do NOT redirect again to
+     * yet another last page (anti-chase under concurrent posting). Default `false` keeps every other
+     * route — including the initial post-submit refresh — unaffected; defaulted so older serialised
+     * back stacks deserialise without the field.
+     */
+    val postSubmitOverflowLanding: Boolean = false,
 ) : RedfaceNavKey
 
 @Serializable
@@ -277,10 +298,37 @@ private data class ProfileSheetRequest(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3AdaptiveApi::class)
 @Composable
 fun RedfaceApp(intent: Intent?) {
-    RedfaceTheme {
+    // #286 — resolve the persisted theme selection before applying RedfaceTheme. SYSTEM (default)
+    // keeps the historical isSystemInDarkTheme() behaviour; LIGHT/DARK force the app theme.
+    val themeViewModel: AppThemeViewModel = hiltViewModel()
+    val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
+    val amoledEnabled by themeViewModel.amoledEnabled.collectAsStateWithLifecycle()
+    val darkTheme = when (themeMode) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
+    // #286 — keep the system bar ICON contrast in sync with the EFFECTIVE app theme, not the OS night
+    // mode. MainActivity calls enableEdgeToEdge() once, whose default SystemBarStyle derives bar icon
+    // contrast from the OS uiMode; once the user forces LIGHT/DARK against the OS, the status /
+    // navigation bar icons would otherwise keep the OS contrast (e.g. light icons on a forced-light
+    // background = invisible). SideEffect re-asserts it after each themed recomposition.
+    val view = LocalView.current
+    // Resolve the host Activity defensively (Context.findActivity) instead of casting view.context
+    // directly: RedfaceApp is mounted under MainActivity today, but a future ContextWrapper in the
+    // chain would make a hard `as Activity` cast crash. isInEditMode guards the @Preview path.
+    val window = view.context.findActivity()?.window
+    if (!view.isInEditMode && window != null) {
+        SideEffect {
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = !darkTheme
+            controller.isAppearanceLightNavigationBars = !darkTheme
+        }
+    }
+    RedfaceTheme(darkTheme = darkTheme, amoledTheme = amoledEnabled) {
         val flagsBackStack = rememberNavBackStack(FlagsListRoute)
         val forumBackStack = rememberNavBackStack(ForumRoute)
         val searchBackStack = rememberNavBackStack(SearchRoute)
@@ -332,6 +380,13 @@ fun RedfaceApp(intent: Intent?) {
         // metadata never outlives the session / account.
         var multiRecipientThreadIds by remember { mutableStateOf(emptySet<Int>()) }
 
+        // Bug fix (build 89) — per-topic title cache keyed by (cat, post). A page change replaces the
+        // TopicRoute (new nav entry → new ViewModel → Loading with no topic), which used to flash the
+        // generic « Sujet » title in the top bar. The topic screen reports its loaded title here; the
+        // next page reads it back via TopicRequest.titleHint. Hoisted above NavDisplay so it survives
+        // the entry recreation; keyed by (cat, post) so titles never bleed across categories.
+        var topicTitleCache by remember { mutableStateOf(emptyMap<TopicTitleKey, String>()) }
+
         LaunchedEffect(authState) {
             when (authState) {
                 null -> Unit
@@ -348,7 +403,20 @@ fun RedfaceApp(intent: Intent?) {
             }
         }
 
+        // #624 — the post/topic editor pins an « Envoyer » bar above the keyboard. Inside the bottom-nav
+        // scaffold that bar sat ABOVE the navigation component, so the window-relative IME inset overshot
+        // it by the nav bar height (the bar floated mid-screen with a gap). Hiding the navigation for editor
+        // routes makes the editor full-screen: its submit bar then sits at the window bottom and the IME
+        // inset lands exactly on the keyboard. Bonus UX: no tab switching mid-compose (would drop the draft).
+        val topRoute = backStacks.getValue(currentDestination).lastOrNull()
+        val navLayoutType = if (topRoute is PostEditorRoute || topRoute is TopicFormRoute) {
+            NavigationSuiteType.None
+        } else {
+            NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
+        }
+
         NavigationSuiteScaffold(
+            layoutType = navLayoutType,
             navigationSuiteItems = {
                 TopLevelDestination.entries.forEach { destination ->
                     item(
@@ -387,6 +455,12 @@ fun RedfaceApp(intent: Intent?) {
                         },
                         onThreadOpenedAsMulti = { threadId ->
                             multiRecipientThreadIds = multiRecipientThreadIds + threadId
+                        },
+                    ),
+                    topicTitleNavState = TopicTitleNavState(
+                        titles = topicTitleCache,
+                        onTitleLoaded = { cat, post, title ->
+                            topicTitleCache = topicTitleCache.withTitle(TopicTitleKey(cat, post), title)
                         },
                     ),
                     onOpenProfile = { userId, pseudo, avatarUrl ->
@@ -487,6 +561,56 @@ private data class PrivateMessageNavState(
     val onThreadOpenedAsMulti: (Int) -> Unit,
 )
 
+/**
+ * Bug fix (build 89) — per-topic title cache plumbed into [RedfaceNavHost]. A topic page change
+ * replaces the TopicRoute (new nav entry → new ViewModel → Loading with no topic yet), which used to
+ * flash the generic « Sujet » title in the top app bar. The `var` backing [titles] lives in
+ * [RedfaceApp] so it survives the entry recreation; [onTitleLoaded] writes the freshly-loaded title
+ * back and the next page reads it via TopicRequest.titleHint. Keyed by `(cat, post)` ([TopicTitleKey])
+ * — a topic id is unique only per HFR category — so titles never bleed across categories. Same
+ * read-map + onLoaded-callback shape as [PrivateMessageNavState].
+ *
+ * @property titles last known title per topic, fed into TopicRequest.titleHint.
+ * @property onTitleLoaded records a topic's title once its page has loaded.
+ */
+private data class TopicTitleNavState(
+    val titles: Map<TopicTitleKey, String>,
+    val onTitleLoaded: (cat: Int, post: Int, title: String) -> Unit,
+)
+
+/**
+ * Composite cache key for [TopicTitleNavState]. A topic id (`post`) is unique only **per HFR
+ * category**, not globally — two categories can theoretically expose the same id (cf. the same
+ * `(cat, topicId)` composite key in `SearchScreen`), so keying by `post` alone could flash the
+ * wrong title across categories while a page loads. Keyed by `(cat, post)` to stay correct.
+ */
+internal data class TopicTitleKey(val cat: Int, val post: Int)
+
+// Upper bound on the per-topic title cache (display hint only). A long reading session opens many
+// topics; capping at a generous size keeps the map from growing unbounded for the app's lifetime.
+// Eviction is FIFO (oldest insertions dropped) — losing a stale hint just falls back to « Sujet »
+// for one loading frame, which is harmless.
+internal const val TOPIC_TITLE_CACHE_MAX = 128
+
+/**
+ * Inserts [title] for [key] into the per-topic title cache, evicting the oldest entries past
+ * [TOPIC_TITLE_CACHE_MAX]. `Map + pair` preserves insertion order (LinkedHashMap), so dropping from
+ * the front evicts the least-recently-inserted titles. Extracted from [RedfaceApp] to keep that
+ * composable under the cyclomatic-complexity budget.
+ */
+internal fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: String): Map<TopicTitleKey, String> {
+    // Short-circuit when the title is unchanged: a page change within the same topic re-emits the
+    // identical loaded title, and re-inserting it would allocate a fresh map + trigger a global
+    // RedfaceApp recomposition for nothing.
+    if (this[key] == title) return this
+    val updated = this + (key to title)
+    return if (updated.size > TOPIC_TITLE_CACHE_MAX) {
+        updated.entries.drop(updated.size - TOPIC_TITLE_CACHE_MAX).associate { it.toPair() }
+    } else {
+        updated
+    }
+}
+
 @Composable
 @Suppress("CyclomaticComplexMethod") // One entry per top-level route + per-screen navigation callbacks ;
 // splitting the host would just push the same `when` shape one level deeper without reducing complexity.
@@ -494,6 +618,9 @@ private fun RedfaceNavHost(
     backStack: NavBackStack<NavKey>,
     accountMenu: @Composable () -> Unit,
     privateMessageNavState: PrivateMessageNavState,
+    // Bug fix (build 89) — per-topic title cache threaded down from RedfaceApp (where the `var` lives
+    // so it survives entry recreation across page changes). Bundled to keep the param count in check.
+    topicTitleNavState: TopicTitleNavState,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     NavDisplay(
@@ -708,7 +835,12 @@ private fun RedfaceNavHost(
                         scrollTo = route.scrollTo,
                         submitSignal = route.submitSignal,
                         forceRefresh = route.forceRefresh,
+                        postSubmitOverflowLanding = route.postSubmitOverflowLanding,
+                        titleHint = topicTitleNavState.titles[TopicTitleKey(route.cat, route.post)],
                     ),
+                    onTitleLoaded = { title ->
+                        topicTitleNavState.onTitleLoaded(route.cat, route.post, title)
+                    },
                     onOpenProfile = onOpenProfile,
                     onReply = { subcat, page ->
                         backStack.add(
@@ -784,6 +916,34 @@ private fun RedfaceNavHost(
                             scrollTo = null,
                         )
                     },
+                    onBack = {
+                        // #285 — explicit back affordance in the topic top bar. Pop to the screen that
+                        // opened the topic (list / flags). Guard size > 1 so we never pop a tab root
+                        // (mirrors the global back handling used across the other entries).
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    onNavigateToLastPage = { lastPage ->
+                        // #226 — the plain reply overflowed onto a freshly created page; land the user
+                        // there (their reply lives on the last page, not the stale form page). Carry a
+                        // fresh submitSignal so the destination ViewModel force-fetches the page — a
+                        // plain cache-aside load could serve a TTL-fresh row that pre-dates the reply
+                        // (the original #226 failure). The `postSubmitOverflowLanding` flag is what
+                        // keeps the old anti-chase guarantee WITHOUT dropping the refresh: the landing
+                        // ViewModel scrolls to the end but never re-emits NavigateToLastPage, so a
+                        // concurrent post that pushes totalPages further during the refresh window does
+                        // not start a moving-tail chase. Indexed set (not removeAt + add) for the same
+                        // single-mutation reason as onOpenPage (#282).
+                        backStack[backStack.lastIndex] = TopicRoute(
+                            cat = route.cat,
+                            post = route.post,
+                            page = lastPage,
+                            scrollTo = null,
+                            submitSignal = System.currentTimeMillis(),
+                            postSubmitOverflowLanding = true,
+                        )
+                    },
                 )
             }
             entry<PostEditorRoute> { route ->
@@ -828,6 +988,10 @@ private fun RedfaceNavHost(
                                     // is silently suppressed (it gates on `target == null`).
                                     scrollTo = scrollTo,
                                     submitSignal = System.currentTimeMillis(),
+                                    // #226 — a fresh submit may itself overflow, so it must be allowed
+                                    // to redirect once. Reset the landing flag the previous route may
+                                    // have carried (topicEntry could already be an overflow landing).
+                                    postSubmitOverflowLanding = false,
                                 ),
                             )
                         }
@@ -870,6 +1034,10 @@ private fun RedfaceNavHost(
                                     // is silently suppressed (it gates on `target == null`).
                                     scrollTo = scrollTo,
                                     submitSignal = System.currentTimeMillis(),
+                                    // #226 — a fresh submit may itself overflow, so it must be allowed
+                                    // to redirect once. Reset the landing flag the previous route may
+                                    // have carried (topicEntry could already be an overflow landing).
+                                    postSubmitOverflowLanding = false,
                                 ),
                             )
                         }
@@ -978,6 +1146,16 @@ private fun resetStack(
     if (route != root) {
         backStack.add(route)
     }
+}
+
+/**
+ * #286 — walk the Context chain to the host [Activity] (or null), so the system-bar SideEffect never
+ * crashes on a non-Activity / ContextWrapper context. Tail-recursive over [ContextWrapper.baseContext].
+ */
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 /** Default NavDisplay cross-fade duration, mirroring nav3 1.1.1 `defaultTransitionSpec` (700 ms). */

@@ -8,9 +8,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -18,16 +16,23 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,9 +47,13 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -110,6 +119,25 @@ fun TopicScreen(
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
     /**
+     * #285 — leave the topic and go back to the screen that opened it (topic list / flags).
+     * Wired to a back-stack pop in `:app`. Surfaced as an explicit back arrow in the top app
+     * bar so the user never has to rely on the system / gesture back to exit a topic.
+     */
+    onBack: () -> Unit,
+    /**
+     * #226 — after a plain reply that overflowed onto a freshly created page, re-route to that
+     * last page : the post the user just published lives there, not on the page the reply form
+     * was anchored to. `:app` replaces the current TopicRoute in place with the target page.
+     */
+    onNavigateToLastPage: (page: Int) -> Unit,
+    /**
+     * Bug fix (build 89) — reports the loaded topic title up to `:app` so it can keep a per-topic
+     * title cache. On a page change the screen is recreated and starts in `Loading`; `:app` feeds
+     * the cached title back via [TopicRequest.titleHint] so the top app bar no longer flashes the
+     * generic « Sujet » fallback between pages.
+     */
+    onTitleLoaded: (String) -> Unit = {},
+    /**
      * Phase 2 finish (#208) — emitted when the user taps on a post avatar or author name.
      * Carries the numeric user id (canonical key for profile navigation) plus display hints
      * [pseudo] and [avatarUrl] that `:app` can show immediately while the profile loads.
@@ -133,6 +161,22 @@ fun TopicScreen(
     // suspending lambda but the surrounding scope is still a Composable). Capturing the message
     // upfront keeps the rule happy and avoids re-resolving on every effect.
     val refreshFailedMsg = stringResource(R.string.topic_post_submit_refresh_failed)
+    // #292 — delete feedback messages, resolved upfront (same rationale as refreshFailedMsg).
+    val deleteSuccessMsg = stringResource(R.string.topic_post_delete_success)
+    val deleteFailedLoginMsg = stringResource(R.string.topic_post_delete_failed_login)
+    val deleteFailedLockedMsg = stringResource(R.string.topic_post_delete_failed_locked)
+    val deleteFailedGenericMsg = stringResource(R.string.topic_post_delete_failed_generic)
+    // #292 — `numreponse` awaiting delete confirmation (null = no dialog). Local UI state: the
+    // confirmation is a pure view concern, only the confirmed deletion reaches the ViewModel.
+    var deleteCandidate by rememberSaveable { mutableStateOf<Int?>(null) }
+
+    // Bug fix (build 89) — report the loaded title up so `:app` caches it per topic. The next page
+    // (recreated screen) reads it back through `request.titleHint`, keeping the top bar title stable
+    // instead of flashing « Sujet » during the load.
+    val loadedTitle = (state.mode as? TopicUiState.Mode.Loaded)?.topic?.title
+    LaunchedEffect(loadedTitle) {
+        loadedTitle?.takeIf { it.isNotBlank() }?.let(onTitleLoaded)
+    }
 
     // Single-shot scroll : `effects` emits `ScrollToPost` exactly once per request,
     // when the ViewModel has loaded a page that contains the requested numreponse.
@@ -189,6 +233,34 @@ fun TopicScreen(
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
+                is TopicEffect.NavigateToLastPage -> {
+                    // #226 — the plain reply overflowed onto a freshly created last page. Hand the
+                    // target page to `:app`, which replaces the current TopicRoute in place so the
+                    // user lands on the page that actually holds their new post (the ViewModel for
+                    // that route then anchors #bas → ScrollToEndOfPage as usual).
+                    onNavigateToLastPage(effect.page)
+                }
+                TopicEffect.PostDeleted -> {
+                    // #292 — HFR accepted the deletion; the ViewModel force-refreshes the page so the
+                    // post is already gone by the time this lands. Confirm with a Toast.
+                    android.widget.Toast.makeText(
+                        context,
+                        deleteSuccessMsg,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                is TopicEffect.PostDeleteFailed -> {
+                    val message = when (effect.reason) {
+                        DeleteFailureReason.LoginRequired -> deleteFailedLoginMsg
+                        DeleteFailureReason.TopicLocked -> deleteFailedLockedMsg
+                        DeleteFailureReason.Generic -> deleteFailedGenericMsg
+                    }
+                    android.widget.Toast.makeText(
+                        context,
+                        message,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
         }
     }
@@ -197,13 +269,27 @@ fun TopicScreen(
         state = state,
         listState = lazyListState,
         onIntent = viewModel::send,
+        onBack = onBack,
         onReply = onReply,
         onQuote = onQuote,
         onEdit = onEdit,
         onEditFirstPost = onEditFirstPost,
         onOpenPage = onOpenPage,
         onOpenProfile = onOpenProfile,
+        onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
     )
+
+    // #292 — confirmation before the (irreversible, no-undo) deletion. Only « Supprimer » sends the
+    // intent; dismissing leaves the post untouched. Mirrors the « Vider le cache » confirm pattern.
+    deleteCandidate?.let { numreponse ->
+        DeletePostConfirmDialog(
+            onConfirm = {
+                viewModel.send(TopicIntent.DeletePost(numreponse))
+                deleteCandidate = null
+            },
+            onDismiss = { deleteCandidate = null },
+        )
+    }
 }
 
 /**
@@ -332,71 +418,140 @@ private const val REANCHOR_MIN_FRAMES = 60
 /** Frames the target position must hold still before we treat the layout as settled. */
 private const val REANCHOR_STABLE_FRAMES = 3
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 @Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
 internal fun TopicContent(
     state: TopicUiState,
     listState: LazyListState,
     onIntent: (TopicIntent) -> Unit,
+    onBack: () -> Unit,
     onReply: (subcat: Int, page: Int) -> Unit,
     onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    // #292 — a per-post « Supprimer » tap; the screen owns the confirmation dialog, so this only
+    // requests it (carrying the post's numreponse). Never invoked for the first post (excluded).
+    onDeleteRequest: (numreponse: Int) -> Unit = {},
 ) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.surface,
-    ) {
-        when (val mode = state.mode) {
-            TopicUiState.Mode.Loading -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                        .navigationBarsPadding()
-                        .padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    CircularProgressIndicator()
-                    Text(
-                        text = stringResource(R.string.topic_loading),
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                }
-            }
-
-            is TopicUiState.Mode.Error -> {
-                RedfacePlaceholderScreen(
-                    title = stringResource(R.string.topic_error_title),
-                    body = stringResource(R.string.topic_error_body, state.request.page, mode.message),
-                ) {
-                    TopicPageNavigation(
-                        currentPage = state.request.page,
-                        availablePages = state.availablePages,
-                        canGoPrevious = state.canGoPrevious,
-                        canGoNext = state.canGoNext,
-                        onOpenPage = onOpenPage,
-                    )
-                    OutlinedButton(onClick = { onIntent(TopicIntent.Retry) }) {
-                        Text(text = stringResource(R.string.topic_retry))
+    // #285 — the topic title and #284 — the page counter live in a persistent top app bar so they
+    // stay visible while the user scrolls (the in-card title/caption scrolls away). When the page
+    // is still loading / errored, fall back to a generic title and the requested page.
+    val loaded = state.mode as? TopicUiState.Mode.Loaded
+    val fallbackTitle = stringResource(R.string.topic_topbar_fallback_title)
+    // Honour TopicRequest.titleHint's contract: the cached hint is a LOADING-only stand-in. Once the
+    // page is Loaded, the live Topic.title wins (or the generic fallback if it is somehow blank) — we
+    // never reach back to the stale hint, so a loaded topic can never display another page's title.
+    val barTitle = if (loaded != null) {
+        loaded.topic.title.takeIf { it.isNotBlank() } ?: fallbackTitle
+    } else {
+        state.request.titleHint?.takeIf { it.isNotBlank() } ?: fallbackTitle
+    }
+    val barCurrentPage = loaded?.topic?.page ?: state.request.page
+    val barTotalPages = loaded?.topic?.totalPages
+        ?: state.availablePages.lastOrNull()
+        ?: state.request.page
+    val backLabel = stringResource(R.string.topic_back)
+    // Build 89 follow-up — when the user opted into auto-hide, give the top bar an `enterAlways`
+    // scroll behaviour (collapses on scroll-down, snaps back on the first scroll-up). Otherwise
+    // leave it `null` so the bar stays pinned (the prior, always-visible behaviour). Toggling the
+    // preference re-enters the other branch, recreating the behaviour expanded — the desired reset.
+    val scrollBehavior = if (state.topBarAutoHide) {
+        TopAppBarDefaults.enterAlwaysScrollBehavior()
+    } else {
+        null
+    }
+    Scaffold(
+        modifier = if (scrollBehavior != null) {
+            Modifier.nestedScroll(scrollBehavior.nestedScrollConnection)
+        } else {
+            Modifier
+        },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(
+                            text = barTitle,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = stringResource(R.string.topic_page_indicator, barCurrentPage, barTotalPages),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.semantics { contentDescription = backLabel },
+                    ) {
+                        Text("←")
+                    }
+                },
+                scrollBehavior = scrollBehavior,
+            )
+        },
+    ) { innerPadding ->
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            when (val mode = state.mode) {
+                TopicUiState.Mode.Loading -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        CircularProgressIndicator()
+                        Text(
+                            text = stringResource(R.string.topic_loading),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
                     }
                 }
-            }
 
-            is TopicUiState.Mode.Loaded -> {
-                TopicLoadedContent(
-                    state = state,
-                    topic = mode.topic,
-                    onReply = onReply,
-                    onQuote = onQuote,
-                    onEdit = onEdit,
-                    onEditFirstPost = onEditFirstPost,
-                    onOpenPage = onOpenPage,
-                    onOpenProfile = onOpenProfile,
-                    listState = listState,
-                )
+                is TopicUiState.Mode.Error -> {
+                    RedfacePlaceholderScreen(
+                        title = stringResource(R.string.topic_error_title),
+                        body = stringResource(R.string.topic_error_body, state.request.page, mode.message),
+                    ) {
+                        TopicPageNavigation(
+                            currentPage = state.request.page,
+                            availablePages = state.availablePages,
+                            canGoPrevious = state.canGoPrevious,
+                            canGoNext = state.canGoNext,
+                            onOpenPage = onOpenPage,
+                        )
+                        OutlinedButton(onClick = { onIntent(TopicIntent.Retry) }) {
+                            Text(text = stringResource(R.string.topic_retry))
+                        }
+                    }
+                }
+
+                is TopicUiState.Mode.Loaded -> {
+                    TopicLoadedContent(
+                        state = state,
+                        topic = mode.topic,
+                        onReply = onReply,
+                        onQuote = onQuote,
+                        onEdit = onEdit,
+                        onEditFirstPost = onEditFirstPost,
+                        onOpenPage = onOpenPage,
+                        onOpenProfile = onOpenProfile,
+                        onDeleteRequest = onDeleteRequest,
+                        listState = listState,
+                    )
+                }
             }
         }
     }
@@ -413,9 +568,13 @@ private fun TopicLoadedContent(
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    onDeleteRequest: (numreponse: Int) -> Unit = {},
     listState: LazyListState,
 ) {
     val highlight = state.request.scrollTo
+    // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
+    // the « cité N fois » badge below. Pure + page-scoped (cf. citationCountsByNumreponse KDoc).
+    val citationCounts = remember(topic.posts) { citationCountsByNumreponse(topic.posts) }
     // #282 — shared offset between the gesture (drives translationX) and the edge glow. A plain
     // MutableFloatState: the gesture writes it synchronously per frame (no coroutine/alloc), the draw
     // phase reads it; an Animatable inside the gesture handles only release transitions. Lives in the
@@ -446,8 +605,9 @@ private fun TopicLoadedContent(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
+            // #285 — system-bar insets (status + navigation) are now consumed by the Scaffold/TopAppBar
+            // in TopicContent and applied via the content Surface's padding(innerPadding); the list no
+            // longer adds statusBarsPadding()/navigationBarsPadding() here to avoid double-insetting.
             // #282 — horizontal swipe changes page via the existing route-driven onOpenPage, with
             // drag-follow feedback: the page tracks the finger (graphicsLayer inside topicPageSwipe)
             // and topicPageSwipeEdge paints an edge glow as the swipe arms. topicPageSwipeEdge must
@@ -536,6 +696,22 @@ private fun TopicLoadedContent(
             } else {
                 null
             }
+            // #292 — « Supprimer » uses the same gate as « Modifier » (HFR allows deletion via the
+            // edit form), EXCEPT it is never offered on the topic's first post: deleting that would
+            // remove the entire topic, an out-of-scope destructive path for this MVP. The first post
+            // is `topic.posts.first()` on page 1.
+            // Disable every delete affordance while a deletion is in flight (state.deletingNumreponse
+            // != null) so a second tap can't queue another POST mid-request (the ViewModel also
+            // guards, but hiding the button is the honest UI signal).
+            val deleteAction: (() -> Unit)? = if (
+                state.deletingNumreponse == null &&
+                !isFirstPostOfTopic(topic, post) &&
+                shouldShowDeleteAction(topic, post, state.isAuthenticated)
+            ) {
+                { onDeleteRequest(post.numreponse) }
+            } else {
+                null
+            }
             // Phase 2 finish (#208) — profile tap is enabled only when HFR exposed
             // a profile link for this post (Post.profileId != null). Posts without a
             // profile link (Publicité rows, anonymous reads) keep the tap hidden.
@@ -545,8 +721,10 @@ private fun TopicLoadedContent(
             TopicPostCard(
                 post = post,
                 highlighted = highlight == post.numreponse,
+                citedCount = citationCounts[post.numreponse] ?: 0,
                 onQuote = quoteAction,
                 onEdit = editAction,
+                onDelete = deleteAction,
                 onOpenProfile = profileAction,
             )
         }
@@ -791,11 +969,21 @@ private fun TopicPollCard(poll: Poll) {
 }
 
 @Composable
+@Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
 private fun TopicPostCard(
     post: Post,
     highlighted: Boolean,
+    /**
+     * #239 — number of posts on the current page that cite this one. 0 hides the badge.
+     */
+    citedCount: Int,
     onQuote: (() -> Unit)?,
     onEdit: (() -> Unit)?,
+    /**
+     * #292 — « Supprimer » this post. Null hides the button (not the user's own post, locked topic,
+     * logged out, or the topic's first post — which is excluded to avoid whole-topic deletion).
+     */
+    onDelete: (() -> Unit)? = null,
     /**
      * Phase 2 finish (#208) — tapping the avatar or author opens the profile bottom sheet.
      * Null when [Post.profileId] is null (Publicité rows, anonymous reads).
@@ -908,22 +1096,53 @@ private fun TopicPostCard(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (citedCount > 0) {
+                        // #239 — sober pill: how many posts of THIS page cite this one. Page-scoped
+                        // (cf. citationCountsByNumreponse); jumping to the citing posts is a follow-up.
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text(
+                                text = pluralStringResource(
+                                    R.plurals.topic_post_cited_count,
+                                    citedCount,
+                                    citedCount,
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
                 }
             }
-            PostRenderer(content = post.content)
-            if (onQuote != null || onEdit != null) {
+            // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
+            PostRenderer(content = post.content, selectable = true)
+            if (onQuote != null || onEdit != null || onDelete != null) {
                 // Actions row at the bottom of the post card, sober TextButtons
                 // so they stay subordinate to the post content. « Modifier »
-                // (Phase 2D, #147) appears only on the user's own editable posts
-                // when the topic is still postable. « Citer » (Phase 2C, #146)
-                // appears whenever the topic is postable, even when the per-post
-                // `quoteRef` link was obfuscated and parsed as null (#227).
-                // Either can be absent — we only render the row at all if at least
-                // one action is provided.
+                // (Phase 2D, #147) and « Supprimer » (#292) appear only on the
+                // user's own editable posts when the topic is still postable
+                // (« Supprimer » additionally excludes the first post). « Citer »
+                // (Phase 2C, #146) appears whenever the topic is postable, even
+                // when the per-post `quoteRef` link was obfuscated and parsed as
+                // null (#227). Any can be absent — we render the row only if at
+                // least one action is provided.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                 ) {
+                    if (onDelete != null) {
+                        TextButton(
+                            onClick = onDelete,
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error,
+                            ),
+                        ) {
+                            Text(text = stringResource(R.string.topic_post_delete))
+                        }
+                    }
                     if (onEdit != null) {
                         TextButton(onClick = onEdit) {
                             Text(text = stringResource(R.string.topic_post_edit))
@@ -946,6 +1165,37 @@ private val topicDateFormatter = DateTimeFormatter
 
 private fun java.time.Instant.asTopicDate(): String = topicDateFormatter.format(this)
 
+/**
+ * #292 — confirmation before an irreversible post deletion (HFR offers no undo, cf. the #99 flag
+ * delete). « Supprimer » is styled as a destructive (error-coloured) action; « Annuler » dismisses.
+ */
+@Composable
+private fun DeletePostConfirmDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = stringResource(R.string.topic_post_delete_confirm_title)) },
+        text = { Text(text = stringResource(R.string.topic_post_delete_confirm_message)) },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error,
+                ),
+            ) {
+                Text(text = stringResource(R.string.topic_post_delete_confirm_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(R.string.topic_post_delete_confirm_cancel))
+            }
+        },
+    )
+}
+
 // #220 — write affordances additionally require an authenticated session. A logged-out user
 // can still hold a stale cached `canReply = true` row (the topic page cache is intentionally
 // not purged on logout, cf. CacheInvalidator), so these gates consult auth explicitly instead
@@ -959,6 +1209,19 @@ internal fun shouldShowQuoteAction(topic: Topic, isAuthenticated: Boolean): Bool
 
 internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
     post.isEditable && topic.canReply && isAuthenticated
+
+// #292 — « Supprimer » shares the « Modifier » gate: HFR exposes deletion through the same edit
+// form, so any post the user can edit, they can delete. The first-post exclusion (deleting it would
+// remove the whole topic) is applied at the call site by position, not here.
+internal fun shouldShowDeleteAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
+    post.isEditable && topic.canReply && isAuthenticated
+
+// #292 — the topic's first post is `topic.posts.first()` on page 1. Deleting it would remove the whole
+// topic (out of scope for this MVP), so the call site excludes it from the delete affordance. Position
+// + identity based: `numreponse` is unique per HFR category, so matching it against the page's first
+// row is sufficient within a loaded topic page.
+internal fun isFirstPostOfTopic(topic: Topic, post: Post): Boolean =
+    topic.page == 1 && post.numreponse == topic.posts.firstOrNull()?.numreponse
 
 // Phase 2D #148 / #220 — « Modifier le premier message ». 6-way conjunction by design: auth,
 // FP ownership, postable topic, a real sub-category (FP recategorise is NOT relaxed for subcat=0,

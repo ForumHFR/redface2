@@ -385,7 +385,7 @@ jobs:
           ls -la release-artefacts/
 
       - name: Upload workflow artefacts (always)
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: redface2-${{ needs.resolve-target.outputs.channel }}-v${{ steps.meta.outputs.version_code }}-${{ steps.meta.outputs.short_sha }}
           path: release-artefacts/*
@@ -402,7 +402,7 @@ jobs:
         # the signed artefacts are always attached. No `on: release` trigger exists → the published event
         # cannot re-enter this workflow.
         if: ${{ always() && steps.artefacts.outcome == 'success' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.meta.outputs.release_tag }}
           # The COMMIT ACTUALLY BUILT (the checked-out HEAD), not github.sha — a dispatch with `ref`
@@ -450,7 +450,7 @@ jobs:
     steps:
       - name: Generate F-Droid publisher App token
         id: fdroid_app_token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ secrets.RF2_FDROID_APP_ID }}
           private-key: ${{ secrets.RF2_FDROID_APP_PRIVATE_KEY }}

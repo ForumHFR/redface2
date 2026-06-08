@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.FlagType
 import javax.inject.Inject
@@ -143,6 +144,63 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeThemeMode(): Flow<ThemeMode> =
+        dataStore.data
+            // Default SYSTEM: follow the OS dark-mode setting unless the user picked otherwise (#286).
+            .map(::readThemeMode)
+            // `dataStore.data` re-emits on ANY write; keep the theme flow quiet unless the mode
+            // actually changes so RedfaceApp doesn't recompose the whole tree on unrelated edits.
+            .distinctUntilChanged()
+            .catch { emit(ThemeMode.SYSTEM) }
+
+    override suspend fun setThemeMode(mode: ThemeMode) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_THEME_MODE] = mode.name
+            }
+        }
+    }
+
+    override fun observeAmoledEnabled(): Flow<Boolean> =
+        dataStore.data
+            // Default `false`: AMOLED is opt-in and only meaningful in dark (#286).
+            .map { prefs -> prefs[KEY_AMOLED_ENABLED] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setAmoledEnabled(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_AMOLED_ENABLED] = enabled
+            }
+        }
+    }
+
+    override fun observeTopicTopBarAutoHide(): Flow<Boolean> =
+        dataStore.data
+            // Default `false`: the topic top bar stays pinned unless the user opts into auto-hide.
+            .map { prefs -> prefs[KEY_TOPIC_TOPBAR_AUTO_HIDE] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setTopicTopBarAutoHide(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_TOPIC_TOPBAR_AUTO_HIDE] = enabled
+            }
+        }
+    }
+
+    /**
+     * Reads [KEY_THEME_MODE] defensively: an unknown / corrupt stored value (older build with a
+     * renamed enum, manual edit) falls back to [ThemeMode.SYSTEM] instead of crashing on
+     * `ThemeMode.valueOf`.
+     */
+    private fun readThemeMode(prefs: Preferences): ThemeMode =
+        prefs[KEY_THEME_MODE]
+            ?.let { stored -> runCatching { ThemeMode.valueOf(stored) }.getOrNull() }
+            ?: ThemeMode.SYSTEM
+
     /**
      * Resolves the per-tab view settings (#309 layout) plus the per-type unreadOnly (#317). For the
      * LAYOUT pair: with the override off, the global pair is returned verbatim; with it on, each
@@ -214,5 +272,12 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // #317 — per-type « non-lus uniquement » key (no global counterpart; type-aware default).
         fun flagsUnreadOnlyKey(type: FlagType) =
             booleanPreferencesKey("flags_unread_only_${type.name.lowercase()}")
+
+        // #286 — app theme selection (ThemeMode.name, defensively parsed) + AMOLED toggle.
+        val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+        val KEY_AMOLED_ENABLED = booleanPreferencesKey("amoled_enabled")
+
+        // build 89 follow-up — topic top app bar auto-hide on scroll.
+        val KEY_TOPIC_TOPBAR_AUTO_HIDE = booleanPreferencesKey("topic_topbar_auto_hide")
     }
 }

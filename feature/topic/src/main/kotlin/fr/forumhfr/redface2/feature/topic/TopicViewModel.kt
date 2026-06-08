@@ -8,8 +8,13 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
+import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.write.EditPostContext
+import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -40,6 +45,8 @@ class TopicViewModel @AssistedInject constructor(
     @Assisted private val request: TopicRequest,
     private val topicRepository: TopicRepository,
     private val authRepository: AuthRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
+    private val deletePostRepository: DeletePostRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
@@ -93,6 +100,13 @@ class TopicViewModel @AssistedInject constructor(
                 _state.update { it.copy(isAuthenticated = authState is AuthState.Authenticated) }
             }
             .launchIn(viewModelScope)
+        // Build 89 follow-up — mirror the top-bar auto-hide preference into state so the screen
+        // can switch between a pinned and an `enterAlways` scroll behaviour without a refetch.
+        userPreferencesRepository.observeTopicTopBarAutoHide()
+            .onEach { autoHide ->
+                _state.update { it.copy(topBarAutoHide = autoHide) }
+            }
+            .launchIn(viewModelScope)
     }
 
     fun send(intent: TopicIntent) {
@@ -101,6 +115,7 @@ class TopicViewModel @AssistedInject constructor(
             // refresh — by then the new post has been persisted and the user just wants
             // to recover from a transient error.
             TopicIntent.Retry -> loadCurrentPage()
+            is TopicIntent.DeletePost -> deletePost(intent.numreponse)
         }
     }
 
@@ -217,6 +232,27 @@ class TopicViewModel @AssistedInject constructor(
                     )
                 }
                 endFirstContentSectionIfNeeded()
+                // #226 — plain-reply overflow: the reply created a new page but HFR anchored the page
+                // the form was on (request.page). The force-refreshed page reports the up-to-date
+                // totalPages; if it now exceeds request.page (plain reply → scrollTo null; quote/edit
+                // carry a #t{N} scrollTo and are excluded), the fresh post lives on the last page, not
+                // here. Re-route there instead of scrolling this stale page. A same-page reply keeps
+                // totalPages == request.page and falls through to the #200 ScrollToEndOfPage path.
+                // Best-effort under concurrency: HFR's #bas success URL carries NO numreponse, so we
+                // cannot tell our own overflow from a concurrent poster's new page — we send the user
+                // to the last page either way (a reasonable landing). `postSubmitOverflowLanding`
+                // guards re-entry: once the host re-routes us onto that last page it sets the flag (and
+                // a fresh submitSignal so we STILL force-fetch it — no stale cache). On that landing we
+                // must NOT redirect again, or a concurrent post bumping totalPages during our refresh
+                // would start a moving-tail chase. The flagged landing falls through to
+                // ScrollToEndOfPage below.
+                if (request.scrollTo == null &&
+                    topic.totalPages > request.page &&
+                    !request.postSubmitOverflowLanding
+                ) {
+                    _effects.send(TopicEffect.NavigateToLastPage(topic.totalPages))
+                    return@launch
+                }
                 maybeEmitScroll(topic.posts.map { it.numreponse })
                 // Skip the page+1 warmup here — the user just submitted and is unlikely to need
                 // page+1 immediately; the next normal navigation will trigger the warmup through
@@ -271,9 +307,107 @@ class TopicViewModel @AssistedInject constructor(
         }
     }
 
+    /**
+     * #292 — deletes one of the user's own posts. The screen confirms first; this runs only after
+     * the user accepts. We resolve `subcat` from the loaded topic (the route carries only
+     * `cat`/`post`/`page`) and guard the [EditPostContext] invariants before calling the repository.
+     * On success we force-refresh the current page so the removed post disappears (unless HFR
+     * removed the whole topic — a defensive branch the UI doesn't reach today, since delete is only
+     * offered on normal posts). `deletingNumreponse` gates the affordance and blocks a double-submit.
+     */
+    @Suppress("ComplexCondition") // one conjunction guarding a destructive action; each clause distinct.
+    private fun deletePost(numreponse: Int) {
+        if (_state.value.deletingNumreponse != null) return
+        val topic = (_state.value.mode as? TopicUiState.Mode.Loaded)?.topic ?: return
+        // Re-validate server-side, never trust the UI gate alone for a HFR-mutating delete: a stale
+        // or buggy intent could carry the first post, a non-editable / foreign post, or arrive after
+        // logout. We refuse to POST unless the post is present on the page, editable, the topic is
+        // postable, the session is authenticated, and it is NOT the first post (deleting that removes
+        // the whole topic — out of scope today). `subcat == 0` is a valid HFR value (cat without a
+        // sub-category, cf. EditPostContext), so only the SUBCAT_UNKNOWN sentinel (-1) is rejected.
+        val post = topic.posts.firstOrNull { it.numreponse == numreponse }
+        val isFirstPost = topic.page == 1 && numreponse == topic.posts.firstOrNull()?.numreponse
+        if (post != null && !isFirstPost && post.isEditable && topic.canReply &&
+            _state.value.isAuthenticated && topic.subcat >= 0
+        ) {
+            runDeletion(numreponse, topic.subcat)
+        }
+        // else: stale/invalid request the UI gate should have prevented — silently no-op, no POST.
+    }
+
+    private fun runDeletion(numreponse: Int, subcat: Int) {
+        val context = EditPostContext(
+            cat = request.cat,
+            subcat = subcat,
+            topicId = request.post,
+            page = request.page,
+            numreponse = numreponse,
+        )
+        _state.update { it.copy(deletingNumreponse = numreponse) }
+        viewModelScope.launch {
+            val result = deletePostRepository.deletePost(context)
+            _state.update { it.copy(deletingNumreponse = null) }
+            when (result) {
+                is DeletePostResult.Success -> {
+                    _effects.send(TopicEffect.PostDeleted)
+                    // A normal-post delete keeps the topic alive → refresh so the post vanishes. A
+                    // whole-topic delete (first post) would 404 on reload, so we skip the refetch and
+                    // leave the page; the UI never offers delete on the first post today.
+                    if (!result.deletedWholeTopic) refreshAfterDelete()
+                }
+                is DeletePostResult.Failure ->
+                    _effects.send(TopicEffect.PostDeleteFailed(result.reason.toDeleteFailureReason()))
+            }
+        }
+    }
+
+    /**
+     * Network-first reload of the current page after a successful deletion, so the removed post is
+     * gone immediately (a cache-aside reload would flash the stale cached page that still contains
+     * it). On failure we fall back to the cache-aside path: the delete already succeeded, so the
+     * worst case is a briefly-stale list that the normal refresh reconciles.
+     *
+     * Konsist guard: this function cancels the inflight prefetch AND calls `refreshTopicPage`, so it
+     * carries the `konsist:bypass-prefetch-guard` marker (same allow-list as `forceRefreshCurrentPage`).
+     * The bypass is intentional: this is a deliberate authenticated refetch following an explicit
+     * user-confirmed deletion, not an anonymous warmup escalating to authenticated.
+     */
+    private fun refreshAfterDelete() {
+        loadJob?.cancel()
+        prefetchJob?.cancel()
+        prefetchedPage = null
+        _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
+        loadJob = viewModelScope.launch {
+            try {
+                val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
+                _state.update {
+                    it.copy(
+                        mode = TopicUiState.Mode.Loaded(topic),
+                        availablePages = (1..topic.totalPages).toList(),
+                    )
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
+                android.util.Log.w(LOG_TAG, "Post-delete refresh failed", refreshError)
+                loadCurrentPage()
+            }
+        }
+    }
+
     @AssistedFactory
     interface Factory {
         fun create(request: TopicRequest): TopicViewModel
+    }
+
+    private fun ReplyFailureReason.toDeleteFailureReason(): DeleteFailureReason = when (this) {
+        ReplyFailureReason.LoginRequired -> DeleteFailureReason.LoginRequired
+        ReplyFailureReason.TopicLocked -> DeleteFailureReason.TopicLocked
+        ReplyFailureReason.EmptyMessage,
+        ReplyFailureReason.InvalidHashCheck,
+        ReplyFailureReason.AntiFlood,
+        ReplyFailureReason.Unknown,
+        -> DeleteFailureReason.Generic
     }
 
     private companion object {

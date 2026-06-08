@@ -17,6 +17,20 @@ data class TopicUiState(
      * in practice the cookie jar is primed at nav-host start so the window rarely shows.
      */
     val isAuthenticated: Boolean = false,
+    /**
+     * #292 — `numreponse` of the post whose deletion is currently in flight, or `null` when no
+     * delete is running. Drives the per-post « Supprimer » affordance (disabled / busy) and guards
+     * against a double-submit. Cleared when the delete settles (success or failure).
+     */
+    val deletingNumreponse: Int? = null,
+    /**
+     * Build 89 follow-up — mirrors `UserPreferencesRepository.observeTopicTopBarAutoHide()`.
+     * When `true`, the screen wires a Material3 `enterAlways` scroll behaviour on the top app
+     * bar (title + page counter) so it collapses while scrolling down through the posts and
+     * re-appears on the first upward scroll. Default `false` keeps the bar pinned (the prior,
+     * always-visible behaviour). Flips on the first preference emission.
+     */
+    val topBarAutoHide: Boolean = false,
 ) {
     /**
      * Helper used by the screen / ViewModel : `true` when the user has navigated to a
@@ -55,6 +69,28 @@ data class TopicUiState(
 
 sealed interface TopicIntent {
     data object Retry : TopicIntent
+
+    /**
+     * #292 — confirmed deletion of one of the user's own (normal) posts. The screen shows a
+     * confirmation dialog first; this intent is only sent once the user confirms. [numreponse]
+     * identifies the post to delete (unique per category).
+     */
+    data class DeletePost(val numreponse: Int) : TopicIntent
+}
+
+/**
+ * #292 — UI-facing classification of a delete failure, mapped from the domain `ReplyFailureReason`
+ * so the screen can pick a specific message without depending on the write model directly.
+ */
+enum class DeleteFailureReason {
+    /** Session not (or no longer) authenticated — surface a login CTA. */
+    LoginRequired,
+
+    /** The topic was closed/locked, so HFR refuses the deletion. */
+    TopicLocked,
+
+    /** Any other refusal (invalid token, unrecognised response, network) — generic message. */
+    Generic,
 }
 
 /**
@@ -92,4 +128,33 @@ sealed interface TopicEffect {
      * the submit silently failed.
      */
     data object PostSubmitRefreshFailed : TopicEffect
+
+    /**
+     * Issue #226 — emitted after a plain-reply submit when the reply overflowed the topic onto a
+     * newly-created page but HFR's success URL anchored the OLD page (the one the form was on). The
+     * ViewModel detects this in `forceRefreshCurrentPage`: the force-refreshed page reports a
+     * `totalPages` greater than `request.page` while `scrollTo` is null (plain reply — quote/edit
+     * carry a `#t{N}` scrollTo and are excluded). The navigation host re-routes to [page] (= the new
+     * `totalPages`) with `scrollTo = null`, a **fresh `submitSignal`** AND
+     * `postSubmitOverflowLanding = true` (cf. `TopicRequest`). The fresh `submitSignal` makes the new
+     * ViewModel force-fetch that last page — never a stale cache-aside row — and the landing flag
+     * makes it emit [ScrollToEndOfPage] (surfacing the freshly-published post) **without** re-emitting
+     * `NavigateToLastPage`: if a concurrent post bumped `totalPages` further during the refresh, the
+     * flag breaks the moving-tail chase. Defensive: works whether HFR anchored the old page (the bug)
+     * or the new one.
+     */
+    data class NavigateToLastPage(val page: Int) : TopicEffect
+
+    /**
+     * #292 — emitted after a post was successfully deleted. The screen surfaces a confirmation
+     * toast; the ViewModel separately force-refreshes the current page so the removed post
+     * disappears (unless the deletion removed the whole topic, an out-of-scope path today).
+     */
+    data object PostDeleted : TopicEffect
+
+    /**
+     * #292 — emitted when HFR refused the deletion. The screen surfaces a [reason]-specific toast
+     * and leaves the post in place.
+     */
+    data class PostDeleteFailed(val reason: DeleteFailureReason) : TopicEffect
 }
