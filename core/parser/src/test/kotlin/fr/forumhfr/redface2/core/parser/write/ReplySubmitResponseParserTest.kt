@@ -103,6 +103,33 @@ class ReplySubmitResponseParserTest {
     }
 
     @Test
+    fun `delete post success is classified and refreshes to the topic (#292)`() {
+        // #292 — normal-post delete. Shared marker « Message effacé avec succès ! ». HFR refreshes
+        // to the topic (`sujet_{id}_{page}.htm`), so the thread segment / topic id is recoverable.
+        val html = readFixture("write_delete_post_success_response.html")
+        val result = parser.parse(html)
+        assertTrue("delete success must classify as Success — got $result", result is ReplySubmitResult.Success)
+        val success = result as ReplySubmitResult.Success
+        val refreshUrl = requireNotNull(success.refreshUrl) { "refreshUrl must be present" }
+        assertTrue("normal-post delete refreshes to the topic", refreshUrl.contains("sujet_"))
+        assertNotNull("topic id is recoverable on a normal-post delete", success.topicId)
+    }
+
+    @Test
+    fun `delete whole-topic success refreshes to the listing and exposes no topic id (#292)`() {
+        // #292 — first-post delete removes the whole topic: HFR refreshes to the sub-category
+        // listing (`liste_sujet-1.htm`), so there is no thread segment → topicId is null.
+        // `DefaultDeletePostRepository` reads that null to flag a whole-topic deletion.
+        val html = readFixture("write_delete_topic_success_response.html")
+        val result = parser.parse(html)
+        assertTrue("delete-topic success must classify as Success — got $result", result is ReplySubmitResult.Success)
+        val success = result as ReplySubmitResult.Success
+        val refreshUrl = requireNotNull(success.refreshUrl) { "refreshUrl must be present" }
+        assertTrue("whole-topic delete refreshes to the listing", refreshUrl.contains("liste_sujet"))
+        assertNull("no thread segment on a listing refresh → no topic id", success.topicId)
+    }
+
+    @Test
     fun `a refresh page without any known success marker is not a false success`() {
         // #214 — classification keys on the explicit success sentences (reply/edit/create),
         // NOT on the mere presence of a `<meta refresh>`. A page that redirects somewhere but

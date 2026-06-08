@@ -67,6 +67,15 @@ class ReplySubmitResponseParser {
             // null topicId/page/numreponse here and the navigation host lands on the listing.
             body.contains(CREATE_SUCCESS_MARKER, ignoreCase = true) -> parseSuccess(html)
 
+            // #292 — delete post/topic success uses its OWN sentence (« Message effacé avec succès ! »),
+            // shared by both the normal-post and the whole-topic delete. The refresh URL shape decides
+            // which happened: a normal-post delete refreshes to `…sujet_{topic}_{page}.htm` (topicId
+            // recoverable), a whole-topic delete refreshes to `…liste_sujet-1.htm` (no sujet_ segment →
+            // topicId stays null). `DefaultDeletePostRepository` reads that null to flag a whole-topic
+            // deletion. Captured live, cf. `write_delete_post_success_response.html` /
+            // `write_delete_topic_success_response.html`.
+            body.contains(DELETE_SUCCESS_MARKER, ignoreCase = true) -> parseSuccess(html)
+
             else -> ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         }
     }
@@ -128,6 +137,10 @@ class ReplySubmitResponseParser {
         // postée") and edit ("message édité"). HFR refreshes to the category listing
         // here, not to the new topic, so no topic id is recoverable on create.
         private const val CREATE_SUCCESS_MARKER: String = "votre message a été posté avec succès"
+
+        // #292 — delete post/topic success sentence, shared by both delete flavours. Captured live,
+        // cf. `write_delete_post_success_response.html` / `write_delete_topic_success_response.html`.
+        private const val DELETE_SUCCESS_MARKER: String = "message effacé avec succès"
 
         private val META_REFRESH_REGEX: Regex =
             Regex("""<meta[^>]*http-equiv="Refresh"[^>]*content="\d+\s*;\s*url=([^"]+)""", RegexOption.IGNORE_CASE)

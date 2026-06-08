@@ -7,8 +7,12 @@ import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
+import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.write.EditPostContext
+import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.Topic
@@ -383,6 +387,177 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `DeletePost success emits PostDeleted and force-refreshes the current page (#292)`() = runTest {
+        // Page 2 so the editable post 777 is NOT the first post (the FP lives on page 1 and is
+        // excluded from deletion). Editable + authenticated + canReply → the VM gate lets it through.
+        val loaded = fakeTopic(
+            page = 2,
+            totalPages = 3,
+            posts = listOf(fakePost(numreponse = 777, isEditable = true)),
+        )
+        val refreshed = fakeTopic(page = 2, totalPages = 3, title = "refreshed")
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+        val deleteRepo = FakeDeletePostRepository(DeletePostResult.Success(deletedWholeTopic = false))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            deletePostRepository = deleteRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.DeletePost(777))
+            assertEquals(TopicEffect.PostDeleted, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(1, deleteRepo.calls.size)
+        assertEquals(777, deleteRepo.calls.single().numreponse)
+        assertEquals(SAMPLE_SUBCAT, deleteRepo.calls.single().subcat)
+        assertEquals(
+            "a successful delete force-refreshes the current page so the post disappears",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
+            repository.refreshCalls,
+        )
+    }
+
+    @Test
+    fun `DeletePost failure emits PostDeleteFailed with the mapped reason and does not refresh (#292)`() =
+        runTest {
+            val loaded = fakeTopic(
+                page = 2,
+                totalPages = 3,
+                posts = listOf(fakePost(numreponse = 777, isEditable = true)),
+            )
+            val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(loaded) }))
+            val deleteRepo = FakeDeletePostRepository(
+                DeletePostResult.Failure(ReplyFailureReason.TopicLocked),
+            )
+            val viewModel = topicViewModel(
+                request = topicRequest(page = 2),
+                topicRepository = repository,
+                authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+                deletePostRepository = deleteRepo,
+            )
+
+            viewModel.effects.test {
+                viewModel.send(TopicIntent.DeletePost(777))
+                val effect = awaitItem() as TopicEffect.PostDeleteFailed
+                assertEquals(DeleteFailureReason.TopicLocked, effect.reason)
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertTrue("a failed delete must not force-refresh", repository.refreshCalls.isEmpty())
+        }
+
+    @Test
+    fun `DeletePost refuses the first post and never POSTs (#292)`() = runTest {
+        // Page 1, single post → it IS the first post. Even editable, the VM must refuse (deleting the
+        // FP removes the whole topic, out of scope) and never reach the repository.
+        val loaded = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(numreponse = 100, isEditable = true)),
+        )
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(loaded) }))
+        val deleteRepo = FakeDeletePostRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            deletePostRepository = deleteRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.DeletePost(100))
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertTrue("the first post must never be deleted", deleteRepo.calls.isEmpty())
+    }
+
+    @Test
+    fun `DeletePost refuses a non-editable post and never POSTs (#292)`() = runTest {
+        val loaded = fakeTopic(
+            page = 2,
+            totalPages = 3,
+            posts = listOf(fakePost(numreponse = 777, isEditable = false)),
+        )
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(loaded) }))
+        val deleteRepo = FakeDeletePostRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            deletePostRepository = deleteRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.DeletePost(777))
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertTrue("a non-editable post must never be deleted", deleteRepo.calls.isEmpty())
+    }
+
+    @Test
+    fun `DeletePost refuses when the session is not authenticated and never POSTs (#292)`() = runTest {
+        val loaded = fakeTopic(
+            page = 2,
+            totalPages = 3,
+            posts = listOf(fakePost(numreponse = 777, isEditable = true)),
+        )
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(loaded) }))
+        val deleteRepo = FakeDeletePostRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            deletePostRepository = deleteRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.DeletePost(777))
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertTrue("a logged-out session must never delete", deleteRepo.calls.isEmpty())
+    }
+
+    @Test
+    fun `DeletePost proceeds for a subcat-0 topic (cat without sub-category) (#292)`() = runTest {
+        // #292 Codex review: subcat=0 is a valid HFR value (cat without sub-category), so the VM must
+        // NOT block it — only the SUBCAT_UNKNOWN sentinel (-1) is rejected.
+        val loaded = fakeTopic(
+            page = 2,
+            totalPages = 3,
+            posts = listOf(fakePost(numreponse = 777, isEditable = true)),
+            subcat = 0,
+        )
+        val refreshed = fakeTopic(page = 2, totalPages = 3, subcat = 0, title = "refreshed")
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+        val deleteRepo = FakeDeletePostRepository(DeletePostResult.Success(deletedWholeTopic = false))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            deletePostRepository = deleteRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.DeletePost(777))
+            assertEquals(TopicEffect.PostDeleted, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals("subcat=0 must reach the repository", 1, deleteRepo.calls.size)
+        assertEquals(0, deleteRepo.calls.single().subcat)
+    }
+
+    @Test
     fun `forceRefresh from the request is forwarded to observeTopicPage (#231)`() = runTest {
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) }))
         topicViewModel(
@@ -405,11 +580,13 @@ class TopicViewModelTest {
         topicRepository: TopicRepository,
         authRepository: AuthRepository,
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
+        deletePostRepository: DeletePostRepository = FakeDeletePostRepository(),
     ): TopicViewModel = TopicViewModel(
         request = request,
         topicRepository = topicRepository,
         authRepository = authRepository,
         userPreferencesRepository = userPreferencesRepository,
+        deletePostRepository = deletePostRepository,
     )
 
     private fun topicRequest(
@@ -632,25 +809,29 @@ class TopicViewModelTest {
         totalPages: Int,
         title: String = "fake",
         posts: List<Post> = emptyList(),
+        subcat: Int = SAMPLE_SUBCAT,
     ): Topic = Topic(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
-        subcat = SAMPLE_SUBCAT,
+        subcat = subcat,
         title = title,
         posts = posts,
         page = page,
         totalPages = totalPages,
         isFirstPostOwner = false,
+        // Postable by default: the #292 delete gate requires it, and no VM test exercises a
+        // read-only topic (the previous default was the Topic model's `false`, never asserted here).
+        canReply = true,
         poll = null,
     )
 
-    private fun fakePost(numreponse: Int): Post = Post(
+    private fun fakePost(numreponse: Int, isEditable: Boolean = false): Post = Post(
         numreponse = numreponse,
         author = "tester",
         date = java.time.Instant.parse("2026-05-04T12:00:00Z"),
         content = PostContent(blocks = emptyList()),
         avatarUrl = null,
-        isEditable = false,
+        isEditable = isEditable,
         isOwnPost = false,
         quotedAuthors = emptyList(),
         postIndex = null,
@@ -723,6 +904,17 @@ private class FakeTopicRepository(
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {
         prefetches += Triple(cat, post, page)
         prefetchHook?.invoke(cat, post, page)
+    }
+}
+
+private class FakeDeletePostRepository(
+    private val result: DeletePostResult = DeletePostResult.Success(deletedWholeTopic = false),
+) : DeletePostRepository {
+    val calls = mutableListOf<EditPostContext>()
+
+    override suspend fun deletePost(context: EditPostContext): DeletePostResult {
+        calls += context
+        return result
     }
 }
 

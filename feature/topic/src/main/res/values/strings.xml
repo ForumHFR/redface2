@@ -33,4 +33,15 @@
     <string name="topic_edit_first_post">Modifier le premier message</string>
     <string name="topic_post_submit_refresh_failed">Message envoyé, mais le rafraîchissement de la page a échoué. Tirez pour réessayer.</string>
     <string name="topic_open_profile_action">Voir le profil</string>
+
+    <!-- #292 — suppression d'un de ses propres posts (post normal). -->
+    <string name="topic_post_delete">Supprimer</string>
+    <string name="topic_post_delete_confirm_title">Effacer ce message ?</string>
+    <string name="topic_post_delete_confirm_message">Cette action est irréversible.</string>
+    <string name="topic_post_delete_confirm_action">Supprimer</string>
+    <string name="topic_post_delete_confirm_cancel">Annuler</string>
+    <string name="topic_post_delete_success">Message supprimé</string>
+    <string name="topic_post_delete_failed_login">Vous devez être connecté pour supprimer ce message.</string>
+    <string name="topic_post_delete_failed_locked">Ce sujet est fermé : suppression impossible.</string>
+    <string name="topic_post_delete_failed_generic">La suppression a échoué. Réessayez.</string>
 </resources>
