@@ -24,11 +24,13 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -510,6 +512,27 @@ internal fun TopicContent(
                 scrollBehavior = scrollBehavior,
             )
         },
+        floatingActionButton = {
+            // #283 + bonus — quick access to "poster" and page-change without scrolling back to the
+            // header. Only in Loaded mode (needs subcat/page/canReply). The Scaffold applies the
+            // navigation-bar insets to this slot, so no manual padding here. Coexists with the #300
+            // scrollbar (right edge, auto-hiding) — a slight bottom-right overlap is acceptable.
+            val current = loaded
+            if (current != null) {
+                TopicBottomActions(
+                    showReply = shouldEnableReply(current.topic, state.isAuthenticated),
+                    canGoPrevious = state.canGoPrevious,
+                    canGoNext = state.canGoNext,
+                    // Clamp to [1, totalPages]: `canGoPrevious/Next` are derived from `request.page`
+                    // while the target is computed from the parsed `topic.page`; if those ever desync
+                    // (HFR clamps an out-of-range page to the last one), the clamp keeps navigation in
+                    // bounds — same robustness as the header guard and the swipe (#282).
+                    onPreviousPage = { onOpenPage((current.topic.page - 1).coerceAtLeast(1)) },
+                    onNextPage = { onOpenPage((current.topic.page + 1).coerceAtMost(current.topic.totalPages)) },
+                    onReply = { onReply(current.topic.subcat, current.topic.page) },
+                )
+            }
+        },
     ) { innerPadding ->
         Surface(
             modifier = Modifier
@@ -671,7 +694,10 @@ private fun TopicLoadedContent(
                 ),
             ),
         state = listState,
-        contentPadding = PaddingValues(16.dp),
+        // #283 — extra bottom padding so the last post's right-aligned actions clear the floating
+        // bottom-action cluster (the Scaffold FAB slot floats over the content). Harmless extra
+        // breathing room when the cluster is absent (anon + single page).
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
@@ -1227,6 +1253,67 @@ private fun DeletePostConfirmDialog(
             }
         },
     )
+}
+
+/**
+ * #283 + bonus — the floating bottom-action cluster: previous/next page mini-FABs and a « Répondre »
+ * extended FAB, so posting and page-change are reachable without scrolling back up to the header. Pure
+ * presentation: each affordance is gated on the same flags the header already uses, and reuses the
+ * existing `onReply`/`onOpenPage` callbacks. Renders nothing when nothing is available (anon + single
+ * page), so the Scaffold reserves no FAB space.
+ */
+@Composable
+@Suppress("LongParameterList") // hoisted action cluster, mirrors other hoisted composables in this file
+private fun TopicBottomActions(
+    showReply: Boolean,
+    canGoPrevious: Boolean,
+    canGoNext: Boolean,
+    onPreviousPage: () -> Unit,
+    onNextPage: () -> Unit,
+    onReply: () -> Unit,
+) {
+    val previousLabel = stringResource(R.string.topic_fab_previous_page)
+    val nextLabel = stringResource(R.string.topic_fab_next_page)
+    if (showReply || canGoPrevious || canGoNext) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (canGoPrevious) {
+                PageFab(description = previousLabel, glyph = "‹", onClick = onPreviousPage)
+            }
+            if (canGoNext) {
+                PageFab(description = nextLabel, glyph = "›", onClick = onNextPage)
+            }
+            if (showReply) {
+                ReplyFab(onClick = onReply)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PageFab(
+    description: String,
+    glyph: String,
+    onClick: () -> Unit,
+) {
+    // No Material icons (detekt ForbiddenImport blocks androidx.compose.material.*): the glyph is a
+    // decorative Text and the real label rides on the FAB's `contentDescription` for TalkBack — same
+    // pattern as the top-bar back button.
+    SmallFloatingActionButton(
+        onClick = onClick,
+        modifier = Modifier.semantics { contentDescription = description },
+    ) {
+        Text(glyph)
+    }
+}
+
+@Composable
+private fun ReplyFab(onClick: () -> Unit) {
+    ExtendedFloatingActionButton(onClick = onClick) {
+        Text(text = stringResource(R.string.topic_fab_reply))
+    }
 }
 
 // #220 — write affordances additionally require an authenticated session. A logged-out user
