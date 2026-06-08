@@ -98,6 +98,16 @@ class SettingsViewModel @Inject constructor(
                 }
             }
         }
+        viewModelScope.launch {
+            val autoHide = userPreferencesRepository.observeTopicTopBarAutoHide().first()
+            _state.update { current ->
+                if (current.topicTopBarAutoHideTouchedLocally || current.isUpdatingTopicTopBarAutoHide) {
+                    current
+                } else {
+                    current.copy(topicTopBarAutoHide = autoHide)
+                }
+            }
+        }
     }
 
     @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the SettingsIntent variants ; flat by design.
@@ -130,6 +140,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FlagsPerTabOverrideChanged -> updateFlagsPerTabOverride(intent.enabled)
             is SettingsIntent.ThemeModeChanged -> updateThemeMode(intent.mode)
             is SettingsIntent.AmoledEnabledChanged -> updateAmoled(intent.enabled)
+            is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
         }
     }
 
@@ -366,6 +377,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setAmoledEnabled,
+        )
+    }
+
+    private fun updateTopicTopBarAutoHide(desired: Boolean) {
+        val previous = _state.value.topicTopBarAutoHide
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    topicTopBarAutoHide = desired,
+                    isUpdatingTopicTopBarAutoHide = true,
+                    topicTopBarAutoHideError = false,
+                    topicTopBarAutoHideTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(topicTopBarAutoHide = desired, isUpdatingTopicTopBarAutoHide = false)
+                } else {
+                    state.copy(
+                        topicTopBarAutoHide = previous,
+                        isUpdatingTopicTopBarAutoHide = false,
+                        topicTopBarAutoHideError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setTopicTopBarAutoHide,
         )
     }
 

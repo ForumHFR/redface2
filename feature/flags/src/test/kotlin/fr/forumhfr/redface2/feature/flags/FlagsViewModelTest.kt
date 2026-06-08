@@ -1387,6 +1387,10 @@ class FlagsViewModelTest {
 
         override suspend fun setAmoledEnabled(enabled: Boolean) = Unit
 
+        override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
+
         fun setGroupBy(value: Boolean) {
             groupBy.value = value
         }

@@ -63,6 +63,14 @@ data class SettingsState(
     val isUpdatingAmoled: Boolean = false,
     val amoledError: Boolean = false,
     val amoledTouchedLocally: Boolean = false,
+    // Topic reading preferences (build 89 follow-up). Same optimistic-flip + startup-race-guard
+    // machinery: `topicTopBarAutoHide` is the displayed value, `isUpdating*` gates the switch while
+    // DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init`
+    // hydration from clobbering a fast user flip. Default false (top bar pinned).
+    val topicTopBarAutoHide: Boolean = false,
+    val isUpdatingTopicTopBarAutoHide: Boolean = false,
+    val topicTopBarAutoHideError: Boolean = false,
+    val topicTopBarAutoHideTouchedLocally: Boolean = false,
 ) {
     val canSave: Boolean
         get() = !isSaving
@@ -91,6 +99,10 @@ data class SettingsState(
 
     val canToggleAmoled: Boolean
         get() = !isUpdatingAmoled
+
+    // Build 89 follow-up — the topic top-bar auto-hide toggle is gated only by its own write.
+    val canToggleTopicTopBarAutoHide: Boolean
+        get() = !isUpdatingTopicTopBarAutoHide
 }
 
 sealed interface SettingsError {
@@ -141,4 +153,8 @@ sealed interface SettingsIntent {
     // both applied optimistically with revert-on-failure, like the flags toggles.
     data class ThemeModeChanged(val mode: ThemeMode) : SettingsIntent
     data class AmoledEnabledChanged(val enabled: Boolean) : SettingsIntent
+
+    // Build 89 follow-up — topic top-bar auto-hide toggle. Optimistic-flip contract, like the
+    // flags toggles: the boolean is the desired post-flip state.
+    data class TopicTopBarAutoHideChanged(val enabled: Boolean) : SettingsIntent
 }

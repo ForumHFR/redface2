@@ -176,6 +176,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeTopicTopBarAutoHide(): Flow<Boolean> =
+        dataStore.data
+            // Default `false`: the topic top bar stays pinned unless the user opts into auto-hide.
+            .map { prefs -> prefs[KEY_TOPIC_TOPBAR_AUTO_HIDE] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setTopicTopBarAutoHide(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_TOPIC_TOPBAR_AUTO_HIDE] = enabled
+            }
+        }
+    }
+
     /**
      * Reads [KEY_THEME_MODE] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [ThemeMode.SYSTEM] instead of crashing on
@@ -261,5 +276,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // #286 — app theme selection (ThemeMode.name, defensively parsed) + AMOLED toggle.
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_AMOLED_ENABLED = booleanPreferencesKey("amoled_enabled")
+
+        // build 89 follow-up — topic top app bar auto-hide on scroll.
+        val KEY_TOPIC_TOPBAR_AUTO_HIDE = booleanPreferencesKey("topic_topbar_auto_hide")
     }
 }
