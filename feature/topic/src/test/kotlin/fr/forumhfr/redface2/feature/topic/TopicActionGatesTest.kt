@@ -46,6 +46,38 @@ class TopicActionGatesTest {
     }
 
     @Test
+    fun `delete action shares the edit gate (own editable post, postable topic, authenticated)`() {
+        val editablePost = post(isEditable = true)
+        val postable = topic(canReply = true, posts = listOf(editablePost))
+        val readOnly = topic(canReply = false, posts = listOf(editablePost))
+
+        assertTrue(shouldShowDeleteAction(postable, editablePost, isAuthenticated = true))
+        assertFalse("read-only topic", shouldShowDeleteAction(readOnly, editablePost, isAuthenticated = true))
+        assertFalse(
+            "non-editable post (not the author / no edit link)",
+            shouldShowDeleteAction(topic(canReply = true), post(isEditable = false), isAuthenticated = true),
+        )
+        assertFalse(
+            "#220 — logged-out must never see delete, even on a stale canReply=true row",
+            shouldShowDeleteAction(postable, editablePost, isAuthenticated = false),
+        )
+    }
+
+    @Test
+    fun `first-post exclusion fences the delete affordance to a page-1 position`() {
+        val first = post(isEditable = true, numreponse = 100)
+        val second = post(isEditable = true, numreponse = 200)
+        val page1 = topic(canReply = true, posts = listOf(first, second), page = 1)
+
+        assertTrue("page-1 first post would delete the whole topic → excluded", isFirstPostOfTopic(page1, first))
+        assertFalse("a later post on page 1 is deletable", isFirstPostOfTopic(page1, second))
+        assertFalse(
+            "the same numreponse on page 2 is never the topic's first post",
+            isFirstPostOfTopic(topic(canReply = true, posts = listOf(first, second), page = 2), first),
+        )
+    }
+
+    @Test
     fun `reply is enabled only when the topic is postable AND the session is authenticated (#220)`() {
         assertTrue(shouldEnableReply(topic(canReply = true), isAuthenticated = true))
         assertFalse("read-only topic", shouldEnableReply(topic(canReply = false), isAuthenticated = true))
@@ -102,8 +134,9 @@ class TopicActionGatesTest {
     private fun post(
         isEditable: Boolean = false,
         quoteRef: Int? = 1,
+        numreponse: Int = 16244,
     ): Post = Post(
-        numreponse = 16244,
+        numreponse = numreponse,
         author = "XaTriX",
         date = Instant.EPOCH,
         content = PostContent(blocks = emptyList()),
