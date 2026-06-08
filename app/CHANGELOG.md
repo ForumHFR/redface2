@@ -16,6 +16,38 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v92 — `0.6.0` — 2026-06-08
+
+**Statut** : `open` (track open testing) + F-Droid `.beta`
+**Commit** : tag `app-v92` (versionCode alloué par le registre de tags, plancher 72)
+**Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) → **track open testing** + tag pour F-Droid beta
+
+**Première bêta du batch Phase 5** dogfoodé sur le canal dev (v87 → v91) : thème, lecture topic, suppression de post, bouton Envoyer, correctifs. Promotion `dev → main` (#342) puis ship beta.
+
+### Added
+- **Thème clair / sombre / système + AMOLED** (#286) — sélecteur dans les réglages, barres système synchronisées au thème effectif.
+- **Suppression de ses propres posts** (#292) — bouton « Supprimer » (même gate que « Modifier »), dialog de confirmation, refresh in-place. Posts normaux uniquement (le 1er post = suppression du sujet entier, différée).
+- **Barre de titre du topic** (#285) — rappel du titre + bouton retour vers la liste.
+- **Compteur de page** (#284) — « page X/Y » visible en lecture.
+- **Option « masquer la barre de titre en défilant »** (#338) — top bar repliable au scroll (réglage).
+- **Badge « cité N fois »** (#239) sur les posts.
+- **Bouton « Envoyer » épinglé au-dessus du clavier** — éditeurs de réponse et de nouveau topic en plein écran.
+
+### Fixed
+- **Sélection de texte impossible** en lecture d'un topic (#281).
+- **Page bloquée après un post qui déborde** sur une nouvelle page (#226) — atterrissage force-refreshé sur la dernière page + scroll vers le post (contrat de nav `postSubmitOverflowLanding`).
+- **Pseudo à espace mal décodé** (« Dintr-un+lemn ») (#260).
+- **Titre du top bar qui devenait « Sujet »** au changement de page (#338).
+- **Bouton « Envoyer » coupé** en plein écran (nav masquée sur les routes éditeur).
+- **Barres système** incohérentes avec le thème.
+
+### Changed
+- **`versionName` 0.5.1 → 0.6.0**.
+- Polish post-review (#341) : cache de titres (court-circuit recompose), couverture de tests `withTitle` / gates suppression.
+- Dépendances : navigation androidx, kotlin runtime, mockk, github-actions, compose-bom 2026.05.01 ; routage CI Dependabot → dev.
+
+---
+
 ## v86 — `0.5.1` — 2026-06-07
 
 **Statut** : `open` (track open testing) + F-Droid `.beta`
