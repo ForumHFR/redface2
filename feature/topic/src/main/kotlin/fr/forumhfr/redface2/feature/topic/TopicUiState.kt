@@ -31,6 +31,13 @@ data class TopicUiState(
      * always-visible behaviour). Flips on the first preference emission.
      */
     val topBarAutoHide: Boolean = false,
+    /**
+     * #335 — `true` while a manual pull-to-refresh of the current page is in flight. Drives the
+     * Material3 `PullToRefreshBox` spinner. Set on the `Refresh` intent, cleared in the refresh
+     * coroutine's `finally` (so a cancellation — e.g. a delete starting mid-refresh — never leaves
+     * the indicator stuck).
+     */
+    val isRefreshing: Boolean = false,
 ) {
     /**
      * Helper used by the screen / ViewModel : `true` when the user has navigated to a
@@ -69,6 +76,13 @@ data class TopicUiState(
 
 sealed interface TopicIntent {
     data object Retry : TopicIntent
+
+    /**
+     * #335 — manual pull-to-refresh of the currently open page. Re-fetches over the network and
+     * updates the loaded page in place, without the post-submit overflow redirect (#226) or any
+     * scroll effect, so the user keeps their reading position.
+     */
+    data object Refresh : TopicIntent
 
     /**
      * #292 — confirmed deletion of one of the user's own (normal) posts. The screen shows a
@@ -128,6 +142,12 @@ sealed interface TopicEffect {
      * the submit silently failed.
      */
     data object PostSubmitRefreshFailed : TopicEffect
+
+    /**
+     * #335 — emitted when a manual pull-to-refresh (`Refresh` intent) failed to reach HFR. The
+     * current page stays on screen (cache-first); the screen surfaces a Toast inviting a retry.
+     */
+    data object RefreshFailed : TopicEffect
 
     /**
      * Issue #226 — emitted after a plain-reply submit when the reply overflowed the topic onto a

@@ -34,6 +34,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -161,6 +162,8 @@ fun TopicScreen(
     // suspending lambda but the surrounding scope is still a Composable). Capturing the message
     // upfront keeps the rule happy and avoids re-resolving on every effect.
     val refreshFailedMsg = stringResource(R.string.topic_post_submit_refresh_failed)
+    // #335 — manual pull-to-refresh failure message (resolved upfront, same rationale).
+    val refreshManualFailedMsg = stringResource(R.string.topic_refresh_failed)
     // #292 — delete feedback messages, resolved upfront (same rationale as refreshFailedMsg).
     val deleteSuccessMsg = stringResource(R.string.topic_post_delete_success)
     val deleteFailedLoginMsg = stringResource(R.string.topic_post_delete_failed_login)
@@ -230,6 +233,15 @@ fun TopicScreen(
                     android.widget.Toast.makeText(
                         context,
                         refreshFailedMsg,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+                TopicEffect.RefreshFailed -> {
+                    // #335 — manual pull-to-refresh could not reach HFR; the page stays on screen
+                    // (cache-first) and the Toast invites a retry.
+                    android.widget.Toast.makeText(
+                        context,
+                        refreshManualFailedMsg,
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
@@ -539,18 +551,29 @@ internal fun TopicContent(
                 }
 
                 is TopicUiState.Mode.Loaded -> {
-                    TopicLoadedContent(
-                        state = state,
-                        topic = mode.topic,
-                        onReply = onReply,
-                        onQuote = onQuote,
-                        onEdit = onEdit,
-                        onEditFirstPost = onEditFirstPost,
-                        onOpenPage = onOpenPage,
-                        onOpenProfile = onOpenProfile,
-                        onDeleteRequest = onDeleteRequest,
-                        listState = listState,
-                    )
+                    // #335 — pull-to-refresh only wraps the loaded content (Loading/Error don't need
+                    // it). PullToRefreshBox layers a vertical nested-scroll connection on top of the
+                    // top-bar enterAlways behaviour (#338) and the horizontal page swipe (#282); the
+                    // pull only engages on overscroll at the top of the list, so the read position is
+                    // preserved on refresh (the ViewModel emits no scroll effect).
+                    PullToRefreshBox(
+                        isRefreshing = state.isRefreshing,
+                        onRefresh = { onIntent(TopicIntent.Refresh) },
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        TopicLoadedContent(
+                            state = state,
+                            topic = mode.topic,
+                            onReply = onReply,
+                            onQuote = onQuote,
+                            onEdit = onEdit,
+                            onEditFirstPost = onEditFirstPost,
+                            onOpenPage = onOpenPage,
+                            onOpenProfile = onOpenProfile,
+                            onDeleteRequest = onDeleteRequest,
+                            listState = listState,
+                        )
+                    }
                 }
             }
         }
