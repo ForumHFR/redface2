@@ -593,12 +593,14 @@ class TopicViewModelTest {
         page: Int,
         scrollTo: Int? = null,
         submitSignal: Long? = null,
+        postSubmitOverflowLanding: Boolean = false,
     ): TopicRequest = TopicRequest(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
         page = page,
         scrollTo = scrollTo,
         submitSignal = submitSignal,
+        postSubmitOverflowLanding = postSubmitOverflowLanding,
     )
 
     // ──────────────────────────────────────────────────────────────────────
@@ -723,6 +725,74 @@ class TopicViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
     }
+
+    @Test
+    fun `overflow landing force-refreshes and scrolls to end without re-redirecting (#226)`() = runTest {
+        // #226 — the host re-routed us onto the freshly created last page (21) with a fresh
+        // submitSignal AND postSubmitOverflowLanding = true. The force refresh still runs (submitSignal
+        // != null) so the page is never a stale cache-aside row — the original #226 failure — but the
+        // landing flag means we stop here: emit ScrollToEndOfPage to surface the new reply, NOT another
+        // NavigateToLastPage. (totalPages == request.page, the normal post-overflow shape.)
+        val landedTopic = fakeTopic(
+            page = 21,
+            totalPages = 21,
+            posts = listOf(fakePost(40), fakePost(41)),
+        )
+        val repository = FakeTopicRepository(
+            flowsToReturn = emptyList(),
+            refreshTopicsToReturn = listOf(landedTopic),
+        )
+
+        val viewModel = topicViewModel(
+            request = topicRequest(
+                page = 21,
+                scrollTo = null,
+                submitSignal = 456L,
+                postSubmitOverflowLanding = true,
+            ),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToEndOfPage, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `overflow landing does not chase a moving tail when a concurrent post grows totalPages (#226)`() =
+        runTest {
+            // #226 anti-chase — on the overflow landing (page 21, flag set), a concurrent poster
+            // created page 22 during our refresh, so the fresh page reports totalPages = 22 >
+            // request.page = 21. Without the flag the ViewModel would NavigateToLastPage(22) and keep
+            // chasing the moving tail. The flag pins us here: ScrollToEndOfPage, never NavigateToLastPage.
+            val landedTopic = fakeTopic(
+                page = 21,
+                totalPages = 22,
+                posts = listOf(fakePost(40), fakePost(41)),
+            )
+            val repository = FakeTopicRepository(
+                flowsToReturn = emptyList(),
+                refreshTopicsToReturn = listOf(landedTopic),
+            )
+
+            val viewModel = topicViewModel(
+                request = topicRequest(
+                    page = 21,
+                    scrollTo = null,
+                    submitSignal = 789L,
+                    postSubmitOverflowLanding = true,
+                ),
+                topicRepository = repository,
+                authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            )
+
+            viewModel.effects.test {
+                assertEquals(TopicEffect.ScrollToEndOfPage, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
 
     @Test
     fun `normal load without submitSignal does not emit ScrollToEndOfPage`() = runTest {

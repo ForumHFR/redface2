@@ -278,6 +278,12 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
                                           // appeler `refreshTopicPage` (skip cache) pour que le post
                                           // fraîchement publié soit visible. Reste null sur tous les autres
                                           // chemins (deep link, pagination, retour Flags/Forum).
+    val postSubmitOverflowLanding: Boolean = false, // #226 — true seulement sur la route re-poussée
+                                          // après qu'une réponse simple a débordé sur une nouvelle
+                                          // dernière page. Couplé à un submitSignal frais (force-fetch,
+                                          // jamais de cache stale) ; signale au ViewModel que c'est
+                                          // l'atterrissage d'overflow : scroller en bas SANS re-rediriger
+                                          // (anti-chase si un post concurrent pousse encore totalPages).
 ) : RedfaceNavKey
 @Serializable data class PostEditorRoute(
     val mode: PostEditorMode,
