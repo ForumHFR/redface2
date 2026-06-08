@@ -1,5 +1,43 @@
 <resources>
     <string name="settings_title">Paramètres</string>
+    <!-- #288 — « menu vitrine » : intro distinguant prefs locales vs compte HFR, sections par aire,
+         et catalogue des réglages futurs (grisés, avec tag d’issue ou de phase). -->
+    <string name="settings_intro">La plupart des réglages sont enregistrés sur cet appareil. Ceux du compte HFR (section dédiée) seront synchronisés depuis votre profil et arriveront plus tard. Les réglages à venir sont affichés en grisé avec leur étiquette.</string>
+    <string name="settings_section_network">Réseau et cache</string>
+    <string name="settings_section_display">Affichage</string>
+    <string name="settings_section_flags">Drapeaux</string>
+    <string name="settings_section_topic">Sujet et lecture</string>
+    <string name="settings_section_editing">Édition et publication</string>
+    <string name="settings_section_mp">Messages privés</string>
+    <string name="settings_section_hfr_account">Compte HFR</string>
+    <string name="settings_section_notifications">Notifications</string>
+    <string name="settings_section_accessibility">Accessibilité</string>
+    <string name="settings_section_extensions">Extensions et filtrage</string>
+    <string name="settings_hfr_account_note">Ces réglages proviennent de votre profil HFR (editprofil.php) et arriveront plus tard.</string>
+    <string name="settings_phase_future">À venir</string>
+    <string name="settings_phase_future_far">Plus tard</string>
+    <string name="settings_phase_planned">Planifié</string>
+    <string name="settings_phase_5">Phase 5</string>
+    <!-- Pastille de tag d'un réglage à venir rattaché à une issue GitHub (identifiant technique). -->
+    <string name="settings_future_issue_tag">#%1$d</string>
+    <string name="settings_future_reading_density">Densité et compacité de lecture</string>
+    <string name="settings_future_ui_colors">Personnalisation des couleurs</string>
+    <string name="settings_future_material_you">Material You (thème dynamique)</string>
+    <string name="settings_future_classic_theme">Thème HFR Classique</string>
+    <string name="settings_future_flags_on_listing">Poser les drapeaux en listant une catégorie</string>
+    <string name="settings_future_scroll_memory">Retenir la position de lecture par page</string>
+    <string name="settings_future_prefetch">Préchargement de la page suivante</string>
+    <string name="settings_future_submit_confirm">Confirmation avant publication</string>
+    <string name="settings_future_signature">Signature automatique et notification e-mail</string>
+    <string name="settings_future_mp_write">Écriture des messages privés</string>
+    <string name="settings_future_mp_notifications">Notifications et badge de MP non lus</string>
+    <string name="settings_future_data_saver">Mode économie de données</string>
+    <string name="settings_future_clear_image_cache">Vider le cache des images</string>
+    <string name="settings_future_hfr_profile">Avatars, signatures, messages par page</string>
+    <string name="settings_future_notifications">Relève configurable, filtres, mode Ne pas déranger</string>
+    <string name="settings_future_timezone">Fuseau horaire d’affichage</string>
+    <string name="settings_future_multilang">Multilingue</string>
+    <string name="settings_future_extensions">Blacklist, Color Tag, ignore-list, Qualitay, Redflag</string>
     <string name="settings_proxy_title">Proxy utilisateur</string>
     <string name="settings_proxy_intro">Route les requêtes HFR via votre proxy. Le changement peut nécessiter un redémarrage de l’app.</string>
     <string name="settings_proxy_enabled">Activer le proxy</string>
