@@ -2,6 +2,9 @@ version: 2
 updates:
   - package-ecosystem: "gradle"
     directory: "/"
+    # Bumps land on the `dev` integration branch first so they ride a dev-channel
+    # dogfood build before being promoted to `main` (beta/prod). cf. git-flow-lite.
+    target-branch: "dev"
     schedule:
       interval: "monthly"
     open-pull-requests-limit: 5
@@ -73,6 +76,7 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "monthly"
     open-pull-requests-limit: 3
