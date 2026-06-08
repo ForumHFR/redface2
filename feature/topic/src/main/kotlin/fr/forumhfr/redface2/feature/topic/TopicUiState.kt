@@ -134,10 +134,14 @@ sealed interface TopicEffect {
      * newly-created page but HFR's success URL anchored the OLD page (the one the form was on). The
      * ViewModel detects this in `forceRefreshCurrentPage`: the force-refreshed page reports a
      * `totalPages` greater than `request.page` while `scrollTo` is null (plain reply — quote/edit
-     * carry a `#t{N}` scrollTo and are excluded). The screen re-routes to [page] (= the new
-     * `totalPages`) with a fresh `submitSignal` + `scrollTo = null`, so the new ViewModel
-     * force-refreshes that last page and [ScrollToEndOfPage] lands on the freshly-published post.
-     * Defensive: works whether HFR anchored the old page (the bug) or the new one.
+     * carry a `#t{N}` scrollTo and are excluded). The navigation host re-routes to [page] (= the new
+     * `totalPages`) with `scrollTo = null`, a **fresh `submitSignal`** AND
+     * `postSubmitOverflowLanding = true` (cf. `TopicRequest`). The fresh `submitSignal` makes the new
+     * ViewModel force-fetch that last page — never a stale cache-aside row — and the landing flag
+     * makes it emit [ScrollToEndOfPage] (surfacing the freshly-published post) **without** re-emitting
+     * `NavigateToLastPage`: if a concurrent post bumped `totalPages` further during the refresh, the
+     * flag breaks the moving-tail chase. Defensive: works whether HFR anchored the old page (the bug)
+     * or the new one.
      */
     data class NavigateToLastPage(val page: Int) : TopicEffect
 

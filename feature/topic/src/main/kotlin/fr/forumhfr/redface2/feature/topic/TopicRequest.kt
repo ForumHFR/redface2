@@ -29,4 +29,15 @@ data class TopicRequest(
      * used once the page is `Loaded` (the real `Topic.title` wins).
      */
     val titleHint: String? = null,
+    /**
+     * #226 — `true` only on the route the navigation host re-pushes after a plain reply overflowed
+     * onto a freshly created last page (see `TopicEffect.NavigateToLastPage`). It is paired with a
+     * fresh [submitSignal] so the ViewModel force-fetches that page (never a stale cache-aside row —
+     * the original #226 failure), but it marks this as the overflow **landing**: the ViewModel must
+     * NOT re-emit `NavigateToLastPage` even if a concurrent post pushed `totalPages` further while we
+     * refreshed (that would chase a moving tail). It scrolls to the end instead, surfacing the freshly
+     * published reply. `false` on every other path — including the initial post-submit refresh, which
+     * is the route allowed to redirect once.
+     */
+    val postSubmitOverflowLanding: Boolean = false,
 )

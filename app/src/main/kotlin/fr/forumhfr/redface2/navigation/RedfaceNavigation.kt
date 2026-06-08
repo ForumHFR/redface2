@@ -139,6 +139,16 @@ data class TopicRoute(
      * `false` on ordinary navigation (forum / deep link / back-nav) to keep the cache snappy.
      */
     val forceRefresh: Boolean = false,
+    /**
+     * #226 — `true` only on the route re-pushed by [onNavigateToLastPage] after a plain reply
+     * overflowed onto a freshly created last page. Forwarded to `TopicRequest.postSubmitOverflowLanding`.
+     * Always paired with a fresh [submitSignal] (force-fetch, no stale cache) and tells the ViewModel
+     * this is the overflow *landing*: scroll to the end of the fresh page, do NOT redirect again to
+     * yet another last page (anti-chase under concurrent posting). Default `false` keeps every other
+     * route — including the initial post-submit refresh — unaffected; defaulted so older serialised
+     * back stacks deserialise without the field.
+     */
+    val postSubmitOverflowLanding: Boolean = false,
 ) : RedfaceNavKey
 
 @Serializable
@@ -825,6 +835,7 @@ private fun RedfaceNavHost(
                         scrollTo = route.scrollTo,
                         submitSignal = route.submitSignal,
                         forceRefresh = route.forceRefresh,
+                        postSubmitOverflowLanding = route.postSubmitOverflowLanding,
                         titleHint = topicTitleNavState.titles[TopicTitleKey(route.cat, route.post)],
                     ),
                     onTitleLoaded = { title ->
@@ -915,17 +926,22 @@ private fun RedfaceNavHost(
                     },
                     onNavigateToLastPage = { lastPage ->
                         // #226 — the plain reply overflowed onto a freshly created page; land the user
-                        // there (their reply lives on the last page, not the stale form page). We do
-                        // NOT carry a submitSignal here: a second force-refresh would re-run the overflow
-                        // guard and, if a concurrent post created yet another page during the refresh
-                        // window, keep chasing the moving tail (review finding). A plain cache-aside load
-                        // surfaces the reply without re-triggering the redirect. Indexed set (not
-                        // removeAt + add) for the same single-mutation reason as onOpenPage (#282).
+                        // there (their reply lives on the last page, not the stale form page). Carry a
+                        // fresh submitSignal so the destination ViewModel force-fetches the page — a
+                        // plain cache-aside load could serve a TTL-fresh row that pre-dates the reply
+                        // (the original #226 failure). The `postSubmitOverflowLanding` flag is what
+                        // keeps the old anti-chase guarantee WITHOUT dropping the refresh: the landing
+                        // ViewModel scrolls to the end but never re-emits NavigateToLastPage, so a
+                        // concurrent post that pushes totalPages further during the refresh window does
+                        // not start a moving-tail chase. Indexed set (not removeAt + add) for the same
+                        // single-mutation reason as onOpenPage (#282).
                         backStack[backStack.lastIndex] = TopicRoute(
                             cat = route.cat,
                             post = route.post,
                             page = lastPage,
                             scrollTo = null,
+                            submitSignal = System.currentTimeMillis(),
+                            postSubmitOverflowLanding = true,
                         )
                     },
                 )
@@ -972,6 +988,10 @@ private fun RedfaceNavHost(
                                     // is silently suppressed (it gates on `target == null`).
                                     scrollTo = scrollTo,
                                     submitSignal = System.currentTimeMillis(),
+                                    // #226 — a fresh submit may itself overflow, so it must be allowed
+                                    // to redirect once. Reset the landing flag the previous route may
+                                    // have carried (topicEntry could already be an overflow landing).
+                                    postSubmitOverflowLanding = false,
                                 ),
                             )
                         }
@@ -1014,6 +1034,10 @@ private fun RedfaceNavHost(
                                     // is silently suppressed (it gates on `target == null`).
                                     scrollTo = scrollTo,
                                     submitSignal = System.currentTimeMillis(),
+                                    // #226 — a fresh submit may itself overflow, so it must be allowed
+                                    // to redirect once. Reset the landing flag the previous route may
+                                    // have carried (topicEntry could already be an overflow landing).
+                                    postSubmitOverflowLanding = false,
                                 ),
                             )
                         }

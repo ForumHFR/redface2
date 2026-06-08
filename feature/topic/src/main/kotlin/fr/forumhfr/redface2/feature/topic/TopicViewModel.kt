@@ -240,9 +240,16 @@ class TopicViewModel @AssistedInject constructor(
                 // totalPages == request.page and falls through to the #200 ScrollToEndOfPage path.
                 // Best-effort under concurrency: HFR's #bas success URL carries NO numreponse, so we
                 // cannot tell our own overflow from a concurrent poster's new page — we send the user
-                // to the last page either way (a reasonable landing). The redirect target route omits
-                // submitSignal precisely so we don't re-enter this guard and chase a moving tail.
-                if (request.scrollTo == null && topic.totalPages > request.page) {
+                // to the last page either way (a reasonable landing). `postSubmitOverflowLanding`
+                // guards re-entry: once the host re-routes us onto that last page it sets the flag (and
+                // a fresh submitSignal so we STILL force-fetch it — no stale cache). On that landing we
+                // must NOT redirect again, or a concurrent post bumping totalPages during our refresh
+                // would start a moving-tail chase. The flagged landing falls through to
+                // ScrollToEndOfPage below.
+                if (request.scrollTo == null &&
+                    topic.totalPages > request.page &&
+                    !request.postSubmitOverflowLanding
+                ) {
                     _effects.send(TopicEffect.NavigateToLastPage(topic.totalPages))
                     return@launch
                 }
