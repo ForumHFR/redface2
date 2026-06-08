@@ -17,6 +17,7 @@ import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.Topic
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -30,6 +31,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -794,6 +796,213 @@ class TopicViewModelTest {
             }
         }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // #335 — manual pull-to-refresh
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `Refresh re-fetches in place, toggles isRefreshing, emits no nav-or-scroll effect (#335)`() = runTest {
+        val loaded = fakeTopic(page = 2, totalPages = 5, title = "loaded")
+        val refreshed = fakeTopic(page = 2, totalPages = 5, title = "refreshed")
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+        repository.refreshHook = { _, _, _ -> gate.await() }
+
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.Refresh)
+            assertTrue("the spinner shows while the refresh is in flight", viewModel.state.value.isRefreshing)
+            gate.complete(Unit)
+            // A successful manual refresh keeps the reading position: no ScrollToEndOfPage and no
+            // NavigateToLastPage (those are post-submit concerns, #200/#226).
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertFalse(viewModel.state.value.isRefreshing)
+        assertEquals("refreshed", (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title)
+        assertEquals(1, repository.refreshCalls.size)
+    }
+
+    @Test
+    fun `a second Refresh while one is in flight is collapsed to a single network call (#335)`() = runTest {
+        val loaded = fakeTopic(page = 2, totalPages = 5, title = "loaded")
+        val refreshed = fakeTopic(page = 2, totalPages = 5, title = "refreshed")
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+        repository.refreshHook = { _, _, _ -> gate.await() }
+
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.send(TopicIntent.Refresh) // suspends in the hook → isRefreshing = true
+        viewModel.send(TopicIntent.Refresh) // must be ignored: a refresh is already running
+        assertEquals("the in-flight guard collapses a double pull to one fetch", 1, repository.refreshCalls.size)
+
+        gate.complete(Unit)
+        assertFalse(viewModel.state.value.isRefreshing)
+    }
+
+    @Test
+    fun `Refresh failure keeps the current page and emits RefreshFailed (#335)`() = runTest {
+        val loaded = fakeTopic(page = 2, totalPages = 5, title = "loaded")
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshErrorToThrow = IOException("network"),
+        )
+
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.Refresh)
+            assertEquals(TopicEffect.RefreshFailed, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertFalse(viewModel.state.value.isRefreshing)
+        assertEquals(
+            "the page on screen is unchanged after a failed refresh",
+            "loaded",
+            (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title,
+        )
+    }
+
+    @Test
+    fun `Refresh is a no-op while the page is still loading (#335)`() = runTest {
+        // observeTopicPage never emits → state stays Loading; a pull-to-refresh must not fire.
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { }))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.send(TopicIntent.Refresh)
+
+        assertTrue("no refresh call while not loaded", repository.refreshCalls.isEmpty())
+        assertFalse(viewModel.state.value.isRefreshing)
+    }
+
+    @Test
+    fun `Refresh revealing a new page updates availablePages but emits no navigation effect (#335)`() = runTest {
+        // A manual refresh must surface a grown page count WITHOUT yanking the user to the last page
+        // (#226 NavigateToLastPage is a post-submit concern only).
+        val loaded = fakeTopic(page = 2, totalPages = 5, title = "loaded")
+        val refreshed = fakeTopic(page = 2, totalPages = 6, title = "refreshed")
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.Refresh)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals((1..6).toList(), viewModel.state.value.availablePages)
+    }
+
+    @Test
+    fun `a delete cancelling an in-flight refresh clears isRefreshing (#335)`() = runTest {
+        // The `finally { isRefreshing = false }` in refresh() exists precisely so another path
+        // cancelling the refresh job mid-flight never strands the spinner. DeletePost →
+        // refreshAfterDelete() does exactly that (loadJob?.cancel()). Pin that guarantee.
+        val loaded = fakeTopic(
+            page = 2,
+            totalPages = 3,
+            posts = listOf(fakePost(numreponse = 777, isEditable = true)),
+        )
+        val afterDelete = fakeTopic(page = 2, totalPages = 3, title = "after-delete")
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(afterDelete),
+        )
+        repository.refreshHook = { _, _, _ -> gate.await() }
+        val deleteRepo = FakeDeletePostRepository(DeletePostResult.Success(deletedWholeTopic = false))
+
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            deletePostRepository = deleteRepo,
+        )
+
+        viewModel.send(TopicIntent.Refresh)
+        assertTrue("the spinner shows while the manual refresh is in flight", viewModel.state.value.isRefreshing)
+
+        // Let the post-delete refetch run to completion instead of suspending on the same gate.
+        // The gated refresh recorded its call but never reached the refreshQueue dequeue, so the
+        // `afterDelete` topic is still queued for refreshAfterDelete().
+        repository.refreshHook = null
+        viewModel.send(TopicIntent.DeletePost(777))
+
+        assertFalse(
+            "a delete cancelling the refresh must clear isRefreshing (finally guard)",
+            viewModel.state.value.isRefreshing,
+        )
+        assertEquals(
+            "the post-delete refetch lands the fresh page",
+            "after-delete",
+            (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title,
+        )
+    }
+
+    @Test
+    fun `Refresh re-arms the page+1 prefetch (#335)`() = runTest {
+        // A successful manual pull on an intermediate page re-arms the page+1 warmup (the user keeps
+        // reading forward) — unlike the post-submit force refresh which deliberately skips it. Expect
+        // two prefetches of page+1: one on the initial load, one after the Refresh re-fetch.
+        val loaded = fakeTopic(page = 2, totalPages = 5, title = "loaded")
+        val refreshed = fakeTopic(page = 2, totalPages = 5, title = "refreshed")
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        assertEquals(
+            "the initial load warms page+1 once",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 3)),
+            repository.prefetches,
+        )
+
+        viewModel.send(TopicIntent.Refresh)
+
+        assertEquals(
+            "a manual refresh re-arms the page+1 warmup",
+            listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 3), Triple(SAMPLE_CAT, SAMPLE_POST, 3)),
+            repository.prefetches,
+        )
+    }
+
     @Test
     fun `normal load without submitSignal does not emit ScrollToEndOfPage`() = runTest {
         // Regression guard: ScrollToEndOfPage is gated on submitSignal != null. A normal
@@ -958,6 +1167,14 @@ private class FakeTopicRepository(
     var lastForceRefresh: Boolean? = null
         private set
 
+    /**
+     * Optional hook to suspend or fail inside `refreshTopicPage(...)` — symmetric with
+     * [prefetchHook]. #335 pull-to-refresh tests install a `CompletableDeferred`-backed hook to
+     * observe the in-flight `isRefreshing` window and assert anti-double-trigger (a second refresh
+     * while the first is suspended must not issue a second call). Default keeps the fake fast.
+     */
+    var refreshHook: (suspend (cat: Int, post: Int, page: Int) -> Unit)? = null
+
     override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<Topic> {
         calls += Triple(cat, post, page)
         lastForceRefresh = forceRefresh
@@ -966,6 +1183,7 @@ private class FakeTopicRepository(
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
         refreshCalls += Triple(cat, post, page)
+        refreshHook?.invoke(cat, post, page)
         refreshErrorToThrow?.let { throw it }
         return refreshQueue.removeFirstOrNull()
             ?: error("No more refresh topics queued (issue #200 post-submit force fetch path)")

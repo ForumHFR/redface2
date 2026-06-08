@@ -116,6 +116,51 @@ class TopicViewModel @AssistedInject constructor(
             // to recover from a transient error.
             TopicIntent.Retry -> loadCurrentPage()
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
+            TopicIntent.Refresh -> refresh()
+        }
+    }
+
+    /**
+     * #335 — manual pull-to-refresh of the current page. Re-fetches over the network and replaces the
+     * loaded page in place, WITHOUT the post-submit overflow redirect (#226) or any scroll effect, so
+     * the user keeps their reading position. NO-OP unless a page is already loaded and no refresh is
+     * in flight (guards a double pull). `isRefreshing` is cleared in `finally` so a cancellation —
+     * e.g. a delete's `refreshAfterDelete` re-assigning `loadJob` mid-refresh — never leaves the
+     * spinner stuck.
+     *
+     * konsist:bypass-prefetch-guard — cancels the in-flight prefetch and force-fetches the page; this
+     * is an explicit user-initiated authenticated refresh, not an anonymous warmup escalating to
+     * authenticated (same justification as `forceRefreshCurrentPage`).
+     */
+    private fun refresh() {
+        if (_state.value.mode !is TopicUiState.Mode.Loaded || _state.value.isRefreshing) return
+        loadJob?.cancel()
+        prefetchJob?.cancel()
+        prefetchedPage = null
+        _state.update { it.copy(isRefreshing = true) }
+        loadJob = viewModelScope.launch {
+            try {
+                val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
+                _state.update {
+                    it.copy(
+                        mode = TopicUiState.Mode.Loaded(topic),
+                        availablePages = (1..topic.totalPages).toList(),
+                    )
+                }
+                // Re-arm the page+1 warmup, like `loadCurrentPage` (l. ~219). Unlike the post-submit
+                // `forceRefreshCurrentPage` (which deliberately skips it), a manual mid-page pull is
+                // exactly when the user keeps reading forward, so re-warming page+1 restores the
+                // prefetch benefit lost by the `prefetchedPage = null` reset above.
+                maybeSchedulePrefetch(totalPages = topic.totalPages)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
+                // Cache-first: keep the page currently on screen and invite a retry via a Toast.
+                android.util.Log.w(LOG_TAG, "Manual refresh failed", refreshError)
+                _effects.send(TopicEffect.RefreshFailed)
+            } finally {
+                _state.update { it.copy(isRefreshing = false) }
+            }
         }
     }
 
