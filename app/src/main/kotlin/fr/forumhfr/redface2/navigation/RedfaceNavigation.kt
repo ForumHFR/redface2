@@ -370,6 +370,13 @@ fun RedfaceApp(intent: Intent?) {
         // metadata never outlives the session / account.
         var multiRecipientThreadIds by remember { mutableStateOf(emptySet<Int>()) }
 
+        // Bug fix (build 89) — per-topic title cache keyed by (cat, post). A page change replaces the
+        // TopicRoute (new nav entry → new ViewModel → Loading with no topic), which used to flash the
+        // generic « Sujet » title in the top bar. The topic screen reports its loaded title here; the
+        // next page reads it back via TopicRequest.titleHint. Hoisted above NavDisplay so it survives
+        // the entry recreation; keyed by (cat, post) so titles never bleed across categories.
+        var topicTitleCache by remember { mutableStateOf(emptyMap<TopicTitleKey, String>()) }
+
         LaunchedEffect(authState) {
             when (authState) {
                 null -> Unit
@@ -438,6 +445,12 @@ fun RedfaceApp(intent: Intent?) {
                         },
                         onThreadOpenedAsMulti = { threadId ->
                             multiRecipientThreadIds = multiRecipientThreadIds + threadId
+                        },
+                    ),
+                    topicTitleNavState = TopicTitleNavState(
+                        titles = topicTitleCache,
+                        onTitleLoaded = { cat, post, title ->
+                            topicTitleCache = topicTitleCache.withTitle(TopicTitleKey(cat, post), title)
                         },
                     ),
                     onOpenProfile = { userId, pseudo, avatarUrl ->
@@ -538,6 +551,51 @@ private data class PrivateMessageNavState(
     val onThreadOpenedAsMulti: (Int) -> Unit,
 )
 
+/**
+ * Bug fix (build 89) — per-topic title cache plumbed into [RedfaceNavHost]. A topic page change
+ * replaces the TopicRoute (new nav entry → new ViewModel → Loading with no topic yet), which used to
+ * flash the generic « Sujet » title in the top app bar. The `var` backing [titles] lives in
+ * [RedfaceApp] so it survives the entry recreation; [onTitleLoaded] writes the freshly-loaded title
+ * back and the next page reads it via TopicRequest.titleHint. Keyed by topic id so titles never bleed
+ * across topics. Same read-map + onLoaded-callback shape as [PrivateMessageNavState].
+ *
+ * @property titles last known title per topic, fed into TopicRequest.titleHint.
+ * @property onTitleLoaded records a topic's title once its page has loaded.
+ */
+private data class TopicTitleNavState(
+    val titles: Map<TopicTitleKey, String>,
+    val onTitleLoaded: (cat: Int, post: Int, title: String) -> Unit,
+)
+
+/**
+ * Composite cache key for [TopicTitleNavState]. A topic id (`post`) is unique only **per HFR
+ * category**, not globally — two categories can theoretically expose the same id (cf. the same
+ * `(cat, topicId)` composite key in `SearchScreen`), so keying by `post` alone could flash the
+ * wrong title across categories while a page loads. Keyed by `(cat, post)` to stay correct.
+ */
+private data class TopicTitleKey(val cat: Int, val post: Int)
+
+// Upper bound on the per-topic title cache (display hint only). A long reading session opens many
+// topics; capping at a generous size keeps the map from growing unbounded for the app's lifetime.
+// Eviction is FIFO (oldest insertions dropped) — losing a stale hint just falls back to « Sujet »
+// for one loading frame, which is harmless.
+private const val TOPIC_TITLE_CACHE_MAX = 128
+
+/**
+ * Inserts [title] for [key] into the per-topic title cache, evicting the oldest entries past
+ * [TOPIC_TITLE_CACHE_MAX]. `Map + pair` preserves insertion order (LinkedHashMap), so dropping from
+ * the front evicts the least-recently-inserted titles. Extracted from [RedfaceApp] to keep that
+ * composable under the cyclomatic-complexity budget.
+ */
+private fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: String): Map<TopicTitleKey, String> {
+    val updated = this + (key to title)
+    return if (updated.size > TOPIC_TITLE_CACHE_MAX) {
+        updated.entries.drop(updated.size - TOPIC_TITLE_CACHE_MAX).associate { it.toPair() }
+    } else {
+        updated
+    }
+}
+
 @Composable
 @Suppress("CyclomaticComplexMethod") // One entry per top-level route + per-screen navigation callbacks ;
 // splitting the host would just push the same `when` shape one level deeper without reducing complexity.
@@ -545,6 +603,9 @@ private fun RedfaceNavHost(
     backStack: NavBackStack<NavKey>,
     accountMenu: @Composable () -> Unit,
     privateMessageNavState: PrivateMessageNavState,
+    // Bug fix (build 89) — per-topic title cache threaded down from RedfaceApp (where the `var` lives
+    // so it survives entry recreation across page changes). Bundled to keep the param count in check.
+    topicTitleNavState: TopicTitleNavState,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     NavDisplay(
@@ -759,7 +820,11 @@ private fun RedfaceNavHost(
                         scrollTo = route.scrollTo,
                         submitSignal = route.submitSignal,
                         forceRefresh = route.forceRefresh,
+                        titleHint = topicTitleNavState.titles[TopicTitleKey(route.cat, route.post)],
                     ),
+                    onTitleLoaded = { title ->
+                        topicTitleNavState.onTitleLoaded(route.cat, route.post, title)
+                    },
                     onOpenProfile = onOpenProfile,
                     onReply = { subcat, page ->
                         backStack.add(

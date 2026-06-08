@@ -8,6 +8,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import kotlinx.coroutines.CancellationException
@@ -40,6 +41,7 @@ class TopicViewModel @AssistedInject constructor(
     @Assisted private val request: TopicRequest,
     private val topicRepository: TopicRepository,
     private val authRepository: AuthRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
@@ -91,6 +93,13 @@ class TopicViewModel @AssistedInject constructor(
         authRepository.observeAuthState()
             .onEach { authState ->
                 _state.update { it.copy(isAuthenticated = authState is AuthState.Authenticated) }
+            }
+            .launchIn(viewModelScope)
+        // Build 89 follow-up — mirror the top-bar auto-hide preference into state so the screen
+        // can switch between a pinned and an `enterAlways` scroll behaviour without a refetch.
+        userPreferencesRepository.observeTopicTopBarAutoHide()
+            .onEach { autoHide ->
+                _state.update { it.copy(topBarAutoHide = autoHide) }
             }
             .launchIn(viewModelScope)
     }

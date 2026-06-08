@@ -30,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +45,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -127,6 +129,13 @@ fun TopicScreen(
      */
     onNavigateToLastPage: (page: Int) -> Unit,
     /**
+     * Bug fix (build 89) — reports the loaded topic title up to `:app` so it can keep a per-topic
+     * title cache. On a page change the screen is recreated and starts in `Loading`; `:app` feeds
+     * the cached title back via [TopicRequest.titleHint] so the top app bar no longer flashes the
+     * generic « Sujet » fallback between pages.
+     */
+    onTitleLoaded: (String) -> Unit = {},
+    /**
      * Phase 2 finish (#208) — emitted when the user taps on a post avatar or author name.
      * Carries the numeric user id (canonical key for profile navigation) plus display hints
      * [pseudo] and [avatarUrl] that `:app` can show immediately while the profile loads.
@@ -150,6 +159,14 @@ fun TopicScreen(
     // suspending lambda but the surrounding scope is still a Composable). Capturing the message
     // upfront keeps the rule happy and avoids re-resolving on every effect.
     val refreshFailedMsg = stringResource(R.string.topic_post_submit_refresh_failed)
+
+    // Bug fix (build 89) — report the loaded title up so `:app` caches it per topic. The next page
+    // (recreated screen) reads it back through `request.titleHint`, keeping the top bar title stable
+    // instead of flashing « Sujet » during the load.
+    val loadedTitle = (state.mode as? TopicUiState.Mode.Loaded)?.topic?.title
+    LaunchedEffect(loadedTitle) {
+        loadedTitle?.takeIf { it.isNotBlank() }?.let(onTitleLoaded)
+    }
 
     // Single-shot scroll : `effects` emits `ScrollToPost` exactly once per request,
     // when the ViewModel has loaded a page that contains the requested numreponse.
@@ -376,14 +393,35 @@ internal fun TopicContent(
     // stay visible while the user scrolls (the in-card title/caption scrolls away). When the page
     // is still loading / errored, fall back to a generic title and the requested page.
     val loaded = state.mode as? TopicUiState.Mode.Loaded
-    val barTitle = loaded?.topic?.title?.takeIf { it.isNotBlank() }
-        ?: stringResource(R.string.topic_topbar_fallback_title)
+    val fallbackTitle = stringResource(R.string.topic_topbar_fallback_title)
+    // Honour TopicRequest.titleHint's contract: the cached hint is a LOADING-only stand-in. Once the
+    // page is Loaded, the live Topic.title wins (or the generic fallback if it is somehow blank) — we
+    // never reach back to the stale hint, so a loaded topic can never display another page's title.
+    val barTitle = if (loaded != null) {
+        loaded.topic.title.takeIf { it.isNotBlank() } ?: fallbackTitle
+    } else {
+        state.request.titleHint?.takeIf { it.isNotBlank() } ?: fallbackTitle
+    }
     val barCurrentPage = loaded?.topic?.page ?: state.request.page
     val barTotalPages = loaded?.topic?.totalPages
         ?: state.availablePages.lastOrNull()
         ?: state.request.page
     val backLabel = stringResource(R.string.topic_back)
+    // Build 89 follow-up — when the user opted into auto-hide, give the top bar an `enterAlways`
+    // scroll behaviour (collapses on scroll-down, snaps back on the first scroll-up). Otherwise
+    // leave it `null` so the bar stays pinned (the prior, always-visible behaviour). Toggling the
+    // preference re-enters the other branch, recreating the behaviour expanded — the desired reset.
+    val scrollBehavior = if (state.topBarAutoHide) {
+        TopAppBarDefaults.enterAlwaysScrollBehavior()
+    } else {
+        null
+    }
     Scaffold(
+        modifier = if (scrollBehavior != null) {
+            Modifier.nestedScroll(scrollBehavior.nestedScrollConnection)
+        } else {
+            Modifier
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -409,6 +447,7 @@ internal fun TopicContent(
                         Text("←")
                     }
                 },
+                scrollBehavior = scrollBehavior,
             )
         },
     ) { innerPadding ->

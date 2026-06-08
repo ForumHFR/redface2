@@ -2,8 +2,13 @@ package fr.forumhfr.redface2.feature.topic
 
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.Topic
@@ -43,7 +48,7 @@ class TopicViewModelTest {
         val topic = fakeTopic(page = 2, totalPages = 5)
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 2),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -85,7 +90,7 @@ class TopicViewModelTest {
                 throw cancellation
             }
         }
-        val vm = TopicViewModel(
+        val vm = topicViewModel(
             request = topicRequest(page = 2),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -121,7 +126,7 @@ class TopicViewModelTest {
         val topic = fakeTopic(page = 5, totalPages = 5)
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
-        TopicViewModel(
+        topicViewModel(
             request = topicRequest(page = 5),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -144,7 +149,7 @@ class TopicViewModelTest {
         val controlled = MutableSharedFlow<Topic>(replay = 0)
         val repository = FakeStreamingTopicRepository(controlled)
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -171,7 +176,7 @@ class TopicViewModelTest {
             flowsToReturn = listOf(flow { throw IOException("network") }),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -193,7 +198,7 @@ class TopicViewModelTest {
             ),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -213,7 +218,7 @@ class TopicViewModelTest {
         )
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 3, scrollTo = target),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -231,7 +236,7 @@ class TopicViewModelTest {
         val topic = fakeTopic(page = 1, totalPages = 1, posts = listOf(fakePost(numreponse = 555)))
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1, scrollTo = 999),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -256,7 +261,7 @@ class TopicViewModelTest {
             }),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 2, scrollTo = target),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -274,7 +279,7 @@ class TopicViewModelTest {
     fun `canGoPrevious is false on page 1 and true otherwise`() = runTest {
         val topic = fakeTopic(page = 1, totalPages = 3)
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -287,7 +292,7 @@ class TopicViewModelTest {
     fun `canGoNext is false on the last page`() = runTest {
         val topic = fakeTopic(page = 5, totalPages = 5)
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 5),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -306,7 +311,7 @@ class TopicViewModelTest {
             ),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 2),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -326,14 +331,14 @@ class TopicViewModelTest {
 
     @Test
     fun `state isAuthenticated reflects the auth repository (#220)`() = runTest {
-        val authed = TopicViewModel(
+        val authed = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
         assertEquals(true, authed.state.value.isAuthenticated)
 
-        val anon = TopicViewModel(
+        val anon = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
             authRepository = FakeAuthRepository(AuthState.Anonymous),
@@ -344,7 +349,7 @@ class TopicViewModelTest {
     @Test
     fun `isAuthenticated flips when the session changes while the topic is open (#220)`() = runTest {
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
-        val vm = TopicViewModel(
+        val vm = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
             authRepository = auth,
@@ -359,9 +364,28 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `state topBarAutoHide reflects the user preference (build 89)`() = runTest {
+        val on = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicTopBarAutoHide = true),
+        )
+        assertEquals(true, on.state.value.topBarAutoHide)
+
+        val off = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicTopBarAutoHide = false),
+        )
+        assertEquals(false, off.state.value.topBarAutoHide)
+    }
+
+    @Test
     fun `forceRefresh from the request is forwarded to observeTopicPage (#231)`() = runTest {
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) }))
-        TopicViewModel(
+        topicViewModel(
             request = topicRequest(page = 1).copy(forceRefresh = true),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -372,6 +396,21 @@ class TopicViewModelTest {
             repository.lastForceRefresh,
         )
     }
+
+    // Construction seam: the ViewModel now also takes a UserPreferencesRepository (for the build 89
+    // top-bar auto-hide preference) which none of these tests exercise, so it defaults to a no-op
+    // fake. Keeps every existing call site unchanged bar the constructor → helper rename.
+    private fun topicViewModel(
+        request: TopicRequest,
+        topicRepository: TopicRepository,
+        authRepository: AuthRepository,
+        userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
+    ): TopicViewModel = TopicViewModel(
+        request = request,
+        topicRepository = topicRepository,
+        authRepository = authRepository,
+        userPreferencesRepository = userPreferencesRepository,
+    )
 
     private fun topicRequest(
         page: Int,
@@ -401,7 +440,7 @@ class TopicViewModelTest {
             refreshTopicsToReturn = listOf(freshTopic),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 2, submitSignal = 1_700_000_000_000L),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -440,7 +479,7 @@ class TopicViewModelTest {
             refreshTopicsToReturn = listOf(freshTopic),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1, scrollTo = targetNumreponse, submitSignal = 42L),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -467,7 +506,7 @@ class TopicViewModelTest {
             refreshTopicsToReturn = listOf(freshTopic),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 20, scrollTo = null, submitSignal = 99L),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -496,7 +535,7 @@ class TopicViewModelTest {
             refreshTopicsToReturn = listOf(overflowedTopic),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 20, scrollTo = null, submitSignal = 123L),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -516,7 +555,7 @@ class TopicViewModelTest {
         val topic = fakeTopic(page = 1, totalPages = 1, posts = listOf(fakePost(1)))
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 1, scrollTo = null, submitSignal = null),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -553,7 +592,7 @@ class TopicViewModelTest {
             refreshErrorToThrow = IOException("force refresh transient failure"),
         )
 
-        val viewModel = TopicViewModel(
+        val viewModel = topicViewModel(
             request = topicRequest(page = 2, submitSignal = 7L),
             topicRepository = repository,
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
@@ -699,4 +738,57 @@ private class FakeStreamingTopicRepository(
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {
         // no-op for streaming tests
     }
+}
+
+/**
+ * No-op preferences fake for the topic ViewModel tests. Only [observeTopicTopBarAutoHide] is read by
+ * [TopicViewModel] (build 89 follow-up) — everything else returns the DataStore default so the fake
+ * stays a thin stand-in. The single relevant value is constructor-injectable for any future test that
+ * wants to assert the auto-hide flag reaches state.
+ */
+private class FakeUserPreferencesRepository(
+    private val topicTopBarAutoHide: Boolean = false,
+) : UserPreferencesRepository {
+    override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
+
+    override suspend fun saveProxyConfig(config: ProxyConfig) = Unit
+
+    override fun readProxyConfigForNetworkBootstrap(): ProxyConfig = ProxyConfig()
+
+    override fun observeIgnoreTopicCache(): Flow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun setIgnoreTopicCache(enabled: Boolean) = Unit
+
+    override fun observeFlagsGroupByCategory(): Flow<Boolean> = MutableStateFlow(true)
+
+    override suspend fun setFlagsGroupByCategory(enabled: Boolean) = Unit
+
+    override fun observeFlagsHideReadCategories(): Flow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun setFlagsHideReadCategories(enabled: Boolean) = Unit
+
+    override fun observeFlagsPerTabOverride(): Flow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun setFlagsPerTabOverride(enabled: Boolean) = Unit
+
+    override fun observeFlagsViewSettings(type: FlagType): Flow<FlagsViewSettings> =
+        MutableStateFlow(FlagsViewSettings())
+
+    override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) = Unit
+
+    override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
+
+    override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
+
+    override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
+
+    override suspend fun setThemeMode(mode: ThemeMode) = Unit
+
+    override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun setAmoledEnabled(enabled: Boolean) = Unit
+
+    override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(topicTopBarAutoHide)
+
+    override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
 }

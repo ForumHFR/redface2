@@ -125,4 +125,16 @@ interface UserPreferencesRepository {
 
     /** Persists [observeAmoledEnabled]. Default `false` until the first call. */
     suspend fun setAmoledEnabled(enabled: Boolean)
+
+    /**
+     * Topic top app bar auto-hide (build 89 follow-up): when `true`, the topic top bar (title +
+     * page counter) collapses while the user scrolls down through the posts and re-appears as soon
+     * as they scroll back toward the top — Material3 `enterAlways` behaviour — freeing reading
+     * space. Default `false` (the bar stays pinned). Observed by `:feature:topic`, toggled in
+     * Settings.
+     */
+    fun observeTopicTopBarAutoHide(): Flow<Boolean>
+
+    /** Persists [observeTopicTopBarAutoHide]. Default `false` until the first call. */
+    suspend fun setTopicTopBarAutoHide(enabled: Boolean)
 }

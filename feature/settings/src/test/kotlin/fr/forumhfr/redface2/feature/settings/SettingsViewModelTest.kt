@@ -590,6 +590,30 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `TopicTopBarAutoHideChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("auto-hide is off by default", viewModel.state.value.topicTopBarAutoHide)
+
+        viewModel.submit(SettingsIntent.TopicTopBarAutoHideChanged(true))
+
+        assertTrue(viewModel.state.value.topicTopBarAutoHide)
+        assertFalse(viewModel.state.value.isUpdatingTopicTopBarAutoHide)
+        assertEquals(1, repository.topicTopBarAutoHideSetCalls)
+    }
+
+    @Test
+    fun `TopicTopBarAutoHideChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnTopicTopBarAutoHideSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.TopicTopBarAutoHideChanged(true))
+
+        assertFalse("must revert to the previous value on failure", viewModel.state.value.topicTopBarAutoHide)
+        assertFalse(viewModel.state.value.isUpdatingTopicTopBarAutoHide)
+        assertTrue(viewModel.state.value.topicTopBarAutoHideError)
+    }
+
+    @Test
     fun `theme hydration race - a stale initial DataStore emission must not overwrite a local mode change`() =
         runTest {
             // Mirror of the ignoreTopicCache startup-race test for ThemeMode (#286, Codex nit): init
@@ -756,12 +780,30 @@ class SettingsViewModelTest {
             amoledEnabled.value = enabled
         }
 
+        // Build 89 follow-up — topic top-bar auto-hide. Same optimistic-flip seam as amoled.
+        private val topicTopBarAutoHide = MutableStateFlow(false)
+        var topicTopBarAutoHideSetCalls: Int = 0
+            private set
+        var failOnTopicTopBarAutoHideSet: Boolean = false
+
+        override fun observeTopicTopBarAutoHide(): Flow<Boolean> = topicTopBarAutoHide
+
+        override suspend fun setTopicTopBarAutoHide(enabled: Boolean) {
+            topicTopBarAutoHideSetCalls += 1
+            check(!failOnTopicTopBarAutoHideSet) { "boom" }
+            topicTopBarAutoHide.value = enabled
+        }
+
         fun emitThemeMode(value: ThemeMode) {
             themeMode.value = value
         }
 
         fun emitAmoledEnabled(value: Boolean) {
             amoledEnabled.value = value
+        }
+
+        fun emitTopicTopBarAutoHide(value: Boolean) {
+            topicTopBarAutoHide.value = value
         }
 
         // Per-type resolution / writes are exercised by the Flags ViewModel, not Settings; stubbed.

@@ -351,6 +351,26 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeTopicTopBarAutoHide defaults to false then persists true and false`() = runTest(dispatcher) {
+        repository.observeTopicTopBarAutoHide().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setTopicTopBarAutoHide(true)
+        repository.observeTopicTopBarAutoHide().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setTopicTopBarAutoHide(false)
+        repository.observeTopicTopBarAutoHide().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `saving disabled proxy removes optional fields from effective config`() = runTest(dispatcher) {
         repository.saveProxyConfig(
             ProxyConfig(

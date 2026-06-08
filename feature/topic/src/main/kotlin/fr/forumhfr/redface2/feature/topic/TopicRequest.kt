@@ -21,4 +21,12 @@ data class TopicRequest(
      * leaves it `false` to keep back-nav snappy.
      */
     val forceRefresh: Boolean = false,
+    /**
+     * Display-only fallback title for the top app bar while a freshly-navigated page is still
+     * loading. A page change replaces the `TopicRoute` (new nav entry → new ViewModel → `Loading`
+     * with no topic yet), which would otherwise flash the generic « Sujet » fallback. `:app` keeps
+     * a per-topic title cache and feeds the last known title here so the bar stays stable. Never
+     * used once the page is `Loaded` (the real `Topic.title` wins).
+     */
+    val titleHint: String? = null,
 )

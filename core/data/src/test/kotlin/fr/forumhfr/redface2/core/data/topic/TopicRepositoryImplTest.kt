@@ -504,5 +504,9 @@ class TopicRepositoryImplTest {
         override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setAmoledEnabled(enabled: Boolean) = Unit
+
+        override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
     }
 }

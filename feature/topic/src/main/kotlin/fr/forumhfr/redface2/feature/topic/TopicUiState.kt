@@ -17,6 +17,14 @@ data class TopicUiState(
      * in practice the cookie jar is primed at nav-host start so the window rarely shows.
      */
     val isAuthenticated: Boolean = false,
+    /**
+     * Build 89 follow-up — mirrors `UserPreferencesRepository.observeTopicTopBarAutoHide()`.
+     * When `true`, the screen wires a Material3 `enterAlways` scroll behaviour on the top app
+     * bar (title + page counter) so it collapses while scrolling down through the posts and
+     * re-appears on the first upward scroll. Default `false` keeps the bar pinned (the prior,
+     * always-visible behaviour). Flips on the first preference emission.
+     */
+    val topBarAutoHide: Boolean = false,
 ) {
     /**
      * Helper used by the screen / ViewModel : `true` when the user has navigated to a

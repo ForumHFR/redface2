@@ -199,6 +199,11 @@ internal fun SettingsContent(
                 onIntent = onIntent,
             )
 
+            TopicPreferencesCard(
+                state = state,
+                onIntent = onIntent,
+            )
+
             MaintenanceCard(
                 state = state,
                 onIntent = onIntent,
@@ -330,6 +335,41 @@ private fun FlagsPreferencesCard(
             )
             if (state.flagsPerTabOverrideError) {
                 PreferencePersistError(R.string.settings_flags_per_tab_override_persist_failed)
+            }
+        }
+    }
+}
+
+/**
+ * Topic reading preferences (build 89 follow-up): the « masquer la barre du haut en défilant »
+ * toggle. When on, the topic top app bar (title + page counter) collapses on scroll-down and snaps
+ * back on the first scroll-up (Material3 `enterAlways`), freeing reading space. Persisted via
+ * DataStore and observed live by the topic screen, so a flip here applies without reopening a topic.
+ */
+@Composable
+private fun TopicPreferencesCard(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_topic_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_topic_topbar_auto_hide_title),
+                description = stringResource(R.string.settings_topic_topbar_auto_hide_description),
+                checked = state.topicTopBarAutoHide,
+                enabled = state.canToggleTopicTopBarAutoHide,
+                onCheckedChange = { onIntent(SettingsIntent.TopicTopBarAutoHideChanged(it)) },
+            )
+            if (state.topicTopBarAutoHideError) {
+                PreferencePersistError(R.string.settings_topic_topbar_auto_hide_persist_failed)
             }
         }
     }
