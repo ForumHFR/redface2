@@ -16,7 +16,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -159,6 +161,14 @@ fun TopicScreen(
     // suspending lambda but the surrounding scope is still a Composable). Capturing the message
     // upfront keeps the rule happy and avoids re-resolving on every effect.
     val refreshFailedMsg = stringResource(R.string.topic_post_submit_refresh_failed)
+    // #292 — delete feedback messages, resolved upfront (same rationale as refreshFailedMsg).
+    val deleteSuccessMsg = stringResource(R.string.topic_post_delete_success)
+    val deleteFailedLoginMsg = stringResource(R.string.topic_post_delete_failed_login)
+    val deleteFailedLockedMsg = stringResource(R.string.topic_post_delete_failed_locked)
+    val deleteFailedGenericMsg = stringResource(R.string.topic_post_delete_failed_generic)
+    // #292 — `numreponse` awaiting delete confirmation (null = no dialog). Local UI state: the
+    // confirmation is a pure view concern, only the confirmed deletion reaches the ViewModel.
+    var deleteCandidate by rememberSaveable { mutableStateOf<Int?>(null) }
 
     // Bug fix (build 89) — report the loaded title up so `:app` caches it per topic. The next page
     // (recreated screen) reads it back through `request.titleHint`, keeping the top bar title stable
@@ -230,6 +240,27 @@ fun TopicScreen(
                     // that route then anchors #bas → ScrollToEndOfPage as usual).
                     onNavigateToLastPage(effect.page)
                 }
+                TopicEffect.PostDeleted -> {
+                    // #292 — HFR accepted the deletion; the ViewModel force-refreshes the page so the
+                    // post is already gone by the time this lands. Confirm with a Toast.
+                    android.widget.Toast.makeText(
+                        context,
+                        deleteSuccessMsg,
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                is TopicEffect.PostDeleteFailed -> {
+                    val message = when (effect.reason) {
+                        DeleteFailureReason.LoginRequired -> deleteFailedLoginMsg
+                        DeleteFailureReason.TopicLocked -> deleteFailedLockedMsg
+                        DeleteFailureReason.Generic -> deleteFailedGenericMsg
+                    }
+                    android.widget.Toast.makeText(
+                        context,
+                        message,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
         }
     }
@@ -245,7 +276,20 @@ fun TopicScreen(
         onEditFirstPost = onEditFirstPost,
         onOpenPage = onOpenPage,
         onOpenProfile = onOpenProfile,
+        onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
     )
+
+    // #292 — confirmation before the (irreversible, no-undo) deletion. Only « Supprimer » sends the
+    // intent; dismissing leaves the post untouched. Mirrors the « Vider le cache » confirm pattern.
+    deleteCandidate?.let { numreponse ->
+        DeletePostConfirmDialog(
+            onConfirm = {
+                viewModel.send(TopicIntent.DeletePost(numreponse))
+                deleteCandidate = null
+            },
+            onDismiss = { deleteCandidate = null },
+        )
+    }
 }
 
 /**
@@ -388,6 +432,9 @@ internal fun TopicContent(
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    // #292 — a per-post « Supprimer » tap; the screen owns the confirmation dialog, so this only
+    // requests it (carrying the post's numreponse). Never invoked for the first post (excluded).
+    onDeleteRequest: (numreponse: Int) -> Unit = {},
 ) {
     // #285 — the topic title and #284 — the page counter live in a persistent top app bar so they
     // stay visible while the user scrolls (the in-card title/caption scrolls away). When the page
@@ -501,6 +548,7 @@ internal fun TopicContent(
                         onEditFirstPost = onEditFirstPost,
                         onOpenPage = onOpenPage,
                         onOpenProfile = onOpenProfile,
+                        onDeleteRequest = onDeleteRequest,
                         listState = listState,
                     )
                 }
@@ -520,6 +568,7 @@ private fun TopicLoadedContent(
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    onDeleteRequest: (numreponse: Int) -> Unit = {},
     listState: LazyListState,
 ) {
     val highlight = state.request.scrollTo
@@ -647,6 +696,24 @@ private fun TopicLoadedContent(
             } else {
                 null
             }
+            // #292 — « Supprimer » uses the same gate as « Modifier » (HFR allows deletion via the
+            // edit form), EXCEPT it is never offered on the topic's first post: deleting that would
+            // remove the entire topic, an out-of-scope destructive path for this MVP. The first post
+            // is `topic.posts.first()` on page 1.
+            val isFirstPostOfTopic =
+                topic.page == 1 && post.numreponse == topic.posts.firstOrNull()?.numreponse
+            // Disable every delete affordance while a deletion is in flight (state.deletingNumreponse
+            // != null) so a second tap can't queue another POST mid-request (the ViewModel also
+            // guards, but hiding the button is the honest UI signal).
+            val deleteAction: (() -> Unit)? = if (
+                state.deletingNumreponse == null &&
+                !isFirstPostOfTopic &&
+                shouldShowDeleteAction(topic, post, state.isAuthenticated)
+            ) {
+                { onDeleteRequest(post.numreponse) }
+            } else {
+                null
+            }
             // Phase 2 finish (#208) — profile tap is enabled only when HFR exposed
             // a profile link for this post (Post.profileId != null). Posts without a
             // profile link (Publicité rows, anonymous reads) keep the tap hidden.
@@ -659,6 +726,7 @@ private fun TopicLoadedContent(
                 citedCount = citationCounts[post.numreponse] ?: 0,
                 onQuote = quoteAction,
                 onEdit = editAction,
+                onDelete = deleteAction,
                 onOpenProfile = profileAction,
             )
         }
@@ -914,6 +982,11 @@ private fun TopicPostCard(
     onQuote: (() -> Unit)?,
     onEdit: (() -> Unit)?,
     /**
+     * #292 — « Supprimer » this post. Null hides the button (not the user's own post, locked topic,
+     * logged out, or the topic's first post — which is excluded to avoid whole-topic deletion).
+     */
+    onDelete: (() -> Unit)? = null,
+    /**
      * Phase 2 finish (#208) — tapping the avatar or author opens the profile bottom sheet.
      * Null when [Post.profileId] is null (Publicité rows, anonymous reads).
      */
@@ -1048,19 +1121,30 @@ private fun TopicPostCard(
             }
             // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
             PostRenderer(content = post.content, selectable = true)
-            if (onQuote != null || onEdit != null) {
+            if (onQuote != null || onEdit != null || onDelete != null) {
                 // Actions row at the bottom of the post card, sober TextButtons
                 // so they stay subordinate to the post content. « Modifier »
-                // (Phase 2D, #147) appears only on the user's own editable posts
-                // when the topic is still postable. « Citer » (Phase 2C, #146)
-                // appears whenever the topic is postable, even when the per-post
-                // `quoteRef` link was obfuscated and parsed as null (#227).
-                // Either can be absent — we only render the row at all if at least
-                // one action is provided.
+                // (Phase 2D, #147) and « Supprimer » (#292) appear only on the
+                // user's own editable posts when the topic is still postable
+                // (« Supprimer » additionally excludes the first post). « Citer »
+                // (Phase 2C, #146) appears whenever the topic is postable, even
+                // when the per-post `quoteRef` link was obfuscated and parsed as
+                // null (#227). Any can be absent — we render the row only if at
+                // least one action is provided.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                 ) {
+                    if (onDelete != null) {
+                        TextButton(
+                            onClick = onDelete,
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error,
+                            ),
+                        ) {
+                            Text(text = stringResource(R.string.topic_post_delete))
+                        }
+                    }
                     if (onEdit != null) {
                         TextButton(onClick = onEdit) {
                             Text(text = stringResource(R.string.topic_post_edit))
@@ -1083,6 +1167,37 @@ private val topicDateFormatter = DateTimeFormatter
 
 private fun java.time.Instant.asTopicDate(): String = topicDateFormatter.format(this)
 
+/**
+ * #292 — confirmation before an irreversible post deletion (HFR offers no undo, cf. the #99 flag
+ * delete). « Supprimer » is styled as a destructive (error-coloured) action; « Annuler » dismisses.
+ */
+@Composable
+private fun DeletePostConfirmDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = stringResource(R.string.topic_post_delete_confirm_title)) },
+        text = { Text(text = stringResource(R.string.topic_post_delete_confirm_message)) },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error,
+                ),
+            ) {
+                Text(text = stringResource(R.string.topic_post_delete_confirm_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(R.string.topic_post_delete_confirm_cancel))
+            }
+        },
+    )
+}
+
 // #220 — write affordances additionally require an authenticated session. A logged-out user
 // can still hold a stale cached `canReply = true` row (the topic page cache is intentionally
 // not purged on logout, cf. CacheInvalidator), so these gates consult auth explicitly instead
@@ -1095,6 +1210,12 @@ internal fun shouldShowQuoteAction(topic: Topic, isAuthenticated: Boolean): Bool
     topic.canReply && isAuthenticated
 
 internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
+    post.isEditable && topic.canReply && isAuthenticated
+
+// #292 — « Supprimer » shares the « Modifier » gate: HFR exposes deletion through the same edit
+// form, so any post the user can edit, they can delete. The first-post exclusion (deleting it would
+// remove the whole topic) is applied at the call site by position, not here.
+internal fun shouldShowDeleteAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
     post.isEditable && topic.canReply && isAuthenticated
 
 // Phase 2D #148 / #220 — « Modifier le premier message ». 6-way conjunction by design: auth,

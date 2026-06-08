@@ -1,0 +1,6 @@
+Source: forum.hardware.fr
+Captured: 2026-05-17 with authenticated XaTelitte session
+URL: POST https://forum.hardware.fr/bdd.php?config=hfr.inc
+Notes: Server response after submitting delete=1 from the non-first post edit form.
+Sanitization: hash_check/codehex redacted; MP unread target id and MP count redacted when present; no cookies stored.
+Test context: Temporary owned topic cat=10 post=148749 subcat=388; disposable reply numreponse=2523830.

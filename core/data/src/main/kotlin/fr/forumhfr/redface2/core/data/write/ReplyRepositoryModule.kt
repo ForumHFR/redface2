@@ -5,6 +5,7 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
@@ -31,6 +32,10 @@ abstract class ReplyRepositoryModule {
     @Binds
     @Singleton
     abstract fun bindEditPostRepository(impl: DefaultEditPostRepository): EditPostRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindDeletePostRepository(impl: DefaultDeletePostRepository): DeletePostRepository
 
     @Binds
     @Singleton
