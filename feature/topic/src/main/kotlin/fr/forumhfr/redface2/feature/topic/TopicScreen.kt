@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.topic
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -561,18 +562,27 @@ internal fun TopicContent(
                         onRefresh = { onIntent(TopicIntent.Refresh) },
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        TopicLoadedContent(
-                            state = state,
-                            topic = mode.topic,
-                            onReply = onReply,
-                            onQuote = onQuote,
-                            onEdit = onEdit,
-                            onEditFirstPost = onEditFirstPost,
-                            onOpenPage = onOpenPage,
-                            onOpenProfile = onOpenProfile,
-                            onDeleteRequest = onDeleteRequest,
-                            listState = listState,
-                        )
+                        // #300 — wrap the list in a Box so the intra-page scrollbar can overlay its
+                        // right edge. The scrollbar is pure UI derived from `listState`; it never moves
+                        // the read position on its own — only an explicit thumb drag fast-scrolls.
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            TopicLoadedContent(
+                                state = state,
+                                topic = mode.topic,
+                                onReply = onReply,
+                                onQuote = onQuote,
+                                onEdit = onEdit,
+                                onEditFirstPost = onEditFirstPost,
+                                onOpenPage = onOpenPage,
+                                onOpenProfile = onOpenProfile,
+                                onDeleteRequest = onDeleteRequest,
+                                listState = listState,
+                            )
+                            TopicScrollbar(
+                                listState = listState,
+                                modifier = Modifier.align(Alignment.CenterEnd),
+                            )
+                        }
                     }
                 }
             }
