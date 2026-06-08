@@ -556,8 +556,9 @@ private data class PrivateMessageNavState(
  * replaces the TopicRoute (new nav entry → new ViewModel → Loading with no topic yet), which used to
  * flash the generic « Sujet » title in the top app bar. The `var` backing [titles] lives in
  * [RedfaceApp] so it survives the entry recreation; [onTitleLoaded] writes the freshly-loaded title
- * back and the next page reads it via TopicRequest.titleHint. Keyed by topic id so titles never bleed
- * across topics. Same read-map + onLoaded-callback shape as [PrivateMessageNavState].
+ * back and the next page reads it via TopicRequest.titleHint. Keyed by `(cat, post)` ([TopicTitleKey])
+ * — a topic id is unique only per HFR category — so titles never bleed across categories. Same
+ * read-map + onLoaded-callback shape as [PrivateMessageNavState].
  *
  * @property titles last known title per topic, fed into TopicRequest.titleHint.
  * @property onTitleLoaded records a topic's title once its page has loaded.
@@ -573,13 +574,13 @@ private data class TopicTitleNavState(
  * `(cat, topicId)` composite key in `SearchScreen`), so keying by `post` alone could flash the
  * wrong title across categories while a page loads. Keyed by `(cat, post)` to stay correct.
  */
-private data class TopicTitleKey(val cat: Int, val post: Int)
+internal data class TopicTitleKey(val cat: Int, val post: Int)
 
 // Upper bound on the per-topic title cache (display hint only). A long reading session opens many
 // topics; capping at a generous size keeps the map from growing unbounded for the app's lifetime.
 // Eviction is FIFO (oldest insertions dropped) — losing a stale hint just falls back to « Sujet »
 // for one loading frame, which is harmless.
-private const val TOPIC_TITLE_CACHE_MAX = 128
+internal const val TOPIC_TITLE_CACHE_MAX = 128
 
 /**
  * Inserts [title] for [key] into the per-topic title cache, evicting the oldest entries past
@@ -587,7 +588,11 @@ private const val TOPIC_TITLE_CACHE_MAX = 128
  * the front evicts the least-recently-inserted titles. Extracted from [RedfaceApp] to keep that
  * composable under the cyclomatic-complexity budget.
  */
-private fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: String): Map<TopicTitleKey, String> {
+internal fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: String): Map<TopicTitleKey, String> {
+    // Short-circuit when the title is unchanged: a page change within the same topic re-emits the
+    // identical loaded title, and re-inserting it would allocate a fresh map + trigger a global
+    // RedfaceApp recomposition for nothing.
+    if (this[key] == title) return this
     val updated = this + (key to title)
     return if (updated.size > TOPIC_TITLE_CACHE_MAX) {
         updated.entries.drop(updated.size - TOPIC_TITLE_CACHE_MAX).associate { it.toPair() }

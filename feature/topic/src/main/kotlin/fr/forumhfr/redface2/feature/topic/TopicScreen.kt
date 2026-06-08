@@ -700,14 +700,12 @@ private fun TopicLoadedContent(
             // edit form), EXCEPT it is never offered on the topic's first post: deleting that would
             // remove the entire topic, an out-of-scope destructive path for this MVP. The first post
             // is `topic.posts.first()` on page 1.
-            val isFirstPostOfTopic =
-                topic.page == 1 && post.numreponse == topic.posts.firstOrNull()?.numreponse
             // Disable every delete affordance while a deletion is in flight (state.deletingNumreponse
             // != null) so a second tap can't queue another POST mid-request (the ViewModel also
             // guards, but hiding the button is the honest UI signal).
             val deleteAction: (() -> Unit)? = if (
                 state.deletingNumreponse == null &&
-                !isFirstPostOfTopic &&
+                !isFirstPostOfTopic(topic, post) &&
                 shouldShowDeleteAction(topic, post, state.isAuthenticated)
             ) {
                 { onDeleteRequest(post.numreponse) }
@@ -1217,6 +1215,13 @@ internal fun shouldShowEditAction(topic: Topic, post: Post, isAuthenticated: Boo
 // remove the whole topic) is applied at the call site by position, not here.
 internal fun shouldShowDeleteAction(topic: Topic, post: Post, isAuthenticated: Boolean): Boolean =
     post.isEditable && topic.canReply && isAuthenticated
+
+// #292 — the topic's first post is `topic.posts.first()` on page 1. Deleting it would remove the whole
+// topic (out of scope for this MVP), so the call site excludes it from the delete affordance. Position
+// + identity based: `numreponse` is unique per HFR category, so matching it against the page's first
+// row is sufficient within a loaded topic page.
+internal fun isFirstPostOfTopic(topic: Topic, post: Post): Boolean =
+    topic.page == 1 && post.numreponse == topic.posts.firstOrNull()?.numreponse
 
 // Phase 2D #148 / #220 — « Modifier le premier message ». 6-way conjunction by design: auth,
 // FP ownership, postable topic, a real sub-category (FP recategorise is NOT relaxed for subcat=0,
