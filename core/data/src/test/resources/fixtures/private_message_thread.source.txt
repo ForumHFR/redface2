@@ -1,0 +1,4 @@
+Source: forum.hardware.fr (capture authentifiee live, compte XaTriX). @XaaT 2026-06-03
+Captured page: forum2.php?config=hfr.inc&cat=prive&post=3195237&page=1
+Notes: conversation MP (4 messages : 3 de l'utilisateur courant, 1 du correspondant ; 1 seule page). Capturee en HTTP authentifie car hfr_read (MCP) n'accepte cat qu'en entier et ne peut pas lire cat=prive.
+Privacy (#298) : MP prive, scrubbe avant commit. Pseudo de l'utilisateur courant -> "TestUser", correspondant -> "Correspondant", sujet (h3) -> "Sujet prive de test", corps de chaque message -> placeholder "Message prive de test (contenu remplace).", userids de profil + fichiers avatar remappes vers des ids factices, hash_check neutralise. Conserves (non sensibles) : structure DOM, threadId (post=3195237), numreponse, dates, liens d'edition obfusques (md_*cryptlink) qui pilotent isOwnPost.

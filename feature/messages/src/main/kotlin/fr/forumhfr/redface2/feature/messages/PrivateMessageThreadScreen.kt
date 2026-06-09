@@ -15,6 +15,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -49,6 +50,7 @@ import java.util.Locale
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("LongParameterList") // Screen host: route request + 3 nav callbacks + multi-recipient hint + actions slot.
 fun PrivateMessageThreadScreen(
     request: PrivateMessageThreadRequest,
     // Ephemeral UI hint from the inbox row (the route stays opaque, carrying only threadId/page).
@@ -57,6 +59,7 @@ fun PrivateMessageThreadScreen(
     isMultiRecipientHint: Boolean,
     onLoaded: () -> Unit,
     onBack: () -> Unit,
+    onReply: (threadId: Int, page: Int) -> Unit,
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel = hiltViewModel<PrivateMessageThreadViewModel, PrivateMessageThreadViewModel.Factory>(
@@ -115,6 +118,20 @@ fun PrivateMessageThreadScreen(
                 },
                 actions = { topBarActions?.invoke() },
             )
+        },
+        floatingActionButton = {
+            // #301 — reply affordance, shown only once the page proved a reply form is available
+            // (`canReply`). Carries the page the user is viewing so the form HFR pre-fills (and its
+            // `numrep`) matches what's on screen.
+            val content = mode as? PrivateMessageThreadUiState.Mode.Content
+            if (content?.thread?.canReply == true) {
+                val replyLabel = stringResource(R.string.messages_reply)
+                ExtendedFloatingActionButton(
+                    text = { Text(replyLabel) },
+                    icon = { Text("✎") },
+                    onClick = { onReply(request.threadId, state.page) },
+                )
+            }
         },
     ) { innerPadding ->
         Box(
