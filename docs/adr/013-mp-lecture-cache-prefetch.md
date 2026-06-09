@@ -39,12 +39,14 @@ Le prefetch MP butait sur un contrat serveur jamais mesuré (le comportement top
 
 C'est le cas « (b) binaire » anticipé par #361, mais avec une observation clé qui change le verdict prefetch : l'ouverture d'une conversation consomme déjà tout l'état observable.
 
-## Décision
+## Décision proposée
+
+> Les formulations au présent ci-dessous décrivent l'état cible **si cette ADR est acceptée**. Rien n'est effectif ni acté tant que le statut n'est pas passé à « Accepté » par le maintainer.
 
 ### 1. Partage topic↔MP à deux niveaux dans `:core:ui`
 
 - Les **fonctions pures du swipe** (`swipeTargetPage`, `swipeCommitDirection`, `swipeCommitDistancePx`, `swipeFollowOffset`, `swipeArmed`, `swipeEdgeHintAlpha` — aujourd'hui `internal` dans `feature/topic/.../TopicSwipe.kt`, testées unitairement, sans dépendance topic) déménagent vers `:core:ui`. Elles portent l'intégralité du « ressenti » (seuils distance/vélocité, overpull, hint d'armement) et garantissent un geste identique sur les deux écrans.
-- **`TopicScrollbar`** (purement paramétrique sur `LazyListState` + callbacks, zéro référence à un type topic — [vérifié #351](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4662808989)) déménage vers `:core:ui` comme composant générique, dans le sous-package `components/` déjà prévu par [architecture.md]({{ site.baseurl }}/specs/architecture). **Pas de nouveau module.**
+- **`TopicScrollbar`** (paramétrique sur `LazyListState`, callbacks internes au composant, zéro référence à un type topic — [vérifié #351](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4662808989)) déménage vers `:core:ui` comme composant générique, dans le sous-package `components/` déjà prévu par [architecture.md]({{ site.baseurl }}/specs/architecture). **Pas de nouveau module.**
 - La **machinerie gestuelle nav-driven** (`Modifier.topicPageSwipe` : `pointerInput` + latch + slide-out, intrinsèquement couplée à la destruction de composition du modèle route-driven) **reste dans `:feature:topic`**.
 - Les MP reçoivent une implémentation **minimale in-place** réutilisant les mêmes fonctions pures : commit → `selectPage()`, latch réarmé localement en fin de chargement, sans slide-out ([décision XaaT, #351](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4662808989)).
 
@@ -60,7 +62,7 @@ Cette politique précise [#316](https://github.com/ForumHFR/redface2/issues/316)
 
 L'invariant général « les requêtes de prefetch ne sont jamais authentifiées » ([protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#règle-critique--prefetch-non-authentifié)) **reste en vigueur partout ailleurs**. Pour les MP, où le prefetch anonyme est impossible (`cat=prive` exige l'auth), une exception **bornée** est définie :
 
-- **Autorisé : prefetch authentifié intra-conversation ouverte** (le cas du swipe — page N+1 de la conversation que l'utilisateur lit). Aucun effet observable : le GET d'ouverture a déjà effacé le dot binaire de toute la conversation, et en MultiMP l'utilisateur est déjà sorti de la liste « pas lu par » ([#361, verdict 1](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)). Pas de compensation nécessaire. Edge-case assumé et documenté : un message arrivant entre la lecture de N et le prefetch de N+1 verrait son dot effacé — bénin, l'utilisateur est dans la conversation.
+- **Autorisé : prefetch authentifié intra-conversation ouverte** (le cas du swipe — page N+1 de la conversation que l'utilisateur lit). **Pas d'effet supplémentaire dans le cas nominal** : le GET d'ouverture a déjà effacé le dot binaire de toute la conversation, et en MultiMP l'utilisateur est déjà sorti de la liste « pas lu par » ([#361, verdict 1](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)). Pas de compensation nécessaire. Hors cas nominal, une race **documentée et assumée** : un message arrivant entre la lecture de N et le prefetch de N+1 verrait son dot effacé (et, en MultiMP, le read-receipt mis à jour) sans avoir été affiché — effet observable mais jugé bénin, l'utilisateur est précisément dans cette conversation.
 - **Interdit : prefetch depuis la liste** (conversations non ouvertes, dot non-lu) : il effacerait un non-lu jamais vu par l'utilisateur **et** le retirerait de la liste « pas lu par » des autres participants en MultiMP (read-receipt). La compensation `nonlu.php` serait sans perte, mais les deux requêtes ne sont pas atomiques : un crash entre les deux corromprait un état visible des autres clients ([#361, verdict 2](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)). Interdit en v1, réévaluable.
 
 Conséquence d'implémentation : la règle Konsist « toute fonction `prefetch*` passe `useAuth = false` » devra distinguer explicitement le call-site MP intra-conversation (nommage dédié ou exemption documentée) — à traiter dans la PR qui introduira ce prefetch, pas silencieusement.
@@ -77,7 +79,7 @@ Tant qu'ils ne sont pas réunis, les MP restent in-place avec le swipe minimal (
 ## Conséquences
 
 - `:core:ui` gagne le composant scrollbar générique (`components/`) et les helpers purs du swipe ; `:feature:messages` et `:feature:topic` les consomment sans nouvelle arête de dépendance (les deux dépendent déjà de `:core:ui`).
-- Prérequis UI côté MP : `selectPage()` / refresh ne doivent plus passer par `Mode.Loading` plein écran (qui efface le contenu affiché) — contenu conservé + indicateur de chargement, tranche a du [plan en trois tranches de #351](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4662808989).
+- Prérequis UI côté MP : `selectPage()` / refresh ne doivent plus passer par `PrivateMessageThreadUiState.Mode.Loading` plein écran (qui efface le contenu affiché) — contenu conservé + indicateur de chargement, tranche a du [plan en trois tranches de #351](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4662808989).
 - La position de lecture locale introduit le premier stockage MP côté app : clé par conversation, format aligné MPStorage2 ([#6](https://github.com/ForumHFR/redface2/issues/6)), purge à la déconnexion comme le reste de l'état privé.
 - Vie privée : rien de plus persistant par défaut qu'aujourd'hui. Le cache Room est OFF par défaut, purgé au logout ; les routes opaques de [#316](https://github.com/ForumHFR/redface2/issues/316) sont inchangées.
 - Opportunité produit hors périmètre de cette ADR : exposer « Marquer comme non lu » dans l'app — le contrat `nonlu.php` est trivial (GET sans `hash_check`, [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)).
