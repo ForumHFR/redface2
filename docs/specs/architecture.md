@@ -378,6 +378,8 @@ class TopicViewModel @Inject constructor(
 | MultiMP flags | Room, jamais expire (donnée locale) | Permanent |
 | Préférences | DataStore | Permanent |
 
+> **Proposition en cours — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (statut Proposé, non acté)** : politique de cache des conversations MP à trois étages — position de lecture locale par conversation, cache RAM de session, cache Room du contenu en opt-in explicite (défaut OFF, purge au logout). Le tableau ci-dessus sera mis à jour si l'ADR est acceptée ; d'ici là, les MP restent sans cache (état #316/#298).
+
 ### Sémantique fresh / stale
 
 `observeTopicPage(cat, post, page)` :
@@ -424,6 +426,8 @@ Implémentation Phase 1D PR 4 (#108) :
 Les requêtes de prefetch ne doivent **jamais** inclure les cookies de session — sinon HFR marque silencieusement les topics comme lus. Implémentation avec deux instances `OkHttpClient` (`@AuthenticatedClient` / `@AnonymousClient`) et test Konsist d'enforcement : voir [protocol-hfr.md § Règle critique prefetch non-authentifié]({{ site.baseurl }}/specs/protocol-hfr#règle-critique--prefetch-non-authentifié).
 
 Côté cache disque, l'entrée est tagguée `authMode = ANONYMOUS` et **ne remplace pas** une row existante taguée `AUTHENTICATED` (cf. § Stratégie de cache).
+
+> **Proposition en cours — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (statut Proposé, non acté)** : une exception **bornée aux MP** est proposée — prefetch authentifié limité aux pages de la conversation `cat=prive` actuellement ouverte (l'état lu/non-lu serveur est binaire par conversation et déjà consommé à l'ouverture, vérifié live dans [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)) ; prefetch depuis la liste interdit. La règle générale ci-dessus reste en vigueur partout ailleurs.
 
 ---
 

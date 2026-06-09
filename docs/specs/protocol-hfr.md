@@ -590,6 +590,8 @@ Le contrat se ramène à un **flag de booléen** côté caller : `useAuth = true
 
 Confirmé par Corran Horn sur le topic HFR Redface 2 : *« en utilisant un cookie d'un compte anonyme pour pas péter les drapeaux »*.
 
+> **Proposition en cours — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (statut Proposé, non acté)** : exception **bornée aux MP** — prefetch authentifié limité aux pages de la conversation `cat=prive` actuellement ouverte. Justification mesurée live dans [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132) : l'état lu/non-lu MP est un dot **binaire par conversation**, effacé par le GET d'ouverture (le prefetch intra-conversation n'a donc pas d'effet supplémentaire dans le cas nominal ; reste une race nouveau-message documentée et assumée dans l'ADR) ; le GET de la liste est inerte ; « marquer comme non lu » = `GET /user/nonlu.php` sans `hash_check`, granularité conversation entière ; aucune position de lecture serveur n'existe pour les MP. Cette section sera complétée (contrat `nonlu.php`) si l'ADR est acceptée.
+
 ---
 
 ## Autres edge cases documentés
