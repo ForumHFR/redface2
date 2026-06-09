@@ -596,7 +596,7 @@ Confirmé par Corran Horn sur le topic HFR Redface 2 : *« en utilisant un cooki
 
 ### Posts édités
 
-Pattern dans le HTML des posts : `Message édité par <auteur> le DD-MM-YYYY à HH:MM:SS`. Extraire côté parser en champ `Post.editedAt: Instant?`.
+Marqueur dans le HTML des posts : un `div.edited` en fin de contenu, ex. `<div class="edited"><a …>Message cité 1 fois</a><br />Message édité par jubjub le 14-03-2016&nbsp;à&nbsp;12:09:00</div>`. Le lien « Message cité N fois » est optionnel et peut exister **sans** ligne « Message édité » (post cité jamais édité) — et inversement. Extrait côté parser (#362) en champ `Post.editedAt: Instant?` via `HfrDateParser.parseEditedAtOrNull` (regex non ancrée, le préfixe citation est toléré ; null si pas de marqueur d'édition). Le `div.edited` reste par ailleurs retiré du contenu rendu (`PostContentParser`).
 
 ### Posts supprimés / modérés
 

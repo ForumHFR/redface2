@@ -1,0 +1,345 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 8,
+    "identityHash": "21cce4434dbc3467f3add7307e02fdd7",
+    "entities": [
+      {
+        "tableName": "topic_pages",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`cat` INTEGER NOT NULL, `post` INTEGER NOT NULL, `page` INTEGER NOT NULL, `title` TEXT NOT NULL, `totalPages` INTEGER NOT NULL, `isFirstPostOwner` INTEGER NOT NULL, `pollJson` TEXT, `numreponses` TEXT NOT NULL, `fetchedAt` INTEGER NOT NULL, `authMode` TEXT NOT NULL, `subcat` INTEGER NOT NULL, `canReply` INTEGER NOT NULL, PRIMARY KEY(`cat`, `post`, `page`))",
+        "fields": [
+          {
+            "fieldPath": "cat",
+            "columnName": "cat",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "post",
+            "columnName": "post",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "page",
+            "columnName": "page",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalPages",
+            "columnName": "totalPages",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isFirstPostOwner",
+            "columnName": "isFirstPostOwner",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pollJson",
+            "columnName": "pollJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "numreponses",
+            "columnName": "numreponses",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fetchedAt",
+            "columnName": "fetchedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "authMode",
+            "columnName": "authMode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subcat",
+            "columnName": "subcat",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canReply",
+            "columnName": "canReply",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "cat",
+            "post",
+            "page"
+          ]
+        }
+      },
+      {
+        "tableName": "posts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`cat` INTEGER NOT NULL, `numreponse` INTEGER NOT NULL, `post` INTEGER NOT NULL, `author` TEXT NOT NULL, `date` INTEGER NOT NULL, `content` TEXT NOT NULL, `avatarUrl` TEXT, `isEditable` INTEGER NOT NULL, `isOwnPost` INTEGER NOT NULL, `quotedAuthors` TEXT NOT NULL, `postIndex` INTEGER, `fetchedAt` INTEGER NOT NULL, `authMode` TEXT NOT NULL, `quoteRef` INTEGER, `profileId` INTEGER, `editedAt` INTEGER, PRIMARY KEY(`cat`, `numreponse`))",
+        "fields": [
+          {
+            "fieldPath": "cat",
+            "columnName": "cat",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "numreponse",
+            "columnName": "numreponse",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "post",
+            "columnName": "post",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "author",
+            "columnName": "author",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "date",
+            "columnName": "date",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "content",
+            "columnName": "content",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "avatarUrl",
+            "columnName": "avatarUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isEditable",
+            "columnName": "isEditable",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isOwnPost",
+            "columnName": "isOwnPost",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quotedAuthors",
+            "columnName": "quotedAuthors",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "postIndex",
+            "columnName": "postIndex",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "fetchedAt",
+            "columnName": "fetchedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "authMode",
+            "columnName": "authMode",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quoteRef",
+            "columnName": "quoteRef",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "profileId",
+            "columnName": "profileId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "editedAt",
+            "columnName": "editedAt",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "cat",
+            "numreponse"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_posts_cat_post",
+            "unique": false,
+            "columnNames": [
+              "cat",
+              "post"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_posts_cat_post` ON `${TABLE_NAME}` (`cat`, `post`)"
+          }
+        ]
+      },
+      {
+        "tableName": "flag_topics",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`userId` TEXT NOT NULL, `type` TEXT NOT NULL, `cat` INTEGER NOT NULL, `subcat` INTEGER, `topicId` INTEGER NOT NULL, `title` TEXT NOT NULL, `totalPages` INTEGER NOT NULL, `replyCount` INTEGER NOT NULL, `hasUnread` INTEGER NOT NULL, `lastReadPage` INTEGER NOT NULL, `lastPostReadId` INTEGER, `firstPostAuthor` TEXT NOT NULL, `lastReplyAuthor` TEXT NOT NULL, `lastReplyAt` TEXT NOT NULL, `fetchedAt` INTEGER NOT NULL, `authMode` TEXT NOT NULL, PRIMARY KEY(`userId`, `type`, `cat`, `topicId`))",
+        "fields": [
+          {
+            "fieldPath": "userId",
+            "columnName": "userId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cat",
+            "columnName": "cat",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subcat",
+            "columnName": "subcat",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "topicId",
+            "columnName": "topicId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalPages",
+            "columnName": "totalPages",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "replyCount",
+            "columnName": "replyCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hasUnread",
+            "columnName": "hasUnread",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastReadPage",
+            "columnName": "lastReadPage",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastPostReadId",
+            "columnName": "lastPostReadId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "firstPostAuthor",
+            "columnName": "firstPostAuthor",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastReplyAuthor",
+            "columnName": "lastReplyAuthor",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastReplyAt",
+            "columnName": "lastReplyAt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fetchedAt",
+            "columnName": "fetchedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "authMode",
+            "columnName": "authMode",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "userId",
+            "type",
+            "cat",
+            "topicId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_flag_topics_userId_type",
+            "unique": false,
+            "columnNames": [
+              "userId",
+              "type"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_flag_topics_userId_type` ON `${TABLE_NAME}` (`userId`, `type`)"
+          },
+          {
+            "name": "index_flag_topics_userId_fetchedAt",
+            "unique": false,
+            "columnNames": [
+              "userId",
+              "fetchedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_flag_topics_userId_fetchedAt` ON `${TABLE_NAME}` (`userId`, `fetchedAt`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '21cce4434dbc3467f3add7307e02fdd7')"
+    ]
+  }
+}

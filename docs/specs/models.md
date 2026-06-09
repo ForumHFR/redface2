@@ -94,6 +94,8 @@ classDiagram
         +List~String~ quotedAuthors
         +Int? postIndex
         +Int? quoteRef
+        +Int? profileId
+        +Instant? editedAt
     }
 
     class PostContent {
@@ -279,6 +281,8 @@ data class Post(
     val quotedAuthors: List<String>,     // dérivé de PostContent pour recherche, filtres et décorateurs
     val postIndex: Int?,                 // (page-1) * postsPerPage + position — null quand le parser n'a pas le contexte page/postsPerPage (preview, fixtures isolées). postsPerPage vient des préférences HFR de l'utilisateur, PAS une constante (voir UserSettings)
     val quoteRef: Int? = null,           // Phase 2C (#146/#227) : `ref` opaque parsé depuis le href du lien quote HFR (`message.php?…&numrep=…&ref=N`) quand il est en clair. Null = ref absent/obfusqué/locked/anonyme. Persisté en Room v5 (`MIGRATION_4_5`) pour préserver le `ref` best-effort ; le bouton « Citer » dépend de `Topic.canReply`, pas de ce champ.
+    val profileId: Int? = null,          // Phase 2 finish (#208) : id numérique HFR du lien profil toolbar (cf. note en tête de page). Persisté en Room v6 (`MIGRATION_5_6`).
+    val editedAt: Instant? = null,       // #362 : date de dernière édition parsée depuis le trailer `div.edited` (« Message édité par <auteur> le DD-MM-YYYY à HH:MM:SS »). Null = jamais édité — y compris un div.edited ne portant que le lien « Message cité N fois » (post cité jamais édité). Persisté en Room v8 (`MIGRATION_7_8`). Affiché dans le menu contextuel de post (« Édité le … »).
 )
 
 data class PostContent(
