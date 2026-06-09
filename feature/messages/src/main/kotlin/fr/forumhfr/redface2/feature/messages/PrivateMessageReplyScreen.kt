@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -34,6 +35,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -144,7 +146,13 @@ private fun ReplyHeader(onBack: () -> Unit) {
             onClick = onBack,
             modifier = Modifier.semantics { contentDescription = backLabel },
         ) {
-            Text("←")
+            // dp-sized vector instead of a text « ← » glyph (font/baseline-dependent, cf. Codex
+            // review). a11y label on the IconButton; the icon is decorative.
+            Icon(
+                painter = painterResource(fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back),
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+            )
         }
         Text(
             text = stringResource(R.string.messages_reply_title),
