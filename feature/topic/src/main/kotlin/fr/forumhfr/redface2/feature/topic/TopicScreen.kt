@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -24,6 +25,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -52,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -505,11 +508,16 @@ internal fun TopicContent(
                         onClick = onBack,
                         modifier = Modifier.semantics { contentDescription = backLabel },
                     ) {
-                        // The bare `←` glyph rendered oversized next to the title (it fills the em box
-                        // in the project font, so matching the title's point size still looked too big).
-                        // Down-size it to a normal body text size so it sits naturally beside the title;
-                        // the IconButton keeps the 48dp touch target regardless of the glyph size.
-                        Text("←", style = MaterialTheme.typography.bodySmall)
+                        // A text glyph used as an icon was unstable: its size depended on the system
+                        // font's `←` rendering, the baseline and the font-scale, never matching the
+                        // title cleanly (cf. Codex review). Use a dp-sized vector instead — optically
+                        // centred by the IconButton, font-independent. The a11y label stays on the
+                        // IconButton, so the icon itself is decorative (contentDescription = null).
+                        Icon(
+                            painter = painterResource(fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back),
+                            contentDescription = null,
+                            modifier = Modifier.size(24.dp),
+                        )
                     }
                 },
                 scrollBehavior = scrollBehavior,

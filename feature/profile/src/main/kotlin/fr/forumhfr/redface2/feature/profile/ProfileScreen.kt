@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -24,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -102,21 +104,23 @@ internal fun ProfileScreen(
                     )
                 },
                 navigationIcon = {
-                    // Review feedback C2: the previous `Text("←")` had no
-                    // contentDescription, which made the back button silent to
-                    // TalkBack and a generic « Bouton » to LiveCaptions. The detekt
-                    // ForbiddenImport rule blocks `androidx.compose.material.*` (Material 2
-                    // surface, which includes `material-icons-core`), so we cannot use
-                    // `Icons.AutoMirrored.Filled.ArrowBack`. Instead we keep the « ← »
-                    // glyph but attach a proper a11y label via
-                    // `Modifier.semantics { contentDescription = … }` on the IconButton.
-                    // TalkBack now announces « Retour, bouton » as expected.
+                    // detekt ForbiddenImport blocks `androidx.compose.material.*` (incl.
+                    // `material-icons-core`), so `Icons.AutoMirrored.Filled.ArrowBack` is off-limits.
+                    // A text « ← » glyph proved unstable as an icon (size depends on the system font,
+                    // baseline and font-scale — cf. Codex review), so use a local dp-sized vector
+                    // drawable rendered with material3 `Icon` (allowed: material3, not material). The
+                    // a11y label stays on the IconButton; the icon is decorative (contentDescription
+                    // = null) to avoid duplicate semantics. TalkBack still announces « Retour, bouton ».
                     val backLabel = stringResource(R.string.profile_back)
                     IconButton(
                         onClick = onBack,
                         modifier = Modifier.semantics { contentDescription = backLabel },
                     ) {
-                        Text("←")
+                        Icon(
+                            painter = painterResource(fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back),
+                            contentDescription = null,
+                            modifier = Modifier.size(24.dp),
+                        )
                     }
                 },
             )
