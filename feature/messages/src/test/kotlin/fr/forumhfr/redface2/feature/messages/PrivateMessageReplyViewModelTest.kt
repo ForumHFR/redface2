@@ -132,6 +132,28 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun `invalid hash check refetch preserves the user option toggles`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.submitReply(any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+
+        val viewModel = PrivateMessageReplyViewModel(request, repository, previewParser)
+        // First load hydrates signature ON (hidden `signature=1`); the user turns it OFF.
+        viewModel.onToggleSignature(false)
+        viewModel.onContentChanged(TextFieldValue("hello"))
+        viewModel.onSubmit()
+
+        // The silent refetch after the expired hash_check must NOT re-hydrate the toggle back to
+        // HFR's default — the user's choice survives into the second submit.
+        assertFalse(
+            "InvalidHashCheck refetch must preserve the user's signature toggle",
+            viewModel.state.value.signatureEnabled,
+        )
+        coVerify(exactly = 2) { repository.fetchReplyForm(any()) }
+    }
+
+    @Test
     fun `unknown response maps to the non-destructive unexpected banner`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any()) } returns form()
