@@ -1,6 +1,9 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
@@ -11,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -55,19 +57,24 @@ import kotlin.math.roundToInt
  * Outside the thumb hit target there is no pointer node, so a normal vertical scroll / a tap on a
  * right-aligned post action falls straight through to the list.
  *
- * Geometry uses a **pixel-based estimated** model: thumb size ≈ viewport / (averageItemSize × total),
- * thumb top ≈ pixelsScrolled / maxScroll. The earlier index-based model (`visibleItems/total`,
- * `firstVisibleIndex/total`) was the root cause of the "jumps + resizes" bug on a forum page: posts have
- * wildly unequal heights, so `visibleItemsCount` (an integer) flipped 3↔4↔2 as a tall post entered/left
- * the viewport — resizing the thumb by whole-item steps — and the thumb travelled ~10× faster over a
- * short post than a tall one for the same `1/total` step, so it accelerated/jumped at every item border.
- * The pixel model derives both size and position from an estimated total height (mean of the *visible*
- * item sizes × total), which varies continuously instead of by integer steps. It is still an
- * approximation (the mean drifts a little as the visible set changes), but far smoother. "Is there
- * anything to scroll" is read from [LazyListState.canScrollForward]/[LazyListState.canScrollBackward],
- * NOT from visible ≥ total (false when one item is taller than the viewport). It works in pure
- * `LazyListState` index space (the header card is lazy item 0), so thumb position and `scrollToItem`
- * stay mutually consistent — no header offset to apply.
+ * Geometry uses a **fixed-size, ordinal** model: the thumb is a constant fraction of the track
+ * ([THUMB_SIZE_FRACTION]) and its position comes purely from the list ordinal
+ * `firstVisibleItemIndex / (totalItemsCount − 1)`. It deliberately does NOT read any measured item
+ * size. Two earlier attempts both tied the thumb to a *moving estimate* of total content height and
+ * failed: an index-based one (size = `visibleItemsCount/total`, an integer flipping 3↔4↔2) and a
+ * pixel-estimated one (size = `viewport / (avgVisibleItemSize × total)`). On a forum page — unequal
+ * post heights, plus block images that grow 160→480dp once Coil decodes them (#197) and inline media
+ * that resizes after measurement — the estimated total "breathes", so the thumb resized and jumped
+ * (the average of the *visible* items rewrites the assumed height of every item before the viewport),
+ * even while idle. Decoupling the geometry from measured sizes is the only stable option.
+ *
+ * Trade-off (per the Codex review): the thumb is no longer proportional to true scroll length — a tall
+ * image post and a one-liner are one ordinal step each — but it is rock-stable and matches the
+ * fast-scroll use case ("where am I / jump near another post"). A spring on the drawn offset softens
+ * the coarse per-item steps; the thumb drag snaps (no animation) so it never lags under the finger.
+ * "Is there anything to scroll" is still read from
+ * [LazyListState.canScrollForward]/[LazyListState.canScrollBackward]. Pure `LazyListState` index space
+ * (the header card is lazy item 0), so thumb position and `scrollToItem` stay mutually consistent.
  */
 @Composable
 internal fun TopicScrollbar(
@@ -79,14 +86,9 @@ internal fun TopicScrollbar(
     }
     val metrics by remember {
         derivedStateOf {
-            val info = listState.layoutInfo
-            val visible = info.visibleItemsInfo
             scrollbarMetrics(
                 firstVisibleItemIndex = listState.firstVisibleItemIndex,
-                firstVisibleItemScrollOffset = listState.firstVisibleItemScrollOffset,
-                averageItemSizePx = visible.averageItemSizePx(),
-                totalItemsCount = info.totalItemsCount,
-                viewportHeightPx = (info.viewportEndOffset - info.viewportStartOffset).toFloat(),
+                totalItemsCount = listState.layoutInfo.totalItemsCount,
             )
         }
     }
@@ -94,33 +96,27 @@ internal fun TopicScrollbar(
     var isDragging by remember { mutableStateOf(false) }
     val active = canScroll && metrics != null
 
-    // Visible while scrolling or dragging; otherwise a brief show-then-fade. The idle branch also fires
-    // on the first composition of a scrollable page (initial flash → discoverability of the fast-scroll
-    // affordance) and after a scroll settles (post-scroll hold). The LaunchedEffect restarts on every
-    // (active / scroll / drag) change, so a scroll resuming within the hold cancels the pending fade.
-    var alphaTarget by remember { mutableStateOf(0f) }
-    LaunchedEffect(active, listState.isScrollInProgress, isDragging) {
-        when {
-            !active -> alphaTarget = 0f
-            listState.isScrollInProgress || isDragging -> alphaTarget = 1f
-            else -> {
-                alphaTarget = 1f
-                delay(HIDE_DELAY_MS)
-                alphaTarget = 0f
-            }
-        }
-    }
-    val alpha by animateFloatAsState(targetValue = alphaTarget, label = "topicScrollbarAlpha")
+    // Auto-hide alpha extracted to rememberScrollbarAlpha to keep this composable under the cyclomatic
+    // complexity threshold; visible while scrolling/dragging, brief show-then-fade otherwise.
+    val alpha = rememberScrollbarAlpha(
+        active = active,
+        isScrollInProgress = listState.isScrollInProgress,
+        isDragging = isDragging,
+    )
     val thumbColor = MaterialTheme.colorScheme.primary
 
-    // Read live geometry inside the gesture without re-keying the pointerInput on the (per-frame)
-    // metrics. Same estimated-height inputs as `scrollbarMetrics`, so a fast-scroll lands where the
-    // thumb sits.
-    val currentTotalCount = rememberUpdatedState(listState.layoutInfo.totalItemsCount)
-    val currentAvgItemSize = rememberUpdatedState(listState.layoutInfo.visibleItemsInfo.averageItemSizePx())
-    val currentViewportHeight = rememberUpdatedState(
-        (listState.layoutInfo.viewportEndOffset - listState.layoutInfo.viewportStartOffset).toFloat(),
+    // Soften the coarse ordinal steps (the position jumps by 1/(total-1) each time the first visible
+    // item changes): a spring chases the moving target while scrolling/settling, but the thumb drag
+    // snaps (no animation) so the thumb never lags under the finger during a fast-scroll.
+    val animatedOffset by animateFloatAsState(
+        targetValue = metrics?.offsetFraction ?: 0f,
+        animationSpec = if (isDragging) snap() else spring(stiffness = Spring.StiffnessMediumLow),
+        label = "topicScrollbarOffset",
     )
+    val drawnMetrics = metrics?.copy(offsetFraction = animatedOffset)
+
+    // Live total read inside the gesture without re-keying the pointerInput on the (per-frame) metrics.
+    val currentTotalCount = rememberUpdatedState(listState.layoutInfo.totalItemsCount)
     val scope = rememberCoroutineScope()
     var lastTargetIndex by remember { mutableIntStateOf(-1) }
     var scrollJob by remember { mutableStateOf<Job?>(null) }
@@ -133,9 +129,7 @@ internal fun TopicScrollbar(
     val onSeek: (Float) -> Unit = { travelFraction ->
         val index = targetIndexForDrag(
             travelFraction = travelFraction,
-            averageItemSizePx = currentAvgItemSize.value,
             totalItemsCount = currentTotalCount.value,
-            viewportHeightPx = currentViewportHeight.value,
         )
         if (index != lastTargetIndex) {
             lastTargetIndex = index
@@ -151,12 +145,12 @@ internal fun TopicScrollbar(
     ) {
         val trackHeightPx = constraints.maxHeight.toFloat()
         Canvas(modifier = Modifier.fillMaxSize().clearAndSetSemantics { }) {
-            val m = metrics
+            val m = drawnMetrics
             if (alpha > 0f && m != null) {
                 drawScrollbarThumb(metrics = m, alpha = alpha, color = thumbColor)
             }
         }
-        val m = metrics
+        val m = drawnMetrics
         if (active && m != null) {
             ThumbHitTarget(
                 listState = listState,
@@ -167,6 +161,35 @@ internal fun TopicScrollbar(
             )
         }
     }
+}
+
+/**
+ * Auto-hide opacity for the scrollbar: fully visible while [active] and (scrolling or [isDragging]),
+ * otherwise a brief show-then-fade after the last interaction. The idle branch also fires on the first
+ * composition of a scrollable page (initial flash → discoverability) and after a scroll settles. The
+ * [LaunchedEffect] restarts on every (active / scroll / drag) change, so a scroll resuming within the
+ * hold cancels the pending fade.
+ */
+@Composable
+private fun rememberScrollbarAlpha(
+    active: Boolean,
+    isScrollInProgress: Boolean,
+    isDragging: Boolean,
+): Float {
+    var alphaTarget by remember { mutableStateOf(0f) }
+    LaunchedEffect(active, isScrollInProgress, isDragging) {
+        when {
+            !active -> alphaTarget = 0f
+            isScrollInProgress || isDragging -> alphaTarget = 1f
+            else -> {
+                alphaTarget = 1f
+                delay(HIDE_DELAY_MS)
+                alphaTarget = 0f
+            }
+        }
+    }
+    val alpha by animateFloatAsState(targetValue = alphaTarget, label = "topicScrollbarAlpha")
+    return alpha
 }
 
 /**
@@ -242,71 +265,58 @@ internal data class ScrollbarMetrics(
     val sizeFraction: Float,
 )
 
-/** Mean size (px) of the currently visible lazy items — the estimator both pure functions rely on. */
-private fun List<LazyListItemInfo>.averageItemSizePx(): Float =
-    if (isEmpty()) 0f else sumOf { it.size }.toFloat() / size
-
 /**
- * Pure thumb geometry, **pixel-based** (#300 follow-up fixing the "jumps + resizes" report). The thumb
- * size and position come from an *estimated* total content height ([averageItemSizePx] × [totalItemsCount])
- * and the pixels already scrolled — NOT from the integer count of visible items, which flipped by whole
- * steps on a page of unequal-height posts and made the thumb resize and travel non-uniformly.
+ * Pure thumb geometry, **fixed-size + ordinal** (#300 follow-up fixing the "jumps + grows suddenly"
+ * report). The thumb size is the constant [THUMB_SIZE_FRACTION] of the track, and its position is the
+ * pure list ordinal `firstVisibleItemIndex / (totalItemsCount − 1)` mapped onto the available travel
+ * `1 − sizeFraction`. It reads **no measured item size**, so neither a changing visible set during
+ * scroll nor a post-decode image growth (#197) can resize or move the thumb on its own — only an actual
+ * change of the first-visible ordinal does.
  *
- * [averageItemSizePx] is the mean size of the **currently visible** items: an approximation that stays
- * smooth because it varies continuously (a tall post entering nudges the mean up gradually) rather than by
- * whole-item steps. A small residual discontinuity remains when the first visible item changes while its
- * size differs a lot from the mean; it is far smaller than the index-based jump and accepted for v1.
+ * Returns `null` when an ordinal position is meaningless ([totalItemsCount] ≤ 1): a single (possibly
+ * tall) item carries no ordinal progress. A topic page always has the header card (item 0) plus posts,
+ * so this only hides the bar on a degenerate one-item list. The "page fits, nothing to scroll" decision
+ * stays with the caller (`canScrollForward/Backward`). [offsetFraction] ∈ [0, 1 − sizeFraction];
+ * [sizeFraction] is constant.
  *
- * Returns `null` only when there is nothing to represent ([totalItemsCount] ≤ 0, no visible item, or a
- * non-positive [averageItemSizePx]/[viewportHeightPx]). The "page fits, nothing to scroll" decision stays
- * with the caller (`canScrollForward/Backward`). [offsetFraction] ∈ [0, 1 − sizeFraction]; [sizeFraction]
- * ∈ (0, 1].
+ * Trade-off: a tall post and a one-liner are one ordinal step each, so the thumb is not proportional to
+ * true scroll length — accepted for stability (cf. the Codex review). At the very bottom the first
+ * ordinal is `total − visibleCount`, so the thumb rests slightly above the end; a drag to the bottom
+ * still lands there via [targetIndexForDrag] (`scrollToItem(total − 1)`).
  */
 internal fun scrollbarMetrics(
     firstVisibleItemIndex: Int,
-    firstVisibleItemScrollOffset: Int,
-    averageItemSizePx: Float,
     totalItemsCount: Int,
-    viewportHeightPx: Float,
 ): ScrollbarMetrics? {
-    // Single guard (ReturnCount): an empty visible set surfaces as `averageItemSizePx == 0f`, so the
-    // "nothing visible" case is covered here without a separate `visibleItemsCount` parameter.
-    if (totalItemsCount <= 0 || averageItemSizePx <= 0f || viewportHeightPx <= 0f) return null
-    val estimatedTotalHeight = averageItemSizePx * totalItemsCount
-    val sizeFraction = (viewportHeightPx / estimatedTotalHeight).coerceIn(MIN_THUMB_FRACTION, 1f)
-    val maxScrollPx = estimatedTotalHeight - viewportHeightPx
-    val offsetFraction = if (maxScrollPx <= 0f) {
-        0f
-    } else {
-        val scrolledPx = firstVisibleItemIndex * averageItemSizePx + firstVisibleItemScrollOffset
-        ((scrolledPx / maxScrollPx) * (1f - sizeFraction)).coerceIn(0f, 1f - sizeFraction)
-    }
-    return ScrollbarMetrics(offsetFraction = offsetFraction, sizeFraction = sizeFraction)
+    if (totalItemsCount <= 1) return null
+    val progress = (firstVisibleItemIndex.toFloat() / (totalItemsCount - 1)).coerceIn(0f, 1f)
+    val offsetFraction = progress * (1f - THUMB_SIZE_FRACTION)
+    return ScrollbarMetrics(offsetFraction = offsetFraction, sizeFraction = THUMB_SIZE_FRACTION)
 }
 
 /**
  * Maps the thumb's travel fraction (∈ [0, 1] over its *available* travel = track − thumb) back to a
- * target first-visible item index, using the SAME estimated-height model as [scrollbarMetrics] so the
- * thumb position and a fast-scroll stay mutually consistent: `travelFraction × maxScrollPx` is the target
- * scroll position in px, divided by [averageItemSizePx] for the item to land on. Clamps to a valid index
- * so a shrinking [totalItemsCount] mid-drag never yields an out-of-range value.
+ * target first-visible item index, the inverse of [scrollbarMetrics]'s ordinal mapping:
+ * `round(travelFraction × (total − 1))`. Clamps so an out-of-range fraction or a shrinking
+ * [totalItemsCount] mid-drag never yields an out-of-range index.
  */
 internal fun targetIndexForDrag(
     travelFraction: Float,
-    averageItemSizePx: Float,
     totalItemsCount: Int,
-    viewportHeightPx: Float,
 ): Int {
-    if (averageItemSizePx <= 0f || totalItemsCount <= 0) return 0
-    val estimatedTotalHeight = averageItemSizePx * totalItemsCount
-    val maxScrollPx = (estimatedTotalHeight - viewportHeightPx).coerceAtLeast(0f)
-    val targetScrollPx = travelFraction.coerceIn(0f, 1f) * maxScrollPx
-    val index = (targetScrollPx / averageItemSizePx).roundToInt()
+    if (totalItemsCount <= 1) return 0
+    val index = (travelFraction.coerceIn(0f, 1f) * (totalItemsCount - 1)).roundToInt()
     return index.coerceIn(0, totalItemsCount - 1)
 }
 
 private const val THUMB_ALPHA = 0.7f
-internal const val MIN_THUMB_FRACTION = 0.08f
+
+/**
+ * Constant thumb height as a fraction of the track. Fixed on purpose: tying the size to any measured
+ * quantity (visible-item count, or an estimated total height) made it resize as the visible set or image
+ * heights changed — the "grows suddenly" symptom. ~12% gives a comfortable grab target on a phone track.
+ */
+internal const val THUMB_SIZE_FRACTION = 0.12f
 private const val HIDE_DELAY_MS = 800L
 private val SCROLLBAR_GUTTER_WIDTH = 24.dp
 private val THUMB_WIDTH = 6.dp
