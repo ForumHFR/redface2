@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -15,6 +16,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -26,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -49,6 +53,7 @@ import java.util.Locale
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("LongParameterList") // Screen host: route request + 3 nav callbacks + multi-recipient hint + actions slot.
 fun PrivateMessageThreadScreen(
     request: PrivateMessageThreadRequest,
     // Ephemeral UI hint from the inbox row (the route stays opaque, carrying only threadId/page).
@@ -57,6 +62,7 @@ fun PrivateMessageThreadScreen(
     isMultiRecipientHint: Boolean,
     onLoaded: () -> Unit,
     onBack: () -> Unit,
+    onReply: (threadId: Int, page: Int) -> Unit,
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel = hiltViewModel<PrivateMessageThreadViewModel, PrivateMessageThreadViewModel.Factory>(
@@ -110,11 +116,31 @@ fun PrivateMessageThreadScreen(
                         onClick = onBack,
                         modifier = Modifier.semantics { contentDescription = backLabel },
                     ) {
-                        Text("←")
+                        // dp-sized vector instead of a text « ← » glyph (font/baseline-dependent, cf.
+                        // Codex review). a11y label on the IconButton; the icon is decorative.
+                        Icon(
+                            painter = painterResource(fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back),
+                            contentDescription = null,
+                            modifier = Modifier.size(24.dp),
+                        )
                     }
                 },
                 actions = { topBarActions?.invoke() },
             )
+        },
+        floatingActionButton = {
+            // #301 — reply affordance, shown only once the page proved a reply form is available
+            // (`canReply`). Carries the page the user is viewing so the form HFR pre-fills (and its
+            // `numrep`) matches what's on screen.
+            val content = mode as? PrivateMessageThreadUiState.Mode.Content
+            if (content?.thread?.canReply == true) {
+                val replyLabel = stringResource(R.string.messages_reply)
+                ExtendedFloatingActionButton(
+                    text = { Text(replyLabel) },
+                    icon = { Text("✎") },
+                    onClick = { onReply(request.threadId, state.page) },
+                )
+            }
         },
     ) { innerPadding ->
         Box(

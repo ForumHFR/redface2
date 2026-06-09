@@ -16,6 +16,30 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v101 — `0.7.0` — 2026-06-09
+
+**Statut** : `open` (track open testing) + F-Droid `.beta`
+**Commit** : tag `app-v101` (versionCode alloué par le registre de tags, plancher 72)
+**Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) → **track open testing** + tag pour F-Droid beta
+
+**Deuxième batch de fonctionnalités** dogfoodé sur le canal dev (v93 → v100) : écriture MP, ascenseur fast-scroll, pull-to-refresh, accès rapide poster, écran Réglages. Promotion `dev → main` puis ship beta.
+
+### Added
+- **Répondre à une conversation privée** (#301) — éditeur BBCode complet (barre d'outils, aperçu, options signature/smiley/notification e-mail), bouton « Envoyer » épinglé au-dessus du clavier ; calqué sur l'éditeur de post. La composition d'un nouveau MP depuis zéro reste à venir.
+- **Ascenseur (scrollbar) de sujet** (#300) — indicateur de position + fast-scroll par glisser. Modèle de pouce à taille fixe avec ancrage intra-post fluide (pas d'à-coups, pas de « respiration » de la hauteur).
+- **Pull-to-refresh d'une page de sujet** (#335) — tirer vers le bas recharge la page courante.
+- **Accès rapide « poster » + changement de page en bas de sujet** (#283).
+- **Écran Réglages « menu vitrine »** (#288) — catalogue des réglages présents et à venir (grisés, étiquetés par issue ou phase).
+
+### Fixed
+- **Flèche retour incohérente** (#355/#356/#357) — remplacement du glyphe texte « ← » (taille dépendante de la police et de la baseline système) par une icône vectorielle 24 dp rendue via material3 `Icon`, sur les écrans sujet, profil et messages privés.
+
+### Changed
+- **`versionName` 0.6.0 → 0.7.0**.
+- Post-review Codex : le refetch silencieux après `hash_check` expiré en réponse MP **ne réécrase plus** les options choisies par l'utilisateur (#301, garde `optionsHydratedFromForm` alignée sur l'éditeur de post) ; le catalogue Réglages n'annonce plus l'écriture MP comme « à venir » (reformulé vers la composition d'un nouveau MP).
+
+---
+
 ## v92 — `0.6.0` — 2026-06-08
 
 **Statut** : `open` (track open testing) + F-Droid `.beta`

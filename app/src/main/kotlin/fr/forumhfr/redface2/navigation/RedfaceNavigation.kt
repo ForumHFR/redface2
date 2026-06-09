@@ -67,6 +67,8 @@ import fr.forumhfr.redface2.feature.forum.CategoryRequest
 import fr.forumhfr.redface2.feature.forum.ForumCategoryScreen
 import fr.forumhfr.redface2.feature.forum.ForumScreen
 import fr.forumhfr.redface2.feature.messages.MessagesScreen
+import fr.forumhfr.redface2.feature.messages.PrivateMessageReplyRequest
+import fr.forumhfr.redface2.feature.messages.PrivateMessageReplyScreen
 import fr.forumhfr.redface2.feature.messages.PrivateMessageThreadRequest
 import fr.forumhfr.redface2.feature.messages.PrivateMessageThreadScreen
 import fr.forumhfr.redface2.feature.profile.ProfilePreviewSheet
@@ -98,7 +100,29 @@ data object MessagesRoute : RedfaceNavKey
 data class PrivateMessageThreadRoute(
     val threadId: Int,
     val page: Int = 1,
+    /**
+     * #301 — bumped to `System.currentTimeMillis()` by the navigation host when the private-message
+     * reply editor pops back after a successful send. The new value invalidates the route key so a
+     * fresh [PrivateMessageThreadViewModel] is created and re-fetches the conversation (there is no MP
+     * cache, so a new entry always hits the network) — without it, returning to the retained entry
+     * would show the conversation as it was before the reply. `null` on every normal nav path.
+     */
+    val submitSignal: Long? = null,
 ) : RedfaceNavKey
+
+@Serializable
+data class PrivateMessageReplyRoute(
+    val threadId: Int,
+    val page: Int = 1,
+) : RedfaceNavKey
+
+/**
+ * Full-screen editor routes hide the navigation suite so their IME-pinned submit bar sits at the
+ * window bottom (and to avoid dropping the draft on a tab switch). Extracted from `RedfaceApp` to
+ * keep its cyclomatic complexity in check.
+ */
+private fun NavKey?.hidesNavigationSuite(): Boolean =
+    this is PostEditorRoute || this is TopicFormRoute || this is PrivateMessageReplyRoute
 
 @Serializable
 data class CategoryRoute(
@@ -409,7 +433,7 @@ fun RedfaceApp(intent: Intent?) {
         // routes makes the editor full-screen: its submit bar then sits at the window bottom and the IME
         // inset lands exactly on the keyboard. Bonus UX: no tab switching mid-compose (would drop the draft).
         val topRoute = backStacks.getValue(currentDestination).lastOrNull()
-        val navLayoutType = if (topRoute is PostEditorRoute || topRoute is TopicFormRoute) {
+        val navLayoutType = if (topRoute.hidesNavigationSuite()) {
             NavigationSuiteType.None
         } else {
             NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
@@ -757,7 +781,41 @@ private fun RedfaceNavHost(
                             backStack.removeAt(backStack.lastIndex)
                         }
                     },
+                    onReply = { threadId, page ->
+                        backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
+                    },
                     topBarActions = accountMenu,
+                )
+            }
+            entry<PrivateMessageReplyRoute> { route ->
+                PrivateMessageReplyScreen(
+                    request = PrivateMessageReplyRequest(
+                        threadId = route.threadId,
+                        page = route.page,
+                    ),
+                    onSubmitSucceeded = { threadId, page ->
+                        // Pop the editor, then replace the conversation entry with a fresh key
+                        // (bumped submitSignal) so the thread re-fetches and shows the sent message.
+                        // Mirrors PostEditorRoute.onSubmitSucceeded. Never collapse below the tab root.
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                        val threadEntry = backStack.lastOrNull() as? PrivateMessageThreadRoute
+                        if (threadEntry != null) {
+                            backStack.removeAt(backStack.lastIndex)
+                            backStack.add(
+                                threadEntry.copy(
+                                    page = page,
+                                    submitSignal = System.currentTimeMillis(),
+                                ),
+                            )
+                        }
+                    },
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
                 )
             }
             entry<SettingsRoute> {

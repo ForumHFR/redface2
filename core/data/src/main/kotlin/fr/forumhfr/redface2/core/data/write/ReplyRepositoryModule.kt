@@ -7,6 +7,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
+import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
@@ -40,6 +41,12 @@ abstract class ReplyRepositoryModule {
     @Binds
     @Singleton
     abstract fun bindTopicFormRepository(impl: DefaultTopicFormRepository): TopicFormRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindPrivateMessageWriteRepository(
+        impl: DefaultPrivateMessageWriteRepository,
+    ): PrivateMessageWriteRepository
 
     companion object {
         @Provides
