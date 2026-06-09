@@ -6,71 +6,117 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * #300 — pure-geometry tests for the topic scrollbar, **fixed-size + ordinal** model. Composable
- * behaviour (auto-hide, gesture, the spring on the drawn offset) is not unit-tested here; the value is
- * in the position math, the drag→index inverse, and the regression guards for the "jumps + grows
- * suddenly" bug: the thumb size must be constant (never derived from content) and the position must be
- * a pure ordinal of the first-visible index (never derived from measured item sizes).
+ * #300 — pure-geometry tests for the topic scrollbar, **fixed-size ordinal + sub-item interpolation**.
+ * Composable behaviour (auto-hide, gesture, the offset spring) is not unit-tested here; the value is in
+ * the position math, the drag→index inverse, and the regression guards: the thumb size is constant
+ * (never derived from content), the position interpolates continuously within a post (no per-post step),
+ * and a #197-style growth of the top post can move the thumb by at most one ordinal step.
  */
 class TopicScrollbarTest {
 
     private val tolerance = 1e-4f
 
+    // Keeps the 4-arg calls short. Defaults: a 10-item page, 100px items, at the very top.
+    private fun metrics(index: Int, offset: Int = 0, size: Int = 100, total: Int = 10) =
+        scrollbarMetrics(
+            firstVisibleItemIndex = index,
+            firstVisibleItemScrollOffset = offset,
+            firstVisibleItemSize = size,
+            totalItemsCount = total,
+        )
+
+    private fun oneOrdinalStep(total: Int) = (1f / (total - 1)) * (1f - THUMB_SIZE_FRACTION)
+
     @Test
-    fun `scrollbarMetrics returns null for a single item (no ordinal progress)`() {
-        assertNull(scrollbarMetrics(firstVisibleItemIndex = 0, totalItemsCount = 1))
+    fun `returns null for a single item (no ordinal progress)`() {
+        assertNull(metrics(index = 0, total = 1))
     }
 
     @Test
-    fun `scrollbarMetrics returns null when there is no item`() {
-        assertNull(scrollbarMetrics(firstVisibleItemIndex = 0, totalItemsCount = 0))
+    fun `returns null when there is no item`() {
+        assertNull(metrics(index = 0, total = 0))
     }
 
     @Test
-    fun `offsetFraction is 0 at the top of the page`() {
-        val metrics = scrollbarMetrics(firstVisibleItemIndex = 0, totalItemsCount = 10)!!
-        assertEquals(0f, metrics.offsetFraction, tolerance)
+    fun `offsetFraction is 0 at the very top`() {
+        assertEquals(0f, metrics(0)!!.offsetFraction, tolerance)
     }
 
     @Test
     fun `offsetFraction reaches 1 minus sizeFraction at the last ordinal`() {
-        val metrics = scrollbarMetrics(firstVisibleItemIndex = 9, totalItemsCount = 10)!!
-        assertEquals(1f - metrics.sizeFraction, metrics.offsetFraction, tolerance)
+        val m = metrics(9)!!
+        assertEquals(1f - m.sizeFraction, m.offsetFraction, tolerance)
     }
 
     @Test
     fun `offsetFraction clamps a transient out-of-range index`() {
-        // firstVisibleItemIndex should never exceed total, but a transient layoutInfo must not overshoot.
-        val metrics = scrollbarMetrics(firstVisibleItemIndex = 20, totalItemsCount = 10)!!
-        assertEquals(1f - metrics.sizeFraction, metrics.offsetFraction, tolerance)
+        val m = metrics(20)!!
+        assertEquals(1f - m.sizeFraction, m.offsetFraction, tolerance)
     }
 
-    // --- Regression guards for the "jumps + grows suddenly" bug -------------------------------------
+    // --- Regression guards --------------------------------------------------------------------------
 
     @Test
-    fun `thumb size is a constant, independent of the page or position`() {
-        // The two earlier models tied the size to a moving estimate (visible count, or viewport/estTotal);
-        // that was the "grows suddenly" symptom. The fixed model must return the same size everywhere.
-        assertEquals(THUMB_SIZE_FRACTION, scrollbarMetrics(0, 10)!!.sizeFraction, tolerance)
-        assertEquals(THUMB_SIZE_FRACTION, scrollbarMetrics(5, 10)!!.sizeFraction, tolerance)
-        assertEquals(THUMB_SIZE_FRACTION, scrollbarMetrics(500, 1000)!!.sizeFraction, tolerance)
+    fun `thumb size is a constant, independent of page or position`() {
+        assertEquals(THUMB_SIZE_FRACTION, metrics(0)!!.sizeFraction, tolerance)
+        assertEquals(THUMB_SIZE_FRACTION, metrics(5)!!.sizeFraction, tolerance)
+        assertEquals(THUMB_SIZE_FRACTION, metrics(500, total = 1000)!!.sizeFraction, tolerance)
     }
 
     @Test
-    fun `position advances by equal ordinal steps`() {
-        // Pure ordinal: each first-visible-index increment moves the thumb by the same amount,
-        // (1/(total-1)) * (1 - sizeFraction) — no dependence on measured item heights.
-        val m0 = scrollbarMetrics(0, 10)!!
-        val m1 = scrollbarMetrics(1, 10)!!
-        val m2 = scrollbarMetrics(2, 10)!!
-        val firstStep = m1.offsetFraction - m0.offsetFraction
-        val secondStep = m2.offsetFraction - m1.offsetFraction
-        assertTrue("position is monotonic with the index", firstStep > 0f)
-        assertEquals(firstStep, secondStep, tolerance)
-        assertEquals((1f / 9f) * (1f - THUMB_SIZE_FRACTION), firstStep, tolerance)
+    fun `sub-item interpolation moves the thumb continuously within a post`() {
+        // Scrolling within the first post (offset 0 → mid) advances the thumb, but stays inside the
+        // first ordinal step (never reaches the next anchor).
+        val top = metrics(0, offset = 0)!!.offsetFraction
+        val mid = metrics(0, offset = 50)!!.offsetFraction
+        val nextAnchor = metrics(1, offset = 0)!!.offsetFraction
+        assertTrue("interpolates upward within the post", mid > top)
+        assertTrue("stays below the next anchor", mid < nextAnchor)
     }
 
-    // --- targetIndexForDrag (drag → first-visible item index), inverse of the ordinal mapping --------
+    @Test
+    fun `position is near-continuous across a post boundary (no per-post step)`() {
+        // End of post 0 (offset clamped to size-1) vs start of post 1: the gap must be a tiny fraction
+        // of one ordinal step, NOT a full step — that is what removes the "à-coup".
+        val endOfFirst = metrics(0, offset = 99, size = 100)!!.offsetFraction
+        val startOfSecond = metrics(1, offset = 0, size = 100)!!.offsetFraction
+        val gap = startOfSecond - endOfFirst
+        assertTrue("monotonic across the boundary", gap >= 0f)
+        assertTrue("gap is far smaller than one ordinal step", gap < oneOrdinalStep(10) * 0.1f)
+    }
+
+    @Test
+    fun `the last post ignores sub-item offset so progress never exceeds 1`() {
+        // index == lastIndex forces itemFraction = 0; a non-zero offset must not push offset past the end.
+        assertEquals(metrics(9, offset = 0)!!.offsetFraction, metrics(9, offset = 50)!!.offsetFraction, tolerance)
+        assertEquals(1f - THUMB_SIZE_FRACTION, metrics(9, offset = 50)!!.offsetFraction, tolerance)
+    }
+
+    @Test
+    fun `a zero item size falls back to the pure ordinal anchor`() {
+        // size 0 (item not measured yet) must not divide by zero; itemFraction = 0.
+        val ordinal = metrics(2, offset = 0)!!.offsetFraction
+        val unmeasured = metrics(2, offset = 30, size = 0)!!.offsetFraction
+        assertEquals(ordinal, unmeasured, tolerance)
+    }
+
+    @Test
+    fun `an oversized offset is clamped within one ordinal step`() {
+        // A transient offset larger than the item can't push the thumb past the next anchor.
+        val clamped = metrics(0, offset = 10_000, size = 100)!!.offsetFraction
+        assertTrue(clamped < metrics(1, offset = 0)!!.offsetFraction)
+    }
+
+    @Test
+    fun `a top-post growth wobbles the thumb by less than one ordinal step`() {
+        // #197 bound: same scroll offset, the top post grows 160→480 (px proxy). The thumb moves by less
+        // than one ordinal step while that post is on top — acceptable vs the per-post jerk it removes.
+        val before = metrics(3, offset = 120, size = 160)!!.offsetFraction
+        val after = metrics(3, offset = 120, size = 480)!!.offsetFraction
+        assertTrue(kotlin.math.abs(after - before) < oneOrdinalStep(10))
+    }
+
+    // --- targetIndexForDrag (drag → first-visible item index), inverse of the ordinal anchors --------
 
     @Test
     fun `targetIndexForDrag maps full travel to the last item`() {
@@ -84,7 +130,6 @@ class TopicScrollbarTest {
 
     @Test
     fun `targetIndexForDrag maps half travel to the middle ordinal`() {
-        // 0.5 * (11 - 1) = 5.
         assertEquals(5, targetIndexForDrag(travelFraction = 0.5f, totalItemsCount = 11))
     }
 
@@ -101,13 +146,13 @@ class TopicScrollbarTest {
     }
 
     @Test
-    fun `drag and position are mutual inverses`() {
-        // The thumb-travel fraction of ordinal i is offsetFraction / (1 - sizeFraction) = i / (total-1);
-        // feeding it back must recover i.
+    fun `drag and the post-anchor position are mutual inverses`() {
+        // At a post anchor (offset 0) the thumb-travel fraction is offsetFraction / (1 - sizeFraction) =
+        // i / (total-1); feeding it back must recover i.
         val total = 10
         for (i in 0 until total) {
-            val metrics = scrollbarMetrics(firstVisibleItemIndex = i, totalItemsCount = total)!!
-            val travelFraction = metrics.offsetFraction / (1f - metrics.sizeFraction)
+            val m = metrics(index = i, offset = 0, total = total)!!
+            val travelFraction = m.offsetFraction / (1f - m.sizeFraction)
             assertEquals(i, targetIndexForDrag(travelFraction, total))
         }
     }
