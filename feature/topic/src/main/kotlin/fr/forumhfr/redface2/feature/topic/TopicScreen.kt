@@ -505,9 +505,11 @@ internal fun TopicContent(
                         onClick = onBack,
                         modifier = Modifier.semantics { contentDescription = backLabel },
                     ) {
-                        // Match the adjacent title text size (user request) rather than the default,
-                        // oversized glyph. The IconButton still provides the 48dp touch target.
-                        Text("←", style = MaterialTheme.typography.titleMedium)
+                        // The bare `←` glyph rendered oversized next to the title (it fills the em box
+                        // in the project font, so matching the title's point size still looked too big).
+                        // Down-size it to a normal body text size so it sits naturally beside the title;
+                        // the IconButton keeps the 48dp touch target regardless of the glyph size.
+                        Text("←", style = MaterialTheme.typography.bodySmall)
                     }
                 },
                 scrollBehavior = scrollBehavior,
