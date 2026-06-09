@@ -25,6 +25,12 @@ data class PrivateMessageReplyUiState(
     val signatureEnabled: Boolean = false,
     val smileyDisabled: Boolean = false,
     val emailNotificationEnabled: Boolean = false,
+    /**
+     * True once the option toggles have been hydrated from a parsed form. Mirrors the post editor's
+     * `optionsHydratedFromForm`: a silent refetch after an expired `hash_check` must not re-hydrate
+     * (and thus clobber) a toggle the user changed in between.
+     */
+    val optionsHydratedFromForm: Boolean = false,
     val isSubmitting: Boolean = false,
     val submitError: PrivateMessageReplyError? = null,
 ) {

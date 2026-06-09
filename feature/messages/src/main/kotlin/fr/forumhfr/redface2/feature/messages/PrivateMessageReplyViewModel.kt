@@ -87,21 +87,35 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 }
                 loadedForm = form
                 _state.update { current ->
+                    // HFR's private "quick reply" form carries the per-post options as plain hidden
+                    // inputs (e.g. `signature=1`), not checkboxes — so `ReplyForm.options` (read from
+                    // `checked` attributes) is all-false here. Hydrate from the hidden fields too,
+                    // OR'ing with the checkbox view, so the user keeps HFR's default (signature on).
+                    //
+                    // Hydrate ONLY on the first successful load: a silent refetch after an expired
+                    // `hash_check` (InvalidHashCheck) must not reset a toggle the user changed in
+                    // between — mirror the post editor's `optionsHydratedFromForm` guard.
+                    val hydrateOptions = !current.optionsHydratedFromForm
                     current.copy(
                         isLoadingForm = false,
                         formAvailable = true,
                         formError = false,
-                        // HFR's private "quick reply" form carries the per-post options as plain
-                        // hidden inputs (e.g. `signature=1`), not checkboxes — so `ReplyForm.options`
-                        // (read from `checked` attributes) is all-false here. Hydrate from the hidden
-                        // fields too, OR'ing with the checkbox view, so the user keeps HFR's default
-                        // (signature on) instead of silently dropping it on submit.
-                        signatureEnabled = form.options.signatureEnabled ||
-                            form.hiddenFields["signature"] == "1",
-                        smileyDisabled = form.options.smileyDisabled ||
-                            form.hiddenFields["smiley"] == "1",
-                        emailNotificationEnabled = form.options.emailNotificationEnabled ||
-                            form.hiddenFields["emaill"] == "1",
+                        signatureEnabled = if (hydrateOptions) {
+                            form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
+                        } else {
+                            current.signatureEnabled
+                        },
+                        smileyDisabled = if (hydrateOptions) {
+                            form.options.smileyDisabled || form.hiddenFields["smiley"] == "1"
+                        } else {
+                            current.smileyDisabled
+                        },
+                        emailNotificationEnabled = if (hydrateOptions) {
+                            form.options.emailNotificationEnabled || form.hiddenFields["emaill"] == "1"
+                        } else {
+                            current.emailNotificationEnabled
+                        },
+                        optionsHydratedFromForm = true,
                     )
                 }
             } catch (cancellation: CancellationException) {

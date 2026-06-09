@@ -29,7 +29,9 @@
     <string name="settings_future_prefetch">Préchargement de la page suivante</string>
     <string name="settings_future_submit_confirm">Confirmation avant publication</string>
     <string name="settings_future_signature">Signature automatique et notification e-mail</string>
-    <string name="settings_future_mp_write">Écriture des messages privés</string>
+    <!-- #301 — la réponse à une conversation existante est livrée ; reste « à venir » la
+         composition d'un nouveau MP depuis zéro (new-MP), encore non observée côté HFR. -->
+    <string name="settings_future_mp_write">Composer un nouveau message privé</string>
     <string name="settings_future_mp_notifications">Notifications et badge de MP non lus</string>
     <string name="settings_future_data_saver">Mode économie de données</string>
     <string name="settings_future_clear_image_cache">Vider le cache des images</string>
