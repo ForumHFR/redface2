@@ -734,15 +734,16 @@ private fun RedfaceNavHost(
             }
             entry<SearchRoute> {
                 SearchScreen(
-                    onOpenTopic = { result ->
-                        // Title-search rows open page 1. Content-search rows can carry a
-                        // matched `numreponse` link, so consume it when HFR provides it.
+                    onOpenTopic = { cat, post, page, scrollTo ->
+                        // #277 — the callback receives the FINAL values : `page` was resolved
+                        // by SearchViewModel through HFR's server-side redirect when the row
+                        // carried a matched numreponse (the search href always says page=1).
                         backStack.add(
                             TopicRoute(
-                                cat = result.cat,
-                                post = result.topicId,
-                                page = result.page ?: 1,
-                                scrollTo = result.numreponse,
+                                cat = cat,
+                                post = post,
+                                page = page,
+                                scrollTo = scrollTo,
                             ),
                         )
                     },

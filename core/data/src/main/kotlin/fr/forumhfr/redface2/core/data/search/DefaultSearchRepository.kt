@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.model.search.SearchRequest
 import fr.forumhfr.redface2.core.model.search.SearchResultPage
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.search.SearchResultParser
+import fr.forumhfr.redface2.core.parser.search.TopicPageUrlParser
 import java.io.IOException
 import java.time.Clock
 import java.time.LocalDate
@@ -91,6 +92,29 @@ class DefaultSearchRepository @Inject constructor(
             )
         }
     }
+
+    /**
+     * Issue #277 — page resolution through HFR's server-side redirect. The HfrClient
+     * already degrades network failures to `null` ; this layer adds the Location →
+     * page extraction (also `null`-degrading). Wrapped in `withContext(ioDispatcher)`
+     * per the project rule (`feedback_repos_must_wrap_io`) even though the regex pass
+     * is cheap — every repo path that reaches HfrClient hops to IO, no exception.
+     *
+     * Diagnostics never need redaction here : unlike [search], the probe URL carries
+     * no user text — only the `(cat, post, numreponse)` ids.
+     */
+    override suspend fun resolveSearchResultPage(cat: Int, post: Int, numreponse: Int): Int? =
+        withContext(ioDispatcher) {
+            val location = hfrClient.resolveTopicPageUrl(cat = cat, post = post, numreponse = numreponse)
+            val page = location?.let { TopicPageUrlParser.parseTopicPageFromUrl(url = it, post = post) }
+            diagnostics.record(
+                DiagnosticsLog.Level.INFO,
+                LOG_TAG,
+                "resolve result page cat=$cat post=$post numreponse=$numreponse -> " +
+                    "page=$page (location=${if (location != null) "present" else "absent"})",
+            )
+            page
+        }
 
     private companion object {
         private const val LOG_TAG = "SearchRepository"

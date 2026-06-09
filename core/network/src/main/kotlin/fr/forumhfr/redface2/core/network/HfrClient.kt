@@ -471,6 +471,68 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * Issue #277 — resolves the real topic page of a post by letting HFR's server-side
+     * redirect answer for us.
+     *
+     * HFR's search result hrefs ALWAYS carry `page=1` (verified 2026-06-10 on both the
+     * anonymous and the authenticated captures : 34/34 anchors), so the page in the href
+     * is useless for navigation. The actual page is resolved server-side : requesting
+     * `forum2.php?config=hfr.inc&cat={cat}&post={post}&page=1&numreponse={numreponse}`
+     * returns a 301 whose `Location` is the **relative** pretty URL of the right page,
+     * with a `#t{numreponse}` fragment. Live proof (2026-06-10, anonymous) :
+     *
+     * `GET …forum2.php?config=hfr.inc&cat=23&post=35421&page=1&numreponse=2786758`
+     * → `301 Location: /hfr/gsmgpspda/redface-dev-sujet_35421_3.htm#t2786758` (page 3).
+     *
+     * The pretty path may or may not include the sub-category segment — callers must
+     * anchor on the `sujet_{post}_{page}.htm` segment, never on path depth. Note that
+     * [numreponse] is unique per **category**, not globally, hence the full
+     * `(cat, post, numreponse)` tuple.
+     *
+     * Uses the [anonymousNoRedirect] client : anonymous because a probe must never
+     * mark drapeaux as read (prefetch-non-authentifié rule), and no-follow because the
+     * redirect target IS the payload — following it would download a full topic page
+     * for nothing.
+     *
+     * @return the raw `Location` header of the 3xx response, or `null` when the
+     * response is not a redirect, carries no `Location`, or the request fails with an
+     * [IOException] (the caller falls back to the href page — never worse than today).
+     */
+    suspend fun resolveTopicPageUrl(cat: Int, post: Int, numreponse: Int): String? {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("forum2.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", cat.toString())
+            .addQueryParameter("post", post.toString())
+            .addQueryParameter("page", "1")
+            .addQueryParameter("numreponse", numreponse.toString())
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return withContext(ioDispatcher) {
+            // The Location header is the only thing we want ; a network failure simply
+            // degrades to the caller's fallback (search-href page). Other exception
+            // kinds (cancellation, programming errors) keep propagating.
+            @Suppress("SwallowedException")
+            try {
+                anonymousNoRedirect.newCall(request).execute().use { response ->
+                    if (response.code in REDIRECT_CODE_RANGE) response.header("Location") else null
+                }
+            } catch (error: IOException) {
+                null
+            }
+        }
+    }
+
+    /**
+     * Anonymous client variant that does NOT follow redirects, for callers that consume
+     * the `Location` header itself (cf. [resolveTopicPageUrl]). Derived once — sharing
+     * the connection pool / dispatcher of [anonymous] — instead of being rebuilt per call.
+     */
+    private val anonymousNoRedirect: OkHttpClient by lazy {
+        anonymous.newBuilder().followRedirects(false).build()
+    }
+
+    /**
      * Maps [FlagType] to the HFR `owntopic` discriminator used by `delflag.php` / `addflag.php`
      * and the REST `flag_owntopic` field. Kept private to the network layer : the mapping is a
      * wire detail of the HFR contract, not a domain concept the rest of the app should know.
@@ -526,6 +588,10 @@ class HfrClient @Inject constructor(
         private const val TOPIC_TRACE_PREFIX = "rf2.topic"
         private const val ORDER_BY_MATCHED_MESSAGE_DATE = "0"
         private const val ORDER_BY_LAST_TOPIC_REPLY = "1"
+
+        // 3xx — any redirect status whose Location header points at the resolved pretty URL
+        // (HFR serves 301 in practice, cf. resolveTopicPageUrl ; the range is defensive).
+        private val REDIRECT_CODE_RANGE = 300..399
     }
 
     private fun HttpUrl.isLoginUrl(): Boolean =
