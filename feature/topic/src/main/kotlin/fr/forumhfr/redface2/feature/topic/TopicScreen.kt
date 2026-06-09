@@ -24,7 +24,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -506,7 +505,9 @@ internal fun TopicContent(
                         onClick = onBack,
                         modifier = Modifier.semantics { contentDescription = backLabel },
                     ) {
-                        Text("←")
+                        // Match the adjacent title text size (user request) rather than the default,
+                        // oversized glyph. The IconButton still provides the 48dp touch target.
+                        Text("←", style = MaterialTheme.typography.titleMedium)
                     }
                 },
                 scrollBehavior = scrollBehavior,
@@ -1311,8 +1312,15 @@ private fun PageFab(
 
 @Composable
 private fun ReplyFab(onClick: () -> Unit) {
-    ExtendedFloatingActionButton(onClick = onClick) {
-        Text(text = stringResource(R.string.topic_fab_reply))
+    // Same SmallFloatingActionButton footprint as the page FABs (user request): the « Répondre » label
+    // rides on contentDescription for TalkBack and the glyph is decorative (no Material icons — detekt
+    // ForbiddenImport blocks androidx.compose.material.*), mirroring PageFab and the top-bar back button.
+    val replyLabel = stringResource(R.string.topic_fab_reply)
+    SmallFloatingActionButton(
+        onClick = onClick,
+        modifier = Modifier.semantics { contentDescription = replyLabel },
+    ) {
+        Text("✎")
     }
 }
 
