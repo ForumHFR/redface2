@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -320,7 +321,9 @@ private fun ReplySubmitBar(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onOpenOptions) {
+                // Tonal container for the secondary trigger, filled for « Envoyer » — same M3
+                // emphasis pair as the post editor's bar.
+                FilledTonalButton(onClick = onOpenOptions) {
                     Text(text = stringResource(R.string.messages_reply_actions_options))
                 }
                 Spacer(modifier = Modifier.weight(1f))
