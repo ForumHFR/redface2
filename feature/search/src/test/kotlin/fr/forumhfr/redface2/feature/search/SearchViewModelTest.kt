@@ -490,6 +490,26 @@ class SearchViewModelTest {
     }
 
     @Test
+    fun `OpenResult falls back to the href page when resolution exceeds the probe timeout`() = runTest {
+        // A resolution that never completes : the 3 s probe deadline (virtual time)
+        // must release the guard and degrade to the pre-#277 href navigation.
+        coEvery { repo.resolveSearchResultPage(any(), any(), any()) } coAnswers {
+            CompletableDeferred<Int?>().await()
+        }
+        val vm = SearchViewModel(repo)
+        val result = fakeTopic(topicId = 35421, title = "Redface dev", cat = 23, page = 1, numreponse = 2786758)
+
+        vm.effects.test {
+            vm.submit(SearchIntent.OpenResult(result))
+            assertEquals(
+                SearchEffect.NavigateToTopic(cat = 23, post = 35421, page = 1, scrollTo = 2786758),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `OpenResult guard resets after a completed resolution`() = runTest {
         coEvery { repo.resolveSearchResultPage(any(), any(), any()) } returns 3
         val vm = SearchViewModel(repo)

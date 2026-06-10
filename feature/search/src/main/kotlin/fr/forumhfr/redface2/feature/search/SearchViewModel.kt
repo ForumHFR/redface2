@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -154,11 +155,25 @@ class SearchViewModel @Inject constructor(
         if (isOpeningResult) return
         val numreponse = result.numreponse
         if (numreponse == null) {
-            // Title-search row : nothing to resolve, nothing to scroll to.
+            // Title-search row : nothing to resolve, nothing to scroll to. The guard
+            // is armed for branch symmetry with the resolution path below. Under
+            // Main.immediate the whole launch body runs inline (send is non-suspending
+            // on a buffered channel), so the guarded window is a single dispatch —
+            // a second physical tap lands a frame later, after the collector navigated.
+            isOpeningResult = true
             viewModelScope.launch {
-                _effects.send(
-                    SearchEffect.NavigateToTopic(cat = result.cat, post = result.topicId, page = 1, scrollTo = null),
-                )
+                try {
+                    _effects.send(
+                        SearchEffect.NavigateToTopic(
+                            cat = result.cat,
+                            post = result.topicId,
+                            page = 1,
+                            scrollTo = null,
+                        ),
+                    )
+                } finally {
+                    isOpeningResult = false
+                }
             }
             return
         }
@@ -166,11 +181,17 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val outcome = runCatching {
-                    searchRepository.resolveSearchResultPage(
-                        cat = result.cat,
-                        post = result.topicId,
-                        numreponse = numreponse,
-                    )
+                    // Cap the resolution probe well below the shared OkHttp call timeout
+                    // (30 s) : on a degraded network the guard would otherwise silently
+                    // swallow every tap for the whole call. Timing out degrades to the
+                    // href-page fallback below — never worse than pre-#277.
+                    withTimeoutOrNull(RESOLVE_TIMEOUT_MS) {
+                        searchRepository.resolveSearchResultPage(
+                            cat = result.cat,
+                            post = result.topicId,
+                            numreponse = numreponse,
+                        )
+                    }
                 }
                 (outcome.exceptionOrNull() as? CancellationException)?.let { throw it }
                 // Resolution failure (null or exception) degrades to the href page —
@@ -245,5 +266,15 @@ class SearchViewModel @Inject constructor(
                 },
             )
         }
+    }
+
+    private companion object {
+        /**
+         * Upper bound for the #277 page-resolution probe. The shared OkHttp client
+         * allows calls up to 30 s ; holding the open-result guard that long would
+         * make the whole result list feel frozen on a degraded network. Past this
+         * deadline the resolution degrades to the href-page fallback.
+         */
+        const val RESOLVE_TIMEOUT_MS: Long = 3_000
     }
 }
