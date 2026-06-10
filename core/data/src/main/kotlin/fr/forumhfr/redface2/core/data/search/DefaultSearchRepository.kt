@@ -32,7 +32,8 @@ import kotlinx.coroutines.withContext
  *
  * Diagnostics never carry the [SearchRequest.query] verbatim — a search term can be free
  * user text, including content lifted from a message draft. We log only the length, the
- * cat presence flag, and the page index.
+ * cat presence flag, and the page index. The author filter ([SearchRequest.pseudo]) is a
+ * public username, but it rides the same URL as the query — same presence-flag treatment.
  *
  * On `IOException`, the catch site strips the URL (which contains `search=<query>`) from
  * the message before re-throwing, so the wrapped exception never leaks into a diagnostic
@@ -58,7 +59,8 @@ class DefaultSearchRepository @Inject constructor(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
             "GET forum1 search hasCat=${catId != null} scope=${request.textScope} " +
-                "queryLength=${request.query.length} page=${request.page}",
+                "queryLength=${request.query.length} hasPseudo=${!request.pseudo.isNullOrBlank()} " +
+                "page=${request.page}",
         )
         return withContext(ioDispatcher) {
             // HFR's form serialises today's date even when `daterange=2` makes it
@@ -79,6 +81,7 @@ class DefaultSearchRepository @Inject constructor(
                     page = request.page,
                     date = today,
                     textScope = request.textScope,
+                    pseudo = request.pseudo,
                 )
             } catch (error: SessionExpiredException) {
                 // `SessionExpiredException` extends `IOException` (so it's caught by the

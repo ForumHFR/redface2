@@ -341,6 +341,10 @@ class HfrClient @Inject constructor(
      *                 computes it from an injectable [java.time.Clock] so tests are
      *                 reproducible.
      * - [textScope] : HFR's `titre` field (`1` titles, `3` titles + posts, `0` posts).
+     * - [pseudo]    : HFR's `pseud` field — author filter. `null`/blank = no filter (encoded
+     *                 as the empty `pseud=` the form always carries). Author-only searches
+     *                 (empty [query]) are supported by HFR ; all-categories author searches
+     *                 answer a 302 onto the multi-cat pivot, which OkHttp follows.
      *
      * Uses the **anonymous** client : the search endpoint is public and we don't want the
      * user's session cookies attached to a request whose URL contains the search payload
@@ -354,6 +358,7 @@ class HfrClient @Inject constructor(
         page: Int,
         date: java.time.LocalDate,
         textScope: SearchTextScope,
+        pseudo: String? = null,
     ): String {
         val orderSearch = if (textScope == SearchTextScope.TitlesOnly) {
             ORDER_BY_LAST_TOPIC_REPLY
@@ -366,7 +371,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("cat", cat?.let { "$it*hfr.inc" } ?: "")
             .addQueryParameter("orderSearch", orderSearch)
             .addQueryParameter("config", "hfr.inc")
-            .addQueryParameter("pseud", "")
+            .addQueryParameter("pseud", pseudo.orEmpty())
             .addQueryParameter("search", query)
             .addQueryParameter("titre", textScope.hfrTitreValue.toString())
             .addQueryParameter("jour", date.dayOfMonth.toString())
