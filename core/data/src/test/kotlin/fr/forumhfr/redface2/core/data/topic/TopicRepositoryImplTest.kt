@@ -508,5 +508,10 @@ class TopicRepositoryImplTest {
         override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
+
+        // #312 — confirm-before-posting is irrelevant to TopicRepositoryImpl; stubbed at its default.
+        override fun observeConfirmBeforePosting(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setConfirmBeforePosting(enabled: Boolean) = Unit
     }
 }

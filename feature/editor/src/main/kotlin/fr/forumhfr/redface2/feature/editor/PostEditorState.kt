@@ -86,6 +86,13 @@ data class PostEditorState(
      * repository falls back to `user_id=0`.
      */
     val userId: Int? = null,
+    /**
+     * #312 — `true` while the « Confirmation avant publication » dialog is shown. Only ever set
+     * when the persisted preference is on AND the submit already passed every validation gate
+     * (we never ask to confirm a form that could not be submitted). Confirm / dismiss go through
+     * [PostEditorIntent.SubmitConfirmed] / [PostEditorIntent.SubmitConfirmationDismissed].
+     */
+    val showSubmitConfirmation: Boolean = false,
 ) {
     /**
      * Submission is allowed when : we know the routing context (page + subcat + topicId),

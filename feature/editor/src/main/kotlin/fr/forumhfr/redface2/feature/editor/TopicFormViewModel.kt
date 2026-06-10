@@ -11,6 +11,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.PostContent
@@ -59,6 +60,7 @@ class TopicFormViewModel @AssistedInject constructor(
     private val previewParser: BbcodePreviewParser,
     private val topicFormRepository: TopicFormRepository,
     private val smileyRepository: SmileyRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
     private val diagnostics: DiagnosticsLog,
 ) : ViewModel() {
 
@@ -90,14 +92,26 @@ class TopicFormViewModel @AssistedInject constructor(
     /** In-flight wiki smiley search ; cancelled on next query change / picker close / selection. */
     private var smileySearchJob: Job? = null
 
+    /**
+     * #312 — mirror of the persisted « Confirmation avant publication » preference. Collected on
+     * init (same DataStore-consumption shape as `TopicViewModel.observeTopicTopBarAutoHide`) and
+     * read synchronously at submit time, identical to `PostEditorViewModel`.
+     */
+    private var confirmBeforePosting: Boolean = false
+
     init {
+        viewModelScope.launch {
+            userPreferencesRepository.observeConfirmBeforePosting().collect { enabled ->
+                confirmBeforePosting = enabled
+            }
+        }
         when (request.mode) {
             TopicFormMode.EditFirstPost -> loadEditFirstPostFormIfPossible()
             TopicFormMode.New -> loadNewTopicFormIfPossible()
         }
     }
 
-    @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over 14 intent variants ; flat by design.
+    @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over 16 intent variants ; flat by design.
     fun submit(intent: TopicFormIntent) {
         when (intent) {
             is TopicFormIntent.SubjectChanged -> onSubjectChanged(intent.value)
@@ -105,6 +119,9 @@ class TopicFormViewModel @AssistedInject constructor(
             is TopicFormIntent.ToolbarActionClicked -> onToolbarActionClicked(intent.action)
             TopicFormIntent.TogglePreview -> onTogglePreview()
             TopicFormIntent.SubmitClicked -> onSubmitClicked()
+            TopicFormIntent.SubmitConfirmed -> onSubmitConfirmed()
+            TopicFormIntent.SubmitConfirmationDismissed ->
+                _state.update { it.copy(showSubmitConfirmation = false) }
             TopicFormIntent.ErrorDismissed -> _state.update { it.copy(submitError = null) }
             is TopicFormIntent.SubcatSelected ->
                 _state.update { it.copy(selectedSubcat = intent.id) }
@@ -349,7 +366,27 @@ class TopicFormViewModel @AssistedInject constructor(
         _state.update { it.copy(isLoadingForm = false, submitError = mapped) }
     }
 
-    private fun onSubmitClicked() {
+    /**
+     * #312 — confirm path. Closes the dialog and re-runs the submit dispatch with
+     * `bypassConfirmation = true` so the real submission executes directly (re-checking the
+     * preference here would loop « confirmation → confirmation » forever). The mode-specific
+     * guards run again on the latest snapshot, which is safe because the dialog is modal.
+     */
+    private fun onSubmitConfirmed() {
+        _state.update { it.copy(showSubmitConfirmation = false) }
+        onSubmitClicked(bypassConfirmation = true)
+    }
+
+    private fun onSubmitClicked(bypassConfirmation: Boolean = false) {
+        // #312 — single interception point covering BOTH submit paths (New + EditFirstPost).
+        // The `canSubmit` gate runs first so we never confirm an invalid form; the deeper
+        // per-mode guards (form not loaded, anonymous, in-flight job) are re-checked after the
+        // confirmation by the dispatched handler, exactly as on the direct path.
+        if (!_state.value.canSubmit) return
+        if (!bypassConfirmation && confirmBeforePosting) {
+            _state.update { it.copy(showSubmitConfirmation = true) }
+            return
+        }
         when (_state.value.mode) {
             TopicFormMode.EditFirstPost -> onSubmitEditFirstPostClicked()
             TopicFormMode.New -> onSubmitNewTopicClicked()

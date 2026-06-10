@@ -5,10 +5,15 @@ import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
+import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
@@ -24,6 +29,8 @@ import fr.forumhfr.redface2.core.model.write.TopicPollForm
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -752,10 +759,162 @@ class TopicFormViewModelTest {
         assertEquals("image: ", viewModel.state.value.draft.text)
     }
 
+    // ----- #312 : confirmation avant publication ------------------------------
+
+    @Test
+    fun `confirm-before-posting OFF keeps the one-tap EditFirstPost submit unchanged`() = runTest {
+        topicFormRepository.submitResult = ReplySubmitResult.Success(targetPage = 1, refreshUrl = "/hfr/")
+        val viewModel = newViewModel() // default fake → preference OFF
+        viewModel.state.test {
+            awaitHydratedState()
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals("OFF must POST directly, no dialog detour", 1, topicFormRepository.submitCalls)
+        assertFalse(viewModel.state.value.showSubmitConfirmation)
+    }
+
+    @Test
+    fun `confirm-before-posting ON parks the EditFirstPost submit behind the confirmation dialog`() = runTest {
+        topicFormRepository.submitResult = ReplySubmitResult.Success(targetPage = 1, refreshUrl = "/hfr/")
+        val viewModel = newViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        viewModel.state.test {
+            awaitHydratedState()
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            val parked = expectMostRecentItem()
+            assertTrue("the confirmation dialog must be armed", parked.showSubmitConfirmation)
+            assertFalse("nothing is in flight while the dialog is up", parked.isSubmitting)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals("no POST before the user confirms", 0, topicFormRepository.submitCalls)
+    }
+
+    @Test
+    fun `confirm-before-posting ON EditFirstPost confirm executes the real submission once`() = runTest {
+        topicFormRepository.submitResult = ReplySubmitResult.Success(targetPage = 1, refreshUrl = "/hfr/")
+        val viewModel = newViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        viewModel.state.test {
+            awaitHydratedState()
+            cancelAndIgnoreRemainingEvents()
+        }
+        viewModel.submit(TopicFormIntent.SubmitClicked)
+        assertEquals(0, topicFormRepository.submitCalls)
+
+        viewModel.effects.test {
+            viewModel.submit(TopicFormIntent.SubmitConfirmed)
+            val effect = awaitItem() as TopicFormEffect.SubmitSucceeded
+            assertEquals(1, effect.targetPage)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals("confirm must bypass the preference and POST exactly once", 1, topicFormRepository.submitCalls)
+        assertFalse(
+            "the dialog must close on confirm — no « confirmation → confirmation » loop",
+            viewModel.state.value.showSubmitConfirmation,
+        )
+    }
+
+    @Test
+    fun `confirm-before-posting OFF keeps the one-tap New submit unchanged`() = runTest {
+        topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Success(
+            newTopicId = null,
+            newNumreponse = null,
+            targetCat = SAMPLE_CAT,
+            targetSubcat = SAMPLE_SUBCAT,
+            refreshUrl = null,
+        )
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) // default fake → OFF
+        viewModel.state.test {
+            expectMostRecentItem() // drain hydration
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals("OFF must POST directly, no dialog detour", 1, topicFormRepository.newTopicSubmitCalls)
+        assertFalse(viewModel.state.value.showSubmitConfirmation)
+    }
+
+    @Test
+    fun `confirm-before-posting ON parks the New submit then confirm posts it`() = runTest {
+        topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Success(
+            newTopicId = null,
+            newNumreponse = null,
+            targetCat = SAMPLE_CAT,
+            targetSubcat = SAMPLE_SUBCAT,
+            refreshUrl = null,
+        )
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        viewModel.state.test {
+            expectMostRecentItem() // drain hydration
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            val parked = expectMostRecentItem()
+            assertTrue("the confirmation dialog must be armed", parked.showSubmitConfirmation)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals("no POST before the user confirms", 0, topicFormRepository.newTopicSubmitCalls)
+
+        viewModel.submit(TopicFormIntent.SubmitConfirmed)
+
+        assertEquals(1, topicFormRepository.newTopicSubmitCalls)
+        assertFalse(viewModel.state.value.showSubmitConfirmation)
+    }
+
+    @Test
+    fun `confirm-before-posting ON dismissing the dialog sends nothing and keeps subject and draft`() = runTest {
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        viewModel.state.test {
+            expectMostRecentItem() // drain hydration
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitConfirmationDismissed)
+            val finalState = expectMostRecentItem()
+            assertFalse(finalState.showSubmitConfirmation)
+            assertEquals("the subject survives the dismissal", "Topic", finalState.subject.text)
+            assertEquals("the draft survives the dismissal", "Body", finalState.draft.text)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals("dismiss must not POST anything", 0, topicFormRepository.newTopicSubmitCalls)
+        assertEquals(0, topicFormRepository.submitCalls)
+    }
+
+    @Test
+    fun `confirm-before-posting ON never confirms an invalid New form`() = runTest {
+        // The confirmation slots in AFTER the canSubmit gate : with no sub-category picked (cat
+        // WITH sub-categories, no entry chip), the form is invalid so no dialog may appear.
+        val viewModel = newTopicViewModel(
+            entrySubcat = null,
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        viewModel.state.test {
+            expectMostRecentItem() // drain hydration
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            val finalState = expectMostRecentItem()
+            assertFalse("invalid form must not raise the dialog", finalState.showSubmitConfirmation)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(0, topicFormRepository.newTopicSubmitCalls)
+    }
+
     private fun newTopicViewModel(
         entrySubcat: Int?,
         cat: Int = SAMPLE_CAT,
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
+        userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
     ): TopicFormViewModel = TopicFormViewModel(
         request = TopicFormRequest(
             mode = TopicFormMode.New,
@@ -768,6 +927,7 @@ class TopicFormViewModelTest {
         previewParser = previewParser,
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
+        userPreferencesRepository = userPreferencesRepository,
         diagnostics = diagnostics,
     )
 
@@ -784,6 +944,7 @@ class TopicFormViewModelTest {
 
     private fun newViewModel(
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
+        userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
     ): TopicFormViewModel = TopicFormViewModel(
         request = TopicFormRequest(
             mode = TopicFormMode.EditFirstPost,
@@ -796,6 +957,7 @@ class TopicFormViewModelTest {
         previewParser = previewParser,
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
+        userPreferencesRepository = userPreferencesRepository,
         diagnostics = diagnostics,
     )
 
@@ -976,6 +1138,44 @@ class TopicFormViewModelTest {
         fun failNext(error: Throwable) {
             requireNotNull(pending) { "no pending searchWiki to fail" }.completeExceptionally(error)
             pending = null
+        }
+    }
+
+    /**
+     * #312 — fake preferences repository. Only `observeConfirmBeforePosting` matters to the
+     * topic form; every other member is stubbed at its default (same shape as the
+     * `FakeUserPreferencesRepository` in `PostEditorViewModelTest` / `TopicViewModelTest`).
+     */
+    private class FakeUserPreferencesRepository(
+        confirmBeforePosting: Boolean = false,
+    ) : UserPreferencesRepository {
+        private val confirmBeforePosting = MutableStateFlow(confirmBeforePosting)
+
+        override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
+        override suspend fun saveProxyConfig(config: ProxyConfig) = Unit
+        override fun readProxyConfigForNetworkBootstrap(): ProxyConfig = ProxyConfig()
+        override fun observeIgnoreTopicCache(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setIgnoreTopicCache(enabled: Boolean) = Unit
+        override fun observeFlagsGroupByCategory(): Flow<Boolean> = MutableStateFlow(true)
+        override suspend fun setFlagsGroupByCategory(enabled: Boolean) = Unit
+        override fun observeFlagsHideReadCategories(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setFlagsHideReadCategories(enabled: Boolean) = Unit
+        override fun observeFlagsPerTabOverride(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setFlagsPerTabOverride(enabled: Boolean) = Unit
+        override fun observeFlagsViewSettings(type: FlagType): Flow<FlagsViewSettings> =
+            MutableStateFlow(FlagsViewSettings())
+        override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) = Unit
+        override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
+        override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
+        override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
+        override suspend fun setThemeMode(mode: ThemeMode) = Unit
+        override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setAmoledEnabled(enabled: Boolean) = Unit
+        override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
+        override fun observeConfirmBeforePosting(): Flow<Boolean> = confirmBeforePosting
+        override suspend fun setConfirmBeforePosting(enabled: Boolean) {
+            confirmBeforePosting.value = enabled
         }
     }
 

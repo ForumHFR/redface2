@@ -1391,6 +1391,11 @@ class FlagsViewModelTest {
 
         override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
 
+        // #312 — confirm-before-posting is irrelevant to FlagsViewModel; stubbed at its default.
+        override fun observeConfirmBeforePosting(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setConfirmBeforePosting(enabled: Boolean) = Unit
+
         fun setGroupBy(value: Boolean) {
             groupBy.value = value
         }

@@ -47,6 +47,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
+import fr.forumhfr.redface2.core.ui.editor.ConfirmSubmitDialog
 
 /**
  * Reply editor for a private-message conversation (#301). Reuses the shared `:core:ui` BBCode
@@ -88,6 +89,14 @@ fun PrivateMessageReplyScreen(
         onRetryFormLoad = viewModel::retryFormLoad,
         modifier = modifier,
     )
+    // #312 — « Confirmation avant publication ». Visibility is owned by the ViewModel, which only
+    // raises the flag once the submit passed every validation gate and the preference is on.
+    if (state.showSubmitConfirmation) {
+        ConfirmSubmitDialog(
+            onConfirm = viewModel::onSubmitConfirmed,
+            onDismiss = viewModel::onSubmitConfirmationDismissed,
+        )
+    }
 }
 
 @Composable

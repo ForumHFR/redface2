@@ -6,7 +6,12 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
+import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
@@ -20,6 +25,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -664,6 +671,7 @@ class PostEditorViewModelTest {
         quotedNumreponse: Int? = null,
         quoteRef: Int? = null,
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
+        userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
     ): PostEditorViewModel =
         PostEditorViewModel(
             request = PostEditorRequest(
@@ -680,6 +688,7 @@ class PostEditorViewModelTest {
             replyRepository = replyRepository,
             editPostRepository = editPostRepository,
             smileyRepository = smileyRepository,
+            userPreferencesRepository = userPreferencesRepository,
             diagnostics = diagnostics,
         )
 
@@ -882,6 +891,7 @@ class PostEditorViewModelTest {
         subcat: Int? = SAMPLE_SUBCAT,
         numreponse: Int? = SAMPLE_EDITED_NUMREPONSE,
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
+        userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
     ): PostEditorViewModel =
         PostEditorViewModel(
             request = PostEditorRequest(
@@ -896,8 +906,127 @@ class PostEditorViewModelTest {
             replyRepository = replyRepository,
             editPostRepository = editPostRepository,
             smileyRepository = smileyRepository,
+            userPreferencesRepository = userPreferencesRepository,
             diagnostics = diagnostics,
         )
+
+    // ----- #312 : confirmation avant publication ------------------------------
+
+    @Test
+    fun `confirm-before-posting OFF keeps the one-tap reply submit unchanged`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val viewModel = newReplyViewModel() // default fake → preference OFF
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
+
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+
+        assertEquals("OFF must POST directly, no dialog detour", 1, replyRepository.submitCalls)
+        assertFalse(viewModel.state.value.showSubmitConfirmation)
+    }
+
+    @Test
+    fun `confirm-before-posting ON parks the reply submit behind the confirmation dialog`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val viewModel = newReplyViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
+
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+
+        assertTrue("the confirmation dialog must be armed", viewModel.state.value.showSubmitConfirmation)
+        assertEquals("no POST before the user confirms", 0, replyRepository.submitCalls)
+        assertFalse("nothing is in flight while the dialog is up", viewModel.state.value.isSubmitting)
+    }
+
+    @Test
+    fun `confirm-before-posting ON SubmitConfirmed executes the real submission without re-confirming`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.submitResult = ReplySubmitResult.Success(
+            refreshUrl = "/hfr/.../sujet_X_20.htm#bas",
+            targetPage = 20,
+        )
+        val viewModel = newReplyViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        assertEquals(0, replyRepository.submitCalls)
+
+        viewModel.effects.test {
+            viewModel.submit(PostEditorIntent.SubmitConfirmed)
+            val effect = awaitItem()
+            assertEquals(PostEditorEffect.SubmitSucceeded(targetPage = 20), effect)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals("confirm must bypass the preference and POST exactly once", 1, replyRepository.submitCalls)
+        assertFalse(
+            "the dialog must close on confirm — no « confirmation → confirmation » loop",
+            viewModel.state.value.showSubmitConfirmation,
+        )
+    }
+
+    @Test
+    fun `confirm-before-posting ON dismissing the dialog sends nothing and keeps the draft`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+
+        viewModel.submit(PostEditorIntent.SubmitConfirmationDismissed)
+
+        assertFalse(viewModel.state.value.showSubmitConfirmation)
+        assertEquals("dismiss must not POST anything", 0, replyRepository.submitCalls)
+        assertEquals("the draft survives the dismissal", "Hello!", viewModel.state.value.draft.text)
+        assertNull(viewModel.state.value.submitError)
+    }
+
+    @Test
+    fun `confirm-before-posting ON never confirms an invalid form`() = runTest {
+        // The confirmation slots in AFTER validation : a blank draft fails `canSubmit`, so no
+        // dialog may appear (confirming an unsendable form would be a lie).
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+
+        assertFalse("invalid form must not raise the dialog", viewModel.state.value.showSubmitConfirmation)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `confirm-before-posting ON also guards the Edit submit`() = runTest {
+        editPostRepository.submitResult = ReplySubmitResult.Success(
+            refreshUrl = "/hfr/foo/bar-sujet_35395_20.htm#t100",
+            targetPage = 20,
+        )
+        val viewModel = newEditViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("rewritten body")))
+
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        assertTrue(viewModel.state.value.showSubmitConfirmation)
+        assertEquals("no edit POST before the user confirms", 0, editPostRepository.submitCalls)
+
+        viewModel.submit(PostEditorIntent.SubmitConfirmed)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1, editPostRepository.submitCalls)
+        assertFalse(viewModel.state.value.showSubmitConfirmation)
+    }
 
     private fun authenticatedForm(initialContent: String = ""): ReplyForm = ReplyForm(
         hashCheck = "FAKE_HASH",
@@ -1080,6 +1209,44 @@ class PostEditorViewModelTest {
         fun failNext(error: Throwable) {
             requireNotNull(pending) { "no pending searchWiki to fail" }.completeExceptionally(error)
             pending = null
+        }
+    }
+
+    /**
+     * #312 — fake preferences repository. Only `observeConfirmBeforePosting` matters to the
+     * editor; every other member is stubbed at its default (same shape as the
+     * `FakeUserPreferencesRepository` in `TopicViewModelTest`).
+     */
+    private class FakeUserPreferencesRepository(
+        confirmBeforePosting: Boolean = false,
+    ) : UserPreferencesRepository {
+        private val confirmBeforePosting = MutableStateFlow(confirmBeforePosting)
+
+        override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
+        override suspend fun saveProxyConfig(config: ProxyConfig) = Unit
+        override fun readProxyConfigForNetworkBootstrap(): ProxyConfig = ProxyConfig()
+        override fun observeIgnoreTopicCache(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setIgnoreTopicCache(enabled: Boolean) = Unit
+        override fun observeFlagsGroupByCategory(): Flow<Boolean> = MutableStateFlow(true)
+        override suspend fun setFlagsGroupByCategory(enabled: Boolean) = Unit
+        override fun observeFlagsHideReadCategories(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setFlagsHideReadCategories(enabled: Boolean) = Unit
+        override fun observeFlagsPerTabOverride(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setFlagsPerTabOverride(enabled: Boolean) = Unit
+        override fun observeFlagsViewSettings(type: FlagType): Flow<FlagsViewSettings> =
+            MutableStateFlow(FlagsViewSettings())
+        override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) = Unit
+        override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
+        override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
+        override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
+        override suspend fun setThemeMode(mode: ThemeMode) = Unit
+        override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setAmoledEnabled(enabled: Boolean) = Unit
+        override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(false)
+        override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
+        override fun observeConfirmBeforePosting(): Flow<Boolean> = confirmBeforePosting
+        override suspend fun setConfirmBeforePosting(enabled: Boolean) {
+            confirmBeforePosting.value = enabled
         }
     }
 

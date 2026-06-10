@@ -248,9 +248,12 @@ internal fun SettingsContent(
             )
 
             SettingsSectionHeader(stringResource(R.string.settings_section_editing))
+            EditingPreferencesCard(
+                state = state,
+                onIntent = onIntent,
+            )
             FutureSettingsCard(
                 items = listOf(
-                    R.string.settings_future_submit_confirm to issueTag(312),
                     R.string.settings_future_signature to stringResource(R.string.settings_phase_planned),
                 ),
             )
@@ -531,6 +534,41 @@ private fun TopicPreferencesCard(
             )
             if (state.topicTopBarAutoHideError) {
                 PreferencePersistError(R.string.settings_topic_topbar_auto_hide_persist_failed)
+            }
+        }
+    }
+}
+
+/**
+ * Publishing preferences (#312): the « Confirmation avant publication » toggle. When on, every
+ * publish action (topic reply / post edit, new topic / first-post edit, private-message reply)
+ * first shows a confirmation dialog. Persisted via DataStore and observed live by the editor
+ * ViewModels, so a flip here applies without reopening an editor.
+ */
+@Composable
+private fun EditingPreferencesCard(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_editing_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_confirm_before_posting_title),
+                description = stringResource(R.string.settings_confirm_before_posting_description),
+                checked = state.confirmBeforePosting,
+                enabled = state.canToggleConfirmBeforePosting,
+                onCheckedChange = { onIntent(SettingsIntent.ConfirmBeforePostingChanged(it)) },
+            )
+            if (state.confirmBeforePostingError) {
+                PreferencePersistError(R.string.settings_confirm_before_posting_persist_failed)
             }
         }
     }

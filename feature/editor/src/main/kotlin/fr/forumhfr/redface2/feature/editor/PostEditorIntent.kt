@@ -15,6 +15,15 @@ sealed interface PostEditorIntent {
     /** User asked to send the reply to HFR (Phase 2C, [PostEditorMode.Reply] only). */
     data object SubmitClicked : PostEditorIntent
 
+    /**
+     * #312 — user confirmed the « Confirmation avant publication » dialog. Executes the real
+     * submission directly, BYPASSING the preference re-check (otherwise the dialog would loop).
+     */
+    data object SubmitConfirmed : PostEditorIntent
+
+    /** #312 — user dismissed the confirmation dialog. No submission happens; the draft stays. */
+    data object SubmitConfirmationDismissed : PostEditorIntent
+
     /** User dismissed an in-flight error banner. Clears [PostEditorState.submitError]. */
     data object ErrorDismissed : PostEditorIntent
 

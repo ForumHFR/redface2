@@ -11,6 +11,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
@@ -54,12 +55,14 @@ import kotlinx.coroutines.launch
  * by the repository are surfaced via [SubmitError]; the draft is preserved.
  */
 @HiltViewModel(assistedFactory = PostEditorViewModel.Factory::class)
+@Suppress("LongParameterList") // Hilt constructor injection — one dependency per collaborator.
 class PostEditorViewModel @AssistedInject constructor(
     @Assisted private val request: PostEditorRequest,
     private val previewParser: BbcodePreviewParser,
     private val replyRepository: ReplyRepository,
     private val editPostRepository: EditPostRepository,
     private val smileyRepository: SmileyRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
     private val diagnostics: DiagnosticsLog,
 ) : ViewModel() {
 
@@ -90,19 +93,36 @@ class PostEditorViewModel @AssistedInject constructor(
     /** In-flight wiki smiley search ; cancelled on next query change / picker close. */
     private var smileySearchJob: Job? = null
 
+    /**
+     * #312 — mirror of the persisted « Confirmation avant publication » preference. Collected on
+     * init (same DataStore-consumption shape as `TopicViewModel.observeTopicTopBarAutoHide`) and
+     * read synchronously at submit time. Kept off [PostEditorState] because the UI never renders
+     * the preference itself — only the dialog visibility flag it gates.
+     */
+    private var confirmBeforePosting: Boolean = false
+
     init {
+        viewModelScope.launch {
+            userPreferencesRepository.observeConfirmBeforePosting().collect { enabled ->
+                confirmBeforePosting = enabled
+            }
+        }
         when (request.mode) {
             PostEditorMode.Reply -> loadReplyFormIfPossible()
             PostEditorMode.Edit -> loadEditFormIfPossible()
         }
     }
 
+    @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the PostEditorIntent variants ; flat by design.
     fun submit(intent: PostEditorIntent) {
         when (intent) {
             is PostEditorIntent.ContentChanged -> onContentChanged(intent.value)
             is PostEditorIntent.ToolbarActionClicked -> onToolbarActionClicked(intent.action)
             PostEditorIntent.TogglePreview -> onTogglePreview()
             PostEditorIntent.SubmitClicked -> onSubmitClicked()
+            PostEditorIntent.SubmitConfirmed -> onSubmitConfirmed()
+            PostEditorIntent.SubmitConfirmationDismissed ->
+                _state.update { it.copy(showSubmitConfirmation = false) }
             PostEditorIntent.ErrorDismissed -> _state.update { it.copy(submitError = null) }
             is PostEditorIntent.ToggleSignature ->
                 _state.update { it.copy(signatureEnabled = intent.enabled) }
@@ -453,8 +473,19 @@ class PostEditorViewModel @AssistedInject constructor(
         _state.update { it.copy(isLoadingForm = false, submitError = mapped) }
     }
 
+    /**
+     * #312 — confirm path. Closes the dialog and re-runs the submit pipeline with
+     * `bypassConfirmation = true` so the real submission executes directly (re-checking the
+     * preference here would loop « confirmation → confirmation » forever). The validation
+     * guards run again on the latest snapshot, which is safe because the dialog is modal.
+     */
+    private fun onSubmitConfirmed() {
+        _state.update { it.copy(showSubmitConfirmation = false) }
+        onSubmitClicked(bypassConfirmation = true)
+    }
+
     @Suppress("ReturnCount") // guard clauses are the natural shape of the dispatcher
-    private fun onSubmitClicked() {
+    private fun onSubmitClicked(bypassConfirmation: Boolean = false) {
         val snapshot = _state.value
         if (!snapshot.canSubmit) return
         val form = loadedForm ?: run {
@@ -470,6 +501,13 @@ class PostEditorViewModel @AssistedInject constructor(
             return
         }
         if (submitJob?.isActive == true) return
+        // #312 — AFTER every validation gate (we never confirm an unsendable form), BEFORE the
+        // real POST: when the preference is on, park the submit behind the confirmation dialog.
+        // [onSubmitConfirmed] re-enters with `bypassConfirmation = true`.
+        if (!bypassConfirmation && confirmBeforePosting) {
+            _state.update { it.copy(showSubmitConfirmation = true) }
+            return
+        }
 
         val options = ReplyFormOptions(
             signatureEnabled = snapshot.signatureEnabled,

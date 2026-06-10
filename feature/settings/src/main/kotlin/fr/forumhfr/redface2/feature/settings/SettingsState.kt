@@ -71,6 +71,14 @@ data class SettingsState(
     val isUpdatingTopicTopBarAutoHide: Boolean = false,
     val topicTopBarAutoHideError: Boolean = false,
     val topicTopBarAutoHideTouchedLocally: Boolean = false,
+    // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
+    // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
+    // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
+    // from clobbering a fast user flip. Default false (publishing stays one-tap).
+    val confirmBeforePosting: Boolean = false,
+    val isUpdatingConfirmBeforePosting: Boolean = false,
+    val confirmBeforePostingError: Boolean = false,
+    val confirmBeforePostingTouchedLocally: Boolean = false,
 ) {
     val canSave: Boolean
         get() = !isSaving
@@ -103,6 +111,10 @@ data class SettingsState(
     // Build 89 follow-up — the topic top-bar auto-hide toggle is gated only by its own write.
     val canToggleTopicTopBarAutoHide: Boolean
         get() = !isUpdatingTopicTopBarAutoHide
+
+    // #312 — the confirm-before-posting toggle is gated only by its own write.
+    val canToggleConfirmBeforePosting: Boolean
+        get() = !isUpdatingConfirmBeforePosting
 }
 
 sealed interface SettingsError {
@@ -157,4 +169,8 @@ sealed interface SettingsIntent {
     // Build 89 follow-up — topic top-bar auto-hide toggle. Optimistic-flip contract, like the
     // flags toggles: the boolean is the desired post-flip state.
     data class TopicTopBarAutoHideChanged(val enabled: Boolean) : SettingsIntent
+
+    // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
+    // the boolean is the desired post-flip state.
+    data class ConfirmBeforePostingChanged(val enabled: Boolean) : SettingsIntent
 }
