@@ -22,4 +22,13 @@ object HfrConstants {
     val ReadTimeout: Duration = Duration.ofSeconds(20)
     val WriteTimeout: Duration = Duration.ofSeconds(20)
     val CallTimeout: Duration = Duration.ofSeconds(30)
+
+    /**
+     * End-to-end budget of the search-result page probe (`resolveTopicPageUrl`, #277).
+     * MUST stay <= the ViewModel-side `RESOLVE_TIMEOUT_MS` (3 s) : coroutine cancellation
+     * cannot interrupt a blocking OkHttp `execute()`, so the enforcement lives HERE —
+     * OkHttp aborts the call itself and surfaces an IOException, which the probe already
+     * degrades to its page-1 fallback. The coroutine timeout is only a belt-and-braces.
+     */
+    val ProbeCallTimeout: Duration = Duration.ofSeconds(3)
 }

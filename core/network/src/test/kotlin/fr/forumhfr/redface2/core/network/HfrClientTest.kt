@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import java.time.LocalDate
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
@@ -270,6 +271,32 @@ class HfrClientTest {
         server.shutdown()
 
         assertNull(client.resolveTopicPageUrl(cat = 23, post = 35421, numreponse = 2786758))
+    }
+
+    @Test
+    fun `resolveTopicPageUrl aborts a stalled probe after its dedicated call timeout`() = runTest {
+        // Promotion-review finding : coroutine cancellation cannot interrupt a blocking
+        // OkHttp execute(), so the 3 s probe budget MUST be enforced by OkHttp itself
+        // (ProbeCallTimeout on the derived no-redirect client). The server stalls the
+        // headers for 10 s ; without the dedicated timeout the call would only die at the
+        // 30 s default — and the late answer would then be a perfectly valid redirect,
+        // so the assertNull below would fail too (double signal).
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(301)
+                .addHeader("Location", "/hfr/cat/sujet_1_3.htm#t42")
+                .setHeadersDelay(10, TimeUnit.SECONDS),
+        )
+
+        val startedAtMs = System.currentTimeMillis()
+        val location = client.resolveTopicPageUrl(cat = 23, post = 35421, numreponse = 2786758)
+        val elapsedMs = System.currentTimeMillis() - startedAtMs
+
+        assertNull("a stalled probe must degrade to the page-1 fallback", location)
+        assertTrue(
+            "probe must be cut by its own call timeout, not the 30 s default (took ${"$"}{elapsedMs}ms)",
+            elapsedMs < 9_000,
+        )
     }
 
     @Test

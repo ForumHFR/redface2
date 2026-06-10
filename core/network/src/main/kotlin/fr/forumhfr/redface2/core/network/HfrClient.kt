@@ -532,9 +532,17 @@ class HfrClient @Inject constructor(
      * Anonymous client variant that does NOT follow redirects, for callers that consume
      * the `Location` header itself (cf. [resolveTopicPageUrl]). Derived once — sharing
      * the connection pool / dispatcher of [anonymous] — instead of being rebuilt per call.
+     *
+     * The tight [HfrConstants.ProbeCallTimeout] (3 s vs the 30 s default) is the REAL
+     * timeout of the probe : the caller's `withTimeoutOrNull` cannot interrupt a blocking
+     * `execute()`, so without it a degraded network would freeze the search tap (and its
+     * in-flight guard) for the full default call timeout (promotion review finding).
      */
     private val anonymousNoRedirect: OkHttpClient by lazy {
-        anonymous.newBuilder().followRedirects(false).build()
+        anonymous.newBuilder()
+            .followRedirects(false)
+            .callTimeout(HfrConstants.ProbeCallTimeout)
+            .build()
     }
 
     /**
