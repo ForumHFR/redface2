@@ -1,0 +1,15 @@
+Source : https://forum.hardware.fr/forum1.php?recherches=1&cat=&orderSearch=0&config=hfr.inc&pseud=Lt+Ripley&search=&titre=3&jour=11&mois=6&annee=2026&resSearch=20&daterange=2&subcat=0&searchtype=1&trash=0&trash_post=0&moderation=0
+
+Captured : 2026-06-11 via curl -L, anonymous (no session cookies).
+
+Query : `search=` (empty), `pseud=Lt+Ripley`, `cat=` (ALL categories), `titre=3` (titles + posts).
+
+Shape : « author-only, all categories » — the exact wire shape of the profile's « Derniers
+messages » button (#402). HFR answers the all-categories author search with a **302** onto the
+standard multi-cat pivot URL (`cat=1&post_cat_list=|1*hfr|16*hfr|…&searchall=1`) ; this file is
+the FOLLOWED page (curl -L), i.e. what OkHttp hands the parser after its automatic redirect.
+20 topic rows (resSearch=20) in the first pivot category, plus the pivot dropdown listing every
+category where Lt Ripley posted.
+
+Sanitization : none required — anonymous capture, `hash_check` empty, no cookies, no PII beyond
+the public username the filter explicitly required (same exposure as search_pseud_filter_lt_ripley).

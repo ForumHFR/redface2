@@ -31,12 +31,23 @@ package fr.forumhfr.redface2.core.model.search
 /**
  * Caller-side description of a search. Built by the ViewModel from the user's
  * input and passed verbatim to [fr.forumhfr.redface2.core.domain.search.SearchRepository].
+ *
+ * [pseudo] maps to HFR's `pseud` form field — an author filter. HFR supports an
+ * author-only search (`search=` empty, `pseud=` set), verified live 2026-06-11 in
+ * all three shapes : explicit cat + `titre=1` (fixture
+ * `search_pseud_filter_lt_ripley.html`), explicit cat + `titre=3` (content rows
+ * with « Dernier message correspondant » snippets), and all-categories + `titre=3`
+ * (302 redirect onto the standard multi-cat pivot, which OkHttp follows). The
+ * result semantics are « topics where this user posted » — HFR does NOT
+ * distinguish authored vs participated. At least one of [query] / [pseudo] must
+ * be non-blank ; the ViewModel enforces this before building the request.
  */
 data class SearchRequest(
     val query: String,
     val category: SearchCategoryScope = SearchCategoryScope.All,
     val textScope: SearchTextScope = SearchTextScope.TitlesAndPosts,
     val page: Int = 1,
+    val pseudo: String? = null,
 )
 
 /**

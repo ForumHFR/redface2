@@ -2,9 +2,12 @@
     <string name="search_title">Recherche</string>
     <string name="search_field_label">Mot-clé recherché</string>
     <string name="search_field_placeholder">Mot dans un titre ou un message…</string>
+    <string name="search_pseudo_label">Auteur (pseudo)</string>
+    <string name="search_pseudo_placeholder">Topics où ce membre a posté…</string>
+    <string name="search_back">Retour</string>
     <string name="search_submit">Rechercher</string>
     <string name="search_retry">Réessayer</string>
-    <string name="search_idle_hint">Saisissez un mot-clé pour chercher dans les titres et messages HFR. Quand HFR fournit un extrait, le résultat ouvre le message correspondant ; sinon il ouvre le topic.</string>
+    <string name="search_idle_hint">Saisissez un mot-clé et/ou un pseudo. Le pseudo seul liste les topics où ce membre a posté. Quand HFR fournit un extrait, le résultat ouvre le message correspondant ; sinon il ouvre le topic.</string>
     <string name="search_loading">Recherche en cours…</string>
     <string name="search_empty">Aucun résultat pour cette recherche.</string>
     <!-- #324 — les cas ServerDown / Network rendent les libellés partagés de :core:ui
@@ -14,7 +17,7 @@
     <string name="search_scope_titles_and_posts">Titres + messages</string>
     <string name="search_scope_titles_only">Titres seuls</string>
     <string name="search_scope_posts_only">Messages seuls</string>
-    <string name="search_future_filters_hint">Filtres auteur, date et pagination arrivent dans la suite de la recherche.</string>
+    <string name="search_future_filters_hint">Filtres date et pagination arrivent dans la suite de la recherche.</string>
     <string name="search_pivot_label">Catégories HFR avec résultats</string>
     <string name="search_pivot_hint">HFR affiche les topics d’une catégorie à la fois. Choisir une catégorie relance la même recherche dans ce périmètre.</string>
     <string name="search_result_location">dans %1$s</string>

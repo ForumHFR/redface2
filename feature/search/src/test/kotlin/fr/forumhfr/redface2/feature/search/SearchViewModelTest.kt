@@ -54,7 +54,7 @@ class SearchViewModelTest {
 
     @Test
     fun `QueryChanged updates the query in state`() = runTest {
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.submit(SearchIntent.QueryChanged("kotlin"))
         assertEquals("kotlin", vm.state.value.query)
         assertFalse(vm.state.value.hasSearched)
@@ -62,7 +62,7 @@ class SearchViewModelTest {
 
     @Test
     fun `Submit with a blank query does not call the repository`() = runTest {
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.submit(SearchIntent.QueryChanged("   "))
         vm.submit(SearchIntent.Submit)
         coVerify(exactly = 0) { repo.search(any()) }
@@ -76,7 +76,7 @@ class SearchViewModelTest {
             topics = listOf(fakeTopic(topicId = 1, title = "Hello kotlin")),
             pivot = listOf(SearchPivotCategory(id = 10, label = "Programmation", isSelected = true)),
         )
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.submit(SearchIntent.QueryChanged("kotlin"))
         vm.submit(SearchIntent.Submit)
 
@@ -92,7 +92,7 @@ class SearchViewModelTest {
     @Test
     fun `Submit no-results leaves results empty without an error`() = runTest {
         coEvery { repo.search(any()) } returns fakePage(topics = emptyList(), pivot = emptyList())
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.submit(SearchIntent.QueryChanged("xqzkbm9wj4abc"))
         vm.submit(SearchIntent.Submit)
 
@@ -105,7 +105,7 @@ class SearchViewModelTest {
     @Test
     fun `repository IOException sets the network error kind and preserves the query`() = runTest {
         coEvery { repo.search(any()) } throws IOException("HFR search request failed: HFR returned 500")
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.submit(SearchIntent.QueryChanged("kotlin"))
         vm.submit(SearchIntent.Submit)
 
@@ -120,7 +120,7 @@ class SearchViewModelTest {
         // #324 — DefaultSearchRepository lets the typed exception traverse (URL redacted);
         // a 5xx must surface as « HFR est en panne », not as a network problem.
         coEvery { repo.search(any()) } throws HfrServerException(code = 500, url = "<redacted>")
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.submit(SearchIntent.QueryChanged("kotlin"))
         vm.submit(SearchIntent.Submit)
 
@@ -134,7 +134,7 @@ class SearchViewModelTest {
         // #324 — search has no dedicated session treatment; an expired session must not be
         // presented as a connectivity cut (classifyHfrError → Other).
         coEvery { repo.search(any()) } throws SessionExpiredException("<redacted>")
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.submit(SearchIntent.QueryChanged("kotlin"))
         vm.submit(SearchIntent.Submit)
 
@@ -149,7 +149,7 @@ class SearchViewModelTest {
             if (attempt == 1) throw IOException("offline")
             else fakePage(topics = listOf(fakeTopic(2, "Recovered")), pivot = emptyList())
         }
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.submit(SearchIntent.QueryChanged("kotlin"))
         vm.submit(SearchIntent.Submit) // first attempt throws
         assertEquals(HfrErrorKind.Network, vm.state.value.errorMessage)
@@ -190,7 +190,7 @@ class SearchViewModelTest {
             ),
         )
 
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.submit(SearchIntent.QueryChanged("android"))
         vm.submit(SearchIntent.Submit)
 
@@ -232,7 +232,7 @@ class SearchViewModelTest {
             pivot = emptyList(),
         )
 
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.submit(SearchIntent.QueryChanged("android"))
         vm.submit(SearchIntent.Submit)
         vm.submit(SearchIntent.TextScopeSelected(SearchTextScope.TitlesOnly))
@@ -293,7 +293,7 @@ class SearchViewModelTest {
             pivot = emptyList(),
         )
 
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.submit(SearchIntent.QueryChanged("android"))
         vm.submit(SearchIntent.Submit)
         vm.submit(
@@ -347,7 +347,7 @@ class SearchViewModelTest {
             pivot = emptyList(),
         )
 
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.submit(SearchIntent.QueryChanged("android"))
         vm.submit(SearchIntent.TextScopeSelected(SearchTextScope.PostsOnly))
         vm.submit(SearchIntent.Submit)
@@ -372,7 +372,7 @@ class SearchViewModelTest {
         coEvery { repo.search(SearchRequest(query = "kotlin", category = SearchCategoryScope.All)) } returns
             fakePage(topics = listOf(fakeTopic(1, "kotlin hit")), pivot = emptyList())
 
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.state.test {
             // initial idle state
             skipItems(1)
@@ -404,7 +404,7 @@ class SearchViewModelTest {
             gate.await()
         }
 
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         vm.submit(SearchIntent.QueryChanged("android"))
         vm.submit(SearchIntent.Submit)
         assertTrue(vm.state.value.isLoading)
@@ -432,7 +432,7 @@ class SearchViewModelTest {
     @Test
     fun `OpenResult with a matched numreponse emits the resolved page`() = runTest {
         coEvery { repo.resolveSearchResultPage(cat = 23, post = 35421, numreponse = 2786758) } returns 3
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         val result = fakeTopic(topicId = 35421, title = "Redface dev", cat = 23, page = 1, numreponse = 2786758)
 
         vm.effects.test {
@@ -448,7 +448,7 @@ class SearchViewModelTest {
     @Test
     fun `OpenResult falls back to the href page when resolution returns null`() = runTest {
         coEvery { repo.resolveSearchResultPage(any(), any(), any()) } returns null
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         val result = fakeTopic(topicId = 35421, title = "Redface dev", cat = 23, page = 2, numreponse = 2786758)
 
         vm.effects.test {
@@ -464,7 +464,7 @@ class SearchViewModelTest {
     @Test
     fun `OpenResult falls back to page 1 when resolution throws and the href has no page`() = runTest {
         coEvery { repo.resolveSearchResultPage(any(), any(), any()) } throws IOException("offline")
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         val result = fakeTopic(topicId = 35421, title = "Redface dev", cat = 23, page = null, numreponse = 2786758)
 
         vm.effects.test {
@@ -480,7 +480,7 @@ class SearchViewModelTest {
 
     @Test
     fun `OpenResult on a title-only row emits page 1 without calling the repository`() = runTest {
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         val result = fakeTopic(topicId = 777, title = "Title-only hit", cat = 10)
 
         vm.effects.test {
@@ -498,7 +498,7 @@ class SearchViewModelTest {
     fun `OpenResult ignores further taps while a resolution is in flight`() = runTest {
         val gate = CompletableDeferred<Int?>()
         coEvery { repo.resolveSearchResultPage(any(), any(), any()) } coAnswers { gate.await() }
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         val result = fakeTopic(topicId = 35421, title = "Redface dev", cat = 23, page = 1, numreponse = 2786758)
 
         vm.effects.test {
@@ -525,7 +525,7 @@ class SearchViewModelTest {
         coEvery { repo.resolveSearchResultPage(any(), any(), any()) } coAnswers {
             CompletableDeferred<Int?>().await()
         }
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         val result = fakeTopic(topicId = 35421, title = "Redface dev", cat = 23, page = 1, numreponse = 2786758)
 
         vm.effects.test {
@@ -541,7 +541,7 @@ class SearchViewModelTest {
     @Test
     fun `OpenResult guard resets after a completed resolution`() = runTest {
         coEvery { repo.resolveSearchResultPage(any(), any(), any()) } returns 3
-        val vm = SearchViewModel(repo)
+        val vm = SearchViewModel(repo, initialPseudo = null)
         val result = fakeTopic(topicId = 35421, title = "Redface dev", cat = 23, page = 1, numreponse = 2786758)
 
         vm.effects.test {
@@ -553,6 +553,134 @@ class SearchViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
         coVerify(exactly = 2) { repo.resolveSearchResultPage(any(), any(), any()) }
+    }
+
+    // Author filter (`pseud=`) — query-only, author-only, and combined searches are all
+    // legal ; at least one of the two must be non-blank.
+
+    @Test
+    fun `Submit with author only calls the repository with the pseudo and an empty query`() = runTest {
+        coEvery { repo.search(any()) } returns fakePage(
+            topics = listOf(fakeTopic(1, "participated topic")),
+            pivot = emptyList(),
+        )
+        val vm = SearchViewModel(repo, initialPseudo = null)
+        vm.submit(SearchIntent.PseudoChanged("Lt Ripley"))
+        vm.submit(SearchIntent.Submit)
+
+        coVerify(exactly = 1) {
+            repo.search(
+                SearchRequest(query = "", category = SearchCategoryScope.All, pseudo = "Lt Ripley"),
+            )
+        }
+        assertTrue(vm.state.value.hasSearched)
+        assertEquals(1, vm.state.value.results.size)
+    }
+
+    @Test
+    fun `Submit with blank query AND blank pseudo does not call the repository`() = runTest {
+        val vm = SearchViewModel(repo, initialPseudo = null)
+        vm.submit(SearchIntent.QueryChanged("   "))
+        vm.submit(SearchIntent.PseudoChanged("  "))
+        vm.submit(SearchIntent.Submit)
+        coVerify(exactly = 0) { repo.search(any()) }
+        assertFalse(vm.state.value.hasSearched)
+    }
+
+    @Test
+    fun `a non-blank initialPseudo fires the author-only search at construction`() = runTest {
+        coEvery { repo.search(any()) } returns fakePage(
+            topics = listOf(fakeTopic(1, "recent post topic")),
+            pivot = emptyList(),
+        )
+        val vm = SearchViewModel(repo, initialPseudo = "Lt Ripley")
+
+        coVerify(exactly = 1) {
+            repo.search(
+                SearchRequest(query = "", category = SearchCategoryScope.All, pseudo = "Lt Ripley"),
+            )
+        }
+        val state = vm.state.value
+        assertEquals("Lt Ripley", state.pseudo)
+        assertTrue(state.hasSearched)
+        assertEquals("recent post topic", state.results.first().title)
+    }
+
+    @Test
+    fun `a null initialPseudo starts idle without any repository call`() = runTest {
+        val vm = SearchViewModel(repo, initialPseudo = null)
+        coVerify(exactly = 0) { repo.search(any()) }
+        assertFalse(vm.state.value.hasSearched)
+    }
+
+    @Test
+    fun `PseudoChanged invalidates the displayed results like QueryChanged`() = runTest {
+        coEvery { repo.search(any()) } returns fakePage(
+            topics = listOf(fakeTopic(1, "hit")),
+            pivot = emptyList(),
+        )
+        val vm = SearchViewModel(repo, initialPseudo = null)
+        vm.submit(SearchIntent.QueryChanged("kotlin"))
+        vm.submit(SearchIntent.Submit)
+        assertEquals(1, vm.state.value.results.size)
+
+        vm.submit(SearchIntent.PseudoChanged("Lt Ripley"))
+
+        val typed = vm.state.value
+        assertEquals("Lt Ripley", typed.pseudo)
+        assertEquals("the un-submitted query stays in its field", "kotlin", typed.query)
+        assertFalse("editing the author filter orphans the displayed results", typed.hasSearched)
+        assertEquals(emptyList<SearchTopicResult>(), typed.results)
+    }
+
+    @Test
+    fun `Retry re-runs the last author-only search with its pseudo`() = runTest {
+        var attempt = 0
+        coEvery { repo.search(any()) } answers {
+            attempt += 1
+            if (attempt == 1) throw IOException("offline")
+            else fakePage(topics = listOf(fakeTopic(2, "Recovered")), pivot = emptyList())
+        }
+        val vm = SearchViewModel(repo, initialPseudo = null)
+        vm.submit(SearchIntent.PseudoChanged("Lt Ripley"))
+        vm.submit(SearchIntent.Submit)
+        assertEquals(HfrErrorKind.Network, vm.state.value.errorMessage)
+
+        vm.submit(SearchIntent.Retry)
+
+        coVerify(exactly = 2) {
+            repo.search(
+                SearchRequest(query = "", category = SearchCategoryScope.All, pseudo = "Lt Ripley"),
+            )
+        }
+        assertEquals("Recovered", vm.state.value.results.first().title)
+    }
+
+    @Test
+    fun `CategorySelected keeps the author filter of an author-only search`() = runTest {
+        coEvery { repo.search(any()) } returns fakePage(
+            topics = listOf(fakeTopic(1, "pivot hit")),
+            pivot = listOf(
+                SearchPivotCategory(id = 1, label = "Hardware", isSelected = true),
+                SearchPivotCategory(id = 10, label = "Programmation", isSelected = false),
+            ),
+        )
+        val vm = SearchViewModel(repo, initialPseudo = "Lt Ripley")
+        vm.submit(
+            SearchIntent.CategorySelected(
+                SearchPivotCategory(id = 10, label = "Programmation", isSelected = false),
+            ),
+        )
+
+        coVerify(exactly = 1) {
+            repo.search(
+                SearchRequest(
+                    query = "",
+                    category = SearchCategoryScope.Category(id = 10, name = "Programmation"),
+                    pseudo = "Lt Ripley",
+                ),
+            )
+        }
     }
 
     private fun fakeTopic(
