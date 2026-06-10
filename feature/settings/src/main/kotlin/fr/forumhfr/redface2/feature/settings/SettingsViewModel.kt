@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -19,6 +20,7 @@ import kotlinx.coroutines.launch
 class SettingsViewModel @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val topicCacheMaintenance: TopicCacheMaintenance,
+    private val imageCacheMaintenance: ImageCacheMaintenance,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(SettingsState())
@@ -134,6 +136,15 @@ class SettingsViewModel @Inject constructor(
             SettingsIntent.ClearTopicCacheDismissed ->
                 _state.update { it.copy(showClearTopicCacheConfirm = false) }
             SettingsIntent.ClearTopicCacheConfirmed -> clearTopicCache()
+            SettingsIntent.ClearImageCacheClicked ->
+                _state.update {
+                    // Same clean-slate reset as the topic mirror: the dialog must not open
+                    // over a stale "succès" / "échec" label from a previous attempt.
+                    it.copy(showClearImageCacheConfirm = true, imageCacheClearResult = null)
+                }
+            SettingsIntent.ClearImageCacheDismissed ->
+                _state.update { it.copy(showClearImageCacheConfirm = false) }
+            SettingsIntent.ClearImageCacheConfirmed -> clearImageCache()
             is SettingsIntent.IgnoreTopicCacheChanged -> updateIgnoreTopicCache(intent.enabled)
             is SettingsIntent.FlagsGroupByCategoryChanged -> updateFlagsGroupByCategory(intent.enabled)
             is SettingsIntent.FlagsHideReadCategoriesChanged -> updateFlagsHideReadCategories(intent.enabled)
@@ -175,6 +186,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun clearTopicCache() {
+        // Re-entrance guard: the dialog's confirm button is not gated by state, so a
+        // double-tap before recomposition would otherwise launch two concurrent clears.
+        if (_state.value.isClearingTopicCache) return
         // Close the confirmation dialog upfront so the user can't double-confirm, then flip
         // `isClearingTopicCache` so the button is disabled while Room runs the transaction.
         _state.update {
@@ -199,6 +213,40 @@ class SettingsViewModel @Inject constructor(
                         it.copy(
                             isClearingTopicCache = false,
                             topicCacheClearResult = TopicCacheClearResult.Failure,
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun clearImageCache() {
+        // Re-entrance guard, mirror of clearTopicCache() above.
+        if (_state.value.isClearingImageCache) return
+        // Mirror of clearTopicCache(): close the dialog upfront so the user can't
+        // double-confirm, then gate the button on `isClearingImageCache` while Coil
+        // wipes the memory + disk caches.
+        _state.update {
+            it.copy(
+                showClearImageCacheConfirm = false,
+                isClearingImageCache = true,
+                imageCacheClearResult = null,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { imageCacheMaintenance.clearImageCache() }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            isClearingImageCache = false,
+                            imageCacheClearResult = ImageCacheClearResult.Success,
+                        )
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            isClearingImageCache = false,
+                            imageCacheClearResult = ImageCacheClearResult.Failure,
                         )
                     }
                 }

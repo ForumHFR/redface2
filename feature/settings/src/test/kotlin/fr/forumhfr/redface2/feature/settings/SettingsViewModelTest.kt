@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.settings
 
+import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
@@ -30,6 +31,7 @@ class SettingsViewModelTest {
 
     private val repository = FakeUserPreferencesRepository()
     private val topicCacheMaintenance = FakeTopicCacheMaintenance()
+    private val imageCacheMaintenance = FakeImageCacheMaintenance()
 
     @Before
     fun setUp() {
@@ -210,6 +212,147 @@ class SettingsViewModelTest {
         // pending operation.
         assertTrue(viewModel.state.value.showClearTopicCacheConfirm)
         assertNull(viewModel.state.value.topicCacheClearResult)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Image cache maintenance — "Vider le cache des images" action (#314)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `ClearImageCacheClicked opens the confirmation dialog without touching the cache`() = runTest {
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ClearImageCacheClicked)
+
+        assertTrue(viewModel.state.value.showClearImageCacheConfirm)
+        assertEquals(
+            "clear() must NOT run until the user confirms",
+            0,
+            imageCacheMaintenance.clearCalls,
+        )
+    }
+
+    @Test
+    fun `ClearImageCacheDismissed closes the dialog without calling clear`() = runTest {
+        val viewModel = newViewModel()
+        viewModel.submit(SettingsIntent.ClearImageCacheClicked)
+
+        viewModel.submit(SettingsIntent.ClearImageCacheDismissed)
+
+        assertFalse(viewModel.state.value.showClearImageCacheConfirm)
+        assertEquals(0, imageCacheMaintenance.clearCalls)
+        assertNull(viewModel.state.value.imageCacheClearResult)
+    }
+
+    @Test
+    fun `ClearImageCacheConfirmed runs clear and surfaces Success`() = runTest {
+        val viewModel = newViewModel()
+        viewModel.submit(SettingsIntent.ClearImageCacheClicked)
+
+        viewModel.submit(SettingsIntent.ClearImageCacheConfirmed)
+
+        val state = viewModel.state.value
+        assertEquals(1, imageCacheMaintenance.clearCalls)
+        assertFalse("dialog must close at confirm time", state.showClearImageCacheConfirm)
+        assertFalse("isClearing must flip back to false after success", state.isClearingImageCache)
+        assertEquals(ImageCacheClearResult.Success, state.imageCacheClearResult)
+    }
+
+    @Test
+    fun `ClearImageCacheConfirmed ignores a re-entrant confirm while a clear is running`() = runTest {
+        // Codex final-review finding (#314): the dialog's confirm button is not gated by
+        // state — a double-tap before recomposition must not start two concurrent clears.
+        val gate = CompletableDeferred<Unit>()
+        imageCacheMaintenance.blockUntil = gate
+        val viewModel = newViewModel()
+        viewModel.submit(SettingsIntent.ClearImageCacheClicked)
+
+        viewModel.submit(SettingsIntent.ClearImageCacheConfirmed)
+        viewModel.submit(SettingsIntent.ClearImageCacheConfirmed)
+
+        assertEquals(1, imageCacheMaintenance.clearCalls)
+        gate.complete(Unit)
+        assertEquals(ImageCacheClearResult.Success, viewModel.state.value.imageCacheClearResult)
+        assertFalse(viewModel.state.value.isClearingImageCache)
+    }
+
+    @Test
+    fun `ClearImageCacheConfirmed exposes in-progress state while clear is running`() = runTest {
+        imageCacheMaintenance.blockUntil = CompletableDeferred()
+        val viewModel = newViewModel()
+        viewModel.submit(SettingsIntent.ClearImageCacheClicked)
+
+        viewModel.submit(SettingsIntent.ClearImageCacheConfirmed)
+
+        assertTrue(viewModel.state.value.isClearingImageCache)
+        assertFalse(viewModel.state.value.canClearImageCache)
+
+        imageCacheMaintenance.blockUntil?.complete(Unit)
+        yield()
+
+        assertFalse(viewModel.state.value.isClearingImageCache)
+        assertEquals(ImageCacheClearResult.Success, viewModel.state.value.imageCacheClearResult)
+    }
+
+    @Test
+    fun `ClearImageCacheConfirmed surfaces Failure when the maintenance call throws`() = runTest {
+        imageCacheMaintenance.failOnClear = true
+        val viewModel = newViewModel()
+        viewModel.submit(SettingsIntent.ClearImageCacheClicked)
+
+        viewModel.submit(SettingsIntent.ClearImageCacheConfirmed)
+
+        val state = viewModel.state.value
+        assertEquals(1, imageCacheMaintenance.clearCalls)
+        assertFalse(state.isClearingImageCache)
+        assertEquals(ImageCacheClearResult.Failure, state.imageCacheClearResult)
+        // Proxy state stays untouched — the two domains must not bleed.
+        assertNull(state.error)
+        assertFalse(state.saved)
+    }
+
+    @Test
+    fun `re-clicking the image clear after a previous result resets the inline message`() = runTest {
+        imageCacheMaintenance.failOnClear = true
+        val viewModel = newViewModel()
+        viewModel.submit(SettingsIntent.ClearImageCacheClicked)
+        viewModel.submit(SettingsIntent.ClearImageCacheConfirmed)
+        assertEquals(ImageCacheClearResult.Failure, viewModel.state.value.imageCacheClearResult)
+
+        // Second pass — user retries.
+        viewModel.submit(SettingsIntent.ClearImageCacheClicked)
+
+        assertTrue(viewModel.state.value.showClearImageCacheConfirm)
+        assertNull(viewModel.state.value.imageCacheClearResult)
+    }
+
+    @Test
+    fun `image and topic clear flows stay independent`() = runTest {
+        // The two Maintenance entries live side by side in the same card — dedicated state
+        // fields must guarantee a click on one never opens/repaints the other (#314 design
+        // note: no shared topicCacheClearResult/isClearingTopicCache).
+        imageCacheMaintenance.failOnClear = true
+        val viewModel = newViewModel()
+        viewModel.submit(SettingsIntent.ClearTopicCacheClicked)
+        viewModel.submit(SettingsIntent.ClearTopicCacheConfirmed)
+        assertEquals(TopicCacheClearResult.Success, viewModel.state.value.topicCacheClearResult)
+
+        viewModel.submit(SettingsIntent.ClearImageCacheClicked)
+        assertFalse(
+            "the image dialog must not be mirrored on the topic flag",
+            viewModel.state.value.showClearTopicCacheConfirm,
+        )
+        viewModel.submit(SettingsIntent.ClearImageCacheConfirmed)
+
+        val state = viewModel.state.value
+        assertEquals(ImageCacheClearResult.Failure, state.imageCacheClearResult)
+        assertEquals(
+            "the image failure must not erase the topic success feedback",
+            TopicCacheClearResult.Success,
+            state.topicCacheClearResult,
+        )
+        assertEquals(1, topicCacheMaintenance.clearCalls)
+        assertEquals(1, imageCacheMaintenance.clearCalls)
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -650,7 +793,7 @@ class SettingsViewModelTest {
         }
 
     private fun newViewModel(): SettingsViewModel =
-        SettingsViewModel(repository, topicCacheMaintenance)
+        SettingsViewModel(repository, topicCacheMaintenance, imageCacheMaintenance)
 
     private class FakeUserPreferencesRepository : UserPreferencesRepository {
         private val config = MutableStateFlow(ProxyConfig())
@@ -844,6 +987,19 @@ class SettingsViewModelTest {
         var blockUntil: CompletableDeferred<Unit>? = null
 
         override suspend fun clearTopicCache() {
+            clearCalls += 1
+            blockUntil?.await()
+            check(!failOnClear) { "boom" }
+        }
+    }
+
+    private class FakeImageCacheMaintenance : ImageCacheMaintenance {
+        var clearCalls: Int = 0
+            private set
+        var failOnClear: Boolean = false
+        var blockUntil: CompletableDeferred<Unit>? = null
+
+        override suspend fun clearImageCache() {
             clearCalls += 1
             blockUntil?.await()
             check(!failOnClear) { "boom" }
