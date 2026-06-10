@@ -86,6 +86,12 @@ data class SettingsState(
     val isUpdatingConfirmBeforePosting: Boolean = false,
     val confirmBeforePostingError: Boolean = false,
     val confirmBeforePostingTouchedLocally: Boolean = false,
+    // Drapeaux — opt-in « DT » placeholder tab (MPStorage sync #6 lands later). Same
+    // optimistic-flip + startup-race-guard machinery. Default false (tab hidden).
+    val showDtSection: Boolean = false,
+    val isUpdatingShowDtSection: Boolean = false,
+    val showDtSectionError: Boolean = false,
+    val showDtSectionTouchedLocally: Boolean = false,
 ) {
     val canSave: Boolean
         get() = !isSaving
@@ -125,6 +131,10 @@ data class SettingsState(
     // #312 — the confirm-before-posting toggle is gated only by its own write.
     val canToggleConfirmBeforePosting: Boolean
         get() = !isUpdatingConfirmBeforePosting
+
+    // DT tab — gated only by its own write.
+    val canToggleShowDtSection: Boolean
+        get() = !isUpdatingShowDtSection
 }
 
 sealed interface SettingsError {
@@ -200,4 +210,8 @@ sealed interface SettingsIntent {
     // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
     // the boolean is the desired post-flip state.
     data class ConfirmBeforePostingChanged(val enabled: Boolean) : SettingsIntent
+
+    // Drapeaux — opt-in « DT » placeholder tab (MPStorage sync #6 lands later). Optimistic-flip
+    // contract, like the flags toggles: the boolean is the desired post-flip state.
+    data class ShowDtSectionChanged(val enabled: Boolean) : SettingsIntent
 }

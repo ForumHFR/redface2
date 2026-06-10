@@ -16,10 +16,36 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v113 — `0.9.0` — 2026-06-11
+
+**Statut** : `local` (candidat — promotion `promote/0.9.0` figée sur dev `bb3ee57b`, en attente de review Codex)
+**Commit** : candidat depuis dev `bb3ee57b` (build dev 112), versionCode anticipé 113 (ledger 112+1)
+**Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) → track open testing + tag pour F-Droid beta
+
+**Lot dogfooding du 2026-06-10 soir** : 7 PR mergées sur dev (#388–#392, #397, #399), dogfoodées en continu sur le canal dev (v106 → v112).
+
+### Added
+- **Barre d'actions de l'éditeur** — « Options | Smileys | Envoyer » épinglée au-dessus du clavier sur les trois éditeurs (post, sujet, MP) ; les toggles HFR (signature/smileys/notification) passent dans un bottom sheet ouvert par « Options » ; boutons secondaires en pilules tonales (#390).
+- **Confirmation par double-bouton** (#312 v2) — le dialog modal disparaît : « Envoyer » s'arme (« Confirmer », couleurs tertiary), le fond se vide pendant les 4 s du compte à rebours (désarmement auto), le 2ᵉ appui envoie.
+- **Champ de rédaction extensible** — le champ BBCode s'étire jusqu'à la barre d'actions (éditeur de post et réponse MP) ; aperçu ouvert = partage 50/50 avec scroll interne.
+- **Double-tap pour rafraîchir** (#382) — double-tap n'importe où dans une page de sujet = re-fetch réseau (même retour visuel que le pull-to-refresh, tic haptique).
+- **Section DT (opt-in)** — toggle Réglages › Drapeaux faisant apparaître un onglet « DT » placeholder ; le contenu (drapeaux synchronisés via MPStorage, #6) arrivera plus tard.
+
+### Fixed
+- **Pastilles lu/non-lu de l'onglet Forum** (#329) — la pastille de drapeau d'une ligne lue est atténuée (même grammaire que l'onglet Drapeaux) ; l'état visuel n'avait jamais été implémenté.
+- **Libellé « Confirmer » cassé sur deux lignes** — les déclencheurs secondaires s'effacent pendant l'armement.
+- **Gouttières réelles des posts** — le NavHost ajoutait déjà 8 dp par côté (hérité du bootstrap) : la liste n'ajoute plus rien, les posts ont enfin 8 dp réels par côté (dette du padding global tracée en #398).
+
+### Changed
+- **Lecture des posts** — bande d'identité teintée (avatar/pseudo/date) sur toute la largeur de la carte ; ~24 dp de largeur de lecture en plus ; grille uniforme 8 dp (rythme vertical aligné sur les côtés).
+- **`versionName` 0.8.0 → 0.9.0**.
+
+---
+
 ## v104 — `0.8.0` — 2026-06-10
 
-**Statut** : `local` (entrée écrite avant le dispatch ; passer à `open` + F-Droid `.beta` après le ship)
-**Commit** : merge de promotion `dev → main` (numéro v104 anticipé : registre de tags à 103 au moment du bump)
+**Statut** : `open` (track open testing) + F-Droid `.beta`
+**Commit** : merge de promotion `918bb619` (#373), tag `app-v104` (versionCode 104, ledger 103→104)
 **Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) → **track open testing** + tag pour F-Droid beta
 
 **Troisième batch** : night-run 2026-06-10 (8 items, dont 7 features/fixes code) + lot dogfooding même journée, dogfoodé sur le canal dev (v102 → v103).

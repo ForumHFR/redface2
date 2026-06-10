@@ -547,5 +547,9 @@ class TopicRepositoryImplTest {
         override fun observeConfirmBeforePosting(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setConfirmBeforePosting(enabled: Boolean) = Unit
+
+        override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setShowDtSection(enabled: Boolean) = Unit
     }
 }

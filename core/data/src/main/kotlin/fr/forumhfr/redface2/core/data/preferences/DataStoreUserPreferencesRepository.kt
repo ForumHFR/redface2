@@ -206,6 +206,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeShowDtSection(): Flow<Boolean> =
+        dataStore.data
+            // Default `false`: the DT tab is a placeholder until the MPStorage sync (#6) — opt-in only.
+            .map { prefs -> prefs[KEY_FLAGS_SHOW_DT_SECTION] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setShowDtSection(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_SHOW_DT_SECTION] = enabled
+            }
+        }
+    }
+
     /**
      * Reads [KEY_THEME_MODE] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [ThemeMode.SYSTEM] instead of crashing on
@@ -297,5 +312,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #312 — confirmation dialog before any publish action (reply / edit / new topic / MP).
         val KEY_CONFIRM_BEFORE_POSTING = booleanPreferencesKey("confirm_before_posting")
+
+        // Opt-in « DT » placeholder tab on the Drapeaux screen (MPStorage sync lands later, #6).
+        val KEY_FLAGS_SHOW_DT_SECTION = booleanPreferencesKey("flags_show_dt_section")
     }
 }

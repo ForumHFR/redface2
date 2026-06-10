@@ -20,8 +20,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -37,16 +37,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
+import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
+import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitLabels
+import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitState
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
-import fr.forumhfr.redface2.core.ui.editor.ConfirmSubmitDialog
+import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 
 /**
  * Post-level editor screen. Phase 2C (#145) adds a Submit button that posts the
@@ -85,8 +87,8 @@ private fun PostEditorContent(
     onIntent: (PostEditorIntent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val openSmileyPickerDescription = stringResource(R.string.editor_smiley_open_description)
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
+    var optionsSheetOpen by remember { mutableStateOf(false) }
     // Reply (#145), Quote (#146) and Edit (#147) submit through HFR's reply/edit form ; the other
     // (defensive) modes show a disabled note instead of a submit bar.
     val showSubmitBar = state.mode == PostEditorMode.Reply || state.mode == PostEditorMode.Edit
@@ -95,11 +97,17 @@ private fun PostEditorContent(
         color = MaterialTheme.colorScheme.surface,
     ) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+            // No outer scroll : the draft field is weighted so it stretches to fill every
+            // free pixel down to the bottom bar (dogfooding v108 — the column used to leave
+            // a large blank under « Afficher l'aperçu »). Long content scrolls INSIDE the
+            // field (and inside the preview pane), which is also why weight() is usable at
+            // all — it needs the bounded height an outer verticalScroll would destroy.
+            // Keyboard handling is unchanged : the bar's IME inset grows, this column
+            // shrinks by the same amount (weight absorbs), the field compresses.
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -114,23 +122,12 @@ private fun PostEditorContent(
                     onImageUrlRequested = { imageUrlDialogOpen = true },
                 )
 
-                // Phase 2F-B (#11) — quick access to the smiley picker. Lives next to the BBCode
-                // toolbar rather than inside it because smileys are point-insertions, not wrappers,
-                // and the underlying `BbcodeAction` model is wrap-only.
-                TextButton(
-                    onClick = { onIntent(PostEditorIntent.SmileyPickerOpened) },
-                    modifier = Modifier.semantics {
-                        contentDescription = openSmileyPickerDescription
-                    },
-                ) {
-                    Text(text = stringResource(R.string.editor_smiley_open))
-                }
-
                 BbcodeTextField(
                     value = state.draft,
                     onValueChange = { value -> onIntent(PostEditorIntent.ContentChanged(value)) },
                     label = stringResource(R.string.editor_field_label),
                     placeholder = stringResource(R.string.editor_field_placeholder),
+                    modifier = Modifier.weight(1f),
                 )
 
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
@@ -149,7 +146,15 @@ private fun PostEditorContent(
 
                 if (state.isPreviewVisible) {
                     HorizontalDivider()
-                    BbcodePreview(content = state.preview)
+                    // The preview shares the stretch with the field (50/50) and scrolls
+                    // internally — long rendered content must not push the bar off-screen.
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        BbcodePreview(content = state.preview)
+                    }
                 }
 
                 state.submitError?.let { error ->
@@ -163,26 +168,9 @@ private fun PostEditorContent(
                     }
                 }
 
-                if (showSubmitBar) {
-                    // HFR per-post option toggles. Defaults come from `ReplyForm.options`
-                    // (the `checked` attribute of each HTML checkbox HFR rendered for
-                    // this user / topic). The repository only adds the matching POST
-                    // field when the toggle is on — mirroring how a browser submits.
-                    // Phase 2D (#147) — Edit shares the same options surface as Reply:
-                    // both toggles live in `PostEditorState` and the matching
-                    // repository reads them at submit time, so the UI stays identical.
-                    PostEditorOptions(
-                        signatureEnabled = state.signatureEnabled,
-                        smileyDisabled = state.smileyDisabled,
-                        emailNotificationEnabled = state.emailNotificationEnabled,
-                        enabled = !state.isSubmitting && !state.isLoadingForm,
-                        onSignatureChanged = { onIntent(PostEditorIntent.ToggleSignature(it)) },
-                        onSmileyDisabledChanged = { onIntent(PostEditorIntent.ToggleSmileyDisabled(it)) },
-                        onEmailNotificationChanged = { onIntent(PostEditorIntent.ToggleEmailNotification(it)) },
-                    )
-                } else {
+                if (!showSubmitBar) {
                     // Defensive fallback for future post-level modes. Reply (#145),
-                    // Quote (#146) and Edit (#147) all go through the branch above ;
+                    // Quote (#146) and Edit (#147) submit through the bottom bar ;
                     // topic-level create/edit flows are handled by TopicFormScreen.
                     Text(
                         text = stringResource(R.string.editor_submit_disabled),
@@ -197,10 +185,19 @@ private fun PostEditorContent(
             // the defensive fallback mode keeps its disabled note inside the scroll.
             if (showSubmitBar) {
                 EditorSubmitBar(
-                    canSubmit = state.canSubmit,
-                    isSubmitting = state.isSubmitting,
-                    isLoadingForm = state.isLoadingForm,
-                    onSubmit = { onIntent(PostEditorIntent.SubmitClicked) },
+                    state = EditorSubmitState(
+                        canSubmit = state.canSubmit,
+                        isSubmitting = state.isSubmitting,
+                        isLoadingForm = state.isLoadingForm,
+                        confirmArmed = state.showSubmitConfirmation,
+                    ),
+                    actions = EditorSubmitActions(
+                        onSubmit = { onIntent(PostEditorIntent.SubmitClicked) },
+                        onConfirmSubmit = { onIntent(PostEditorIntent.SubmitConfirmed) },
+                        onDisarmConfirm = { onIntent(PostEditorIntent.SubmitConfirmationDismissed) },
+                        onOpenOptions = { optionsSheetOpen = true },
+                        onOpenSmileys = { onIntent(PostEditorIntent.SmileyPickerOpened) },
+                    ),
                 )
             }
         }
@@ -224,27 +221,67 @@ private fun PostEditorContent(
                 onInsert = { url -> onIntent(PostEditorIntent.ImageUrlInserted(url)) },
             )
         }
-        // #312 — « Confirmation avant publication ». Visibility is owned by the ViewModel, which
-        // only raises the flag once the submit passed every validation gate and the preference is on.
-        if (state.showSubmitConfirmation) {
-            ConfirmSubmitDialog(
-                onConfirm = { onIntent(PostEditorIntent.SubmitConfirmed) },
-                onDismiss = { onIntent(PostEditorIntent.SubmitConfirmationDismissed) },
-            )
+        // HFR per-post option toggles, moved behind the bottom bar's « Options » trigger.
+        // Defaults come from `ReplyForm.options` (the `checked` attribute of each HTML
+        // checkbox HFR rendered for this user / topic) ; the repository only adds the
+        // matching POST field when the toggle is on — mirroring how a browser submits.
+        // Phase 2D (#147) — Edit shares the same options surface as Reply.
+        if (optionsSheetOpen) {
+            EditorOptionsSheet(onDismiss = { optionsSheetOpen = false }) {
+                PostEditorOptions(
+                    signatureEnabled = state.signatureEnabled,
+                    smileyDisabled = state.smileyDisabled,
+                    emailNotificationEnabled = state.emailNotificationEnabled,
+                    enabled = !state.isSubmitting && !state.isLoadingForm,
+                    onSignatureChanged = { onIntent(PostEditorIntent.ToggleSignature(it)) },
+                    onSmileyDisabledChanged = { onIntent(PostEditorIntent.ToggleSmileyDisabled(it)) },
+                    onEmailNotificationChanged = { onIntent(PostEditorIntent.ToggleEmailNotification(it)) },
+                )
+            }
         }
     }
 }
 
 /**
- * Submit action pinned to the bottom of an editor screen, lifted above the IME so the user never has
- * to dismiss the keyboard to reach « Envoyer ». Shared by [PostEditorContent] and `TopicFormContent`.
+ * Display state of [EditorSubmitBar]. [confirmArmed] is the « confirmation avant
+ * publication » flag (#312) raised by the ViewModel once the submit passed every gate and
+ * the preference is on : instead of the old modal dialog, the submit button arms itself
+ * (« Confirmer ? », tertiary colors) and the SECOND tap performs the real submit — less
+ * intrusive, keyboard stays up. Bundled (with [EditorSubmitActions]) to stay under the
+ * detekt parameter-count threshold.
+ */
+internal data class EditorSubmitState(
+    val canSubmit: Boolean,
+    val isSubmitting: Boolean,
+    val isLoadingForm: Boolean,
+    val confirmArmed: Boolean,
+)
+
+/**
+ * Callbacks of [EditorSubmitBar]. [onOpenSmileys] is nullable : surfaces without a smiley
+ * picker (the MP reply editor, for now) simply don't render the button.
+ */
+internal data class EditorSubmitActions(
+    val onSubmit: () -> Unit,
+    val onConfirmSubmit: () -> Unit,
+    val onDisarmConfirm: () -> Unit,
+    val onOpenOptions: () -> Unit,
+    val onOpenSmileys: (() -> Unit)? = null,
+)
+
+/**
+ * Bottom action bar of an editor screen, pinned above the IME so the user never has to
+ * dismiss the keyboard to reach « Envoyer ». Shared by [PostEditorContent] and
+ * `TopicFormContent`. Besides submit, it now carries the « Options » trigger (per-post
+ * toggles moved into [EditorOptionsSheet]) and the « Smileys » trigger — reclaiming the
+ * vertical space both used to take around the draft field (dogfooding feedback). The
+ * armed-confirmation behaviour (#312 v2, countdown drain included) lives in the shared
+ * [ArmedSubmitButton].
  */
 @Composable
 internal fun EditorSubmitBar(
-    canSubmit: Boolean,
-    isSubmitting: Boolean,
-    isLoadingForm: Boolean,
-    onSubmit: () -> Unit,
+    state: EditorSubmitState,
+    actions: EditorSubmitActions,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -266,26 +303,49 @@ internal fun EditorSubmitBar(
                             .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
                     )
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (isLoadingForm) {
+                // Tonal containers for the secondary triggers, filled for « Envoyer » — the
+                // canonical M3 emphasis pair (user choice over outlined / bare text). The
+                // expressive press-morphing `shapes` overload does NOT exist on material3
+                // 1.4.0 (no ButtonShapes in the artifact, verified at the bytecode) — revisit
+                // when the BOM bumps material3.
+                // While the confirmation is armed the secondary triggers step aside : they
+                // are not actionable mid-confirmation anyway, and the freed width guarantees
+                // the armed label never wraps (the tonal pills ate the Row slack and
+                // line-broke « Confirmer ? » — dogfooding v108).
+                if (!state.confirmArmed) {
+                    FilledTonalButton(onClick = actions.onOpenOptions) {
+                        Text(text = stringResource(R.string.editor_actions_options))
+                    }
+                    actions.onOpenSmileys?.let { openSmileys ->
+                        Spacer(modifier = Modifier.width(8.dp))
+                        FilledTonalButton(onClick = openSmileys) {
+                            Text(text = stringResource(R.string.editor_smiley_open))
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                if (state.isLoadingForm) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(12.dp))
                 }
-                Button(
-                    enabled = canSubmit,
-                    onClick = onSubmit,
-                ) {
-                    if (isSubmitting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-                    } else {
-                        Text(text = stringResource(R.string.editor_submit))
-                    }
-                }
+                ArmedSubmitButton(
+                    state = ArmedSubmitState(
+                        armed = state.confirmArmed,
+                        enabled = state.canSubmit,
+                        showProgress = state.isSubmitting,
+                    ),
+                    labels = ArmedSubmitLabels(
+                        submit = stringResource(R.string.editor_submit),
+                        confirm = stringResource(R.string.editor_submit_confirm),
+                    ),
+                    actions = ArmedSubmitActions(
+                        onSubmit = actions.onSubmit,
+                        onConfirmSubmit = actions.onConfirmSubmit,
+                        onDisarm = actions.onDisarmConfirm,
+                    ),
+                )
             }
         }
     }
