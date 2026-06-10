@@ -16,6 +16,33 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v104 — `0.8.0` — 2026-06-10
+
+**Statut** : `local` (entrée écrite avant le dispatch ; passer à `open` + F-Droid `.beta` après le ship)
+**Commit** : merge de promotion `dev → main` (numéro v104 anticipé : registre de tags à 103 au moment du bump)
+**Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) → **track open testing** + tag pour F-Droid beta
+
+**Troisième batch** : night-run 2026-06-10 (8 items, dont 7 features/fixes code) + lot dogfooding même journée, dogfoodé sur le canal dev (v102 → v103).
+
+### Added
+- **Menu contextuel de post** (#362) — icône « ⋯ » dans la barre du post : pseudo + avatar, numéro du post (déplacé ici), « Copier le lien de ce post », « Ouvrir dans le navigateur », date d'édition, nombre de citations sur la page ; « Alerter (à venir) » grisé.
+- **Horodatage du dernier message** (#325) — dans les listes catégorie, recherche et drapeaux ; sur les drapeaux il est aligné à droite et jamais tronqué (le compteur de réponses, redondant avec p.X/Y, disparaît).
+- **Vider le cache des images** (#314) — Réglages › carte Maintenance (mémoire + disque Coil).
+- **Confirmation avant publication** (#312) — toggle Réglages (désactivé par défaut) ; couvre réponse, création de topic, édition de post et réponse MP, avec wording dédié MP.
+- **Panne HFR vs coupure réseau** (#324) — les écrans de lecture distinguent « HFR est en panne » (5xx serveur) de « pas de connexion » ; la session expirée garde son bouton de reconnexion.
+
+### Fixed
+- **Résultats de recherche** (#277) — ouvrir un résultat atterrit sur la bonne page et le bon post (résolution par redirection HFR côté serveur ; budget réseau 3 s appliqué par OkHttp avec repli page 1 — durci post-review Codex de promotion).
+- **Position de lecture par page** (#307) — revenir sur une page déjà visitée d'un sujet (swipe, pager, retour) reprend la position quittée au lieu du haut de page (cache session borné, priorité aux atterrissages deep-link/post-publication).
+- **En-tête Recherche** réaligné sur le gabarit des autres onglets (titre et avatar n'étaient pas aux mêmes marges).
+
+### Changed
+- **`versionName` 0.7.0 → 0.8.0**.
+- **En-tête Drapeaux** : icône engrenage à la place du libellé « Affichage » (libellé conservé pour TalkBack).
+- ADR-013 « Lecture MP : partage topic↔MP, cache 3 étages, prefetch borné » ajoutée (statut Proposé).
+
+---
+
 ## v101 — `0.7.0` — 2026-06-09
 
 **Statut** : `open` (track open testing) + F-Droid `.beta`
