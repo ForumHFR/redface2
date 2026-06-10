@@ -20,8 +20,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -43,11 +41,14 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
+import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
+import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitLabels
+import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitState
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
-import kotlinx.coroutines.delay
 
 /**
  * Post-level editor screen. Phase 2C (#145) adds a Submit button that posts the
@@ -268,30 +269,20 @@ internal data class EditorSubmitActions(
     val onOpenSmileys: (() -> Unit)? = null,
 )
 
-/** How long the armed « Confirmer ? » state survives without a second tap (#312 v2). */
-private const val CONFIRM_DISARM_DELAY_MS = 4_000L
-
 /**
  * Bottom action bar of an editor screen, pinned above the IME so the user never has to
  * dismiss the keyboard to reach « Envoyer ». Shared by [PostEditorContent] and
  * `TopicFormContent`. Besides submit, it now carries the « Options » trigger (per-post
  * toggles moved into [EditorOptionsSheet]) and the « Smileys » trigger — reclaiming the
- * vertical space both used to take around the draft field (dogfooding feedback).
+ * vertical space both used to take around the draft field (dogfooding feedback). The
+ * armed-confirmation behaviour (#312 v2, countdown drain included) lives in the shared
+ * [ArmedSubmitButton].
  */
 @Composable
 internal fun EditorSubmitBar(
     state: EditorSubmitState,
     actions: EditorSubmitActions,
 ) {
-    // #312 v2 — auto-disarm : an armed confirmation that is not confirmed within the
-    // delay silently falls back to the normal « Envoyer » state (same ViewModel intent
-    // as dismissing the old dialog). Keyed on the flag so any re-arm restarts the clock.
-    LaunchedEffect(state.confirmArmed) {
-        if (state.confirmArmed) {
-            delay(CONFIRM_DISARM_DELAY_MS)
-            actions.onDisarmConfirm()
-        }
-    }
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 3.dp,
@@ -339,35 +330,22 @@ internal fun EditorSubmitBar(
                     CircularProgressIndicator(modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(12.dp))
                 }
-                val armed = state.confirmArmed
-                Button(
-                    enabled = state.canSubmit,
-                    onClick = if (armed) actions.onConfirmSubmit else actions.onSubmit,
-                    colors = if (armed) {
-                        // Distinct (but not destructive) palette : the second tap is a
-                        // deliberate confirmation, not a warning.
-                        ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.tertiary,
-                            contentColor = MaterialTheme.colorScheme.onTertiary,
-                        )
-                    } else {
-                        ButtonDefaults.buttonColors()
-                    },
-                ) {
-                    if (state.isSubmitting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-                    } else {
-                        Text(
-                            text = stringResource(
-                                if (armed) R.string.editor_submit_confirm else R.string.editor_submit,
-                            ),
-                            maxLines = 1,
-                        )
-                    }
-                }
+                ArmedSubmitButton(
+                    state = ArmedSubmitState(
+                        armed = state.confirmArmed,
+                        enabled = state.canSubmit,
+                        showProgress = state.isSubmitting,
+                    ),
+                    labels = ArmedSubmitLabels(
+                        submit = stringResource(R.string.editor_submit),
+                        confirm = stringResource(R.string.editor_submit_confirm),
+                    ),
+                    actions = ArmedSubmitActions(
+                        onSubmit = actions.onSubmit,
+                        onConfirmSubmit = actions.onConfirmSubmit,
+                        onDisarm = actions.onDisarmConfirm,
+                    ),
+                )
             }
         }
     }
