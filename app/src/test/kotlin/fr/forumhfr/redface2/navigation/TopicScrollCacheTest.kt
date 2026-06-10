@@ -85,4 +85,25 @@ class TopicScrollCacheTest {
             cache.containsKey(key(0, 1, TOPIC_SCROLL_ANCHOR_CACHE_MAX + 9)),
         )
     }
+
+    @Test
+    fun `withScrollAnchor refreshes the eviction rank when an existing key is updated`() {
+        // Regression (review sev. 82): `LinkedHashMap.put` keeps an updated key at its ORIGINAL
+        // insertion rank, so a page visited first, then revisited and re-scrolled, was the first
+        // evicted — despite holding the freshest anchor. The update must move the key to the tail.
+        var cache = emptyMap<TopicScrollKey, TopicScrollAnchor>()
+            .withScrollAnchor(key(9, 99, 1), TopicScrollAnchor(index = 5, offset = 42))
+        repeat(TOPIC_SCROLL_ANCHOR_CACHE_MAX - 1) { i ->
+            cache = cache.withScrollAnchor(key(0, 1, i), TopicScrollAnchor(index = i, offset = 0))
+        }
+
+        // The cache is exactly full; updating the oldest key must re-rank it to most recent…
+        cache = cache.withScrollAnchor(key(9, 99, 1), TopicScrollAnchor(index = 50, offset = 7))
+        // …so the next insertion evicts the oldest of the filler keys, not the just-updated one.
+        cache = cache.withScrollAnchor(key(0, 1, 9999), TopicScrollAnchor(index = 1, offset = 0))
+
+        assertEquals(TOPIC_SCROLL_ANCHOR_CACHE_MAX, cache.size)
+        assertEquals(TopicScrollAnchor(index = 50, offset = 7), cache[key(9, 99, 1)])
+        assertTrue("the oldest filler entry is the one evicted", !cache.containsKey(key(0, 1, 0)))
+    }
 }
