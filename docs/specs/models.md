@@ -564,39 +564,58 @@ reply/quote MP, MultiMP et MPStorage restent dans la suite Phase 3.
 
 ## MPStorage
 
-MPStorage est une bibliothèque cross-plateforme qui utilise un **MP HFR dédié** comme backend de stockage. Les données (drapeaux MultiMP, bookmarks, préférences) sont sérialisées en JSON dans le corps de ce message privé. Cela permet la synchronisation entre appareils sans serveur tiers.
+MPStorage est une bibliothèque cross-plateforme (HFRGMTools/Wiripse, en production depuis ~2019) qui utilise un **MP HFR dédié** comme backend de stockage : sujet = hash fixe `a2bcc09b796b8c6fab77058ff8446c34`, destinataire = compte tiers `MultiMP`. Le **premier post** de ce MP contient un document JSON **partagé par tous les userscripts** (DTCloud pour les drapeaux DT, HFR4K, …). Redface 2 adopte **l'enveloppe v0.1 de facto telle quelle** (cf. exploration [#6](https://github.com/ForumHFR/redface2/issues/6)) : toute extension Redface 2 passe par de **nouvelles clés additives** dans l'entrée v0.1, jamais par un nouveau format — la compatibilité avec les userscripts existants est non négociable.
+
+Enveloppe réelle (source : `MPStorage.user.js` + doc Wiripse, confrontées le 2026-06-10) :
+
+```json
+{
+  "data": [
+    {
+      "version": "0.1",
+      "mpFlags": { "list": [ { "uri": "…", "post": 12345, "page": 3, "href": "t1980000001", "p": 2 } ] },
+      "hfr4k": { "…": "clés d'un autre outil, à préserver verbatim" }
+    }
+  ],
+  "sourceName": "DTCloud",
+  "lastUpdate": 1718064000000
+}
+```
+
+Modèles Kotlin (lecture seule, Phase 3) :
 
 ```kotlin
-// Données stockées dans le MP de stockage (format JSON)
-data class MPStorageData(
-    val multiMPFlags: Map<Int, MultiMPFlag>,  // clé = mpId
-    val bookmarks: List<Bookmark>,
-    val settings: MPStorageSettings,
+/**
+ * Document du premier post du MP storage. Parsing TOLÉRANT : seules les clés que
+ * Redface 2 consomme sont projetées ; le JSON intégral est conservé dans
+ * [rawEnvelope] pour le futur read-modify-write (écriture = full overwrite
+ * last-write-wins, les clés des autres outils doivent survivre au round-trip).
+ */
+data class MpStorageDocument(
+    val sourceName: String?,                 // dernier OUTIL écrivain (pas par-outil)
+    val mpFlags: List<MpStorageFlagEntry>,   // section DTCloud, vide si absente
+    val rawEnvelope: String,                 // JSON intégral, jamais reconstruit champ à champ
 )
 
-data class MultiMPFlag(
-    // mpId est la clé du Map, pas besoin de le dupliquer
-    val lastReadDate: Instant,
-    val pinned: Boolean,
-)
-
-data class MPStorageSettings(
-    val compactFlags: Boolean = false,
-    val defaultImageHost: String = "diberie",
-)
-
-data class Bookmark(
-    val cat: Int,
-    val post: Int,              // topic ID
-    val numreponse: Int,        // post ID
-    val topicTitle: String,
-    val author: String,
-    val preview: String,
-    val createdAt: Instant,
+/**
+ * Position de REPRISE DE LECTURE d'une conversation DT (≥ 3 pseudos) — ce n'est
+ * NI un lu/non-lu (le lu/non-lu MP est le dot serveur, cf. #361), NI un pinned.
+ */
+data class MpStorageFlagEntry(
+    val threadId: Int,      // `post` côté wire
+    val page: Int,
+    val numreponse: Int?,   // `href` = "t<numreponse>" côté wire
+    val uri: String?,       // format desktop exact, relayé verbatim
 )
 ```
 
-L'app synchronise ces données avec le MP de stockage HFR et les cache localement dans Room pour des accès rapides. Cela garantit la compatibilité avec les userscripts existants qui utilisent le même mécanisme.
+Règles non négociables (exploration #6) :
+
+- **Préserver les clés inconnues** : l'écriture MPStorage est un remplacement intégral sans verrou (last-write-wins) — perdre `hfr4k` ou toute clé tierce casserait les userscripts de l'utilisateur.
+- **Jamais de reset destructif** sur contenu invalide (le piège de la bibliothèque d'origine) : un document illisible = lecture en échec explicite, pas un écrasement par le défaut.
+- **Découverte** = recherche authentifiée par sujet : `forum1.php?recherches=1&cat=prive&search=<hash>&titre=1` (vérifié live 2026-06-11, fixtures `mp_storage_search_*`). L'absence de MP storage (compte n'ayant jamais utilisé DTCloud) est le **cas nominal premier**.
+- **Lecture** = GET du formulaire d'édition du premier post (`message.php?cat=prive&post=<mpId>&numreponse=<repId>`), textarea `content_form` (contenu brut, pas le HTML rendu).
+- **Écriture** (différée, opt-in) = POST `bdd.php` `cat=prive` en read-modify-write juste avant le POST, jamais une édition par page vue.
 
 ---
 
