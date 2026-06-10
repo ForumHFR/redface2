@@ -34,6 +34,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.UserProfile
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 
 /**
  * Phase 2 finish (#208) — full profile screen.
@@ -150,10 +151,14 @@ internal fun ProfileScreen(
                         avatarUrl = state.avatarUrlHint,
                     )
                     Spacer(Modifier.height(16.dp))
-                    // Review feedback I7: the ViewModel surfaces an ErrorKind enum,
-                    // not a String — the UI maps it to the localised resource.
+                    // Review feedback I7: the ViewModel surfaces an error kind,
+                    // not a String — the UI maps it to the localised resource. #324 —
+                    // ServerDown / Network resolve to the shared :core:ui labels,
+                    // Other keeps the feature's generic message.
                     Text(
-                        text = stringResource(R.string.profile_error_load_failed),
+                        text = stringResource(
+                            mode.kind.sharedLabelResOrNull() ?: R.string.profile_error_load_failed,
+                        ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error,
                     )

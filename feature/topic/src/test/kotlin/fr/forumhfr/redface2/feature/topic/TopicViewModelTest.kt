@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.feature.topic
 
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -17,6 +19,7 @@ import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.Topic
 import java.io.IOException
+import java.net.UnknownHostException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -190,6 +193,42 @@ class TopicViewModelTest {
 
         val mode = assertMode<TopicUiState.Mode.Error>(viewModel.state.value)
         assertEquals("network", mode.message)
+    }
+
+    @Test
+    fun `flow failing with an HFR 5xx exposes the ServerDown error kind`() = runTest {
+        // #324 — an HFR outage (HfrServerException 5xx) must be distinguishable from a
+        // local network cut by the screen, via the type-derived kind on the Error mode.
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { throw HfrServerException(code = 500, url = "https://forum.hardware.fr/forum2.php") },
+            ),
+        )
+
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        val mode = assertMode<TopicUiState.Mode.Error>(viewModel.state.value)
+        assertEquals(HfrErrorKind.ServerDown, mode.kind)
+    }
+
+    @Test
+    fun `flow failing with a transport IOException exposes the Network error kind`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { throw UnknownHostException("forum.hardware.fr") }),
+        )
+
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        val mode = assertMode<TopicUiState.Mode.Error>(viewModel.state.value)
+        assertEquals(HfrErrorKind.Network, mode.kind)
     }
 
     @Test
@@ -1271,4 +1310,9 @@ private class FakeUserPreferencesRepository(
     override fun observeTopicTopBarAutoHide(): Flow<Boolean> = MutableStateFlow(topicTopBarAutoHide)
 
     override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
+
+    // #312 — confirm-before-posting is irrelevant to TopicViewModel; stubbed at its default.
+    override fun observeConfirmBeforePosting(): Flow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun setConfirmBeforePosting(enabled: Boolean) = Unit
 }

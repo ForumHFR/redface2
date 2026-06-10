@@ -29,6 +29,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.UserProfile
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import kotlinx.coroutines.launch
 
 /**
@@ -166,8 +167,11 @@ private fun ProfilePreviewContent(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     // Review feedback I7: localised via stringResource ; the ViewModel
-                    // surfaces an ErrorKind enum, not a String.
-                    text = stringResource(R.string.profile_error_load_failed),
+                    // surfaces an error kind, not a String. #324 — ServerDown / Network
+                    // resolve to the shared :core:ui labels, Other keeps the generic one.
+                    text = stringResource(
+                        mode.kind.sharedLabelResOrNull() ?: R.string.profile_error_load_failed,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )

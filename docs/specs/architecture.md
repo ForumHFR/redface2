@@ -98,11 +98,14 @@ graph TB
     CDOM --> CM[":core:model"]
     CEXT --> CM
     CU --> CM
+    CU --> CDOM
 
     CDATA --> CDOM
     CDATA --> CN[":core:network"]
     CDATA --> CP[":core:parser"]
     CDATA --> CD[":core:database"]
+
+    CN --> CDOM
 
     CP --> CM
     CD --> CM
@@ -126,10 +129,10 @@ graph TB
 | `:core:model` | Modèles domaine purs (`Topic`, `Post`, `PostContent`, `Category`, `Flag`, `MP`). Aucune dépendance Android. | rien |
 | `:core:domain` | Interfaces de repositories (`TopicRepository`, `FlagRepository`, `AuthRepository`...) et règles métier partagées. Aucune dépendance framework. | `:core:model` |
 | `:core:data` | Implémentations des repositories. Orchestre réseau (HTML + REST JSON), parser HTML et cache. Porte les DTO `@Serializable` REST et leurs mappers vers `:core:model`. Fournit les bindings Hilt. | `:core:domain`, `:core:network`, `:core:parser`, `:core:database` |
-| `:core:network` | Deux clients : `HfrClient` (HTML brut sur `forum*.php`, login, MPs, mutations) et `HfrApiClient` (JSON REST sur `/webservices/rest_api.php`, browsing). Encapsulent OkHttp. Aucun type domaine exposé — du `String` brut ou des erreurs typées. Le helper de rewrite HATEOAS `HfrApiClient.rewriteHateoasHref(href)` vit ici. Cf. [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride). | rien |
+| `:core:network` | Deux clients : `HfrClient` (HTML brut sur `forum*.php`, login, MPs, mutations) et `HfrApiClient` (JSON REST sur `/webservices/rest_api.php`, browsing). Encapsulent OkHttp. Aucun type domaine exposé — du `String` brut ou des erreurs typées. Le helper de rewrite HATEOAS `HfrApiClient.rewriteHateoasHref(href)` vit ici. Cf. [ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride). | `:core:domain` (erreurs typées levées par les clients : `SessionExpiredException`, `HfrServerException` #324) |
 | `:core:parser` | `HfrParser` : transforme le HTML HFR et, à partir de l'éditeur Phase 2, le BBCode HFR en modèles domaine, dont l'AST `PostContent`. Pas de parser JSON REST ici — les DTO REST vivent dans `:core:data`. | `:core:model` |
 | `:core:database` | Room DB, DAOs, entities, mappers entity↔model. Cache locale + cache MPStorage. | `:core:model` |
-| `:core:ui` | Thème Material 3 (`theme/`) et `PostRenderer` (`post/`, `PostContent` → Compose). D'autres sous-packages (`components/`, `adaptive/`, `semantics/`, `util/`, `extensions/`) sont prévus mais n'apparaîtront qu'au fur et à mesure de l'arrivée des features qui les justifient — pas de module vide en avance. Seul module autorisé à instancier `ColorScheme`, `Typography`, `Shapes`. | `:core:model` |
+| `:core:ui` | Thème Material 3 (`theme/`), `PostRenderer` (`post/`, `PostContent` → Compose) et libellés d'erreur partagés (`error/`, mapping `HfrErrorKind` → string resource, #324). D'autres sous-packages (`components/`, `adaptive/`, `semantics/`, `util/`, `extensions/`) sont prévus mais n'apparaîtront qu'au fur et à mesure de l'arrivée des features qui les justifient — pas de module vide en avance. Seul module autorisé à instancier `ColorScheme`, `Typography`, `Shapes`. | `:core:model`, `:core:domain` (#324 : résolution des libellés partagés depuis `HfrErrorKind`) |
 | `:core:extension` | Interfaces d'extension : `PostDecorator`, `TopicToolbarContributor`, `EditorToolbarContributor`. | `:core:model` |
 
 ### Modules feature (base)
@@ -378,6 +381,8 @@ class TopicViewModel @Inject constructor(
 | MultiMP flags | Room, jamais expire (donnée locale) | Permanent |
 | Préférences | DataStore | Permanent |
 
+> **Proposition en cours — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (statut Proposé, non acté)** : politique de cache des conversations MP à trois étages — position de lecture locale par conversation, cache RAM de session, cache Room du contenu en opt-in explicite (défaut OFF, purge au logout). Le tableau ci-dessus sera mis à jour si l'ADR est acceptée ; d'ici là, les MP restent sans cache (état #316/#298).
+
 ### Sémantique fresh / stale
 
 `observeTopicPage(cat, post, page)` :
@@ -424,6 +429,8 @@ Implémentation Phase 1D PR 4 (#108) :
 Les requêtes de prefetch ne doivent **jamais** inclure les cookies de session — sinon HFR marque silencieusement les topics comme lus. Implémentation avec deux instances `OkHttpClient` (`@AuthenticatedClient` / `@AnonymousClient`) et test Konsist d'enforcement : voir [protocol-hfr.md § Règle critique prefetch non-authentifié]({{ site.baseurl }}/specs/protocol-hfr#règle-critique--prefetch-non-authentifié).
 
 Côté cache disque, l'entrée est tagguée `authMode = ANONYMOUS` et **ne remplace pas** une row existante taguée `AUTHENTICATED` (cf. § Stratégie de cache).
+
+> **Proposition en cours — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (statut Proposé, non acté)** : une exception **bornée aux MP** est proposée — prefetch authentifié limité aux pages de la conversation `cat=prive` actuellement ouverte (l'état lu/non-lu serveur est binaire par conversation et déjà consommé à l'ouverture, vérifié live dans [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)) ; prefetch depuis la liste interdit. La règle générale ci-dessus reste en vigueur partout ailleurs.
 
 ---
 

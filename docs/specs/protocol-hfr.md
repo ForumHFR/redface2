@@ -402,7 +402,7 @@ Le `numreponse` d'un post est unique **au sein d'une catégorie** (`cat=X`). Deu
 
 - **Deep linking** : toujours inclure `cat` ET `numreponse` (optionnellement `post` pour la page). Un deep link qui ne fournit qu'un `numreponse` est ambigu.
 
-- **Recherche** : les résultats titre (`titre=1`) renvoient `(cat, topicId)` sans `numreponse` : ouvrir le topic page 1. Les résultats contenu (`titre=0`) et certains résultats mixtes (`titre=3`) peuvent ajouter sous le titre un lien `forum2.php?...page=N&numreponse=M` avec une citation « Dernier message correspondant » : dans ce cas, naviguer vers `(cat, topicId, page, numreponse)`. Ne jamais inventer un `numreponse` quand ce second lien est absent.
+- **Recherche** : les résultats titre (`titre=1`) renvoient `(cat, topicId)` sans `numreponse` : ouvrir le topic page 1. Les résultats contenu (`titre=0`) et certains résultats mixtes (`titre=3`) peuvent ajouter sous le titre un lien `forum2.php?...page=1&numreponse=M` avec une citation « Dernier message correspondant » : le `numreponse` est exploitable, mais **le `page` du href vaut toujours `1`** (vérifié 2026-06-10 sur les captures anonyme ET authentifiée : 34/34 ancres portent `page=1&p=1`) — il n'indique PAS la page réelle du post. La vraie page se résout **côté serveur** : `GET forum2.php?config=hfr.inc&cat={cat}&post={post}&page=1&numreponse={M}` répond par une redirection 301 vers la pretty URL de la bonne page, avec fragment `#t{M}` et `Location` **relatif** (le segment sous-catégorie peut être présent ou absent — ancrer le parsing sur `sujet_{post}_{page}.htm`, jamais sur la profondeur du chemin). Preuve live (2026-06-10, anonyme, #277) : `GET …cat=23&post=35421&page=1&numreponse=2786758` → `301 Location: /hfr/gsmgpspda/redface-dev-sujet_35421_3.htm#t2786758` (page 3). Implémentation : `HfrClient.resolveTopicPageUrl` + `TopicPageUrlParser`. Ne jamais inventer un `numreponse` quand ce second lien est absent. **Réserve connue (non vérifiée live)** : la sonde de résolution est anonyme (invariant drapeaux), donc la 301 pagine au défaut serveur (40 posts/page) ; pour un compte dont le réglage « posts par page » diffère de 40, la page résolue peut diverger de la page vue authentifié — l'atterrissage retombe alors sur le comportement fallback (`scrollTo` introuvable, haut de page). À requalifier si un compte à réglage non-défaut confirme la divergence (suivi : #277).
 
 ### Endpoint recherche (Phase 2G-A/B)
 
@@ -425,7 +425,7 @@ Contrat live capturé le 2026-05-22 (cf. `core/parser/src/test/resources/fixture
   4. `explicit cat` : aucune bannière, aucun pivot — listing `forum1.php` standard. Déclenché quand le request scope la recherche à une catégorie précise (`cat=<id>*hfr.inc`).
 - Ligne topic :
   - le lien principal `a.cCatTopic` pointe vers le topic (`/hfr/...-sujet_<post>_<page>.htm`) ;
-  - quand le match vient d'un message, HFR ajoute souvent un second lien `forum2.php?...page=N&numreponse=M` contenant `<div class="citation"><b>Dernier message correspondant :</b>...` ; c'est la seule source fiable pour le scroll vers le post exact ;
+  - quand le match vient d'un message, HFR ajoute souvent un second lien `forum2.php?...page=1&numreponse=M` contenant `<div class="citation"><b>Dernier message correspondant :</b>...` ; le `numreponse` de ce lien est la seule source fiable pour le scroll vers le post exact — mais **son `page` vaut toujours `1`** et ne doit pas servir à la navigation : la page réelle se résout via la redirection serveur (cf. § `numreponse` ci-dessus / `HfrClient.resolveTopicPageUrl`, #277) ;
   - les lignes de titre ou certains résultats mixtes n'ont pas ce second lien : `page`, `numreponse` et extrait restent `null`.
 - Le footer de `forum1.php` contient un `<select name="cat" onchange=...>` (le « Goto category » présent sur tous les listings) avec des valeurs entières (`<option value="10">`). **Ne pas confondre** avec le pivot recherche, dont les valeurs sont au format `<id>*hfr.inc` et qui vit uniquement dans `<div class="search">`.
 - HFR upper-case la query echo dans le HTML retourné (`<input value="KOTLIN" name="search">`). Le match SQL est insensible à la casse — on n'a pas à se soucier de la casse côté UI.
@@ -590,13 +590,15 @@ Le contrat se ramène à un **flag de booléen** côté caller : `useAuth = true
 
 Confirmé par Corran Horn sur le topic HFR Redface 2 : *« en utilisant un cookie d'un compte anonyme pour pas péter les drapeaux »*.
 
+> **Proposition en cours — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (statut Proposé, non acté)** : exception **bornée aux MP** — prefetch authentifié limité aux pages de la conversation `cat=prive` actuellement ouverte. Justification mesurée live dans [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132) : l'état lu/non-lu MP est un dot **binaire par conversation**, effacé par le GET d'ouverture (le prefetch intra-conversation n'a donc pas d'effet supplémentaire dans le cas nominal ; reste une race nouveau-message documentée et assumée dans l'ADR) ; le GET de la liste est inerte ; « marquer comme non lu » = `GET /user/nonlu.php` sans `hash_check`, granularité conversation entière ; aucune position de lecture serveur n'existe pour les MP. Cette section sera complétée (contrat `nonlu.php`) si l'ADR est acceptée.
+
 ---
 
 ## Autres edge cases documentés
 
 ### Posts édités
 
-Pattern dans le HTML des posts : `Message édité par <auteur> le DD-MM-YYYY à HH:MM:SS`. Extraire côté parser en champ `Post.editedAt: Instant?`.
+Marqueur dans le HTML des posts : un `div.edited` en fin de contenu, ex. `<div class="edited"><a …>Message cité 1 fois</a><br />Message édité par jubjub le 14-03-2016&nbsp;à&nbsp;12:09:00</div>`. Le lien « Message cité N fois » est optionnel et peut exister **sans** ligne « Message édité » (post cité jamais édité) — et inversement. Extrait côté parser (#362) en champ `Post.editedAt: Instant?` via `HfrDateParser.parseEditedAtOrNull` (regex non ancrée, le préfixe citation est toléré ; null si pas de marqueur d'édition). Le `div.edited` reste par ailleurs retiré du contenu rendu (`PostContentParser`).
 
 ### Posts supprimés / modérés
 

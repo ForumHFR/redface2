@@ -3,12 +3,14 @@ package fr.forumhfr.redface2.core.data.search
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.search.SearchRepository
 import fr.forumhfr.redface2.core.model.search.SearchCategoryScope
 import fr.forumhfr.redface2.core.model.search.SearchRequest
 import fr.forumhfr.redface2.core.model.search.SearchResultPage
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.search.SearchResultParser
+import fr.forumhfr.redface2.core.parser.search.TopicPageUrlParser
 import java.io.IOException
 import java.time.Clock
 import java.time.LocalDate
@@ -45,6 +47,11 @@ class DefaultSearchRepository @Inject constructor(
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : SearchRepository {
 
+    // ThrowsCount: the three rethrow branches are the same redaction contract applied per
+    // exception TYPE (#324 — SessionExpired / HfrServer / generic IOException); folding them
+    // into one branch would either lose the type the downstream classifier needs or leak the
+    // query-bearing URL. Suppressed locally rather than relaxing the project rule.
+    @Suppress("ThrowsCount")
     override suspend fun search(request: SearchRequest): SearchResultPage {
         val catId = (request.category as? SearchCategoryScope.Category)?.id
         diagnostics.record(
@@ -78,8 +85,16 @@ class DefaultSearchRepository @Inject constructor(
                 // generic branch too if we let it through) ; its message embeds the final
                 // URL via "final URL was <url>" — which carries `search=<query>` — and the
                 // generic `substringBefore(" for ")` strip wouldn't catch this prefix.
-                // Handle it explicitly so neither variant leaks the query.
-                throw IOException("HFR search request failed: session expired")
+                // Handle it explicitly so neither variant leaks the query. #324: re-throw
+                // the SAME type (with a redacted URL) instead of a generic IOException so
+                // the shared error classifier downstream still sees the session expiry.
+                throw SessionExpiredException(REDACTED_URL)
+            } catch (error: HfrServerException) {
+                // #324 — keep the TYPE and status code (the ViewModel classifies a 5xx as
+                // « HFR est en panne », not as a network cut) while rebuilding the message
+                // so the URL — which carries `search=<query>` — never leaks, matching the
+                // redaction contract of the sibling branches.
+                throw HfrServerException(error.code, REDACTED_URL)
             } catch (error: IOException) {
                 throw IOException("HFR search request failed: ${error.message?.substringBefore(" for ")}")
             }
@@ -92,7 +107,37 @@ class DefaultSearchRepository @Inject constructor(
         }
     }
 
+    /**
+     * Issue #277 — page resolution through HFR's server-side redirect. The HfrClient
+     * already degrades network failures to `null` ; this layer adds the Location →
+     * page extraction (also `null`-degrading). Wrapped in `withContext(ioDispatcher)`
+     * per the project rule (`feedback_repos_must_wrap_io`) even though the regex pass
+     * is cheap — every repo path that reaches HfrClient hops to IO, no exception.
+     *
+     * Diagnostics never need redaction here : unlike [search], the probe URL carries
+     * no user text — only the `(cat, post, numreponse)` ids.
+     */
+    override suspend fun resolveSearchResultPage(cat: Int, post: Int, numreponse: Int): Int? =
+        withContext(ioDispatcher) {
+            val location = hfrClient.resolveTopicPageUrl(cat = cat, post = post, numreponse = numreponse)
+            val page = location?.let { TopicPageUrlParser.parseTopicPageFromUrl(url = it, post = post) }
+            diagnostics.record(
+                DiagnosticsLog.Level.INFO,
+                LOG_TAG,
+                "resolve result page cat=$cat post=$post numreponse=$numreponse -> " +
+                    "page=$page (location=${if (location != null) "present" else "absent"})",
+            )
+            page
+        }
+
     private companion object {
         private const val LOG_TAG = "SearchRepository"
+
+        /**
+         * Placeholder substituted for the search URL when re-throwing typed exceptions
+         * (#324) : the original URL embeds `search=<query>` and must never survive into a
+         * message that can land in a diagnostics screenshot.
+         */
+        private const val REDACTED_URL = "<redacted>"
     }
 }

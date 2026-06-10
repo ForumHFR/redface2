@@ -1,6 +1,9 @@
 package fr.forumhfr.redface2.feature.search
 
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.search.SearchRepository
 import fr.forumhfr.redface2.core.model.search.SearchCategoryScope
 import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
@@ -107,9 +110,35 @@ class SearchViewModelTest {
         vm.submit(SearchIntent.Submit)
 
         val final = vm.state.value
-        assertEquals(SearchErrorKind.Network, final.errorMessage)
+        assertEquals(HfrErrorKind.Network, final.errorMessage)
         assertEquals("kotlin", final.query)
         assertFalse(final.isLoading)
+    }
+
+    @Test
+    fun `repository HfrServerException sets the ServerDown error kind`() = runTest {
+        // #324 — DefaultSearchRepository lets the typed exception traverse (URL redacted);
+        // a 5xx must surface as « HFR est en panne », not as a network problem.
+        coEvery { repo.search(any()) } throws HfrServerException(code = 500, url = "<redacted>")
+        val vm = SearchViewModel(repo)
+        vm.submit(SearchIntent.QueryChanged("kotlin"))
+        vm.submit(SearchIntent.Submit)
+
+        val final = vm.state.value
+        assertEquals(HfrErrorKind.ServerDown, final.errorMessage)
+        assertFalse(final.isLoading)
+    }
+
+    @Test
+    fun `repository SessionExpiredException sets the Other error kind not Network`() = runTest {
+        // #324 — search has no dedicated session treatment; an expired session must not be
+        // presented as a connectivity cut (classifyHfrError → Other).
+        coEvery { repo.search(any()) } throws SessionExpiredException("<redacted>")
+        val vm = SearchViewModel(repo)
+        vm.submit(SearchIntent.QueryChanged("kotlin"))
+        vm.submit(SearchIntent.Submit)
+
+        assertEquals(HfrErrorKind.Other, vm.state.value.errorMessage)
     }
 
     @Test
@@ -123,7 +152,7 @@ class SearchViewModelTest {
         val vm = SearchViewModel(repo)
         vm.submit(SearchIntent.QueryChanged("kotlin"))
         vm.submit(SearchIntent.Submit) // first attempt throws
-        assertEquals(SearchErrorKind.Network, vm.state.value.errorMessage)
+        assertEquals(HfrErrorKind.Network, vm.state.value.errorMessage)
 
         // User types a NEW value in the field but does NOT submit — Retry must
         // still re-use the previously submitted query, not the current field value.
@@ -396,10 +425,142 @@ class SearchViewModelTest {
         assertEquals(emptyList<SearchTopicResult>(), vm.state.value.results)
     }
 
+    // #277 — opening a result resolves the real page through the repository before
+    // emitting the navigation effect. The search href always carries page=1, so the
+    // resolved page is the only trustworthy navigation input for content matches.
+
+    @Test
+    fun `OpenResult with a matched numreponse emits the resolved page`() = runTest {
+        coEvery { repo.resolveSearchResultPage(cat = 23, post = 35421, numreponse = 2786758) } returns 3
+        val vm = SearchViewModel(repo)
+        val result = fakeTopic(topicId = 35421, title = "Redface dev", cat = 23, page = 1, numreponse = 2786758)
+
+        vm.effects.test {
+            vm.submit(SearchIntent.OpenResult(result))
+            assertEquals(
+                SearchEffect.NavigateToTopic(cat = 23, post = 35421, page = 3, scrollTo = 2786758),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `OpenResult falls back to the href page when resolution returns null`() = runTest {
+        coEvery { repo.resolveSearchResultPage(any(), any(), any()) } returns null
+        val vm = SearchViewModel(repo)
+        val result = fakeTopic(topicId = 35421, title = "Redface dev", cat = 23, page = 2, numreponse = 2786758)
+
+        vm.effects.test {
+            vm.submit(SearchIntent.OpenResult(result))
+            assertEquals(
+                SearchEffect.NavigateToTopic(cat = 23, post = 35421, page = 2, scrollTo = 2786758),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `OpenResult falls back to page 1 when resolution throws and the href has no page`() = runTest {
+        coEvery { repo.resolveSearchResultPage(any(), any(), any()) } throws IOException("offline")
+        val vm = SearchViewModel(repo)
+        val result = fakeTopic(topicId = 35421, title = "Redface dev", cat = 23, page = null, numreponse = 2786758)
+
+        vm.effects.test {
+            vm.submit(SearchIntent.OpenResult(result))
+            // Network failure must degrade to the pre-#277 behaviour, never block navigation.
+            assertEquals(
+                SearchEffect.NavigateToTopic(cat = 23, post = 35421, page = 1, scrollTo = 2786758),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `OpenResult on a title-only row emits page 1 without calling the repository`() = runTest {
+        val vm = SearchViewModel(repo)
+        val result = fakeTopic(topicId = 777, title = "Title-only hit", cat = 10)
+
+        vm.effects.test {
+            vm.submit(SearchIntent.OpenResult(result))
+            assertEquals(
+                SearchEffect.NavigateToTopic(cat = 10, post = 777, page = 1, scrollTo = null),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+        coVerify(exactly = 0) { repo.resolveSearchResultPage(any(), any(), any()) }
+    }
+
+    @Test
+    fun `OpenResult ignores further taps while a resolution is in flight`() = runTest {
+        val gate = CompletableDeferred<Int?>()
+        coEvery { repo.resolveSearchResultPage(any(), any(), any()) } coAnswers { gate.await() }
+        val vm = SearchViewModel(repo)
+        val result = fakeTopic(topicId = 35421, title = "Redface dev", cat = 23, page = 1, numreponse = 2786758)
+
+        vm.effects.test {
+            vm.submit(SearchIntent.OpenResult(result))
+            // Double (and triple) tap while the first resolution hangs : ignored, no queue.
+            vm.submit(SearchIntent.OpenResult(result))
+            vm.submit(SearchIntent.OpenResult(result))
+            gate.complete(3)
+
+            assertEquals(
+                SearchEffect.NavigateToTopic(cat = 23, post = 35421, page = 3, scrollTo = 2786758),
+                awaitItem(),
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        coVerify(exactly = 1) { repo.resolveSearchResultPage(any(), any(), any()) }
+    }
+
+    @Test
+    fun `OpenResult falls back to the href page when resolution exceeds the probe timeout`() = runTest {
+        // A resolution that never completes : the 3 s probe deadline (virtual time)
+        // must release the guard and degrade to the pre-#277 href navigation.
+        coEvery { repo.resolveSearchResultPage(any(), any(), any()) } coAnswers {
+            CompletableDeferred<Int?>().await()
+        }
+        val vm = SearchViewModel(repo)
+        val result = fakeTopic(topicId = 35421, title = "Redface dev", cat = 23, page = 1, numreponse = 2786758)
+
+        vm.effects.test {
+            vm.submit(SearchIntent.OpenResult(result))
+            assertEquals(
+                SearchEffect.NavigateToTopic(cat = 23, post = 35421, page = 1, scrollTo = 2786758),
+                awaitItem(),
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `OpenResult guard resets after a completed resolution`() = runTest {
+        coEvery { repo.resolveSearchResultPage(any(), any(), any()) } returns 3
+        val vm = SearchViewModel(repo)
+        val result = fakeTopic(topicId = 35421, title = "Redface dev", cat = 23, page = 1, numreponse = 2786758)
+
+        vm.effects.test {
+            vm.submit(SearchIntent.OpenResult(result))
+            awaitItem()
+            // The first resolution completed — a second tap must go through again.
+            vm.submit(SearchIntent.OpenResult(result))
+            awaitItem()
+            cancelAndIgnoreRemainingEvents()
+        }
+        coVerify(exactly = 2) { repo.resolveSearchResultPage(any(), any(), any()) }
+    }
+
     private fun fakeTopic(
         topicId: Int,
         title: String,
         cat: Int = 10,
+        page: Int? = null,
+        numreponse: Int? = null,
     ): SearchTopicResult = SearchTopicResult(
         cat = cat,
         topicId = topicId,
@@ -413,8 +574,8 @@ class SearchViewModelTest {
         categorySlug = "x",
         subcategorySlug = "y",
         isLocked = false,
-        page = null,
-        numreponse = null,
+        page = page,
+        numreponse = numreponse,
         matchedExcerpt = null,
     )
 

@@ -371,6 +371,27 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeConfirmBeforePosting defaults to false then persists true and false`() = runTest(dispatcher) {
+        // #312 — publishing stays one-tap by default; the guard is strictly opt-in.
+        repository.observeConfirmBeforePosting().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setConfirmBeforePosting(true)
+        repository.observeConfirmBeforePosting().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setConfirmBeforePosting(false)
+        repository.observeConfirmBeforePosting().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `saving disabled proxy removes optional fields from effective config`() = runTest(dispatcher) {
         repository.saveProxyConfig(
             ProxyConfig(

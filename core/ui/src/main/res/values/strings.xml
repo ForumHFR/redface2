@@ -33,6 +33,13 @@
     <string name="bbcode_color_grey">Gris</string>
     <string name="bbcode_preview_empty">La prévisualisation s\'affiche ici dès que vous saisissez du texte.</string>
 
+    <!-- #312 — confirmation avant publication, partagée par les trois éditeurs (réponse/édition,
+         sujet, message privé) via ConfirmSubmitDialog. -->
+    <string name="confirm_submit_title">Publier ce message ?</string>
+    <string name="confirm_submit_body">Votre message va être envoyé sur le forum.</string>
+    <string name="confirm_submit_action">Publier</string>
+    <string name="confirm_submit_cancel">Annuler</string>
+
     <!-- #198 Menu compte global — shared by every main screen via RedfaceAccountMenu. -->
     <string name="account_menu_status_loading">Compte en cours de vérification…</string>
     <string name="account_menu_status_anonymous">Anonyme</string>
@@ -54,4 +61,12 @@
          instead of leaking the raw image / placeholder. #207 round-3 closes the a11y gap when the
          avatar is rendered as a standalone placeholder (no SubcomposeAsyncImage parent). -->
     <string name="avatar_content_description">Avatar de %1$s</string>
+
+    <!-- #324 — panne HFR (5xx) vs coupure réseau : libellés partagés par tous les écrans de
+         lecture (topic, forum/catégories, drapeaux, recherche, MP, profil). Résolus depuis
+         `core.domain.error.HfrErrorKind` via `error/HfrErrorLabels.sharedLabelResOrNull()`
+         (ServerDown / Network) ; le cas Other garde le message générique propre à chaque
+         écran. -->
+    <string name="error_hfr_server_down">HFR est en panne (erreur serveur)</string>
+    <string name="error_no_connection">Pas de connexion</string>
 </resources>

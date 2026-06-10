@@ -206,7 +206,6 @@ internal fun SettingsContent(
             FutureSettingsCard(
                 items = listOf(
                     R.string.settings_future_data_saver to issueTag(310),
-                    R.string.settings_future_clear_image_cache to issueTag(314),
                 ),
             )
 
@@ -248,9 +247,12 @@ internal fun SettingsContent(
             )
 
             SettingsSectionHeader(stringResource(R.string.settings_section_editing))
+            EditingPreferencesCard(
+                state = state,
+                onIntent = onIntent,
+            )
             FutureSettingsCard(
                 items = listOf(
-                    R.string.settings_future_submit_confirm to issueTag(312),
                     R.string.settings_future_signature to stringResource(R.string.settings_phase_planned),
                 ),
             )
@@ -303,6 +305,12 @@ internal fun SettingsContent(
         ClearTopicCacheConfirmDialog(
             onConfirm = { onIntent(SettingsIntent.ClearTopicCacheConfirmed) },
             onDismiss = { onIntent(SettingsIntent.ClearTopicCacheDismissed) },
+        )
+    }
+    if (state.showClearImageCacheConfirm) {
+        ClearImageCacheConfirmDialog(
+            onConfirm = { onIntent(SettingsIntent.ClearImageCacheConfirmed) },
+            onDismiss = { onIntent(SettingsIntent.ClearImageCacheDismissed) },
         )
     }
 }
@@ -537,6 +545,41 @@ private fun TopicPreferencesCard(
 }
 
 /**
+ * Publishing preferences (#312): the « Confirmation avant publication » toggle. When on, every
+ * publish action (topic reply / post edit, new topic / first-post edit, private-message reply)
+ * first shows a confirmation dialog. Persisted via DataStore and observed live by the editor
+ * ViewModels, so a flip here applies without reopening an editor.
+ */
+@Composable
+private fun EditingPreferencesCard(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_editing_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_confirm_before_posting_title),
+                description = stringResource(R.string.settings_confirm_before_posting_description),
+                checked = state.confirmBeforePosting,
+                enabled = state.canToggleConfirmBeforePosting,
+                onCheckedChange = { onIntent(SettingsIntent.ConfirmBeforePostingChanged(it)) },
+            )
+            if (state.confirmBeforePostingError) {
+                PreferencePersistError(R.string.settings_confirm_before_posting_persist_failed)
+            }
+        }
+    }
+}
+
+/**
  * One label + description + Material 3 [Switch] row. Generic so the two Drapeaux preference rows
  * share the layout; the persist-failure message is rendered by the caller via
  * [PreferencePersistError] so this stays a layout-only composable.
@@ -644,6 +687,50 @@ private fun MaintenanceCard(
                 Text(stringResource(R.string.settings_clear_topic_cache_button))
             }
 
+            // #314 — « Vider le cache des images », same confirm → progress → inline-result
+            // flow as the topic clear above, on its own dedicated state fields.
+            Text(
+                text = stringResource(R.string.settings_clear_image_cache_intro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (state.isClearingImageCache) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Text(
+                        text = stringResource(R.string.settings_clear_image_cache_in_progress),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            when (state.imageCacheClearResult) {
+                ImageCacheClearResult.Success -> Text(
+                    text = stringResource(R.string.settings_clear_image_cache_success),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                ImageCacheClearResult.Failure -> Text(
+                    text = stringResource(R.string.settings_clear_image_cache_failure),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                null -> Unit
+            }
+            OutlinedButton(
+                enabled = state.canClearImageCache,
+                onClick = { onIntent(SettingsIntent.ClearImageCacheClicked) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.settings_clear_image_cache_button))
+            }
+
             IgnoreTopicCacheRow(
                 state = state,
                 onIntent = onIntent,
@@ -709,6 +796,28 @@ private fun ClearTopicCacheConfirmDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.settings_clear_topic_cache_confirm_cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun ClearImageCacheConfirmDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_clear_image_cache_confirm_title)) },
+        text = { Text(stringResource(R.string.settings_clear_image_cache_confirm_body)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.settings_clear_image_cache_confirm_action))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_clear_image_cache_confirm_cancel))
             }
         },
     )

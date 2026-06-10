@@ -32,7 +32,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.Category
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 
 /**
  * Forum home tab. Lists the 19 public HFR categories from the REST API. Tapping a row
@@ -89,6 +91,7 @@ fun ForumScreen(
                     ForumUiState.Loading -> ForumLoading()
                     is ForumUiState.Error -> ForumError(
                         message = current.message,
+                        kind = current.kind,
                         onRetry = viewModel::refresh,
                     )
 
@@ -118,9 +121,13 @@ private fun ForumLoading(modifier: Modifier = Modifier) {
 @Composable
 private fun ForumError(
     message: String?,
+    kind: HfrErrorKind,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // #324 — ServerDown / Network swap the raw exception message for the shared
+    // :core:ui label; Other keeps the pre-existing rendering (raw message if any).
+    val detail = kind.sharedLabelResOrNull()?.let { stringResource(it) } ?: message
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -132,9 +139,9 @@ private fun ForumError(
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.error,
         )
-        if (!message.isNullOrBlank()) {
+        if (!detail.isNullOrBlank()) {
             Text(
-                text = message,
+                text = detail,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -45,4 +45,15 @@ data class Post(
      * profile tap available without a network round-trip.
      */
     val profileId: Int? = null,
+    /**
+     * #362 — when HFR marks the post as edited, the timestamp of the last edit,
+     * parsed from the `div.edited` trailer (`Message édité par <auteur> le
+     * DD-MM-YYYY à HH:MM:SS`). `null` when the post was never edited — including
+     * the case where `div.edited` exists but only carries the « Message cité N
+     * fois » citation link (a cited-but-never-edited post).
+     *
+     * Persisted in Room v8 (cf. `MIGRATION_7_8`) so cache hits keep the edit
+     * marker; pre-v8 rows backfill to `NULL` and recover on the next live fetch.
+     */
+    val editedAt: Instant? = null,
 )

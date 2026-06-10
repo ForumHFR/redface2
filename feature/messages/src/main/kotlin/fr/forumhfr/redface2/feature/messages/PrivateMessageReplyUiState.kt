@@ -33,6 +33,13 @@ data class PrivateMessageReplyUiState(
     val optionsHydratedFromForm: Boolean = false,
     val isSubmitting: Boolean = false,
     val submitError: PrivateMessageReplyError? = null,
+    /**
+     * #312 — `true` while the « Confirmation avant publication » dialog is shown. Only raised when
+     * the persisted preference is on AND the submit already passed every validation gate (mirrors
+     * the post editor's `showSubmitConfirmation`). Confirm / dismiss go through
+     * [PrivateMessageReplyViewModel.onSubmitConfirmed] / [PrivateMessageReplyViewModel.onSubmitConfirmationDismissed].
+     */
+    val showSubmitConfirmation: Boolean = false,
 ) {
     val canSubmit: Boolean
         get() = formAvailable && !isLoadingForm && !isSubmitting && draft.text.isNotBlank()

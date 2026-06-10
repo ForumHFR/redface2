@@ -691,6 +691,57 @@ class TopicPageParserTest {
         assertNull("quote-less post must expose null quoteRef", post.quoteRef)
     }
 
+    // ─── editedAt (#362) ─────────────────────────────────────────────────────────
+
+    @Test
+    fun `editedAt is parsed from the div edited trailer on khakha page 2`() {
+        // Real-fixture contract on `topic_khakha_page_2.html`, covering every shape of
+        // the `div.edited` trailer (cf. the per-post mapping below) :
+        //   - n°16628102 : « Message cité 2 fois » + « Message édité par reelooz10 le
+        //     03-11-2008 à 21:43:47 » → the edit date must be found BEHIND the citation
+        //     link prefix (non-anchored regex).
+        //   - n°16628775 : edit trailer alone (no citation link) → parsed too.
+        //   - n°16628222 : citation link alone (cited but never edited) → null.
+        //   - n°16628071 : no div.edited at all → null.
+        // 2008-11-03 is CET (UTC+1) in Europe/Paris.
+        val topic = parser.parse(fixture("topic_khakha_page_2.html"))
+        val byNumreponse = topic.posts.associateBy { it.numreponse }
+
+        assertEquals(
+            "cited + edited post must surface the edit date behind the citation prefix",
+            java.time.Instant.parse("2008-11-03T20:43:47Z"),
+            byNumreponse[16628102]?.editedAt,
+        )
+        assertEquals(
+            "edited-only post must surface its edit date",
+            java.time.Instant.parse("2008-11-03T21:45:52Z"),
+            byNumreponse[16628775]?.editedAt,
+        )
+        assertNull(
+            "cited-but-never-edited post must keep editedAt null",
+            byNumreponse[16628222]?.editedAt,
+        )
+        assertNull(
+            "post without div.edited must keep editedAt null",
+            byNumreponse[16628071]?.editedAt,
+        )
+    }
+
+    @Test
+    fun `editedAt stays scoped to its own post table`() {
+        // The page mixes edited and non-edited posts : if the parser ever matched a
+        // div.edited outside the current post's table, one of the 33 non-edited posts of
+        // this fixture would pick up a neighbour's date. Pin the exact distribution
+        // instead of a single example (8 edited posts out of the 41 on this capture).
+        val topic = parser.parse(fixture("topic_khakha_page_2.html"))
+
+        val editedNumreponses = topic.posts.filter { it.editedAt != null }.map { it.numreponse }
+        assertEquals(
+            listOf(16628102, 16628106, 16628775, 16631302, 16631323, 16631394, 16632446, 16632858),
+            editedNumreponses,
+        )
+    }
+
     // ─── profileId (#208) ───────────────────────────────────────────────────────
 
     @Test

@@ -27,14 +27,12 @@
     <string name="settings_future_flags_on_listing">Poser les drapeaux en listant une catégorie</string>
     <string name="settings_future_scroll_memory">Retenir la position de lecture par page</string>
     <string name="settings_future_prefetch">Préchargement de la page suivante</string>
-    <string name="settings_future_submit_confirm">Confirmation avant publication</string>
     <string name="settings_future_signature">Signature automatique et notification e-mail</string>
     <!-- #301 — la réponse à une conversation existante est livrée ; reste « à venir » la
          composition d'un nouveau MP depuis zéro (new-MP), encore non observée côté HFR. -->
     <string name="settings_future_mp_write">Composer un nouveau message privé</string>
     <string name="settings_future_mp_notifications">Notifications et badge de MP non lus</string>
     <string name="settings_future_data_saver">Mode économie de données</string>
-    <string name="settings_future_clear_image_cache">Vider le cache des images</string>
     <string name="settings_future_hfr_profile">Avatars, signatures, messages par page</string>
     <string name="settings_future_notifications">Relève configurable, filtres, mode Ne pas déranger</string>
     <string name="settings_future_timezone">Fuseau horaire d’affichage</string>
@@ -67,6 +65,20 @@
     <string name="settings_clear_topic_cache_in_progress">Vidage du cache des topics…</string>
     <string name="settings_clear_topic_cache_success">Cache des topics vidé. Les prochains topics ouverts seront retéléchargés.</string>
     <string name="settings_clear_topic_cache_failure">Impossible de vider le cache des topics. Réessayez depuis cette page.</string>
+
+    <!-- #314 — action de maintenance « Vider le cache des images ». Vide les caches Coil
+         (mémoire + disque) : avatars, smileys perso, images [img]. Les images sont simplement
+         retéléchargées à leur prochain affichage ; ne touche ni à l'authentification, ni aux
+         drapeaux, ni aux pages de topics en cache, ni aux préférences. -->
+    <string name="settings_clear_image_cache_intro">Supprime les images téléchargées (avatars, smileys, images des messages) stockées en mémoire et sur le disque. Elles seront retéléchargées à leur prochain affichage. Les topics en cache, les drapeaux et l\'authentification ne sont pas affectés.</string>
+    <string name="settings_clear_image_cache_button">Vider le cache des images</string>
+    <string name="settings_clear_image_cache_confirm_title">Vider le cache des images ?</string>
+    <string name="settings_clear_image_cache_confirm_body">Cette action ne déconnecte pas et ne supprime aucun message. Les images seront retéléchargées à leur prochain affichage.</string>
+    <string name="settings_clear_image_cache_confirm_action">Vider</string>
+    <string name="settings_clear_image_cache_confirm_cancel">Annuler</string>
+    <string name="settings_clear_image_cache_in_progress">Vidage du cache des images…</string>
+    <string name="settings_clear_image_cache_success">Cache des images vidé. Les images seront retéléchargées à leur prochain affichage.</string>
+    <string name="settings_clear_image_cache_failure">Impossible de vider le cache des images. Réessayez depuis cette page.</string>
 
     <!-- Phase 2 finish — alpha toggle "Ignorer le cache topic". Bypasses the topic Room cache
          read path and turns the anonymous topic prefetch into a no-op, so a parser/renderer
@@ -111,4 +123,13 @@
     <string name="settings_topic_topbar_auto_hide_title">Masquer la barre en défilant</string>
     <string name="settings_topic_topbar_auto_hide_description">La barre du haut (titre du sujet et numéro de page) disparaît quand vous faites défiler vers le bas et réapparaît dès que vous remontez.</string>
     <string name="settings_topic_topbar_auto_hide_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+
+    <!-- #312 — Publication. Confirmation avant chaque envoi (réponse/édition de message, sujet,
+         message privé) ; persisté en DataStore et lu en direct par les éditeurs.
+         `settings_future_submit_confirm` (catalogue vitrine #288) renommé selon la convention des
+         toggles actifs. -->
+    <string name="settings_editing_title">Publication</string>
+    <string name="settings_confirm_before_posting_title">Confirmation avant publication</string>
+    <string name="settings_confirm_before_posting_description">Demande une confirmation avant d\'envoyer une réponse, un sujet ou un message privé.</string>
+    <string name="settings_confirm_before_posting_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 </resources>

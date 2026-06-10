@@ -10,6 +10,7 @@ import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -48,6 +49,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     @Assisted private val request: PrivateMessageReplyRequest,
     private val repository: PrivateMessageWriteRepository,
     private val previewParser: BbcodePreviewParser,
+    private val userPreferencesRepository: UserPreferencesRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PrivateMessageReplyUiState())
@@ -65,7 +67,19 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private var formJob: Job? = null
     private var submitJob: Job? = null
 
+    /**
+     * #312 — mirror of the persisted « Confirmation avant publication » preference. Collected on
+     * init (same DataStore-consumption shape as `TopicViewModel.observeTopicTopBarAutoHide`) and
+     * read synchronously at submit time, identical to the post editor.
+     */
+    private var confirmBeforePosting: Boolean = false
+
     init {
+        viewModelScope.launch {
+            userPreferencesRepository.observeConfirmBeforePosting().collect { enabled ->
+                confirmBeforePosting = enabled
+            }
+        }
         loadForm()
     }
 
@@ -170,8 +184,24 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     fun onErrorDismissed() = _state.update { it.copy(submitError = null) }
 
+    /**
+     * #312 — confirm path. Closes the dialog and re-runs the submit pipeline with
+     * `bypassConfirmation = true` so the real submission executes directly (re-checking the
+     * preference here would loop « confirmation → confirmation » forever). The validation
+     * guards run again on the latest snapshot, which is safe because the dialog is modal.
+     */
+    fun onSubmitConfirmed() {
+        _state.update { it.copy(showSubmitConfirmation = false) }
+        onSubmit(bypassConfirmation = true)
+    }
+
+    /** #312 — dismiss path: close the dialog, send nothing, keep the draft. */
+    fun onSubmitConfirmationDismissed() = _state.update { it.copy(showSubmitConfirmation = false) }
+
+    fun onSubmit() = onSubmit(bypassConfirmation = false)
+
     @Suppress("ReturnCount") // Guard clauses are the natural shape of the submit dispatcher.
-    fun onSubmit() {
+    private fun onSubmit(bypassConfirmation: Boolean) {
         val snapshot = _state.value
         if (!snapshot.canSubmit) return
         val form = loadedForm ?: run {
@@ -183,6 +213,13 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             return
         }
         if (submitJob?.isActive == true) return
+        // #312 — AFTER every validation gate (we never confirm an unsendable form), BEFORE the
+        // real POST: when the preference is on, park the submit behind the confirmation dialog.
+        // [onSubmitConfirmed] re-enters with `bypassConfirmation = true`.
+        if (!bypassConfirmation && confirmBeforePosting) {
+            _state.update { it.copy(showSubmitConfirmation = true) }
+            return
+        }
 
         val options = ReplyFormOptions(
             signatureEnabled = snapshot.signatureEnabled,

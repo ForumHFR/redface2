@@ -40,6 +40,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -73,10 +74,12 @@ import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 
 @Composable
@@ -155,6 +158,24 @@ fun TopicScreen(
      * (cf. `docs/specs/architecture.md` § Frontière feature:topic ↔ feature:profile).
      */
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    /**
+     * #307 — saved read position to restore for THIS `(cat, post, page)` landing, or `null` when
+     * nothing should be restored. `:app` resolves the full priority chain
+     * (`resolveTopicScrollRestoration`: route `scrollTo` > post-submit landing > saved anchor > top)
+     * BEFORE threading the value here, so a non-null anchor already means « the saved position won »
+     * — the screen applies it once the first `Loaded` emission lands, exactly once per landing, and
+     * it can never compete with the `ScrollToPost` / `ScrollToEndOfPage` effects (their routes
+     * resolve to `null` here).
+     */
+    restoreScrollAnchor: TopicScrollAnchor? = null,
+    /**
+     * #307 — reports the read position when the screen leaves the composition, so `:app` can cache
+     * it per `(cat, post, page)` (twin of [onTitleLoaded] / the title cache). Fired from a single
+     * `DisposableEffect` — the unique save point covering EVERY departure (swipe, FAB, header pager,
+     * back, tab switch) — and only after the page actually loaded, so a landing abandoned while
+     * still `Loading` never clobbers a previously saved position with `(0, 0)`.
+     */
+    onScrollAnchorSaved: (TopicScrollAnchor) -> Unit = {},
 ) {
     val viewModel = hiltViewModel<TopicViewModel, TopicViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -185,6 +206,16 @@ fun TopicScreen(
     LaunchedEffect(loadedTitle) {
         loadedTitle?.takeIf { it.isNotBlank() }?.let(onTitleLoaded)
     }
+
+    // #307 — one-shot restore of the saved read position + the single central save point,
+    // extracted to its own effect holder (also keeps TopicScreen under the detekt complexity cap).
+    TopicScrollRestorationEffects(
+        state = viewModel.state,
+        lazyListState = lazyListState,
+        request = request,
+        restoreScrollAnchor = restoreScrollAnchor,
+        onScrollAnchorSaved = onScrollAnchorSaved,
+    )
 
     // Single-shot scroll : `effects` emits `ScrollToPost` exactly once per request,
     // when the ViewModel has loaded a page that contains the requested numreponse.
@@ -373,6 +404,55 @@ private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int) {
             }
         }
         previous = current
+    }
+}
+
+/**
+ * #307 — one-shot restoration of the saved read position + the single central save point.
+ *
+ * RESTORE: waits for the FIRST `Loaded` emission (same timing as the `ScrollToPost` effect, and read
+ * from the [state] flow — not a recomposition-captured snapshot — for the same race-free reason),
+ * then applies the anchor exactly once per route landing. Subsequent `Loaded` emissions
+ * (cache→network refresh of the stale path, manual pull-to-refresh, post-delete reload) never
+ * re-scroll: the effect has already completed, mirroring the one-shot contract of the scroll
+ * effects. The priority chain was resolved by `:app` — see `restoreScrollAnchor` on [TopicScreen].
+ *
+ * SAVE: `onDispose` is the ONE save point. `onOpenPage` is shared by swipe, header, pager and
+ * FAB, so saving per trigger would multiply call sites (and race); disposal of this composition
+ * covers every departure — swipe, FAB, back, tab switch, editor push — with a single write.
+ * `scrollAnchorSettled` gates the save: a page abandoned while still Loading reads (0, 0) from
+ * a list that never rendered, and must not clobber the real position saved by an earlier visit.
+ */
+@Composable
+private fun TopicScrollRestorationEffects(
+    state: StateFlow<TopicUiState>,
+    lazyListState: LazyListState,
+    request: TopicRequest,
+    restoreScrollAnchor: TopicScrollAnchor?,
+    onScrollAnchorSaved: (TopicScrollAnchor) -> Unit,
+) {
+    var scrollAnchorSettled by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        state.first { it.mode is TopicUiState.Mode.Loaded }
+        restoreScrollAnchor?.let { anchor ->
+            lazyListState.scrollToItem(anchor.index, anchor.offset)
+        }
+        scrollAnchorSettled = true
+    }
+    DisposableEffect(request.cat, request.post, request.page) {
+        onDispose {
+            // Deliberately captures THIS composition's `onScrollAnchorSaved` (keyed to this route's
+            // (cat, post, page)) rather than a rememberUpdatedState latest-value: if the request
+            // ever changed in place, the departing position must be saved under the OLD key.
+            if (scrollAnchorSettled) {
+                onScrollAnchorSaved(
+                    TopicScrollAnchor(
+                        index = lazyListState.firstVisibleItemIndex,
+                        offset = lazyListState.firstVisibleItemScrollOffset,
+                    ),
+                )
+            }
+        }
     }
 }
 
@@ -568,9 +648,15 @@ internal fun TopicContent(
                 }
 
                 is TopicUiState.Mode.Error -> {
+                    // #324 — ServerDown / Network swap the raw exception message for the
+                    // shared :core:ui label; Other keeps the existing diagnostic detail.
+                    // (`if` rather than `?.let {} ?:` keeps TopicContent under detekt's
+                    // cyclomatic-complexity threshold.)
+                    val sharedLabelRes = mode.kind.sharedLabelResOrNull()
+                    val detail = if (sharedLabelRes != null) stringResource(sharedLabelRes) else mode.message
                     RedfacePlaceholderScreen(
                         title = stringResource(R.string.topic_error_title),
-                        body = stringResource(R.string.topic_error_body, state.request.page, mode.message),
+                        body = stringResource(R.string.topic_error_body, state.request.page, detail),
                     ) {
                         TopicPageNavigation(
                             currentPage = state.request.page,
@@ -642,6 +728,12 @@ private fun TopicLoadedContent(
     // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
     // the « cité N fois » badge below. Pure + page-scoped (cf. citationCountsByNumreponse KDoc).
     val citationCounts = remember(topic.posts) { citationCountsByNumreponse(topic.posts) }
+    // #362 — post whose contextual menu is open (null = closed). Plain local UI state at the
+    // Loaded level: the menu carries no async data, so no ViewModel/hoisting is needed — the
+    // sheet lives in :feature:topic (unlike ProfilePreviewSheet, hoisted in :app only because
+    // it needs a Hilt ViewModel). Deliberately NOT rememberSaveable: Post is not Parcelable
+    // and losing an open overflow menu across process death is acceptable.
+    var menuPost by remember { mutableStateOf<Post?>(null) }
     // #282 — shared offset between the gesture (drives translationX) and the edge glow. A plain
     // MutableFloatState: the gesture writes it synchronously per frame (no coroutine/alloc), the draw
     // phase reads it; an Animatable inside the gesture handles only release transitions. Lives in the
@@ -796,8 +888,25 @@ private fun TopicLoadedContent(
                 onEdit = editAction,
                 onDelete = deleteAction,
                 onOpenProfile = profileAction,
+                onOpenMenu = { menuPost = post },
             )
         }
+    }
+    // #362 — per-post contextual menu. The permalink is rebuilt from the LOADED topic's
+    // (cat, post, page) — not the request — so it always reflects the page HFR actually
+    // served (HFR clamps out-of-range pages). citedCount reuses the page-scoped #239 index.
+    menuPost?.let { post ->
+        PostMenuSheet(
+            post = post,
+            permalink = buildPostPermalink(
+                cat = topic.cat,
+                post = topic.post,
+                page = topic.page,
+                numreponse = post.numreponse,
+            ),
+            citedCount = citationCounts[post.numreponse] ?: 0,
+            onDismiss = { menuPost = null },
+        )
     }
 }
 
@@ -1059,6 +1168,11 @@ private fun TopicPostCard(
      * Null when [Post.profileId] is null (Publicité rows, anonymous reads).
      */
     onOpenProfile: (() -> Unit)? = null,
+    /**
+     * #362 — opens the per-post contextual menu ([PostMenuSheet]): post number (moved out
+     * of the header bar), permalink copy, edit marker, citation count.
+     */
+    onOpenMenu: () -> Unit = {},
 ) {
     Card(
         colors = CardDefaults.cardColors(
@@ -1118,6 +1232,7 @@ private fun TopicPostCard(
                 Modifier
             }
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 // Centre the avatar against the name+date block so the identity line reads as one
                 // tidy unit (the previous Top alignment + the inflated pseudo made the pseudo look
@@ -1130,7 +1245,9 @@ private fun TopicPostCard(
                     modifier = avatarModifier,
                 )
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
+                    // #362 — weight(1f) instead of fillMaxWidth so the menu button below gets its
+                    // slot at the right edge of the header; the pseudo keeps its own weight inside.
+                    modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Row(
@@ -1150,15 +1267,10 @@ private fun TopicPostCard(
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            // Clickable on the pseudo only — post number and date stay inert.
+                            // Clickable on the pseudo only — the date stays inert.
                             modifier = Modifier
                                 .weight(weight = 1f, fill = false)
                                 .then(pseudoModifier),
-                        )
-                        Text(
-                            text = stringResource(R.string.topic_post_numreponse_suffix, post.numreponse),
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
                         )
                     }
                     Text(
@@ -1186,6 +1298,27 @@ private fun TopicPostCard(
                         }
                     }
                 }
+                // #362 — per-post contextual menu trigger, flush right of the header. The post
+                // number that used to trail the pseudo lives in the menu now. A text glyph, not a
+                // Material icon (detekt ForbiddenImport blocks androidx.compose.material.*) — same
+                // pattern as PageFab/ReplyFab. Sits in the OUTER row (next to the whole
+                // avatar+name+date block) so its 48dp touch target never inflates the pseudo line
+                // (cf. the pseudo minimumInteractiveComponentSize note above).
+                val menuLabel = stringResource(R.string.topic_post_menu_action)
+                Text(
+                    text = "⋯",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .clickable(
+                            onClick = onOpenMenu,
+                            role = Role.Button,
+                            onClickLabel = menuLabel,
+                        )
+                        .semantics { contentDescription = menuLabel },
+                )
             }
             // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
             PostRenderer(content = post.content, selectable = true)
@@ -1233,7 +1366,9 @@ private val topicDateFormatter = DateTimeFormatter
     .ofPattern("dd/MM/yyyy HH:mm:ss", Locale.FRANCE)
     .withZone(ZoneId.of("Europe/Paris"))
 
-private fun java.time.Instant.asTopicDate(): String = topicDateFormatter.format(this)
+// `internal` (#362): PostMenuSheet renders the post date and the « Édité le … » line with the
+// exact same format as the post header, so both surfaces always agree.
+internal fun java.time.Instant.asTopicDate(): String = topicDateFormatter.format(this)
 
 /**
  * #292 — confirmation before an irreversible post deletion (HFR offers no undo, cf. the #99 flag

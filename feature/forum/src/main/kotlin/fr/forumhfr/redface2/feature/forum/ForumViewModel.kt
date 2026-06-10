@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.forum
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.Category
@@ -58,7 +59,9 @@ class ForumViewModel @Inject constructor(
         when (this) {
             ForumResult.Loading -> ForumUiState.Loading
             is ForumResult.Success -> ForumUiState.Content(value)
-            is ForumResult.Failure -> ForumUiState.Error(cause.message)
+            // #324 — kind derives from the exception TYPE so the screen can tell an HFR
+            // 5xx outage from a local network cut.
+            is ForumResult.Failure -> ForumUiState.Error(cause.message, classifyHfrError(cause))
         }
 
     private companion object {

@@ -21,10 +21,11 @@ import org.robolectric.annotation.Config
 /**
  * Robolectric-driven migration tests for every hand-written Room migration in the schema
  * — currently `MIGRATION_1_2`, `MIGRATION_2_3`, `MIGRATION_3_4`, `MIGRATION_4_5`,
- * `MIGRATION_5_6` (Phase 2 finish #208 added `Post.profileId` in v6) and `MIGRATION_6_7`
- * (#213 added `Topic.canReply` in v7). Without these tests a typo (missing column, wrong
- * index name, wrong default) would only crash on a real upgrade-in-place install, where
- * the diagnostic loop is days long. The tests take seconds.
+ * `MIGRATION_5_6` (Phase 2 finish #208 added `Post.profileId` in v6), `MIGRATION_6_7`
+ * (#213 added `Topic.canReply` in v7) and `MIGRATION_7_8` (#362 added `Post.editedAt`
+ * in v8). Without these tests a typo (missing column, wrong index name, wrong default)
+ * would only crash on a real upgrade-in-place install, where the diagnostic loop is
+ * days long. The tests take seconds.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [33])
@@ -113,6 +114,7 @@ class MigrationTest {
                 MIGRATION_4_5,
                 MIGRATION_5_6,
                 MIGRATION_6_7,
+                MIGRATION_7_8,
             )
             .build()
 
@@ -250,6 +252,7 @@ class MigrationTest {
                 MIGRATION_4_5,
                 MIGRATION_5_6,
                 MIGRATION_6_7,
+                MIGRATION_7_8,
             )
             .build()
 
@@ -347,6 +350,7 @@ class MigrationTest {
                 MIGRATION_4_5,
                 MIGRATION_5_6,
                 MIGRATION_6_7,
+                MIGRATION_7_8,
             )
             .build()
 
@@ -416,6 +420,7 @@ class MigrationTest {
                 MIGRATION_4_5,
                 MIGRATION_5_6,
                 MIGRATION_6_7,
+                MIGRATION_7_8,
             )
             .build()
 
@@ -481,6 +486,7 @@ class MigrationTest {
                 MIGRATION_4_5,
                 MIGRATION_5_6,
                 MIGRATION_6_7,
+                MIGRATION_7_8,
             )
             .build()
 
@@ -537,6 +543,7 @@ class MigrationTest {
                 MIGRATION_4_5,
                 MIGRATION_5_6,
                 MIGRATION_6_7,
+                MIGRATION_7_8,
             )
             .build()
 
@@ -555,6 +562,68 @@ class MigrationTest {
                     0L,
                     cursor.getLong(1),
                 )
+            }
+        } finally {
+            migrated.close()
+        }
+    }
+
+    /**
+     * #362 — v7 → v8 adds nullable `editedAt` to `posts`.
+     *
+     * Verifies:
+     * 1. The migration runs cleanly against the v7 fixture.
+     * 2. Pre-existing post rows survive the migration.
+     * 3. The new column defaults to NULL on old rows (recovered on the next live fetch).
+     */
+    @Test
+    fun migrate_7_to_8_adds_nullable_editedAt_to_posts() {
+        val dbName = "migration_7_8_test"
+
+        // 1. Create a v7 database and insert a posts row that pre-dates `editedAt`.
+        helper.createDatabase(dbName, 7).apply {
+            execSQL(
+                """INSERT INTO topic_pages (cat, post, page, title, totalPages, isFirstPostOwner,
+                   numreponses, fetchedAt, authMode, subcat, canReply)
+                   VALUES (23, 35395, 1, 'v7 cached topic', 10, 0, '[]', 1000, 'AUTHENTICATED', 550, 1)""",
+            )
+            execSQL(
+                """INSERT INTO posts (cat, numreponse, post, author, date, content, avatarUrl,
+                   isEditable, isOwnPost, quotedAuthors, postIndex, fetchedAt, authMode, quoteRef,
+                   profileId)
+                   VALUES (23, 100, 35395, 'XaTriX', 1000,
+                   '{"blocks":[]}', NULL, 0, 0, '[]', 1, 1000, 'AUTHENTICATED', NULL, NULL)""",
+            )
+            close()
+        }
+
+        // 2. Run MIGRATION_7_8 and validate against the v8 schema.
+        helper.runMigrationsAndValidate(dbName, 8, true, MIGRATION_7_8).close()
+
+        // 3. Open the production Room database (which chains every migration).
+        val migrated = Room.databaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java,
+            dbName,
+        )
+            .allowMainThreadQueries()
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+                MIGRATION_7_8,
+            )
+            .build()
+
+        try {
+            migrated.openHelper.readableDatabase.query(
+                "SELECT editedAt FROM posts WHERE cat = 23 AND numreponse = 100",
+            ).use { cursor ->
+                assertTrue("pre-v8 post row must survive MIGRATION_7_8", cursor.moveToFirst())
+                assertTrue("editedAt must be NULL for pre-v8 rows", cursor.isNull(0))
             }
         } finally {
             migrated.close()

@@ -40,6 +40,10 @@ android {
 }
 
 dependencies {
+    // #324 — `error/HfrErrorLabels.kt` maps the domain `HfrErrorKind` classification to the
+    // shared `error_hfr_server_down` / `error_no_connection` string resources. No cycle:
+    // :core:domain only depends on :core:model.
+    implementation(project(":core:domain"))
     implementation(project(":core:model"))
 
     api(platform(libs.androidx.compose.bom))

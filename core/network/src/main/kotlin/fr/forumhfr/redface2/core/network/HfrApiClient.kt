@@ -1,10 +1,10 @@
 package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
-import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 import okhttp3.Call
@@ -26,7 +26,9 @@ import okhttp3.Request
  *
  * The client returns raw JSON [String]. Parsing lives in `:core:data` next to its
  * consuming repositories (per ADR-003, "Frontières de modules"). On non-2xx the call
- * raises [IOException] with the URL, status and a short body excerpt for diagnostics.
+ * raises [HfrServerException] (#324 — typed status code so the screens can tell a 5xx
+ * outage from a network cut) with the URL, status and a short body excerpt for
+ * diagnostics.
  *
  * Authenticated calls run through [executeAuthenticatedJson] which surfaces a
  * [SessionExpiredException] when HFR redirects to login or returns the login HTML
@@ -182,7 +184,12 @@ class HfrApiClient @Inject constructor(
         } else {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    throw IOException(failureMessage(response.code, url, response.body.string()))
+                    // #324 — typed (status code) while keeping the richer REST diagnostic line.
+                    throw HfrServerException(
+                        code = response.code,
+                        url = url.toString(),
+                        detailMessage = failureMessage(response.code, url, response.body.string()),
+                    )
                 }
                 response.body.string()
             }
@@ -192,7 +199,12 @@ class HfrApiClient @Inject constructor(
     private fun Call.executeAuthenticatedJson(): String = execute().use { response ->
         val body = response.body.string()
         if (!response.isSuccessful) {
-            throw IOException(failureMessage(response.code, response.request.url, body))
+            // #324 — typed (status code) while keeping the richer REST diagnostic line.
+            throw HfrServerException(
+                code = response.code,
+                url = response.request.url.toString(),
+                detailMessage = failureMessage(response.code, response.request.url, body),
+            )
         }
         val finalUrl = response.request.url
         if (finalUrl.isLoginUrl() || body.looksLikeLoginPage()) {

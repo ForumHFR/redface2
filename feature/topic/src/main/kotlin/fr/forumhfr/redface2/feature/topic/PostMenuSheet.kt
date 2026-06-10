@@ -1,0 +1,244 @@
+package fr.forumhfr.redface2.feature.topic
+
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SheetState
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
+import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+
+/**
+ * #362 — per-post contextual menu, opened from the `⋯` trigger in the post header
+ * ([TopicPostCard]). Layout mirrors `ProfilePreviewSheet` (dogfooding feedback on v102:
+ * the original plain-text sheet read as unfinished next to the profile one):
+ *
+ * - a hero row: avatar + author, with « Post n°{numreponse} » (the post number moved
+ *   here from the header bar) and the post date underneath;
+ * - optional info lines: « Édité le … » when [Post.editedAt] is non-null, and
+ *   « Cité N fois sur cette page » when [citedCount] > 0 (hidden at 0 — same
+ *   page-scoped #239 count as the badge, which stays on the card);
+ * - stacked full-width actions, profile-sheet style: a filled « Copier le lien de ce
+ *   post » (primary), an outlined « Ouvrir dans le navigateur » (debug-friendly: the
+ *   canonical permalink opens in the default browser), and a DISABLED « Alerter »
+ *   placeholder — the report flow is not implemented yet, the greyed button shows the
+ *   roadmap like the Settings « menu vitrine » (#288).
+ *
+ * Clipboard feedback follows the Diagnostics pattern: Android 13+ shows the system
+ * overlay natively, older devices get a Toast. Both real actions play the sheet's hide
+ * animation before releasing the state (cf. `hideThenDismiss`).
+ *
+ * Lives in `:feature:topic` (local UI state in `TopicScreen`, no ViewModel): unlike
+ * `ProfilePreviewSheet`, hoisted in `:app` only because it needs a Hilt ViewModel,
+ * this menu has no async data.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun PostMenuSheet(
+    post: Post,
+    permalink: String,
+    citedCount: Int,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState()
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    // Resolved at composition time — the action callbacks run outside composition.
+    val copiedFeedback = stringResource(R.string.topic_post_menu_link_copied)
+    val browserFailedFeedback = stringResource(R.string.topic_post_menu_no_browser)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .navigationBarsPadding(),
+        ) {
+            PostMenuHero(post = post)
+
+            if (post.editedAt != null || citedCount > 0) {
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(8.dp))
+                post.editedAt?.let { editedAt ->
+                    Text(
+                        text = stringResource(
+                            R.string.topic_post_menu_edited,
+                            editedAt.asTopicDate(),
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 2.dp),
+                    )
+                }
+                if (citedCount > 0) {
+                    Text(
+                        text = pluralStringResource(
+                            R.plurals.topic_post_menu_cited_on_page,
+                            citedCount,
+                            citedCount,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 2.dp),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Button(
+                onClick = {
+                    copyPermalinkToClipboard(context, permalink, copiedFeedback)
+                    hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.topic_post_menu_copy_link))
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = {
+                    openPermalinkInBrowser(context, permalink, browserFailedFeedback)
+                    hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.topic_post_menu_open_in_browser))
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Report flow not implemented yet — greyed « menu vitrine » placeholder (#288
+            // pattern): the affordance is visible, the « (à venir) » suffix explains why it
+            // is disabled.
+            OutlinedButton(
+                onClick = {},
+                enabled = false,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.topic_post_menu_report_soon))
+            }
+
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+/**
+ * Hero row of the sheet — avatar + author with the post identity (number, date)
+ * underneath, mirroring `ProfilePreviewHero`. [RedfaceUserAvatar] handles the
+ * `avatarUrl == null` / load-error placeholder on its own.
+ */
+@Composable
+private fun PostMenuHero(post: Post) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        RedfaceUserAvatar(
+            avatarUrl = post.avatarUrl,
+            author = post.author,
+            size = 56.dp,
+        )
+        Column {
+            Text(
+                text = post.author,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = stringResource(R.string.topic_post_menu_number, post.numreponse),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = post.date.asTopicDate(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * Clipboard write + feedback, mirroring the Diagnostics export pattern
+ * (`DiagnosticsViewModel`): Android 13+ (T) shows the system « copié » overlay on its
+ * own, so the Toast is only raised on older API levels to avoid double feedback.
+ */
+private fun copyPermalinkToClipboard(context: Context, permalink: String, feedback: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText("redface2 post link", permalink))
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+        Toast.makeText(context, feedback, Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * Fires an `ACTION_VIEW` on the canonical permalink — lands in the default browser (or
+ * the user's link-handling app). A device without any handler is vanishingly rare but
+ * cheap to survive: the failure surfaces as a Toast instead of a crash.
+ */
+private fun openPermalinkInBrowser(context: Context, permalink: String, failureFeedback: String) {
+    try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, permalink.toUri()))
+    } catch (ignored: ActivityNotFoundException) {
+        Toast.makeText(context, failureFeedback, Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * Plays the sheet's hide animation, then invokes [onDismiss] once the sheet is actually
+ * off-screen — same Material 3 « animated dismiss » idiom as ProfilePreviewSheet's
+ * `hideThenNavigate`.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+private fun hideThenDismiss(
+    coroutineScope: CoroutineScope,
+    sheetState: SheetState,
+    onDismiss: () -> Unit,
+) {
+    coroutineScope.launch { sheetState.hide() }
+        .invokeOnCompletion {
+            if (!sheetState.isVisible) {
+                onDismiss()
+            }
+        }
+}

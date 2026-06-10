@@ -34,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,9 +45,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.search.SearchTopicResult
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
+import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 
 /**
  * Phase 2G-A/B (#150 partiel) — search tab screen.
@@ -55,22 +59,36 @@ import fr.forumhfr.redface2.core.model.search.SearchTopicResult
  * scroll the result cards, tap one to open the topic. When the query matched
  * multiple HFR categories, a chip row at the top lets the user re-scope.
  *
- * The [onOpenTopic] callback receives a [SearchTopicResult] and is responsible
- * for pushing the matching `TopicRoute` onto the back stack — the screen itself
- * has no knowledge of the nav graph.
+ * Tapping a result goes through the ViewModel ([SearchIntent.OpenResult]) which
+ * resolves the result's REAL topic page when it carries a matched `numreponse`
+ * (#277 — HFR's search hrefs always say `page=1`), then emits
+ * [SearchEffect.NavigateToTopic]. [onOpenTopic] receives the FINAL navigation
+ * values `(cat, post, page, scrollTo)` and is responsible for pushing the
+ * matching `TopicRoute` onto the back stack — the screen itself has no
+ * knowledge of the nav graph.
  */
 @Composable
 fun SearchScreen(
-    onOpenTopic: (SearchTopicResult) -> Unit,
+    onOpenTopic: (cat: Int, post: Int, page: Int, scrollTo: Int?) -> Unit,
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    // Same one-shot collection pattern as TopicScreen : the Channel-backed flow
+    // delivers each navigation effect exactly once.
+    LaunchedEffect(Unit) {
+        viewModel.effects.collect { effect ->
+            when (effect) {
+                is SearchEffect.NavigateToTopic ->
+                    onOpenTopic(effect.cat, effect.post, effect.page, effect.scrollTo)
+            }
+        }
+    }
     SearchContent(
         state = state,
         onIntent = viewModel::submit,
-        onOpenTopic = onOpenTopic,
+        onOpenTopic = { result -> viewModel.submit(SearchIntent.OpenResult(result)) },
         modifier = modifier,
         topBarActions = topBarActions,
     )
@@ -92,12 +110,16 @@ internal fun SearchContent(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .navigationBarsPadding(),
         ) {
+            // Header padding matches the other three main screens (24/12, headlineMedium) —
+            // dogfooding feedback on v102: Recherche inherited the content's tighter 16dp
+            // gutter, so its title and the account avatar sat visibly offset from
+            // Drapeaux / Forum / Messages.
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
@@ -108,35 +130,42 @@ internal fun SearchContent(
                 )
                 topBarActions?.invoke()
             }
-            SearchField(
-                query = state.query,
-                isSubmitEnabled = !state.isLoading && state.query.isNotBlank(),
-                onQueryChange = { onIntent(SearchIntent.QueryChanged(it)) },
-                onSubmit = { onIntent(SearchIntent.Submit) },
-            )
-            SearchOptions(
-                textScope = state.textScope,
-                onTextScopeSelected = { onIntent(SearchIntent.TextScopeSelected(it)) },
-            )
-            if (state.pivotCategories.isNotEmpty()) {
-                PivotChips(
-                    pivot = state.pivotCategories,
-                    selected = state.selectedCategory,
-                    onSelect = { onIntent(SearchIntent.CategorySelected(it)) },
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                SearchField(
+                    query = state.query,
+                    isSubmitEnabled = !state.isLoading && state.query.isNotBlank(),
+                    onQueryChange = { onIntent(SearchIntent.QueryChanged(it)) },
+                    onSubmit = { onIntent(SearchIntent.Submit) },
+                )
+                SearchOptions(
+                    textScope = state.textScope,
+                    onTextScopeSelected = { onIntent(SearchIntent.TextScopeSelected(it)) },
+                )
+                if (state.pivotCategories.isNotEmpty()) {
+                    PivotChips(
+                        pivot = state.pivotCategories,
+                        selected = state.selectedCategory,
+                        onSelect = { onIntent(SearchIntent.CategorySelected(it)) },
+                    )
+                }
+                HorizontalDivider()
+                // `Modifier.weight(1f)` is required so the inner `LazyColumn` (in
+                // `ResultsList`) gets a bounded vertical constraint. Without it, the
+                // child `LazyColumn` measures with `Constraints.Infinity` and Compose
+                // throws `IllegalStateException: Vertically scrollable component was
+                // measured with an infinite max constraints`.
+                SearchBody(
+                    state = state,
+                    onRetry = { onIntent(SearchIntent.Retry) },
+                    onOpenTopic = onOpenTopic,
+                    modifier = Modifier.weight(1f),
                 )
             }
-            HorizontalDivider()
-            // `Modifier.weight(1f)` is required so the inner `LazyColumn` (in
-            // `ResultsList`) gets a bounded vertical constraint. Without it, the
-            // child `LazyColumn` measures with `Constraints.Infinity` and Compose
-            // throws `IllegalStateException: Vertically scrollable component was
-            // measured with an infinite max constraints`.
-            SearchBody(
-                state = state,
-                onRetry = { onIntent(SearchIntent.Retry) },
-                onOpenTopic = onOpenTopic,
-                modifier = Modifier.weight(1f),
-            )
         }
     }
 }
@@ -314,11 +343,10 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ErrorState(kind: SearchErrorKind, onRetry: () -> Unit, modifier: Modifier = Modifier) {
-    val messageResId = when (kind) {
-        SearchErrorKind.Network -> R.string.search_error_network
-        SearchErrorKind.Unknown -> R.string.search_error_unknown
-    }
+private fun ErrorState(kind: HfrErrorKind, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    // #324 — shared :core:ui labels for an HFR 5xx outage / a connectivity cut;
+    // Other keeps the feature's generic message.
+    val messageResId = kind.sharedLabelResOrNull() ?: R.string.search_error_unknown
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = modifier) {
         Text(
             text = stringResource(messageResId),
@@ -406,7 +434,7 @@ private fun SearchResultCard(result: SearchTopicResult, onClick: () -> Unit) {
             Text(
                 text = stringResource(
                     R.string.search_result_last_reply,
-                    result.lastReplyAt,
+                    formatLastReplyTimestamp(result.lastReplyAt),
                     result.lastReplyAuthor,
                 ),
                 style = MaterialTheme.typography.bodySmall,
