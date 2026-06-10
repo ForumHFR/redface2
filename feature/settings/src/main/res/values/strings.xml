@@ -34,7 +34,6 @@
     <string name="settings_future_mp_write">Composer un nouveau message privé</string>
     <string name="settings_future_mp_notifications">Notifications et badge de MP non lus</string>
     <string name="settings_future_data_saver">Mode économie de données</string>
-    <string name="settings_future_clear_image_cache">Vider le cache des images</string>
     <string name="settings_future_hfr_profile">Avatars, signatures, messages par page</string>
     <string name="settings_future_notifications">Relève configurable, filtres, mode Ne pas déranger</string>
     <string name="settings_future_timezone">Fuseau horaire d’affichage</string>
@@ -67,6 +66,20 @@
     <string name="settings_clear_topic_cache_in_progress">Vidage du cache des topics…</string>
     <string name="settings_clear_topic_cache_success">Cache des topics vidé. Les prochains topics ouverts seront retéléchargés.</string>
     <string name="settings_clear_topic_cache_failure">Impossible de vider le cache des topics. Réessayez depuis cette page.</string>
+
+    <!-- #314 — action de maintenance « Vider le cache des images ». Vide les caches Coil
+         (mémoire + disque) : avatars, smileys perso, images [img]. Les images sont simplement
+         retéléchargées à leur prochain affichage ; ne touche ni à l'authentification, ni aux
+         drapeaux, ni aux pages de topics en cache, ni aux préférences. -->
+    <string name="settings_clear_image_cache_intro">Supprime les images téléchargées (avatars, smileys, images des messages) stockées en mémoire et sur le disque. Elles seront retéléchargées à leur prochain affichage. Les topics en cache, les drapeaux et l\'authentification ne sont pas affectés.</string>
+    <string name="settings_clear_image_cache_button">Vider le cache des images</string>
+    <string name="settings_clear_image_cache_confirm_title">Vider le cache des images ?</string>
+    <string name="settings_clear_image_cache_confirm_body">Cette action ne déconnecte pas et ne supprime aucun message. Les images seront retéléchargées à leur prochain affichage.</string>
+    <string name="settings_clear_image_cache_confirm_action">Vider</string>
+    <string name="settings_clear_image_cache_confirm_cancel">Annuler</string>
+    <string name="settings_clear_image_cache_in_progress">Vidage du cache des images…</string>
+    <string name="settings_clear_image_cache_success">Cache des images vidé. Les images seront retéléchargées à leur prochain affichage.</string>
+    <string name="settings_clear_image_cache_failure">Impossible de vider le cache des images. Réessayez depuis cette page.</string>
 
     <!-- Phase 2 finish — alpha toggle "Ignorer le cache topic". Bypasses the topic Room cache
          read path and turns the anonymous topic prefetch into a no-op, so a parser/renderer

@@ -36,6 +36,12 @@ dependencies {
     // `rf2.topic.room_write` markers around the topic-page repository pipeline (#117).
     implementation(libs.androidx.tracing)
 
+    // Coil singleton accessor for DefaultImageCacheMaintenance (#314) — the `coil` artifact
+    // carries SingletonImageLoader and exposes ImageLoader/MemoryCache/DiskCache via its
+    // api dependency on coil-core. No compose/network artifacts here: :core:data only
+    // clears caches, it never loads images.
+    implementation(libs.coil.core)
+
     testImplementation(libs.junit4)
     testImplementation(libs.mockk)
     testImplementation(libs.robolectric)

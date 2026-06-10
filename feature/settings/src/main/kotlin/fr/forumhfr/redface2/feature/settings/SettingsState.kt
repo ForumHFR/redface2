@@ -17,6 +17,13 @@ data class SettingsState(
     val showClearTopicCacheConfirm: Boolean = false,
     val isClearingTopicCache: Boolean = false,
     val topicCacheClearResult: TopicCacheClearResult? = null,
+    // Image cache maintenance — « Vider le cache des images » (#314). DEDICATED trio,
+    // strictly mirroring the topic-cache fields above: sharing them would make the two
+    // Maintenance entries collide (a topic clear would flash its result under the image
+    // button and vice versa).
+    val showClearImageCacheConfirm: Boolean = false,
+    val isClearingImageCache: Boolean = false,
+    val imageCacheClearResult: ImageCacheClearResult? = null,
     // Alpha-only "Ignorer le cache topic" toggle (Phase 2 finish). Persisted in DataStore via
     // UserPreferencesRepository — the ViewModel hydrates this field from the persisted value
     // and writes back on user toggle. `isUpdatingIgnoreTopicCache` gates the switch while the
@@ -78,6 +85,9 @@ data class SettingsState(
     val canClearTopicCache: Boolean
         get() = !isClearingTopicCache
 
+    val canClearImageCache: Boolean
+        get() = !isClearingImageCache
+
     val canToggleIgnoreTopicCache: Boolean
         get() = !isUpdatingIgnoreTopicCache
 
@@ -121,6 +131,17 @@ sealed interface TopicCacheClearResult {
     data object Failure : TopicCacheClearResult
 }
 
+/**
+ * Outcome of the latest « Vider le cache des images » click (#314). Dedicated type for
+ * the same reason [TopicCacheClearResult] is separate from the proxy fields: the two
+ * Maintenance actions are unrelated flows and one must never dismiss or repaint the
+ * other's still-visible feedback.
+ */
+sealed interface ImageCacheClearResult {
+    data object Success : ImageCacheClearResult
+    data object Failure : ImageCacheClearResult
+}
+
 sealed interface SettingsIntent {
     data class ProxyEnabledChanged(val enabled: Boolean) : SettingsIntent
     data class ProxyHostChanged(val host: String) : SettingsIntent
@@ -135,6 +156,12 @@ sealed interface SettingsIntent {
     data object ClearTopicCacheClicked : SettingsIntent
     data object ClearTopicCacheConfirmed : SettingsIntent
     data object ClearTopicCacheDismissed : SettingsIntent
+
+    // Image cache maintenance flow (#314) — same three-intent confirm shape as the topic
+    // cache above, operating on the dedicated image-cache state fields.
+    data object ClearImageCacheClicked : SettingsIntent
+    data object ClearImageCacheConfirmed : SettingsIntent
+    data object ClearImageCacheDismissed : SettingsIntent
 
     // Alpha "Ignorer le cache topic" toggle. The boolean is the desired post-flip state; the
     // ViewModel applies it optimistically, then reverts on DataStore failure so the UI never
