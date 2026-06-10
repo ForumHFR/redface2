@@ -18,8 +18,8 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ## v113 — `0.9.0` — 2026-06-11
 
-**Statut** : `local` (candidat — promotion `promote/0.9.0` figée sur dev `bb3ee57b`, en attente de review Codex)
-**Commit** : candidat depuis dev `bb3ee57b` (build dev 112), versionCode anticipé 113 (ledger 112+1)
+**Statut** : `open` (track open testing) + F-Droid `.beta`
+**Commit** : merge de promotion `0313e8f4` (#400, candidat dev `bb3ee57b` + review Codex SHIP), tag `app-v113` (versionCode 113, ledger 112→113)
 **Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) → track open testing + tag pour F-Droid beta
 
 **Lot dogfooding du 2026-06-10 soir** : 7 PR mergées sur dev (#388–#392, #397, #399), dogfoodées en continu sur le canal dev (v106 → v112).
