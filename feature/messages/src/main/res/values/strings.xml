@@ -37,4 +37,7 @@
     <string name="messages_reply_error_network">Problème de connexion. Vérifiez votre réseau puis réessayez.</string>
     <string name="messages_reply_error_session_expired">La session a expiré. Reconnectez-vous puis réessayez.</string>
     <string name="messages_reply_error_unexpected">Réponse inattendue de HFR. Votre message a peut-être été envoyé : vérifiez la conversation.</string>
+    <string name="messages_reply_confirm_title">Envoyer ce message privé ?</string>
+    <string name="messages_reply_confirm_body">Votre message privé va être envoyé à votre correspondant.</string>
+    <string name="messages_reply_confirm_action">Envoyer</string>
 </resources>

@@ -377,12 +377,17 @@ class TopicFormViewModel @AssistedInject constructor(
         onSubmitClicked(bypassConfirmation = true)
     }
 
+    @Suppress("ReturnCount") // Guard clauses
     private fun onSubmitClicked(bypassConfirmation: Boolean = false) {
         // #312 — single interception point covering BOTH submit paths (New + EditFirstPost).
         // The `canSubmit` gate runs first so we never confirm an invalid form; the deeper
         // per-mode guards (form not loaded, anonymous, in-flight job) are re-checked after the
         // confirmation by the dispatched handler, exactly as on the direct path.
         if (!_state.value.canSubmit) return
+        // Same guard order as PostEditorViewModel / PrivateMessageReplyViewModel: never show
+        // the confirmation dialog over an in-flight submit. Redundant with canSubmit's
+        // !isSubmitting today, but keeps the three VMs symmetric if canSubmit is relaxed.
+        if (submitJob?.isActive == true) return
         if (!bypassConfirmation && confirmBeforePosting) {
             _state.update { it.copy(showSubmitConfirmation = true) }
             return

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import androidx.annotation.StringRes
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -19,14 +20,19 @@ import fr.forumhfr.redface2.core.ui.R
 fun ConfirmSubmitDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    // Forum wording by default; `:feature:messages` overrides the three texts because a
+    // private reply is NOT « envoyé sur le forum » and the established MP verb is « Envoyer ».
+    @StringRes title: Int = R.string.confirm_submit_title,
+    @StringRes body: Int = R.string.confirm_submit_body,
+    @StringRes confirmLabel: Int = R.string.confirm_submit_action,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = stringResource(R.string.confirm_submit_title)) },
-        text = { Text(text = stringResource(R.string.confirm_submit_body)) },
+        title = { Text(text = stringResource(title)) },
+        text = { Text(text = stringResource(body)) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text(text = stringResource(R.string.confirm_submit_action))
+                Text(text = stringResource(confirmLabel))
             }
         },
         dismissButton = {

@@ -16,6 +16,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -319,5 +320,62 @@ class PrivateMessageReplyViewModelTest {
 
         assertFalse("invalid form must not raise the dialog", viewModel.state.value.showSubmitConfirmation)
         coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `confirm-before-posting ON re-submitting while the dialog is up keeps it armed without posting`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns form()
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request,
+            repository,
+            previewParser,
+            userPreferences(confirmBeforePosting = true),
+        )
+        viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
+        viewModel.onSubmit()
+        assertTrue("the confirmation dialog must be armed", viewModel.state.value.showSubmitConfirmation)
+
+        // Second tap while the dialog is up (double-tap race) : idempotent — re-raising
+        // `showSubmitConfirmation = true` is a no-op, and no POST may slip through.
+        viewModel.onSubmit()
+
+        assertTrue("the dialog must stay armed", viewModel.state.value.showSubmitConfirmation)
+        assertFalse("nothing is in flight while the dialog is up", viewModel.state.value.isSubmitting)
+        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `confirm-before-posting ON rapid double onSubmitConfirmed posts exactly once`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns form()
+        // Hold the first confirmed submit in flight : with UnconfinedTestDispatcher a
+        // non-suspending mock would complete synchronously and the second confirm would
+        // legitimately re-fire. The gate keeps `submitJob` active across both confirms.
+        val gate = CompletableDeferred<Unit>()
+        coEvery { repository.submitReply(any(), any(), any(), any()) } coAnswers {
+            gate.await()
+            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        }
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request,
+            repository,
+            previewParser,
+            userPreferences(confirmBeforePosting = true),
+        )
+        viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
+        viewModel.onSubmit()
+        assertTrue("the confirmation dialog must be armed", viewModel.state.value.showSubmitConfirmation)
+
+        viewModel.onSubmitConfirmed() // launches the POST ; suspends on gate
+        viewModel.onSubmitConfirmed() // must be a no-op (canSubmit / submitJob guards)
+
+        gate.complete(Unit)
+
+        coVerify(exactly = 1) { repository.submitReply(any(), any(), any(), any()) }
+        assertFalse(viewModel.state.value.showSubmitConfirmation)
+        assertFalse(viewModel.state.value.isSubmitting)
     }
 }

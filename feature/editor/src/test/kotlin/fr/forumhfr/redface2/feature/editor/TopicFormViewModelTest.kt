@@ -910,6 +910,71 @@ class TopicFormViewModelTest {
         assertEquals(0, topicFormRepository.newTopicSubmitCalls)
     }
 
+    @Test
+    fun `confirm-before-posting ON re-clicking submit keeps the New dialog armed without posting`() = runTest {
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        viewModel.state.test {
+            expectMostRecentItem() // drain hydration
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            val parked = expectMostRecentItem()
+            assertTrue("the confirmation dialog must be armed", parked.showSubmitConfirmation)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        // Second tap while the dialog is up (double-tap race) : idempotent — re-raising
+        // `showSubmitConfirmation = true` is a no-op, and no POST may slip through.
+        viewModel.submit(TopicFormIntent.SubmitClicked)
+
+        assertTrue("the dialog must stay armed", viewModel.state.value.showSubmitConfirmation)
+        assertFalse("nothing is in flight while the dialog is up", viewModel.state.value.isSubmitting)
+        assertEquals("no POST while the dialog is parked", 0, topicFormRepository.newTopicSubmitCalls)
+    }
+
+    @Test
+    fun `confirm-before-posting ON rapid double confirm posts the New topic exactly once`() = runTest {
+        // Hold the first confirmed submit in flight : with UnconfinedTestDispatcher a
+        // non-suspending fake would complete synchronously and the second confirm would
+        // legitimately re-fire. Same shape as the `submitGate` double-submit test in
+        // `PostEditorViewModelTest`. EditFirstPost shares the same guards hoisted into
+        // `onSubmitClicked`, so New-mode coverage protects both submit paths.
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.submitGate = gate
+        topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Success(
+            newTopicId = null,
+            newNumreponse = null,
+            targetCat = SAMPLE_CAT,
+            targetSubcat = SAMPLE_SUBCAT,
+            refreshUrl = null,
+        )
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        viewModel.state.test {
+            expectMostRecentItem() // drain hydration
+            viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
+            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.submit(TopicFormIntent.SubmitClicked)
+            val parked = expectMostRecentItem()
+            assertTrue("the confirmation dialog must be armed", parked.showSubmitConfirmation)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        viewModel.submit(TopicFormIntent.SubmitConfirmed) // launches the POST ; suspends on gate
+        viewModel.submit(TopicFormIntent.SubmitConfirmed) // must be a no-op (canSubmit / submitJob guards)
+
+        gate.complete(Unit)
+
+        assertEquals("rapid double confirm must POST exactly once", 1, topicFormRepository.newTopicSubmitCalls)
+        assertFalse(viewModel.state.value.showSubmitConfirmation)
+        assertFalse(viewModel.state.value.isSubmitting)
+    }
+
     private fun newTopicViewModel(
         entrySubcat: Int?,
         cat: Int = SAMPLE_CAT,
@@ -1027,6 +1092,9 @@ class TopicFormViewModelTest {
         )
 
         var formGate: CompletableDeferred<Unit>? = null
+        // #312 — holds an in-flight submit (both Edit FP and New) until the test releases it,
+        // mirroring `FakeReplyRepository.submitGate` in `PostEditorViewModelTest`.
+        var submitGate: CompletableDeferred<Unit>? = null
 
         var formFetches: Int = 0
             private set
@@ -1072,6 +1140,7 @@ class TopicFormViewModelTest {
             lastSubmittedBbcode = bbcodeContent
             lastSubmittedSubcat = selectedSubcat
             lastSubmittedOptions = options
+            submitGate?.await()
             return submitResult ?: error("submitResult not set")
         }
 
@@ -1096,6 +1165,7 @@ class TopicFormViewModelTest {
             lastSubmittedBbcode = bbcodeContent
             lastSubmittedSubcat = selectedSubcat
             lastSubmittedOptions = options
+            submitGate?.await()
             return newTopicSubmitResult ?: error("newTopicSubmitResult not set")
         }
     }

@@ -1028,6 +1028,53 @@ class PostEditorViewModelTest {
         assertFalse(viewModel.state.value.showSubmitConfirmation)
     }
 
+    @Test
+    fun `confirm-before-posting ON re-clicking submit keeps the dialog armed without posting`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        assertTrue("the confirmation dialog must be armed", viewModel.state.value.showSubmitConfirmation)
+
+        // Second tap while the dialog is up (double-tap race) : idempotent — re-raising
+        // `showSubmitConfirmation = true` is a no-op, and no POST may slip through.
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+
+        assertTrue("the dialog must stay armed", viewModel.state.value.showSubmitConfirmation)
+        assertFalse("nothing is in flight while the dialog is up", viewModel.state.value.isSubmitting)
+        assertEquals("no POST while the dialog is parked", 0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `confirm-before-posting ON rapid double confirm posts exactly once`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        // Hold the first confirmed submit in flight : with UnconfinedTestDispatcher a
+        // non-suspending fake would complete synchronously and the second confirm would
+        // legitimately re-fire. Same shape as `double submit only triggers one POST`.
+        val gate = CompletableDeferred<Unit>()
+        replyRepository.submitGate = gate
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val viewModel = newReplyViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        assertTrue("the confirmation dialog must be armed", viewModel.state.value.showSubmitConfirmation)
+
+        viewModel.submit(PostEditorIntent.SubmitConfirmed) // launches the POST ; suspends on gate
+        viewModel.submit(PostEditorIntent.SubmitConfirmed) // must be a no-op (canSubmit / submitJob guards)
+
+        gate.complete(Unit)
+
+        assertEquals("rapid double confirm must POST exactly once", 1, replyRepository.submitCalls)
+        assertFalse(viewModel.state.value.showSubmitConfirmation)
+        assertFalse(viewModel.state.value.isSubmitting)
+    }
+
     private fun authenticatedForm(initialContent: String = ""): ReplyForm = ReplyForm(
         hashCheck = "FAKE_HASH",
         sujet = "Fake Topic",

@@ -92,9 +92,14 @@ fun PrivateMessageReplyScreen(
     // #312 — « Confirmation avant publication ». Visibility is owned by the ViewModel, which only
     // raises the flag once the submit passed every validation gate and the preference is on.
     if (state.showSubmitConfirmation) {
+        // MP wording: a private reply is not « envoyé sur le forum », and the MP verb
+        // everywhere else is « Envoyer » — override the forum defaults of the shared dialog.
         ConfirmSubmitDialog(
             onConfirm = viewModel::onSubmitConfirmed,
             onDismiss = viewModel::onSubmitConfirmationDismissed,
+            title = R.string.messages_reply_confirm_title,
+            body = R.string.messages_reply_confirm_body,
+            confirmLabel = R.string.messages_reply_confirm_action,
         )
     }
 }
