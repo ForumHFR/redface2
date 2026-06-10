@@ -19,6 +19,12 @@
     <!-- #301 — réponse à une conversation privée (écriture MP). -->
     <string name="messages_reply">Répondre</string>
     <string name="messages_reply_title">Répondre</string>
+    <string name="messages_compose_title">Nouveau message</string>
+    <string name="messages_compose_new">Nouveau</string>
+    <string name="messages_compose_recipients_label">Destinataire(s)</string>
+    <string name="messages_compose_recipients_placeholder">Pseudo(s), séparés par des virgules…</string>
+    <string name="messages_compose_subject_label">Sujet</string>
+    <string name="messages_compose_subject_counter">%1$d/%2$d</string>
     <string name="messages_reply_field_label">Votre réponse</string>
     <string name="messages_reply_field_placeholder">Écrivez votre message…</string>
     <string name="messages_reply_preview_show">Aperçu</string>
