@@ -186,6 +186,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun clearTopicCache() {
+        // Re-entrance guard: the dialog's confirm button is not gated by state, so a
+        // double-tap before recomposition would otherwise launch two concurrent clears.
+        if (_state.value.isClearingTopicCache) return
         // Close the confirmation dialog upfront so the user can't double-confirm, then flip
         // `isClearingTopicCache` so the button is disabled while Room runs the transaction.
         _state.update {
@@ -217,6 +220,8 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun clearImageCache() {
+        // Re-entrance guard, mirror of clearTopicCache() above.
+        if (_state.value.isClearingImageCache) return
         // Mirror of clearTopicCache(): close the dialog upfront so the user can't
         // double-confirm, then gate the button on `isClearingImageCache` while Coil
         // wipes the memory + disk caches.

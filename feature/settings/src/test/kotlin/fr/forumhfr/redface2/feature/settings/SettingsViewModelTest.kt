@@ -259,6 +259,24 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `ClearImageCacheConfirmed ignores a re-entrant confirm while a clear is running`() = runTest {
+        // Codex final-review finding (#314): the dialog's confirm button is not gated by
+        // state — a double-tap before recomposition must not start two concurrent clears.
+        val gate = CompletableDeferred<Unit>()
+        imageCacheMaintenance.blockUntil = gate
+        val viewModel = newViewModel()
+        viewModel.submit(SettingsIntent.ClearImageCacheClicked)
+
+        viewModel.submit(SettingsIntent.ClearImageCacheConfirmed)
+        viewModel.submit(SettingsIntent.ClearImageCacheConfirmed)
+
+        assertEquals(1, imageCacheMaintenance.clearCalls)
+        gate.complete(Unit)
+        assertEquals(ImageCacheClearResult.Success, viewModel.state.value.imageCacheClearResult)
+        assertFalse(viewModel.state.value.isClearingImageCache)
+    }
+
+    @Test
     fun `ClearImageCacheConfirmed exposes in-progress state while clear is running`() = runTest {
         imageCacheMaintenance.blockUntil = CompletableDeferred()
         val viewModel = newViewModel()
