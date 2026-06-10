@@ -19,6 +19,12 @@ import fr.forumhfr.redface2.core.model.search.SearchTopicResult
  */
 data class SearchUiState(
     val query: String = "",
+    /**
+     * Author filter, forwarded as HFR's `pseud` field. A search is submittable when
+     * at least one of [query] / [pseudo] is non-blank — HFR supports author-only
+     * searches (« every topic where this user posted », cf. [SearchRequest.pseudo]).
+     */
+    val pseudo: String = "",
     val textScope: SearchTextScope = SearchTextScope.TitlesAndPosts,
     val selectedCategory: SearchPivotCategory? = null,
     val pivotCategories: List<SearchPivotCategory> = emptyList(),
@@ -38,6 +44,7 @@ data class SearchUiState(
  */
 sealed interface SearchIntent {
     data class QueryChanged(val query: String) : SearchIntent
+    data class PseudoChanged(val pseudo: String) : SearchIntent
     data class TextScopeSelected(val scope: SearchTextScope) : SearchIntent
     data object Submit : SearchIntent
     data object Retry : SearchIntent
