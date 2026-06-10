@@ -218,3 +218,25 @@ val MIGRATION_6_7: Migration = object : Migration(6, 7) {
         db.execSQL("UPDATE topic_pages SET fetchedAt = 0")
     }
 }
+
+/**
+ * v7 → v8 (#362):
+ *
+ * Adds `editedAt` to `posts`. Stores the last-edit timestamp parsed from the post's
+ * `div.edited` trailer (« Message édité par <auteur> le DD-MM-YYYY à HH:MM:SS »), so
+ * the « Édité le … » line of the per-post menu survives a cache hit without a network
+ * round-trip.
+ *
+ * Nullable on disk because:
+ * - pre-v8 rows backfill to `NULL` (the next live fetch sets the real value);
+ * - never-edited posts legitimately carry no edit trailer — including cited-but-never-
+ *   edited posts whose `div.edited` only holds the « Message cité N fois » link.
+ *
+ * Pure DDL, no row rewrite — posts are short-lived cache (stored as epoch millis via
+ * the `Instant` type converter, hence `INTEGER`).
+ */
+val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE posts ADD COLUMN editedAt INTEGER")
+    }
+}

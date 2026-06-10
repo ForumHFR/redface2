@@ -328,6 +328,40 @@ class TopicRepositoryImplTest {
         assertEquals("fresh cache hit must not trigger a refresh", 1, server.requestCount)
     }
 
+    @Test
+    fun `observeTopicPage fresh cache preserves editedAt without network refresh`() = runTest {
+        // #362 regression : Post.editedAt is persisted in Room v8 (MIGRATION_7_8). Without
+        // the column + mapper round-trip, every fresh cache hit (the common case once a
+        // topic has been refreshed once) would silently reset the edit marker to null and
+        // the « Édité le … » menu line would vanish. The khakha p2 fixture carries both
+        // edited and never-edited posts, so the cache re-emission is checked on both.
+        server.enqueue(MockResponse().setBody(fixtureHtml("topic_khakha_page_2.html")))
+        val repo = repository(now = Instant.parse("2026-04-26T18:00:00Z"))
+        val fresh = repo.refreshTopicPage(13, 84_540, 2)
+        assertEquals("warmup must issue exactly one network request", 1, server.requestCount)
+
+        // n°16628102 = reelooz10, « Message cité 2 fois » + edited 03-11-2008 à 21:43:47
+        // (CET = UTC+1) ; n°16628071 = Mora1651, never edited.
+        val freshEdited = fresh.posts.first { it.numreponse == 16_628_102 }
+        assertEquals(Instant.parse("2008-11-03T20:43:47Z"), freshEdited.editedAt)
+
+        // Same clock → fresh cache → no network refresh.
+        repo.observeTopicPage(13, 84_540, 2).test {
+            val cached = awaitItem()
+            awaitComplete()
+            assertEquals(
+                "editedAt must round-trip Room v8 unchanged on cache hit",
+                freshEdited.editedAt,
+                cached.posts.first { it.numreponse == 16_628_102 }.editedAt,
+            )
+            assertNull(
+                "never-edited post must keep editedAt null on cache hit",
+                cached.posts.first { it.numreponse == 16_628_071 }.editedAt,
+            )
+        }
+        assertEquals("fresh cache hit must not trigger a refresh", 1, server.requestCount)
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // Alpha "Ignorer le cache topic" toggle — bypass tests
     // ──────────────────────────────────────────────────────────────────────

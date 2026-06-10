@@ -63,12 +63,43 @@ class HfrDateParser(
         ).atZone(zoneId).toInstant()
     }
 
+    /**
+     * #362 — parses the last-edit timestamp from a post's `div.edited` trailer text:
+     * `Message édité par <auteur> le DD-MM-YYYY à HH:MM:SS` (same `à` + seconds shape
+     * as [parsePostedAt]). The regex is deliberately **not** anchored at the start of
+     * the string: the trailer can be prefixed by the optional « Message cité N fois »
+     * citation link (`Message cité 2 fois Message édité par … le …`).
+     *
+     * Returns `null` when the text holds no edit marker — including the real-fixture
+     * case of a `div.edited` that only carries the citation link (post cited but
+     * never edited), and the empty string.
+     */
+    fun parseEditedAtOrNull(text: String): Instant? {
+        val normalized = text
+            .replace('\u00A0', ' ')
+            .replace(Regex("\\s+"), " ")
+
+        val match = EDITED_AT_REGEX.find(normalized) ?: return null
+
+        return LocalDateTime.of(
+            match.groupValues[3].toInt(),
+            match.groupValues[2].toInt(),
+            match.groupValues[1].toInt(),
+            match.groupValues[4].toInt(),
+            match.groupValues[5].toInt(),
+            match.groupValues[6].toInt(),
+        ).atZone(zoneId).toInstant()
+    }
+
     private companion object {
         val POSTED_AT_REGEX = Regex(
             """Posté le (\d{2})-(\d{2})-(\d{4}) à (\d{2}):(\d{2}):(\d{2})""",
         )
         val LIST_DATE_REGEX = Regex(
             """(\d{2})-(\d{2})-(\d{4}) à (\d{2}):(\d{2})""",
+        )
+        val EDITED_AT_REGEX = Regex(
+            """Message édité par .+ le (\d{2})-(\d{2})-(\d{4}) à (\d{2}):(\d{2}):(\d{2})""",
         )
     }
 }

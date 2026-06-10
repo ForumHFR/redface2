@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.database.migrations.MIGRATION_3_4
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_4_5
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_5_6
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_6_7
+import fr.forumhfr.redface2.core.database.migrations.MIGRATION_7_8
 import javax.inject.Singleton
 
 @Module
@@ -37,6 +38,7 @@ object DatabaseModule {
             MIGRATION_4_5,
             MIGRATION_5_6,
             MIGRATION_6_7,
+            MIGRATION_7_8,
         )
         .build()
 

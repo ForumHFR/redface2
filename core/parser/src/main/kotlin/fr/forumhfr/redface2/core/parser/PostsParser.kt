@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.parser
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.parser.common.HfrDateParser
 import fr.forumhfr.redface2.core.parser.common.HfrSelectors
+import java.time.Instant
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
@@ -80,8 +81,23 @@ class PostsParser(
             postIndex = null,
             quoteRef = parseQuoteRef(postTable),
             profileId = parseProfileId(postTable),
+            editedAt = parseEditedAt(postTable),
         )
     }
+
+    /**
+     * #362 — last-edit timestamp from the post's `div.edited` trailer, or `null` when the
+     * post was never edited. The lookup is **scoped to the current post's table** so the
+     * `div.edited` of another post on the page can never bleed in. The trailer may carry
+     * only the « Message cité N fois » citation link (cited-but-never-edited post) — the
+     * date parser returns `null` for that text. Reading the live DOM here is safe even
+     * though [PostContentParser] strips `div.edited` from the rendered content: it clones
+     * the content element before its `remove()`, so the original document is not mutated.
+     */
+    private fun parseEditedAt(postTable: Element): Instant? =
+        postTable.selectFirst(HfrSelectors.POST_EDITED)
+            ?.text()
+            ?.let(dateParser::parseEditedAtOrNull)
 
     /**
      * Phase 2D (#147) / #227 — returns `true` when the post's left toolbar exposes an

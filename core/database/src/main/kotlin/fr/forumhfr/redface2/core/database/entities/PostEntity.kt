@@ -66,4 +66,15 @@ data class PostEntity(
      * - future HFR changes may stop rendering the link for some post types.
      */
     val profileId: Int? = null,
+    /**
+     * #362 — last-edit timestamp parsed from the post's `div.edited` trailer
+     * (« Message édité par <auteur> le DD-MM-YYYY à HH:MM:SS »). Persisted in
+     * Room v8 (`MIGRATION_7_8`) so a cache hit keeps the « Édité le … » line of
+     * the post menu without a network round-trip. Nullable on disk:
+     *
+     * - pre-v8 rows backfill to `NULL` (recovered on the next live fetch);
+     * - never-edited posts legitimately carry no edit trailer — including posts
+     *   whose `div.edited` only holds the « Message cité N fois » citation link.
+     */
+    val editedAt: Instant? = null,
 )
