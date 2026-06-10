@@ -55,7 +55,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
-import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.model.AuthState
@@ -63,6 +62,7 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.ui.FlagItem
 import fr.forumhfr.redface2.core.ui.FlagItemDivider
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import kotlinx.coroutines.launch
 
@@ -559,17 +559,14 @@ private fun ColumnScope.AuthenticatedBody(
                 Text(
                     text = stringResource(
                         // The dedicated session branch stays FIRST — the #324 classifier
-                        // only refines the remaining failures (5xx outage vs network cut
-                        // vs generic), so the reconnect CTA below never regresses.
-                        when {
-                            sessionExpired -> R.string.flags_session_expired
-                            else -> when (classifyHfrError(current.cause)) {
-                                HfrErrorKind.ServerDown ->
-                                    fr.forumhfr.redface2.core.ui.R.string.error_hfr_server_down
-                                HfrErrorKind.Network ->
-                                    fr.forumhfr.redface2.core.ui.R.string.error_no_connection
-                                HfrErrorKind.Other -> R.string.flags_error
-                            }
+                        // only refines the remaining failures (shared ServerDown/Network
+                        // labels vs the generic flags_error), so the reconnect CTA below
+                        // never regresses.
+                        if (sessionExpired) {
+                            R.string.flags_session_expired
+                        } else {
+                            classifyHfrError(current.cause).sharedLabelResOrNull()
+                                ?: R.string.flags_error
                         },
                     ),
                     style = MaterialTheme.typography.bodyMedium,

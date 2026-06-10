@@ -44,10 +44,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicSummary
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 
@@ -185,14 +185,9 @@ private fun SubcategoryChips(
             Text(
                 // #324 — ServerDown / Network render the shared :core:ui label; Other
                 // keeps the pre-existing rendering (raw message, generic fallback).
-                text = when (state.kind) {
-                    HfrErrorKind.ServerDown ->
-                        stringResource(fr.forumhfr.redface2.core.ui.R.string.error_hfr_server_down)
-                    HfrErrorKind.Network ->
-                        stringResource(fr.forumhfr.redface2.core.ui.R.string.error_no_connection)
-                    HfrErrorKind.Other ->
-                        state.message ?: stringResource(R.string.category_subcategories_error)
-                },
+                text = state.kind.sharedLabelResOrNull()?.let { stringResource(it) }
+                    ?: state.message
+                    ?: stringResource(R.string.category_subcategories_error),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
@@ -268,13 +263,8 @@ private fun TopicsBody(
             )
             // #324 — ServerDown / Network swap the raw exception message for the shared
             // :core:ui label; Other keeps the pre-existing rendering (raw message if any).
-            val detail = when (state.kind) {
-                HfrErrorKind.ServerDown ->
-                    stringResource(fr.forumhfr.redface2.core.ui.R.string.error_hfr_server_down)
-                HfrErrorKind.Network ->
-                    stringResource(fr.forumhfr.redface2.core.ui.R.string.error_no_connection)
-                HfrErrorKind.Other -> state.message
-            }
+            val detail = state.kind.sharedLabelResOrNull()?.let { stringResource(it) }
+                ?: state.message
             if (!detail.isNullOrBlank()) {
                 Text(
                     text = detail,

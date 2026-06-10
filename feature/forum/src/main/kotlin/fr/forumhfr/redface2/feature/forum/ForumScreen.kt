@@ -34,6 +34,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.Category
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 
 /**
  * Forum home tab. Lists the 19 public HFR categories from the REST API. Tapping a row
@@ -126,13 +127,7 @@ private fun ForumError(
 ) {
     // #324 — ServerDown / Network swap the raw exception message for the shared
     // :core:ui label; Other keeps the pre-existing rendering (raw message if any).
-    val detail = when (kind) {
-        HfrErrorKind.ServerDown ->
-            stringResource(fr.forumhfr.redface2.core.ui.R.string.error_hfr_server_down)
-        HfrErrorKind.Network ->
-            stringResource(fr.forumhfr.redface2.core.ui.R.string.error_no_connection)
-        HfrErrorKind.Other -> message
-    }
+    val detail = kind.sharedLabelResOrNull()?.let { stringResource(it) } ?: message
     Column(
         modifier = modifier
             .fillMaxSize()

@@ -68,12 +68,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -571,13 +571,10 @@ internal fun TopicContent(
                 is TopicUiState.Mode.Error -> {
                     // #324 — ServerDown / Network swap the raw exception message for the
                     // shared :core:ui label; Other keeps the existing diagnostic detail.
-                    val detail = when (mode.kind) {
-                        HfrErrorKind.ServerDown ->
-                            stringResource(fr.forumhfr.redface2.core.ui.R.string.error_hfr_server_down)
-                        HfrErrorKind.Network ->
-                            stringResource(fr.forumhfr.redface2.core.ui.R.string.error_no_connection)
-                        HfrErrorKind.Other -> mode.message
-                    }
+                    // (`if` rather than `?.let {} ?:` keeps TopicContent under detekt's
+                    // cyclomatic-complexity threshold.)
+                    val sharedLabelRes = mode.kind.sharedLabelResOrNull()
+                    val detail = if (sharedLabelRes != null) stringResource(sharedLabelRes) else mode.message
                     RedfacePlaceholderScreen(
                         title = stringResource(R.string.topic_error_title),
                         body = stringResource(R.string.topic_error_body, state.request.page, detail),

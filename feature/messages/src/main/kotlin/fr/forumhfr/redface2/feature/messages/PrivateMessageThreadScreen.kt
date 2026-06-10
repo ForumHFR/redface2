@@ -38,9 +38,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import java.time.Instant
 import java.time.ZoneId
@@ -180,13 +180,7 @@ fun PrivateMessageThreadScreen(
                         // ServerDown / Network render the shared :core:ui label, Other keeps
                         // the generic message.
                         text = stringResource(
-                            when (mode.kind) {
-                                HfrErrorKind.ServerDown ->
-                                    fr.forumhfr.redface2.core.ui.R.string.error_hfr_server_down
-                                HfrErrorKind.Network ->
-                                    fr.forumhfr.redface2.core.ui.R.string.error_no_connection
-                                HfrErrorKind.Other -> R.string.messages_thread_error_load
-                            },
+                            mode.kind.sharedLabelResOrNull() ?: R.string.messages_thread_error_load,
                         ),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.error,

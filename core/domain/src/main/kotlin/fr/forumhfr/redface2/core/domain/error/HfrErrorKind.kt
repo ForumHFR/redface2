@@ -7,7 +7,8 @@ import java.io.IOException
  * Coarse classification of a read-path failure (#324), shared by every reading screen
  * (topic, forum/catégories, drapeaux, recherche, MP, profil) so an HFR outage and a local
  * connectivity cut are rendered consistently. The matching user-facing strings live in
- * `:core:ui` (`error_hfr_server_down` / `error_no_connection`); [Other] keeps each
+ * `:core:ui` (`error_hfr_server_down` / `error_no_connection`, resolved through the
+ * shared `sharedLabelResOrNull()` mapper in `core.ui.error`); [Other] keeps each
  * screen's existing generic message.
  */
 enum class HfrErrorKind {

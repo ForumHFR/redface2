@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.search
 
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.search.SearchRepository
 import fr.forumhfr.redface2.core.model.search.SearchCategoryScope
@@ -109,7 +110,7 @@ class SearchViewModelTest {
         vm.submit(SearchIntent.Submit)
 
         val final = vm.state.value
-        assertEquals(SearchErrorKind.Network, final.errorMessage)
+        assertEquals(HfrErrorKind.Network, final.errorMessage)
         assertEquals("kotlin", final.query)
         assertFalse(final.isLoading)
     }
@@ -124,20 +125,20 @@ class SearchViewModelTest {
         vm.submit(SearchIntent.Submit)
 
         val final = vm.state.value
-        assertEquals(SearchErrorKind.ServerDown, final.errorMessage)
+        assertEquals(HfrErrorKind.ServerDown, final.errorMessage)
         assertFalse(final.isLoading)
     }
 
     @Test
-    fun `repository SessionExpiredException sets the Unknown error kind not Network`() = runTest {
+    fun `repository SessionExpiredException sets the Other error kind not Network`() = runTest {
         // #324 — search has no dedicated session treatment; an expired session must not be
-        // presented as a connectivity cut (classifyHfrError → Other → Unknown).
+        // presented as a connectivity cut (classifyHfrError → Other).
         coEvery { repo.search(any()) } throws SessionExpiredException("<redacted>")
         val vm = SearchViewModel(repo)
         vm.submit(SearchIntent.QueryChanged("kotlin"))
         vm.submit(SearchIntent.Submit)
 
-        assertEquals(SearchErrorKind.Unknown, vm.state.value.errorMessage)
+        assertEquals(HfrErrorKind.Other, vm.state.value.errorMessage)
     }
 
     @Test
@@ -151,7 +152,7 @@ class SearchViewModelTest {
         val vm = SearchViewModel(repo)
         vm.submit(SearchIntent.QueryChanged("kotlin"))
         vm.submit(SearchIntent.Submit) // first attempt throws
-        assertEquals(SearchErrorKind.Network, vm.state.value.errorMessage)
+        assertEquals(HfrErrorKind.Network, vm.state.value.errorMessage)
 
         // User types a NEW value in the field but does NOT submit — Retry must
         // still re-use the previously submitted query, not the current field value.
