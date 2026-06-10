@@ -16,7 +16,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -33,8 +32,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -43,7 +40,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
-import fr.forumhfr.redface2.core.ui.editor.ConfirmSubmitDialog
+import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 
 /**
  * Topic-level form screen. Live for [TopicFormMode.EditFirstPost] (Phase 2D
@@ -126,8 +123,8 @@ internal fun TopicFormContent(
     onIntent: (TopicFormIntent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val openSmileyPickerDescription = stringResource(R.string.editor_smiley_open_description)
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
+    var optionsSheetOpen by remember { mutableStateOf(false) }
     Surface(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
@@ -173,17 +170,6 @@ internal fun TopicFormContent(
                     onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
                     onImageUrlRequested = { imageUrlDialogOpen = true },
                 )
-                // Phase 2F-C (#11 partial) — quick access to the smiley picker. Same placement
-                // and rationale as `PostEditorScreen` : smileys are point-insertions, not
-                // wrappers, so they don't fit the wrap-only `BbcodeAction` toolbar model.
-                TextButton(
-                    onClick = { onIntent(TopicFormIntent.SmileyPickerOpened) },
-                    modifier = Modifier.semantics {
-                        contentDescription = openSmileyPickerDescription
-                    },
-                ) {
-                    Text(text = stringResource(R.string.editor_smiley_open))
-                }
                 BbcodeTextField(
                     value = state.draft,
                     onValueChange = { onIntent(TopicFormIntent.ContentChanged(it)) },
@@ -202,16 +188,6 @@ internal fun TopicFormContent(
                 if (state.isPreviewVisible) {
                     BbcodePreview(content = state.preview, modifier = Modifier.fillMaxWidth())
                 }
-                HorizontalDivider()
-                TopicFormOptionsBlock(
-                    signatureEnabled = state.signatureEnabled,
-                    smileyDisabled = state.smileyDisabled,
-                    emailNotificationEnabled = state.emailNotificationEnabled,
-                    enabled = !state.isSubmitting && !state.isLoadingForm,
-                    onSignatureChanged = { onIntent(TopicFormIntent.ToggleSignature(it)) },
-                    onSmileyDisabledChanged = { onIntent(TopicFormIntent.ToggleSmileyDisabled(it)) },
-                    onEmailNotificationChanged = { onIntent(TopicFormIntent.ToggleEmailNotification(it)) },
-                )
                 if (state.pollPresent && !state.pollEditable) {
                     // Honest copy : the topic has a poll, but Phase 2D #148 does
                     // not edit poll fields — they are preserved verbatim on POST.
@@ -236,10 +212,34 @@ internal fun TopicFormContent(
             // never has to dismiss the keyboard to submit a new topic / first-post edit (shared
             // EditorSubmitBar with PostEditorScreen).
             EditorSubmitBar(
-                canSubmit = state.canSubmit,
-                isSubmitting = state.isSubmitting,
-                isLoadingForm = state.isLoadingForm,
-                onSubmit = { onIntent(TopicFormIntent.SubmitClicked) },
+                state = EditorSubmitState(
+                    canSubmit = state.canSubmit,
+                    isSubmitting = state.isSubmitting,
+                    isLoadingForm = state.isLoadingForm,
+                    confirmArmed = state.showSubmitConfirmation,
+                ),
+                actions = EditorSubmitActions(
+                    onSubmit = { onIntent(TopicFormIntent.SubmitClicked) },
+                    onConfirmSubmit = { onIntent(TopicFormIntent.SubmitConfirmed) },
+                    onDisarmConfirm = { onIntent(TopicFormIntent.SubmitConfirmationDismissed) },
+                    onOpenOptions = { optionsSheetOpen = true },
+                    onOpenSmileys = { onIntent(TopicFormIntent.SmileyPickerOpened) },
+                ),
+            )
+        }
+    }
+    // HFR per-topic option toggles, moved behind the bottom bar's « Options » trigger
+    // (shared EditorOptionsSheet with PostEditorScreen).
+    if (optionsSheetOpen) {
+        EditorOptionsSheet(onDismiss = { optionsSheetOpen = false }) {
+            TopicFormOptionsBlock(
+                signatureEnabled = state.signatureEnabled,
+                smileyDisabled = state.smileyDisabled,
+                emailNotificationEnabled = state.emailNotificationEnabled,
+                enabled = !state.isSubmitting && !state.isLoadingForm,
+                onSignatureChanged = { onIntent(TopicFormIntent.ToggleSignature(it)) },
+                onSmileyDisabledChanged = { onIntent(TopicFormIntent.ToggleSmileyDisabled(it)) },
+                onEmailNotificationChanged = { onIntent(TopicFormIntent.ToggleEmailNotification(it)) },
             )
         }
     }
@@ -247,14 +247,6 @@ internal fun TopicFormContent(
         ImageUrlDialog(
             onDismiss = { imageUrlDialogOpen = false },
             onInsert = { url -> onIntent(TopicFormIntent.ImageUrlInserted(url)) },
-        )
-    }
-    // #312 — « Confirmation avant publication ». Visibility is owned by the ViewModel, which only
-    // raises the flag once the submit passed the canSubmit gate and the preference is on.
-    if (state.showSubmitConfirmation) {
-        ConfirmSubmitDialog(
-            onConfirm = { onIntent(TopicFormIntent.SubmitConfirmed) },
-            onDismiss = { onIntent(TopicFormIntent.SubmitConfirmationDismissed) },
         )
     }
 }

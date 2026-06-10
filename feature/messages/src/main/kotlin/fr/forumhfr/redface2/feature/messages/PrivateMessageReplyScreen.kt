@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -33,6 +34,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -47,7 +51,8 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
-import fr.forumhfr.redface2.core.ui.editor.ConfirmSubmitDialog
+import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
+import kotlinx.coroutines.delay
 
 /**
  * Reply editor for a private-message conversation (#301). Reuses the shared `:core:ui` BBCode
@@ -86,22 +91,11 @@ fun PrivateMessageReplyScreen(
         onToggleEmailNotification = viewModel::onToggleEmailNotification,
         onErrorDismissed = viewModel::onErrorDismissed,
         onSubmit = viewModel::onSubmit,
+        onSubmitConfirmed = viewModel::onSubmitConfirmed,
+        onSubmitConfirmationDismissed = viewModel::onSubmitConfirmationDismissed,
         onRetryFormLoad = viewModel::retryFormLoad,
         modifier = modifier,
     )
-    // #312 — « Confirmation avant publication ». Visibility is owned by the ViewModel, which only
-    // raises the flag once the submit passed every validation gate and the preference is on.
-    if (state.showSubmitConfirmation) {
-        // MP wording: a private reply is not « envoyé sur le forum », and the MP verb
-        // everywhere else is « Envoyer » — override the forum defaults of the shared dialog.
-        ConfirmSubmitDialog(
-            onConfirm = viewModel::onSubmitConfirmed,
-            onDismiss = viewModel::onSubmitConfirmationDismissed,
-            title = R.string.messages_reply_confirm_title,
-            body = R.string.messages_reply_confirm_body,
-            confirmLabel = R.string.messages_reply_confirm_action,
-        )
-    }
 }
 
 @Composable
@@ -117,9 +111,12 @@ private fun PrivateMessageReplyContent(
     onToggleEmailNotification: (Boolean) -> Unit,
     onErrorDismissed: () -> Unit,
     onSubmit: () -> Unit,
+    onSubmitConfirmed: () -> Unit,
+    onSubmitConfirmationDismissed: () -> Unit,
     onRetryFormLoad: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var optionsSheetOpen by remember { mutableStateOf(false) }
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             ReplyHeader(onBack = onBack)
@@ -132,18 +129,34 @@ private fun PrivateMessageReplyContent(
                         onContentChanged = onContentChanged,
                         onToolbarAction = onToolbarAction,
                         onTogglePreview = onTogglePreview,
-                        onToggleSignature = onToggleSignature,
-                        onToggleSmileyDisabled = onToggleSmileyDisabled,
-                        onToggleEmailNotification = onToggleEmailNotification,
                         onErrorDismissed = onErrorDismissed,
                         modifier = Modifier.weight(1f),
                     )
                     ReplySubmitBar(
                         canSubmit = state.canSubmit,
                         isSubmitting = state.isSubmitting,
+                        confirmArmed = state.showSubmitConfirmation,
                         onSubmit = onSubmit,
+                        onConfirmSubmit = onSubmitConfirmed,
+                        onDisarmConfirm = onSubmitConfirmationDismissed,
+                        onOpenOptions = { optionsSheetOpen = true },
                     )
                 }
+            }
+        }
+        // HFR per-message option toggles, moved behind the bar's « Options » trigger —
+        // same surface as the post editor / topic form (shared EditorOptionsSheet).
+        if (optionsSheetOpen) {
+            EditorOptionsSheet(onDismiss = { optionsSheetOpen = false }) {
+                ReplyOptions(
+                    signatureEnabled = state.signatureEnabled,
+                    smileyDisabled = state.smileyDisabled,
+                    emailNotificationEnabled = state.emailNotificationEnabled,
+                    enabled = !state.isSubmitting && !state.isLoadingForm,
+                    onSignatureChanged = onToggleSignature,
+                    onSmileyDisabledChanged = onToggleSmileyDisabled,
+                    onEmailNotificationChanged = onToggleEmailNotification,
+                )
             }
         }
     }
@@ -210,9 +223,6 @@ private fun ReplyEditorBody(
     onContentChanged: (TextFieldValue) -> Unit,
     onToolbarAction: (BbcodeAction) -> Unit,
     onTogglePreview: () -> Unit,
-    onToggleSignature: (Boolean) -> Unit,
-    onToggleSmileyDisabled: (Boolean) -> Unit,
-    onToggleEmailNotification: (Boolean) -> Unit,
     onErrorDismissed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -261,30 +271,39 @@ private fun ReplyEditorBody(
                 Text(text = stringResource(R.string.messages_reply_error_dismiss))
             }
         }
-
-        ReplyOptions(
-            signatureEnabled = state.signatureEnabled,
-            smileyDisabled = state.smileyDisabled,
-            emailNotificationEnabled = state.emailNotificationEnabled,
-            enabled = !state.isSubmitting && !state.isLoadingForm,
-            onSignatureChanged = onToggleSignature,
-            onSmileyDisabledChanged = onToggleSmileyDisabled,
-            onEmailNotificationChanged = onToggleEmailNotification,
-        )
     }
 }
+
+/** How long the armed « Confirmer ? » state survives without a second tap (#312 v2). */
+private const val CONFIRM_DISARM_DELAY_MS = 4_000L
 
 /**
  * Send button pinned to the bottom, lifted above the IME so the user never dismisses the keyboard to
  * reach « Envoyer ». Mirrors the post editor's submit bar (the editor's `EditorSubmitBar` is module-
  * private, so the window-insets pattern is replicated here). Requires `windowSoftInputMode=adjustNothing`.
+ * #312 v2 : the confirmation preference arms the button (« Confirmer ? », tertiary colors) instead of
+ * raising the old modal dialog — the SECOND tap sends, and the armed state auto-disarms after a delay.
  */
 @Composable
+@Suppress("LongParameterList") // Mirrors the editor bar's state + actions.
 private fun ReplySubmitBar(
     canSubmit: Boolean,
     isSubmitting: Boolean,
+    confirmArmed: Boolean,
     onSubmit: () -> Unit,
+    onConfirmSubmit: () -> Unit,
+    onDisarmConfirm: () -> Unit,
+    onOpenOptions: () -> Unit,
 ) {
+    // Auto-disarm : an armed confirmation that is not confirmed within the delay silently
+    // falls back to « Envoyer » (same ViewModel intent as dismissing the old dialog).
+    // Keyed on the flag so any re-arm restarts the clock.
+    LaunchedEffect(confirmArmed) {
+        if (confirmArmed) {
+            delay(CONFIRM_DISARM_DELAY_MS)
+            onDisarmConfirm()
+        }
+    }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 3.dp) {
         Column(modifier = Modifier.fillMaxWidth()) {
             HorizontalDivider()
@@ -299,15 +318,39 @@ private fun ReplySubmitBar(
                             .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
                     )
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                TextButton(onClick = onOpenOptions) {
+                    Text(text = stringResource(R.string.messages_reply_actions_options))
+                }
+                Spacer(modifier = Modifier.weight(1f))
                 if (isSubmitting) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(12.dp))
                 }
-                Button(enabled = canSubmit, onClick = onSubmit) {
-                    Text(text = stringResource(R.string.messages_reply_submit))
+                Button(
+                    enabled = canSubmit,
+                    onClick = if (confirmArmed) onConfirmSubmit else onSubmit,
+                    colors = if (confirmArmed) {
+                        // Distinct (but not destructive) palette : the second tap is a
+                        // deliberate confirmation, not a warning.
+                        ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiary,
+                            contentColor = MaterialTheme.colorScheme.onTertiary,
+                        )
+                    } else {
+                        ButtonDefaults.buttonColors()
+                    },
+                ) {
+                    Text(
+                        text = stringResource(
+                            if (confirmArmed) {
+                                R.string.messages_reply_submit_confirm
+                            } else {
+                                R.string.messages_reply_submit
+                            },
+                        ),
+                    )
                 }
             }
         }
