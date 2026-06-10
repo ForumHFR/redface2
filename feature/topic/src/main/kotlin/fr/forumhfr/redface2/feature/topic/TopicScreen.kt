@@ -800,7 +800,9 @@ private fun TopicLoadedContent(
         // #283 — extra bottom padding so the last post's right-aligned actions clear the floating
         // bottom-action cluster (the Scaffold FAB slot floats over the content). Harmless extra
         // breathing room when the cluster is absent (anon + single page).
-        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
+        // 8 dp gutters (was 16) — posts are the app's main reading surface, every horizontal
+        // pixel counts on a phone ; the cards keep their own inner padding for breathing room.
+        contentPadding = PaddingValues(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 88.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
@@ -1183,11 +1185,18 @@ private fun TopicPostCard(
             },
         ),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        // Identity band — the avatar/pseudo/date header gets its own tinted strip across the
+        // full card width (forum idiom, dogfooding v109) : secondaryContainer over the neutral
+        // card, tertiaryContainer when the card itself is highlighted secondaryContainer so the
+        // band stays distinct. The Surface also sets LocalContentColor to the matching
+        // on-container colour for the pseudo. The Card clips the strip to its rounded corners.
+        Surface(
+            color = if (highlighted) {
+                MaterialTheme.colorScheme.tertiaryContainer
+            } else {
+                MaterialTheme.colorScheme.secondaryContainer
+            },
+            modifier = Modifier.fillMaxWidth(),
         ) {
             // #201 — avatar + author header in a Row so the visual identity of the poster
             // is immediately visible. Falls back to a placeholder square (cf.
@@ -1232,7 +1241,9 @@ private fun TopicPostCard(
                 Modifier
             }
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 // Centre the avatar against the name+date block so the identity line reads as one
                 // tidy unit (the previous Top alignment + the inflated pseudo made the pseudo look
@@ -1281,8 +1292,10 @@ private fun TopicPostCard(
                     if (citedCount > 0) {
                         // #239 — sober pill: how many posts of THIS page cite this one. Page-scoped
                         // (cf. citationCountsByNumreponse); jumping to the citing posts is a follow-up.
+                        // `surface` container : the pill now lives on the secondaryContainer identity
+                        // band, where a secondaryContainer pill would be invisible.
                         Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            color = MaterialTheme.colorScheme.surface,
                             shape = MaterialTheme.shapes.small,
                         ) {
                             Text(
@@ -1292,7 +1305,7 @@ private fun TopicPostCard(
                                     citedCount,
                                 ),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             )
                         }
@@ -1320,6 +1333,15 @@ private fun TopicPostCard(
                         .semantics { contentDescription = menuLabel },
                 )
             }
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                // 12 dp inner gutters (was 16) — combined with the list's 8 dp this buys the
+                // post body ~24 dp of extra reading width per line on a phone.
+                .padding(start = 12.dp, top = 10.dp, end = 12.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
             PostRenderer(content = post.content, selectable = true)
             if (onQuote != null || onEdit != null || onDelete != null) {

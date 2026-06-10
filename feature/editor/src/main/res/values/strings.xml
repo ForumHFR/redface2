@@ -31,7 +31,7 @@
     <string name="editor_new_topic_created">Sujet créé. Rafraîchis la liste si besoin pour le retrouver.</string>
     <string name="editor_smiley_open">Smileys</string>
     <string name="editor_actions_options">Options</string>
-    <string name="editor_submit_confirm">Confirmer&#160;?</string>
+    <string name="editor_submit_confirm">Confirmer</string>
     <string name="editor_smiley_title">Smileys</string>
     <string name="editor_smiley_tab_standard">Standard</string>
     <string name="editor_smiley_tab_wiki">Wiki</string>

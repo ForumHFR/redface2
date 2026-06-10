@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -48,12 +47,15 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
+import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
+import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitLabels
+import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitState
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
-import kotlinx.coroutines.delay
 
 /**
  * Reply editor for a private-message conversation (#301). Reuses the shared `:core:ui` BBCode
@@ -285,15 +287,12 @@ private fun ReplyEditorBody(
     }
 }
 
-/** How long the armed « Confirmer ? » state survives without a second tap (#312 v2). */
-private const val CONFIRM_DISARM_DELAY_MS = 4_000L
-
 /**
  * Send button pinned to the bottom, lifted above the IME so the user never dismisses the keyboard to
  * reach « Envoyer ». Mirrors the post editor's submit bar (the editor's `EditorSubmitBar` is module-
  * private, so the window-insets pattern is replicated here). Requires `windowSoftInputMode=adjustNothing`.
- * #312 v2 : the confirmation preference arms the button (« Confirmer ? », tertiary colors) instead of
- * raising the old modal dialog — the SECOND tap sends, and the armed state auto-disarms after a delay.
+ * The armed-confirmation behaviour (#312 v2, countdown drain included) lives in the shared
+ * [ArmedSubmitButton].
  */
 @Composable
 @Suppress("LongParameterList") // Mirrors the editor bar's state + actions.
@@ -306,15 +305,6 @@ private fun ReplySubmitBar(
     onDisarmConfirm: () -> Unit,
     onOpenOptions: () -> Unit,
 ) {
-    // Auto-disarm : an armed confirmation that is not confirmed within the delay silently
-    // falls back to « Envoyer » (same ViewModel intent as dismissing the old dialog).
-    // Keyed on the flag so any re-arm restarts the clock.
-    LaunchedEffect(confirmArmed) {
-        if (confirmArmed) {
-            delay(CONFIRM_DISARM_DELAY_MS)
-            onDisarmConfirm()
-        }
-    }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 3.dp) {
         Column(modifier = Modifier.fillMaxWidth()) {
             HorizontalDivider()
@@ -344,31 +334,18 @@ private fun ReplySubmitBar(
                     CircularProgressIndicator(modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(12.dp))
                 }
-                Button(
-                    enabled = canSubmit,
-                    onClick = if (confirmArmed) onConfirmSubmit else onSubmit,
-                    colors = if (confirmArmed) {
-                        // Distinct (but not destructive) palette : the second tap is a
-                        // deliberate confirmation, not a warning.
-                        ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.tertiary,
-                            contentColor = MaterialTheme.colorScheme.onTertiary,
-                        )
-                    } else {
-                        ButtonDefaults.buttonColors()
-                    },
-                ) {
-                    Text(
-                        text = stringResource(
-                            if (confirmArmed) {
-                                R.string.messages_reply_submit_confirm
-                            } else {
-                                R.string.messages_reply_submit
-                            },
-                        ),
-                        maxLines = 1,
-                    )
-                }
+                ArmedSubmitButton(
+                    state = ArmedSubmitState(armed = confirmArmed, enabled = canSubmit),
+                    labels = ArmedSubmitLabels(
+                        submit = stringResource(R.string.messages_reply_submit),
+                        confirm = stringResource(R.string.messages_reply_submit_confirm),
+                    ),
+                    actions = ArmedSubmitActions(
+                        onSubmit = onSubmit,
+                        onConfirmSubmit = onConfirmSubmit,
+                        onDisarm = onDisarmConfirm,
+                    ),
+                )
             }
         }
     }
