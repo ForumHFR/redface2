@@ -122,6 +122,34 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * #301 follow-up — GET the « new private message » composer. The URL is the one HFR's own
+     * « Créer un nouveau message » buttons carry on the MP list (captured live 2026-06-11,
+     * fixture `mp_compose_form.html`) : `message.php?config=hfr.inc&cat=prive&sond=0&p=1
+     * &subcat=0&dest=&subcatgroup=0` — `message.php` **without** `post=` opens the standalone
+     * MP composer. [prefilledDest] pre-fills the recipient field server-side (verified live :
+     * `dest=foo` renders `<input name="dest" value="foo">`), handy for a future « send a MP to
+     * this user » entry point ; the empty default mirrors HFR's own buttons.
+     *
+     * Always authenticated : composing toward the anonymous form would only produce a
+     * [ReplyForm.isAnonymous] refusal downstream — surface [SessionExpiredException] instead.
+     */
+    suspend fun getPrivateMessageComposePage(prefilledDest: String? = null): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("message.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", "prive")
+            .addQueryParameter("sond", "0")
+            .addQueryParameter("p", "1")
+            .addQueryParameter("subcat", "0")
+            .addQueryParameter("dest", prefilledDest.orEmpty())
+            .addQueryParameter("subcatgroup", "0")
+            .build()
+
+        val request = Request.Builder().url(url).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Phase 2C — GET the HFR reply or quote form. The shape is the same in both
      * cases (`/message.php?cat=…&post=…&page=…&p=1&subcat=…&sondage=0&owntopic=0
      * &new=0`); a quote carries `numrep={quotedNumreponse}` and may additionally

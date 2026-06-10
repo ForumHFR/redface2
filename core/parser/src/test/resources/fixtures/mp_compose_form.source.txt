@@ -1,0 +1,9 @@
+Source: forum.hardware.fr (capture authentifiee live, compte XaTriX). 2026-06-11
+Captured page: message.php?config=hfr.inc&cat=prive&sond=0&p=1&subcat=0&dest=&subcatgroup=0
+  (URL exacte du bouton "Creer un nouveau message" id=md_btn_new_topic de forum1.php?cat=prive)
+Methode: curl GET authentifie (login POST login_validation.php pseudo+password -> cookies md_user/md_passs/md_id),
+  User-Agent navigateur. hfr_read (MCP) refuse cat=prive, comme pour #298/#301.
+Notes: formulaire de COMPOSITION d'un nouveau MP (form name="hop" id="hop" action="/bddpost.php?config=hfr.inc" method=post).
+  AUCUN POST envoye — formulaire capture, jamais soumis.
+Privacy: scrubbe. hash_check -> SCRUBBED_HASH_CHECK (3 occurrences: fastsearch, apercu, hop), pseudo du compte -> TestUser,
+  emails -> scrubbed@example.invalid. Conserves (non sensibles): structure DOM, champs du form, libelles.

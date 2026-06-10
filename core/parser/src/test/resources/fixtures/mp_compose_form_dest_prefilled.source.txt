@@ -1,0 +1,5 @@
+Source: forum.hardware.fr (capture authentifiee live, compte XaTriX). 2026-06-11
+Captured page: message.php?config=hfr.inc&cat=prive&sond=0&p=1&subcat=0&dest=bozoleclown&subcatgroup=0
+Notes: variante du composer nouveau MP avec dest= prerempli par l'URL -> <input name="dest" value="bozoleclown">.
+  Prouve que le param GET dest preremplit le champ destinataire. AUCUN POST envoye.
+Privacy: scrubbe comme mp_compose_form_scrubbed.html. "bozoleclown" est un pseudo public HFR utilise comme valeur de test.

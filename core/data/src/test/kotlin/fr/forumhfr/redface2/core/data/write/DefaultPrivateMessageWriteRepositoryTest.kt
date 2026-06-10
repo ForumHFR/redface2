@@ -195,6 +195,123 @@ class DefaultPrivateMessageWriteRepositoryTest {
         assertEquals(ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage), result)
     }
 
+    // #301 follow-up — composing a NEW conversation (fixture mp_compose_form.html,
+    // captured live 2026-06-11 ; the POST response shape is the shared bddpost.php family).
+
+    @Test
+    fun `fetchComposeForm GETs the standalone composer on message_php with cat=prive`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("mp_compose_form.html")))
+
+        val form = repository.fetchComposeForm()
+
+        assertFalse(form.isAnonymous)
+        assertEquals("prive", form.hiddenFields["cat"])
+        assertEquals("", form.hiddenFields["post"])
+
+        val url = requireNotNull(server.takeRequest().requestUrl)
+        assertEquals("message.php", url.pathSegments.first())
+        assertEquals("prive", url.queryParameter("cat"))
+        assertEquals("", url.queryParameter("dest"))
+        assertEquals("0", url.queryParameter("subcat"))
+    }
+
+    @Test
+    fun `fetchComposeForm forwards the prefilled recipient in the URL`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("mp_compose_form.html")))
+
+        repository.fetchComposeForm(prefilledRecipient = "bozoleclown")
+
+        val url = requireNotNull(server.takeRequest().requestUrl)
+        assertEquals("bozoleclown", url.queryParameter("dest"))
+    }
+
+    @Test
+    fun `submitNewMessage overrides dest and sujet and forwards the composer routing verbatim`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("mp_compose_form.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+
+        val form = repository.fetchComposeForm()
+        val result = repository.submitNewMessage(
+            form = form,
+            recipients = "bozoleclown, Lt Ripley",
+            subject = "Test depuis Redface 2",
+            bbcodeContent = "Bonjour en privé.",
+        )
+
+        assertTrue("Expected success, got $result", result is ReplySubmitResult.Success)
+
+        server.takeRequest() // drop the GET
+        val recorded = server.takeRequest()
+        assertEquals("POST", recorded.method)
+        assertEquals("bddpost.php", requireNotNull(recorded.requestUrl).pathSegments.first())
+
+        val raw = recorded.body.readUtf8()
+        val body = parseFormBody(raw)
+        // User-typed routing overrides the form's (empty) text-input values…
+        assertEquals("bozoleclown, Lt Ripley", body["dest"])
+        assertEquals("Test depuis Redface 2", body["sujet"])
+        assertEquals("Bonjour en privé.", body["content_form"])
+        // …and exactly once : the parsed empty prefill must not ride along as a duplicate.
+        assertEquals(1, raw.split('&').count { it.startsWith("dest=") })
+        assertEquals(1, raw.split('&').count { it.startsWith("sujet=") })
+        // New-conversation routing forwarded verbatim from the composer's hidden fields.
+        assertEquals("prive", body["cat"])
+        assertEquals("", body["post"])
+        assertEquals("", body["numrep"])
+        assertEquals("", body["numreponse"])
+        assertEquals("", body["parents"])
+        assertEquals("", body["stickold"])
+        assertEquals("SCRUBBED_HASH_CHECK", body["hash_check"])
+        assertEquals("1100", body["verifrequet"])
+        assertEquals("TestUser", body["pseudo"])
+        assertFalse("password must never be transmitted", body.containsKey("password"))
+    }
+
+    @Test
+    fun `submitNewMessage refuses blank recipients without any network call`() = runTest {
+        val form = ReplyForm(hashCheck = "h", sujet = "", hiddenFields = emptyMap(), isAnonymous = false)
+
+        val result = repository.submitNewMessage(
+            form = form,
+            recipients = "   ",
+            subject = "Sujet",
+            bbcodeContent = "corps",
+        )
+
+        assertEquals(ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage), result)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `submitNewMessage refuses a blank subject without any network call`() = runTest {
+        val form = ReplyForm(hashCheck = "h", sujet = "", hiddenFields = emptyMap(), isAnonymous = false)
+
+        val result = repository.submitNewMessage(
+            form = form,
+            recipients = "bozoleclown",
+            subject = " ",
+            bbcodeContent = "corps",
+        )
+
+        assertEquals(ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage), result)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `submitNewMessage refuses an anonymous composer form`() = runTest {
+        val form = ReplyForm(hashCheck = "h", sujet = "", hiddenFields = emptyMap(), isAnonymous = true)
+
+        val result = repository.submitNewMessage(
+            form = form,
+            recipients = "bozoleclown",
+            subject = "Sujet",
+            bbcodeContent = "corps",
+        )
+
+        assertEquals(ReplySubmitResult.Failure(ReplyFailureReason.LoginRequired), result)
+        assertEquals(0, server.requestCount)
+    }
+
     private fun fixture(name: String): String {
         val stream = requireNotNull(
             DefaultPrivateMessageWriteRepositoryTest::class.java.classLoader?.getResourceAsStream("fixtures/$name"),
