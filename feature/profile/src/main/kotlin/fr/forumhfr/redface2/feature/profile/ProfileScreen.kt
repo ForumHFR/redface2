@@ -271,9 +271,13 @@ private fun ProfileFullContent(
 
     // Author-only search (« topics where this user posted ») pre-filled with the
     // CANONICAL pseudo from the loaded profile — not the tap-site hint, whose casing
-    // can drift from the real account name.
+    // can drift from the real account name. Disabled on ProfileParser's defensive
+    // sentinel ("?", served when even the page title gave no pseudo) — searching it
+    // would fire a pointless author query (Codex review of #403).
+    val hasUsablePseudo = profile.pseudo.isNotBlank() && profile.pseudo != "?"
     OutlinedButton(
         onClick = { onShowUserPosts(profile.pseudo) },
+        enabled = hasUsablePseudo,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Text(stringResource(R.string.profile_action_recent_posts))

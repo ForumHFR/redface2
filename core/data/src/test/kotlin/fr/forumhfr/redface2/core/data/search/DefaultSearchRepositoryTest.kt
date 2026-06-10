@@ -166,6 +166,69 @@ class DefaultSearchRepositoryTest {
     }
 
     @Test
+    fun `author filter is forwarded to the HfrClient`() = runTest {
+        // #402 — author-only search : empty query, pseud filter riding through.
+        val hfrClient = mockk<HfrClient>()
+        coEvery {
+            hfrClient.searchTopics(
+                query = any(),
+                cat = any(),
+                page = any(),
+                date = any(),
+                textScope = any(),
+                pseudo = any(),
+            )
+        } returns NO_RESULTS_HTML
+
+        val repo = buildRepository(hfrClient = hfrClient)
+        repo.search(SearchRequest(query = "", pseudo = "Lt Ripley"))
+
+        coVerify(exactly = 1) {
+            hfrClient.searchTopics(
+                query = "",
+                cat = any(),
+                page = any(),
+                date = any(),
+                textScope = any(),
+                pseudo = "Lt Ripley",
+            )
+        }
+    }
+
+    @Test
+    fun `IOException message never carries the pseud parameter`() = runTest {
+        // #402 — the search URL now also embeds `pseud=<author>` ; the same strip that
+        // protects `search=` must keep the author out of the rebranded message.
+        val hfrClient = mockk<HfrClient>()
+        coEvery {
+            hfrClient.searchTopics(
+                query = any(),
+                cat = any(),
+                page = any(),
+                date = any(),
+                textScope = any(),
+                pseudo = any(),
+            )
+        } throws IOException(
+            "HFR returned 500 for https://forum.hardware.fr/forum1.php" +
+                "?recherches=1&cat=&pseud=Secret+Pseudo&search=&...",
+        )
+
+        val repo = buildRepository(hfrClient = hfrClient)
+        val thrown = assertThrows(IOException::class.java) {
+            kotlinx.coroutines.runBlocking {
+                repo.search(SearchRequest(query = "", pseudo = "Secret Pseudo"))
+            }
+        }
+
+        assertFalse(
+            "expected the pseud parameter to NOT appear in the rebranded exception, got <${thrown.message}>",
+            thrown.message!!.contains("Secret"),
+        )
+        assertTrue(thrown.message!!.contains("500"))
+    }
+
+    @Test
     fun `IOException from HfrClient is rebranded without leaking the query URL`() = runTest {
         val hfrClient = mockk<HfrClient>()
         // Mimic the exact message shape that `executeAuthenticatedHtml` produces.
