@@ -67,6 +67,7 @@ import fr.forumhfr.redface2.feature.forum.CategoryRequest
 import fr.forumhfr.redface2.feature.forum.ForumCategoryScreen
 import fr.forumhfr.redface2.feature.forum.ForumScreen
 import fr.forumhfr.redface2.feature.messages.MessagesScreen
+import fr.forumhfr.redface2.feature.messages.PrivateMessageComposeScreen
 import fr.forumhfr.redface2.feature.messages.PrivateMessageReplyRequest
 import fr.forumhfr.redface2.feature.messages.PrivateMessageReplyScreen
 import fr.forumhfr.redface2.feature.messages.PrivateMessageThreadRequest
@@ -129,12 +130,23 @@ data class PrivateMessageReplyRoute(
 ) : RedfaceNavKey
 
 /**
+ * #301 follow-up — standalone new-conversation composer, pushed from the MP list's « Nouveau »
+ * button. [prefilledRecipient] rides HFR's `dest=` GET parameter and seeds the recipients field
+ * (future « envoyer un MP à ce membre » entry points) ; the list button passes none.
+ */
+@Serializable
+data class PrivateMessageComposeRoute(
+    val prefilledRecipient: String? = null,
+) : RedfaceNavKey
+
+/**
  * Full-screen editor routes hide the navigation suite so their IME-pinned submit bar sits at the
  * window bottom (and to avoid dropping the draft on a tab switch). Extracted from `RedfaceApp` to
  * keep its cyclomatic complexity in check.
  */
 private fun NavKey?.hidesNavigationSuite(): Boolean =
-    this is PostEditorRoute || this is TopicFormRoute || this is PrivateMessageReplyRoute
+    this is PostEditorRoute || this is TopicFormRoute || this is PrivateMessageReplyRoute ||
+        this is PrivateMessageComposeRoute
 
 @Serializable
 data class CategoryRoute(
@@ -415,6 +427,11 @@ fun RedfaceApp(intent: Intent?) {
         // Purged on every auth transition, exactly like readPrivateMessageThreadIds, so private
         // metadata never outlives the session / account.
         var multiRecipientThreadIds by remember { mutableStateOf(emptySet<Int>()) }
+        // #301 follow-up — bumped when the new-conversation composer pops back after a successful
+        // send. The MP list collects the signal and refreshes itself so the created conversation
+        // appears at the top (its thread id is unknown — the bddpost success response of a new MP
+        // is not topic-shaped). In-memory only, like the other private-message hints above.
+        var privateMessageSentSignal by remember { mutableStateOf<Long?>(null) }
 
         // Bug fix (build 89) — per-topic title cache keyed by (cat, post). A page change replaces the
         // TopicRoute (new nav entry → new ViewModel → Loading with no topic), which used to flash the
@@ -436,11 +453,13 @@ fun RedfaceApp(intent: Intent?) {
                 AuthState.Anonymous -> {
                     readPrivateMessageThreadIds = emptySet()
                     multiRecipientThreadIds = emptySet()
+                    privateMessageSentSignal = null
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
                 }
                 is AuthState.Authenticated -> {
                     readPrivateMessageThreadIds = emptySet()
                     multiRecipientThreadIds = emptySet()
+                    privateMessageSentSignal = null
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
                 }
             }
@@ -498,6 +517,10 @@ fun RedfaceApp(intent: Intent?) {
                         },
                         onThreadOpenedAsMulti = { threadId ->
                             multiRecipientThreadIds = multiRecipientThreadIds + threadId
+                        },
+                        sentSignal = privateMessageSentSignal,
+                        onConversationSent = {
+                            privateMessageSentSignal = System.currentTimeMillis()
                         },
                     ),
                     topicTitleNavState = TopicTitleNavState(
@@ -611,6 +634,10 @@ private data class PrivateMessageNavState(
     val multiRecipientThreadIds: Set<Int>,
     val onThreadLoaded: (Int) -> Unit,
     val onThreadOpenedAsMulti: (Int) -> Unit,
+    /** #301 follow-up — last successful new-conversation send ; the MP list refreshes on change. */
+    val sentSignal: Long? = null,
+    /** #301 follow-up — bumps [sentSignal] when the composer reports a successful send. */
+    val onConversationSent: () -> Unit = {},
 )
 
 /**
@@ -838,7 +865,28 @@ private fun RedfaceNavHost(
                             ),
                         )
                     },
+                    onComposeNew = { backStack.add(PrivateMessageComposeRoute()) },
+                    sentSignal = privateMessageNavState.sentSignal,
                     topBarActions = accountMenu,
+                )
+            }
+            entry<PrivateMessageComposeRoute> { route ->
+                PrivateMessageComposeScreen(
+                    initialRecipient = route.prefilledRecipient,
+                    onSubmitSucceeded = {
+                        // Pop the composer, then bump the sent signal so the MP list refreshes —
+                        // the created thread id is unknown (the bddpost success response of a new
+                        // conversation is not topic-shaped), so there is no thread to land on.
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                        privateMessageNavState.onConversationSent()
+                    },
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
                 )
             }
             entry<PrivateMessageThreadRoute> { route ->
