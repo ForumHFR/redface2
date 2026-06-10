@@ -43,6 +43,12 @@ import fr.forumhfr.redface2.core.model.FlagType
  * `weight(1f)` so the action stays pinned to the right and the text ellipsises instead of
  * overlapping it. When absent (default), the column fills the row as before.
  *
+ * [metadataEnd] is an optional end-aligned segment of the footer line (#325 follow-up:
+ * the last-reply timestamp). It is NEVER truncated — the start segment ([metadata]) takes
+ * the remaining width and ellipsises instead, so on narrow screens the date survives and
+ * the author/pagination clip first (dogfooding feedback on v102: the timestamp, placed
+ * last in a single string, was the part being cut off).
+ *
  * Note (#99): the « Retirer le drapeau » affordance is no longer an inline `trailingAction`
  * button — `:feature:flags` now wraps this row in a Material 3 `SwipeToDismissBox`
  * (swipe-to-remove + confirmation dialog). The slot is kept for future inline actions.
@@ -53,6 +59,7 @@ fun FlagItem(
     metadata: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    metadataEnd: String = "",
     trailingAction: (@Composable RowScope.() -> Unit)? = null,
 ) {
     Row(
@@ -75,16 +82,32 @@ fun FlagItem(
                 fontWeight = if (flag.hasUnread) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 2,
             )
-            if (metadata.isNotEmpty()) {
-                Text(
-                    text = metadata,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    // #325 — the line can exceed narrow screens now that it carries the
-                    // last-reply timestamp: signal the truncation instead of hard-clipping.
-                    overflow = TextOverflow.Ellipsis,
-                )
+            if (metadata.isNotEmpty() || metadataEnd.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = metadata,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        // #325 — only the START segment may truncate; the end-aligned
+                        // timestamp keeps its intrinsic width (weight measures this text
+                        // in the remaining space).
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (metadataEnd.isNotEmpty()) {
+                        Text(
+                            text = metadataEnd,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            modifier = Modifier.padding(start = 8.dp),
+                        )
+                    }
+                }
             }
         }
         trailingAction?.invoke(this)

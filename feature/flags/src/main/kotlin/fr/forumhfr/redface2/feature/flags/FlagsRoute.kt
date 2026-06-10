@@ -687,6 +687,7 @@ private fun CategorySectionedFlagList(
                     SwipeableFlagItem(
                         flag = flag,
                         metadata = flagMetadata(flag),
+                        metadataEnd = flagMetadataEnd(flag),
                         removalInFlight = removalInFlight,
                         onClick = { actions.onOpenFlag(flag) },
                         onRequestRemove = { actions.onRequestRemoveFlag(flag) },
@@ -765,6 +766,7 @@ private fun FlatFlagList(
                 SwipeableFlagItem(
                     flag = flag,
                     metadata = flagMetadata(flag),
+                    metadataEnd = flagMetadataEnd(flag),
                     removalInFlight = removalInFlight,
                     onClick = { actions.onOpenFlag(flag) },
                     onRequestRemove = { actions.onRequestRemoveFlag(flag) },
@@ -818,6 +820,7 @@ private fun flatEmptyLabel(tab: FlagTab): Int = when (tab) {
 private fun SwipeableFlagItem(
     flag: Flag,
     metadata: String,
+    metadataEnd: String,
     removalInFlight: Boolean,
     onClick: () -> Unit,
     onRequestRemove: () -> Unit,
@@ -844,6 +847,7 @@ private fun SwipeableFlagItem(
         FlagItem(
             flag = flag,
             metadata = metadata,
+            metadataEnd = metadataEnd,
             onClick = onClick,
             // Opaque background so the destructive backdrop never bleeds through the row while
             // it is animating back to settled. Swipe is the only removal affordance now, so we
@@ -948,43 +952,32 @@ private data class FlagsViewSettingsActions(
 )
 
 /**
- * Footer line of a drapeau row. #325 adds the last-reply timestamp, formatted web-style
- * (`01-05-2026 à 17:07`) by [formatLastReplyTimestamp] from the raw REST string. Both the
- * author and the timestamp are optional on the wire (blank when REST omits them), so each
- * combination maps to its own template — never a dangling `·` separator.
+ * Start segment of a drapeau row's footer: `author · p.X/Y`. Dogfooding feedback on v102:
+ * the single-string footer (`author · N rép. · p.X/Y · timestamp`) truncated its tail —
+ * the #325 timestamp — on narrow screens. The reply count is dropped entirely (redundant
+ * with the page count for a quick scan, and the web listing survives without it on
+ * mobile) and the timestamp moves to [flagMetadataEnd], rendered end-aligned and never
+ * truncated by [FlagItem].
  */
 @Composable
-private fun flagMetadata(flag: Flag): String {
-    val lastReplyAt = formatLastReplyTimestamp(flag.lastReplyAt)
-    val hasAuthor = flag.lastReplyAuthor.isNotBlank()
-    return when {
-        hasAuthor && lastReplyAt.isNotBlank() -> stringResource(
-            R.string.flags_item_metadata_with_author_at,
-            flag.lastReplyAuthor,
-            lastReplyAt,
-            flag.replyCount,
-            flag.lastReadPage,
-            flag.totalPages,
-        )
-        hasAuthor -> stringResource(
-            R.string.flags_item_metadata_with_author,
-            flag.lastReplyAuthor,
-            flag.replyCount,
-            flag.lastReadPage,
-            flag.totalPages,
-        )
-        lastReplyAt.isNotBlank() -> stringResource(
-            R.string.flags_item_metadata_no_author_at,
-            lastReplyAt,
-            flag.replyCount,
-            flag.lastReadPage,
-            flag.totalPages,
-        )
-        else -> stringResource(
-            R.string.flags_item_metadata_no_author,
-            flag.replyCount,
-            flag.lastReadPage,
-            flag.totalPages,
-        )
-    }
+private fun flagMetadata(flag: Flag): String = if (flag.lastReplyAuthor.isNotBlank()) {
+    stringResource(
+        R.string.flags_item_metadata_with_author,
+        flag.lastReplyAuthor,
+        flag.lastReadPage,
+        flag.totalPages,
+    )
+} else {
+    stringResource(
+        R.string.flags_item_metadata_no_author,
+        flag.lastReadPage,
+        flag.totalPages,
+    )
 }
+
+/**
+ * End-aligned segment of the footer: the last-reply timestamp (#325), formatted web-style
+ * (`01-05-2026 à 17:07`) by [formatLastReplyTimestamp] from the raw REST string. Blank when
+ * REST omits it — [FlagItem] then renders the start segment alone.
+ */
+private fun flagMetadataEnd(flag: Flag): String = formatLastReplyTimestamp(flag.lastReplyAt)
