@@ -120,6 +120,16 @@ class SettingsViewModel @Inject constructor(
                 }
             }
         }
+        viewModelScope.launch {
+            val showDt = userPreferencesRepository.observeShowDtSection().first()
+            _state.update { current ->
+                if (current.showDtSectionTouchedLocally || current.isUpdatingShowDtSection) {
+                    current
+                } else {
+                    current.copy(showDtSection = showDt)
+                }
+            }
+        }
     }
 
     @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the SettingsIntent variants ; flat by design.
@@ -162,6 +172,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.ThemeModeChanged -> updateThemeMode(intent.mode)
             is SettingsIntent.AmoledEnabledChanged -> updateAmoled(intent.enabled)
             is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
+            is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
         }
     }
@@ -463,6 +474,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setTopicTopBarAutoHide,
+        )
+    }
+
+    private fun updateShowDtSection(desired: Boolean) {
+        val previous = _state.value.showDtSection
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    showDtSection = desired,
+                    isUpdatingShowDtSection = true,
+                    showDtSectionError = false,
+                    showDtSectionTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(showDtSection = desired, isUpdatingShowDtSection = false)
+                } else {
+                    state.copy(
+                        showDtSection = previous,
+                        isUpdatingShowDtSection = false,
+                        showDtSectionError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setShowDtSection,
         )
     }
 

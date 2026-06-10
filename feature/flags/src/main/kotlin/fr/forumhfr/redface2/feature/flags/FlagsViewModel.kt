@@ -54,6 +54,18 @@ class FlagsViewModel @Inject constructor(
     private val _selectedTab = MutableStateFlow<FlagTab>(FlagTab.Cyan)
     val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
 
+    /**
+     * Whether the opt-in « DT » placeholder tab is shown (Settings toggle, default off).
+     * The content arrives with the MPStorage sync (#6) — until then the tab only renders
+     * a placeholder body, like [FlagTab.Super].
+     */
+    val showDtTab: StateFlow<Boolean> = userPreferencesRepository.observeShowDtSection()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false,
+        )
+
     val authState: StateFlow<AuthState?> = authRepository.observeAuthState()
         .stateIn(
             scope = viewModelScope,
@@ -605,6 +617,15 @@ sealed interface FlagTab {
 
     /** Placeholder — future « super favoris ». No fetch, no backend. */
     data object Super : FlagTab {
+        override val flagType: FlagType? = null
+    }
+
+    /**
+     * Placeholder — future « discussions suivies » (DT) whose flags will sync through the
+     * MPStorage v0.1 document (#6, mpFlags DTCloud). No fetch, no backend yet ; the tab
+     * itself is opt-in behind the « section DT » Settings toggle.
+     */
+    data object Dt : FlagTab {
         override val flagType: FlagType? = null
     }
 }

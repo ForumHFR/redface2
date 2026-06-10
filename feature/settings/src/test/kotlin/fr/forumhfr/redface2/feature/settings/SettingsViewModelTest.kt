@@ -989,6 +989,14 @@ class SettingsViewModelTest {
             confirmBeforePosting.value = enabled
         }
 
+        private val showDtSection = MutableStateFlow(false)
+
+        override fun observeShowDtSection(): Flow<Boolean> = showDtSection
+
+        override suspend fun setShowDtSection(enabled: Boolean) {
+            showDtSection.value = enabled
+        }
+
         fun emitConfirmBeforePosting(value: Boolean) {
             confirmBeforePosting.value = value
         }

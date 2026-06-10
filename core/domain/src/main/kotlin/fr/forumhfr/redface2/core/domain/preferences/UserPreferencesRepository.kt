@@ -149,4 +149,15 @@ interface UserPreferencesRepository {
 
     /** Persists [observeConfirmBeforePosting]. Default `false` until the first call. */
     suspend fun setConfirmBeforePosting(enabled: Boolean)
+
+    /**
+     * Opt-in « DT » section on the Drapeaux screen: when `true`, a « DT » tab appears next
+     * to the flag-type tabs. Placeholder for now — the content (the followed-discussions
+     * list whose flags sync through the MPStorage document, #6) lands later. Default
+     * `false`. Observed by `:feature:flags`, toggled in Settings.
+     */
+    fun observeShowDtSection(): Flow<Boolean>
+
+    /** Persists [observeShowDtSection]. Default `false` until the first call. */
+    suspend fun setShowDtSection(enabled: Boolean)
 }

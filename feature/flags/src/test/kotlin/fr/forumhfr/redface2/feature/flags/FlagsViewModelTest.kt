@@ -1422,6 +1422,10 @@ class FlagsViewModelTest {
 
         override suspend fun setConfirmBeforePosting(enabled: Boolean) = Unit
 
+        override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setShowDtSection(enabled: Boolean) = Unit
+
         fun setGroupBy(value: Boolean) {
             groupBy.value = value
         }

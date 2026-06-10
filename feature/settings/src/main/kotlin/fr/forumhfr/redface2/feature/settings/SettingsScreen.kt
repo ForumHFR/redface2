@@ -505,6 +505,16 @@ private fun FlagsPreferencesCard(
             if (state.flagsPerTabOverrideError) {
                 PreferencePersistError(R.string.settings_flags_per_tab_override_persist_failed)
             }
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_flags_show_dt_section_title),
+                description = stringResource(R.string.settings_flags_show_dt_section_description),
+                checked = state.showDtSection,
+                enabled = state.canToggleShowDtSection,
+                onCheckedChange = { onIntent(SettingsIntent.ShowDtSectionChanged(it)) },
+            )
+            if (state.showDtSectionError) {
+                PreferencePersistError(R.string.settings_flags_show_dt_section_persist_failed)
+            }
         }
     }
 }
