@@ -23,6 +23,9 @@ dependencies {
     implementation(project(":core:ui"))
     implementation(project(":core:extension"))
 
+    // androidx.core.net.toUri for the post-menu « Ouvrir dans le navigateur » action (#362
+    // follow-up) — same ktx idiom as the mailto: intent in :app.
+    implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

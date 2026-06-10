@@ -22,6 +22,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
@@ -48,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -62,6 +64,7 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.ui.FlagItem
 import fr.forumhfr.redface2.core.ui.FlagItemDivider
+import fr.forumhfr.redface2.core.ui.FlagMetadata
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import kotlinx.coroutines.launch
@@ -291,15 +294,26 @@ private fun FlagsHeader(
             color = MaterialTheme.colorScheme.onSurface,
         )
         // Refresh moved to a PullToRefreshBox (swipe down) on the list — the header now carries the
-        // display-settings trigger (#309, text-only: the icons-extended dependency is not on this
-        // module's classpath) and the global account menu slot.
+        // display-settings trigger (#309) and the global account menu slot.
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             onOpenViewSettings?.let { open ->
-                TextButton(onClick = open) {
-                    Text(stringResource(R.string.flags_view_settings_action))
+                // Gear glyph instead of the « Affichage » text label (dogfooding v102: the word
+                // crowded the header). Text glyph because ForbiddenImport bans material icons
+                // (cf. the Text("←") precedent); U+FE0E pins the monochrome text rendition over
+                // the emoji one. The wording survives as the TalkBack label.
+                val viewSettingsLabel = stringResource(R.string.flags_view_settings_action)
+                IconButton(
+                    onClick = open,
+                    modifier = Modifier.semantics { contentDescription = viewSettingsLabel },
+                ) {
+                    Text(
+                        text = "\u2699\uFE0E",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
             topBarActions?.invoke()
@@ -686,7 +700,7 @@ private fun CategorySectionedFlagList(
                     // Confirming phase and the ViewModel rejects re-entry.
                     SwipeableFlagItem(
                         flag = flag,
-                        metadata = flagMetadata(flag),
+                        metadata = flagRowMetadata(flag),
                         removalInFlight = removalInFlight,
                         onClick = { actions.onOpenFlag(flag) },
                         onRequestRemove = { actions.onRequestRemoveFlag(flag) },
@@ -764,7 +778,7 @@ private fun FlatFlagList(
             ) { flag ->
                 SwipeableFlagItem(
                     flag = flag,
-                    metadata = flagMetadata(flag),
+                    metadata = flagRowMetadata(flag),
                     removalInFlight = removalInFlight,
                     onClick = { actions.onOpenFlag(flag) },
                     onRequestRemove = { actions.onRequestRemoveFlag(flag) },
@@ -817,7 +831,7 @@ private fun flatEmptyLabel(tab: FlagTab): Int = when (tab) {
 @Composable
 private fun SwipeableFlagItem(
     flag: Flag,
-    metadata: String,
+    metadata: FlagMetadata,
     removalInFlight: Boolean,
     onClick: () -> Unit,
     onRequestRemove: () -> Unit,
@@ -948,43 +962,29 @@ private data class FlagsViewSettingsActions(
 )
 
 /**
- * Footer line of a drapeau row. #325 adds the last-reply timestamp, formatted web-style
- * (`01-05-2026 à 17:07`) by [formatLastReplyTimestamp] from the raw REST string. Both the
- * author and the timestamp are optional on the wire (blank when REST omits them), so each
- * combination maps to its own template — never a dangling `·` separator.
+ * Builds the two-segment footer of a drapeau row ([FlagMetadata]). Dogfooding feedback on
+ * v102: the single-string footer (`author · N rép. · p.X/Y · timestamp`) truncated its
+ * tail — the #325 timestamp — on narrow screens. `start` is `author · p.X/Y` (the only
+ * segment allowed to ellipsise; the reply count is dropped, redundant with the page count
+ * for a quick scan) and `end` is the last-reply timestamp, formatted web-style
+ * (`01-05-2026 à 17:07`) by [formatLastReplyTimestamp] from the raw REST string — rendered
+ * end-aligned and never truncated by [FlagItem]. Blank when REST omits it.
  */
 @Composable
-private fun flagMetadata(flag: Flag): String {
-    val lastReplyAt = formatLastReplyTimestamp(flag.lastReplyAt)
-    val hasAuthor = flag.lastReplyAuthor.isNotBlank()
-    return when {
-        hasAuthor && lastReplyAt.isNotBlank() -> stringResource(
-            R.string.flags_item_metadata_with_author_at,
-            flag.lastReplyAuthor,
-            lastReplyAt,
-            flag.replyCount,
-            flag.lastReadPage,
-            flag.totalPages,
-        )
-        hasAuthor -> stringResource(
+private fun flagRowMetadata(flag: Flag): FlagMetadata {
+    val start = if (flag.lastReplyAuthor.isNotBlank()) {
+        stringResource(
             R.string.flags_item_metadata_with_author,
             flag.lastReplyAuthor,
-            flag.replyCount,
             flag.lastReadPage,
             flag.totalPages,
         )
-        lastReplyAt.isNotBlank() -> stringResource(
-            R.string.flags_item_metadata_no_author_at,
-            lastReplyAt,
-            flag.replyCount,
-            flag.lastReadPage,
-            flag.totalPages,
-        )
-        else -> stringResource(
+    } else {
+        stringResource(
             R.string.flags_item_metadata_no_author,
-            flag.replyCount,
             flag.lastReadPage,
             flag.totalPages,
         )
     }
+    return FlagMetadata(start = start, end = formatLastReplyTimestamp(flag.lastReplyAt))
 }

@@ -110,12 +110,16 @@ internal fun SearchContent(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .navigationBarsPadding(),
         ) {
+            // Header padding matches the other three main screens (24/12, headlineMedium) —
+            // dogfooding feedback on v102: Recherche inherited the content's tighter 16dp
+            // gutter, so its title and the account avatar sat visibly offset from
+            // Drapeaux / Forum / Messages.
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
@@ -126,35 +130,42 @@ internal fun SearchContent(
                 )
                 topBarActions?.invoke()
             }
-            SearchField(
-                query = state.query,
-                isSubmitEnabled = !state.isLoading && state.query.isNotBlank(),
-                onQueryChange = { onIntent(SearchIntent.QueryChanged(it)) },
-                onSubmit = { onIntent(SearchIntent.Submit) },
-            )
-            SearchOptions(
-                textScope = state.textScope,
-                onTextScopeSelected = { onIntent(SearchIntent.TextScopeSelected(it)) },
-            )
-            if (state.pivotCategories.isNotEmpty()) {
-                PivotChips(
-                    pivot = state.pivotCategories,
-                    selected = state.selectedCategory,
-                    onSelect = { onIntent(SearchIntent.CategorySelected(it)) },
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                SearchField(
+                    query = state.query,
+                    isSubmitEnabled = !state.isLoading && state.query.isNotBlank(),
+                    onQueryChange = { onIntent(SearchIntent.QueryChanged(it)) },
+                    onSubmit = { onIntent(SearchIntent.Submit) },
+                )
+                SearchOptions(
+                    textScope = state.textScope,
+                    onTextScopeSelected = { onIntent(SearchIntent.TextScopeSelected(it)) },
+                )
+                if (state.pivotCategories.isNotEmpty()) {
+                    PivotChips(
+                        pivot = state.pivotCategories,
+                        selected = state.selectedCategory,
+                        onSelect = { onIntent(SearchIntent.CategorySelected(it)) },
+                    )
+                }
+                HorizontalDivider()
+                // `Modifier.weight(1f)` is required so the inner `LazyColumn` (in
+                // `ResultsList`) gets a bounded vertical constraint. Without it, the
+                // child `LazyColumn` measures with `Constraints.Infinity` and Compose
+                // throws `IllegalStateException: Vertically scrollable component was
+                // measured with an infinite max constraints`.
+                SearchBody(
+                    state = state,
+                    onRetry = { onIntent(SearchIntent.Retry) },
+                    onOpenTopic = onOpenTopic,
+                    modifier = Modifier.weight(1f),
                 )
             }
-            HorizontalDivider()
-            // `Modifier.weight(1f)` is required so the inner `LazyColumn` (in
-            // `ResultsList`) gets a bounded vertical constraint. Without it, the
-            // child `LazyColumn` measures with `Constraints.Infinity` and Compose
-            // throws `IllegalStateException: Vertically scrollable component was
-            // measured with an infinite max constraints`.
-            SearchBody(
-                state = state,
-                onRetry = { onIntent(SearchIntent.Retry) },
-                onOpenTopic = onOpenTopic,
-                modifier = Modifier.weight(1f),
-            )
         }
     }
 }
