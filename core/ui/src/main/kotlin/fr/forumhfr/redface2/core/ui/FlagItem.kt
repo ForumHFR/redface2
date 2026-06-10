@@ -26,14 +26,6 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 
 /**
- * Footer line of a [FlagItem] row, split in two segments (#325 follow-up). [start] is the
- * only segment allowed to truncate (ellipsis); [end] — typically the last-reply
- * timestamp — keeps its intrinsic width, pinned to the row's end. Either side may be
- * empty. Bundled as one value so callers stay under the detekt parameter-count threshold.
- */
-data class FlagMetadata(val start: String = "", val end: String = "")
-
-/**
  * Renders one row of the user's drapeaux list.
  *
  * Visual hierarchy mirrors what HFR users have spent ~20 years training their eyes on:
