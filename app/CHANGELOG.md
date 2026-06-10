@@ -22,7 +22,7 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 **Commit** : candidat depuis dev `bb3ee57b` (build dev 112), versionCode anticipé 113 (ledger 112+1)
 **Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) → track open testing + tag pour F-Droid beta
 
-**Lot dogfooding du 2026-06-10 soir** : 8 PR mergées sur dev (#388–#392, #397, #399), dogfoodées en continu sur le canal dev (v106 → v112).
+**Lot dogfooding du 2026-06-10 soir** : 7 PR mergées sur dev (#388–#392, #397, #399), dogfoodées en continu sur le canal dev (v106 → v112).
 
 ### Added
 - **Barre d'actions de l'éditeur** — « Options | Smileys | Envoyer » épinglée au-dessus du clavier sur les trois éditeurs (post, sujet, MP) ; les toggles HFR (signature/smileys/notification) passent dans un bottom sheet ouvert par « Options » ; boutons secondaires en pilules tonales (#390).
