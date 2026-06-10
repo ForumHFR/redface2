@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -298,11 +299,17 @@ internal fun EditorSubmitBar(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = actions.onOpenOptions) {
+                // Tonal containers for the secondary triggers, filled for « Envoyer » — the
+                // canonical M3 emphasis pair (user choice over outlined / bare text). The
+                // expressive press-morphing `shapes` overload does NOT exist on material3
+                // 1.4.0 (no ButtonShapes in the artifact, verified at the bytecode) — revisit
+                // when the BOM bumps material3.
+                FilledTonalButton(onClick = actions.onOpenOptions) {
                     Text(text = stringResource(R.string.editor_actions_options))
                 }
                 actions.onOpenSmileys?.let { openSmileys ->
-                    TextButton(onClick = openSmileys) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    FilledTonalButton(onClick = openSmileys) {
                         Text(text = stringResource(R.string.editor_smiley_open))
                     }
                 }
