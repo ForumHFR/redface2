@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,7 +54,9 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -696,6 +699,7 @@ internal fun TopicContent(
                                 onOpenPage = onOpenPage,
                                 onOpenProfile = onOpenProfile,
                                 onDeleteRequest = onDeleteRequest,
+                                onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
                                 listState = listState,
                             )
                             TopicScrollbar(
@@ -722,6 +726,8 @@ private fun TopicLoadedContent(
     onOpenPage: (Int) -> Unit,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
     onDeleteRequest: (numreponse: Int) -> Unit = {},
+    /** #382 — double-tap anywhere on the list refreshes the current page (RF1 parity). */
+    onDoubleTapRefresh: () -> Unit = {},
     listState: LazyListState,
 ) {
     val highlight = state.request.scrollTo
@@ -795,7 +801,21 @@ private fun TopicLoadedContent(
                     onOpenPage = onOpenPage,
                     enabled = swipeEnabled,
                 ),
-            ),
+            )
+            // #382 — double-tap anywhere on the list to refresh the page (RF1 parity). Child
+            // clickables (links, buttons, avatar) consume their own up events, so taps on them
+            // never count toward this detector; drags past slop cancel it, so scrolling and the
+            // #282 page swipe are untouched. The PullToRefreshBox spinner gives the feedback
+            // (isRefreshing is already shared with the pull gesture); the haptic tick confirms
+            // the trigger under the finger.
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onDoubleTap = {
+                        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                        onDoubleTapRefresh()
+                    },
+                )
+            },
         state = listState,
         // #283 — extra bottom padding so the last post's right-aligned actions clear the floating
         // bottom-action cluster (the Scaffold FAB slot floats over the content). Harmless extra
@@ -803,7 +823,9 @@ private fun TopicLoadedContent(
         // 8 dp gutters (was 16) — posts are the app's main reading surface, every horizontal
         // pixel counts on a phone ; the cards keep their own inner padding for breathing room.
         contentPadding = PaddingValues(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 88.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        // 8 dp vertical rhythm, matching the 8 dp side gutters above — a uniform grid (and a
+        // denser feed, cf. the #287 density feedback) instead of the previous 12/8 mismatch.
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
             // Phase 2D #148 — the « Modifier le premier message » action is

@@ -105,6 +105,11 @@
     <string name="settings_flags_per_tab_override_description">Chaque onglet (Mes sujets, Lu, Favoris) garde son propre affichage. Les réglages ci-dessus deviennent les valeurs par défaut ; ajustez chaque onglet depuis le menu d\'affichage de l\'écran Drapeaux.</string>
     <string name="settings_flags_per_tab_override_persist_failed">Impossible de mémoriser le réglage par onglet. Réessayez.</string>
 
+    <!-- Onglet « DT » opt-in dans l'écran Drapeaux (placeholder, synchro MPStorage à venir, #6). -->
+    <string name="settings_flags_show_dt_section_title">Section DT</string>
+    <string name="settings_flags_show_dt_section_description">Affiche un onglet « DT » dans l\'écran Drapeaux. Le contenu (discussions suivies avec drapeaux synchronisés via MPStorage) arrivera dans une prochaine version.</string>
+    <string name="settings_flags_show_dt_section_persist_failed">Impossible de mémoriser la section DT. Réessayez.</string>
+
     <!-- #286 — Thème. Sélecteur Clair/Système/Sombre (Système = suit l'OS) + thème AMOLED (vrai
          noir), persistés en DataStore et appliqués à toute l'app en direct. -->
     <string name="settings_theme_title">Thème</string>

@@ -21,6 +21,11 @@
     <string name="flags_super_placeholder_title">Super favoris — à venir</string>
     <string name="flags_super_placeholder_body">Les « super favoris » permettront d\'épingler les sujets les plus importants. Cette vue arrivera dans une prochaine version.</string>
 
+    <!-- Onglet « DT » opt-in (toggle Réglages) : placeholder en attendant la synchro MPStorage (#6). -->
+    <string name="flags_tab_dt">DT</string>
+    <string name="flags_dt_placeholder_title">Discussions suivies — à venir</string>
+    <string name="flags_dt_placeholder_body">Cette section listera vos DT avec des drapeaux synchronisés entre appareils via MPStorage. Le contenu arrivera dans une prochaine version.</string>
+
     <!-- #179 — Vue drapeaux groupée par catégorie (parité vue web par défaut). -->
     <!-- Cyan (« Mes sujets ») : section de catégorie sans nouveau message non lu. Wording parité web. -->
     <string name="flags_category_empty_cyan">Aucun nouveau message</string>

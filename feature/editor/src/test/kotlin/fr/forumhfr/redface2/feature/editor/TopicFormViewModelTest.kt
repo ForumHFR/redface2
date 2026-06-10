@@ -1247,6 +1247,10 @@ class TopicFormViewModelTest {
         override suspend fun setConfirmBeforePosting(enabled: Boolean) {
             confirmBeforePosting.value = enabled
         }
+
+        override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setShowDtSection(enabled: Boolean) = Unit
     }
 
     private companion object {

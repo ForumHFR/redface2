@@ -118,6 +118,9 @@ fun FlagsRoute(
     // a cold start or a tab switch before DataStore re-resolves the selected tab (#317).
     val cyanShowsRead by viewModel.cyanShowsReadShortcut.collectAsStateWithLifecycle()
 
+    // Opt-in « DT » placeholder tab (Settings toggle ; MPStorage sync #6 lands later).
+    val showDtTab by viewModel.showDtTab.collectAsStateWithLifecycle()
+
     val snackbarHostState = remember { SnackbarHostState() }
 
     // #309 — display-settings bottom sheet. Opened from the header « Affichage » action; the trigger
@@ -132,6 +135,12 @@ fun FlagsRoute(
     LaunchedEffect(canConfigureView) {
         if (!canConfigureView) showViewSettingsSheet = false
     }
+
+    DtTabFallbackEffect(
+        showDtTab = showDtTab,
+        selectedTab = selectedTab,
+        onFallback = { viewModel.selectTab(FlagTab.Cyan) },
+    )
 
     // One-shot snackbar for the delflag outcome (#99). Keyed on the event instance so a
     // config change does not replay it ; consumed once shown so it never re-fires.
@@ -191,6 +200,7 @@ fun FlagsRoute(
                                 cyanShowsRead = cyanShowsRead,
                                 isRefreshing = isRefreshing,
                                 removeFlagState = removeFlagState,
+                                showDtTab = showDtTab,
                             ),
                             actions = AuthenticatedActions(
                                 onSelectTab = viewModel::selectTab,
@@ -473,6 +483,7 @@ private fun flagTabLabel(tab: FlagTab): Int = when (tab) {
     FlagTab.Red -> R.string.flags_type_read_only
     FlagTab.Favorite -> R.string.flags_tab_favorite
     FlagTab.Super -> R.string.flags_tab_super
+    FlagTab.Dt -> R.string.flags_tab_dt
 }
 
 @Composable
@@ -505,12 +516,15 @@ private fun ColumnScope.AuthenticatedBody(
 ) {
     val selectedTab = state.selectedTab
     val cyanShowsRead = state.cyanShowsRead
-    val tabs = listOf(
-        FlagTab.Cyan to stringResource(R.string.flags_tab_my_topics),
-        FlagTab.Red to stringResource(R.string.flags_tab_read_only),
-        FlagTab.Favorite to stringResource(R.string.flags_tab_favorite),
-        FlagTab.Super to stringResource(R.string.flags_tab_super),
-    )
+    val tabs = buildList {
+        add(FlagTab.Cyan to stringResource(R.string.flags_tab_my_topics))
+        add(FlagTab.Red to stringResource(R.string.flags_tab_read_only))
+        add(FlagTab.Favorite to stringResource(R.string.flags_tab_favorite))
+        // Opt-in placeholder (Settings toggle) — sits before Super : DT is closer to the
+        // real flag lists it will eventually join (MPStorage sync, #6).
+        if (state.showDtTab) add(FlagTab.Dt to stringResource(R.string.flags_tab_dt))
+        add(FlagTab.Super to stringResource(R.string.flags_tab_super))
+    }
     val selectedIndex = tabs.indexOfFirst { it.first == selectedTab }.coerceAtLeast(0)
     // Discreet « +lus » suffix on the Cyan label so the user knows read participated topics
     // are currently shown — re-tapping the (already selected) Cyan tab toggles it.
@@ -534,6 +548,11 @@ private fun ColumnScope.AuthenticatedBody(
     if (selectedTab == FlagTab.Super) {
         // Placeholder — no backend, no fetch, no pull-to-refresh (cf. FlagTab.Super KDoc).
         SuperPlaceholderBody()
+        return
+    }
+    if (selectedTab == FlagTab.Dt) {
+        // Placeholder — content arrives with the MPStorage sync (#6), cf. FlagTab.Dt KDoc.
+        DtPlaceholderBody()
         return
     }
 
@@ -927,6 +946,48 @@ private fun ColumnScope.SuperPlaceholderBody() {
 }
 
 /**
+ * If the Settings toggle hides the DT tab while it is selected, falls back to Cyan —
+ * otherwise the body would keep rendering a tab that no longer exists in the row.
+ * Extracted so the guard's branches don't count against [FlagsRoute]'s complexity budget.
+ */
+@Composable
+private fun DtTabFallbackEffect(
+    showDtTab: Boolean,
+    selectedTab: FlagTab,
+    onFallback: () -> Unit,
+) {
+    LaunchedEffect(showDtTab, selectedTab) {
+        if (!showDtTab && selectedTab == FlagTab.Dt) onFallback()
+    }
+}
+
+/**
+ * Sober M3 placeholder for the opt-in « DT » [FlagTab.Dt] tab. The content (followed
+ * discussions whose flags sync through the MPStorage document, #6) lands later.
+ */
+@Composable
+private fun ColumnScope.DtPlaceholderBody() {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .weight(1f)
+            .padding(horizontal = 24.dp, vertical = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.flags_dt_placeholder_title),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = stringResource(R.string.flags_dt_placeholder_body),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
  * Read-only state bundle for [AuthenticatedBody], grouped so the composable stays under the
  * detekt parameter-count threshold and mirrors the [AuthenticatedActions] callback bundle.
  */
@@ -937,6 +998,8 @@ private data class FlagsBodyState(
     val cyanShowsRead: Boolean,
     val isRefreshing: Boolean,
     val removeFlagState: RemoveFlagState,
+    /** Whether the opt-in « DT » placeholder tab is shown (Settings toggle). */
+    val showDtTab: Boolean,
 )
 
 private data class AuthenticatedActions(
