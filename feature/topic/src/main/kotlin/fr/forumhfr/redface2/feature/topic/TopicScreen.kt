@@ -78,6 +78,7 @@ import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 
 @Composable
@@ -205,43 +206,15 @@ fun TopicScreen(
         loadedTitle?.takeIf { it.isNotBlank() }?.let(onTitleLoaded)
     }
 
-    // #307 — one-shot restoration of the saved read position + the single central save point.
-    //
-    // RESTORE: waits for the FIRST `Loaded` emission (same timing as ScrollToPost below, and read
-    // from `viewModel.state` — not the recomposition-captured `state` — for the same race-free
-    // reason), then applies the anchor exactly once per route landing. Subsequent `Loaded`
-    // emissions (cache→network refresh of the stale path, manual pull-to-refresh, post-delete
-    // reload) never re-scroll: the effect has already completed, mirroring the one-shot contract
-    // of the scroll effects. The priority chain was resolved by `:app` — see [restoreScrollAnchor].
-    //
-    // SAVE: `onDispose` is the ONE save point. `onOpenPage` is shared by swipe, header, pager and
-    // FAB, so saving per trigger would multiply call sites (and race); disposal of this composition
-    // covers every departure — swipe, FAB, back, tab switch, editor push — with a single write.
-    // `scrollAnchorSettled` gates the save: a page abandoned while still Loading reads (0, 0) from
-    // a list that never rendered, and must not clobber the real position saved by an earlier visit.
-    var scrollAnchorSettled by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        viewModel.state.first { it.mode is TopicUiState.Mode.Loaded }
-        restoreScrollAnchor?.let { anchor ->
-            lazyListState.scrollToItem(anchor.index, anchor.offset)
-        }
-        scrollAnchorSettled = true
-    }
-    DisposableEffect(request.cat, request.post, request.page) {
-        onDispose {
-            // Deliberately captures THIS composition's `onScrollAnchorSaved` (keyed to this route's
-            // (cat, post, page)) rather than a rememberUpdatedState latest-value: if the request
-            // ever changed in place, the departing position must be saved under the OLD key.
-            if (scrollAnchorSettled) {
-                onScrollAnchorSaved(
-                    TopicScrollAnchor(
-                        index = lazyListState.firstVisibleItemIndex,
-                        offset = lazyListState.firstVisibleItemScrollOffset,
-                    ),
-                )
-            }
-        }
-    }
+    // #307 — one-shot restore of the saved read position + the single central save point,
+    // extracted to its own effect holder (also keeps TopicScreen under the detekt complexity cap).
+    TopicScrollRestorationEffects(
+        state = viewModel.state,
+        lazyListState = lazyListState,
+        request = request,
+        restoreScrollAnchor = restoreScrollAnchor,
+        onScrollAnchorSaved = onScrollAnchorSaved,
+    )
 
     // Single-shot scroll : `effects` emits `ScrollToPost` exactly once per request,
     // when the ViewModel has loaded a page that contains the requested numreponse.
@@ -430,6 +403,55 @@ private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int) {
             }
         }
         previous = current
+    }
+}
+
+/**
+ * #307 — one-shot restoration of the saved read position + the single central save point.
+ *
+ * RESTORE: waits for the FIRST `Loaded` emission (same timing as the `ScrollToPost` effect, and read
+ * from the [state] flow — not a recomposition-captured snapshot — for the same race-free reason),
+ * then applies the anchor exactly once per route landing. Subsequent `Loaded` emissions
+ * (cache→network refresh of the stale path, manual pull-to-refresh, post-delete reload) never
+ * re-scroll: the effect has already completed, mirroring the one-shot contract of the scroll
+ * effects. The priority chain was resolved by `:app` — see `restoreScrollAnchor` on [TopicScreen].
+ *
+ * SAVE: `onDispose` is the ONE save point. `onOpenPage` is shared by swipe, header, pager and
+ * FAB, so saving per trigger would multiply call sites (and race); disposal of this composition
+ * covers every departure — swipe, FAB, back, tab switch, editor push — with a single write.
+ * `scrollAnchorSettled` gates the save: a page abandoned while still Loading reads (0, 0) from
+ * a list that never rendered, and must not clobber the real position saved by an earlier visit.
+ */
+@Composable
+private fun TopicScrollRestorationEffects(
+    state: StateFlow<TopicUiState>,
+    lazyListState: LazyListState,
+    request: TopicRequest,
+    restoreScrollAnchor: TopicScrollAnchor?,
+    onScrollAnchorSaved: (TopicScrollAnchor) -> Unit,
+) {
+    var scrollAnchorSettled by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        state.first { it.mode is TopicUiState.Mode.Loaded }
+        restoreScrollAnchor?.let { anchor ->
+            lazyListState.scrollToItem(anchor.index, anchor.offset)
+        }
+        scrollAnchorSettled = true
+    }
+    DisposableEffect(request.cat, request.post, request.page) {
+        onDispose {
+            // Deliberately captures THIS composition's `onScrollAnchorSaved` (keyed to this route's
+            // (cat, post, page)) rather than a rememberUpdatedState latest-value: if the request
+            // ever changed in place, the departing position must be saved under the OLD key.
+            if (scrollAnchorSettled) {
+                onScrollAnchorSaved(
+                    TopicScrollAnchor(
+                        index = lazyListState.firstVisibleItemIndex,
+                        offset = lazyListState.firstVisibleItemScrollOffset,
+                    ),
+                )
+            }
+        }
     }
 }
 
