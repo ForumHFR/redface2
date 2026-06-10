@@ -34,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,22 +56,36 @@ import fr.forumhfr.redface2.core.model.search.SearchTopicResult
  * scroll the result cards, tap one to open the topic. When the query matched
  * multiple HFR categories, a chip row at the top lets the user re-scope.
  *
- * The [onOpenTopic] callback receives a [SearchTopicResult] and is responsible
- * for pushing the matching `TopicRoute` onto the back stack — the screen itself
- * has no knowledge of the nav graph.
+ * Tapping a result goes through the ViewModel ([SearchIntent.OpenResult]) which
+ * resolves the result's REAL topic page when it carries a matched `numreponse`
+ * (#277 — HFR's search hrefs always say `page=1`), then emits
+ * [SearchEffect.NavigateToTopic]. [onOpenTopic] receives the FINAL navigation
+ * values `(cat, post, page, scrollTo)` and is responsible for pushing the
+ * matching `TopicRoute` onto the back stack — the screen itself has no
+ * knowledge of the nav graph.
  */
 @Composable
 fun SearchScreen(
-    onOpenTopic: (SearchTopicResult) -> Unit,
+    onOpenTopic: (cat: Int, post: Int, page: Int, scrollTo: Int?) -> Unit,
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    // Same one-shot collection pattern as TopicScreen : the Channel-backed flow
+    // delivers each navigation effect exactly once.
+    LaunchedEffect(Unit) {
+        viewModel.effects.collect { effect ->
+            when (effect) {
+                is SearchEffect.NavigateToTopic ->
+                    onOpenTopic(effect.cat, effect.post, effect.page, effect.scrollTo)
+            }
+        }
+    }
     SearchContent(
         state = state,
         onIntent = viewModel::submit,
-        onOpenTopic = onOpenTopic,
+        onOpenTopic = { result -> viewModel.submit(SearchIntent.OpenResult(result)) },
         modifier = modifier,
         topBarActions = topBarActions,
     )

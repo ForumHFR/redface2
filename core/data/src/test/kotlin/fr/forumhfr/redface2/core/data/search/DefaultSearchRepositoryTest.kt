@@ -20,6 +20,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -224,6 +225,40 @@ class DefaultSearchRepositoryTest {
             "expected the message to mention « session expired », got <${thrown.message}>",
             thrown.message!!.contains("session expired"),
         )
+    }
+
+    @Test
+    fun `resolveSearchResultPage parses the page from the redirect Location`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        // Live-proven Location shape (#277, 2026-06-10) : relative pretty URL + fragment.
+        coEvery {
+            hfrClient.resolveTopicPageUrl(cat = 23, post = 35421, numreponse = 2786758)
+        } returns "/hfr/gsmgpspda/redface-dev-sujet_35421_3.htm#t2786758"
+
+        val repo = buildRepository(hfrClient = hfrClient)
+
+        assertEquals(3, repo.resolveSearchResultPage(cat = 23, post = 35421, numreponse = 2786758))
+    }
+
+    @Test
+    fun `resolveSearchResultPage returns null when the client found no redirect`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        // HfrClient already degrades non-redirect / no-Location / IOException to null.
+        coEvery { hfrClient.resolveTopicPageUrl(any(), any(), any()) } returns null
+
+        val repo = buildRepository(hfrClient = hfrClient)
+
+        assertNull(repo.resolveSearchResultPage(cat = 23, post = 35421, numreponse = 2786758))
+    }
+
+    @Test
+    fun `resolveSearchResultPage returns null when the Location is not parsable`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.resolveTopicPageUrl(any(), any(), any()) } returns "/login.php"
+
+        val repo = buildRepository(hfrClient = hfrClient)
+
+        assertNull(repo.resolveSearchResultPage(cat = 23, post = 35421, numreponse = 2786758))
     }
 
     private fun buildRepository(

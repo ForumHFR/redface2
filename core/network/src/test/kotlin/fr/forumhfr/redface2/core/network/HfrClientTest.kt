@@ -220,6 +220,57 @@ class HfrClientTest {
         assertTrue("expected SessionExpiredException, got $error", error is SessionExpiredException)
     }
 
+    @Test
+    fun `resolveTopicPageUrl returns the Location of a 301 without following the redirect`() = runTest {
+        // Live-proven shape (#277, 2026-06-10) : HFR answers the page=1 probe with a 301
+        // whose Location is the relative pretty URL of the REAL page, fragment included.
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(301)
+                .addHeader("Location", "/hfr/gsmgpspda/redface-dev-sujet_35421_3.htm#t2786758"),
+        )
+        // A second response is enqueued on purpose : if the client followed the redirect,
+        // it would consume it and requestCount would be 2.
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html>page 3</html>"))
+
+        val location = client.resolveTopicPageUrl(cat = 23, post = 35421, numreponse = 2786758)
+
+        assertEquals("/hfr/gsmgpspda/redface-dev-sujet_35421_3.htm#t2786758", location)
+        assertEquals("redirect must NOT be followed", 1, server.requestCount)
+        val request = server.takeRequest()
+        val url = requireNotNull(request.requestUrl)
+        assertEquals("/forum2.php", url.encodedPath)
+        assertEquals("anonymous", request.headers["X-RF2-Client"])
+        assertEquals("hfr.inc", url.queryParameter("config"))
+        assertEquals("23", url.queryParameter("cat"))
+        assertEquals("35421", url.queryParameter("post"))
+        assertEquals("1", url.queryParameter("page"))
+        assertEquals("2786758", url.queryParameter("numreponse"))
+    }
+
+    @Test
+    fun `resolveTopicPageUrl returns null on a non-redirect response`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html>not a redirect</html>"))
+
+        assertNull(client.resolveTopicPageUrl(cat = 23, post = 35421, numreponse = 2786758))
+    }
+
+    @Test
+    fun `resolveTopicPageUrl returns null when the redirect has no Location header`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(301))
+
+        assertNull(client.resolveTopicPageUrl(cat = 23, post = 35421, numreponse = 2786758))
+    }
+
+    @Test
+    fun `resolveTopicPageUrl returns null on a network failure`() = runTest {
+        // Shut the server down so the call fails with an IOException — the method must
+        // degrade to null (caller falls back to the search-href page), not throw.
+        server.shutdown()
+
+        assertNull(client.resolveTopicPageUrl(cat = 23, post = 35421, numreponse = 2786758))
+    }
+
     private fun taggedClient(tag: String): OkHttpClient =
         OkHttpClient.Builder()
             .addInterceptor { chain ->
