@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.profile
 
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.UserProfile
 
 /**
@@ -32,20 +33,16 @@ data class ProfileUiState(
 
         /**
          * Review feedback I7: the ViewModel must not own the user-visible string.
-         * It surfaces an [ErrorKind] (and optionally the originating [Throwable] for
-         * diagnostics) and the UI maps it to a localised `stringResource(...)`. This
-         * keeps `:feature:profile` layer-clean and i18n-ready.
+         * It surfaces the classified [HfrErrorKind] (and optionally the originating
+         * [Throwable] for diagnostics) and the UI maps it to a localised
+         * `stringResource(...)` — the shared `:core:ui` labels for ServerDown /
+         * Network (#324), the feature's generic string for Other. This keeps
+         * `:feature:profile` layer-clean and i18n-ready.
          */
         data class Error(
-            val kind: ErrorKind,
+            val kind: HfrErrorKind,
             val cause: Throwable? = null,
         ) : Mode
-    }
-
-    /** Classification of profile-load failures surfaced by the ViewModel to the UI. */
-    enum class ErrorKind {
-        /** Generic / unknown failure — UI shows the « load failed » string. */
-        Unknown,
     }
 
     companion object {

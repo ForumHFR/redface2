@@ -7,7 +7,8 @@
     <string name="search_idle_hint">Saisissez un mot-clé pour chercher dans les titres et messages HFR. Quand HFR fournit un extrait, le résultat ouvre le message correspondant ; sinon il ouvre le topic.</string>
     <string name="search_loading">Recherche en cours…</string>
     <string name="search_empty">Aucun résultat pour cette recherche.</string>
-    <string name="search_error_network">Erreur réseau. Vérifiez votre connexion puis réessayez.</string>
+    <!-- #324 — les cas ServerDown / Network rendent les libellés partagés de :core:ui
+         (error_hfr_server_down / error_no_connection) ; seul le fallback générique reste local. -->
     <string name="search_error_unknown">HFR a renvoyé une réponse inattendue. Réessayez.</string>
     <string name="search_scope_label">Champ de recherche</string>
     <string name="search_scope_titles_and_posts">Titres + messages</string>

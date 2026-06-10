@@ -45,9 +45,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.search.SearchTopicResult
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 
 /**
@@ -330,11 +332,10 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ErrorState(kind: SearchErrorKind, onRetry: () -> Unit, modifier: Modifier = Modifier) {
-    val messageResId = when (kind) {
-        SearchErrorKind.Network -> R.string.search_error_network
-        SearchErrorKind.Unknown -> R.string.search_error_unknown
-    }
+private fun ErrorState(kind: HfrErrorKind, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    // #324 — shared :core:ui labels for an HFR 5xx outage / a connectivity cut;
+    // Other keeps the feature's generic message.
+    val messageResId = kind.sharedLabelResOrNull() ?: R.string.search_error_unknown
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = modifier) {
         Text(
             text = stringResource(messageResId),

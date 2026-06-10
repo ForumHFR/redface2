@@ -4,6 +4,9 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.LoginError
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
@@ -312,6 +315,29 @@ class FlagsViewModelTest {
                 "expected SessionExpiredException to traverse the stack — got ${failure.cause::class.simpleName}",
                 failure.cause is SessionExpiredException,
             )
+            // #324 non-régression CTA : la session expirée doit rester classée Other (jamais
+            // Network/ServerDown) pour que la branche session de FlagsRoute garde la priorité.
+            assertEquals(HfrErrorKind.Other, classifyHfrError(failure.cause))
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `flagsState propagates an HfrServerException cause so the route can render the outage`() = runTest {
+        // #324 — the drapeaux REST fetch (HfrApiClient) raises HfrServerException on a 5xx.
+        // FlagsRoute classifies `Failure.cause` at render time, so the typed exception must
+        // traverse repository → ViewModel → exposed state un-wrapped, like SessionExpired.
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, forum)
+        val outage = HfrServerException(code = 500, url = "https://forum.hardware.fr/webservices/rest_api.php")
+
+        vm.flagsState.test {
+            awaitItem() // initial null
+            flags.emit(FlagType.CYAN, FlagsResult.Failure(outage))
+            val failure = awaitItem() as FlagsListUiState.Failure
+            assertEquals(HfrErrorKind.ServerDown, classifyHfrError(failure.cause))
             cancelAndIgnoreRemainingEvents()
         }
     }

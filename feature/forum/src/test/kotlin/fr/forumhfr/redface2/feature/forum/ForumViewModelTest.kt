@@ -1,11 +1,14 @@
 package fr.forumhfr.redface2.feature.forum
 
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
+import java.net.UnknownHostException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -57,6 +60,40 @@ class ForumViewModelTest {
             assertEquals(ForumUiState.Loading, awaitItem())
             repo.emitCategories(ForumResult.Failure(IllegalStateException("HFR down")))
             assertEquals(ForumUiState.Error("HFR down"), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `uiState classifies an HFR 5xx Failure on the REST path as ServerDown`() = runTest {
+        // #324 — the categories fetch goes through HfrApiClient (REST); a 500 there must
+        // be presented as « HFR est en panne », not as a connectivity problem.
+        val repo = FakeForumRepository()
+        val vm = ForumViewModel(repo)
+
+        vm.uiState.test {
+            assertEquals(ForumUiState.Loading, awaitItem())
+            repo.emitCategories(
+                ForumResult.Failure(
+                    HfrServerException(code = 500, url = "https://forum.hardware.fr/webservices/rest_api.php"),
+                ),
+            )
+            val error = awaitItem() as ForumUiState.Error
+            assertEquals(HfrErrorKind.ServerDown, error.kind)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `uiState classifies a transport failure as Network`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = ForumViewModel(repo)
+
+        vm.uiState.test {
+            assertEquals(ForumUiState.Loading, awaitItem())
+            repo.emitCategories(ForumResult.Failure(UnknownHostException("forum.hardware.fr")))
+            val error = awaitItem() as ForumUiState.Error
+            assertEquals(HfrErrorKind.Network, error.kind)
             cancelAndIgnoreRemainingEvents()
         }
     }

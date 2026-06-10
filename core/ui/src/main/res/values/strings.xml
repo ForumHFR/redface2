@@ -61,4 +61,12 @@
          instead of leaking the raw image / placeholder. #207 round-3 closes the a11y gap when the
          avatar is rendered as a standalone placeholder (no SubcomposeAsyncImage parent). -->
     <string name="avatar_content_description">Avatar de %1$s</string>
+
+    <!-- #324 — panne HFR (5xx) vs coupure réseau : libellés partagés par tous les écrans de
+         lecture (topic, forum/catégories, drapeaux, recherche, MP, profil). Résolus depuis
+         `core.domain.error.HfrErrorKind` via `error/HfrErrorLabels.sharedLabelResOrNull()`
+         (ServerDown / Network) ; le cas Other garde le message générique propre à chaque
+         écran. -->
+    <string name="error_hfr_server_down">HFR est en panne (erreur serveur)</string>
+    <string name="error_no_connection">Pas de connexion</string>
 </resources>

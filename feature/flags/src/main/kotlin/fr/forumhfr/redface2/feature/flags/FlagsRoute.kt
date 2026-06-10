@@ -55,12 +55,14 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.ui.FlagItem
 import fr.forumhfr.redface2.core.ui.FlagItemDivider
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import kotlinx.coroutines.launch
 
@@ -556,7 +558,16 @@ private fun ColumnScope.AuthenticatedBody(
                 val sessionExpired = current.cause is SessionExpiredException
                 Text(
                     text = stringResource(
-                        if (sessionExpired) R.string.flags_session_expired else R.string.flags_error,
+                        // The dedicated session branch stays FIRST — the #324 classifier
+                        // only refines the remaining failures (shared ServerDown/Network
+                        // labels vs the generic flags_error), so the reconnect CTA below
+                        // never regresses.
+                        if (sessionExpired) {
+                            R.string.flags_session_expired
+                        } else {
+                            classifyHfrError(current.cause).sharedLabelResOrNull()
+                                ?: R.string.flags_error
+                        },
                     ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,

@@ -3,13 +3,14 @@ package fr.forumhfr.redface2.feature.search
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.search.SearchRepository
 import fr.forumhfr.redface2.core.model.search.SearchCategoryScope
 import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
 import fr.forumhfr.redface2.core.model.search.SearchRequest
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.search.SearchTopicResult
-import java.io.IOException
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -33,8 +34,8 @@ import kotlinx.coroutines.launch
  *  1. Clear any prior error, flip `isLoading=true`.
  *  2. Call [SearchRepository.search] with the user's query + scope.
  *  3. On success, populate `results`/`pivotCategories`/`selectedCategory`.
- *  4. On failure, map the exception kind to [SearchErrorKind] and surface
- *     a retry button.
+ *  4. On failure, classify the exception into an [HfrErrorKind] (#324) and
+ *     surface a retry button.
  *
  * The repository already redacts the query from `IOException` messages, so
  * nothing in this layer logs it either — we map error kinds purely on the
@@ -250,14 +251,15 @@ class SearchViewModel @Inject constructor(
                     }
                 },
                 onFailure = { error ->
-                    val kind = when (error) {
-                        is IOException -> SearchErrorKind.Network
-                        else -> SearchErrorKind.Unknown
-                    }
+                    // #324 — shared type-derived classification. The repository lets
+                    // HfrServerException traverse (URL redacted) so a 5xx maps to
+                    // ServerDown instead of being mistaken for a network cut; a redacted
+                    // SessionExpiredException lands in Other (search has no dedicated
+                    // session treatment).
                     _state.update {
                         it.copy(
                             isLoading = false,
-                            errorMessage = kind,
+                            errorMessage = classifyHfrError(error),
                             // Keep the previous results untouched on retry-friendly errors —
                             // wiping the list on a transient network blip is more disruptive
                             // than helpful.

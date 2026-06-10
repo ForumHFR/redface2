@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.search
 
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.search.SearchTopicResult
@@ -11,8 +12,10 @@ import fr.forumhfr.redface2.core.model.search.SearchTopicResult
  * distinguish the « initial idle state » from a no-result outcome. Without it the
  * « Aucun résultat » empty state would flash before the user has even searched.
  *
- * `errorMessage` is a localized string already resolved by the ViewModel ; the
- * screen surfaces it verbatim with a retry button.
+ * `errorMessage` is the #324 [HfrErrorKind] classification of the last failure
+ * (`null` = no error) ; the screen resolves it to the shared ServerDown / Network
+ * labels, or to the feature's generic message for Other, with a retry button —
+ * no technical exception message ever reaches the UI.
  */
 data class SearchUiState(
     val query: String = "",
@@ -21,20 +24,9 @@ data class SearchUiState(
     val pivotCategories: List<SearchPivotCategory> = emptyList(),
     val results: List<SearchTopicResult> = emptyList(),
     val isLoading: Boolean = false,
-    val errorMessage: SearchErrorKind? = null,
+    val errorMessage: HfrErrorKind? = null,
     val hasSearched: Boolean = false,
 )
-
-/**
- * Localized failure kinds the screen can render. Kept as a discrete sum so the
- * Compose layer can pick the right string resource (network vs unexpected
- * response vs « no cat context » parser error) without leaking technical
- * exception messages to the user.
- */
-sealed interface SearchErrorKind {
-    data object Network : SearchErrorKind
-    data object Unknown : SearchErrorKind
-}
 
 /**
  * Intents emitted by [SearchScreen]. `Retry` reuses the last submitted query

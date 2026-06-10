@@ -41,6 +41,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -124,12 +125,17 @@ fun MessagesScreen(
                             modifier = Modifier.padding(horizontal = 24.dp),
                         ) {
                             Text(
-                                text = stringResource(R.string.messages_error_load),
+                                // #324 — the kind is a type-derived closed enum (safe per #316);
+                                // ServerDown / Network render the shared :core:ui label, Other
+                                // keeps the generic message.
+                                text = stringResource(
+                                    mode.kind.sharedLabelResOrNull() ?: R.string.messages_error_load,
+                                ),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.error,
                             )
                             // No raw error detail on screen (#316): it can embed the private
-                            // conversation URL. Generic message + retry only.
+                            // conversation URL. Kind-resolved message + retry only.
                             Button(onClick = viewModel::retry) {
                                 Text(text = stringResource(R.string.messages_retry))
                             }

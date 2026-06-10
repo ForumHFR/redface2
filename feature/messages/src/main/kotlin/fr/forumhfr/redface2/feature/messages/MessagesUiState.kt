@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 
 /**
@@ -29,7 +30,11 @@ data class MessagesUiState(
          * auth error can embed the private `forum2.php?cat=prive&post=<id>` URL, which would leak the
          * conversation id on screen. The UI shows a generic message + retry; the raw message must
          * reach neither the screen nor the exportable DiagnosticsLog.
+         *
+         * [kind] (#324) is SAFE by construction: a closed enum derived from the exception TYPE
+         * only (`classifyHfrError`), never from its message — it lets the screen tell an HFR 5xx
+         * outage from a network cut without weakening the #316 guarantee.
          */
-        data object Error : Mode
+        data class Error(val kind: HfrErrorKind = HfrErrorKind.Other) : Mode
     }
 }

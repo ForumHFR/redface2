@@ -6,6 +6,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.profile.ProfileRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,7 +28,7 @@ import kotlinx.coroutines.launch
  * = { factory -> factory.create(...) })`), while [profileRepository] is injected by
  * Hilt's usual component binding.
  *
- * Review feedback I7/I8: error states surface an [ProfileUiState.ErrorKind] (the UI
+ * Review feedback I7/I8: error states surface the classified `HfrErrorKind` (the UI
  * resolves the user-visible string via `stringResource`) and a [loadJob] is held so
  * concurrent Retry taps cancel the previous in-flight load.
  */
@@ -75,11 +76,12 @@ class ProfileViewModel @AssistedInject constructor(
                 onFailure = { error ->
                     // Review feedback I7: ViewModel must not carry a localised String. It
                     // surfaces the kind + cause ; the UI resolves the message via
-                    // `stringResource(R.string.profile_error_load_failed)`.
+                    // `stringResource(...)`. #324 — the kind is the shared classifier's
+                    // verdict so a 5xx outage and a network cut render distinctly.
                     _state.update {
                         it.copy(
                             mode = ProfileUiState.Mode.Error(
-                                kind = ProfileUiState.ErrorKind.Unknown,
+                                kind = classifyHfrError(error),
                                 cause = error,
                             ),
                         )

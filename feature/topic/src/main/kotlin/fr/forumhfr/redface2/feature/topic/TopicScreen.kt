@@ -73,6 +73,7 @@ import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
+import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -568,9 +569,15 @@ internal fun TopicContent(
                 }
 
                 is TopicUiState.Mode.Error -> {
+                    // #324 — ServerDown / Network swap the raw exception message for the
+                    // shared :core:ui label; Other keeps the existing diagnostic detail.
+                    // (`if` rather than `?.let {} ?:` keeps TopicContent under detekt's
+                    // cyclomatic-complexity threshold.)
+                    val sharedLabelRes = mode.kind.sharedLabelResOrNull()
+                    val detail = if (sharedLabelRes != null) stringResource(sharedLabelRes) else mode.message
                     RedfacePlaceholderScreen(
                         title = stringResource(R.string.topic_error_title),
-                        body = stringResource(R.string.topic_error_body, state.request.page, mode.message),
+                        body = stringResource(R.string.topic_error_body, state.request.page, detail),
                     ) {
                         TopicPageNavigation(
                             currentPage = state.request.page,

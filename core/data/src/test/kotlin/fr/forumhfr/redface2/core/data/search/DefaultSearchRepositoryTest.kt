@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.data.search
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.model.search.SearchCategoryScope
 import fr.forumhfr.redface2.core.model.search.SearchRequest
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
@@ -224,6 +225,41 @@ class DefaultSearchRepositoryTest {
         assertTrue(
             "expected the message to mention « session expired », got <${thrown.message}>",
             thrown.message!!.contains("session expired"),
+        )
+        // #324 — the TYPE must survive the redaction so downstream classification
+        // (classifyHfrError → Other, never Network) still sees the session expiry.
+        assertTrue(
+            "expected the SessionExpiredException type to be preserved, got ${thrown::class.simpleName}",
+            thrown is SessionExpiredException,
+        )
+    }
+
+    @Test
+    fun `HfrServerException traverses with its code preserved and its URL redacted`() = runTest {
+        // #324 — without the dedicated catch branch, the generic IOException re-wrap would
+        // strip the type and a 5xx HFR outage would be classified as a network cut by
+        // SearchViewModel. The URL still must not survive (it carries `search=<query>`).
+        val hfrClient = mockk<HfrClient>()
+        coEvery {
+            hfrClient.searchTopics(any(), any(), any(), any(), any())
+        } throws HfrServerException(
+            code = 500,
+            url = "https://forum.hardware.fr/forum1.php?recherches=1&cat=&search=secret_term&...",
+        )
+
+        val repo = buildRepository(hfrClient = hfrClient)
+        val thrown = assertThrows(HfrServerException::class.java) {
+            kotlinx.coroutines.runBlocking { repo.search(SearchRequest(query = "secret_term")) }
+        }
+
+        assertEquals(500, thrown.code)
+        assertFalse(
+            "expected the URL portion to be redacted, got <${thrown.message}>",
+            thrown.message!!.contains("forum1.php"),
+        )
+        assertFalse(
+            "expected the user query to NOT survive the redaction, got <${thrown.message}>",
+            thrown.message!!.contains("secret_term"),
         )
     }
 

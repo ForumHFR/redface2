@@ -8,6 +8,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
@@ -202,8 +203,18 @@ class TopicViewModel @AssistedInject constructor(
                     // the network blip after the cache emission. A surface for that error
                     // (Snackbar / banner) is deferred to Phase 1D.
                     _state.update { current ->
-                        if (current.mode is TopicUiState.Mode.Loaded) current
-                        else current.copy(mode = TopicUiState.Mode.Error(error.message ?: "Unknown error"))
+                        if (current.mode is TopicUiState.Mode.Loaded) {
+                            current
+                        } else {
+                            current.copy(
+                                mode = TopicUiState.Mode.Error(
+                                    message = error.message ?: "Unknown error",
+                                    // #324 — type-derived kind so the screen can tell an HFR
+                                    // 5xx outage from a local network cut.
+                                    kind = classifyHfrError(error),
+                                ),
+                            )
+                        }
                     }
                     // Close the async trace section even on the error path so the trace
                     // still draws a bounded sliver from intent to terminal state.
