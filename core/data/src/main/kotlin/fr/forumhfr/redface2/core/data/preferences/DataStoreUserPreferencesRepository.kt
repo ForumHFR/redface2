@@ -191,6 +191,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeConfirmBeforePosting(): Flow<Boolean> =
+        dataStore.data
+            // Default `false`: publishing stays one-tap unless the user opts into the #312 guard.
+            .map { prefs -> prefs[KEY_CONFIRM_BEFORE_POSTING] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setConfirmBeforePosting(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_CONFIRM_BEFORE_POSTING] = enabled
+            }
+        }
+    }
+
     /**
      * Reads [KEY_THEME_MODE] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [ThemeMode.SYSTEM] instead of crashing on
@@ -279,5 +294,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // build 89 follow-up — topic top app bar auto-hide on scroll.
         val KEY_TOPIC_TOPBAR_AUTO_HIDE = booleanPreferencesKey("topic_topbar_auto_hide")
+
+        // #312 — confirmation dialog before any publish action (reply / edit / new topic / MP).
+        val KEY_CONFIRM_BEFORE_POSTING = booleanPreferencesKey("confirm_before_posting")
     }
 }

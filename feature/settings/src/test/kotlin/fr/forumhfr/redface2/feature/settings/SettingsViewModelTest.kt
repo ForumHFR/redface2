@@ -756,6 +756,44 @@ class SettingsViewModelTest {
         assertTrue(viewModel.state.value.topicTopBarAutoHideError)
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Confirm before posting (#312)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates confirmBeforePosting from the persisted preference`() = runTest {
+        repository.emitConfirmBeforePosting(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.confirmBeforePosting)
+        assertFalse(viewModel.state.value.confirmBeforePostingError)
+    }
+
+    @Test
+    fun `ConfirmBeforePostingChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("confirm-before-posting is off by default", viewModel.state.value.confirmBeforePosting)
+
+        viewModel.submit(SettingsIntent.ConfirmBeforePostingChanged(true))
+
+        assertTrue(viewModel.state.value.confirmBeforePosting)
+        assertFalse(viewModel.state.value.isUpdatingConfirmBeforePosting)
+        assertEquals(1, repository.confirmBeforePostingSetCalls)
+    }
+
+    @Test
+    fun `ConfirmBeforePostingChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnConfirmBeforePostingSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ConfirmBeforePostingChanged(true))
+
+        assertFalse("must revert to the previous value on failure", viewModel.state.value.confirmBeforePosting)
+        assertFalse(viewModel.state.value.isUpdatingConfirmBeforePosting)
+        assertTrue(viewModel.state.value.confirmBeforePostingError)
+    }
+
     @Test
     fun `theme hydration race - a stale initial DataStore emission must not overwrite a local mode change`() =
         runTest {
@@ -935,6 +973,24 @@ class SettingsViewModelTest {
             topicTopBarAutoHideSetCalls += 1
             check(!failOnTopicTopBarAutoHideSet) { "boom" }
             topicTopBarAutoHide.value = enabled
+        }
+
+        // #312 — confirm-before-posting. Same optimistic-flip seam as the topic top-bar toggle.
+        private val confirmBeforePosting = MutableStateFlow(false)
+        var confirmBeforePostingSetCalls: Int = 0
+            private set
+        var failOnConfirmBeforePostingSet: Boolean = false
+
+        override fun observeConfirmBeforePosting(): Flow<Boolean> = confirmBeforePosting
+
+        override suspend fun setConfirmBeforePosting(enabled: Boolean) {
+            confirmBeforePostingSetCalls += 1
+            check(!failOnConfirmBeforePostingSet) { "boom" }
+            confirmBeforePosting.value = enabled
+        }
+
+        fun emitConfirmBeforePosting(value: Boolean) {
+            confirmBeforePosting.value = value
         }
 
         fun emitThemeMode(value: ThemeMode) {

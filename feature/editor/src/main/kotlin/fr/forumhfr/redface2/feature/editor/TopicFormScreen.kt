@@ -43,6 +43,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
+import fr.forumhfr.redface2.core.ui.editor.ConfirmSubmitDialog
 
 /**
  * Topic-level form screen. Live for [TopicFormMode.EditFirstPost] (Phase 2D
@@ -246,6 +247,14 @@ internal fun TopicFormContent(
         ImageUrlDialog(
             onDismiss = { imageUrlDialogOpen = false },
             onInsert = { url -> onIntent(TopicFormIntent.ImageUrlInserted(url)) },
+        )
+    }
+    // #312 — « Confirmation avant publication ». Visibility is owned by the ViewModel, which only
+    // raises the flag once the submit passed the canSubmit gate and the preference is on.
+    if (state.showSubmitConfirmation) {
+        ConfirmSubmitDialog(
+            onConfirm = { onIntent(TopicFormIntent.SubmitConfirmed) },
+            onDismiss = { onIntent(TopicFormIntent.SubmitConfirmationDismissed) },
         )
     }
 }

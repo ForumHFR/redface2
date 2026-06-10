@@ -80,6 +80,12 @@ data class TopicFormState(
      * fields : a silent `InvalidHashCheck` refetch must never erase a previously known id.
      */
     val userId: Int? = null,
+    /**
+     * #312 — `true` while the « Confirmation avant publication » dialog is shown. Mirrors
+     * [PostEditorState.showSubmitConfirmation]: only raised when the preference is on AND
+     * [canSubmit] already validated the form (we never confirm an unsendable form).
+     */
+    val showSubmitConfirmation: Boolean = false,
 ) {
     /**
      * Submit is allowed when the mode-specific routing context is complete,
@@ -145,6 +151,16 @@ sealed interface TopicFormIntent {
     data class ToolbarActionClicked(val action: BbcodeAction) : TopicFormIntent
     data object TogglePreview : TopicFormIntent
     data object SubmitClicked : TopicFormIntent
+
+    /**
+     * #312 — user confirmed the « Confirmation avant publication » dialog. Executes the real
+     * submission directly, BYPASSING the preference re-check (otherwise the dialog would loop).
+     */
+    data object SubmitConfirmed : TopicFormIntent
+
+    /** #312 — user dismissed the confirmation dialog. No submission happens; the draft stays. */
+    data object SubmitConfirmationDismissed : TopicFormIntent
+
     data object ErrorDismissed : TopicFormIntent
     data class SubcatSelected(val id: Int) : TopicFormIntent
     data class ToggleSignature(val enabled: Boolean) : TopicFormIntent

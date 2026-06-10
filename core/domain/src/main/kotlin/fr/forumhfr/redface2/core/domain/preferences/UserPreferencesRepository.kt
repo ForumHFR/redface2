@@ -137,4 +137,16 @@ interface UserPreferencesRepository {
 
     /** Persists [observeTopicTopBarAutoHide]. Default `false` until the first call. */
     suspend fun setTopicTopBarAutoHide(enabled: Boolean)
+
+    /**
+     * Confirmation before posting (#312): when `true`, every publish action (topic reply / post
+     * edit, new topic / first-post edit, private-message reply) first shows a confirmation dialog
+     * before the real submission is executed. Default `false` — submission stays one-tap unless the
+     * user opts in. Observed by the editor ViewModels (`:feature:editor`, `:feature:messages`),
+     * toggled in Settings.
+     */
+    fun observeConfirmBeforePosting(): Flow<Boolean>
+
+    /** Persists [observeConfirmBeforePosting]. Default `false` until the first call. */
+    suspend fun setConfirmBeforePosting(enabled: Boolean)
 }

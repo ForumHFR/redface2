@@ -110,6 +110,16 @@ class SettingsViewModel @Inject constructor(
                 }
             }
         }
+        viewModelScope.launch {
+            val confirm = userPreferencesRepository.observeConfirmBeforePosting().first()
+            _state.update { current ->
+                if (current.confirmBeforePostingTouchedLocally || current.isUpdatingConfirmBeforePosting) {
+                    current
+                } else {
+                    current.copy(confirmBeforePosting = confirm)
+                }
+            }
+        }
     }
 
     @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the SettingsIntent variants ; flat by design.
@@ -152,6 +162,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.ThemeModeChanged -> updateThemeMode(intent.mode)
             is SettingsIntent.AmoledEnabledChanged -> updateAmoled(intent.enabled)
             is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
+            is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
         }
     }
 
@@ -452,6 +463,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setTopicTopBarAutoHide,
+        )
+    }
+
+    private fun updateConfirmBeforePosting(desired: Boolean) {
+        val previous = _state.value.confirmBeforePosting
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    confirmBeforePosting = desired,
+                    isUpdatingConfirmBeforePosting = true,
+                    confirmBeforePostingError = false,
+                    confirmBeforePostingTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(confirmBeforePosting = desired, isUpdatingConfirmBeforePosting = false)
+                } else {
+                    state.copy(
+                        confirmBeforePosting = previous,
+                        isUpdatingConfirmBeforePosting = false,
+                        confirmBeforePostingError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setConfirmBeforePosting,
         )
     }
 

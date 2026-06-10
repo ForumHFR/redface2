@@ -47,6 +47,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
+import fr.forumhfr.redface2.core.ui.editor.ConfirmSubmitDialog
 
 /**
  * Reply editor for a private-message conversation (#301). Reuses the shared `:core:ui` BBCode
@@ -88,6 +89,19 @@ fun PrivateMessageReplyScreen(
         onRetryFormLoad = viewModel::retryFormLoad,
         modifier = modifier,
     )
+    // #312 — « Confirmation avant publication ». Visibility is owned by the ViewModel, which only
+    // raises the flag once the submit passed every validation gate and the preference is on.
+    if (state.showSubmitConfirmation) {
+        // MP wording: a private reply is not « envoyé sur le forum », and the MP verb
+        // everywhere else is « Envoyer » — override the forum defaults of the shared dialog.
+        ConfirmSubmitDialog(
+            onConfirm = viewModel::onSubmitConfirmed,
+            onDismiss = viewModel::onSubmitConfirmationDismissed,
+            title = R.string.messages_reply_confirm_title,
+            body = R.string.messages_reply_confirm_body,
+            confirmLabel = R.string.messages_reply_confirm_action,
+        )
+    }
 }
 
 @Composable
