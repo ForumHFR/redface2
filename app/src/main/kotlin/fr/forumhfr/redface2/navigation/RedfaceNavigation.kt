@@ -78,6 +78,7 @@ import fr.forumhfr.redface2.feature.search.SearchScreen
 import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
+import fr.forumhfr.redface2.feature.topic.TopicScrollAnchor
 import kotlinx.serialization.Serializable
 import androidx.compose.material3.ExperimentalMaterial3Api
 
@@ -411,6 +412,13 @@ fun RedfaceApp(intent: Intent?) {
         // the entry recreation; keyed by (cat, post) so titles never bleed across categories.
         var topicTitleCache by remember { mutableStateOf(emptyMap<TopicTitleKey, String>()) }
 
+        // #307 — per-page scroll anchors keyed by (cat, post, page), twin of topicTitleCache: a page
+        // change destroys the nav entry (and its rememberSaveable LazyListState), so returning to an
+        // already-visited page used to land at the top. The topic screen saves its read position here
+        // on departure; the next landing on the same page restores it (unless the route carries a
+        // scrollTo / submitSignal, cf. resolveTopicScrollRestoration). RAM/session only, like titles.
+        var topicScrollAnchorCache by remember { mutableStateOf(emptyMap<TopicScrollKey, TopicScrollAnchor>()) }
+
         LaunchedEffect(authState) {
             when (authState) {
                 null -> Unit
@@ -485,6 +493,15 @@ fun RedfaceApp(intent: Intent?) {
                         titles = topicTitleCache,
                         onTitleLoaded = { cat, post, title ->
                             topicTitleCache = topicTitleCache.withTitle(TopicTitleKey(cat, post), title)
+                        },
+                    ),
+                    topicScrollNavState = TopicScrollNavState(
+                        anchors = topicScrollAnchorCache,
+                        onAnchorSaved = { cat, post, page, anchor ->
+                            topicScrollAnchorCache = topicScrollAnchorCache.withScrollAnchor(
+                                TopicScrollKey(cat, post, page),
+                                anchor,
+                            )
                         },
                     ),
                     onOpenProfile = { userId, pseudo, avatarUrl ->
@@ -603,6 +620,25 @@ private data class TopicTitleNavState(
 )
 
 /**
+ * #307 — per-page scroll-anchor cache plumbed into [RedfaceNavHost], twin of [TopicTitleNavState].
+ * A topic page change replaces the TopicRoute in place (#282), destroying the nav entry and the
+ * `rememberSaveable` `LazyListState` with it, so returning to an already-visited page landed at the
+ * top. The `var` backing [anchors] lives in [RedfaceApp] so it survives the entry recreation;
+ * [onAnchorSaved] records the read position when a topic screen leaves the composition and the next
+ * landing on the same `(cat, post, page)` ([TopicScrollKey]) restores it — unless the route carries
+ * a higher-priority scroll (`scrollTo` / `submitSignal`, cf. [resolveTopicScrollRestoration]). Same
+ * read-map + on-event-callback shape as [TopicTitleNavState] / [PrivateMessageNavState]; in-memory
+ * only (session-scoped), never serialized into a route.
+ *
+ * @property anchors last saved read position per visited topic page.
+ * @property onAnchorSaved records a page's read position when its screen is disposed.
+ */
+private data class TopicScrollNavState(
+    val anchors: Map<TopicScrollKey, TopicScrollAnchor>,
+    val onAnchorSaved: (cat: Int, post: Int, page: Int, anchor: TopicScrollAnchor) -> Unit,
+)
+
+/**
  * Composite cache key for [TopicTitleNavState]. A topic id (`post`) is unique only **per HFR
  * category**, not globally — two categories can theoretically expose the same id (cf. the same
  * `(cat, topicId)` composite key in `SearchScreen`), so keying by `post` alone could flash the
@@ -636,8 +672,9 @@ internal fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: Str
 }
 
 @Composable
-@Suppress("CyclomaticComplexMethod") // One entry per top-level route + per-screen navigation callbacks ;
-// splitting the host would just push the same `when` shape one level deeper without reducing complexity.
+@Suppress("CyclomaticComplexMethod", "LongParameterList") // One entry per top-level route + per-screen
+// navigation callbacks ; splitting the host would just push the same `when` shape one level deeper
+// without reducing complexity. Param count: each nav-state bundle has a distinct owner/call-site.
 private fun RedfaceNavHost(
     backStack: NavBackStack<NavKey>,
     accountMenu: @Composable () -> Unit,
@@ -645,6 +682,8 @@ private fun RedfaceNavHost(
     // Bug fix (build 89) — per-topic title cache threaded down from RedfaceApp (where the `var` lives
     // so it survives entry recreation across page changes). Bundled to keep the param count in check.
     topicTitleNavState: TopicTitleNavState,
+    // #307 — per-page scroll-anchor cache, same hoisting rationale as topicTitleNavState.
+    topicScrollNavState: TopicScrollNavState,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     NavDisplay(
@@ -886,6 +925,17 @@ private fun RedfaceNavHost(
                 )
             }
             entry<TopicRoute>(metadata = mapOf(TOPIC_SCENE_METADATA_KEY to true)) { route ->
+                // #307 — resolve what the initial scroll of this landing should do. Strict priority
+                // (route scrollTo > post-submit landing > saved anchor > top) lives in the pure
+                // resolver; only a RestoreSaved outcome hands the screen an anchor to apply — the
+                // Follow* levels resolve to null so the existing ScrollToPost / ScrollToEndOfPage
+                // effects (#200/#226/#344) keep sole ownership of their landings.
+                val scrollRestoration = resolveTopicScrollRestoration(
+                    scrollTo = route.scrollTo,
+                    submitSignal = route.submitSignal,
+                    savedAnchor = topicScrollNavState
+                        .anchors[TopicScrollKey(route.cat, route.post, route.page)],
+                )
                 TopicScreen(
                     request = TopicRequest(
                         cat = route.cat,
@@ -899,6 +949,11 @@ private fun RedfaceNavHost(
                     ),
                     onTitleLoaded = { title ->
                         topicTitleNavState.onTitleLoaded(route.cat, route.post, title)
+                    },
+                    restoreScrollAnchor =
+                        (scrollRestoration as? TopicScrollRestoration.RestoreSaved)?.anchor,
+                    onScrollAnchorSaved = { anchor ->
+                        topicScrollNavState.onAnchorSaved(route.cat, route.post, route.page, anchor)
                     },
                     onOpenProfile = onOpenProfile,
                     onReply = { subcat, page ->
