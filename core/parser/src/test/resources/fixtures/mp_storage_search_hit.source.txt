@@ -1,0 +1,11 @@
+Source: forum.hardware.fr (capture authentifiee live, compte XaTriX). 2026-06-11
+Captured page: forum1.php?recherches=1&cat=prive&config=hfr.inc&search=Trucs&titre=1&orderSearch=1&resSearch=50&daterange=2&searchtype=1&jour=11&mois=6&annee=2026&pseud=&subcat=0&trash=0&trash_post=0&moderation=0
+Methode: curl GET authentifie (login POST login_validation.php -> cookies), User-Agent navigateur. AUCUN POST emis.
+Notes: recherche par SUJET dans cat=prive avec resultats (3 conversations) — le shape « decouverte
+  reussie » du MP storage MPStorage v0.1 (#6) : la recherche du hash-sujet renverrait ce meme
+  listing avec 1 ligne. Les liens de resultats portent cat=prive&post=<threadId>. Le terme de
+  recherche reel etait un mot d'un sujet du compte (pas le hash : ce compte n'a pas de MP storage,
+  cf. mp_storage_search_no_results.html) ; la STRUCTURE est identique.
+Privacy: scrubbe. hash_check -> SCRUBBED_HASH_CHECK ; sujets -> « Sujet de test N » ; pseudo compte
+  -> TestUser ; correspondants (auteur + dernier posteur) -> Correspondant ; threadIds prives
+  renumerotes 9000001..9000003 (mapping consistant dans tous les href).
