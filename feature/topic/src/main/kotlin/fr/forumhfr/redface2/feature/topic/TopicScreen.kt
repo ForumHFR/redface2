@@ -68,6 +68,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
@@ -568,9 +569,18 @@ internal fun TopicContent(
                 }
 
                 is TopicUiState.Mode.Error -> {
+                    // #324 — ServerDown / Network swap the raw exception message for the
+                    // shared :core:ui label; Other keeps the existing diagnostic detail.
+                    val detail = when (mode.kind) {
+                        HfrErrorKind.ServerDown ->
+                            stringResource(fr.forumhfr.redface2.core.ui.R.string.error_hfr_server_down)
+                        HfrErrorKind.Network ->
+                            stringResource(fr.forumhfr.redface2.core.ui.R.string.error_no_connection)
+                        HfrErrorKind.Other -> mode.message
+                    }
                     RedfacePlaceholderScreen(
                         title = stringResource(R.string.topic_error_title),
-                        body = stringResource(R.string.topic_error_body, state.request.page, mode.message),
+                        body = stringResource(R.string.topic_error_body, state.request.page, detail),
                     ) {
                         TopicPageNavigation(
                             currentPage = state.request.page,

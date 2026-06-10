@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.profile
 
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.profile.ProfileRepository
 import fr.forumhfr.redface2.core.model.UserProfile
 import io.mockk.coEvery
@@ -104,10 +105,11 @@ class ProfileViewModelTest {
     }
 
     @Test
-    fun `network error exposes Error state with ErrorKind Unknown and original cause`() = runTest {
+    fun `network error exposes Error state with ErrorKind Network and original cause`() = runTest {
         // Review feedback I7: the ViewModel must surface an ErrorKind enum (not a String
         // message) so the UI resolves the localised text via stringResource. The original
-        // Throwable is preserved on `cause` for diagnostics / future per-error-type messages.
+        // Throwable is preserved on `cause` for diagnostics. #324 — a transport IOException
+        // now classifies as Network (« Pas de connexion »), no longer as Unknown.
         val cause = IOException("network error")
         coEvery { repository.getProfile(54596) } returns Result.failure(cause)
 
@@ -117,8 +119,39 @@ class ProfileViewModelTest {
             val state = awaitItem()
             assertTrue("Mode should be Error on failure", state.mode is ProfileUiState.Mode.Error)
             val error = state.mode as ProfileUiState.Mode.Error
-            assertEquals(ProfileUiState.ErrorKind.Unknown, error.kind)
+            assertEquals(ProfileUiState.ErrorKind.Network, error.kind)
             assertEquals(cause, error.cause)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `HFR 5xx error exposes Error state with ErrorKind ServerDown`() = runTest {
+        // #324 — getProfile raises a typed HfrServerException on a non-2xx; a 5xx must be
+        // presented as « HFR est en panne » on both the sheet and the full page.
+        val cause = HfrServerException(code = 500, url = "https://forum.hardware.fr/hfr/profil-54596.htm")
+        coEvery { repository.getProfile(54596) } returns Result.failure(cause)
+
+        val vm = createViewModel()
+
+        vm.state.test {
+            val error = awaitItem().mode as ProfileUiState.Mode.Error
+            assertEquals(ProfileUiState.ErrorKind.ServerDown, error.kind)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `non-IO error keeps ErrorKind Unknown`() = runTest {
+        // #324 — parse failures and other programming errors keep the generic message.
+        coEvery { repository.getProfile(54596) } returns
+            Result.failure(IllegalStateException("parser invariant broken"))
+
+        val vm = createViewModel()
+
+        vm.state.test {
+            val error = awaitItem().mode as ProfileUiState.Mode.Error
+            assertEquals(ProfileUiState.ErrorKind.Unknown, error.kind)
             cancelAndIgnoreRemainingEvents()
         }
     }

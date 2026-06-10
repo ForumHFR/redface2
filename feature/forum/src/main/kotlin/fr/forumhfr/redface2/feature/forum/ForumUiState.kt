@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.forum
 
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
@@ -16,7 +17,16 @@ import java.text.Normalizer
 sealed interface ForumUiState {
     data object Loading : ForumUiState
     data class Content(val categories: List<Category>) : ForumUiState
-    data class Error(val message: String?) : ForumUiState
+
+    /**
+     * [kind] (#324) is the type-derived classification: ServerDown / Network make the
+     * screen render the shared `:core:ui` label instead of the raw [message]; Other keeps
+     * the pre-existing rendering ([message] when non-blank).
+     */
+    data class Error(
+        val message: String?,
+        val kind: HfrErrorKind = HfrErrorKind.Other,
+    ) : ForumUiState
 }
 
 /**
@@ -157,11 +167,21 @@ internal fun listingPageCount(totalTopics: Int, resultsPerPage: Int): Int {
 sealed interface SubcategoriesUiState {
     data object Loading : SubcategoriesUiState
     data class Content(val subcategories: List<SubCategory>) : SubcategoriesUiState
-    data class Error(val message: String?) : SubcategoriesUiState
+
+    /** [kind] (#324): same contract as [ForumUiState.Error.kind]. */
+    data class Error(
+        val message: String?,
+        val kind: HfrErrorKind = HfrErrorKind.Other,
+    ) : SubcategoriesUiState
 }
 
 sealed interface TopicsUiState {
     data object Loading : TopicsUiState
     data class Content(val page: TopicListPage) : TopicsUiState
-    data class Error(val message: String?) : TopicsUiState
+
+    /** [kind] (#324): same contract as [ForumUiState.Error.kind]. */
+    data class Error(
+        val message: String?,
+        val kind: HfrErrorKind = HfrErrorKind.Other,
+    ) : TopicsUiState
 }

@@ -44,6 +44,12 @@ data class ProfileUiState(
 
     /** Classification of profile-load failures surfaced by the ViewModel to the UI. */
     enum class ErrorKind {
+        /** #324 — HFR answered with a 5xx: outage, UI shows the shared « panne » string. */
+        ServerDown,
+
+        /** #324 — no HTTP response came back: connectivity cut, UI shows « pas de connexion ». */
+        Network,
+
         /** Generic / unknown failure — UI shows the « load failed » string. */
         Unknown,
     }

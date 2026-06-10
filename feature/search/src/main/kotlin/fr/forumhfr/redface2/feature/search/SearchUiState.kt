@@ -32,6 +32,11 @@ data class SearchUiState(
  * exception messages to the user.
  */
 sealed interface SearchErrorKind {
+    /**
+     * #324 — HFR answered with a 5xx: the site itself is down, retrying immediately is
+     * unlikely to help. Distinct from [Network] (local connectivity cut).
+     */
+    data object ServerDown : SearchErrorKind
     data object Network : SearchErrorKind
     data object Unknown : SearchErrorKind
 }

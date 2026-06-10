@@ -7,6 +7,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.AuthState
@@ -273,13 +274,15 @@ class CategoryViewModel @AssistedInject constructor(
     private fun ForumResult<List<SubCategory>>.toSubcategoriesUiState(): SubcategoriesUiState = when (this) {
         ForumResult.Loading -> SubcategoriesUiState.Loading
         is ForumResult.Success -> SubcategoriesUiState.Content(value)
-        is ForumResult.Failure -> SubcategoriesUiState.Error(cause.message)
+        // #324 — kind derives from the exception TYPE (5xx outage vs network cut vs other).
+        is ForumResult.Failure -> SubcategoriesUiState.Error(cause.message, classifyHfrError(cause))
     }
 
     private fun ForumResult<TopicListPage>.toTopicsUiState(): TopicsUiState = when (this) {
         ForumResult.Loading -> TopicsUiState.Loading
         is ForumResult.Success -> TopicsUiState.Content(value)
-        is ForumResult.Failure -> TopicsUiState.Error(cause.message)
+        // #324 — kind derives from the exception TYPE (5xx outage vs network cut vs other).
+        is ForumResult.Failure -> TopicsUiState.Error(cause.message, classifyHfrError(cause))
     }
 
     private fun ForumResult<List<Category>>.toCategoryName(cat: Int): String? = when (this) {

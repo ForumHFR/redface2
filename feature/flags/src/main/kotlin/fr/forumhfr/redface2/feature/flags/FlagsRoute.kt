@@ -55,6 +55,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Flag
@@ -556,7 +558,19 @@ private fun ColumnScope.AuthenticatedBody(
                 val sessionExpired = current.cause is SessionExpiredException
                 Text(
                     text = stringResource(
-                        if (sessionExpired) R.string.flags_session_expired else R.string.flags_error,
+                        // The dedicated session branch stays FIRST — the #324 classifier
+                        // only refines the remaining failures (5xx outage vs network cut
+                        // vs generic), so the reconnect CTA below never regresses.
+                        when {
+                            sessionExpired -> R.string.flags_session_expired
+                            else -> when (classifyHfrError(current.cause)) {
+                                HfrErrorKind.ServerDown ->
+                                    fr.forumhfr.redface2.core.ui.R.string.error_hfr_server_down
+                                HfrErrorKind.Network ->
+                                    fr.forumhfr.redface2.core.ui.R.string.error_no_connection
+                                HfrErrorKind.Other -> R.string.flags_error
+                            }
+                        },
                     ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,

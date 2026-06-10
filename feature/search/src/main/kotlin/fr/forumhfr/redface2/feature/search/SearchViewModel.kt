@@ -3,13 +3,14 @@ package fr.forumhfr.redface2.feature.search
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.search.SearchRepository
 import fr.forumhfr.redface2.core.model.search.SearchCategoryScope
 import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
 import fr.forumhfr.redface2.core.model.search.SearchRequest
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.search.SearchTopicResult
-import java.io.IOException
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -250,9 +251,15 @@ class SearchViewModel @Inject constructor(
                     }
                 },
                 onFailure = { error ->
-                    val kind = when (error) {
-                        is IOException -> SearchErrorKind.Network
-                        else -> SearchErrorKind.Unknown
+                    // #324 — shared type-derived classification. The repository lets
+                    // HfrServerException traverse (URL redacted) so a 5xx maps to
+                    // ServerDown instead of being mistaken for a network cut; a redacted
+                    // SessionExpiredException lands in Other → Unknown (search has no
+                    // dedicated session treatment).
+                    val kind = when (classifyHfrError(error)) {
+                        HfrErrorKind.ServerDown -> SearchErrorKind.ServerDown
+                        HfrErrorKind.Network -> SearchErrorKind.Network
+                        HfrErrorKind.Other -> SearchErrorKind.Unknown
                     }
                     _state.update {
                         it.copy(

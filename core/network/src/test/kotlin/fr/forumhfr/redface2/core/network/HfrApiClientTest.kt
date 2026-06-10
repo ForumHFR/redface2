@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import kotlinx.coroutines.test.runTest
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -145,15 +146,36 @@ class HfrApiClientTest {
     }
 
     @Test
-    fun `HTTP 500 surfaces an IOException carrying the URL and a body excerpt`() = runTest {
+    fun `HTTP 500 surfaces an HfrServerException carrying the code, URL and a body excerpt`() = runTest {
+        // #324 — the anonymous REST path must raise the TYPED exception (it feeds
+        // forum/catégories), keeping the pre-existing diagnostic message intact.
         server.enqueue(MockResponse().setResponseCode(500).setBody("internal explode"))
 
         val error = runCatching { client.getCategories() }.exceptionOrNull()
 
-        assertTrue("expected IOException, got $error", error is java.io.IOException)
-        val message = requireNotNull(error).message.orEmpty()
+        val typed = error as? HfrServerException
+            ?: throw AssertionError("expected HfrServerException, got $error")
+        assertEquals(500, typed.code)
+        val message = typed.message.orEmpty()
         assertTrue("missing status: $message", "500" in message)
         assertTrue("missing body excerpt: $message", "internal explode" in message)
+    }
+
+    @Test
+    fun `authenticated HTTP 502 surfaces an HfrServerException carrying the code`() = runTest {
+        // #324 — the authenticated REST path (executeAuthenticatedJson) feeds the topic
+        // listings and the drapeaux; a REST 5xx must be typed too or an HFR outage would
+        // be classified as a network cut.
+        server.enqueue(MockResponse().setResponseCode(502).setBody("bad gateway"))
+
+        val error = runCatching {
+            client.getTopicList(cat = 13, subcat = null, page = 1, useAuth = true)
+        }.exceptionOrNull()
+
+        val typed = error as? HfrServerException
+            ?: throw AssertionError("expected HfrServerException, got $error")
+        assertEquals(502, typed.code)
+        assertTrue("missing body excerpt: ${typed.message}", "bad gateway" in typed.message.orEmpty())
     }
 
     @Test

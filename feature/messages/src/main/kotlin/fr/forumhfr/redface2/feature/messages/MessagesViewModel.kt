@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import javax.inject.Inject
@@ -103,11 +104,12 @@ class MessagesViewModel @Inject constructor(
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (
-                // SwallowedException: the throwable message is intentionally NOT propagated to the
-                // UI state — it can embed the private forum2.php?cat=prive&post=<id> URL (#316).
-                // It must not reach the screen, nor the exportable DiagnosticsLog. The Error state
-                // carries no detail; the user gets a generic message + retry.
-                @Suppress("TooGenericExceptionCaught", "SwallowedException") error: Exception,
+                // The throwable MESSAGE is intentionally NOT propagated to the UI state — it can
+                // embed the private forum2.php?cat=prive&post=<id> URL (#316). It must not reach
+                // the screen, nor the exportable DiagnosticsLog. The Error state only carries the
+                // #324 kind, a closed enum derived from the exception TYPE (classifyHfrError) so
+                // the screen can tell an HFR 5xx outage from a network cut.
+                @Suppress("TooGenericExceptionCaught") error: Exception,
             ) {
                 _state.update { current ->
                     // A failed pull-to-refresh must not wipe the conversations already shown:
@@ -117,7 +119,7 @@ class MessagesViewModel @Inject constructor(
                         current.copy(isRefreshing = false)
                     } else {
                         current.copy(
-                            mode = MessagesUiState.Mode.Error,
+                            mode = MessagesUiState.Mode.Error(classifyHfrError(error)),
                             isRefreshing = false,
                         )
                     }

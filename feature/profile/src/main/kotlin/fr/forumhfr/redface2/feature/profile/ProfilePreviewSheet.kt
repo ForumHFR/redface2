@@ -32,6 +32,17 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import kotlinx.coroutines.launch
 
 /**
+ * #324 — maps a profile [ProfileUiState.ErrorKind] to its message resource: the shared
+ * `:core:ui` labels for ServerDown / Network, the feature's generic string otherwise.
+ * Shared by the bottom sheet and the full-page screen.
+ */
+internal fun profileErrorMessageRes(kind: ProfileUiState.ErrorKind): Int = when (kind) {
+    ProfileUiState.ErrorKind.ServerDown -> fr.forumhfr.redface2.core.ui.R.string.error_hfr_server_down
+    ProfileUiState.ErrorKind.Network -> fr.forumhfr.redface2.core.ui.R.string.error_no_connection
+    ProfileUiState.ErrorKind.Unknown -> R.string.profile_error_load_failed
+}
+
+/**
  * Phase 2 finish (#208) — ModalBottomSheet summary of a user's profile.
  *
  * Opened from `TopicScreen` via `onOpenProfile(userId, pseudo, avatarUrl)`, hoisted in
@@ -166,8 +177,9 @@ private fun ProfilePreviewContent(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     // Review feedback I7: localised via stringResource ; the ViewModel
-                    // surfaces an ErrorKind enum, not a String.
-                    text = stringResource(R.string.profile_error_load_failed),
+                    // surfaces an ErrorKind enum, not a String. #324 — ServerDown /
+                    // Network resolve to the shared :core:ui labels.
+                    text = stringResource(profileErrorMessageRes(mode.kind)),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )

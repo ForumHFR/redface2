@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.network
 import androidx.tracing.trace
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
@@ -63,7 +64,9 @@ class HfrClient @Inject constructor(
                     anonymous.newCall(request).execute()
                 }.use { response ->
                     if (!response.isSuccessful) {
-                        throw IOException("HFR returned ${response.code} for $url")
+                        // #324 — typed so the read screens can tell a 5xx outage from a
+                        // local network cut (cf. core.domain.error.classifyHfrError).
+                        throw HfrServerException(response.code, url.toString())
                     }
                     trace("$TOPIC_TRACE_PREFIX.body_read") { response.body.string() }
                 }
@@ -463,7 +466,9 @@ class HfrClient @Inject constructor(
         return withContext(ioDispatcher) {
             anonymous.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    throw java.io.IOException("HFR returned ${response.code} for $url")
+                    // #324 — typed so the profile sheet/page can tell a 5xx outage from a
+                    // local network cut (cf. core.domain.error.classifyHfrError).
+                    throw HfrServerException(response.code, url.toString())
                 }
                 response.body.string()
             }
@@ -565,7 +570,9 @@ class HfrClient @Inject constructor(
             }
             response.use {
                 if (!response.isSuccessful) {
-                    throw IOException("HFR returned ${response.code} for ${response.request.url}")
+                    // #324 — typed so the read screens can tell a 5xx outage from a local
+                    // network cut (cf. core.domain.error.classifyHfrError).
+                    throw HfrServerException(response.code, response.request.url.toString())
                 }
                 val html = if (tracePrefix != null) {
                     // Session-expiry detection (login redirect / login form sniff) runs after the

@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.feature.search
 
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.search.SearchRepository
 import fr.forumhfr.redface2.core.model.search.SearchCategoryScope
 import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
@@ -110,6 +112,32 @@ class SearchViewModelTest {
         assertEquals(SearchErrorKind.Network, final.errorMessage)
         assertEquals("kotlin", final.query)
         assertFalse(final.isLoading)
+    }
+
+    @Test
+    fun `repository HfrServerException sets the ServerDown error kind`() = runTest {
+        // #324 — DefaultSearchRepository lets the typed exception traverse (URL redacted);
+        // a 5xx must surface as « HFR est en panne », not as a network problem.
+        coEvery { repo.search(any()) } throws HfrServerException(code = 500, url = "<redacted>")
+        val vm = SearchViewModel(repo)
+        vm.submit(SearchIntent.QueryChanged("kotlin"))
+        vm.submit(SearchIntent.Submit)
+
+        val final = vm.state.value
+        assertEquals(SearchErrorKind.ServerDown, final.errorMessage)
+        assertFalse(final.isLoading)
+    }
+
+    @Test
+    fun `repository SessionExpiredException sets the Unknown error kind not Network`() = runTest {
+        // #324 — search has no dedicated session treatment; an expired session must not be
+        // presented as a connectivity cut (classifyHfrError → Other → Unknown).
+        coEvery { repo.search(any()) } throws SessionExpiredException("<redacted>")
+        val vm = SearchViewModel(repo)
+        vm.submit(SearchIntent.QueryChanged("kotlin"))
+        vm.submit(SearchIntent.Submit)
+
+        assertEquals(SearchErrorKind.Unknown, vm.state.value.errorMessage)
     }
 
     @Test

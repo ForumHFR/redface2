@@ -7,6 +7,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import kotlinx.coroutines.CancellationException
@@ -95,12 +96,16 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (
-                // SwallowedException: the throwable message is intentionally NOT propagated to the
-                // UI state — it can embed the private forum2.php?cat=prive&post=<id> URL (#316), so
-                // it must reach neither the screen nor the exportable DiagnosticsLog. Generic Error.
-                @Suppress("TooGenericExceptionCaught", "SwallowedException") error: Exception,
+                // The throwable MESSAGE is intentionally NOT propagated to the UI state — it can
+                // embed the private forum2.php?cat=prive&post=<id> URL (#316), so it must reach
+                // neither the screen nor the exportable DiagnosticsLog. The Error state only
+                // carries the #324 kind, a closed enum derived from the exception TYPE
+                // (classifyHfrError) so the screen can tell an HFR 5xx outage from a network cut.
+                @Suppress("TooGenericExceptionCaught") error: Exception,
             ) {
-                _state.update { it.copy(mode = PrivateMessageThreadUiState.Mode.Error) }
+                _state.update {
+                    it.copy(mode = PrivateMessageThreadUiState.Mode.Error(classifyHfrError(error)))
+                }
             }
         }
     }

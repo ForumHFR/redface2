@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import java.time.LocalDate
@@ -269,6 +270,47 @@ class HfrClientTest {
         server.shutdown()
 
         assertNull(client.resolveTopicPageUrl(cat = 23, post = 35421, numreponse = 2786758))
+    }
+
+    @Test
+    fun `getTopicPage anonymous surfaces a 500 as HfrServerException carrying the code`() = runTest {
+        // #324 — a non-2xx answered by HFR must be typed (HfrServerException) so the read
+        // screens can tell « HFR est en panne » (5xx) from a local network cut.
+        server.enqueue(MockResponse().setResponseCode(500).setBody("<html>boom</html>"))
+
+        val error = runCatching {
+            client.getTopicPage(cat = 23, post = 35395, page = 1, useAuth = false)
+        }.exceptionOrNull()
+
+        val typed = error as? HfrServerException
+            ?: throw AssertionError("expected HfrServerException, got $error")
+        assertEquals(500, typed.code)
+        assertTrue("missing status in message: ${typed.message}", "500" in typed.message.orEmpty())
+    }
+
+    @Test
+    fun `getTopicPage authenticated surfaces a 503 as HfrServerException carrying the code`() = runTest {
+        // Covers the shared executeAuthenticatedHtml() path (topic auth, MP list/thread, …).
+        server.enqueue(MockResponse().setResponseCode(503).setBody("<html>maintenance</html>"))
+
+        val error = runCatching {
+            client.getTopicPage(cat = 23, post = 35395, page = 1, useAuth = true)
+        }.exceptionOrNull()
+
+        val typed = error as? HfrServerException
+            ?: throw AssertionError("expected HfrServerException, got $error")
+        assertEquals(503, typed.code)
+    }
+
+    @Test
+    fun `getProfile surfaces a 500 as HfrServerException carrying the code`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(500).setBody("<html>boom</html>"))
+
+        val error = runCatching { client.getProfile(userId = 12345) }.exceptionOrNull()
+
+        val typed = error as? HfrServerException
+            ?: throw AssertionError("expected HfrServerException, got $error")
+        assertEquals(500, typed.code)
     }
 
     private fun taggedClient(tag: String): OkHttpClient =

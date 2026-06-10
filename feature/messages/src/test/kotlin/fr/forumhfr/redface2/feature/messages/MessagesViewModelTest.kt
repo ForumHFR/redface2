@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.feature.messages
 
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
@@ -76,8 +78,25 @@ class MessagesViewModelTest {
         val viewModel = MessagesViewModel(repository, FakeAuthRepository())
 
         // #316: the Error mode carries NO raw throwable message (privacy — it can embed the private
-        // conversation URL). We only assert the generic Error state is reached, not its detail.
-        assertTrue(viewModel.state.value.mode is MessagesUiState.Mode.Error)
+        // conversation URL). The only detail is the #324 type-derived kind (safe closed enum).
+        val mode = viewModel.state.value.mode
+        assertTrue(mode is MessagesUiState.Mode.Error)
+        assertEquals(HfrErrorKind.Network, (mode as MessagesUiState.Mode.Error).kind)
+    }
+
+    @Test
+    fun `surfaces an HFR 5xx load failure with the ServerDown kind`() = runTest {
+        // #324 — an HFR outage must be distinguishable from a network cut on the inbox,
+        // still without any raw message (the kind is derived from the exception TYPE only).
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageList(page = 1) } throws
+            HfrServerException(code = 503, url = "https://forum.hardware.fr/forum1.php")
+
+        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
+
+        val mode = viewModel.state.value.mode
+        assertTrue(mode is MessagesUiState.Mode.Error)
+        assertEquals(HfrErrorKind.ServerDown, (mode as MessagesUiState.Mode.Error).kind)
     }
 
     @Test

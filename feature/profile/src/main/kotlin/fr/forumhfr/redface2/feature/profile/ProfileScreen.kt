@@ -151,9 +151,10 @@ internal fun ProfileScreen(
                     )
                     Spacer(Modifier.height(16.dp))
                     // Review feedback I7: the ViewModel surfaces an ErrorKind enum,
-                    // not a String — the UI maps it to the localised resource.
+                    // not a String — the UI maps it to the localised resource. #324 —
+                    // ServerDown / Network resolve to the shared :core:ui labels.
                     Text(
-                        text = stringResource(R.string.profile_error_load_failed),
+                        text = stringResource(profileErrorMessageRes(mode.kind)),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error,
                     )

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.topic
 
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.Topic
 
 data class TopicUiState(
@@ -61,6 +62,13 @@ data class TopicUiState(
 
         data class Error(
             val message: String,
+            /**
+             * #324 — coarse classification (HFR 5xx / coupure réseau / autre) derived from
+             * the exception TYPE by `classifyHfrError`. The screen swaps the raw [message]
+             * for the shared `:core:ui` string on [HfrErrorKind.ServerDown] /
+             * [HfrErrorKind.Network]; [HfrErrorKind.Other] keeps rendering [message].
+             */
+            val kind: HfrErrorKind = HfrErrorKind.Other,
         ) : Mode
     }
 

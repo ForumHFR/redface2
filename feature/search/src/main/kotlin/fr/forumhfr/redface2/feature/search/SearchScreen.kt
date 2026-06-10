@@ -332,6 +332,8 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 @Composable
 private fun ErrorState(kind: SearchErrorKind, onRetry: () -> Unit, modifier: Modifier = Modifier) {
     val messageResId = when (kind) {
+        // #324 — shared :core:ui label for an HFR 5xx outage.
+        SearchErrorKind.ServerDown -> fr.forumhfr.redface2.core.ui.R.string.error_hfr_server_down
         SearchErrorKind.Network -> R.string.search_error_network
         SearchErrorKind.Unknown -> R.string.search_error_unknown
     }
