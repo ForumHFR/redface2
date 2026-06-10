@@ -19,6 +19,9 @@
     <string name="topic_post_menu_number">Post n°%1$d</string>
     <string name="topic_post_menu_copy_link">Copier le lien de ce post</string>
     <string name="topic_post_menu_link_copied">Lien copié</string>
+    <string name="topic_post_menu_open_in_browser">Ouvrir dans le navigateur</string>
+    <string name="topic_post_menu_no_browser">Aucun navigateur disponible</string>
+    <string name="topic_post_menu_report_soon">Alerter (à venir)</string>
     <string name="topic_post_menu_edited">Édité le %1$s</string>
     <plurals name="topic_post_menu_cited_on_page">
         <item quantity="one">Cité %1$d fois sur cette page</item>
