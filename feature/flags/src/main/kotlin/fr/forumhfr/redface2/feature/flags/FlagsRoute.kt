@@ -686,8 +686,7 @@ private fun CategorySectionedFlagList(
                     // Confirming phase and the ViewModel rejects re-entry.
                     SwipeableFlagItem(
                         flag = flag,
-                        metadata = flagMetadata(flag),
-                        metadataEnd = flagMetadataEnd(flag),
+                        metadata = flagRowMetadata(flag),
                         removalInFlight = removalInFlight,
                         onClick = { actions.onOpenFlag(flag) },
                         onRequestRemove = { actions.onRequestRemoveFlag(flag) },
@@ -765,8 +764,7 @@ private fun FlatFlagList(
             ) { flag ->
                 SwipeableFlagItem(
                     flag = flag,
-                    metadata = flagMetadata(flag),
-                    metadataEnd = flagMetadataEnd(flag),
+                    metadata = flagRowMetadata(flag),
                     removalInFlight = removalInFlight,
                     onClick = { actions.onOpenFlag(flag) },
                     onRequestRemove = { actions.onRequestRemoveFlag(flag) },
@@ -819,8 +817,7 @@ private fun flatEmptyLabel(tab: FlagTab): Int = when (tab) {
 @Composable
 private fun SwipeableFlagItem(
     flag: Flag,
-    metadata: String,
-    metadataEnd: String,
+    metadata: FlagRowMetadata,
     removalInFlight: Boolean,
     onClick: () -> Unit,
     onRequestRemove: () -> Unit,
@@ -846,8 +843,8 @@ private fun SwipeableFlagItem(
     ) {
         FlagItem(
             flag = flag,
-            metadata = metadata,
-            metadataEnd = metadataEnd,
+            metadata = metadata.start,
+            metadataEnd = metadata.end,
             onClick = onClick,
             // Opaque background so the destructive backdrop never bleeds through the row while
             // it is animating back to settled. Swipe is the only removal affordance now, so we
@@ -952,32 +949,34 @@ private data class FlagsViewSettingsActions(
 )
 
 /**
- * Start segment of a drapeau row's footer: `author · p.X/Y`. Dogfooding feedback on v102:
- * the single-string footer (`author · N rép. · p.X/Y · timestamp`) truncated its tail —
- * the #325 timestamp — on narrow screens. The reply count is dropped entirely (redundant
- * with the page count for a quick scan, and the web listing survives without it on
- * mobile) and the timestamp moves to [flagMetadataEnd], rendered end-aligned and never
- * truncated by [FlagItem].
+ * Both segments of a drapeau row's footer, bundled so [SwipeableFlagItem] stays under the
+ * detekt parameter-count threshold (same idiom as [FlagsViewSettingsActions]).
+ *
+ * Dogfooding feedback on v102: the single-string footer (`author · N rép. · p.X/Y ·
+ * timestamp`) truncated its tail — the #325 timestamp — on narrow screens. [start] is
+ * `author · p.X/Y` (the only segment allowed to ellipsise; the reply count is dropped,
+ * redundant with the page count for a quick scan) and [end] is the last-reply timestamp,
+ * formatted web-style (`01-05-2026 à 17:07`) by [formatLastReplyTimestamp] from the raw
+ * REST string — rendered end-aligned and never truncated by [FlagItem]. Blank when REST
+ * omits it.
  */
-@Composable
-private fun flagMetadata(flag: Flag): String = if (flag.lastReplyAuthor.isNotBlank()) {
-    stringResource(
-        R.string.flags_item_metadata_with_author,
-        flag.lastReplyAuthor,
-        flag.lastReadPage,
-        flag.totalPages,
-    )
-} else {
-    stringResource(
-        R.string.flags_item_metadata_no_author,
-        flag.lastReadPage,
-        flag.totalPages,
-    )
-}
+private data class FlagRowMetadata(val start: String, val end: String)
 
-/**
- * End-aligned segment of the footer: the last-reply timestamp (#325), formatted web-style
- * (`01-05-2026 à 17:07`) by [formatLastReplyTimestamp] from the raw REST string. Blank when
- * REST omits it — [FlagItem] then renders the start segment alone.
- */
-private fun flagMetadataEnd(flag: Flag): String = formatLastReplyTimestamp(flag.lastReplyAt)
+@Composable
+private fun flagRowMetadata(flag: Flag): FlagRowMetadata {
+    val start = if (flag.lastReplyAuthor.isNotBlank()) {
+        stringResource(
+            R.string.flags_item_metadata_with_author,
+            flag.lastReplyAuthor,
+            flag.lastReadPage,
+            flag.totalPages,
+        )
+    } else {
+        stringResource(
+            R.string.flags_item_metadata_no_author,
+            flag.lastReadPage,
+            flag.totalPages,
+        )
+    }
+    return FlagRowMetadata(start = start, end = formatLastReplyTimestamp(flag.lastReplyAt))
+}
