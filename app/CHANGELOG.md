@@ -18,8 +18,8 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ## v104 — `0.8.0` — 2026-06-10
 
-**Statut** : `local` (entrée écrite avant le dispatch ; passer à `open` + F-Droid `.beta` après le ship)
-**Commit** : merge de promotion `dev → main` (numéro v104 anticipé : registre de tags à 103 au moment du bump)
+**Statut** : `open` (track open testing) + F-Droid `.beta`
+**Commit** : merge de promotion `918bb619` (#373), tag `app-v104` (versionCode 104, ledger 103→104)
 **Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) → **track open testing** + tag pour F-Droid beta
 
 **Troisième batch** : night-run 2026-06-10 (8 items, dont 7 features/fixes code) + lot dogfooding même journée, dogfoodé sur le canal dev (v102 → v103).
