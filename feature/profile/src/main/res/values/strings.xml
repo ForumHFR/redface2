@@ -23,7 +23,7 @@
     <!-- Actions -->
     <string name="profile_action_open_full">Voir le profil complet</string>
     <string name="profile_action_retry">Réessayer</string>
-    <string name="profile_action_recent_posts_coming_soon">Derniers messages (à venir)</string>
+    <string name="profile_action_recent_posts">Derniers messages</string>
 
     <!-- Error messages -->
     <string name="profile_error_load_failed">Impossible de charger le profil.</string>

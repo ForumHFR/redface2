@@ -352,6 +352,7 @@ class HfrClient @Inject constructor(
      * failures to typed errors and is responsible for stripping the `search=` parameter
      * before logging.
      */
+    @Suppress("LongParameterList") // HFR search form : one parameter per wire field.
     suspend fun searchTopics(
         query: String,
         cat: Int?,

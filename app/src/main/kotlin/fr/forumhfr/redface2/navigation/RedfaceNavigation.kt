@@ -94,6 +94,17 @@ data object ForumRoute : RedfaceNavKey
 @Serializable
 data object SearchRoute : RedfaceNavKey
 
+/**
+ * Author-only search pushed from the profile's « Derniers messages » button. A separate
+ * route (NOT a parameter on [SearchRoute]) so the search tab root stays a serializable
+ * `data object` — saved back stacks from previous app versions keep restoring — and so
+ * the pushed screen gets its own nav-entry ViewModelStore, leaving the tab's idle
+ * search state untouched. The entry pre-fills the author field and fires immediately
+ * (cf. `SearchViewModel.initialPseudo`).
+ */
+@Serializable
+data class SearchUserPostsRoute(val pseudo: String) : RedfaceNavKey
+
 @Serializable
 data object MessagesRoute : RedfaceNavKey
 
@@ -789,6 +800,30 @@ private fun RedfaceNavHost(
                     topBarActions = accountMenu,
                 )
             }
+            entry<SearchUserPostsRoute> { route ->
+                // Profile « Derniers messages » : same screen as the search tab, but
+                // pushed onto the current tab's stack with the author pre-filled and the
+                // search fired at construction. `onBack` gives the pushed entry its back
+                // affordance (the tab root never sets it).
+                SearchScreen(
+                    onOpenTopic = { cat, post, page, scrollTo ->
+                        backStack.add(
+                            TopicRoute(
+                                cat = cat,
+                                post = post,
+                                page = page,
+                                scrollTo = scrollTo,
+                            ),
+                        )
+                    },
+                    initialPseudo = route.pseudo,
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                )
+            }
             entry<MessagesRoute> {
                 MessagesScreen(
                     readThreadIds = privateMessageNavState.readThreadIds,
@@ -921,6 +956,9 @@ private fun RedfaceNavHost(
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
                         }
+                    },
+                    onShowUserPosts = { pseudo ->
+                        backStack.add(SearchUserPostsRoute(pseudo = pseudo))
                     },
                 )
             }
