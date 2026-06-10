@@ -26,6 +26,14 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 
 /**
+ * Footer line of a [FlagItem] row, split in two segments (#325 follow-up). [start] is the
+ * only segment allowed to truncate (ellipsis); [end] — typically the last-reply
+ * timestamp — keeps its intrinsic width, pinned to the row's end. Either side may be
+ * empty. Bundled as one value so callers stay under the detekt parameter-count threshold.
+ */
+data class FlagMetadata(val start: String = "", val end: String = "")
+
+/**
  * Renders one row of the user's drapeaux list.
  *
  * Visual hierarchy mirrors what HFR users have spent ~20 years training their eyes on:
@@ -43,8 +51,8 @@ import fr.forumhfr.redface2.core.model.FlagType
  * `weight(1f)` so the action stays pinned to the right and the text ellipsises instead of
  * overlapping it. When absent (default), the column fills the row as before.
  *
- * [metadataEnd] is an optional end-aligned segment of the footer line (#325 follow-up:
- * the last-reply timestamp). It is NEVER truncated — the start segment ([metadata]) takes
+ * [FlagMetadata.end] is an optional end-aligned segment of the footer line (#325
+ * follow-up: the last-reply timestamp). It is NEVER truncated — the start segment takes
  * the remaining width and ellipsises instead, so on narrow screens the date survives and
  * the author/pagination clip first (dogfooding feedback on v102: the timestamp, placed
  * last in a single string, was the part being cut off).
@@ -56,10 +64,9 @@ import fr.forumhfr.redface2.core.model.FlagType
 @Composable
 fun FlagItem(
     flag: Flag,
-    metadata: String,
+    metadata: FlagMetadata,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    metadataEnd: String = "",
     trailingAction: (@Composable RowScope.() -> Unit)? = null,
 ) {
     Row(
@@ -82,13 +89,13 @@ fun FlagItem(
                 fontWeight = if (flag.hasUnread) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 2,
             )
-            if (metadata.isNotEmpty() || metadataEnd.isNotEmpty()) {
+            if (metadata.start.isNotEmpty() || metadata.end.isNotEmpty()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = metadata,
+                        text = metadata.start,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -98,9 +105,9 @@ fun FlagItem(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    if (metadataEnd.isNotEmpty()) {
+                    if (metadata.end.isNotEmpty()) {
                         Text(
-                            text = metadataEnd,
+                            text = metadata.end,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
