@@ -24,7 +24,7 @@
     <string name="messages_reply_preview_show">Aperçu</string>
     <string name="messages_reply_preview_hide">Masquer l\'aperçu</string>
     <string name="messages_reply_submit">Envoyer</string>
-    <string name="messages_reply_submit_confirm">Confirmer ?</string>
+    <string name="messages_reply_submit_confirm">Confirmer&#160;?</string>
     <string name="messages_reply_actions_options">Options</string>
     <string name="messages_reply_options_title">Options</string>
     <string name="messages_reply_option_signature">Activer la signature</string>

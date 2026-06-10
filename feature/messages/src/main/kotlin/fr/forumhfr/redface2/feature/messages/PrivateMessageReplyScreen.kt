@@ -227,10 +227,12 @@ private fun ReplyEditorBody(
     onErrorDismissed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // No outer scroll : the draft field is weighted so it stretches down to the bar (same
+    // extensible-field design as the post editor) ; long content scrolls INSIDE the field
+    // and inside the preview pane.
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -241,6 +243,7 @@ private fun ReplyEditorBody(
             onValueChange = onContentChanged,
             label = stringResource(R.string.messages_reply_field_label),
             placeholder = stringResource(R.string.messages_reply_field_placeholder),
+            modifier = Modifier.weight(1f),
         )
 
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
@@ -259,7 +262,14 @@ private fun ReplyEditorBody(
 
         if (state.isPreviewVisible) {
             HorizontalDivider()
-            BbcodePreview(content = state.preview)
+            // Shares the stretch with the field (50/50) and scrolls internally.
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                BbcodePreview(content = state.preview)
+            }
         }
 
         state.submitError?.let { error ->
@@ -322,9 +332,12 @@ private fun ReplySubmitBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Tonal container for the secondary trigger, filled for « Envoyer » — same M3
-                // emphasis pair as the post editor's bar.
-                FilledTonalButton(onClick = onOpenOptions) {
-                    Text(text = stringResource(R.string.messages_reply_actions_options))
+                // emphasis pair as the post editor's bar. Hidden while the confirmation is
+                // armed so the armed label never wraps (same fix as the editor bar).
+                if (!confirmArmed) {
+                    FilledTonalButton(onClick = onOpenOptions) {
+                        Text(text = stringResource(R.string.messages_reply_actions_options))
+                    }
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 if (isSubmitting) {
@@ -353,6 +366,7 @@ private fun ReplySubmitBar(
                                 R.string.messages_reply_submit
                             },
                         ),
+                        maxLines = 1,
                     )
                 }
             }
