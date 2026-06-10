@@ -194,6 +194,29 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
+    fun `unknown response emits NO navigation effect — the composer must not pop`() = runTest {
+        // Codex review of #404 : the new-MP success response is not pinned by a live fixture.
+        // An unrecognised answer must keep the user IN the composer (banner only) — popping
+        // would discard the visible draft on an unproven outcome.
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        coEvery {
+            repository.submitNewMessage(any(), any(), any(), any(), any())
+        } returns ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+
+        val vm = viewModel(repository)
+        vm.onRecipientsChanged("bozoleclown")
+        vm.onSubjectChanged("Sujet")
+        vm.onContentChanged(TextFieldValue("Bonjour."))
+
+        vm.effects.test {
+            vm.onSubmit()
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `invalid hash_check refetches the form silently so the user can re-submit`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()

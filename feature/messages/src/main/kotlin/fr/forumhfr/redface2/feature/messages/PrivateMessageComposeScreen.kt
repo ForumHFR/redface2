@@ -108,7 +108,10 @@ private fun PrivateMessageComposeContent(
                 onBack = onBack,
             )
             when {
-                state.formError -> MessageFormErrorState(onRetry = onRetryFormLoad)
+                state.formError -> MessageFormErrorState(
+                    onRetry = onRetryFormLoad,
+                    message = stringResource(R.string.messages_compose_form_error),
+                )
                 state.isLoadingForm && !state.formAvailable -> MessageFormLoadingState()
                 else -> {
                     ComposeEditorBody(
@@ -234,7 +237,16 @@ private fun ComposeEditorBody(
 
         state.submitError?.let { error ->
             Text(
-                text = stringResource(error.bannerResId),
+                // Unexpected gets composer wording (« vérifiez votre liste de messages ») —
+                // the shared banner says « vérifiez la conversation », which has no meaning
+                // before the conversation exists (Codex review of #404).
+                text = stringResource(
+                    if (error == PrivateMessageReplyError.Unexpected) {
+                        R.string.messages_compose_error_unexpected
+                    } else {
+                        error.bannerResId
+                    },
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
             )

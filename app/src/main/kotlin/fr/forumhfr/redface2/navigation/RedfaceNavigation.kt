@@ -442,11 +442,13 @@ fun RedfaceApp(intent: Intent?) {
                 AuthState.Anonymous -> {
                     readPrivateMessageThreadIds = emptySet()
                     multiRecipientThreadIds = emptySet()
+                    privateMessageSentSignal = null
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
                 }
                 is AuthState.Authenticated -> {
                     readPrivateMessageThreadIds = emptySet()
                     multiRecipientThreadIds = emptySet()
+                    privateMessageSentSignal = null
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
                 }
             }

@@ -73,7 +73,9 @@ fun MessagesScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(sentSignal) {
         if (sentSignal != null) {
-            viewModel.refresh()
+            // Page 1 always : the created conversation lands at the top of the inbox, and a
+            // plain current-page refresh from page 2+ would never surface it.
+            viewModel.showFreshInbox()
         }
     }
 

@@ -71,6 +71,15 @@ class MessagesViewModel @Inject constructor(
         load(_state.value.page, refreshing = true)
     }
 
+    /**
+     * #301 follow-up — a new conversation was just sent : it appears at the TOP of page 1,
+     * so always land there (a plain refresh from page 2+ would never show it — Codex review
+     * of #404). Already on page 1 → soft refresh, keeping the visible content.
+     */
+    fun showFreshInbox() {
+        load(page = 1, refreshing = _state.value.page == 1)
+    }
+
     private fun clearPrivateState() {
         authenticatedPseudo = null
         loadJob?.cancel()

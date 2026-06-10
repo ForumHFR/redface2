@@ -82,7 +82,10 @@ internal fun MessageFormLoadingState() {
 }
 
 @Composable
-internal fun MessageFormErrorState(onRetry: () -> Unit) {
+internal fun MessageFormErrorState(
+    onRetry: () -> Unit,
+    message: String = stringResource(R.string.messages_reply_form_error),
+) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -90,7 +93,7 @@ internal fun MessageFormErrorState(onRetry: () -> Unit) {
             modifier = Modifier.padding(horizontal = 24.dp),
         ) {
             Text(
-                text = stringResource(R.string.messages_reply_form_error),
+                text = message,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.error,
             )
