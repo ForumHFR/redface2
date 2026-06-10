@@ -48,6 +48,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.search.SearchTopicResult
+import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 
 /**
  * Phase 2G-A/B (#150 partiel) — search tab screen.
@@ -421,7 +422,7 @@ private fun SearchResultCard(result: SearchTopicResult, onClick: () -> Unit) {
             Text(
                 text = stringResource(
                     R.string.search_result_last_reply,
-                    result.lastReplyAt,
+                    formatLastReplyTimestamp(result.lastReplyAt),
                     result.lastReplyAuthor,
                 ),
                 style = MaterialTheme.typography.bodySmall,
