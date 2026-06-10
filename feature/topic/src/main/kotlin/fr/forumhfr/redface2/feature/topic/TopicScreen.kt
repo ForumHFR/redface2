@@ -820,11 +820,12 @@ private fun TopicLoadedContent(
         // #283 — extra bottom padding so the last post's right-aligned actions clear the floating
         // bottom-action cluster (the Scaffold FAB slot floats over the content). Harmless extra
         // breathing room when the cluster is absent (anon + single page).
-        // 8 dp gutters (was 16) — posts are the app's main reading surface, every horizontal
-        // pixel counts on a phone ; the cards keep their own inner padding for breathing room.
-        contentPadding = PaddingValues(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 88.dp),
-        // 8 dp vertical rhythm, matching the 8 dp side gutters above — a uniform grid (and a
-        // denser feed, cf. the #287 density feedback) instead of the previous 12/8 mismatch.
+        // NO side gutters here : the nav host already pads every screen by 8 dp per side
+        // (RedfaceNavigation's global Surface) — adding 8 more made the real gutter 16 dp
+        // (dogfooding v111). 0 + 8 (host) = the intended 8 dp, matching the vertical rhythm.
+        contentPadding = PaddingValues(start = 0.dp, top = 16.dp, end = 0.dp, bottom = 88.dp),
+        // 8 dp vertical rhythm, matching the 8 dp effective side gutters — a uniform grid (and
+        // a denser feed, cf. the #287 density feedback).
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
