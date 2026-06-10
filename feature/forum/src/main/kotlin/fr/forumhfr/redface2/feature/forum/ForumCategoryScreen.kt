@@ -372,7 +372,7 @@ private fun TopicRow(
         modifier = rowModifier,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FlagIndicator(flagType = topic.flagType)
+        FlagIndicator(flagType = topic.flagType, hasUnread = topic.hasUnread)
         Column(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = topic.title,
@@ -405,8 +405,11 @@ private fun TopicRow(
     }
 }
 
+/** Alpha of a read flag dot — same dimming contract as `FlagDot` (:core:ui FlagItem). */
+private const val READ_FLAG_DOT_ALPHA = 0.35f
+
 @Composable
-private fun FlagIndicator(flagType: FlagType?) {
+private fun FlagIndicator(flagType: FlagType?, hasUnread: Boolean?) {
     // Reserve the same gutter width on every row, flagged or not, so titles stay
     // left-aligned across rows in mixed (auth) listings. When flagType is null the
     // gutter is an empty Spacer; when it is non-null we paint the colored dot inside
@@ -419,7 +422,12 @@ private fun FlagIndicator(flagType: FlagType?) {
         Spacer(modifier = gutter)
         return
     }
-    val color = FlagPalette.colorFor(flagType)
+    // #329 — a read flag keeps its bucket colour but dims, so a vivid dot means
+    // « unread » : same visual grammar as the Drapeaux tab. `hasUnread` is tri-state ;
+    // null (state unknown, e.g. REST omitted the field) keeps the vivid dot rather
+    // than wrongly claiming the topic was read.
+    val base = FlagPalette.colorFor(flagType)
+    val color = if (hasUnread == false) base.copy(alpha = READ_FLAG_DOT_ALPHA) else base
     val description = stringResource(
         when (flagType) {
             FlagType.CYAN -> R.string.category_flag_cyan
