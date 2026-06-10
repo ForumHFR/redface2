@@ -47,6 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicSummary
+import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 
 /**
@@ -376,7 +377,7 @@ private fun TopicRow(
                     R.string.category_topic_metadata,
                     topic.author,
                     topic.lastReplyAuthor,
-                    topic.lastReplyAt,
+                    formatLastReplyTimestamp(topic.lastReplyAt),
                     topic.replyCount,
                     topic.totalPages,
                 ),

@@ -61,6 +61,7 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.ui.FlagItem
 import fr.forumhfr.redface2.core.ui.FlagItemDivider
+import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import kotlinx.coroutines.launch
 
 /**
@@ -935,21 +936,44 @@ private data class FlagsViewSettingsActions(
     val onDismiss: () -> Unit,
 )
 
+/**
+ * Footer line of a drapeau row. #325 adds the last-reply timestamp, formatted web-style
+ * (`01-05-2026 à 17:07`) by [formatLastReplyTimestamp] from the raw REST string. Both the
+ * author and the timestamp are optional on the wire (blank when REST omits them), so each
+ * combination maps to its own template — never a dangling `·` separator.
+ */
 @Composable
-private fun flagMetadata(flag: Flag): String =
-    if (flag.lastReplyAuthor.isNotBlank()) {
-        stringResource(
+private fun flagMetadata(flag: Flag): String {
+    val lastReplyAt = formatLastReplyTimestamp(flag.lastReplyAt)
+    val hasAuthor = flag.lastReplyAuthor.isNotBlank()
+    return when {
+        hasAuthor && lastReplyAt.isNotBlank() -> stringResource(
+            R.string.flags_item_metadata_with_author_at,
+            flag.lastReplyAuthor,
+            lastReplyAt,
+            flag.replyCount,
+            flag.lastReadPage,
+            flag.totalPages,
+        )
+        hasAuthor -> stringResource(
             R.string.flags_item_metadata_with_author,
             flag.lastReplyAuthor,
             flag.replyCount,
             flag.lastReadPage,
             flag.totalPages,
         )
-    } else {
-        stringResource(
+        lastReplyAt.isNotBlank() -> stringResource(
+            R.string.flags_item_metadata_no_author_at,
+            lastReplyAt,
+            flag.replyCount,
+            flag.lastReadPage,
+            flag.totalPages,
+        )
+        else -> stringResource(
             R.string.flags_item_metadata_no_author,
             flag.replyCount,
             flag.lastReadPage,
             flag.totalPages,
         )
     }
+}

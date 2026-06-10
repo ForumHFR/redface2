@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
@@ -80,6 +81,9 @@ fun FlagItem(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    // #325 — the line can exceed narrow screens now that it carries the
+                    // last-reply timestamp: signal the truncation instead of hard-clipping.
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
