@@ -304,13 +304,19 @@ internal fun EditorSubmitBar(
                 // expressive press-morphing `shapes` overload does NOT exist on material3
                 // 1.4.0 (no ButtonShapes in the artifact, verified at the bytecode) — revisit
                 // when the BOM bumps material3.
-                FilledTonalButton(onClick = actions.onOpenOptions) {
-                    Text(text = stringResource(R.string.editor_actions_options))
-                }
-                actions.onOpenSmileys?.let { openSmileys ->
-                    Spacer(modifier = Modifier.width(8.dp))
-                    FilledTonalButton(onClick = openSmileys) {
-                        Text(text = stringResource(R.string.editor_smiley_open))
+                // While the confirmation is armed the secondary triggers step aside : they
+                // are not actionable mid-confirmation anyway, and the freed width guarantees
+                // the armed label never wraps (the tonal pills ate the Row slack and
+                // line-broke « Confirmer ? » — dogfooding v108).
+                if (!state.confirmArmed) {
+                    FilledTonalButton(onClick = actions.onOpenOptions) {
+                        Text(text = stringResource(R.string.editor_actions_options))
+                    }
+                    actions.onOpenSmileys?.let { openSmileys ->
+                        Spacer(modifier = Modifier.width(8.dp))
+                        FilledTonalButton(onClick = openSmileys) {
+                            Text(text = stringResource(R.string.editor_smiley_open))
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.weight(1f))
@@ -343,6 +349,7 @@ internal fun EditorSubmitBar(
                             text = stringResource(
                                 if (armed) R.string.editor_submit_confirm else R.string.editor_submit,
                             ),
+                            maxLines = 1,
                         )
                     }
                 }

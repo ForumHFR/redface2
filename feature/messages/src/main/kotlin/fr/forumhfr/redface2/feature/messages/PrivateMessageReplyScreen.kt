@@ -322,9 +322,12 @@ private fun ReplySubmitBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Tonal container for the secondary trigger, filled for « Envoyer » — same M3
-                // emphasis pair as the post editor's bar.
-                FilledTonalButton(onClick = onOpenOptions) {
-                    Text(text = stringResource(R.string.messages_reply_actions_options))
+                // emphasis pair as the post editor's bar. Hidden while the confirmation is
+                // armed so the armed label never wraps (same fix as the editor bar).
+                if (!confirmArmed) {
+                    FilledTonalButton(onClick = onOpenOptions) {
+                        Text(text = stringResource(R.string.messages_reply_actions_options))
+                    }
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 if (isSubmitting) {
@@ -353,6 +356,7 @@ private fun ReplySubmitBar(
                                 R.string.messages_reply_submit
                             },
                         ),
+                        maxLines = 1,
                     )
                 }
             }
