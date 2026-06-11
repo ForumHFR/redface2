@@ -491,8 +491,10 @@ class HfrClient @Inject constructor(
      * &page={page}&p=1&sondage=0&owntopic={1|2|3}&new=0`
      *
      * - [type] maps to the `owntopic` discriminator that identifies the drapeau bucket :
-     *   `CYAN → 1`, `RED → 2`, `FAVORITE → 3` (same mapping as the REST `flag_owntopic`,
-     *   cf. `Flag.kt`). Targeting the right bucket matters : HFR keys the deletion on it.
+     *   `CYAN → 1`, `RED → 2`, `FAVORITE → 3`. This is a WRITE-side bucket selector only —
+     *   do not read it back from the REST `flag_owntopic` response field, which describes
+     *   the strongest flag ON the topic, not bucket membership (cf. `Flag.kt`, #384).
+     *   Targeting the right bucket matters : HFR keys the deletion on it.
      *   The `FAVORITE` branch is proven by a destructive capture ; `CYAN` / `RED` reuse the
      *   same proven `owntopic` discriminant and should be recaptured when safe.
      * - [subcat] is nullable. REST flag listings do not always carry a sub-category, so we
@@ -639,9 +641,11 @@ class HfrClient @Inject constructor(
     }
 
     /**
-     * Maps [FlagType] to the HFR `owntopic` discriminator used by `delflag.php` / `addflag.php`
-     * and the REST `flag_owntopic` field. Kept private to the network layer : the mapping is a
-     * wire detail of the HFR contract, not a domain concept the rest of the app should know.
+     * Maps [FlagType] to the WRITE-side `owntopic` bucket selector of `delflag.php` — and that
+     * endpoint only (`addflag.php` ignores `owntopic` : favori-only, live-verified ; and the REST
+     * `flag_owntopic` response field describes the strongest flag ON the topic, not the bucket,
+     * cf. `Flag.kt`). Kept private to the network layer : the mapping is a wire detail of the
+     * HFR contract, not a domain concept the rest of the app should know.
      */
     private fun FlagType.toOwntopic(): Int = when (this) {
         FlagType.CYAN -> 1

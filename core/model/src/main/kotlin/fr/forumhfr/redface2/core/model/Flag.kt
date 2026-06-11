@@ -66,11 +66,17 @@ data class Flag(
     val lastReplyAt: String,
 )
 
+/**
+ * The REST bucket a flag row belongs to. NOT a mirror of the REST `flag_owntopic` response
+ * field — that field describes the strongest flag ON the topic, not bucket membership (see
+ * the [Flag] KDoc). The 1/2/3 integers only reappear as the WRITE-side `owntopic` selector
+ * of `delflag.php` (cf. `HfrClient.removeFlag`).
+ */
 enum class FlagType {
-    /** Cyan drapeau — sujets participés (`flag_owntopic=1`). */
+    /** Cyan drapeau — bucket `participated/` (sujets participés). */
     CYAN,
-    /** Red drapeau — lus uniquement (`flag_owntopic=2`). */
+    /** Red drapeau — bucket `read/` (lus uniquement). */
     RED,
-    /** Yellow star — favoris (`flag_owntopic=3`). */
+    /** Yellow star — bucket `favorites/` (favoris). */
     FAVORITE,
 }
