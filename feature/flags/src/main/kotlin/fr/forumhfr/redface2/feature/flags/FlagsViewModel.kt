@@ -64,6 +64,18 @@ class FlagsViewModel @Inject constructor(
      */
     private var lastAutoRefreshAt: Instant? = null
 
+    /**
+     * #378 follow-up — generation counter incremented by [onFlagOpened] (a topic was opened from
+     * this list). A refresh CONSUMES the generations it can see at its **call time** by advancing
+     * [flagOpenedGenerationConsumed]; [maybeAutoRefresh] bypasses the throttle while un-consumed
+     * generations remain. A counter (not a boolean) so a read armed WHILE a landing refresh is
+     * suspended on its pref/auth gates is never swallowed by that refresh — it could not have
+     * captured that reading yet (Codex review on this PR). Same ViewModel scoping rationale as
+     * [lastAutoRefreshAt].
+     */
+    private var flagOpenedGeneration = 0L
+    private var flagOpenedGenerationConsumed = 0L
+
     private val _selectedTab = MutableStateFlow<FlagTab>(FlagTab.Cyan)
     val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
 
@@ -503,6 +515,9 @@ class FlagsViewModel @Inject constructor(
     fun refresh() {
         // Super is a placeholder with no backing FlagType — pull-to-refresh is a no-op there.
         val type = _selectedTab.value.flagType ?: return
+        // A manual refresh captures the post-reading state too, so the generations visible at this
+        // call would only duplicate the fan-out on the next landing — consume them (#378 follow-up).
+        flagOpenedGenerationConsumed = flagOpenedGeneration
         viewModelScope.launch {
             _isRefreshing.value = true
             try {
@@ -511,6 +526,19 @@ class FlagsViewModel @Inject constructor(
                 _isRefreshing.value = false
             }
         }
+    }
+
+    /**
+     * #378 follow-up (retours dev v118) — the screen calls this when the user opens a topic from
+     * the list. The next [maybeAutoRefresh] then BYPASSES the throttle window: coming back from a
+     * just-read topic is precisely when the flag state changed (the read topic should drop out of
+     * an unread-only view), and the 15 s window was eating exactly that case for fast readers
+     * ("je lis vite fait le dernier message → retour → pas de refresh"). The throttle keeps
+     * protecting the no-read round-trips (bottom-tab switches, immediate back-and-forth), which
+     * is what it was for — the REST fan-out is one GET per public category.
+     */
+    fun onFlagOpened() {
+        flagOpenedGeneration++
     }
 
     /**
@@ -533,15 +561,29 @@ class FlagsViewModel @Inject constructor(
         // no-op on a placeholder while still arming the throttle (Codex review on PR #421).
         val type = _selectedTab.value.flagType ?: return
         if (_isRefreshing.value) return
+        // Snapshot at CALL time (same rationale as the tab snapshot above): a read armed AFTER
+        // this landing's call belongs to the NEXT landing. The launch suspends on the pref/auth
+        // gates below — reading the generation there would let this refresh consume a reading it
+        // cannot have captured yet, losing the bypass for the actual return (Codex review).
+        val openedGenerationAtCall = flagOpenedGeneration
         viewModelScope.launch {
             if (!userPreferencesRepository.observeFlagsAutoRefresh().first()) return@launch
             if (authRepository.observeAuthState().first() !is AuthState.Authenticated) return@launch
             val now = clock.instant()
             val last = lastAutoRefreshAt
-            if (last != null && Duration.between(last, now) < AUTO_REFRESH_THROTTLE) return@launch
+            // Throttle SKIPPED when a topic was opened since the last consuming refresh (see
+            // [onFlagOpened]): that landing is a return from a read, the state most worth
+            // refreshing.
+            val returningFromTopic = openedGenerationAtCall > flagOpenedGenerationConsumed
+            if (!returningFromTopic && last != null && Duration.between(last, now) < AUTO_REFRESH_THROTTLE) {
+                return@launch
+            }
             // Re-check after the suspensions: a manual pull-to-refresh may have started while
             // the pref/auth reads were in flight — don't double the REST fan-out.
             if (_isRefreshing.value) return@launch
+            // Consume ONLY the generations visible at call time — a read armed during the
+            // suspensions above stays pending for the next landing.
+            flagOpenedGenerationConsumed = maxOf(flagOpenedGenerationConsumed, openedGenerationAtCall)
             lastAutoRefreshAt = now
             _isRefreshing.value = true
             try {

@@ -224,7 +224,13 @@ fun FlagsRoute(
                             ),
                             actions = AuthenticatedActions(
                                 onSelectTab = viewModel::selectTab,
-                                onOpenFlag = onOpenFlag,
+                                // #378 follow-up — record the read BEFORE navigating: returning
+                                // from this topic must bypass the auto-refresh throttle (the flag
+                                // state just changed), cf. FlagsViewModel.onFlagOpened.
+                                onOpenFlag = { flag ->
+                                    viewModel.onFlagOpened()
+                                    onOpenFlag(flag)
+                                },
                                 onRefresh = viewModel::refresh,
                                 onLoginRequested = onLoginRequested,
                                 onRequestRemoveFlag = viewModel::requestRemoveFlag,
