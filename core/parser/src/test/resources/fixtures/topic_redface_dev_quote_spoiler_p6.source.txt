@@ -1,0 +1,8 @@
+Source: https://forum.hardware.fr/hfr/gsmgpspda/redface-dev-sujet_35421_6.htm
+Captured: 2026-06-11
+Auth: logged-out
+Sanitization: verified logged-out capture; no cookies, session identifiers or account-specific private data detected; empty hash_check inputs preserved
+Purpose: #393 — post t2787065 carries a [quotemsg] citation whose quoted content embeds a [spoiler]
+("Test" / spoiler "caca rose" / "Suite" + the reply text below the quote). The container div of
+that quote used to be classified SPOILER (descendant-matching selectFirst with spoiler tested
+first), swallowing the quote and rendering only its spoiler part.

@@ -107,23 +107,31 @@ class PostContentParser {
         }
     }
 
-    private fun classifyDiv(element: Element): NodeKind = when {
-        element.selectFirst("table.spoiler") != null -> NodeKind.SPOILER
+    private fun classifyDiv(element: Element): NodeKind {
         // HFR renders [quotemsg=...] as <table class="citation"> (with author anchor) and a bare
         // [quote] as <table class="quote"> — both map to the same Quote block. Logged-in users whose
         // profile uses the classic citation style get the "old"-prefixed classes instead:
         // <table class="oldcitation"> for [quotemsg] and <table class="oldquote"> for a bare [quote]
         // — same structure, different class. All four must be recognised or the quote is swallowed
         // and rendered as plain text (real bug on the logged-in vélo topic, page 8270, post 74749781).
-        element.selectFirst("table.citation, table.oldcitation, table.quote, table.oldquote") != null -> NodeKind.QUOTE
-        // Defensive wrapper support: every fixture captured so far emits [fixed] / [code] as a
-        // <table> child direct of <div id="paraN"> (handled by classifyTable above), but quotes
-        // use <div class="container"> wrappers. Synthetic tests pin this fallback so a future HFR
-        // skin wrapping monospace blocks would still keep them out of the surrounding paragraph.
-        element.selectFirst("table.fixed") != null -> NodeKind.FIXED_BLOCK
-        element.selectFirst("table.code") != null -> NodeKind.CODE_BLOCK
-        element.attr("style").contains("clear: both") -> NodeKind.IGNORE
-        else -> NodeKind.PARAGRAPH_CONTAINER
+        // [fixed] / [code] usually surface as <table> children direct of <div id="paraN"> (handled
+        // by classifyTable) ; matching them here is defensive wrapper support, pinned by synthetic
+        // tests.
+        //
+        // These block tables NEST (#393 : a quote whose quoted content embeds a [spoiler] ; the
+        // inverse spoiler-around-quote is real too, cf. CitationIndex), and selectFirst matches
+        // descendants — so a static branch order would mis-classify whichever nesting it tests
+        // first. The OUTERMOST block table decides : selectFirst over the combined selector
+        // returns the first match in document order, and an ancestor always precedes its
+        // descendants there.
+        val blockTable = element.selectFirst(
+            "table.spoiler, table.citation, table.oldcitation, table.quote, table.oldquote, table.fixed, table.code",
+        )
+        return when {
+            blockTable != null -> classifyTable(blockTable)
+            element.attr("style").contains("clear: both") -> NodeKind.IGNORE
+            else -> NodeKind.PARAGRAPH_CONTAINER
+        }
     }
 
     private fun classifyTable(element: Element): NodeKind = when {

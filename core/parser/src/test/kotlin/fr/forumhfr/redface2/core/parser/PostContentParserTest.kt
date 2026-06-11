@@ -195,6 +195,64 @@ class PostContentParserTest {
     }
 
     @Test
+    fun `a quote whose quoted content embeds a spoiler stays a Quote`() {
+        // #393 — post t2787065 (topic RF2-DEV page 6, the live repro) : XaTriX cites a post
+        // shaped "Test / [spoiler]caca rose[/spoiler] / Suite". The container div used to be
+        // classified SPOILER (descendant-matching selectFirst with spoiler tested first), so
+        // the whole quote was swallowed and only its spoiler part rendered.
+        val topic = pageParser.parse(fixture("topic_redface_dev_quote_spoiler_p6.html"))
+        val post = requireNotNull(topic.posts.firstOrNull { it.numreponse == 2787065 }) {
+            "fixture should contain the repro post t2787065"
+        }
+
+        val quotes = post.content.blocks.filterIsInstance<PostBlock.Quote>()
+        assertTrue("the citation must surface as a Quote, not be swallowed by its inner spoiler", quotes.isNotEmpty())
+        val quote = quotes.first()
+        assertEquals("XaTriX", quote.author)
+
+        val quotedText = quote.content.allInlines()
+            .filterIsInstance<PostInline.Text>()
+            .joinToString(" ") { it.value }
+        assertTrue("text BEFORE the spoiler must survive, got=$quotedText", quotedText.contains("Test"))
+        assertTrue("text AFTER the spoiler must survive, got=$quotedText", quotedText.contains("Suite"))
+        assertTrue(
+            "the embedded spoiler must stay a Spoiler block inside the quote",
+            quote.content.allBlocks().filterIsInstance<PostBlock.Spoiler>().isNotEmpty(),
+        )
+
+        val replyText = post.content.allInlines()
+            .filterIsInstance<PostInline.Text>()
+            .joinToString(" ") { it.value }
+        assertTrue("the reply below the quote must remain, got=$replyText", replyText.contains("Caca rose rose"))
+    }
+
+    @Test
+    fun `a spoiler whose hidden content embeds a quote stays a Spoiler`() {
+        // #393 counterpart — the OUTERMOST block table decides the kind in document order.
+        // Synthetic fragment assembled from the two real shapes above (citation header from the
+        // oldcitation test, spoiler wrapper from the khakha fixture) ; pins the inverse nesting
+        // so the #393 fix cannot regress CitationIndex's "quote inside a spoiler" support.
+        val spoilerWrappingQuoteHtml = """
+            <div id="para999"><p></p><div class="container"><table class="spoiler">
+            <tr class="none"><td><b class="s1Topic">Spoiler :</b>
+            <div class="Topic masque"><div class="container"><table class="citation">
+            <tr class="none"><td><b class="s1"><a href="/hfr/gsmgpspda/redface-dev-sujet_35421_6.htm#t2787063" class="Topic">XaTriX a écrit :</a></b>
+            <hr size="1" /><p>caché</p><hr size="1" /></td></tr></table></div></div>
+            </td></tr></table></div><p><br />après le spoiler</p></div>
+        """.trimIndent()
+        val contentElement = Jsoup.parse(spoilerWrappingQuoteHtml).selectFirst("div[id^=para]")
+
+        val ast = PostContentParser().parse(contentElement).ast
+
+        val topLevelSpoilers = ast.blocks.filterIsInstance<PostBlock.Spoiler>()
+        assertTrue("the outer spoiler must stay a Spoiler", topLevelSpoilers.isNotEmpty())
+        assertTrue(
+            "the quote hidden inside the spoiler must surface as a nested Quote",
+            topLevelSpoilers.first().content.allBlocks().filterIsInstance<PostBlock.Quote>().isNotEmpty(),
+        )
+    }
+
+    @Test
     fun `mono-character builtin smileys are recognised with their BBCode token`() {
         val topic = pageParser.parse(fixture("topic_khakha_page_146.html"))
 
