@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -70,6 +71,14 @@ internal fun PostMenuSheet(
     permalink: String,
     citedCount: Int,
     onDismiss: () -> Unit,
+    /**
+     * #418 — « Supprimer ce message », moved here from the post card's action row (beta
+     * feedback by nicko : a destructive one-tap button under every own post invites
+     * accidental taps). Null hides the entry — same #292 gates as before (own editable
+     * post, postable topic, never the first post, no deletion in flight). The existing
+     * #292 confirmation dialog still guards the actual POST.
+     */
+    onDelete: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState()
     val coroutineScope = rememberCoroutineScope()
@@ -154,6 +163,24 @@ internal fun PostMenuSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.topic_post_menu_report_soon))
+            }
+
+            if (onDelete != null) {
+                Spacer(Modifier.height(8.dp))
+                // #418 — destructive action LAST (M3 idiom), error-tinted. The tap closes the
+                // sheet and hands over to the #292 confirmation dialog owned by TopicScreen.
+                OutlinedButton(
+                    onClick = {
+                        onDelete()
+                        hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                    },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.topic_post_menu_delete))
+                }
             }
 
             Spacer(Modifier.height(8.dp))

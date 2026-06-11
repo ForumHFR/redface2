@@ -51,8 +51,10 @@
     <string name="topic_refresh_failed">Le rafraîchissement a échoué. Réessayez.</string>
     <string name="topic_open_profile_action">Voir le profil</string>
 
-    <!-- #292 — suppression d'un de ses propres posts (post normal). -->
+    <!-- #292 — suppression d'un de ses propres posts (post normal). #418 : l'action vit dans
+         le menu contextuel du post (anti appui intempestif), plus dans la rangée d'actions. -->
     <string name="topic_post_delete">Supprimer</string>
+    <string name="topic_post_menu_delete">Supprimer ce message</string>
     <string name="topic_post_delete_confirm_title">Effacer ce message ?</string>
     <string name="topic_post_delete_confirm_message">Cette action est irréversible.</string>
     <string name="topic_post_delete_confirm_action">Supprimer</string>
