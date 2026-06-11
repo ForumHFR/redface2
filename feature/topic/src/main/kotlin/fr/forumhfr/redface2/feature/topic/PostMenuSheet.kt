@@ -90,6 +90,16 @@ internal fun PostMenuSheet(
      * hide animation first so the profile sheet never stacks over this one.
      */
     onOpenProfile: (() -> Unit)? = null,
+    /**
+     * #291 — whether this post already sits in the multi-quote basket; flips the entry's
+     * label between « Ajouter à » and « Retirer de » la citation multiple.
+     */
+    multiQuoteSelected: Boolean = false,
+    /**
+     * #291 — toggles this post in the multi-quote basket. Null hides the entry — same gate
+     * as « Citer » (`shouldShowQuoteAction`): locked topic or anonymous session.
+     */
+    onToggleMultiQuote: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState()
     val coroutineScope = rememberCoroutineScope()
@@ -173,6 +183,29 @@ internal fun PostMenuSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.topic_post_menu_open_in_browser))
+            }
+
+            if (onToggleMultiQuote != null) {
+                Spacer(Modifier.height(8.dp))
+                // #291 — adds/removes this post in the multi-quote basket. The sheet closes on
+                // tap so the « Citer N » FAB count is immediately visible as feedback.
+                OutlinedButton(
+                    onClick = {
+                        onToggleMultiQuote()
+                        hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        stringResource(
+                            if (multiQuoteSelected) {
+                                R.string.topic_post_menu_multi_quote_remove
+                            } else {
+                                R.string.topic_post_menu_multi_quote_add
+                            },
+                        ),
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))

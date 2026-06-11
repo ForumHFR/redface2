@@ -230,6 +230,14 @@ data class PostEditorRoute(
      * absent quote link ; quote still works from `quotedNumreponse` alone.
      */
     val quoteRef: Int? = null,
+    /**
+     * #291 multi-quote — `numreponse`s of the ADDITIONAL posts to quote after
+     * [quotedNumreponse], in selection order. The editor replays the #146 quote
+     * form fetch once per entry and concatenates the `[quotemsg]` prefills —
+     * client-side only, no new HFR contract. Empty for single quote / plain
+     * reply ; defaulted so older serialised back stacks deserialise.
+     */
+    val extraQuoteNumreponses: List<Int> = emptyList(),
 ) : RedfaceNavKey
 
 @Serializable
@@ -450,6 +458,12 @@ fun RedfaceApp(intent: Intent?) {
         // above (plain remember: lost on activity/process recreation, which falls back to the
         // pre-#412 top landing instead of replaying a stale bottom scroll).
         var topicPendingBottomLanding by remember { mutableStateOf<TopicScrollKey?>(null) }
+        // #291 — multi-quote basket: numreponses selected for quoting, in tap order, keyed by
+        // (cat, post) so a page change (which destroys the topic nav entry, cf. titles above)
+        // keeps the cross-page selection while a different topic never sees it. One basket at a
+        // time (selecting in another topic resets it — quoting is a single-topic act). Plain
+        // remember: losing it on process death just means re-selecting, like the markers above.
+        var multiQuoteBasket by remember { mutableStateOf<MultiQuoteBasket?>(null) }
 
         LaunchedEffect(authState) {
             when (authState) {
@@ -543,6 +557,13 @@ fun RedfaceApp(intent: Intent?) {
                         },
                         pendingBottomLanding = topicPendingBottomLanding,
                         onPendingBottomLanding = { topicPendingBottomLanding = it },
+                    ),
+                    multiQuoteNavState = MultiQuoteNavState(
+                        basket = multiQuoteBasket,
+                        onToggle = { cat, post, numreponse ->
+                            multiQuoteBasket = multiQuoteBasket.toggled(cat, post, numreponse)
+                        },
+                        onClear = { multiQuoteBasket = null },
                     ),
                     onOpenProfile = { userId, pseudo, avatarUrl ->
                         // Review feedback I3: capture the **origin** tab so that
@@ -692,6 +713,46 @@ private data class TopicScrollNavState(
 )
 
 /**
+ * #291 — multi-quote nav bundle threaded into [RedfaceNavHost], same shape as the other
+ * hoisted-state bundles ([TopicScrollNavState], `TopicTitleNavState`).
+ */
+private data class MultiQuoteNavState(
+    val basket: MultiQuoteBasket?,
+    val onToggle: (cat: Int, post: Int, numreponse: Int) -> Unit,
+    val onClear: () -> Unit,
+)
+
+/**
+ * #291 — multi-quote selection, hoisted to RedfaceApp (same survival rationale as
+ * [TopicScrollNavState]: a page change replaces the TopicRoute entry, so any state owned by the
+ * topic screen dies with it). [numreponses] keeps SELECTION ORDER — the quotes are concatenated
+ * in the order the user tapped them, not post order.
+ */
+internal data class MultiQuoteBasket(
+    val cat: Int,
+    val post: Int,
+    val numreponses: List<Int>,
+) {
+    fun matches(cat: Int, post: Int): Boolean = this.cat == cat && this.post == post
+}
+
+/**
+ * Toggles [numreponse] in the basket for topic ([cat], [post]). Selecting in a DIFFERENT topic
+ * replaces the basket (one quoting act at a time); removing the last entry clears it to null so
+ * the « Citer N » affordance disappears instead of advertising an empty selection.
+ */
+internal fun MultiQuoteBasket?.toggled(cat: Int, post: Int, numreponse: Int): MultiQuoteBasket? {
+    val current = this?.takeIf { it.matches(cat, post) }
+        ?: return MultiQuoteBasket(cat, post, listOf(numreponse))
+    val next = if (numreponse in current.numreponses) {
+        current.numreponses - numreponse
+    } else {
+        current.numreponses + numreponse
+    }
+    return if (next.isEmpty()) null else current.copy(numreponses = next)
+}
+
+/**
  * Composite cache key for [TopicTitleNavState]. A topic id (`post`) is unique only **per HFR
  * category**, not globally — two categories can theoretically expose the same id (cf. the same
  * `(cat, topicId)` composite key in `SearchScreen`), so keying by `post` alone could flash the
@@ -737,6 +798,8 @@ private fun RedfaceNavHost(
     topicTitleNavState: TopicTitleNavState,
     // #307 — per-page scroll-anchor cache, same hoisting rationale as topicTitleNavState.
     topicScrollNavState: TopicScrollNavState,
+    // #291 — multi-quote basket, same hoisting rationale (survives the per-page entry swap).
+    multiQuoteNavState: MultiQuoteNavState,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     NavDisplay(
@@ -1096,6 +1159,40 @@ private fun RedfaceNavHost(
                             ),
                         )
                     },
+                    // #291 — selection of THIS topic's basket (another topic's selection must
+                    // never leak into the menu checkmarks or the « Citer N » FAB).
+                    multiQuoteSelection = multiQuoteNavState.basket
+                        ?.takeIf { it.matches(route.cat, route.post) }
+                        ?.numreponses
+                        .orEmpty(),
+                    onToggleMultiQuote = { numreponse ->
+                        multiQuoteNavState.onToggle(route.cat, route.post, numreponse)
+                    },
+                    onMultiQuote = { subcat, page ->
+                        // #291 — quote flavour of reply with the EXTRA numreponses riding the
+                        // route; the editor replays the #146 fetch per entry. The basket is
+                        // cleared on launch: the selection's intent is consumed, and backing
+                        // out of the editor should not re-arm a stale « Citer N ».
+                        val selection = multiQuoteNavState.basket
+                            ?.takeIf { it.matches(route.cat, route.post) }
+                            ?.numreponses
+                            .orEmpty()
+                        if (selection.isNotEmpty()) {
+                            backStack.add(
+                                PostEditorRoute(
+                                    mode = PostEditorMode.Reply,
+                                    cat = route.cat,
+                                    topicId = route.post,
+                                    page = page,
+                                    subcat = subcat,
+                                    quotedNumreponse = selection.first(),
+                                    quoteRef = null,
+                                    extraQuoteNumreponses = selection.drop(1),
+                                ),
+                            )
+                            multiQuoteNavState.onClear()
+                        }
+                    },
                     onEdit = { subcat, page, numreponse ->
                         // Phase 2D (#147) — `PostEditorMode.Edit` triggers the
                         // `bdd.php` flow inside the editor. `numreponse` identifies
@@ -1191,6 +1288,7 @@ private fun RedfaceNavHost(
                         subcat = route.subcat,
                         quotedNumreponse = route.quotedNumreponse,
                         quoteRef = route.quoteRef,
+                        extraQuoteNumreponses = route.extraQuoteNumreponses,
                     ),
                     onSubmitSucceeded = { targetPage, scrollTo ->
                         // Pop the editor and refresh the topic page. `targetPage` is parsed

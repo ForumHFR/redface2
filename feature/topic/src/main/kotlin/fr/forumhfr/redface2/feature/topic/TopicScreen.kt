@@ -196,6 +196,23 @@ fun TopicScreen(
      * still `Loading` never clobbers a previously saved position with `(0, 0)`.
      */
     onScrollAnchorSaved: (TopicScrollAnchor) -> Unit = {},
+    /**
+     * #291 — numreponses currently selected for multi-quote in THIS topic, in selection order.
+     * Owned by `:app` (the basket must survive the per-page entry swap, like the title cache);
+     * the screen only renders the count and the per-post toggle state.
+     */
+    multiQuoteSelection: List<Int> = emptyList(),
+    /**
+     * #291 — toggles a post in the multi-quote basket. Only invoked under the same gate as
+     * [onQuote] (`shouldShowQuoteAction`): a topic the user cannot reply to has nothing to quote.
+     */
+    onToggleMultiQuote: (numreponse: Int) -> Unit = {},
+    /**
+     * #291 — opens the editor pre-filled with every selected quote (same destination as
+     * [onQuote]; `:app` rides the selection on the route and clears the basket). Receives the
+     * topic's `(subcat, page)` like [onReply].
+     */
+    onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
 ) {
     val viewModel = hiltViewModel<TopicViewModel, TopicViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -347,6 +364,9 @@ fun TopicScreen(
         onOpenPage = onOpenPage,
         onOpenProfile = onOpenProfile,
         onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
+        multiQuoteSelection = multiQuoteSelection,
+        onToggleMultiQuote = onToggleMultiQuote,
+        onMultiQuote = onMultiQuote,
     )
 
     // #292 — confirmation before the (irreversible, no-undo) deletion. Only « Supprimer » sends the
@@ -571,6 +591,11 @@ internal fun TopicContent(
     // #292 — a per-post « Supprimer » tap; the screen owns the confirmation dialog, so this only
     // requests it (carrying the post's numreponse). Never invoked for the first post (excluded).
     onDeleteRequest: (numreponse: Int) -> Unit = {},
+    // #291 — multi-quote selection (owned by :app) + its two actions, threaded to the post menu
+    // (toggle) and the floating cluster (« Citer N »).
+    multiQuoteSelection: List<Int> = emptyList(),
+    onToggleMultiQuote: (numreponse: Int) -> Unit = {},
+    onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
 ) {
     // #285 — the topic title and #284 — the page counter live in a persistent top app bar so they
     // stay visible while the user scrolls (the in-card title/caption scrolls away). When the page
@@ -654,6 +679,12 @@ internal fun TopicContent(
                     showPageFabs = state.showPageFabs,
                     canGoPrevious = state.canGoPrevious,
                     canGoNext = state.canGoNext,
+                    // #291 — the « Citer N » FAB shares the reply gate: quoting IS replying.
+                    multiQuoteCount = effectiveMultiQuoteCount(
+                        current.topic,
+                        state.isAuthenticated,
+                        multiQuoteSelection,
+                    ),
                     // Clamp to [1, totalPages]: `canGoPrevious/Next` are derived from `request.page`
                     // while the target is computed from the parsed `topic.page`; if those ever desync
                     // (HFR clamps an out-of-range page to the last one), the clamp keeps navigation in
@@ -661,6 +692,7 @@ internal fun TopicContent(
                     onPreviousPage = { onOpenPage((current.topic.page - 1).coerceAtLeast(1)) },
                     onNextPage = { onOpenPage((current.topic.page + 1).coerceAtMost(current.topic.totalPages)) },
                     onReply = { onReply(current.topic.subcat, current.topic.page) },
+                    onMultiQuote = { onMultiQuote(current.topic.subcat, current.topic.page) },
                 )
             }
         },
@@ -738,6 +770,8 @@ internal fun TopicContent(
                                 onDeleteRequest = onDeleteRequest,
                                 onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
                                 listState = listState,
+                                multiQuoteSelection = multiQuoteSelection,
+                                onToggleMultiQuote = onToggleMultiQuote,
                             )
                             TopicScrollbar(
                                 listState = listState,
@@ -766,6 +800,9 @@ private fun TopicLoadedContent(
     /** #382 — double-tap anywhere on the list refreshes the current page (RF1 parity). */
     onDoubleTapRefresh: () -> Unit = {},
     listState: LazyListState,
+    // #291 — selection state + toggle for the post menu's multi-quote entry.
+    multiQuoteSelection: List<Int> = emptyList(),
+    onToggleMultiQuote: (numreponse: Int) -> Unit = {},
 ) {
     val highlight = state.request.scrollTo
     // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
@@ -983,6 +1020,14 @@ private fun TopicLoadedContent(
             // anonymous reads expose no profile link, the hero stays inert.
             onOpenProfile = post.profileId?.let { profileId ->
                 { onOpenProfile(profileId, post.author, post.avatarUrl) }
+            },
+            // #291 — multi-quote toggle, same gate as « Citer » (quoting is a flavour of
+            // replying; a locked topic or an anonymous session has nothing to quote).
+            multiQuoteSelected = post.numreponse in multiQuoteSelection,
+            onToggleMultiQuote = if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
+                { onToggleMultiQuote(post.numreponse) }
+            } else {
+                null
             },
         )
     }
@@ -1526,16 +1571,23 @@ private fun TopicBottomActions(
     showPageFabs: Boolean,
     canGoPrevious: Boolean,
     canGoNext: Boolean,
+    multiQuoteCount: Int,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
     onReply: () -> Unit,
+    onMultiQuote: () -> Unit,
 ) {
     val previousLabel = stringResource(R.string.topic_fab_previous_page)
     val nextLabel = stringResource(R.string.topic_fab_next_page)
     // #383 — the preference only governs the ‹/› page FABs; « Répondre » keeps its own gate.
     val showPrevious = showPageFabs && canGoPrevious
     val showNext = showPageFabs && canGoNext
-    if (showReply || showPrevious || showNext) {
+    // #291 — appears as soon as the basket holds one post of this topic (call-site zeroes the
+    // count when quoting is unavailable). NOT governed by the #383 page-FABs preference: it is
+    // a write affordance the user explicitly armed, not page navigation.
+    val showMultiQuote = multiQuoteCount > 0
+    val showAnyAction = showReply || showPrevious || showNext || showMultiQuote
+    if (showAnyAction) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1546,10 +1598,27 @@ private fun TopicBottomActions(
             if (showNext) {
                 PageFab(description = nextLabel, glyph = "›", onClick = onNextPage)
             }
+            if (showMultiQuote) {
+                MultiQuoteFab(count = multiQuoteCount, onClick = onMultiQuote)
+            }
             if (showReply) {
                 ReplyFab(onClick = onReply)
             }
         }
+    }
+}
+
+@Composable
+private fun MultiQuoteFab(count: Int, onClick: () -> Unit) {
+    // #291 — same SmallFloatingActionButton footprint as PageFab/ReplyFab; the glyph is a
+    // decorative « ❝N » (no Material icons — detekt ForbiddenImport blocks
+    // androidx.compose.material.*) and the real label rides on contentDescription for TalkBack.
+    val label = pluralStringResource(R.plurals.topic_fab_multi_quote, count, count)
+    SmallFloatingActionButton(
+        onClick = onClick,
+        modifier = Modifier.semantics { contentDescription = label },
+    ) {
+        Text("❝$count")
     }
 }
 
@@ -1591,6 +1660,12 @@ private fun ReplyFab(onClick: () -> Unit) {
 // (CategoryViewModel.canCreateTopic).
 internal fun shouldEnableReply(topic: Topic, isAuthenticated: Boolean): Boolean =
     topic.canReply && isAuthenticated
+
+// #291 — the « Citer N » FAB count, zeroed when quoting is unavailable (locked topic, anonymous
+// session): the basket may still hold posts, but advertising an unusable action would be a lie.
+// Extracted from TopicContent for the detekt cyclomatic-complexity budget.
+internal fun effectiveMultiQuoteCount(topic: Topic, isAuthenticated: Boolean, selection: List<Int>): Int =
+    if (shouldShowQuoteAction(topic, isAuthenticated)) selection.size else 0
 
 internal fun shouldShowQuoteAction(topic: Topic, isAuthenticated: Boolean): Boolean =
     topic.canReply && isAuthenticated

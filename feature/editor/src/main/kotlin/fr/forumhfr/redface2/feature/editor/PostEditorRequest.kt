@@ -32,4 +32,12 @@ data class PostEditorRequest(
      * or absent quote link — HFR still quotes from [quotedNumreponse] alone.
      */
     val quoteRef: Int? = null,
+    /**
+     * #291 multi-quote — `numreponse`s of the ADDITIONAL posts to quote after
+     * [quotedNumreponse], in selection order. The ViewModel replays the quote form
+     * fetch once per entry (same #146 contract, `quotedNumreponse` swapped) and
+     * concatenates the `[quotemsg]` prefills into the initial draft. Empty for a
+     * single quote or a plain reply.
+     */
+    val extraQuoteNumreponses: List<Int> = emptyList(),
 )
