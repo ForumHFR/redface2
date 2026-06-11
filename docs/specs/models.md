@@ -227,7 +227,8 @@ data class Flag(
     val title: String,
     val totalPages: Int,           // ceil(links.posts.count / posts_results_per_page) côté REST
     val replyCount: Int,           // max(links.posts.count - 1, 0) côté REST
-    val type: FlagType,
+    val type: FlagType,            // bucket DEMANDÉ au fetch, jamais dérivé de flag_owntopic (#384)
+    val isFavorite: Boolean,       // décoration étoile : flag_owntopic == 3, indépendante du bucket
     val hasUnread: Boolean,        // !is_read côté REST ; defensive true quand is_read absent
     val lastReadPage: Int,         // links.posts.href?page=N côté REST
     val lastPostReadId: Long?,     // last_post_read_id côté REST — id du DERNIER post lu (≠ premier non lu)
@@ -237,12 +238,22 @@ data class Flag(
 )
 
 enum class FlagType {
-    // Mapping confirmé via REST flag_owntopic + onglets HFR capturés :
-    CYAN,       // sujets participés (`flag_owntopic=1`)
-    RED,        // lus uniquement (`flag_owntopic=2`)
-    FAVORITE,   // favoris (`flag_owntopic=3`)
+    // Le type d'un Flag est TOUJOURS le bucket REST demandé au fetch
+    // (participated/read/favorites), jamais dérivé de flag_owntopic (#384 :
+    // le bucket participated renvoie aussi des lignes flag_owntopic=3).
+    CYAN,       // bucket participated (« Mes sujets »)
+    RED,        // bucket read (« Lus uniquement »)
+    FAVORITE,   // bucket favorites (« Favoris »)
 }
 ```
+
+> **`type` vs `isFavorite` (#384 + suivi)** : `flag_owntopic` décrit le drapeau le plus fort
+> SUR le sujet (3 = favori/étoile), pas le bucket d'appartenance — vérifié live (fixture
+> `rest_cat13_participated_favorites.json`) : le bucket participated renvoie des sujets
+> participés-ET-favoris avec `flag_owntopic=3`. Mapper ce champ vers `type` corrompait le
+> cache Room par type (#384). `type` reste donc le bucket (routage, filtres, clé de cache) ;
+> `isFavorite` ne porte que la **décoration** : la pastille d'un favori reste jaune dans
+> « Mes sujets », quelle que soit la couleur du bucket (parité site, retour dev v118).
 
 > **Phase 1D-1 — REST migration** : `Flag` n'est plus alimenté par `forum1f.php` mais par les endpoints REST `forums/hardwarefr/topics/{participated,read,favorites}/` (cf. ADR-003 et `protocol-hfr.md`). Conséquences sur le modèle :
 >

@@ -18,12 +18,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 
 /**
  * Renders one row of the user's drapeaux list.
@@ -130,14 +130,9 @@ private fun FlagDot(type: FlagType, isFavorite: Boolean, hasUnread: Boolean) {
     // #384 follow-up (dev v118 feedback) — the favori/étoile decoration WINS over the bucket
     // color: a favorited topic listed under « Mes sujets » keeps its yellow dot, like the site.
     // `type` stays the bucket (routing/filters); only the dot reads the decoration.
-    val color = when {
-        isFavorite -> Color(0xFFFFB300)
-        else -> when (type) {
-            FlagType.CYAN -> Color(0xFF00BCD4)
-            FlagType.RED -> Color(0xFFE53935)
-            FlagType.FAVORITE -> Color(0xFFFFB300)
-        }
-    }
+    // Colors come from FlagPalette — the same source the Forum tab's topic rows use — instead of
+    // the local literals this dot historically duplicated (Codex review: two drifting palettes).
+    val color = if (isFavorite) FlagPalette.Favorite else FlagPalette.colorFor(type)
     val finalColor = if (hasUnread) color else color.copy(alpha = 0.35f)
     Box(
         modifier = Modifier
