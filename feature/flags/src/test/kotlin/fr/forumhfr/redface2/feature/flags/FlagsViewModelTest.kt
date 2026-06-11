@@ -34,6 +34,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.onSubscription
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -1233,6 +1235,29 @@ class FlagsViewModelTest {
         vm.maybeAutoRefresh() // bypass consumed here
         vm.maybeAutoRefresh() // plain re-landing without a new read — throttled again
 
+        assertEquals(2, flags.refreshCalls.size)
+    }
+
+    @Test
+    fun `a read armed while the landing refresh is suspended stays pending for the return`() = runTest {
+        // Codex review — maybeAutoRefresh snapshots the opened-generation at CALL time: a topic
+        // opened while the landing refresh is still queued/suspended on its pref/auth gates must
+        // NOT be consumed by that refresh (it cannot have captured the reading yet), so the
+        // actual return from the topic still bypasses the throttle.
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = FlagsViewModel(auth, flags, FakeForumRepository(), FakeUserPreferencesRepository(), clock)
+        advanceUntilIdle() // settle the init collectors
+
+        vm.maybeAutoRefresh() // landing — generation snapshot taken now, body not yet run
+        vm.onFlagOpened() // user opens a topic before the landing refresh resumed
+        advanceUntilIdle() // landing refresh runs: throttle armed, the read is NOT consumed
+        assertEquals(1, flags.refreshCalls.size)
+
+        vm.maybeAutoRefresh() // back from the topic, inside the 15 s window — still bypasses
+        advanceUntilIdle()
         assertEquals(2, flags.refreshCalls.size)
     }
 
