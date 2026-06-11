@@ -342,6 +342,90 @@ class PostContentParserTest {
     }
 
     @Test
+    fun `deliberate empty line survives as two LineBreaks inside one paragraph`() {
+        // #333/#280 — an authored empty line is emitted by HFR as `<br /><br />` between the two
+        // text lines. The parser used to FLUSH the paragraph on every top-level <br>, so each
+        // line became its own Paragraph block: the empty line collapsed into a dropped empty
+        // paragraph (#333) and the renderer's inter-block gap replaced the natural line height
+        // between every line (#280).
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            """
+            <div id="para123"><p>ligne1<br /><br />ligne2</p></div>
+            """.trimIndent(),
+        )
+
+        val result = parser.parse(element)
+
+        val paragraphs = result.ast.blocks.filterIsInstance<PostBlock.Paragraph>()
+        assertEquals(
+            "both lines and the empty line belong to ONE paragraph, got=${result.ast.blocks}",
+            1,
+            paragraphs.size,
+        )
+        assertEquals(
+            "the empty line must survive as two consecutive LineBreaks between the Text lines",
+            listOf(
+                PostInline.Text("ligne1"),
+                PostInline.LineBreak,
+                PostInline.LineBreak,
+                PostInline.Text("ligne2"),
+            ),
+            paragraphs.single().inlines,
+        )
+    }
+
+    @Test
+    fun `single br keeps consecutive authored lines in the same paragraph`() {
+        // #280 — real fixture witness: the answer post on the single-page topic separates its
+        // sentences with single <br />s (`…comprendre le problème.<br />Je te propose…`). They
+        // must stay in ONE paragraph with LineBreaks, not become one block per line.
+        val topic = pageParser.parse(fixture("topic_page_single.html"))
+
+        val paragraph = topic.posts
+            .flatMap { it.content.allBlocks() }
+            .filterIsInstance<PostBlock.Paragraph>()
+            .firstOrNull { block ->
+                block.inlines.filterIsInstance<PostInline.Text>()
+                    .any { it.value.contains("comprendre le problème") }
+            }
+
+        assertNotNull("fixture should contain the multi-line answer paragraph", paragraph)
+        assertTrue(
+            "the next authored line stays in the SAME paragraph, got=${paragraph!!.inlines}",
+            paragraph.inlines.filterIsInstance<PostInline.Text>()
+                .any { it.value.contains("Je te propose") },
+        )
+        assertTrue(
+            "the authored line boundary survives as an inline LineBreak",
+            paragraph.inlines.any { it is PostInline.LineBreak },
+        )
+    }
+
+    @Test
+    fun `breaks adjacent to block boundaries never leak to paragraph edges`() {
+        // #333 — edge-trim invariant over real pages. The fixtures carry both directions:
+        // `a écrit :</a></b><br /><br /><p>…` (leading, quote header, topic_page_single) and
+        // `…:o" /><br /><br /></p>` (trailing, end of quoted content, topic_redface2_p24).
+        // Breaks at a paragraph edge would duplicate the renderer's inter-block spacing.
+        listOf("topic_page_single.html", "topic_redface2_p24.html").forEach { name ->
+            val topic = pageParser.parse(fixture(name))
+
+            topic.posts.flatMap { it.content.allBlocks() }
+                .filterIsInstance<PostBlock.Paragraph>()
+                .forEach { block ->
+                    val edges = listOfNotNull(block.inlines.firstOrNull(), block.inlines.lastOrNull())
+                    assertTrue(
+                        "$name: paragraph edges must not be breaks or blank text, got=${block.inlines}",
+                        edges.none {
+                            it is PostInline.LineBreak || (it is PostInline.Text && it.value.isBlank())
+                        },
+                    )
+                }
+        }
+    }
+
+    @Test
     fun `span class u is recognised as Underline`() {
         val topic = pageParser.parse(fixture("topic_khakha_page_1.html"))
 
