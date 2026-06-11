@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -164,12 +165,18 @@ private fun ComposeEditorBody(
     onErrorDismissed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Same extensible-field design as the reply editor : no outer scroll, the draft stretches to
-    // the bar, long content scrolls in the field's own fillViewport column (#275/#410) / the
-    // preview pane.
+    // #275/#410 follow-up (dev v118 feedback, screen 520813) — compose is the ONE editor whose
+    // fixed header (recipients + subject + toolbar, ~300dp) could squeeze the weighted draft
+    // field to ~zero once the IME opened, with no outer scroll to bring it back into view: the
+    // reply editor's « no outer scroll, fillViewport field » design assumes the field owns most
+    // of the body. Header-heavy editors use the OTHER documented branch of the BbcodeTextField
+    // contract (cf. TopicFormScreen): the WHOLE body scrolls and the field keeps the default
+    // grow-with-content mode — cursor bring-into-view and IME re-anchoring route through this
+    // outer column (fillViewport here would nest two unbounded same-direction scrollables).
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -208,10 +215,11 @@ private fun ComposeEditorBody(
             onValueChange = onContentChanged,
             label = stringResource(R.string.messages_reply_field_label),
             placeholder = stringResource(R.string.messages_reply_field_placeholder),
-            modifier = Modifier.weight(1f),
-            // #275/#410 — grow-with-content field in its own scrollable viewport so the
-            // cursor stays visible under the IME (typing AND refocus after the preview).
-            fillViewport = true,
+            // Default grow-with-content mode inside the outer scroll (see the column comment):
+            // a min height keeps a real tap-target/typing area even with an empty draft.
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = COMPOSE_DRAFT_MIN_HEIGHT),
         )
 
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
@@ -230,13 +238,9 @@ private fun ComposeEditorBody(
 
         if (state.isPreviewVisible) {
             HorizontalDivider()
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                BbcodePreview(content = state.preview)
-            }
+            // Plain block inside the outer scroll (a nested same-direction verticalScroll is a
+            // Compose error) — same shape as TopicFormScreen's preview.
+            BbcodePreview(content = state.preview, modifier = Modifier.fillMaxWidth())
         }
 
         state.submitError?.let { error ->
@@ -260,3 +264,7 @@ private fun ComposeEditorBody(
         }
     }
 }
+
+// #275/#410 follow-up — minimum draft area inside the scrollable compose body: with an empty
+// draft the outlined field still offers a real tap/typing target under the header fields.
+private val COMPOSE_DRAFT_MIN_HEIGHT = 160.dp
