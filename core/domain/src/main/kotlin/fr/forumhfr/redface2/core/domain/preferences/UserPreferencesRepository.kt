@@ -173,4 +173,16 @@ interface UserPreferencesRepository {
 
     /** Persists [observeFlagsAutoRefresh]. Default `true` until the first call. */
     suspend fun setFlagsAutoRefresh(enabled: Boolean)
+
+    /**
+     * Floating previous/next page buttons at the bottom of a topic (#283): when `false`, the
+     * ‹/› mini-FABs are hidden — the page swipe (#282) and the header pager already cover
+     * page-change, and some readers find the cluster intrusive (#383). The « Répondre » FAB
+     * is NOT governed by this preference and stays visible. Default `true` (historical
+     * behaviour). Observed by `:feature:topic`, toggled in Settings.
+     */
+    fun observeTopicPageFabs(): Flow<Boolean>
+
+    /** Persists [observeTopicPageFabs]. Default `true` until the first call. */
+    suspend fun setTopicPageFabs(enabled: Boolean)
 }

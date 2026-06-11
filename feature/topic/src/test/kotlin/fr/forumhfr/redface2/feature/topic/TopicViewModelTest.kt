@@ -428,6 +428,25 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `state showPageFabs reflects the user preference (#383)`() = runTest {
+        val hidden = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicPageFabs = false),
+        )
+        assertEquals(false, hidden.state.value.showPageFabs)
+
+        val shown = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicPageFabs = true),
+        )
+        assertEquals(true, shown.state.value.showPageFabs)
+    }
+
+    @Test
     fun `DeletePost success emits PostDeleted and force-refreshes the current page (#292)`() = runTest {
         // Page 2 so the editable post 777 is NOT the first post (the FP lives on page 1 and is
         // excluded from deletion). Editable + authenticated + canReply → the VM gate lets it through.
@@ -1260,13 +1279,14 @@ private class FakeStreamingTopicRepository(
 }
 
 /**
- * No-op preferences fake for the topic ViewModel tests. Only [observeTopicTopBarAutoHide] is read by
- * [TopicViewModel] (build 89 follow-up) — everything else returns the DataStore default so the fake
- * stays a thin stand-in. The single relevant value is constructor-injectable for any future test that
- * wants to assert the auto-hide flag reaches state.
+ * No-op preferences fake for the topic ViewModel tests. Only [observeTopicTopBarAutoHide]
+ * (build 89 follow-up) and [observeTopicPageFabs] (#383) are read by [TopicViewModel] —
+ * everything else returns the DataStore default so the fake stays a thin stand-in. The two
+ * relevant values are constructor-injectable so tests can assert they reach state.
  */
 private class FakeUserPreferencesRepository(
     private val topicTopBarAutoHide: Boolean = false,
+    private val topicPageFabs: Boolean = true,
 ) : UserPreferencesRepository {
     override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
 
@@ -1323,4 +1343,8 @@ private class FakeUserPreferencesRepository(
     override fun observeFlagsAutoRefresh(): Flow<Boolean> = MutableStateFlow(true)
 
     override suspend fun setFlagsAutoRefresh(enabled: Boolean) = Unit
+
+    override fun observeTopicPageFabs(): Flow<Boolean> = MutableStateFlow(topicPageFabs)
+
+    override suspend fun setTopicPageFabs(enabled: Boolean) = Unit
 }

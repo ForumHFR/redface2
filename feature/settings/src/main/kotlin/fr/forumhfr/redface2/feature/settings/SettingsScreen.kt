@@ -561,6 +561,16 @@ private fun TopicPreferencesCard(
             if (state.topicTopBarAutoHideError) {
                 PreferencePersistError(R.string.settings_topic_topbar_auto_hide_persist_failed)
             }
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_topic_page_fabs_title),
+                description = stringResource(R.string.settings_topic_page_fabs_description),
+                checked = state.topicPageFabs,
+                enabled = state.canToggleTopicPageFabs,
+                onCheckedChange = { onIntent(SettingsIntent.TopicPageFabsChanged(it)) },
+            )
+            if (state.topicPageFabsError) {
+                PreferencePersistError(R.string.settings_topic_page_fabs_persist_failed)
+            }
         }
     }
 }

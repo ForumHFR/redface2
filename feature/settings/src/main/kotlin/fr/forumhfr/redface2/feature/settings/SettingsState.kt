@@ -78,6 +78,12 @@ data class SettingsState(
     val isUpdatingTopicTopBarAutoHide: Boolean = false,
     val topicTopBarAutoHideError: Boolean = false,
     val topicTopBarAutoHideTouchedLocally: Boolean = false,
+    // Topic — #383 floating ‹/› page FABs (#283). Same machinery. Default TRUE (historical
+    // cluster); the toggle is the opt-out for swipe-only readers. « Répondre » is not governed.
+    val topicPageFabs: Boolean = true,
+    val isUpdatingTopicPageFabs: Boolean = false,
+    val topicPageFabsError: Boolean = false,
+    val topicPageFabsTouchedLocally: Boolean = false,
     // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
     // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
     // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
@@ -133,6 +139,10 @@ data class SettingsState(
     // Build 89 follow-up — the topic top-bar auto-hide toggle is gated only by its own write.
     val canToggleTopicTopBarAutoHide: Boolean
         get() = !isUpdatingTopicTopBarAutoHide
+
+    // #383 — the page-FABs toggle is gated only by its own write.
+    val canToggleTopicPageFabs: Boolean
+        get() = !isUpdatingTopicPageFabs
 
     // #312 — the confirm-before-posting toggle is gated only by its own write.
     val canToggleConfirmBeforePosting: Boolean
@@ -216,6 +226,10 @@ sealed interface SettingsIntent {
     // Build 89 follow-up — topic top-bar auto-hide toggle. Optimistic-flip contract, like the
     // flags toggles: the boolean is the desired post-flip state.
     data class TopicTopBarAutoHideChanged(val enabled: Boolean) : SettingsIntent
+
+    // #383 — topic floating ‹/› page FABs toggle. Optimistic-flip contract, like the flags
+    // toggles: the boolean is the desired post-flip state.
+    data class TopicPageFabsChanged(val enabled: Boolean) : SettingsIntent
 
     // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
     // the boolean is the desired post-flip state.

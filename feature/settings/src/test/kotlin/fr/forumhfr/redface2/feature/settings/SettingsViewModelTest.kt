@@ -757,6 +757,34 @@ class SettingsViewModelTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────
+    // Topic page FABs (#383)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `TopicPageFabsChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertTrue("page FABs are on by default", viewModel.state.value.topicPageFabs)
+
+        viewModel.submit(SettingsIntent.TopicPageFabsChanged(false))
+
+        assertFalse(viewModel.state.value.topicPageFabs)
+        assertFalse(viewModel.state.value.isUpdatingTopicPageFabs)
+        assertEquals(1, repository.topicPageFabsSetCalls)
+    }
+
+    @Test
+    fun `TopicPageFabsChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnTopicPageFabsSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.TopicPageFabsChanged(false))
+
+        assertTrue("must revert to the previous value on failure", viewModel.state.value.topicPageFabs)
+        assertFalse(viewModel.state.value.isUpdatingTopicPageFabs)
+        assertTrue(viewModel.state.value.topicPageFabsError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Confirm before posting (#312)
     // ──────────────────────────────────────────────────────────────────────
 
@@ -973,6 +1001,20 @@ class SettingsViewModelTest {
             topicTopBarAutoHideSetCalls += 1
             check(!failOnTopicTopBarAutoHideSet) { "boom" }
             topicTopBarAutoHide.value = enabled
+        }
+
+        // #383 — topic page FABs. Same optimistic-flip seam as the topic top-bar toggle.
+        private val topicPageFabs = MutableStateFlow(true)
+        var topicPageFabsSetCalls: Int = 0
+            private set
+        var failOnTopicPageFabsSet: Boolean = false
+
+        override fun observeTopicPageFabs(): Flow<Boolean> = topicPageFabs
+
+        override suspend fun setTopicPageFabs(enabled: Boolean) {
+            topicPageFabsSetCalls += 1
+            check(!failOnTopicPageFabsSet) { "boom" }
+            topicPageFabs.value = enabled
         }
 
         // #312 — confirm-before-posting. Same optimistic-flip seam as the topic top-bar toggle.

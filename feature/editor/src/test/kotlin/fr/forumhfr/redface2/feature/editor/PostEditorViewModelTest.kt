@@ -1303,6 +1303,10 @@ class PostEditorViewModelTest {
         override fun observeFlagsAutoRefresh(): Flow<Boolean> = MutableStateFlow(true)
 
         override suspend fun setFlagsAutoRefresh(enabled: Boolean) = Unit
+
+        override fun observeTopicPageFabs(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setTopicPageFabs(enabled: Boolean) = Unit
     }
 
     private companion object {

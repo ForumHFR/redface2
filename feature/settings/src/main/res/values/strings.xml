@@ -135,6 +135,12 @@
     <string name="settings_topic_topbar_auto_hide_description">La barre du haut (titre du sujet et numéro de page) disparaît quand vous faites défiler vers le bas et réapparaît dès que vous remontez.</string>
     <string name="settings_topic_topbar_auto_hide_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
+    <!-- #383 — Boutons flottants ‹/› de changement de page (#283). Le swipe (#282) couvre déjà le
+         changement de page ; ce réglage est l'opt-out demandé en bêta. « Répondre » reste affiché. -->
+    <string name="settings_topic_page_fabs_title">Boutons de changement de page</string>
+    <string name="settings_topic_page_fabs_description">Affiche les boutons flottants ‹ et › en bas du sujet. Désactivez-les si vous changez de page au glissement ; le bouton Répondre reste affiché.</string>
+    <string name="settings_topic_page_fabs_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+
     <!-- #312 — Publication. Confirmation avant chaque envoi (réponse/édition de message, sujet,
          message privé) ; persisté en DataStore et lu en direct par les éditeurs.
          `settings_future_submit_confirm` (catalogue vitrine #288) renommé selon la convention des

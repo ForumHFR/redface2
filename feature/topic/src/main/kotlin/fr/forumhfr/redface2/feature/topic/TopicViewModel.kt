@@ -108,6 +108,13 @@ class TopicViewModel @AssistedInject constructor(
                 _state.update { it.copy(topBarAutoHide = autoHide) }
             }
             .launchIn(viewModelScope)
+        // #383 — mirror the page-FABs preference so the screen can hide the ‹/› cluster
+        // without a refetch, same pattern as the top-bar auto-hide above.
+        userPreferencesRepository.observeTopicPageFabs()
+            .onEach { enabled ->
+                _state.update { it.copy(showPageFabs = enabled) }
+            }
+            .launchIn(viewModelScope)
     }
 
     fun send(intent: TopicIntent) {

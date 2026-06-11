@@ -650,6 +650,7 @@ internal fun TopicContent(
             if (current != null) {
                 TopicBottomActions(
                     showReply = shouldEnableReply(current.topic, state.isAuthenticated),
+                    showPageFabs = state.showPageFabs,
                     canGoPrevious = state.canGoPrevious,
                     canGoNext = state.canGoNext,
                     // Clamp to [1, totalPages]: `canGoPrevious/Next` are derived from `request.page`
@@ -1473,6 +1474,7 @@ private fun DeletePostConfirmDialog(
 @Suppress("LongParameterList") // hoisted action cluster, mirrors other hoisted composables in this file
 private fun TopicBottomActions(
     showReply: Boolean,
+    showPageFabs: Boolean,
     canGoPrevious: Boolean,
     canGoNext: Boolean,
     onPreviousPage: () -> Unit,
@@ -1481,15 +1483,18 @@ private fun TopicBottomActions(
 ) {
     val previousLabel = stringResource(R.string.topic_fab_previous_page)
     val nextLabel = stringResource(R.string.topic_fab_next_page)
-    if (showReply || canGoPrevious || canGoNext) {
+    // #383 — the preference only governs the ‹/› page FABs; « Répondre » keeps its own gate.
+    val showPrevious = showPageFabs && canGoPrevious
+    val showNext = showPageFabs && canGoNext
+    if (showReply || showPrevious || showNext) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (canGoPrevious) {
+            if (showPrevious) {
                 PageFab(description = previousLabel, glyph = "‹", onClick = onPreviousPage)
             }
-            if (canGoNext) {
+            if (showNext) {
                 PageFab(description = nextLabel, glyph = "›", onClick = onNextPage)
             }
             if (showReply) {
