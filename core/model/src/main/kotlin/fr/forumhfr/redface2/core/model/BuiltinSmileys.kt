@@ -1,24 +1,24 @@
 package fr.forumhfr.redface2.core.model
 
 /**
- * Phase 2F-B (#11 partial) — canonical HFR built-in smiley set.
+ * Phase 2F-B (#11 partial), completed by #415 — canonical HFR built-in smiley set.
  *
- * Codes and image URLs come from the live HFR form fixture
- * `core/parser/src/test/resources/fixtures/write_reply_form_open_topic.html` (Phase 2A capture,
- * cf. `<img … onclick="putSmiley(...)">` block). The list is kept as a Kotlin constant rather
- * than parsed from the form at runtime because :
+ * Canonical source : HFR's own help page `smilies.php` (58 typed codes, live fixture
+ * `core/parser/src/test/resources/fixtures/smilies_help_page.html`, captured 2026-06-11).
+ * The first 25 entries keep the composer-toolbar order (fixture
+ * `write_reply_form_open_topic.html`, historical popularity ranking — the picker renders in
+ * order) ; the remaining 33 follow in `smilies.php` order. The toolbar only SHOWS a popular
+ * subset of what the server interprets, which is how `:sweat:` went missing (#415, beta
+ * report by DjullClint).
+ *
+ * Kept as a Kotlin constant rather than parsed at runtime because :
  *  - the built-in set rarely changes (one drift in the last 10 years observed) ;
- *  - exposing it as a constant means the picker can render the Standard tab without waiting
- *    for the editor's form GET to land ;
- *  - the list is verified against a real fixture, so it is not « invented codes » in the sense
- *    `AGENTS.md` forbids (cf. CLAUDE.md § « Smileys HFR »).
+ *  - the picker can render the Standard tab without waiting for any GET ;
+ *  - every code is verified against a real fixture, so nothing here is an « invented code »
+ *    in the sense `AGENTS.md` forbids (cf. CLAUDE.md § « Smileys HFR »).
  *
- * If HFR ever adds or renames a built-in, the regression surfaces at the next dogfood pass on
- * the picker — at which point we can either bump this constant or move to a runtime extraction
- * from the form HTML (`<img class="smileys">` selector). Phase 2F-B does not need either path.
- *
- * Order matches the order HFR serves the smileys in its toolbar, which itself follows the
- * historical popularity ranking. The picker renders the list in order — no resorting needed.
+ * `BuiltinSmileysSymmetryTest` (`:core:parser`) re-parses the `smilies.php` fixture and fails
+ * if this constant ever drifts from it (missing code, wrong URL).
  */
 @Suppress("MaxLineLength") // URL + token + source on one line per smiley keeps the table readable.
 val BUILTIN_HFR_SMILEYS: List<EditorSmiley> = listOf(
@@ -47,4 +47,39 @@ val BUILTIN_HFR_SMILEYS: List<EditorSmiley> = listOf(
     EditorSmiley(":whistle:", "https://forum-images.hardware.fr/icones/smilies/whistle.gif", EditorSmileySource.BUILTIN),
     EditorSmiley(":sol:", "https://forum-images.hardware.fr/icones/smilies/sol.gif", EditorSmileySource.BUILTIN),
     EditorSmiley(":pt1cable:", "https://forum-images.hardware.fr/icones/smilies/pt1cable.gif", EditorSmileySource.BUILTIN),
+    // Below : the 33 built-ins the server interprets but the composer toolbar does not show
+    // (#415) — smilies.php order.
+    EditorSmiley(":'(", "https://forum-images.hardware.fr/icones/ohill.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":eek:", "https://forum-images.hardware.fr/icones/smilies/eek.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":hap:", "https://forum-images.hardware.fr/icones/smilies/hap.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":dtc:", "https://forum-images.hardware.fr/icones/smilies/dtc.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":gun:", "https://forum-images.hardware.fr/icones/smilies/gun.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":miam:", "https://forum-images.hardware.fr/icones/smilies/miam.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":bic:", "https://forum-images.hardware.fr/icones/smilies/bic.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":hebe:", "https://forum-images.hardware.fr/icones/smilies/hebe.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":gratgrat:", "https://forum-images.hardware.fr/icones/smilies/gratgrat.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":hello:", "https://forum-images.hardware.fr/icones/smilies/hello.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":mmmfff:", "https://forum-images.hardware.fr/icones/smilies/mmmfff.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":mouais:", "https://forum-images.hardware.fr/icones/smilies/mouais.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":benetton:", "https://forum-images.hardware.fr/icones/smilies/benetton.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":eek2:", "https://forum-images.hardware.fr/icones/smilies/eek2.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":int:", "https://forum-images.hardware.fr/icones/smilies/int.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":evil:", "https://forum-images.hardware.fr/icones/smilies/evil.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":spamafote:", "https://forum-images.hardware.fr/icones/smilies/spamafote.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":calimero:", "https://forum-images.hardware.fr/icones/smilies/calimero.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":fuck:", "https://forum-images.hardware.fr/icones/smilies/fuck.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":sum:", "https://forum-images.hardware.fr/icones/smilies/sum.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":ouimaitre:", "https://forum-images.hardware.fr/icones/smilies/ouimaitre.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":foudtag:", "https://forum-images.hardware.fr/icones/smilies/foudtag.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":sweat:", "https://forum-images.hardware.fr/icones/smilies/sweat.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":mad:", "https://forum-images.hardware.fr/icones/smilies/mad.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":hot:", "https://forum-images.hardware.fr/icones/smilies/hot.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":bug:", "https://forum-images.hardware.fr/icones/smilies/bug.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":spookie:", "https://forum-images.hardware.fr/icones/smilies/spookie.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":fouyaya:", "https://forum-images.hardware.fr/icones/smilies/fouyaya.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":sleep:", "https://forum-images.hardware.fr/icones/smilies/sleep.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":vomi:", "https://forum-images.hardware.fr/icones/smilies/vomi.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":pouah:", "https://forum-images.hardware.fr/icones/smilies/pouah.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":24:", "https://forum-images.hardware.fr/icones/smilies/24.gif", EditorSmileySource.BUILTIN),
+    EditorSmiley(":crazy:", "https://forum-images.hardware.fr/icones/smilies/crazy.gif", EditorSmileySource.BUILTIN),
 )
