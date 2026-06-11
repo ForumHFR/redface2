@@ -168,6 +168,9 @@ private fun ReplyEditorBody(
             label = stringResource(R.string.messages_reply_field_label),
             placeholder = stringResource(R.string.messages_reply_field_placeholder),
             modifier = Modifier.weight(1f),
+            // #275/#410 — grow-with-content field in its own scrollable viewport so the
+            // cursor stays visible under the IME (typing AND refocus after the preview).
+            fillViewport = true,
         )
 
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
