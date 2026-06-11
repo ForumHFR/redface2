@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -123,6 +125,15 @@ fun FlagsRoute(
 
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // #385 — hoisted list state + scroll-to-top when the unread filter flips (cf.
+    // FilterFlipScrollResetEffect).
+    val flagsListState = rememberLazyListState()
+    FilterFlipScrollResetEffect(
+        selectedTab = selectedTab,
+        unreadOnly = flagsViewSettings.unreadOnly,
+        listState = flagsListState,
+    )
+
     // #309 — display-settings bottom sheet. Opened from the header « Affichage » action; the trigger
     // is only offered when there is a real list to configure (authenticated AND a real FlagType tab,
     // i.e. not the Super placeholder).
@@ -141,6 +152,15 @@ fun FlagsRoute(
         selectedTab = selectedTab,
         onFallback = { viewModel.selectTab(FlagTab.Cyan) },
     )
+
+    // #378 — auto-refresh on landing. LaunchedEffect(Unit) re-fires every time this screen
+    // (re)enters the composition: app open, back from a topic, return from another bottom tab —
+    // exactly the two requested triggers plus the tab round-trip that motivated #384. The
+    // ViewModel gates it (preference opt-out, auth, real tab, in-flight refresh, 15 s throttle)
+    // and reuses the pull-to-refresh indicator as the visual cue.
+    LaunchedEffect(Unit) {
+        viewModel.maybeAutoRefresh()
+    }
 
     // One-shot snackbar for the delflag outcome (#99). Keyed on the event instance so a
     // config change does not replay it ; consumed once shown so it never re-fires.
@@ -209,6 +229,7 @@ fun FlagsRoute(
                                 onLoginRequested = onLoginRequested,
                                 onRequestRemoveFlag = viewModel::requestRemoveFlag,
                             ),
+                            listState = flagsListState,
                         )
                     }
                 }
@@ -513,6 +534,9 @@ private fun AnonymousBody(onLoginRequested: () -> Unit) {
 private fun ColumnScope.AuthenticatedBody(
     state: FlagsBodyState,
     actions: AuthenticatedActions,
+    // #385 — hoisted by FlagsRoute so the filter-flip effect can reset the scroll. One state
+    // shared by the grouped and flat lists (only one is composed at a time).
+    listState: LazyListState,
 ) {
     val selectedTab = state.selectedTab
     val cyanShowsRead = state.cyanShowsRead
@@ -622,6 +646,7 @@ private fun ColumnScope.AuthenticatedBody(
                     selectedTab = selectedTab,
                     removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
                     actions = actions,
+                    listState = listState,
                 )
 
                 is FlagsContent.Flat -> FlatFlagList(
@@ -629,8 +654,35 @@ private fun ColumnScope.AuthenticatedBody(
                     selectedTab = selectedTab,
                     removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
                     actions = actions,
+                    listState = listState,
                 )
             }
+        }
+    }
+}
+
+/**
+ * #385 — « +lus » left the first re-appearing topics hidden above the viewport: the list state
+ * anchors on the first VISIBLE item's key, so rows inserted above it (read topics re-shown)
+ * require a manual scroll up to be discovered. Reset the hoisted [listState] to the top when the
+ * « non-lus uniquement » filter flips ON THE SAME TAB — the user just asked for a different topic
+ * set, show it from the start. Tab switches keep the current behaviour (no reset): only a same-tab
+ * flip triggers, hence the (tab, unreadOnly) pair comparison instead of a plain key on
+ * [unreadOnly] (which changes on tab switches too — the per-tab #317 setting is what
+ * `flagsViewSettings` resolves).
+ */
+@Composable
+private fun FilterFlipScrollResetEffect(
+    selectedTab: FlagTab,
+    unreadOnly: Boolean,
+    listState: LazyListState,
+) {
+    var lastFilterByTab by remember { mutableStateOf<Pair<FlagTab, Boolean>?>(null) }
+    LaunchedEffect(selectedTab, unreadOnly) {
+        val previous = lastFilterByTab
+        lastFilterByTab = selectedTab to unreadOnly
+        if (previous != null && previous.first == selectedTab && previous.second != unreadOnly) {
+            listState.scrollToItem(0)
         }
     }
 }
@@ -666,8 +718,10 @@ private fun CategorySectionedFlagList(
     selectedTab: FlagTab,
     removalInFlight: Boolean,
     actions: AuthenticatedActions,
+    listState: LazyListState,
 ) {
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface),
@@ -774,8 +828,10 @@ private fun FlatFlagList(
     selectedTab: FlagTab,
     removalInFlight: Boolean,
     actions: AuthenticatedActions,
+    listState: LazyListState,
 ) {
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface),
