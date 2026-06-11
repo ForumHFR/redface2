@@ -70,7 +70,7 @@ data class Flag(
  * The REST bucket a flag row belongs to. NOT a mirror of the REST `flag_owntopic` response
  * field — that field describes the strongest flag ON the topic, not bucket membership (see
  * the [Flag] KDoc). The 1/2/3 integers only reappear as the WRITE-side `owntopic` selector
- * of `delflag.php` (cf. `HfrClient.deleteFlag`).
+ * of `delflag.php` (cf. `HfrClient.removeFlag`).
  */
 enum class FlagType {
     /** Cyan drapeau — bucket `participated/` (sujets participés). */
