@@ -531,10 +531,16 @@ private fun FlagsPreferencesCard(
 }
 
 /**
- * Topic reading preferences (build 89 follow-up): the « masquer la barre du haut en défilant »
- * toggle. When on, the topic top app bar (title + page counter) collapses on scroll-down and snaps
- * back on the first scroll-up (Material3 `enterAlways`), freeing reading space. Persisted via
- * DataStore and observed live by the topic screen, so a flip here applies without reopening a topic.
+ * Topic reading preferences:
+ *
+ * - « masquer la barre du haut en défilant » (build 89 follow-up) — when on, the topic top app
+ *   bar (title + page counter) collapses on scroll-down and snaps back on the first scroll-up
+ *   (Material3 `enterAlways`), freeing reading space;
+ * - « boutons de changement de page » (#383) — when off, the floating ‹/› mini-FABs (#283) are
+ *   hidden for swipe-only readers; « Répondre » keeps its own gates and stays.
+ *
+ * Both persisted via DataStore and observed live by the topic screen, so a flip here applies
+ * without reopening a topic.
  */
 @Composable
 private fun TopicPreferencesCard(

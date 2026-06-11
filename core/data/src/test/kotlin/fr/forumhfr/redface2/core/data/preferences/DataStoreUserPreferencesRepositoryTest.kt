@@ -419,6 +419,27 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeTopicPageFabs defaults to true then persists false and true`() = runTest(dispatcher) {
+        // #383 — the ‹/› cluster is the historical behaviour; hiding it is the opt-out.
+        repository.observeTopicPageFabs().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setTopicPageFabs(false)
+        repository.observeTopicPageFabs().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setTopicPageFabs(true)
+        repository.observeTopicPageFabs().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeConfirmBeforePosting defaults to false then persists true and false`() = runTest(dispatcher) {
         // #312 — publishing stays one-tap by default; the guard is strictly opt-in.
         repository.observeConfirmBeforePosting().test {

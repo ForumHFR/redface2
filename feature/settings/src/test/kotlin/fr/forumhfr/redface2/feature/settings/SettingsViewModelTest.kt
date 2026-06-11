@@ -761,6 +761,42 @@ class SettingsViewModelTest {
     // ──────────────────────────────────────────────────────────────────────
 
     @Test
+    fun `init hydrates topicPageFabs from a persisted false`() = runTest {
+        // The default is true — only a persisted opt-out exercises the hydration path.
+        repository.emitTopicPageFabs(false)
+
+        val viewModel = newViewModel()
+
+        assertFalse(viewModel.state.value.topicPageFabs)
+        assertFalse(viewModel.state.value.topicPageFabsError)
+    }
+
+    @Test
+    fun `topicPageFabs hydration race - a stale emission must not overwrite a local flip`() = runTest {
+        // Same startup race as ignoreTopicCache: init suspends on .first() (the override
+        // emits nothing yet), the user opts out locally, then the stale `true` arrives —
+        // the TouchedLocally guard must skip the apply.
+        val initialHydrationFlow = MutableSharedFlow<Boolean>(replay = 0)
+        repository.topicPageFabsObserveOverride = initialHydrationFlow
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.TopicPageFabsChanged(false))
+        assertFalse(
+            "optimistic flip must reach the state synchronously",
+            viewModel.state.value.topicPageFabs,
+        )
+        assertTrue(viewModel.state.value.topicPageFabsTouchedLocally)
+
+        initialHydrationFlow.emit(true)
+
+        assertFalse(
+            "stale initial DataStore hydration must NOT overwrite the local opt-out",
+            viewModel.state.value.topicPageFabs,
+        )
+        assertEquals(1, repository.topicPageFabsSetCalls)
+    }
+
+    @Test
     fun `TopicPageFabsChanged persists the flip`() = runTest {
         val viewModel = newViewModel()
         assertTrue("page FABs are on by default", viewModel.state.value.topicPageFabs)
@@ -1003,18 +1039,25 @@ class SettingsViewModelTest {
             topicTopBarAutoHide.value = enabled
         }
 
-        // #383 — topic page FABs. Same optimistic-flip seam as the topic top-bar toggle.
+        // #383 — topic page FABs. Same optimistic-flip seam as the topic top-bar toggle,
+        // plus the observe-override seam of ignoreTopicCache for the hydration-race test.
         private val topicPageFabs = MutableStateFlow(true)
         var topicPageFabsSetCalls: Int = 0
             private set
         var failOnTopicPageFabsSet: Boolean = false
+        var topicPageFabsObserveOverride: Flow<Boolean>? = null
 
-        override fun observeTopicPageFabs(): Flow<Boolean> = topicPageFabs
+        override fun observeTopicPageFabs(): Flow<Boolean> =
+            topicPageFabsObserveOverride ?: topicPageFabs
 
         override suspend fun setTopicPageFabs(enabled: Boolean) {
             topicPageFabsSetCalls += 1
             check(!failOnTopicPageFabsSet) { "boom" }
             topicPageFabs.value = enabled
+        }
+
+        fun emitTopicPageFabs(value: Boolean) {
+            topicPageFabs.value = value
         }
 
         // #312 — confirm-before-posting. Same optimistic-flip seam as the topic top-bar toggle.
