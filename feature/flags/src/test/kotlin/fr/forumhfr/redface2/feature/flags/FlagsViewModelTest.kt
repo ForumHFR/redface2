@@ -1516,6 +1516,10 @@ class FlagsViewModelTest {
 
         override suspend fun setTopicTopBarAutoHide(enabled: Boolean) = Unit
 
+        override fun observeTopicPageFabs(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setTopicPageFabs(enabled: Boolean) = Unit
+
         // #312 — confirm-before-posting is irrelevant to FlagsViewModel; stubbed at its default.
         override fun observeConfirmBeforePosting(): Flow<Boolean> = MutableStateFlow(false)
 
