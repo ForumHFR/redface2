@@ -1,0 +1,77 @@
+package fr.forumhfr.redface2.navigation
+
+import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
+import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import io.mockk.every
+import io.mockk.mockk
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+
+/**
+ * #386 — the cold-start contract : until DataStore's first emission lands, the exposed theme
+ * is the synchronous [ThemeBootstrapStore] mirror, NOT a hard-coded SYSTEM default. A user who
+ * forced DARK under a light OS must get DARK on the very first frame.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+class AppThemeViewModelTest {
+
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+    }
+
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
+
+    private fun bootstrapStore(bootstrap: ThemeBootstrap): ThemeBootstrapStore =
+        mockk { every { read() } returns bootstrap }
+
+    @Test
+    fun `before the first DataStore emission the mirror seeds the state`() = runTest {
+        val repository = mockk<UserPreferencesRepository> {
+            // A SharedFlow that never emits = DataStore still hydrating on a cold start.
+            every { observeThemeMode() } returns MutableSharedFlow()
+            every { observeAmoledEnabled() } returns MutableSharedFlow()
+        }
+
+        val vm = AppThemeViewModel(
+            userPreferencesRepository = repository,
+            themeBootstrapStore = bootstrapStore(ThemeBootstrap(ThemeMode.DARK, amoledEnabled = true)),
+        )
+
+        assertEquals(ThemeMode.DARK, vm.themeMode.value)
+        assertTrue(vm.amoledEnabled.value)
+    }
+
+    @Test
+    fun `the hydrated DataStore value wins over a divergent mirror`() = runTest {
+        // Partial restore / cleared mirror : DataStore stays the source of truth.
+        val repository = mockk<UserPreferencesRepository> {
+            every { observeThemeMode() } returns MutableStateFlow(ThemeMode.LIGHT)
+            every { observeAmoledEnabled() } returns MutableStateFlow(false)
+        }
+
+        val vm = AppThemeViewModel(
+            userPreferencesRepository = repository,
+            themeBootstrapStore = bootstrapStore(ThemeBootstrap(ThemeMode.DARK, amoledEnabled = true)),
+        )
+
+        assertEquals(ThemeMode.LIGHT, vm.themeMode.value)
+        assertEquals(false, vm.amoledEnabled.value)
+    }
+}
