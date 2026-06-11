@@ -165,7 +165,8 @@ private fun ComposeEditorBody(
     modifier: Modifier = Modifier,
 ) {
     // Same extensible-field design as the reply editor : no outer scroll, the draft stretches to
-    // the bar, long content scrolls INSIDE the field / the preview pane.
+    // the bar, long content scrolls in the field's own fillViewport column (#275/#410) / the
+    // preview pane.
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -208,6 +209,9 @@ private fun ComposeEditorBody(
             label = stringResource(R.string.messages_reply_field_label),
             placeholder = stringResource(R.string.messages_reply_field_placeholder),
             modifier = Modifier.weight(1f),
+            // #275/#410 — grow-with-content field in its own scrollable viewport so the
+            // cursor stays visible under the IME (typing AND refocus after the preview).
+            fillViewport = true,
         )
 
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
