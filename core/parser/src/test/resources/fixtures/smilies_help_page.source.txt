@@ -1,0 +1,7 @@
+Source: https://forum.hardware.fr/smilies.php
+Captured: 2026-06-11
+Auth: logged-out
+Sanitization: verified logged-out capture; static help page, no forms, no hash_check, no session data
+Purpose: #415 — canonical list of the 58 built-in smileys the server interprets (typed code
+precedes each <img>). BUILTIN_HFR_SMILEYS used to be derived from the composer toolbar palette
+(write_reply_form_open_topic.html), which only SHOWS 25 of them.

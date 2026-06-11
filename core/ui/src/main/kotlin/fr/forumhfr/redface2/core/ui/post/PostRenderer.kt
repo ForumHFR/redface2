@@ -59,6 +59,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
@@ -1092,11 +1093,23 @@ internal fun smileyInlineContent(smiley: PostInline.Smiley, box: InlineMediaBox)
             placeholderVerticalAlign = PlaceholderVerticalAlign.TextBottom,
         ),
     ) {
-        AsyncImage(
+        SubcomposeAsyncImage(
             model = smiley.imageUrl,
             contentDescription = description,
             contentScale = PostMediaDisplayPolicy.smileyContentScale,
             modifier = Modifier.fillMaxSize(),
+            success = { SubcomposeAsyncImageContent() },
+            error = {
+                // #416 — a dead smiley sprite (deleted perso, stale URL) used to render as
+                // BLANK where web/RF1 fall back to the typed code. Show the token, ellipsised
+                // to the sprite box ; semantics carry the full token via contentDescription.
+                Text(
+                    text = description,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
         )
     }
 }
