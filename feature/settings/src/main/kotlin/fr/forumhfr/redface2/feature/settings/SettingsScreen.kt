@@ -241,7 +241,6 @@ internal fun SettingsContent(
             )
             FutureSettingsCard(
                 items = listOf(
-                    R.string.settings_future_scroll_memory to issueTag(307),
                     R.string.settings_future_prefetch to stringResource(R.string.settings_phase_future),
                 ),
             )
@@ -260,7 +259,6 @@ internal fun SettingsContent(
             SettingsSectionHeader(stringResource(R.string.settings_section_mp))
             FutureSettingsCard(
                 items = listOf(
-                    R.string.settings_future_mp_write to issueTag(301),
                     R.string.settings_future_mp_notifications to issueTag(313),
                 ),
             )

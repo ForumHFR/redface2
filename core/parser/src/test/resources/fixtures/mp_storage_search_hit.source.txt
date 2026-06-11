@@ -8,4 +8,7 @@ Notes: recherche par SUJET dans cat=prive avec resultats (3 conversations) — l
   cf. mp_storage_search_no_results.html) ; la STRUCTURE est identique.
 Privacy: scrubbe. hash_check -> SCRUBBED_HASH_CHECK ; sujets -> « Sujet de test N » ; pseudo compte
   -> TestUser ; correspondants (auteur + dernier posteur) -> Correspondant ; threadIds prives
-  renumerotes 9000001..9000003 (mapping consistant dans tous les href).
+  renumerotes 9000001..9000003 (mapping consistant dans les href, les value= des checkboxes
+  d'effacement ET les title="Sujet n°...") ; liste « n'a pas ete lu par » (title) -> pseudos
+  synthetiques Correspondant, TestUser. Re-scrub 2026-06-12 (review de branche : les value=/title=
+  et la liste de lecteurs avaient echappe au scrub initial).
