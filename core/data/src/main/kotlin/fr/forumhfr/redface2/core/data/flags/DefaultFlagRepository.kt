@@ -236,7 +236,7 @@ class DefaultFlagRepository @Inject constructor(
             // [FlagsResult.Failure] propagates with the original cause.
             coroutineScope {
                 cats.map { category ->
-                    async { fetchAllPages(cat = category.id, bucket = bucket, defaultType = type) }
+                    async { fetchAllPages(cat = category.id, bucket = bucket, type = type) }
                 }.awaitAll().flatten()
                     // Per-category fan-out concatenates results in cat-iteration order — without a
                     // global sort the screen would group by cat (Discussions block, then Tech block,
@@ -318,7 +318,7 @@ class DefaultFlagRepository @Inject constructor(
     private suspend fun fetchAllPages(
         cat: Int,
         bucket: HfrRestFlagBucket,
-        defaultType: FlagType,
+        type: FlagType,
     ): List<Flag> {
         val accumulated = mutableListOf<Flag>()
         var page = 1
@@ -334,7 +334,7 @@ class DefaultFlagRepository @Inject constructor(
             val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(body)
             val mapped = RestFlagMappers.toFlags(
                 envelope = envelope,
-                defaultType = defaultType,
+                type = type,
                 fallbackCat = cat,
             )
             accumulated += mapped

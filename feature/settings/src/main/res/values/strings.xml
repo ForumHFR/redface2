@@ -110,6 +110,12 @@
     <string name="settings_flags_show_dt_section_description">Affiche un onglet « DT » dans l\'écran Drapeaux. Le contenu (discussions suivies avec drapeaux synchronisés via MPStorage) arrivera dans une prochaine version.</string>
     <string name="settings_flags_show_dt_section_persist_failed">Impossible de mémoriser la section DT. Réessayez.</string>
 
+    <!-- #378 — auto-refresh des listes de drapeaux à l'arrivée sur l'écran (ouverture de l'app,
+         retour d'un sujet). Activé par défaut ; ce réglage est l'opt-out. -->
+    <string name="settings_flags_auto_refresh_title">Actualisation automatique</string>
+    <string name="settings_flags_auto_refresh_description">Rafraîchit la liste des drapeaux à l\'ouverture de l\'app et au retour d\'un sujet. L\'indicateur de rafraîchissement signale l\'actualisation en cours.</string>
+    <string name="settings_flags_auto_refresh_persist_failed">Impossible de mémoriser l\'actualisation automatique. Réessayez.</string>
+
     <!-- #286 — Thème. Sélecteur Clair/Système/Sombre (Système = suit l'OS) + thème AMOLED (vrai
          noir), persistés en DataStore et appliqués à toute l'app en direct. -->
     <string name="settings_theme_title">Thème</string>

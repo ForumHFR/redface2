@@ -21,6 +21,10 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -44,6 +48,10 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FlagsViewModelTest {
+
+    /** Frozen clock for every test that does not exercise the #378 throttle window. */
+    private val fixedClock: Clock =
+        Clock.fixed(Instant.parse("2026-06-11T12:00:00Z"), ZoneOffset.UTC)
 
     @Before
     fun setUp() {
@@ -249,7 +257,7 @@ class FlagsViewModelTest {
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository() // CYAN default unreadOnly = true
         prefs.blockUnreadOnlySetUntil = kotlinx.coroutines.CompletableDeferred()
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         vm.selectTab(FlagTab.Cyan) // re-tap: true → write(false) gated, pending = false
         vm.selectTab(FlagTab.Cyan) // re-tap: reads optimistic false → write(true) gated, pending = true
@@ -274,7 +282,7 @@ class FlagsViewModelTest {
         val prefs = FakeUserPreferencesRepository() // CYAN default unreadOnly = true
         prefs.blockUnreadOnlySetForType = FlagType.RED
         prefs.blockUnreadOnlySetUntil = kotlinx.coroutines.CompletableDeferred()
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         vm.selectTab(FlagTab.Red)
         vm.setFlagsUnreadOnly(false) // RED write goes in flight (gated), must not touch the CYAN shim
@@ -758,7 +766,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1, 13))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = false)
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -783,7 +791,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -805,7 +813,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -833,7 +841,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -865,7 +873,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -894,7 +902,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -925,7 +933,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = true, perTabOverride = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
         prefs.setFlagsGroupByCategoryForType(FlagType.CYAN, false)
 
         vm.flagsState.test {
@@ -954,7 +962,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -985,7 +993,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = true, perTabOverride = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -1016,7 +1024,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = true, perTabOverride = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
         prefs.setFlagsGroupByCategoryForType(FlagType.RED, false)
 
         vm.flagsViewSettings.test {
@@ -1037,7 +1045,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository()
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         assertFalse(vm.flagsViewSettings.value.hideReadCategories)
         vm.setFlagsHideReadCategories(true)
@@ -1055,7 +1063,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(perTabOverride = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         vm.setFlagsHideReadCategories(true) // CYAN selected
         assertTrue("CYAN per-type hide-read on", vm.flagsViewSettings.value.hideReadCategories)
@@ -1077,7 +1085,7 @@ class FlagsViewModelTest {
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository() // persisted override OFF
         prefs.blockPerTabOverrideSetUntil = kotlinx.coroutines.CompletableDeferred()
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         vm.setFlagsPerTabOverride(true) // optimistic ON; persisted write GATED (never commits here)
         vm.setFlagsGroupByCategory(false)
@@ -1097,7 +1105,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = true) // override OFF initially
-        val vm = FlagsViewModel(auth, flags, forum, prefs)
+        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -1126,12 +1134,103 @@ class FlagsViewModelTest {
      * so the existing tests keep asserting on the grouped sections. Tests that exercise the flat
      * view or the hide-read filter pass an explicit [prefs].
      */
+    // #378 — auto-refresh on landing: pref gate, auth gate, throttle window.
+
+    @Test
+    fun `maybeAutoRefresh refreshes the current tab when authenticated`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        vm.maybeAutoRefresh()
+
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+    }
+
+    @Test
+    fun `maybeAutoRefresh honours the Settings opt-out`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val prefs = FakeUserPreferencesRepository()
+        prefs.flagsAutoRefresh.value = false
+        val vm = viewModel(auth, flags, FakeForumRepository(), prefs)
+
+        vm.maybeAutoRefresh()
+
+        assertEquals(emptyList<FlagType>(), flags.refreshCalls)
+    }
+
+    @Test
+    fun `maybeAutoRefresh is a no-op while anonymous`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Anonymous, flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        vm.maybeAutoRefresh()
+
+        assertEquals(emptyList<FlagType>(), flags.refreshCalls)
+    }
+
+    @Test
+    fun `maybeAutoRefresh throttles rapid landings then allows after the window`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = FlagsViewModel(auth, flags, FakeForumRepository(), FakeUserPreferencesRepository(), clock)
+
+        vm.maybeAutoRefresh()
+        vm.maybeAutoRefresh() // immediate re-landing (back-and-forth) — throttled
+        assertEquals(1, flags.refreshCalls.size)
+
+        clock.now = clock.now.plusSeconds(16) // past the 15 s window
+        vm.maybeAutoRefresh()
+        assertEquals(2, flags.refreshCalls.size)
+    }
+
+    @Test
+    fun `tabUnreadFilter pairs each filter value with the tab that produced it`() = runTest {
+        // #385/#421 — a tab switch must never be observable as « new tab + previous tab's
+        // filter »: each emission carries the tab its unreadOnly value was resolved FOR.
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        vm.tabUnreadFilter.test {
+            // Initial: Cyan with its type-aware default (unread-only ON).
+            assertEquals(FlagTab.Cyan to true, awaitItem())
+            vm.selectTab(FlagTab.Red)
+            // The RED emission carries RED's own resolved default (false) — atomically.
+            assertEquals(FlagTab.Red to false, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `manual refresh is never throttled by a preceding auto-refresh`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        vm.maybeAutoRefresh()
+        vm.refresh() // user pull-to-refresh right after the auto pass
+
+        assertEquals(2, flags.refreshCalls.size)
+    }
+
+    /** Mutable [Clock] for the #378 throttle tests — `now` is advanced by hand. */
+    private class SteppingClock(start: Instant) : Clock() {
+        var now: Instant = start
+        override fun getZone(): ZoneId = ZoneOffset.UTC
+        override fun withZone(zone: ZoneId?): Clock = this
+        override fun instant(): Instant = now
+    }
+
     private fun viewModel(
         auth: FakeAuthRepository,
         flags: FakeFlagRepository,
         forum: FakeForumRepository,
         prefs: FakeUserPreferencesRepository = FakeUserPreferencesRepository(),
-    ): FlagsViewModel = FlagsViewModel(auth, flags, forum, prefs)
+    ): FlagsViewModel = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
 
     /** Flattens whatever content shape into the topics order for assertions on flag content. */
     private fun flatTopics(state: FlagsListUiState.Success): List<Flag> =
@@ -1425,6 +1524,15 @@ class FlagsViewModelTest {
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setShowDtSection(enabled: Boolean) = Unit
+
+        // #378 — writable so the auto-refresh tests can flip the opt-out.
+        val flagsAutoRefresh = MutableStateFlow(true)
+
+        override fun observeFlagsAutoRefresh(): Flow<Boolean> = flagsAutoRefresh
+
+        override suspend fun setFlagsAutoRefresh(enabled: Boolean) {
+            flagsAutoRefresh.value = enabled
+        }
 
         fun setGroupBy(value: Boolean) {
             groupBy.value = value

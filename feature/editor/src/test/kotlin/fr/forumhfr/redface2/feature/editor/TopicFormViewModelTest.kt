@@ -1251,6 +1251,10 @@ class TopicFormViewModelTest {
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setShowDtSection(enabled: Boolean) = Unit
+
+        override fun observeFlagsAutoRefresh(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setFlagsAutoRefresh(enabled: Boolean) = Unit
     }
 
     private companion object {

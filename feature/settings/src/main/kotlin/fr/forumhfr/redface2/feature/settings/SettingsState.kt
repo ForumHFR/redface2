@@ -92,6 +92,12 @@ data class SettingsState(
     val isUpdatingShowDtSection: Boolean = false,
     val showDtSectionError: Boolean = false,
     val showDtSectionTouchedLocally: Boolean = false,
+    // Drapeaux — #378 auto-refresh on landing (app open / back from a topic). Same machinery.
+    // Default TRUE: the staleness was the complaint, the toggle is the opt-out.
+    val flagsAutoRefresh: Boolean = true,
+    val isUpdatingFlagsAutoRefresh: Boolean = false,
+    val flagsAutoRefreshError: Boolean = false,
+    val flagsAutoRefreshTouchedLocally: Boolean = false,
 ) {
     val canSave: Boolean
         get() = !isSaving
@@ -135,6 +141,10 @@ data class SettingsState(
     // DT tab — gated only by its own write.
     val canToggleShowDtSection: Boolean
         get() = !isUpdatingShowDtSection
+
+    // #378 — flags auto-refresh, gated only by its own write.
+    val canToggleFlagsAutoRefresh: Boolean
+        get() = !isUpdatingFlagsAutoRefresh
 }
 
 sealed interface SettingsError {
@@ -214,4 +224,8 @@ sealed interface SettingsIntent {
     // Drapeaux — opt-in « DT » placeholder tab (MPStorage sync #6 lands later). Optimistic-flip
     // contract, like the flags toggles: the boolean is the desired post-flip state.
     data class ShowDtSectionChanged(val enabled: Boolean) : SettingsIntent
+
+    // Drapeaux — #378 auto-refresh on landing. Optimistic-flip contract, like the flags
+    // toggles: the boolean is the desired post-flip state.
+    data class FlagsAutoRefreshChanged(val enabled: Boolean) : SettingsIntent
 }

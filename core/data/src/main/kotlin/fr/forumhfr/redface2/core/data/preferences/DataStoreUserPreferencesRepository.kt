@@ -240,6 +240,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeFlagsAutoRefresh(): Flow<Boolean> =
+        dataStore.data
+            // Default `true`: the lists going stale is the #378 complaint — the toggle is an
+            // opt-out for users who prefer pull-to-refresh only.
+            .map { prefs -> prefs[KEY_FLAGS_AUTO_REFRESH] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setFlagsAutoRefresh(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_AUTO_REFRESH] = enabled
+            }
+        }
+    }
+
     /**
      * Reads [KEY_THEME_MODE] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [ThemeMode.SYSTEM] instead of crashing on
@@ -334,5 +350,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // Opt-in « DT » placeholder tab on the Drapeaux screen (MPStorage sync lands later, #6).
         val KEY_FLAGS_SHOW_DT_SECTION = booleanPreferencesKey("flags_show_dt_section")
+
+        // #378 — auto-refresh of the flags lists on landing (default ON; Settings opt-out).
+        val KEY_FLAGS_AUTO_REFRESH = booleanPreferencesKey("flags_auto_refresh")
     }
 }

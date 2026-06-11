@@ -997,6 +997,15 @@ class SettingsViewModelTest {
             showDtSection.value = enabled
         }
 
+        // #378 — flags auto-refresh opt-out, same writable seam as showDtSection.
+        private val flagsAutoRefresh = MutableStateFlow(true)
+
+        override fun observeFlagsAutoRefresh(): Flow<Boolean> = flagsAutoRefresh
+
+        override suspend fun setFlagsAutoRefresh(enabled: Boolean) {
+            flagsAutoRefresh.value = enabled
+        }
+
         fun emitConfirmBeforePosting(value: Boolean) {
             confirmBeforePosting.value = value
         }
