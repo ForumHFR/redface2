@@ -160,4 +160,29 @@ class PostMediaDisplayPolicyTest {
         assertEquals(70, wideStrip.width)
         assertTrue("wide strip must keep height ≥ 1", wideStrip.height >= 1)
     }
+
+    // #416 — dead-sprite token box : the placeholder must fit the body-sized token, not the sprite.
+
+    @Test
+    fun `deadSmileyTokenBox width scales with the token length`() {
+        val short = PostMediaDisplayPolicy.deadSmileyTokenBox(":o", maxWidthSp = 400)
+        val long = PostMediaDisplayPolicy.deadSmileyTokenBox(":zorglub:", maxWidthSp = 400)
+        assertEquals((2 * PostMediaDisplayPolicy.DEAD_SMILEY_TOKEN_CHAR_SP).sp, short.placeholderWidth)
+        assertEquals((9 * PostMediaDisplayPolicy.DEAD_SMILEY_TOKEN_CHAR_SP).sp, long.placeholderWidth)
+        assertTrue(long.placeholderWidth.value > short.placeholderWidth.value)
+    }
+
+    @Test
+    fun `deadSmileyTokenBox clamps to the relative cap like sprites`() {
+        // A long perso token ([:longcustomsmileyname]) inside a deep quote must not overflow the
+        // narrow container — same `img { max-width }` philosophy as smileyDisplayBox.
+        val box = PostMediaDisplayPolicy.deadSmileyTokenBox("[:averyverylongpersoname]", maxWidthSp = 60)
+        assertEquals(60.sp, box.placeholderWidth)
+    }
+
+    @Test
+    fun `deadSmileyTokenBox height is one body line`() {
+        val box = PostMediaDisplayPolicy.deadSmileyTokenBox(":zorglub:", maxWidthSp = 400)
+        assertEquals(PostMediaDisplayPolicy.DEAD_SMILEY_TOKEN_HEIGHT_SP.sp, box.placeholderHeight)
+    }
 }
