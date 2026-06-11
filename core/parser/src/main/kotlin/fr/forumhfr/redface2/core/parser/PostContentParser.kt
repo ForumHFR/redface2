@@ -41,7 +41,13 @@ class PostContentParser {
         val paragraph = mutableListOf<PostInline>()
 
         fun flushParagraph() {
+            // #333 — trim breaks and blank fragments at the paragraph EDGES only: breaks adjacent
+            // to a block boundary (quote, image, end of post) duplicate the renderer's inter-block
+            // spacing, but INTERIOR breaks are the author's literal line structure — including
+            // consecutive ones, i.e. deliberate empty lines — and must survive verbatim.
             val cleaned = collapseInlines(paragraph)
+                .dropWhile { it.isBlankOrBreak() }
+                .dropLastWhile { it.isBlankOrBreak() }
             if (cleaned.any { it.isNonBlank() }) {
                 blocks += PostBlock.Paragraph(cleaned)
             }
@@ -51,7 +57,13 @@ class PostContentParser {
         nodes.forEach { node ->
             when (classifyNode(node)) {
                 NodeKind.IGNORE -> Unit
-                NodeKind.LINE_BREAK -> flushParagraph()
+                // #333/#280 — a top-level <br> used to FLUSH the paragraph, so every authored
+                // line became its own Paragraph block: blank lines (the `<br><br>` HFR emits for
+                // an empty line) collapsed into a single dropped-empty-paragraph (#333) and the
+                // renderer's 8dp inter-block gap replaced the natural line height between every
+                // line (#280). A top-level break is now an inline LineBreak INSIDE the running
+                // paragraph — web parity: N consecutive breaks render N newlines.
+                NodeKind.LINE_BREAK -> paragraph += PostInline.LineBreak
 
                 NodeKind.QUOTE -> {
                     flushParagraph()
@@ -436,6 +448,13 @@ class PostContentParser {
     private fun PostInline.isNonBlank(): Boolean = when (this) {
         is PostInline.Text -> value.isNotBlank()
         else -> true
+    }
+
+    /** #333 — edge-trim predicate for [parseBlocks]: breaks and whitespace-only fragments. */
+    private fun PostInline.isBlankOrBreak(): Boolean = when (this) {
+        PostInline.LineBreak -> true
+        is PostInline.Text -> value.isBlank()
+        else -> false
     }
 
     private fun collectQuotedAuthors(content: PostContent): List<String> {
