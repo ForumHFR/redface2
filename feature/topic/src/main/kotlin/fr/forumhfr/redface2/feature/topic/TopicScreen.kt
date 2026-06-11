@@ -26,6 +26,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -935,6 +936,19 @@ private fun TopicLoadedContent(
                 onOpenMenu = { menuPost = post },
             )
         }
+        // #379 — explicit end-of-topic marker after the last post of the LAST page. The
+        // « page X/Y » counter (#284) lets the reader deduce it; this says it. Reflects the
+        // LOADED page (same contract as the counter): replies posted since the fetch surface
+        // on the next refresh. Intermediate pages keep their natural « more below » flow.
+        // NO explicit key (Codex review): a stable key would make Lazy track the footer
+        // across an insertion — a reader parked on the marker would keep it in view while a
+        // freshly fetched post lands above the viewport, unseen. Positional identity is
+        // correct for a stateless sentinel.
+        if (topic.page == topic.totalPages) {
+            item {
+                EndOfTopicFooter()
+            }
+        }
     }
     // #362 — per-post contextual menu. The permalink is rebuilt from the LOADED topic's
     // (cat, post, page) — not the request — so it always reflects the page HFR actually
@@ -970,6 +984,36 @@ private fun TopicLoadedContent(
             onOpenProfile = post.profileId?.let { profileId ->
                 { onOpenProfile(profileId, post.author, post.avatarUrl) }
             },
+        )
+    }
+}
+
+/**
+ * #379 — sober end-of-topic marker: a centred label between two hairlines, rendered as the
+ * LAST LazyColumn item of the topic's last page only. Pure presentation — the condition
+ * (`topic.page == topic.totalPages`) lives at the call site.
+ */
+@Composable
+private fun EndOfTopicFooter() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+        Text(
+            text = stringResource(R.string.topic_end_of_topic),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant,
         )
     }
 }

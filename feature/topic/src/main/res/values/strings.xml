@@ -6,6 +6,8 @@
     <string name="topic_fab_previous_page">Page précédente</string>
     <string name="topic_fab_next_page">Page suivante</string>
     <string name="topic_loading">Chargement…</string>
+    <!-- #379 — marqueur explicite de fin de sujet, rendu après le dernier post de la DERNIÈRE page. -->
+    <string name="topic_end_of_topic">Dernier message du sujet</string>
     <!-- #285 — top app bar : back affordance (content description) + fallback title shown while
          the topic page has not loaded yet (or errored), so the bar never reads blank. -->
     <string name="topic_back">Retour</string>
