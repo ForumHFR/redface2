@@ -1,4 +1,4 @@
-package fr.forumhfr.redface2.feature.topic
+package fr.forumhfr.redface2.core.ui.list
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -6,13 +6,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * #300 — pure-geometry tests for the topic scrollbar, **fixed-size ordinal + sub-item interpolation**.
+ * #300/#351 — pure-geometry tests for the shared post-list scrollbar, **fixed-size ordinal + sub-item interpolation**.
  * Composable behaviour (auto-hide, gesture, the offset spring) is not unit-tested here; the value is in
  * the position math, the drag→index inverse, and the regression guards: the thumb size is constant
  * (never derived from content), the position interpolates continuously within a post (no per-post step),
  * and a #197-style growth of the top post can move the thumb by at most one ordinal step.
  */
-class TopicScrollbarTest {
+class LazyListScrollbarTest {
 
     private val tolerance = 1e-4f
 

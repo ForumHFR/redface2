@@ -1,4 +1,4 @@
-package fr.forumhfr.redface2.feature.topic
+package fr.forumhfr.redface2.core.ui.pager
 
 import kotlin.math.abs
 import org.junit.Assert.assertEquals
@@ -7,7 +7,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class TopicSwipeTest {
+class PageSwipeTest {
 
     // --- swipeTargetPage : bornes ---
 
@@ -226,7 +226,7 @@ class TopicSwipeTest {
     }
 
     // --- blocked-edge glow suppression contract (feel-lens fix) ---
-    // topicPageSwipeEdge gates the glow on `swipeTargetPage(...) == null` for the dragged direction:
+    // pageSwipeEdgeHint gates the glow on `swipeTargetPage(...) == null` for the dragged direction:
     // at a wall the damped follow still moves the page (so the wall is felt) but no glow lights up,
     // since no neighbour page is being brought in. These two pure functions are the gate's inputs.
 
