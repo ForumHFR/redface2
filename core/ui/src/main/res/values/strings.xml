@@ -62,4 +62,14 @@
          écran. -->
     <string name="error_hfr_server_down">HFR est en panne (erreur serveur)</string>
     <string name="error_no_connection">Pas de connexion</string>
+    <!-- #387 — smiley picker (promu depuis :feature:editor avec SmileyPickerSheet). -->
+    <string name="editor_smiley_title">Smileys</string>
+    <string name="editor_smiley_tab_standard">Standard</string>
+    <string name="editor_smiley_tab_wiki">Wiki</string>
+    <string name="editor_smiley_search_label">Rechercher un smiley perso</string>
+    <string name="editor_smiley_search_hint">Tape au moins 3 caractères pour interroger le wiki HFR.</string>
+    <string name="editor_smiley_search_loading">Recherche…</string>
+    <string name="editor_smiley_search_empty">Aucun smiley trouvé.</string>
+    <string name="editor_smiley_search_error">Erreur réseau. Réessaie dans un instant.</string>
+    <string name="editor_smiley_insert_description">Insérer %1$s</string>
 </resources>

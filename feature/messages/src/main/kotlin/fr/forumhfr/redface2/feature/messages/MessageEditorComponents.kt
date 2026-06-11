@@ -121,6 +121,7 @@ internal fun MessageSubmitBar(
     onConfirmSubmit: () -> Unit,
     onDisarmConfirm: () -> Unit,
     onOpenOptions: () -> Unit,
+    onOpenSmileys: () -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 3.dp) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -144,6 +145,11 @@ internal fun MessageSubmitBar(
                 if (!confirmArmed) {
                     FilledTonalButton(onClick = onOpenOptions) {
                         Text(text = stringResource(R.string.messages_reply_actions_options))
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    // #387 — same Options/Smileys/Envoyer trio as the post editor's bar (#388).
+                    FilledTonalButton(onClick = onOpenSmileys) {
+                        Text(text = stringResource(R.string.messages_reply_actions_smileys))
                     }
                 }
                 Spacer(modifier = Modifier.weight(1f))

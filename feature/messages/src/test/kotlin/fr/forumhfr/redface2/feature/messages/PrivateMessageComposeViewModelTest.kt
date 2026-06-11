@@ -79,6 +79,7 @@ class PrivateMessageComposeViewModelTest {
         repository = repository,
         previewParser = previewParser,
         userPreferencesRepository = userPreferences(confirmBeforePosting),
+        smileyRepository = mockk(relaxed = true),
     )
 
     @Test

@@ -34,6 +34,9 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 
 /**
  * New-conversation composer (#301 follow-up). Same chrome as the reply editor — shared header,
@@ -77,6 +80,8 @@ fun PrivateMessageComposeScreen(
         onSubmitConfirmed = viewModel::onSubmitConfirmed,
         onSubmitConfirmationDismissed = viewModel::onSubmitConfirmationDismissed,
         onRetryFormLoad = viewModel::retryFormLoad,
+        smileyPicker = viewModel.smileyPicker,
+        onSmileySelected = viewModel::onSmileySelected,
         modifier = modifier,
     )
 }
@@ -99,6 +104,8 @@ private fun PrivateMessageComposeContent(
     onSubmitConfirmed: () -> Unit,
     onSubmitConfirmationDismissed: () -> Unit,
     onRetryFormLoad: () -> Unit,
+    smileyPicker: SmileyPickerController,
+    onSmileySelected: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var optionsSheetOpen by remember { mutableStateOf(false) }
@@ -133,6 +140,7 @@ private fun PrivateMessageComposeContent(
                         onConfirmSubmit = onSubmitConfirmed,
                         onDisarmConfirm = onSubmitConfirmationDismissed,
                         onOpenOptions = { optionsSheetOpen = true },
+                        onOpenSmileys = smileyPicker::open,
                     )
                 }
             }
@@ -149,6 +157,16 @@ private fun PrivateMessageComposeContent(
                     onEmailNotificationChanged = onToggleEmailNotification,
                 )
             }
+        }
+        // #387 — smiley picker sheet (Standard + Wiki), same component as the post editors.
+        val pickerState by smileyPicker.state.collectAsStateWithLifecycle()
+        (pickerState as? SmileyPickerState.Open)?.let { open ->
+            SmileyPickerSheet(
+                state = open,
+                onDismiss = smileyPicker::dismiss,
+                onQueryChange = smileyPicker::onQueryChanged,
+                onSmileyClicked = onSmileySelected,
+            )
         }
     }
 }

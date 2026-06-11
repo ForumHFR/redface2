@@ -17,7 +17,10 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -50,6 +53,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     private val repository: PrivateMessageWriteRepository,
     private val previewParser: BbcodePreviewParser,
     private val userPreferencesRepository: UserPreferencesRepository,
+    smileyRepository: SmileyRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
@@ -162,6 +166,35 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 ),
             )
         }
+    }
+
+    /**
+     * #387 — smiley picker (Standard + Wiki), same sheet as the post editors. The controller owns
+     * the picker state machine (debounce, race guards) ; this ViewModel only handles insertion.
+     * userId stays at the controller's 0 fallback : the MP write flow never resolves a numeric
+     * user id, and the wiki endpoint accepts 0 (same fallback as PostEditorViewModel).
+     */
+    val smileyPicker = SmileyPickerController(
+        scope = viewModelScope,
+        searchWiki = smileyRepository::searchWiki,
+    )
+
+    fun onSmileySelected(token: String) {
+        _state.update { current ->
+            val outcome = insertBbcodeToken(
+                token = token,
+                text = current.draft.text,
+                selectionStart = current.draft.selection.start,
+                selectionEnd = current.draft.selection.end,
+            )
+            current.withDraftPreview(
+                TextFieldValue(
+                    text = outcome.text,
+                    selection = TextRange(outcome.selectionStart, outcome.selectionEnd),
+                ),
+            )
+        }
+        smileyPicker.dismiss()
     }
 
     fun onTogglePreview() {
