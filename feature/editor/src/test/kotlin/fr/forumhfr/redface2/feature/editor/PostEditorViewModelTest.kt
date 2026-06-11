@@ -418,6 +418,31 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `multi-quote VM fails the whole fetch when a prefill comes back blank (#291)`() = runTest {
+        // A 200-OK form whose textarea prefill is EMPTY would otherwise silently drop a quote
+        // the user explicitly selected — same contract as a failed extra: fail globally.
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+            303 to Result.success(authenticatedForm(initialContent = "")),
+        )
+
+        val viewModel = newReplyViewModel(
+            quotedNumreponse = 101,
+            quoteRef = null,
+            extraQuoteNumreponses = listOf(303),
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertFalse(settled.isLoadingForm)
+            assertEquals("draft must not hydrate from a partial multi-quote", "", settled.draft.text)
+            assertEquals(SubmitError.Hfr(ReplyFailureReason.Unknown), settled.submitError)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `quote VM does not overwrite a draft the user already typed`() = runTest {
         // User-typed content lands on the VM before the form fetch completes —
         // we gate the fetch with a CompletableDeferred so we can interleave them

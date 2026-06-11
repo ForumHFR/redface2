@@ -356,8 +356,15 @@ class PostEditorViewModel @AssistedInject constructor(
             }
         }
         val merged = prefills
-            .map { it.trimEnd() }
-            .filter { it.isNotBlank() }
+            .map { prefill ->
+                prefill.trimEnd().also { trimmed ->
+                    // Codex review — a 200-OK form whose prefill came back BLANK would silently
+                    // drop a quote the user explicitly selected (the exact failure mode the
+                    // sequential design refuses). Fail the whole fetch instead; the mapped
+                    // SubmitError keeps the editor on its retryable error path.
+                    check(trimmed.isNotBlank()) { "multi-quote prefill came back blank" }
+                }
+            }
             .joinToString(separator = "\n\n", postfix = "\n\n")
         return form.copy(initialContent = merged)
     }

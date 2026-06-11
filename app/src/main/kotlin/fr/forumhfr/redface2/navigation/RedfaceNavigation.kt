@@ -472,12 +472,16 @@ fun RedfaceApp(intent: Intent?) {
                     readPrivateMessageThreadIds = emptySet()
                     multiRecipientThreadIds = emptySet()
                     privateMessageSentSignal = null
+                    // #291 — a write intention armed under another session must not survive the
+                    // transition (Codex review: stale « Citer N » after logout/login).
+                    multiQuoteBasket = null
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
                 }
                 is AuthState.Authenticated -> {
                     readPrivateMessageThreadIds = emptySet()
                     multiRecipientThreadIds = emptySet()
                     privateMessageSentSignal = null
+                    multiQuoteBasket = null
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
                 }
             }
