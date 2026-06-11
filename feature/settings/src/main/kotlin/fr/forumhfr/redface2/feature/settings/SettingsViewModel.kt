@@ -130,6 +130,16 @@ class SettingsViewModel @Inject constructor(
                 }
             }
         }
+        viewModelScope.launch {
+            val autoRefresh = userPreferencesRepository.observeFlagsAutoRefresh().first()
+            _state.update { current ->
+                if (current.flagsAutoRefreshTouchedLocally || current.isUpdatingFlagsAutoRefresh) {
+                    current
+                } else {
+                    current.copy(flagsAutoRefresh = autoRefresh)
+                }
+            }
+        }
     }
 
     @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the SettingsIntent variants ; flat by design.
@@ -174,6 +184,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
+            is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
         }
     }
 
@@ -501,6 +512,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setShowDtSection,
+        )
+    }
+
+    private fun updateFlagsAutoRefresh(desired: Boolean) {
+        val previous = _state.value.flagsAutoRefresh
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    flagsAutoRefresh = desired,
+                    isUpdatingFlagsAutoRefresh = true,
+                    flagsAutoRefreshError = false,
+                    flagsAutoRefreshTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(flagsAutoRefresh = desired, isUpdatingFlagsAutoRefresh = false)
+                } else {
+                    state.copy(
+                        flagsAutoRefresh = previous,
+                        isUpdatingFlagsAutoRefresh = false,
+                        flagsAutoRefreshError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setFlagsAutoRefresh,
         )
     }
 

@@ -160,4 +160,17 @@ interface UserPreferencesRepository {
 
     /** Persists [observeShowDtSection]. Default `false` until the first call. */
     suspend fun setShowDtSection(enabled: Boolean)
+
+    /**
+     * Auto-refresh of the Drapeaux lists (#378): when `true`, landing on the flags screen
+     * (app open, back from a topic, return from another tab) silently re-fetches the current
+     * tab — throttled by the ViewModel so rapid back-and-forth does not hammer the REST
+     * fan-out — with the pull-to-refresh indicator as the visual cue. Default `true` (the
+     * feature exists because the lists went stale without it); the toggle is the opt-OUT
+     * requested in the beta thread. Observed by `:feature:flags`, toggled in Settings.
+     */
+    fun observeFlagsAutoRefresh(): Flow<Boolean>
+
+    /** Persists [observeFlagsAutoRefresh]. Default `true` until the first call. */
+    suspend fun setFlagsAutoRefresh(enabled: Boolean)
 }

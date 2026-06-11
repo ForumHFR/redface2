@@ -515,6 +515,17 @@ private fun FlagsPreferencesCard(
             if (state.showDtSectionError) {
                 PreferencePersistError(R.string.settings_flags_show_dt_section_persist_failed)
             }
+            // #378 — auto-refresh on landing (app open / back from a topic). Opt-OUT: default on.
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_flags_auto_refresh_title),
+                description = stringResource(R.string.settings_flags_auto_refresh_description),
+                checked = state.flagsAutoRefresh,
+                enabled = state.canToggleFlagsAutoRefresh,
+                onCheckedChange = { onIntent(SettingsIntent.FlagsAutoRefreshChanged(it)) },
+            )
+            if (state.flagsAutoRefreshError) {
+                PreferencePersistError(R.string.settings_flags_auto_refresh_persist_failed)
+            }
         }
     }
 }

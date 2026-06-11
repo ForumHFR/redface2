@@ -14,9 +14,13 @@ import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -47,9 +51,18 @@ class FlagsViewModel @Inject constructor(
     private val flagRepository: FlagRepository,
     private val forumRepository: ForumRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val clock: Clock,
 ) : ViewModel() {
 
     private var observedPseudo: String? = null
+
+    /**
+     * #378 — instant of the last refresh triggered through [maybeAutoRefresh], for the
+     * throttle. ViewModel-scoped on purpose: the ViewModel survives the screen leaving the
+     * composition (tab switch, topic push), so rapid back-and-forth shares one window, while
+     * a cold app start (fresh ViewModel) always allows the first auto-refresh.
+     */
+    private var lastAutoRefreshAt: Instant? = null
 
     private val _selectedTab = MutableStateFlow<FlagTab>(FlagTab.Cyan)
     val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
@@ -475,6 +488,34 @@ class FlagsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * #378 — auto-refresh on landing. Invoked by the screen every time it (re)enters the
+     * composition: app open, back from a topic, return from another bottom tab. Delegates to
+     * [refresh] (same `isRefreshing` indicator — the requested visual cue) when ALL of:
+     *
+     * - the « auto-refresh » preference is on (default; the Settings toggle is the opt-out),
+     * - the user is authenticated (an anonymous landing has no flags to refresh),
+     * - the selected tab has a real [FlagType] (Super/DT placeholders have no backend),
+     * - no refresh is already in flight,
+     * - the last auto-refresh is older than [AUTO_REFRESH_THROTTLE] — the per-tab REST fan-out
+     *   is ~one GET per public category, so rapid back-and-forth between a topic and the list
+     *   must not multiply it. A manual pull-to-refresh is never throttled and does not arm the
+     *   throttle (it goes straight through [refresh]).
+     */
+    fun maybeAutoRefresh() {
+        if (_selectedTab.value.flagType == null) return
+        if (_isRefreshing.value) return
+        viewModelScope.launch {
+            if (!userPreferencesRepository.observeFlagsAutoRefresh().first()) return@launch
+            if (authRepository.observeAuthState().first() !is AuthState.Authenticated) return@launch
+            val now = clock.instant()
+            val last = lastAutoRefreshAt
+            if (last != null && Duration.between(last, now) < AUTO_REFRESH_THROTTLE) return@launch
+            lastAutoRefreshAt = now
+            refresh()
+        }
+    }
+
     // Round-2 review (PR #207): `logout()` was removed from this ViewModel — the global account
     // menu (#198) now drives the logout from `AppAccountViewModel.logout()`, which owns the
     // canonical `clearSessionCache → authRepository.logout` ordering. Keeping a second copy
@@ -672,6 +713,14 @@ sealed interface FlagsContent {
      */
     data class Flat(val flags: List<Flag>) : FlagsContent
 }
+
+/**
+ * #378 — minimum delay between two auto-refreshes ([FlagsViewModel.maybeAutoRefresh]). 15 s:
+ * shorter than any realistic topic-read round-trip (the « back from a topic » trigger stays
+ * effective) but long enough that bouncing between tabs or popping in and out of a topic does
+ * not re-run the per-category REST fan-out every time.
+ */
+private val AUTO_REFRESH_THROTTLE: Duration = Duration.ofSeconds(15)
 
 /**
  * State of the « Retirer le drapeau » interaction (#99). [Confirming] and [Removing] carry
