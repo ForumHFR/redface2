@@ -241,6 +241,10 @@ fun PrivateMessageThreadScreen(
                                 page = state.page,
                                 totalPages = state.totalPages,
                                 onSelectPage = viewModel::selectPage,
+                                // Codex review — gate the pager buttons with the same condition as
+                                // the swipe: re-tapping during a keep-content load would only cancel
+                                // and restart the round-trip (supersede), never advance faster.
+                                pagerEnabled = !state.isRefreshing,
                                 listState = listState,
                                 // #351b — horizontal swipe changes page in place (same thresholds
                                 // and feel as the topic via the shared :core:ui geometry).
@@ -307,13 +311,26 @@ private fun rememberThreadSwipeModifier(
     val currentTotal = rememberUpdatedState(totalPages)
     val swipeEnabled = rememberUpdatedState(!isRefreshing)
     val currentOnSelectPage = rememberUpdatedState(onSelectPage)
+    // Codex review — dragOffset SURVIVES the in-place page change (no composition teardown, unlike
+    // the topic's route-driven model where the offset state dies with the screen). Drop any residual
+    // translation when a new page lands so the incoming content never inherits the old offset. An
+    // in-flight spring-back may stream a few frames after this reset; it converges to 0 by
+    // construction, so the transient is negligible. A drag still under the finger keeps following it
+    // (rare: the page swapped under an active drag) — coherent with the finger, assumed.
+    LaunchedEffect(renderedPage) {
+        dragOffset.floatValue = 0f
+    }
     // Same desaturated accent as the topic edge glow (#282): mostly neutral with a touch of primary.
     val accent = lerp(
         MaterialTheme.colorScheme.onSurfaceVariant,
         MaterialTheme.colorScheme.primary,
         ACCENT_PRIMARY_BLEND,
     )
-    val handlers = remember(haptics) {
+    // Captured ONCE by threadPageSwipe's pointerInput(Unit) block — deliberately remember-ed without
+    // keys so the code does not pretend a recreation would reach the gesture (it would not: the
+    // initial block keeps its first capture). The callback and the gate stay live through the
+    // rememberUpdatedState-backed lambdas; haptics (LocalHapticFeedback) is stable per Activity.
+    val handlers = remember {
         ThreadSwipeHandlers(
             haptics = haptics,
             onSelectPage = { page -> currentOnSelectPage.value(page) },
@@ -337,12 +354,13 @@ private fun rememberThreadSwipeModifier(
 }
 
 @Composable
-@Suppress("LongParameterList") // List host: pager triple + hoisted list state + swipe chain, all distinct.
+@Suppress("LongParameterList") // List host: pager state + hoisted list state + swipe chain, all distinct.
 private fun ThreadMessages(
     messages: List<Post>,
     page: Int,
     totalPages: Int,
     onSelectPage: (Int) -> Unit,
+    pagerEnabled: Boolean = true,
     listState: LazyListState,
     swipeModifier: Modifier = Modifier,
 ) {
@@ -368,14 +386,20 @@ private fun ThreadMessages(
                     horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedButton(onClick = { onSelectPage(page - 1) }, enabled = page > 1) {
+                    OutlinedButton(
+                        onClick = { onSelectPage(page - 1) },
+                        enabled = pagerEnabled && page > 1,
+                    ) {
                         Text(text = stringResource(R.string.messages_pager_previous))
                     }
                     Text(
                         text = stringResource(R.string.messages_pager_position, page, totalPages),
                         style = MaterialTheme.typography.labelLarge,
                     )
-                    OutlinedButton(onClick = { onSelectPage(page + 1) }, enabled = page < totalPages) {
+                    OutlinedButton(
+                        onClick = { onSelectPage(page + 1) },
+                        enabled = pagerEnabled && page < totalPages,
+                    ) {
                         Text(text = stringResource(R.string.messages_pager_next))
                     }
                 }
