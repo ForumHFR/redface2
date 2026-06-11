@@ -115,6 +115,7 @@ class MigrationTest {
                 MIGRATION_5_6,
                 MIGRATION_6_7,
                 MIGRATION_7_8,
+                MIGRATION_8_9,
             )
             .build()
 
@@ -253,6 +254,7 @@ class MigrationTest {
                 MIGRATION_5_6,
                 MIGRATION_6_7,
                 MIGRATION_7_8,
+                MIGRATION_8_9,
             )
             .build()
 
@@ -351,6 +353,7 @@ class MigrationTest {
                 MIGRATION_5_6,
                 MIGRATION_6_7,
                 MIGRATION_7_8,
+                MIGRATION_8_9,
             )
             .build()
 
@@ -421,6 +424,7 @@ class MigrationTest {
                 MIGRATION_5_6,
                 MIGRATION_6_7,
                 MIGRATION_7_8,
+                MIGRATION_8_9,
             )
             .build()
 
@@ -487,6 +491,7 @@ class MigrationTest {
                 MIGRATION_5_6,
                 MIGRATION_6_7,
                 MIGRATION_7_8,
+                MIGRATION_8_9,
             )
             .build()
 
@@ -544,6 +549,7 @@ class MigrationTest {
                 MIGRATION_5_6,
                 MIGRATION_6_7,
                 MIGRATION_7_8,
+                MIGRATION_8_9,
             )
             .build()
 
@@ -615,6 +621,7 @@ class MigrationTest {
                 MIGRATION_5_6,
                 MIGRATION_6_7,
                 MIGRATION_7_8,
+                MIGRATION_8_9,
             )
             .build()
 
@@ -624,6 +631,65 @@ class MigrationTest {
             ).use { cursor ->
                 assertTrue("pre-v8 post row must survive MIGRATION_7_8", cursor.moveToFirst())
                 assertTrue("editedAt must be NULL for pre-v8 rows", cursor.isNull(0))
+            }
+        } finally {
+            migrated.close()
+        }
+    }
+
+    /**
+     * #384 follow-up — v8 → v9 adds `isFavorite` to `flag_topics` (`NOT NULL DEFAULT 0`).
+     *
+     * Verifies:
+     * 1. The migration runs cleanly against the v8 fixture.
+     * 2. Pre-existing flag rows survive the migration.
+     * 3. The new column defaults to `0` (not favorited) on pre-v9 rows — the next live fetch
+     *    sets the real value.
+     */
+    @Test
+    fun migrate_8_to_9_adds_isFavorite_with_false_default_to_flag_topics() {
+        val dbName = "migration_8_9_test"
+
+        // 1. Create a v8 database and insert a flag row that pre-dates `isFavorite`.
+        helper.createDatabase(dbName, 8).apply {
+            execSQL(
+                """INSERT INTO flag_topics (userId, type, cat, subcat, topicId, title, totalPages,
+                   replyCount, hasUnread, lastReadPage, lastPostReadId, firstPostAuthor,
+                   lastReplyAuthor, lastReplyAt, fetchedAt, authMode)
+                   VALUES ('xatrix', 'CYAN', 13, NULL, 26595, 'v8 cached flag', 3, 99, 1, 2, NULL,
+                   'XaTriX', 'bitubo', '2026-06-11 21:00', 1000, 'AUTHENTICATED')""",
+            )
+            close()
+        }
+
+        // 2. Run MIGRATION_8_9 and validate against the v9 schema.
+        helper.runMigrationsAndValidate(dbName, 9, true, MIGRATION_8_9).close()
+
+        // 3. Open the production Room database (which chains every migration).
+        val migrated = Room.databaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java,
+            dbName,
+        )
+            .allowMainThreadQueries()
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+                MIGRATION_7_8,
+                MIGRATION_8_9,
+            )
+            .build()
+
+        try {
+            migrated.openHelper.readableDatabase.query(
+                "SELECT isFavorite FROM flag_topics WHERE userId = 'xatrix' AND topicId = 26595",
+            ).use { cursor ->
+                assertTrue("pre-v9 flag row must survive MIGRATION_8_9", cursor.moveToFirst())
+                assertEquals("isFavorite must default to 0 for pre-v9 rows", 0, cursor.getInt(0))
             }
         } finally {
             migrated.close()
