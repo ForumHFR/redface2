@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Redface2" parent="@android:style/Theme.DeviceDefault.NoActionBar" />
+    <!-- #417 — forceDarkAllowed=false: OEM « dark mode for apps » (MIUI/HyperOS per-app force
+         dark) rewrites draw calls with per-surface heuristics. On the reporter's device it left
+         the M3 Snackbar's light `inverseSurface` container untouched but lightened its dark
+         `inverseOnSurface` text, rendering the « Drapeau retiré : … » feedback as light-on-light
+         (looks empty — see the zoomed capture on the issue). The app paints its own dark theme
+         (Compose, ThemeMode setting) so OS-level inversion is never wanted. minSdk 29 = the
+         attribute's API floor, no values-v29 split needed. -->
+    <style name="Theme.Redface2" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
 </resources>
