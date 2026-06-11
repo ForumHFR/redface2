@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -66,6 +68,8 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("LongParameterList") // contextual-menu surface: each optional action (delete #418,
+// profile #395) is a defaulted nullable param — the idiomatic Compose API, same as TopicBottomActions.
 internal fun PostMenuSheet(
     post: Post,
     permalink: String,
@@ -79,6 +83,13 @@ internal fun PostMenuSheet(
      * #292 confirmation dialog still guards the actual POST.
      */
     onDelete: (() -> Unit)? = null,
+    /**
+     * #395 — opens the author's profile from the hero row (avatar + pseudo), parity with
+     * the #208 tap on the post card. Null keeps the hero inert — same gate as the card
+     * (`Post.profileId == null` : Publicité rows, anonymous reads). The sheet plays its
+     * hide animation first so the profile sheet never stacks over this one.
+     */
+    onOpenProfile: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState()
     val coroutineScope = rememberCoroutineScope()
@@ -97,7 +108,19 @@ internal fun PostMenuSheet(
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .navigationBarsPadding(),
         ) {
-            PostMenuHero(post = post)
+            PostMenuHero(
+                post = post,
+                onClick = onOpenProfile?.let { openProfile ->
+                    {
+                        // Hide first, then dismiss AND navigate — the profile bottom sheet
+                        // must not stack over a still-visible menu sheet.
+                        hideThenDismiss(coroutineScope, sheetState) {
+                            onDismiss()
+                            openProfile()
+                        }
+                    }
+                },
+            )
 
             if (post.editedAt != null || citedCount > 0) {
                 Spacer(Modifier.height(12.dp))
@@ -192,13 +215,29 @@ internal fun PostMenuSheet(
  * Hero row of the sheet — avatar + author with the post identity (number, date)
  * underneath, mirroring `ProfilePreviewHero`. [RedfaceUserAvatar] handles the
  * `avatarUrl == null` / load-error placeholder on its own.
+ *
+ * #395 — when [onClick] is non-null the WHOLE row is one « Voir le profil » tap target:
+ * in a menu sheet a row reads as one action (M3 list-item idiom), unlike the post card
+ * where the date had to stay inert (#208 review I6) because it sits in flowing content.
  */
 @Composable
-private fun PostMenuHero(post: Post) {
+private fun PostMenuHero(post: Post, onClick: (() -> Unit)?) {
+    val openProfileLabel = stringResource(R.string.topic_open_profile_action)
+    val clickModifier = if (onClick != null) {
+        Modifier.clickable(
+            onClick = onClick,
+            role = Role.Button,
+            onClickLabel = openProfileLabel,
+        )
+    } else {
+        Modifier
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(clickModifier),
     ) {
         RedfaceUserAvatar(
             avatarUrl = post.avatarUrl,

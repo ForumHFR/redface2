@@ -964,6 +964,11 @@ private fun TopicLoadedContent(
             citedCount = citationCounts[post.numreponse] ?: 0,
             onDismiss = { menuPost = null },
             onDelete = menuDeleteAction,
+            // #395 — same profileId gate as the post card (#208): Publicité rows and
+            // anonymous reads expose no profile link, the hero stays inert.
+            onOpenProfile = post.profileId?.let { profileId ->
+                { onOpenProfile(profileId, post.author, post.avatarUrl) }
+            },
         )
     }
 }
