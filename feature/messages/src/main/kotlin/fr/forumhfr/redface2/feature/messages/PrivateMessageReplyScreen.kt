@@ -152,8 +152,8 @@ private fun ReplyEditorBody(
     modifier: Modifier = Modifier,
 ) {
     // No outer scroll : the draft field is weighted so it stretches down to the bar (same
-    // extensible-field design as the post editor) ; long content scrolls INSIDE the field
-    // and inside the preview pane.
+    // extensible-field design as the post editor) ; long content scrolls in the field's own
+    // fillViewport column (#275/#410) and inside the preview pane.
     Column(
         modifier = modifier
             .fillMaxWidth()

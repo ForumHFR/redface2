@@ -165,7 +165,8 @@ private fun ComposeEditorBody(
     modifier: Modifier = Modifier,
 ) {
     // Same extensible-field design as the reply editor : no outer scroll, the draft stretches to
-    // the bar, long content scrolls INSIDE the field / the preview pane.
+    // the bar, long content scrolls in the field's own fillViewport column (#275/#410) / the
+    // preview pane.
     Column(
         modifier = modifier
             .fillMaxWidth()

@@ -28,8 +28,9 @@ import org.robolectric.annotation.GraphicsMode
  *   no blank under the field, tapping anywhere in the area focuses) and the wrapping column has
  *   nothing to scroll;
  * - with content TALLER than the viewport, the field GROWS (no internal text scroll) and the
- *   wrapping column becomes the scrollable — the ancestor-scrollable machinery that keeps the
- *   cursor visible under the IME only exists on that path.
+ *   wrapping column becomes the scrollable — the ancestor-scrollable path is the one that
+ *   reliably re-anchors the cursor under the IME (the field's internal scroller takes part in
+ *   bring-into-view but does not re-anchor on IME shrink).
  *
  * The IME interaction itself (resize re-anchoring, bring-into-view on refocus) is platform
  * behaviour that Robolectric cannot exercise — device dogfooding covers it; these tests pin the
