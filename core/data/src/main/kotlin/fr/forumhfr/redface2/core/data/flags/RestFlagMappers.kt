@@ -62,6 +62,13 @@ internal object RestFlagMappers {
      */
     private const val POSTS_PER_PAGE_FALLBACK = 40
 
+    /**
+     * REST `flag_owntopic` value meaning « favori/étoile » (the strongest flag on the topic,
+     * live-verified on the `rest_cat13_participated_favorites.json` fixture, #384). Mirrors
+     * `RestForumMappers`' reading of the same field.
+     */
+    private const val FLAG_OWNTOPIC_FAVORITE = 3
+
     private val CAT_FROM_HREF = Regex("/categories/(\\d+)/")
     private val SUBCAT_FROM_HREF = Regex("/categories/\\d+/subcategories/(\\d+)/")
 
@@ -110,6 +117,9 @@ internal object RestFlagMappers {
             // #384 — the requested bucket IS the type; `flag_owntopic` describes the strongest
             // flag on the topic (3 = favori), not bucket membership. See the object KDoc.
             type = type,
+            // The « étoile » decoration the object KDoc anticipated: surfaced as its own field so
+            // a favorited topic keeps its yellow dot in « Mes sujets » without touching the type.
+            isFavorite = dto.flagOwntopic == FLAG_OWNTOPIC_FAVORITE,
             hasUnread = dto.isRead?.let { !it } ?: true,
             lastReadPage = lastReadPage,
             lastPostReadId = dto.lastPostReadId,

@@ -161,6 +161,16 @@ class RestFlagMappersTest {
             "every row of a CYAN fetch is typed CYAN, whatever flag_owntopic says",
             flags.all { it.type == FlagType.CYAN },
         )
+        // #384 follow-up (dev v118 feedback) — the favori decoration survives as its OWN field:
+        // the yellow dot of « Mes sujets » reads it, the type stays the bucket.
+        assertTrue(
+            "flag_owntopic=3 rows carry isFavorite",
+            favorited.all { it.isFavorite },
+        )
+        assertTrue(
+            "non-favorited rows do not",
+            flags.filterNot { it.topicId == 26595 || it.topicId == 55667 }.none { it.isFavorite },
+        )
     }
 
     @Test

@@ -240,3 +240,18 @@ val MIGRATION_7_8: Migration = object : Migration(7, 8) {
         db.execSQL("ALTER TABLE posts ADD COLUMN editedAt INTEGER")
     }
 }
+
+/**
+ * v8 → v9 — `flag_topics.isFavorite` (#384 follow-up, dev v118 feedback): the favori/étoile
+ * decoration (`flag_owntopic == 3`) surfaced as its own column, independent of `type` (the
+ * bucket), so a favorited topic listed under « Mes sujets » keeps its yellow dot.
+ *
+ * Pure DDL, no row rewrite. `NOT NULL DEFAULT 0` matches the entity's
+ * `@ColumnInfo(defaultValue = "0")`; pre-v9 rows backfill to `false` and the next live fetch
+ * sets the real value (flag lists are short-lived per-account cache).
+ */
+val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE flag_topics ADD COLUMN isFavorite INTEGER NOT NULL DEFAULT 0")
+    }
+}

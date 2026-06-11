@@ -34,6 +34,14 @@ data class Flag(
     val totalPages: Int,
     val replyCount: Int,
     val type: FlagType,
+    /**
+     * True when the topic ALSO carries the favori/étoile flag (REST `flag_owntopic == 3`),
+     * regardless of the bucket this row was fetched from. [type] stays the bucket (#384 — mapping
+     * `flag_owntopic` to [type] corrupted the per-type cache); this field only carries the
+     * decoration: a favorited topic listed under « Mes sujets » keeps its yellow dot (web parity,
+     * regression reported on dev v118). `false` when REST omits the field.
+     */
+    val isFavorite: Boolean = false,
     val hasUnread: Boolean,
     /**
      * Page where the user's last read marker is set, derived from

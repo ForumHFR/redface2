@@ -69,7 +69,7 @@ fun FlagItem(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        FlagDot(type = flag.type, hasUnread = flag.hasUnread)
+        FlagDot(type = flag.type, isFavorite = flag.isFavorite, hasUnread = flag.hasUnread)
         Column(
             modifier = if (trailingAction != null) Modifier.weight(1f) else Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -126,11 +126,17 @@ fun FlagItemDivider(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun FlagDot(type: FlagType, hasUnread: Boolean) {
-    val color = when (type) {
-        FlagType.CYAN -> Color(0xFF00BCD4)
-        FlagType.RED -> Color(0xFFE53935)
-        FlagType.FAVORITE -> Color(0xFFFFB300)
+private fun FlagDot(type: FlagType, isFavorite: Boolean, hasUnread: Boolean) {
+    // #384 follow-up (dev v118 feedback) — the favori/étoile decoration WINS over the bucket
+    // color: a favorited topic listed under « Mes sujets » keeps its yellow dot, like the site.
+    // `type` stays the bucket (routing/filters); only the dot reads the decoration.
+    val color = when {
+        isFavorite -> Color(0xFFFFB300)
+        else -> when (type) {
+            FlagType.CYAN -> Color(0xFF00BCD4)
+            FlagType.RED -> Color(0xFFE53935)
+            FlagType.FAVORITE -> Color(0xFFFFB300)
+        }
     }
     val finalColor = if (hasUnread) color else color.copy(alpha = 0.35f)
     Box(
