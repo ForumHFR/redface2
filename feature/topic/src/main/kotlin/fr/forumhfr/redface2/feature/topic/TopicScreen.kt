@@ -181,6 +181,13 @@ fun TopicScreen(
      */
     startAtBottom: Boolean = false,
     /**
+     * #412 — invoked once the bottom landing for this page has been executed (or skipped on an
+     * empty page), right after the first `Loaded` emission. `:app` uses it to clear the transient
+     * « page précédente » marker so the landing can never replay on a later visit to the same page
+     * (the marker is nav state, not a route field — cf. Codex review on PR #420).
+     */
+    onStartAtBottomConsumed: () -> Unit = {},
+    /**
      * #307 — reports the read position when the screen leaves the composition, so `:app` can cache
      * it per `(cat, post, page)` (twin of [onTitleLoaded] / the title cache). Fired from a single
      * `DisposableEffect` — the unique save point covering EVERY departure (swipe, FAB, header pager,
@@ -227,6 +234,7 @@ fun TopicScreen(
         request = request,
         restoreScrollAnchor = restoreScrollAnchor,
         startAtBottom = startAtBottom,
+        onStartAtBottomConsumed = onStartAtBottomConsumed,
         onScrollAnchorSaved = onScrollAnchorSaved,
     )
 
@@ -446,6 +454,7 @@ private fun TopicScrollRestorationEffects(
     request: TopicRequest,
     restoreScrollAnchor: TopicScrollAnchor?,
     startAtBottom: Boolean,
+    onStartAtBottomConsumed: () -> Unit,
     onScrollAnchorSaved: (TopicScrollAnchor) -> Unit,
 ) {
     var scrollAnchorSettled by remember { mutableStateOf(false) }
@@ -460,6 +469,11 @@ private fun TopicScrollRestorationEffects(
             // header card at index 0 makes the last post index == posts.size.
             startAtBottom && loadedMode.topic.posts.isNotEmpty() ->
                 lazyListState.scrollToItem(loadedMode.topic.posts.size)
+        }
+        if (startAtBottom) {
+            // Consume even when the empty-page guard skipped the scroll: the landing decision for
+            // this page is spent either way.
+            onStartAtBottomConsumed()
         }
         scrollAnchorSettled = true
     }

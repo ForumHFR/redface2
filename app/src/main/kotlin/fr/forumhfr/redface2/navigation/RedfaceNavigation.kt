@@ -197,15 +197,6 @@ data class TopicRoute(
      * back stacks deserialise without the field.
      */
     val postSubmitOverflowLanding: Boolean = false,
-    /**
-     * #412 — `true` when this route comes from a « page précédente » navigation (chevron, FAB,
-     * swipe right — `onOpenPage` compares the target to the departing page). Reading a thread
-     * backwards means the last posts of the previous page come first: when the page has no saved
-     * anchor (#307), the screen lands at the BOTTOM instead of the top. A saved anchor still wins —
-     * the flag only replaces the `StartAtTop` fallback (cf. `resolveTopicScrollRestoration`).
-     * Default `false` keeps forward/jump navigation and older serialised back stacks unchanged.
-     */
-    val previousPageLanding: Boolean = false,
 ) : RedfaceNavKey
 
 @Serializable
@@ -455,6 +446,10 @@ fun RedfaceApp(intent: Intent?) {
         // on departure; the next landing on the same page restores it (unless the route carries a
         // scrollTo / submitSignal, cf. resolveTopicScrollRestoration). RAM/session only, like titles.
         var topicScrollAnchorCache by remember { mutableStateOf(emptyMap<TopicScrollKey, TopicScrollAnchor>()) }
+        // #412 — transient « land at the bottom » marker, lifecycle-matched to the anchor cache
+        // above (plain remember: lost on activity/process recreation, which falls back to the
+        // pre-#412 top landing instead of replaying a stale bottom scroll).
+        var topicPendingBottomLanding by remember { mutableStateOf<TopicScrollKey?>(null) }
 
         LaunchedEffect(authState) {
             when (authState) {
@@ -546,6 +541,8 @@ fun RedfaceApp(intent: Intent?) {
                                 anchor,
                             )
                         },
+                        pendingBottomLanding = topicPendingBottomLanding,
+                        onPendingBottomLanding = { topicPendingBottomLanding = it },
                     ),
                     onOpenProfile = { userId, pseudo, avatarUrl ->
                         // Review feedback I3: capture the **origin** tab so that
@@ -679,10 +676,19 @@ private data class TopicTitleNavState(
  *
  * @property anchors last saved read position per visited topic page.
  * @property onAnchorSaved records a page's read position when its screen is disposed.
+ * @property pendingBottomLanding #412 — the one page currently owed a bottom landing (armed by
+ *   `onOpenPage` on a strict « page - 1 » step, cleared on any other page change and consumed by
+ *   the screen after its first `Loaded`). Deliberately transient nav state, NOT a `TopicRoute`
+ *   field: a serialized route would replay the bottom landing on process/configuration restore and
+ *   could override the user's restored position (Codex review on PR #420). Losing it with the
+ *   composition just falls back to the pre-#412 top landing.
+ * @property onPendingBottomLanding rewrites the pending key (null clears it).
  */
 private data class TopicScrollNavState(
     val anchors: Map<TopicScrollKey, TopicScrollAnchor>,
     val onAnchorSaved: (cat: Int, post: Int, page: Int, anchor: TopicScrollAnchor) -> Unit,
+    val pendingBottomLanding: TopicScrollKey? = null,
+    val onPendingBottomLanding: (TopicScrollKey?) -> Unit = {},
 )
 
 /**
@@ -1030,7 +1036,11 @@ private fun RedfaceNavHost(
                     submitSignal = route.submitSignal,
                     savedAnchor = topicScrollNavState
                         .anchors[TopicScrollKey(route.cat, route.post, route.page)],
-                    previousPageLanding = route.previousPageLanding,
+                    // #412 — armed by onOpenPage on a strict « page - 1 » step; transient nav
+                    // state rather than a route field (Codex review on PR #420: a serialized
+                    // flag would replay the bottom landing on process/config restore).
+                    previousPageLanding = topicScrollNavState.pendingBottomLanding ==
+                        TopicScrollKey(route.cat, route.post, route.page),
                 )
                 TopicScreen(
                     request = TopicRequest(
@@ -1049,6 +1059,11 @@ private fun RedfaceNavHost(
                     restoreScrollAnchor =
                         (scrollRestoration as? TopicScrollRestoration.RestoreSaved)?.anchor,
                     startAtBottom = scrollRestoration is TopicScrollRestoration.StartAtBottom,
+                    onStartAtBottomConsumed = {
+                        // One-shot: once the screen has executed (or skipped) the bottom landing
+                        // for this page, drop the marker so it can never replay.
+                        topicScrollNavState.onPendingBottomLanding(null)
+                    },
                     onScrollAnchorSaved = { anchor ->
                         topicScrollNavState.onAnchorSaved(route.cat, route.post, route.page, anchor)
                     },
@@ -1116,6 +1131,14 @@ private fun RedfaceNavHost(
                         )
                     },
                     onOpenPage = { targetPage ->
+                        // #412 — a one-page step backwards lands at the bottom of the target page
+                        // (reading direction) unless that page has a saved anchor. Strict
+                        // « page - 1 » so pager jumps further back keep the top landing; any other
+                        // page change clears a stale marker.
+                        topicScrollNavState.onPendingBottomLanding(
+                            TopicScrollKey(route.cat, route.post, targetPage)
+                                .takeIf { targetPage == route.page - 1 },
+                        )
                         // #282 — replace the top entry IN PLACE rather than removeAt + add. The two-step
                         // version briefly leaves the parent on top (size-1), an observable intermediate
                         // state NavDisplay can start transitioning toward; an indexed set is a single
@@ -1125,10 +1148,6 @@ private fun RedfaceNavHost(
                             post = route.post,
                             page = targetPage,
                             scrollTo = null,
-                            // #412 — a one-page step backwards lands at the bottom of the target page
-                            // (reading direction) unless that page has a saved anchor. Strict
-                            // « page - 1 » so pager jumps further back keep the top landing.
-                            previousPageLanding = targetPage == route.page - 1,
                         )
                     },
                     onBack = {
