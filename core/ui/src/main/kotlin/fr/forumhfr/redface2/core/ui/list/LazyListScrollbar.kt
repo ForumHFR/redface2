@@ -1,4 +1,4 @@
-package fr.forumhfr.redface2.feature.topic
+package fr.forumhfr.redface2.core.ui.list
 
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -43,12 +43,14 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
- * #300 — intra-page position indicator + fast-scroll for a topic page.
+ * #300/#351 — intra-page position indicator + fast-scroll for a paged post list (topic page, private
+ * conversation page).
  *
- * A thin, auto-hiding scrollbar overlaid on the right edge of the topic [LazyColumn]. It shows the
+ * A thin, auto-hiding scrollbar overlaid on the right edge of a post [LazyColumn]. It shows the
  * reading position within the *current* page (between-page navigation is out of scope — #284/#283 cover
  * that) and lets the user fast-scroll by dragging the thumb. Pure UI derived from [LazyListState] — no
- * MVI/ViewModel/repository change.
+ * MVI/ViewModel/repository change. Born as the topic scrollbar (#300); moved verbatim to `:core:ui`
+ * for the private-message thread (#351, ADR-013 — share the *components*, not the screens).
  *
  * Two layers, deliberately separated (Compose pointer nodes don't share with siblings by default, so a
  * full-height pointer overlay would swallow the list's own scroll/taps on the whole right strip):
@@ -77,7 +79,7 @@ import kotlin.math.roundToInt
  * (the header card is lazy item 0), so thumb position and `scrollToItem` stay mutually consistent.
  */
 @Composable
-internal fun TopicScrollbar(
+fun LazyListScrollbar(
     listState: LazyListState,
     modifier: Modifier = Modifier,
 ) {
@@ -190,7 +192,7 @@ private fun rememberScrollbarAlpha(
             }
         }
     }
-    val alpha by animateFloatAsState(targetValue = alphaTarget, label = "topicScrollbarAlpha")
+    val alpha by animateFloatAsState(targetValue = alphaTarget, label = "lazyListScrollbarAlpha")
     return alpha
 }
 
@@ -211,7 +213,7 @@ private fun rememberScrollbarDrawOffset(
         } else {
             spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy)
         },
-        label = "topicScrollbarOffset",
+        label = "lazyListScrollbarOffset",
     )
     return offset
 }

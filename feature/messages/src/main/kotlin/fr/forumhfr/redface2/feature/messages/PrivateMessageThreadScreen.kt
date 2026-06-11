@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -24,11 +26,15 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -41,6 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
+import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import java.time.Instant
 import java.time.ZoneId
@@ -71,10 +78,29 @@ fun PrivateMessageThreadScreen(
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     val mode = state.mode
+    val listState = rememberLazyListState()
 
     LaunchedEffect(mode) {
         if (mode is PrivateMessageThreadUiState.Mode.Content) {
             onLoaded()
+        }
+    }
+
+    // #351 — one-shot effects (same idiom as TopicScreen): a keep-content load failure keeps the
+    // page on screen and surfaces a Toast inviting a retry (pull again / tap the pager again).
+    val context = LocalContext.current
+    val refreshFailedMsg = stringResource(R.string.messages_thread_refresh_failed)
+    LaunchedEffect(Unit) {
+        viewModel.effects.collect { effect ->
+            when (effect) {
+                PrivateMessageThreadEffect.RefreshFailed -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        refreshFailedMsg,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
         }
     }
 
@@ -192,14 +218,55 @@ fun PrivateMessageThreadScreen(
                     }
                 }
 
-                is PrivateMessageThreadUiState.Mode.Content -> ThreadMessages(
-                    messages = mode.thread.messages,
-                    page = state.page,
-                    totalPages = state.totalPages,
-                    onSelectPage = viewModel::selectPage,
-                )
+                is PrivateMessageThreadUiState.Mode.Content -> {
+                    ScrollToTopOnPageChange(listState = listState, renderedPage = mode.thread.page)
+                    // #335/#351 — pull-to-refresh re-fetches the displayed page; the indicator also
+                    // covers the keep-content page changes (same isRefreshing flag).
+                    PullToRefreshBox(
+                        isRefreshing = state.isRefreshing,
+                        onRefresh = viewModel::refresh,
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        // #300/#351 — same overlay layout as the topic page: the shared scrollbar
+                        // rides the right edge of the message list.
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            ThreadMessages(
+                                messages = mode.thread.messages,
+                                page = state.page,
+                                totalPages = state.totalPages,
+                                onSelectPage = viewModel::selectPage,
+                                listState = listState,
+                            )
+                            LazyListScrollbar(
+                                listState = listState,
+                                modifier = Modifier.align(Alignment.CenterEnd),
+                            )
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+/**
+ * #351 — land at the top when a NEW page replaces the kept-on-screen previous one (in-place
+ * pagination: the composition survives the page change, unlike the topic's route-driven model where
+ * a fresh screen starts at the top for free). Keyed on the RENDERED page: a same-page refresh keeps
+ * the read position. Only fires when a previous page was rendered in THIS composition and differs
+ * (Codex review on the first cut): on the first Content render the guard is still null, so a
+ * rotation / recreation with content already loaded keeps the position `rememberLazyListState` just
+ * restored instead of being yanked back to the top. Extracted from the screen host to keep it under
+ * detekt's cyclomatic-complexity threshold.
+ */
+@Composable
+private fun ScrollToTopOnPageChange(listState: LazyListState, renderedPage: Int) {
+    val lastRenderedPage = remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(renderedPage) {
+        if (lastRenderedPage.value != null && lastRenderedPage.value != renderedPage) {
+            listState.scrollToItem(0)
+        }
+        lastRenderedPage.value = renderedPage
     }
 }
 
@@ -209,8 +276,10 @@ private fun ThreadMessages(
     page: Int,
     totalPages: Int,
     onSelectPage: (Int) -> Unit,
+    listState: LazyListState,
 ) {
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),

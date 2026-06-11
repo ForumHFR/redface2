@@ -79,6 +79,8 @@ import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
+import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
+import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -773,7 +775,7 @@ internal fun TopicContent(
                                 multiQuoteSelection = multiQuoteSelection,
                                 onToggleMultiQuote = onToggleMultiQuote,
                             )
-                            TopicScrollbar(
+                            LazyListScrollbar(
                                 listState = listState,
                                 modifier = Modifier.align(Alignment.CenterEnd),
                             )
@@ -849,11 +851,11 @@ private fun TopicLoadedContent(
             // longer adds statusBarsPadding()/navigationBarsPadding() here to avoid double-insetting.
             // #282 — horizontal swipe changes page via the existing route-driven onOpenPage, with
             // drag-follow feedback: the page tracks the finger (graphicsLayer inside topicPageSwipe)
-            // and topicPageSwipeEdge paints an edge glow as the swipe arms. topicPageSwipeEdge must
+            // and pageSwipeEdgeHint (shared, :core:ui) paints an edge glow as the swipe arms. It must
             // precede topicPageSwipe so the glow draws in untranslated (screen) space.
             // Engages on horizontal slop only, so vertical scroll and the page-grid's own
             // horizontalScroll keep their gestures; edges are a damped no-op.
-            .topicPageSwipeEdge(
+            .pageSwipeEdgeHint(
                 currentPage = topic.page,
                 totalPages = { currentTotalPages },
                 dragOffset = dragOffset,

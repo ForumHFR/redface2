@@ -10,11 +10,13 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -22,6 +24,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -129,6 +132,97 @@ class PrivateMessageThreadViewModelTest {
         val state = viewModel.state.value
         assertEquals(2, state.page)
         assertTrue(state.canGoPrevious)
+    }
+
+    @Test
+    fun `selectPage keeps the displayed page on screen while the next one loads`() = runTest {
+        // #351 — in-place pagination prerequisite for the MP swipe: no full-screen spinner on a
+        // page change. The previous page stays in Content behind isRefreshing until the new page
+        // lands; page/totalPages only advance on success.
+        val repository = mockk<MessagesRepository>()
+        val pageOne = thread(page = 1, totalPages = 2)
+        val pageTwo = thread(page = 2, totalPages = 2)
+        val gate = CompletableDeferred<PrivateMessageThread>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns pageOne
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
+        } coAnswers { gate.await() }
+
+        val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
+        viewModel.selectPage(2)
+
+        // Page 2 is in flight: page 1 is still what the user sees.
+        val inFlight = viewModel.state.value
+        assertTrue(inFlight.isRefreshing)
+        assertEquals(pageOne, (inFlight.mode as PrivateMessageThreadUiState.Mode.Content).thread)
+        assertEquals(1, inFlight.page)
+
+        gate.complete(pageTwo)
+        advanceUntilIdle()
+        val landed = viewModel.state.value
+        assertFalse(landed.isRefreshing)
+        assertEquals(pageTwo, (landed.mode as PrivateMessageThreadUiState.Mode.Content).thread)
+        assertEquals(2, landed.page)
+    }
+
+    @Test
+    fun `refresh re-fetches the displayed page in place`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        val first = thread(page = 1, totalPages = 1)
+        val updated = thread(page = 1, totalPages = 2)
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns first andThen updated
+
+        val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
+        viewModel.refresh()
+
+        val state = viewModel.state.value
+        assertFalse(state.isRefreshing)
+        assertEquals(updated, (state.mode as PrivateMessageThreadUiState.Mode.Content).thread)
+        assertEquals(2, state.totalPages)
+        coVerify(exactly = 2) {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        }
+    }
+
+    @Test
+    fun `refresh failure keeps the displayed page and emits RefreshFailed`() = runTest {
+        // #351 — a keep-content load failure must NOT swap a readable conversation for the Error
+        // placeholder: the page on screen is still valid. The screen gets a one-shot Toast effect.
+        val repository = mockk<MessagesRepository>()
+        val pageOne = thread(page = 1, totalPages = 1)
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns pageOne andThenThrows IOException("offline")
+
+        val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
+        viewModel.refresh()
+
+        val state = viewModel.state.value
+        assertFalse(state.isRefreshing)
+        assertEquals(pageOne, (state.mode as PrivateMessageThreadUiState.Mode.Content).thread)
+        assertEquals(PrivateMessageThreadEffect.RefreshFailed, viewModel.effects.first())
+    }
+
+    @Test
+    fun `refresh is a no-op without loaded content`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } throws IOException("offline")
+
+        val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
+        assertTrue(viewModel.state.value.mode is PrivateMessageThreadUiState.Mode.Error)
+        viewModel.refresh()
+
+        // Initial load failed → Error mode; refresh must not fire a hidden reload (Retry is the
+        // explicit path out of Error).
+        coVerify(exactly = 1) {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        }
     }
 
     @Test
