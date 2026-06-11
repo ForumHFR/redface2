@@ -15,7 +15,11 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.withContext
@@ -43,15 +47,36 @@ class DefaultMessagesRepository @Inject constructor(
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : MessagesRepository {
 
+    // #313 — two refresh channels beyond the auth flip. `unreadRefreshTicks` is the explicit
+    // request (app-foreground) ; `inboxDerivedUnread` is the free piggyback : every page-1 inbox
+    // fetch already carries the per-conversation dots, so the badge updates the moment the user
+    // opens the Messages tab or comes back from a conversation, without a second network call.
+    // tryEmit + extraBufferCapacity=1 : ticks may fire with no collector (badge disabled) — they
+    // must never suspend or throw, and one pending tick is enough (they coalesce).
+    private val unreadRefreshTicks = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    private val inboxDerivedUnread = MutableSharedFlow<Int>(extraBufferCapacity = 1)
+
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun observeUnreadMpCount(): Flow<Int?> = authRepository.observeAuthState()
         .transformLatest { state ->
             when (state) {
                 AuthState.Anonymous -> emit(null)
-                is AuthState.Authenticated -> emit(fetchUnreadCount())
+                is AuthState.Authenticated -> {
+                    emit(fetchUnreadCount())
+                    emitAll(
+                        merge(
+                            unreadRefreshTicks.map { fetchUnreadCount() },
+                            inboxDerivedUnread,
+                        ),
+                    )
+                }
             }
         }
         .flowOn(ioDispatcher)
+
+    override fun requestUnreadRefresh() {
+        unreadRefreshTicks.tryEmit(Unit)
+    }
 
     private suspend fun fetchUnreadCount(): Int? = withContext(ioDispatcher) {
         try {
@@ -78,7 +103,14 @@ class DefaultMessagesRepository @Inject constructor(
     // call per the repository contract (cf. NetworkOnMainThreadException regression, PR #162).
     override suspend fun getPrivateMessageList(page: Int): PrivateMessageListPage =
         withContext(ioDispatcher) {
-            parser.parseList(hfrClient.getPrivateMessageListPage(page = page))
+            val result = parser.parseList(hfrClient.getPrivateMessageListPage(page = page))
+            if (page == FIRST_PAGE) {
+                // #313 — page 1 is the same proxy fetchUnreadCount uses (newest-first, unread
+                // float to the top), so its dots refresh the badge for free. Deeper pages are
+                // NOT representative (their count would clobber a real one with a partial view).
+                inboxDerivedUnread.tryEmit(result.items.count { it.hasUnread })
+            }
+            result
         }
 
     override suspend fun getPrivateMessageThread(
@@ -94,5 +126,6 @@ class DefaultMessagesRepository @Inject constructor(
 
     private companion object {
         const val LOG_TAG = "MessagesRepository"
+        const val FIRST_PAGE = 1
     }
 }

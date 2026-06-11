@@ -39,7 +39,11 @@ import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavBackStack
@@ -302,6 +306,39 @@ internal enum class TopLevelDestination(
     Messages(R.string.nav_messages, MessagesRoute),
 }
 
+/** #313 — badge cap : beyond this the badge shows « 9+ » (page-1 proxy, cf. MpUnreadBadgeViewModel). */
+private const val MAX_BADGE_COUNT = 9
+
+/**
+ * #313 — navigation item icon : the text glyph, plus the unread-MP count badge on the
+ * « Messages » destination only, and only when the ViewModel resolved a positive count
+ * ([mpUnreadCount] is null for 0/disabled/anonymous/failure). Capped at « 9+ » : page 1
+ * of the inbox is the source, an exact two-digit count carries no extra signal at badge size.
+ */
+@Composable
+private fun TopLevelDestinationIcon(destination: TopLevelDestination, mpUnreadCount: Int?) {
+    val glyph = stringResource(destination.labelRes).first().toString()
+    if (destination != TopLevelDestination.Messages || mpUnreadCount == null) {
+        Text(text = glyph)
+        return
+    }
+    BadgedBox(
+        badge = {
+            Badge {
+                Text(
+                    text = if (mpUnreadCount > MAX_BADGE_COUNT) {
+                        stringResource(R.string.nav_messages_badge_overflow)
+                    } else {
+                        mpUnreadCount.toString()
+                    },
+                )
+            }
+        },
+    ) {
+        Text(text = glyph)
+    }
+}
+
 internal data class ParsedDeepLink(
     val destination: TopLevelDestination,
     val route: RedfaceNavKey,
@@ -425,6 +462,15 @@ fun RedfaceApp(intent: Intent?) {
         // every tab (Hilt hands back the same scoped instance for an identical owner).
         val accountViewModel: AppAccountViewModel = hiltViewModel()
         val authState by accountViewModel.authState.collectAsStateWithLifecycle()
+        // #313 — unread-MP badge on the « Messages » nav item. Same shared-instance logic as the
+        // account ViewModel above. The ON_START hook refreshes the count when the app comes back
+        // to the foreground (MPs received while backgrounded) ; the first start is skipped by the
+        // ViewModel (the auth-flip fetch covers the cold start).
+        val mpBadgeViewModel: MpUnreadBadgeViewModel = hiltViewModel()
+        val mpUnreadCount by mpBadgeViewModel.unreadCount.collectAsStateWithLifecycle()
+        LifecycleEventEffect(Lifecycle.Event.ON_START) {
+            mpBadgeViewModel.onAppForegrounded()
+        }
         val reportEmailSubject = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_report_email_subject)
         val reportNoEmailClient = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_no_email_client)
         val context = LocalContext.current
@@ -506,7 +552,12 @@ fun RedfaceApp(intent: Intent?) {
                     item(
                         selected = currentDestination == destination,
                         onClick = { currentDestination = destination },
-                        icon = { Text(text = stringResource(destination.labelRes).first().toString()) },
+                        icon = {
+                            TopLevelDestinationIcon(
+                                destination = destination,
+                                mpUnreadCount = mpUnreadCount,
+                            )
+                        },
                         label = { Text(text = stringResource(destination.labelRes)) },
                     )
                 }

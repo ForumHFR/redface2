@@ -257,6 +257,10 @@ internal fun SettingsContent(
             )
 
             SettingsSectionHeader(stringResource(R.string.settings_section_mp))
+            MessagesPreferencesCard(
+                state = state,
+                onIntent = onIntent,
+            )
             FutureSettingsCard(
                 items = listOf(
                     R.string.settings_future_mp_notifications to issueTag(313),
@@ -585,6 +589,35 @@ private fun TopicPreferencesCard(
  * first shows a confirmation dialog. Persisted via DataStore and observed live by the editor
  * ViewModels, so a flip here applies without reopening an editor.
  */
+@Composable
+private fun MessagesPreferencesCard(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_mp_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_mp_unread_badge_title),
+                description = stringResource(R.string.settings_mp_unread_badge_description),
+                checked = state.mpUnreadBadge,
+                enabled = state.canToggleMpUnreadBadge,
+                onCheckedChange = { onIntent(SettingsIntent.MpUnreadBadgeChanged(it)) },
+            )
+            if (state.mpUnreadBadgeError) {
+                PreferencePersistError(R.string.settings_mp_unread_badge_persist_failed)
+            }
+        }
+    }
+}
+
 @Composable
 private fun EditingPreferencesCard(
     state: SettingsState,

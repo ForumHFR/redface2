@@ -9,6 +9,11 @@
     <string name="settings_section_topic">Sujet et lecture</string>
     <string name="settings_section_editing">Édition et publication</string>
     <string name="settings_section_mp">Messages privés</string>
+    <!-- #313 — carte « Messages privés » : badge MP non lus. -->
+    <string name="settings_mp_title">Notifications</string>
+    <string name="settings_mp_unread_badge_title">Badge de MP non lus</string>
+    <string name="settings_mp_unread_badge_description">Affiche le nombre de conversations non lues sur l\'onglet Messages. Actualisé à l\'ouverture de l\'app et à chaque visite de la liste.</string>
+    <string name="settings_mp_unread_badge_persist_failed">Impossible d\'enregistrer ce réglage pour le moment.</string>
     <string name="settings_section_hfr_account">Compte HFR</string>
     <string name="settings_section_notifications">Notifications</string>
     <string name="settings_section_accessibility">Accessibilité</string>
