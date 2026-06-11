@@ -5,8 +5,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * Covers the pure priority resolver for the initial scroll of a topic page landing (#307):
- * route `scrollTo` > post-submit landing (`submitSignal`, #344) > saved anchor > top.
+ * Covers the pure priority resolver for the initial scroll of a topic page landing (#307, #412):
+ * route `scrollTo` > post-submit landing (`submitSignal`, #344) > saved anchor >
+ * previous-page bottom (#412) > top.
  */
 class TopicScrollRestorationTest {
 
@@ -75,7 +76,58 @@ class TopicScrollRestorationTest {
     }
 
     @Test
-    fun `level 4 - a never-visited page lands at the top`() {
+    fun `level 3 - a saved anchor beats the previous-page bottom landing`() {
+        // #412 — the issue is explicit: « page précédente SANS position retenue ». A retained
+        // position is what the user wants back, whatever direction brought them here.
+        val restoration = resolveTopicScrollRestoration(
+            scrollTo = null,
+            submitSignal = null,
+            savedAnchor = savedAnchor,
+            previousPageLanding = true,
+        )
+
+        assertEquals(TopicScrollRestoration.RestoreSaved(savedAnchor), restoration)
+    }
+
+    @Test
+    fun `level 4 - previous-page navigation without a saved anchor lands at the bottom`() {
+        // #412 — reading backwards: the next posts to read are the last of the previous page.
+        val restoration = resolveTopicScrollRestoration(
+            scrollTo = null,
+            submitSignal = null,
+            savedAnchor = null,
+            previousPageLanding = true,
+        )
+
+        assertEquals(TopicScrollRestoration.StartAtBottom, restoration)
+    }
+
+    @Test
+    fun `level 1 and 2 - scrollTo and submit landings ignore the previous-page flag`() {
+        // A quote/edit submit pops back onto « page - 1 » in some flows — the scroll effects own
+        // those landings, the #412 bottom fallback must never compete with them.
+        assertEquals(
+            TopicScrollRestoration.FollowScrollTo,
+            resolveTopicScrollRestoration(
+                scrollTo = 4242,
+                submitSignal = null,
+                savedAnchor = null,
+                previousPageLanding = true,
+            ),
+        )
+        assertEquals(
+            TopicScrollRestoration.FollowSubmitLanding,
+            resolveTopicScrollRestoration(
+                scrollTo = null,
+                submitSignal = 1_000L,
+                savedAnchor = null,
+                previousPageLanding = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `level 5 - a never-visited page lands at the top`() {
         val restoration = resolveTopicScrollRestoration(
             scrollTo = null,
             submitSignal = null,

@@ -197,6 +197,15 @@ data class TopicRoute(
      * back stacks deserialise without the field.
      */
     val postSubmitOverflowLanding: Boolean = false,
+    /**
+     * #412 — `true` when this route comes from a « page précédente » navigation (chevron, FAB,
+     * swipe right — `onOpenPage` compares the target to the departing page). Reading a thread
+     * backwards means the last posts of the previous page come first: when the page has no saved
+     * anchor (#307), the screen lands at the BOTTOM instead of the top. A saved anchor still wins —
+     * the flag only replaces the `StartAtTop` fallback (cf. `resolveTopicScrollRestoration`).
+     * Default `false` keeps forward/jump navigation and older serialised back stacks unchanged.
+     */
+    val previousPageLanding: Boolean = false,
 ) : RedfaceNavKey
 
 @Serializable
@@ -1021,6 +1030,7 @@ private fun RedfaceNavHost(
                     submitSignal = route.submitSignal,
                     savedAnchor = topicScrollNavState
                         .anchors[TopicScrollKey(route.cat, route.post, route.page)],
+                    previousPageLanding = route.previousPageLanding,
                 )
                 TopicScreen(
                     request = TopicRequest(
@@ -1038,6 +1048,7 @@ private fun RedfaceNavHost(
                     },
                     restoreScrollAnchor =
                         (scrollRestoration as? TopicScrollRestoration.RestoreSaved)?.anchor,
+                    startAtBottom = scrollRestoration is TopicScrollRestoration.StartAtBottom,
                     onScrollAnchorSaved = { anchor ->
                         topicScrollNavState.onAnchorSaved(route.cat, route.post, route.page, anchor)
                     },
@@ -1114,6 +1125,10 @@ private fun RedfaceNavHost(
                             post = route.post,
                             page = targetPage,
                             scrollTo = null,
+                            // #412 — a one-page step backwards lands at the bottom of the target page
+                            // (reading direction) unless that page has a saved anchor. Strict
+                            // « page - 1 » so pager jumps further back keep the top landing.
+                            previousPageLanding = targetPage == route.page - 1,
                         )
                     },
                     onBack = {
