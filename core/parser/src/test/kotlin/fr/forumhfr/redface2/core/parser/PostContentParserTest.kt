@@ -363,11 +363,15 @@ class PostContentParserTest {
             1,
             paragraphs.size,
         )
-        val kinds = paragraphs.single().inlines.map { it::class.simpleName }
         assertEquals(
             "the empty line must survive as two consecutive LineBreaks between the Text lines",
-            listOf("Text", "LineBreak", "LineBreak", "Text"),
-            kinds,
+            listOf(
+                PostInline.Text("ligne1"),
+                PostInline.LineBreak,
+                PostInline.LineBreak,
+                PostInline.Text("ligne2"),
+            ),
+            paragraphs.single().inlines,
         )
     }
 

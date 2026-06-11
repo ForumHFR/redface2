@@ -316,8 +316,9 @@ class PostContentParser {
 
     @Suppress("CyclomaticComplexMethod")
     private fun parseInlineElement(element: Element): List<PostInline> = when (element.tagName()) {
-        // Two granularities of vertical rhythm coexist:
-        //   - top-level <br> flushes the current paragraph (handled in parseBlocks).
+        // Every <br> is an intra-paragraph LineBreak (#333/#280):
+        //   - top-level <br> joins the running paragraph in parseBlocks (it used to FLUSH it,
+        //     which split each authored line into its own block — see the comment there).
         //   - <br> nested inside any inline parent (<strong>, <a>, <span>, <font>, …) keeps
         //     the author's intra-paragraph break as an explicit LineBreak so the renderer
         //     does not silently merge the two text runs.
