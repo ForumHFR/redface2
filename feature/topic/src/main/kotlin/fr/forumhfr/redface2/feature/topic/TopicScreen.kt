@@ -939,8 +939,12 @@ private fun TopicLoadedContent(
         // « page X/Y » counter (#284) lets the reader deduce it; this says it. Reflects the
         // LOADED page (same contract as the counter): replies posted since the fetch surface
         // on the next refresh. Intermediate pages keep their natural « more below » flow.
+        // NO explicit key (Codex review): a stable key would make Lazy track the footer
+        // across an insertion — a reader parked on the marker would keep it in view while a
+        // freshly fetched post lands above the viewport, unseen. Positional identity is
+        // correct for a stateless sentinel.
         if (topic.page == topic.totalPages) {
-            item(key = "end-of-topic") {
+            item {
                 EndOfTopicFooter()
             }
         }
