@@ -1206,6 +1206,54 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `maybeAutoRefresh bypasses the throttle when a topic was opened since the last refresh`() = runTest {
+        // #378 follow-up (retours dev v118, Dintr-un lemn + bitubo) — coming back from a
+        // just-read topic must refresh even inside the 15 s window: the read changed the state.
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = FlagsViewModel(auth, flags, FakeForumRepository(), FakeUserPreferencesRepository(), clock)
+
+        vm.maybeAutoRefresh() // landing refresh, arms the throttle
+        vm.onFlagOpened() // user opens a topic from the list…
+        vm.maybeAutoRefresh() // …and comes right back (< 15 s)
+
+        assertEquals(2, flags.refreshCalls.size)
+    }
+
+    @Test
+    fun `the topic-opened bypass is consumed by the refresh it triggers`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = FlagsViewModel(auth, flags, FakeForumRepository(), FakeUserPreferencesRepository(), clock)
+
+        vm.maybeAutoRefresh()
+        vm.onFlagOpened()
+        vm.maybeAutoRefresh() // bypass consumed here
+        vm.maybeAutoRefresh() // plain re-landing without a new read — throttled again
+
+        assertEquals(2, flags.refreshCalls.size)
+    }
+
+    @Test
+    fun `a manual refresh consumes the pending topic-opened bypass`() = runTest {
+        // The pull captured the post-reading state already; the next landing inside the window
+        // must not duplicate the REST fan-out.
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = FlagsViewModel(auth, flags, FakeForumRepository(), FakeUserPreferencesRepository(), clock)
+
+        vm.maybeAutoRefresh() // arms the throttle
+        vm.onFlagOpened()
+        vm.refresh() // manual pull right after coming back
+        vm.maybeAutoRefresh() // landing inside the window, no new read since the pull
+
+        assertEquals(2, flags.refreshCalls.size)
+    }
+
+    @Test
     fun `manual refresh is never throttled by a preceding auto-refresh`() = runTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)

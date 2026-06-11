@@ -64,6 +64,14 @@ class FlagsViewModel @Inject constructor(
      */
     private var lastAutoRefreshAt: Instant? = null
 
+    /**
+     * #378 follow-up — armed by [onFlagOpened] (a topic was opened from this list), consumed by
+     * the next refresh ([maybeAutoRefresh] bypassing the throttle, or a manual [refresh] that
+     * captures the same post-reading state). Same ViewModel scoping rationale as
+     * [lastAutoRefreshAt].
+     */
+    private var flagOpenedSinceLastAutoRefresh = false
+
     private val _selectedTab = MutableStateFlow<FlagTab>(FlagTab.Cyan)
     val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
 
@@ -503,6 +511,9 @@ class FlagsViewModel @Inject constructor(
     fun refresh() {
         // Super is a placeholder with no backing FlagType — pull-to-refresh is a no-op there.
         val type = _selectedTab.value.flagType ?: return
+        // A manual refresh captures the post-reading state too, so a pending "topic was opened"
+        // bypass would only duplicate the fan-out on the next landing — consume it (#378 follow-up).
+        flagOpenedSinceLastAutoRefresh = false
         viewModelScope.launch {
             _isRefreshing.value = true
             try {
@@ -511,6 +522,19 @@ class FlagsViewModel @Inject constructor(
                 _isRefreshing.value = false
             }
         }
+    }
+
+    /**
+     * #378 follow-up (retours dev v118) — the screen calls this when the user opens a topic from
+     * the list. The next [maybeAutoRefresh] then BYPASSES the throttle window: coming back from a
+     * just-read topic is precisely when the flag state changed (the read topic should drop out of
+     * an unread-only view), and the 15 s window was eating exactly that case for fast readers
+     * ("je lis vite fait le dernier message → retour → pas de refresh"). The throttle keeps
+     * protecting the no-read round-trips (bottom-tab switches, immediate back-and-forth), which
+     * is what it was for — the REST fan-out is one GET per public category.
+     */
+    fun onFlagOpened() {
+        flagOpenedSinceLastAutoRefresh = true
     }
 
     /**
@@ -538,10 +562,18 @@ class FlagsViewModel @Inject constructor(
             if (authRepository.observeAuthState().first() !is AuthState.Authenticated) return@launch
             val now = clock.instant()
             val last = lastAutoRefreshAt
-            if (last != null && Duration.between(last, now) < AUTO_REFRESH_THROTTLE) return@launch
+            // Throttle SKIPPED when a topic was opened since the last refresh (see [onFlagOpened]):
+            // that landing is a return from a read, the state most worth refreshing.
+            val returningFromTopic = flagOpenedSinceLastAutoRefresh
+            if (!returningFromTopic && last != null && Duration.between(last, now) < AUTO_REFRESH_THROTTLE) {
+                return@launch
+            }
             // Re-check after the suspensions: a manual pull-to-refresh may have started while
             // the pref/auth reads were in flight — don't double the REST fan-out.
             if (_isRefreshing.value) return@launch
+            // Consumed by the refresh this very landing triggers — the NEXT landing without a
+            // new read falls back to the plain throttle window.
+            flagOpenedSinceLastAutoRefresh = false
             lastAutoRefreshAt = now
             _isRefreshing.value = true
             try {
