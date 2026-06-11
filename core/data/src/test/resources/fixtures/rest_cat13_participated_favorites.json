@@ -1,0 +1,162 @@
+{
+ "resource": {
+  "page": 1,
+  "results_count": 3,
+  "results_per_page": 84,
+  "resources": [
+   {
+    "id": 121657,
+    "title": "Topic des SONDAGES",
+    "last_post_date": "2026-06-11 15:39",
+    "is_closed": false,
+    "is_sticky": false,
+    "links": {
+     "forum": {
+      "linked_type": "forum",
+      "type": "link",
+      "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+     },
+     "category": {
+      "linked_type": "forum_category",
+      "type": "link",
+      "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"
+     },
+     "subcategory": {
+      "linked_type": "forum_subcategory",
+      "type": "link",
+      "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/subcategories/432/"
+     },
+     "posts": {
+      "linked_type": "list",
+      "type": "link",
+      "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/subcategories/432/topics/121657/posts/?page=1&results_per_page=40",
+      "count": 10
+     },
+     "last_author": {
+      "linked_type": "user",
+      "type": "link",
+      "href": null,
+      "title": "Pims_UTT",
+      "tns3": "mesdiscussions-1006347.png"
+     },
+     "author": {
+      "linked_type": "user",
+      "type": "link",
+      "href": null,
+      "title": "XaTriX",
+      "tns3": "mesdiscussions-54596.png"
+     }
+    },
+    "type": "topic",
+    "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/subcategories/432/topics/121657/",
+    "is_read": false,
+    "flag_owntopic": 1,
+    "last_position": 4,
+    "last_post_read_id": 74800786
+   },
+   {
+    "id": 26595,
+    "title": "Topic Aviation",
+    "last_post_date": "2026-06-11 15:34",
+    "is_closed": false,
+    "is_sticky": false,
+    "links": {
+     "forum": {
+      "linked_type": "forum",
+      "type": "link",
+      "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+     },
+     "category": {
+      "linked_type": "forum_category",
+      "type": "link",
+      "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"
+     },
+     "subcategory": {
+      "linked_type": "forum_subcategory",
+      "type": "link",
+      "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/subcategories/422/"
+     },
+     "posts": {
+      "linked_type": "list",
+      "type": "link",
+      "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/subcategories/422/topics/26595/posts/?page=4532&results_per_page=40",
+      "count": 181260
+     },
+     "last_author": {
+      "linked_type": "user",
+      "type": "link",
+      "href": null,
+      "title": "cd5",
+      "tns3": "mesdiscussions-684334.jpg"
+     },
+     "author": {
+      "linked_type": "user",
+      "type": "link",
+      "href": null,
+      "title": "floflow",
+      "tns3": "mesdiscussions-221567.jpg"
+     }
+    },
+    "type": "topic",
+    "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/subcategories/422/topics/26595/",
+    "is_read": false,
+    "flag_owntopic": 3,
+    "last_position": 181258,
+    "last_post_read_id": 74797773
+   },
+   {
+    "id": 55667,
+    "title": "Le topic de toutes les Questions (AVFFUO)",
+    "last_post_date": "2026-06-11 15:11",
+    "is_closed": false,
+    "is_sticky": false,
+    "links": {
+     "forum": {
+      "linked_type": "forum",
+      "type": "link",
+      "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+     },
+     "category": {
+      "linked_type": "forum_category",
+      "type": "link",
+      "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"
+     },
+     "subcategory": {
+      "linked_type": "forum_subcategory",
+      "type": "link",
+      "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/subcategories/432/"
+     },
+     "posts": {
+      "linked_type": "list",
+      "type": "link",
+      "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/subcategories/432/topics/55667/posts/?page=14898&results_per_page=40",
+      "count": 595908
+     },
+     "last_author": {
+      "linked_type": "user",
+      "type": "link",
+      "href": null,
+      "title": "XaTriX",
+      "tns3": "mesdiscussions-54596.png"
+     },
+     "author": {
+      "linked_type": "user",
+      "type": "link",
+      "href": null,
+      "title": "moonblood",
+      "tns3": "mesdiscussions-385923.jpg"
+     }
+    },
+    "type": "topic",
+    "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/subcategories/432/topics/55667/",
+    "is_read": true,
+    "flag_owntopic": 3,
+    "last_position": 595908,
+    "last_post_read_id": 74800762
+   }
+  ],
+  "list_type": "topic",
+  "type": "list",
+  "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/participated/?page=1&results_per_page=84"
+ }
+}

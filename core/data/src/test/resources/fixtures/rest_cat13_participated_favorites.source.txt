@@ -1,0 +1,29 @@
+Source: forum.hardware.fr — REST API (authentifié)
+Captured endpoint: GET /webservices/rest_api.php?uri=forums/hardwarefr/categories/13/topics/participated/&page=1&results_per_page=50
+Captured: 2026-06-11 avec cookies md_user/md_pass (compte du mainteneur)
+Type: topics participés (bucket `participated`) scopés cat=13 — capture de PREUVE pour le bug #384
+
+Scrub / réduction (documentés, cf. AGENTS.md § fixtures) :
+- Le payload complet listait 84 topics participés du compte ; seuls 3 topics grand public ont été
+  conservés (121657 « Topic des SONDAGES », 26595 « Topic Aviation », 55667 « AVFFUO ») pour ne pas
+  publier la liste de lecture personnelle du compte. `results_count`/`results_per_page` de
+  l'enveloppe ont été réalignés sur le subset (3) pour garder une enveloppe auto-cohérente.
+- Aucun champ supprimé à l'intérieur des lignes conservées : le shape par-ligne est verbatim.
+
+CE QUE CETTE FIXTURE PROUVE (vérifié live 2026-06-11) :
+- Le bucket `participated` renvoie AUSSI les topics participés-ET-favoris, avec
+  `flag_owntopic = 3` (26595 et 55667 ici) au lieu de 1. `flag_owntopic` indique la NATURE du
+  drapeau le plus fort posé sur le topic (3 = favori/étoile), PAS l'appartenance au bucket : le
+  bucket d'appartenance est celui de l'URL demandée.
+- Corollaire #384 : mapper `flag_owntopic` → `Flag.type` faisait persister ces lignes sous
+  FAVORITE dans Room pendant un fetch CYAN (`replaceForType(CYAN)` ne les revoit jamais),
+  d'où la liste « Mes sujets » amputée de ses favoris après un rechargement depuis Room
+  (retour de l'onglet Messages = ViewModel recréé = clearSessionCache → Room).
+- Observation connexe (non incluse dans la fixture) : le bucket `read` renvoie
+  `flag_owntopic = 0` (pas 2) pour les sujets suivis — le mapping 2=RED documenté n'a jamais été
+  observé live ; seul le fallback « type = bucket demandé » est correct.
+
+Conséquence pour Redface 2 :
+- `RestFlagMappers` type désormais chaque ligne avec le bucket demandé (paramètre `type`), sans
+  consulter `flag_owntopic`. Un futur badge « étoile » dans les listes pourra exposer
+  `flag_owntopic == 3` comme champ séparé si besoin.

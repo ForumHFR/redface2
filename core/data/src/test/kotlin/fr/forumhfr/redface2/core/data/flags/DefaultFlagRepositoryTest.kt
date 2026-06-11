@@ -93,6 +93,43 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
+    fun `a CYAN fetch persists favorited rows under CYAN - regression 384`() = runTest {
+        // Live-captured contract (rest_cat13_participated_favorites.json, 2026-06-11): the
+        // participated bucket returns participated-AND-favorited topics with flag_owntopic=3.
+        // Before the fix they were persisted under FAVORITE, so replaceForType(CYAN) never
+        // rewrote them and getFlags(CYAN) lost them on the next Room-served landing — the
+        // « liste amputée au retour de l'onglet Messages » of #384.
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, fixture("rest_cat13_participated_favorites.json"))
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+        }
+        val flagDao = stubFlagDao()
+        val repo = buildRepository(apiClient, forumRepository, flagDao = flagDao)
+
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            val success = awaitItem() as FlagsResult.Success
+            assertEquals(3, success.flags.size)
+            assertTrue(
+                "in-memory list types every row with the requested bucket",
+                success.flags.all { it.type == FlagType.CYAN },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        coVerify {
+            flagDao.replaceForType(
+                userId = "xat",
+                type = FlagType.CYAN,
+                rows = match { rows ->
+                    rows.size == 3 && rows.all { it.type == FlagType.CYAN } &&
+                        rows.map { it.topicId }.containsAll(listOf(26595, 55667, 121657))
+                },
+            )
+        }
+    }
+
+    @Test
     fun `observe emits Failure when the network throws`() = runTest {
         val apiClient = mockk<HfrApiClient>()
         coEvery {
