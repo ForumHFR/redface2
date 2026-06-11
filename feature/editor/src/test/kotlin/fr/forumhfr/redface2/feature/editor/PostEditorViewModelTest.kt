@@ -354,6 +354,95 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `multi-quote VM concatenates the prefills in selection order (#291)`() = runTest {
+        // One #146 form fetch per quoted post — the FIRST carries the session form (hash_check),
+        // the extras only contribute their prefill. HFR prefills end with a trailing blank line;
+        // the merge must keep ONE blank line between quotes and one after the last.
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+            303 to Result.success(authenticatedForm(initialContent = "[quotemsg=303,3,9]c[/quotemsg]\n\n")),
+            202 to Result.success(authenticatedForm(initialContent = "[quotemsg=202,2,9]b[/quotemsg]\n\n")),
+        )
+
+        // Selection order 101 → 303 → 202 is deliberately NOT post order.
+        val viewModel = newReplyViewModel(
+            quotedNumreponse = 101,
+            quoteRef = 0,
+            extraQuoteNumreponses = listOf(303, 202),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("one fetch per quoted post", 3, replyRepository.formFetches)
+        assertEquals(
+            "extras must replay the quote contract with the numreponse swapped (no stale quoteRef)",
+            listOf(101 to 0, 303 to null, 202 to null),
+            replyRepository.fetchedContexts.map { it.quotedNumreponse to it.quoteRef },
+        )
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertFalse("Form must be fully loaded", settled.isLoadingForm)
+            assertEquals(
+                "prefills concatenated in SELECTION order, single blank line between quotes",
+                "[quotemsg=101,1,9]a[/quotemsg]\n\n" +
+                    "[quotemsg=303,3,9]c[/quotemsg]\n\n" +
+                    "[quotemsg=202,2,9]b[/quotemsg]\n\n",
+                settled.draft.text,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `multi-quote VM fails the whole fetch when one extra quote fails (#291)`() = runTest {
+        // Silently dropping a quote the user explicitly selected would be worse than the
+        // retryable form-fetch error, so a failed extra fails the load.
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+            303 to Result.failure(java.io.IOException("boom")),
+        )
+
+        val viewModel = newReplyViewModel(
+            quotedNumreponse = 101,
+            quoteRef = null,
+            extraQuoteNumreponses = listOf(303),
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertFalse(settled.isLoadingForm)
+            assertEquals("draft must not hydrate from a partial multi-quote", "", settled.draft.text)
+            assertEquals(SubmitError.Network, settled.submitError)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `multi-quote VM fails the whole fetch when a prefill comes back blank (#291)`() = runTest {
+        // A 200-OK form whose textarea prefill is EMPTY would otherwise silently drop a quote
+        // the user explicitly selected — same contract as a failed extra: fail globally.
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "[quotemsg=101,1,9]a[/quotemsg]\n\n")),
+            303 to Result.success(authenticatedForm(initialContent = "")),
+        )
+
+        val viewModel = newReplyViewModel(
+            quotedNumreponse = 101,
+            quoteRef = null,
+            extraQuoteNumreponses = listOf(303),
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertFalse(settled.isLoadingForm)
+            assertEquals("draft must not hydrate from a partial multi-quote", "", settled.draft.text)
+            assertEquals(SubmitError.Hfr(ReplyFailureReason.Unknown), settled.submitError)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `quote VM does not overwrite a draft the user already typed`() = runTest {
         // User-typed content lands on the VM before the form fetch completes —
         // we gate the fetch with a CompletableDeferred so we can interleave them
@@ -666,10 +755,12 @@ class PostEditorViewModelTest {
         }
     }
 
+    @Suppress("LongParameterList") // test helper: every param is an optional, defaulted scenario knob.
     private fun newReplyViewModel(
         subcat: Int? = SAMPLE_SUBCAT,
         quotedNumreponse: Int? = null,
         quoteRef: Int? = null,
+        extraQuoteNumreponses: List<Int> = emptyList(),
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
     ): PostEditorViewModel =
@@ -683,6 +774,7 @@ class PostEditorViewModelTest {
                 subcat = subcat,
                 quotedNumreponse = quotedNumreponse,
                 quoteRef = quoteRef,
+                extraQuoteNumreponses = extraQuoteNumreponses,
             ),
             previewParser = previewParser,
             replyRepository = replyRepository,
@@ -1130,12 +1222,19 @@ class PostEditorViewModelTest {
         var lastSubmittedBbcode: String? = null
             private set
 
+        // #291 — per-numrep responses for the multi-quote pipeline; falls back to [formResult]
+        // when the quoted numreponse has no dedicated entry (single-quote / plain-reply tests).
+        var formResultsByNumrep: Map<Int, Result<ReplyForm>> = emptyMap()
+        val fetchedContexts: MutableList<ReplyContext> = mutableListOf()
+
         override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
             formFetches += 1
             lastFetchedContext = context
+            fetchedContexts += context
             formGate?.await()
             formException?.let { throw it }
-            return formResult.getOrThrow()
+            val dedicated = context.quotedNumreponse?.let(formResultsByNumrep::get)
+            return (dedicated ?: formResult).getOrThrow()
         }
 
         var lastSubmittedOptions: fr.forumhfr.redface2.core.model.write.ReplyFormOptions? = null
