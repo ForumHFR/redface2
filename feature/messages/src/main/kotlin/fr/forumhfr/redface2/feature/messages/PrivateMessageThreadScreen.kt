@@ -30,6 +30,8 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -217,13 +219,7 @@ fun PrivateMessageThreadScreen(
                 }
 
                 is PrivateMessageThreadUiState.Mode.Content -> {
-                    // #351 — land at the top when a NEW page replaces the kept-on-screen previous
-                    // one (in-place pagination: the composition survives the page change, unlike the
-                    // topic's route-driven model where a fresh screen starts at the top for free).
-                    // Keyed on the RENDERED page: a same-page refresh keeps the read position.
-                    LaunchedEffect(mode.thread.page) {
-                        listState.scrollToItem(0)
-                    }
+                    ScrollToTopOnPageChange(listState = listState, renderedPage = mode.thread.page)
                     // #335/#351 — pull-to-refresh re-fetches the displayed page; the indicator also
                     // covers the keep-content page changes (same isRefreshing flag).
                     PullToRefreshBox(
@@ -250,6 +246,27 @@ fun PrivateMessageThreadScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * #351 — land at the top when a NEW page replaces the kept-on-screen previous one (in-place
+ * pagination: the composition survives the page change, unlike the topic's route-driven model where
+ * a fresh screen starts at the top for free). Keyed on the RENDERED page: a same-page refresh keeps
+ * the read position. Only fires when a previous page was rendered in THIS composition and differs
+ * (Codex review on the first cut): on the first Content render the guard is still null, so a
+ * rotation / recreation with content already loaded keeps the position `rememberLazyListState` just
+ * restored instead of being yanked back to the top. Extracted from the screen host to keep it under
+ * detekt's cyclomatic-complexity threshold.
+ */
+@Composable
+private fun ScrollToTopOnPageChange(listState: LazyListState, renderedPage: Int) {
+    val lastRenderedPage = remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(renderedPage) {
+        if (lastRenderedPage.value != null && lastRenderedPage.value != renderedPage) {
+            listState.scrollToItem(0)
+        }
+        lastRenderedPage.value = renderedPage
     }
 }
 
