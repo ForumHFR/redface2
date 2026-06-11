@@ -25,6 +25,8 @@
     <string name="topic_caption">post %1$d • page %2$d / %3$d</string>
     <string name="topic_post_index_prefix">#%1$d • </string>
     <!-- #362 — per-post contextual menu (post number, permalink copy, edit marker, citations). -->
+    <!-- #436 — pastille de la bande d'identité quand le post est au panier multi-quote (#291). -->
+    <string name="topic_post_multiquote_selected">Ajouté à la citation</string>
     <string name="topic_post_menu_action">Options du post</string>
     <string name="topic_post_menu_number">Post n°%1$d</string>
     <string name="topic_post_menu_copy_link">Copier le lien de ce post</string>
