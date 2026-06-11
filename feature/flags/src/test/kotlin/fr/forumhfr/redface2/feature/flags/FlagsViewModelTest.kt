@@ -1188,6 +1188,24 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `tabUnreadFilter pairs each filter value with the tab that produced it`() = runTest {
+        // #385/#421 — a tab switch must never be observable as « new tab + previous tab's
+        // filter »: each emission carries the tab its unreadOnly value was resolved FOR.
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        vm.tabUnreadFilter.test {
+            // Initial: Cyan with its type-aware default (unread-only ON).
+            assertEquals(FlagTab.Cyan to true, awaitItem())
+            vm.selectTab(FlagTab.Red)
+            // The RED emission carries RED's own resolved default (false) — atomically.
+            assertEquals(FlagTab.Red to false, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `manual refresh is never throttled by a preceding auto-refresh`() = runTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)

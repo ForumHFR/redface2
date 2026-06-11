@@ -3,12 +3,17 @@ package fr.forumhfr.redface2.core.model
 /**
  * One row of the user's HFR drapeaux page. Phase 1D-1 reads this from the REST API
  * (`forums/hardwarefr/topics/{participated,read,favorites}/`) per ADR-003 — `forum1f.php`
- * HTML scraping has been retired. HFR exposes three drapeau buckets, mapped 1:1 to the
- * REST `flag_owntopic` integer :
+ * HTML scraping has been retired. HFR exposes three drapeau buckets:
  *
- * - `flag_owntopic=1` → [FlagType.CYAN] — sujets participés
- * - `flag_owntopic=2` → [FlagType.RED] — lus uniquement
- * - `flag_owntopic=3` → [FlagType.FAVORITE] — favoris
+ * - `participated/` → [FlagType.CYAN] — sujets participés
+ * - `read/` → [FlagType.RED] — lus uniquement
+ * - `favorites/` → [FlagType.FAVORITE] — favoris
+ *
+ * [type] is the **bucket the row was fetched from**, NOT the REST `flag_owntopic` integer.
+ * Live-verified 2026-06-11 (#384, fixture `rest_cat13_participated_favorites.json`): the
+ * `participated` bucket returns participated-AND-favorited topics with `flag_owntopic=3`, and
+ * the `read` bucket returns `flag_owntopic=0` — the field describes the strongest flag ON the
+ * topic, not bucket membership. Mapping it to [type] corrupted the per-type Room cache.
  *
  * Differences with the legacy HTML model :
  * - `views` was sourced from a column on `forum1f.php`. The REST flag listings do not

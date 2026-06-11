@@ -128,9 +128,9 @@ fun FlagsRoute(
     // #385 — hoisted list state + scroll-to-top when the unread filter flips (cf.
     // FilterFlipScrollResetEffect).
     val flagsListState = rememberLazyListState()
+    val tabUnreadFilter by viewModel.tabUnreadFilter.collectAsStateWithLifecycle()
     FilterFlipScrollResetEffect(
-        selectedTab = selectedTab,
-        unreadOnly = flagsViewSettings.unreadOnly,
+        tabUnreadFilter = tabUnreadFilter,
         listState = flagsListState,
     )
 
@@ -666,22 +666,26 @@ private fun ColumnScope.AuthenticatedBody(
  * anchors on the first VISIBLE item's key, so rows inserted above it (read topics re-shown)
  * require a manual scroll up to be discovered. Reset the hoisted [listState] to the top when the
  * « non-lus uniquement » filter flips ON THE SAME TAB — the user just asked for a different topic
- * set, show it from the start. Tab switches keep the current behaviour (no reset): only a same-tab
- * flip triggers, hence the (tab, unreadOnly) pair comparison instead of a plain key on
- * [unreadOnly] (which changes on tab switches too — the per-tab #317 setting is what
- * `flagsViewSettings` resolves).
+ * set, show it from the start. Tab switches keep the current behaviour (no reset).
+ *
+ * [tabUnreadFilter] is the ViewModel's ATOMIC (tab, unreadOnly) pair — each filter value is
+ * pinned to the tab that produced it (`flatMapLatest`), so a tab switch can never be observed as
+ * « new tab + stale filter » then « new tab + real filter », which this effect would misread as a
+ * same-tab flip and reset the scroll on every switch (Codex review on PR #421).
  */
 @Composable
 private fun FilterFlipScrollResetEffect(
-    selectedTab: FlagTab,
-    unreadOnly: Boolean,
+    tabUnreadFilter: Pair<FlagTab, Boolean>,
     listState: LazyListState,
 ) {
     var lastFilterByTab by remember { mutableStateOf<Pair<FlagTab, Boolean>?>(null) }
-    LaunchedEffect(selectedTab, unreadOnly) {
+    LaunchedEffect(tabUnreadFilter) {
         val previous = lastFilterByTab
-        lastFilterByTab = selectedTab to unreadOnly
-        if (previous != null && previous.first == selectedTab && previous.second != unreadOnly) {
+        lastFilterByTab = tabUnreadFilter
+        if (previous != null &&
+            previous.first == tabUnreadFilter.first &&
+            previous.second != tabUnreadFilter.second
+        ) {
             listState.scrollToItem(0)
         }
     }

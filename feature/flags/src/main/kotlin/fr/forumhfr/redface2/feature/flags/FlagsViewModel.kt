@@ -163,6 +163,31 @@ class FlagsViewModel @Inject constructor(
         )
 
     /**
+     * #385 — the selected tab and ITS resolved « non-lus uniquement » value as one atomic
+     * emission, for the screen's filter-flip scroll reset. The screen must never compare a new
+     * tab against the previous tab's filter value: collecting [selectedTab] and the resolved
+     * settings as two separate states lets Compose observe « new tab + stale filter » then
+     * « new tab + real filter » — a phantom same-tab flip that would reset the scroll on every
+     * tab switch (Codex review on PR #421). `flatMapLatest` pins each filter emission to the
+     * tab that produced it, so consecutive emissions with the same tab are real flips only.
+     * Placeholder tabs (Super/DT) emit `false` — they have no list, the value is inert.
+     */
+    val tabUnreadFilter: StateFlow<Pair<FlagTab, Boolean>> = selectedTab
+        .flatMapLatest { tab ->
+            when (val type = tab.flagType) {
+                null -> flowOf(tab to false)
+                else -> userPreferencesRepository.observeFlagsViewSettings(type)
+                    .map { tab to it.unreadOnly }
+            }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            // Type-aware seed mirroring flagsViewSettings: CYAN defaults to unread-only.
+            initialValue = _selectedTab.value to (_selectedTab.value == FlagTab.Cyan),
+        )
+
+    /**
      * Optimistic shim for CYAN's « non-lus uniquement » value (#317), mirroring
      * [pendingPerTabOverride]. The « +lus » re-tap is the ONLY read-then-flip site, and it is always
      * CYAN — so the shim is deliberately CYAN-scoped (RED/FAVORITE writes never touch it, so a
@@ -503,7 +528,10 @@ class FlagsViewModel @Inject constructor(
      *   throttle (it goes straight through [refresh]).
      */
     fun maybeAutoRefresh() {
-        if (_selectedTab.value.flagType == null) return
+        // Snapshot the tab at CALL time (the landing being refreshed) — re-reading it after the
+        // suspension points below could refresh a different tab than the one that landed, or
+        // no-op on a placeholder while still arming the throttle (Codex review on PR #421).
+        val type = _selectedTab.value.flagType ?: return
         if (_isRefreshing.value) return
         viewModelScope.launch {
             if (!userPreferencesRepository.observeFlagsAutoRefresh().first()) return@launch
@@ -511,8 +539,16 @@ class FlagsViewModel @Inject constructor(
             val now = clock.instant()
             val last = lastAutoRefreshAt
             if (last != null && Duration.between(last, now) < AUTO_REFRESH_THROTTLE) return@launch
+            // Re-check after the suspensions: a manual pull-to-refresh may have started while
+            // the pref/auth reads were in flight — don't double the REST fan-out.
+            if (_isRefreshing.value) return@launch
             lastAutoRefreshAt = now
-            refresh()
+            _isRefreshing.value = true
+            try {
+                flagRepository.refresh(type)
+            } finally {
+                _isRefreshing.value = false
+            }
         }
     }
 
