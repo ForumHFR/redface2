@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.navigation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import javax.inject.Inject
@@ -15,23 +16,25 @@ import kotlinx.coroutines.flow.stateIn
  * [RedfaceApp] can compute the effective dark theme passed to `RedfaceTheme` (which previously
  * only read `isSystemInDarkTheme()`).
  *
- * [SharingStarted.Eagerly] so the first DataStore read starts as soon as the ViewModel is created,
- * keeping the initial-default window as short as possible. The default ([ThemeMode.SYSTEM] / amoled
- * off) is shown until that first read resolves — a brief flash (not a single frame) that only a user
- * who forced a non-SYSTEM mode differing from the OS can perceive on a cold start. Acceptable for the
- * default-SYSTEM majority; a dedicated `Loading` gate is the follow-up if that cold-start flash ever
- * becomes a complaint.
+ * [SharingStarted.Eagerly] so the first DataStore read starts as soon as the ViewModel is created.
+ * Until it resolves, the initial value comes from the SYNCHRONOUS [ThemeBootstrapStore] mirror —
+ * not a hard-coded SYSTEM default — so a user who forced a theme against the OS no longer sees
+ * the OS theme flash on a cold start (#386). MainActivity seeds the window background from the
+ * same mirror, covering the pre-first-frame window too.
  */
 @HiltViewModel
 class AppThemeViewModel @Inject constructor(
     userPreferencesRepository: UserPreferencesRepository,
+    themeBootstrapStore: ThemeBootstrapStore,
 ) : ViewModel() {
+
+    private val bootstrap = themeBootstrapStore.read()
 
     val themeMode: StateFlow<ThemeMode> =
         userPreferencesRepository.observeThemeMode()
-            .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.SYSTEM)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, bootstrap.themeMode)
 
     val amoledEnabled: StateFlow<Boolean> =
         userPreferencesRepository.observeAmoledEnabled()
-            .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, bootstrap.amoledEnabled)
 }
