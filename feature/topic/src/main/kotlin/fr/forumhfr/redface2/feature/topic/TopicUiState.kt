@@ -40,6 +40,12 @@ data class TopicUiState(
      */
     val showPageFabs: Boolean = true,
     /**
+     * #456 — mirrors `UserPreferencesRepository.observeTopicPollsExpanded()`. Seeds the poll
+     * card's initial revealed state; the in-card « afficher / masquer » toggle stays per-topic.
+     * Default `false`: polls start collapsed.
+     */
+    val pollsExpandedDefault: Boolean = false,
+    /**
      * #335 — `true` while a manual pull-to-refresh of the current page is in flight. Drives the
      * Material3 `PullToRefreshBox` spinner. Set on the `Refresh` intent, cleared in the refresh
      * coroutine's `finally` (so a cancellation — e.g. a delete starting mid-refresh — never leaves

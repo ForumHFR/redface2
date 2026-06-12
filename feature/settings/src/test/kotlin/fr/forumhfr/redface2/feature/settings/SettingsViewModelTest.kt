@@ -1113,6 +1113,10 @@ class SettingsViewModelTest {
             mpUnreadBadge.value = enabled
         }
 
+        override fun observeTopicPollsExpanded(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
+
         fun emitMpUnreadBadge(value: Boolean) {
             mpUnreadBadge.value = value
         }

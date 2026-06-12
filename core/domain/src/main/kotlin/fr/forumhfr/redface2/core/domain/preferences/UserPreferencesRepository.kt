@@ -187,6 +187,18 @@ interface UserPreferencesRepository {
     suspend fun setTopicPageFabs(enabled: Boolean)
 
     /**
+     * #456 — whether topic polls render EXPANDED by default. Default `false` (collapsed to the
+     * one-line « Sondage — afficher » card): most readers scroll past the poll, and a long
+     * option list pushes the first post below the fold. The per-topic reveal toggle in the
+     * poll card keeps working either way — this only seeds its initial state. Observed by
+     * `:feature:topic`, toggled in Settings.
+     */
+    fun observeTopicPollsExpanded(): Flow<Boolean>
+
+    /** Persists [observeTopicPollsExpanded]. Default `false` until the first call. */
+    suspend fun setTopicPollsExpanded(enabled: Boolean)
+
+    /**
      * #313 — unread-MP badge on the « Messages » destination of the navigation bar. When
      * `true` (default) the badge shows the count of unread conversations for the authenticated
      * session ; `false` hides it entirely (no fetch is saved — the underlying count flow is

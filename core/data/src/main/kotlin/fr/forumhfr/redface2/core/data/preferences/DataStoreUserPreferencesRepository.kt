@@ -272,6 +272,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeTopicPollsExpanded(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#456): polls start collapsed — the in-card toggle still reveals
+            // them per topic; this preference only seeds the initial state.
+            .map { prefs -> prefs[KEY_TOPIC_POLLS_EXPANDED] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setTopicPollsExpanded(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_TOPIC_POLLS_EXPANDED] = enabled
+            }
+        }
+    }
+
     override fun observeMpUnreadBadge(): Flow<Boolean> =
         dataStore.data
             // Default `true` (#313): the badge is the feature; opting OUT is the preference.
@@ -386,5 +402,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FLAGS_AUTO_REFRESH = booleanPreferencesKey("flags_auto_refresh")
         val KEY_TOPIC_PAGE_FABS = booleanPreferencesKey("topic_page_fabs")
         val KEY_MP_UNREAD_BADGE = booleanPreferencesKey("mp_unread_badge")
+
+        // #456 — polls expanded by default in topic reading (default false = collapsed).
+        val KEY_TOPIC_POLLS_EXPANDED = booleanPreferencesKey("topic_polls_expanded")
     }
 }

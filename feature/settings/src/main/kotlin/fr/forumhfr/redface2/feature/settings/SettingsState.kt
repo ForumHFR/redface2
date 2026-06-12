@@ -89,6 +89,12 @@ data class SettingsState(
     val isUpdatingMpUnreadBadge: Boolean = false,
     val mpUnreadBadgeError: Boolean = false,
     val mpUnreadBadgeTouchedLocally: Boolean = false,
+    // #456 — sondages dépliés par défaut dans la lecture de sujet. Default FALSE (repliés) :
+    // la carte reste dépliable/repliable par sujet, le réglage ne sème que l'état initial.
+    val topicPollsExpanded: Boolean = false,
+    val isUpdatingTopicPollsExpanded: Boolean = false,
+    val topicPollsExpandedError: Boolean = false,
+    val topicPollsExpandedTouchedLocally: Boolean = false,
     // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
     // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
     // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
@@ -151,6 +157,10 @@ data class SettingsState(
 
     val canToggleMpUnreadBadge: Boolean
         get() = !isUpdatingMpUnreadBadge
+
+    // #456 — the polls toggle is gated only by its own write.
+    val canToggleTopicPollsExpanded: Boolean
+        get() = !isUpdatingTopicPollsExpanded
 
     // #312 — the confirm-before-posting toggle is gated only by its own write.
     val canToggleConfirmBeforePosting: Boolean
@@ -241,6 +251,9 @@ sealed interface SettingsIntent {
 
     /** #313 — badge MP non lus (barre de navigation). */
     data class MpUnreadBadgeChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #456 — sondages dépliés par défaut dans la lecture de sujet. */
+    data class TopicPollsExpandedChanged(val enabled: Boolean) : SettingsIntent
 
     // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
     // the boolean is the desired post-flip state.

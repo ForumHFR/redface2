@@ -115,6 +115,13 @@ class TopicViewModel @AssistedInject constructor(
                 _state.update { it.copy(showPageFabs = enabled) }
             }
             .launchIn(viewModelScope)
+        // #456 — mirror the polls-expanded preference: seeds the poll card's initial revealed
+        // state (the in-card toggle stays per-topic on top of it).
+        userPreferencesRepository.observeTopicPollsExpanded()
+            .onEach { expanded ->
+                _state.update { it.copy(pollsExpandedDefault = expanded) }
+            }
+            .launchIn(viewModelScope)
     }
 
     fun send(intent: TopicIntent) {

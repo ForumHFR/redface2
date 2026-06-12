@@ -447,6 +447,25 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `state pollsExpandedDefault reflects the user preference (#456)`() = runTest {
+        val collapsed = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicPollsExpanded = false),
+        )
+        assertEquals(false, collapsed.state.value.pollsExpandedDefault)
+
+        val expanded = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicPollsExpanded = true),
+        )
+        assertEquals(true, expanded.state.value.pollsExpandedDefault)
+    }
+
+    @Test
     fun `DeletePost success emits PostDeleted and force-refreshes the current page (#292)`() = runTest {
         // Page 2 so the editable post 777 is NOT the first post (the FP lives on page 1 and is
         // excluded from deletion). Editable + authenticated + canReply → the VM gate lets it through.
@@ -1287,6 +1306,7 @@ private class FakeStreamingTopicRepository(
 private class FakeUserPreferencesRepository(
     private val topicTopBarAutoHide: Boolean = false,
     private val topicPageFabs: Boolean = true,
+    private val topicPollsExpanded: Boolean = false,
 ) : UserPreferencesRepository {
     override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
 
@@ -1351,4 +1371,8 @@ private class FakeUserPreferencesRepository(
     override fun observeMpUnreadBadge(): Flow<Boolean> = MutableStateFlow(true)
 
     override suspend fun setMpUnreadBadge(enabled: Boolean) = Unit
+
+    override fun observeTopicPollsExpanded(): Flow<Boolean> = MutableStateFlow(topicPollsExpanded)
+
+    override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
 }
