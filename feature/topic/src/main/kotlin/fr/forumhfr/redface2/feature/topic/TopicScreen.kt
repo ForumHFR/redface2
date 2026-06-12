@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -973,6 +974,8 @@ private fun TopicLoadedContent(
                 onEdit = editAction,
                 onOpenProfile = profileAction,
                 onOpenMenu = { menuPost = post },
+                // #436 — same membership source as the menu entry (PostMenuSheet).
+                multiQuoteSelected = post.numreponse in multiQuoteSelection,
             )
         }
         // #379 — explicit end-of-topic marker after the last post of the LAST page. The
@@ -1323,8 +1326,21 @@ private fun TopicPostCard(
      * of the header bar), permalink copy, edit marker, citation count.
      */
     onOpenMenu: () -> Unit = {},
+    /**
+     * #436 — true when this post sits in the multi-quote basket (#291). Marks the card with a
+     * primary border + an « Ajouté à la citation » pill in the identity band, so the selection
+     * is visible without opening the per-post menu (dev feedback by Dintr-un lemn). Orthogonal
+     * to [highlighted] (the scroll anchor) : both can be true at once, the border and the
+     * container tint compose without colliding.
+     */
+    multiQuoteSelected: Boolean = false,
 ) {
     Card(
+        border = if (multiQuoteSelected) {
+            BorderStroke(width = 2.dp, color = MaterialTheme.colorScheme.primary)
+        } else {
+            null
+        },
         colors = CardDefaults.cardColors(
             containerColor = if (highlighted) {
                 MaterialTheme.colorScheme.secondaryContainer
@@ -1454,6 +1470,23 @@ private fun TopicPostCard(
                                 ),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                    if (multiQuoteSelected) {
+                        // #436 — basket-membership pill, same shape family as the #239 pill above.
+                        // primaryContainer : distinct from the band (secondaryContainer) AND from a
+                        // highlighted band (tertiaryContainer), and it echoes the primary border so
+                        // the two marks read as one signal.
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.topic_post_multiquote_selected),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             )
                         }
