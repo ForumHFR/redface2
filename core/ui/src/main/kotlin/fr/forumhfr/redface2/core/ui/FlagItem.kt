@@ -2,11 +2,11 @@ package fr.forumhfr.redface2.core.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -38,20 +38,19 @@ import fr.forumhfr.redface2.core.ui.theme.FlagPalette
  * because `:core:ui` has no localized resources of its own — keeping the i18n boundary
  * clean per the convention recorded in `docs/guides/contributing.md`.
  *
- * [trailingAction] is an optional slot at the end of the row for an inline affordance (e.g.
- * an overflow / quick action). When present, the title column takes the remaining width via
- * `weight(1f)` so the action stays pinned to the right and the text ellipsises instead of
- * overlapping it. When absent (default), the column fills the row as before.
- *
  * [FlagMetadata.end] is an optional end-aligned segment of the footer line (#325
  * follow-up: the last-reply timestamp). It is NEVER truncated — the start segment takes
  * the remaining width and ellipsises instead, so on narrow screens the date survives and
  * the author/pagination clip first (dogfooding feedback on v102: the timestamp, placed
  * last in a single string, was the part being cut off).
  *
- * Note (#99): the « Retirer le drapeau » affordance is no longer an inline `trailingAction`
- * button — `:feature:flags` now wraps this row in a Material 3 `SwipeToDismissBox`
- * (swipe-to-remove + confirmation dialog). The slot is kept for future inline actions.
+ * Note (#99 → #457): the « Retirer le drapeau » affordance went from an inline trailing button
+ * to a `SwipeToDismissBox` (#99), then to a **long-press** ([longPress], #457) — the horizontal
+ * swipe now changes the flag tab, so a row-level horizontal gesture would steal it. The
+ * never-consumed `trailingAction` slot was dropped in the same change (detekt parameter budget).
+ *
+ * [longPress] is optional so the other consumers of this row keep the plain tap behaviour;
+ * when null the row uses [clickable] unchanged (no long-press semantics advertised at all).
  */
 @Composable
 fun FlagItem(
@@ -59,19 +58,28 @@ fun FlagItem(
     metadata: FlagMetadata,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    trailingAction: (@Composable RowScope.() -> Unit)? = null,
+    longPress: FlagItemLongPress? = null,
 ) {
+    val rowInteraction = if (longPress != null) {
+        Modifier.combinedClickable(
+            onLongClick = longPress.onLongPress,
+            onLongClickLabel = longPress.label,
+            onClick = onClick,
+        )
+    } else {
+        Modifier.clickable(onClick = onClick)
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .then(rowInteraction)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         FlagDot(type = flag.type, isFavorite = flag.isFavorite, hasUnread = flag.hasUnread)
         Column(
-            modifier = if (trailingAction != null) Modifier.weight(1f) else Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
@@ -109,7 +117,6 @@ fun FlagItem(
                 }
             }
         }
-        trailingAction?.invoke(this)
     }
 }
 
@@ -117,6 +124,15 @@ fun FlagItem(
  * Bottom divider mirroring the visual rhythm of HFR topic listings. Exposed separately
  * from [FlagItem] so callers can choose whether to draw it (e.g. last item of a page).
  */
+/**
+ * Optional long-press affordance of a [FlagItem] row (#457). [label] doubles as the
+ * accessibility `onLongClickLabel` announced for the long-press action.
+ */
+data class FlagItemLongPress(
+    val label: String,
+    val onLongPress: () -> Unit,
+)
+
 @Composable
 fun FlagItemDivider(modifier: Modifier = Modifier) {
     HorizontalDivider(
