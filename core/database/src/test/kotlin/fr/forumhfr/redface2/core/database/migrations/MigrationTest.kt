@@ -22,8 +22,10 @@ import org.robolectric.annotation.Config
  * Robolectric-driven migration tests for every hand-written Room migration in the schema
  * — currently `MIGRATION_1_2`, `MIGRATION_2_3`, `MIGRATION_3_4`, `MIGRATION_4_5`,
  * `MIGRATION_5_6` (Phase 2 finish #208 added `Post.profileId` in v6), `MIGRATION_6_7`
- * (#213 added `Topic.canReply` in v7) and `MIGRATION_7_8` (#362 added `Post.editedAt`
- * in v8). Without these tests a typo (missing column, wrong index name, wrong default)
+ * (#213 added `Topic.canReply` in v7), `MIGRATION_7_8` (#362 added `Post.editedAt`
+ * in v8), `MIGRATION_8_9` (#384 follow-up added `FlagTopic.isFavorite` in v9) and
+ * `MIGRATION_9_10` (#430 added the `mp_read_positions` table in v10).
+ * Without these tests a typo (missing column, wrong index name, wrong default)
  * would only crash on a real upgrade-in-place install, where the diagnostic loop is
  * days long. The tests take seconds.
  */
@@ -116,6 +118,7 @@ class MigrationTest {
                 MIGRATION_6_7,
                 MIGRATION_7_8,
                 MIGRATION_8_9,
+                MIGRATION_9_10,
             )
             .build()
 
@@ -255,6 +258,7 @@ class MigrationTest {
                 MIGRATION_6_7,
                 MIGRATION_7_8,
                 MIGRATION_8_9,
+                MIGRATION_9_10,
             )
             .build()
 
@@ -354,6 +358,7 @@ class MigrationTest {
                 MIGRATION_6_7,
                 MIGRATION_7_8,
                 MIGRATION_8_9,
+                MIGRATION_9_10,
             )
             .build()
 
@@ -425,6 +430,7 @@ class MigrationTest {
                 MIGRATION_6_7,
                 MIGRATION_7_8,
                 MIGRATION_8_9,
+                MIGRATION_9_10,
             )
             .build()
 
@@ -492,6 +498,7 @@ class MigrationTest {
                 MIGRATION_6_7,
                 MIGRATION_7_8,
                 MIGRATION_8_9,
+                MIGRATION_9_10,
             )
             .build()
 
@@ -550,6 +557,7 @@ class MigrationTest {
                 MIGRATION_6_7,
                 MIGRATION_7_8,
                 MIGRATION_8_9,
+                MIGRATION_9_10,
             )
             .build()
 
@@ -622,6 +630,7 @@ class MigrationTest {
                 MIGRATION_6_7,
                 MIGRATION_7_8,
                 MIGRATION_8_9,
+                MIGRATION_9_10,
             )
             .build()
 
@@ -681,6 +690,7 @@ class MigrationTest {
                 MIGRATION_6_7,
                 MIGRATION_7_8,
                 MIGRATION_8_9,
+                MIGRATION_9_10,
             )
             .build()
 
@@ -690,6 +700,59 @@ class MigrationTest {
             ).use { cursor ->
                 assertTrue("pre-v9 flag row must survive MIGRATION_8_9", cursor.moveToFirst())
                 assertEquals("isFavorite must default to 0 for pre-v9 rows", 0, cursor.getInt(0))
+            }
+        } finally {
+            migrated.close()
+        }
+    }
+
+    /**
+     * #430 — v9 → v10 creates `mp_read_positions` (per-account MP reading positions).
+     *
+     * Verifies:
+     * 1. The migration runs cleanly against the v9 fixture and matches the exported v10 schema.
+     * 2. The production Room database (full migration chain) can write and read a position row
+     *    through the new table.
+     */
+    @Test
+    fun migrate_9_to_10_creates_mp_read_positions() {
+        val dbName = "migration_9_10_test"
+
+        // 1. Create a v9 database (no MP-position rows can pre-exist the table).
+        helper.createDatabase(dbName, 9).close()
+
+        // 2. Run MIGRATION_9_10 and validate against the exported v10 schema.
+        helper.runMigrationsAndValidate(dbName, 10, true, MIGRATION_9_10).close()
+
+        // 3. Open the production Room database (which chains every migration).
+        val migrated = Room.databaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java,
+            dbName,
+        )
+            .allowMainThreadQueries()
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+                MIGRATION_7_8,
+                MIGRATION_8_9,
+                MIGRATION_9_10,
+            )
+            .build()
+
+        try {
+            migrated.openHelper.writableDatabase.execSQL(
+                "INSERT INTO mp_read_positions (userId, threadId, page) VALUES ('xatrix', 42, 7)",
+            )
+            migrated.openHelper.readableDatabase.query(
+                "SELECT page FROM mp_read_positions WHERE userId = 'xatrix' AND threadId = 42",
+            ).use { cursor ->
+                assertTrue("the migrated table must accept and return a row", cursor.moveToFirst())
+                assertEquals(7, cursor.getInt(0))
             }
         } finally {
             migrated.close()

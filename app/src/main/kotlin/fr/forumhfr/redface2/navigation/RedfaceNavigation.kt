@@ -992,7 +992,7 @@ private fun RedfaceNavHost(
             entry<MessagesRoute> {
                 MessagesScreen(
                     readThreadIds = privateMessageNavState.readThreadIds,
-                    onOpenThread = { threadId, isMultiRecipient ->
+                    onOpenThread = { threadId, isMultiRecipient, openAtPage ->
                         // Record the multi-recipient hint in memory only; the route stays opaque.
                         if (isMultiRecipient) {
                             privateMessageNavState.onThreadOpenedAsMulti(threadId)
@@ -1000,6 +1000,10 @@ private fun RedfaceNavHost(
                         backStack.add(
                             PrivateMessageThreadRoute(
                                 threadId = threadId,
+                                // #430 — web parity: open on the conversation's last page (the
+                                // inbox "Pages" link), not page 1. The ViewModel may still land
+                                // further via the locally saved reading position.
+                                page = openAtPage,
                             ),
                         )
                     },

@@ -9,6 +9,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
 import fr.forumhfr.redface2.core.model.AuthState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -33,6 +34,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     @Assisted private val request: PrivateMessageThreadRequest,
     private val repository: MessagesRepository,
     private val authRepository: AuthRepository,
+    private val readPositionStore: PrivateMessageReadPositionStore,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PrivateMessageThreadUiState.initial(request))
@@ -44,6 +46,8 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     // A new page load (or retry) cancels the previous in-flight one so a stale result cannot
     // overwrite the page the user is actually on.
     private var loadJob: Job? = null
+    // #430 — single in-flight position write, latest-wins (cf. savePosition).
+    private var saveJob: Job? = null
     private var authenticatedPseudo: String? = null
 
     init {
@@ -55,7 +59,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                         AuthState.Anonymous -> clearPrivateState()
                         is AuthState.Authenticated -> {
                             authenticatedPseudo = authState.pseudo
-                            load(request.page.coerceAtLeast(1))
+                            loadInitial()
                         }
                     }
                 }
@@ -85,8 +89,41 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private fun clearPrivateState() {
         authenticatedPseudo = null
         loadJob?.cancel()
+        saveJob?.cancel()
         _state.value = PrivateMessageThreadUiState.initial(request)
             .copy(mode = PrivateMessageThreadUiState.Mode.RequiresLogin)
+    }
+
+    /**
+     * Page the conversation opens on (#430). The route freezes the page known at opening time
+     * (the inbox passes its last-page link — web parity), while the local per-account store
+     * remembers the page actually displayed last (it survives process death, the original #430
+     * bug). `max` of the two: a conversation that grew since the last visit opens on its NEW
+     * last page (fresh messages win over an older resume point), and a reader who advanced past
+     * the frozen opening page resumes where they actually were. A store failure falls back to
+     * the route — opening the conversation must never break on a local read.
+     */
+    private suspend fun openingPage(): Int {
+        val saved = try {
+            readPositionStore.readPage(request.threadId)
+        } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+            null
+        }
+        return maxOf(saved ?: 1, request.page.coerceAtLeast(1))
+    }
+
+    /**
+     * Initial load of a (re)authenticated session (#430). The previous session's in-flight load
+     * is cancelled BEFORE the first suspension point (the position-store read inside
+     * [openingPage]): on an `Authenticated(A) → Authenticated(B)` switch, A's fetch could
+     * otherwise land inside that window, pose A's conversation state and save A's position
+     * under B's userId (review Codex PR #462).
+     */
+    private fun loadInitial() {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            fetchPage(openingPage())
+        }
     }
 
     private fun load(page: Int) {
@@ -96,58 +133,92 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         }
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            // #351 — keep the displayed conversation on screen while (re)loading. There is no MP
-            // cache (ADR-013: nothing persisted), so a page change or a pull-to-refresh from a
-            // loaded page is a full network round-trip; wiping to Mode.Loading would flash a
-            // full-screen spinner on every page turn. `page` is NOT advanced optimistically: the
-            // pager keeps describing the page on screen until the new one actually lands.
-            val keepContent = _state.value.mode is PrivateMessageThreadUiState.Mode.Content
+            fetchPage(page)
+        }
+    }
+
+    private suspend fun fetchPage(page: Int) {
+        // Snapshot of the session that issued this fetch — savePosition is sealed to it (#462).
+        val owner = authenticatedPseudo ?: return
+        // #351 — keep the displayed conversation on screen while (re)loading. There is no MP
+        // cache (ADR-013: nothing persisted), so a page change or a pull-to-refresh from a
+        // loaded page is a full network round-trip; wiping to Mode.Loading would flash a
+        // full-screen spinner on every page turn. `page` is NOT advanced optimistically: the
+        // pager keeps describing the page on screen until the new one actually lands.
+        val keepContent = _state.value.mode is PrivateMessageThreadUiState.Mode.Content
+        _state.update {
+            if (keepContent) {
+                it.copy(isRefreshing = true)
+            } else {
+                it.copy(mode = PrivateMessageThreadUiState.Mode.Loading, page = page)
+            }
+        }
+        try {
+            val thread = repository.getPrivateMessageThread(
+                threadId = request.threadId,
+                page = page,
+                fallbackCorrespondent = null,
+            )
             _state.update {
-                if (keepContent) {
-                    it.copy(isRefreshing = true)
-                } else {
-                    it.copy(mode = PrivateMessageThreadUiState.Mode.Loading, page = page)
+                it.copy(
+                    mode = PrivateMessageThreadUiState.Mode.Content(thread),
+                    page = thread.page,
+                    totalPages = thread.totalPages,
+                    isRefreshing = false,
+                )
+            }
+            savePosition(thread.page, owner)
+        } catch (cancellation: CancellationException) {
+            // Deliberately does NOT clear isRefreshing: a cancellation only comes from a
+            // superseding load() (which owns the flag from its own start) or from
+            // clearPrivateState() (which resets the whole state) — clearing it here could
+            // race the superseding load and hide its in-flight indicator.
+            throw cancellation
+        } catch (
+            // The throwable MESSAGE is intentionally NOT propagated to the UI state — it can
+            // embed the private forum2.php?cat=prive&post=<id> URL (#316), so it must reach
+            // neither the screen nor the exportable DiagnosticsLog. The Error state only
+            // carries the #324 kind, a closed enum derived from the exception TYPE
+            // (classifyHfrError) so the screen can tell an HFR 5xx outage from a network cut.
+            @Suppress("TooGenericExceptionCaught") error: Exception,
+        ) {
+            if (keepContent) {
+                // #351 — the page on screen stays put (it is still valid); the screen surfaces
+                // a one-shot Toast instead of swapping a readable conversation for an Error
+                // placeholder. Initial loads (nothing on screen) keep the Error + Retry path.
+                _state.update { it.copy(isRefreshing = false) }
+                _effects.send(PrivateMessageThreadEffect.RefreshFailed)
+            } else {
+                _state.update {
+                    it.copy(mode = PrivateMessageThreadUiState.Mode.Error(classifyHfrError(error)))
                 }
             }
+        }
+    }
+
+    /**
+     * #430 — records the landed page so the next opening (or a process-death restoration)
+     * resumes here. Best-effort: a lost write only costs the resume position. Two guards from
+     * the Codex review of PR #462:
+     *
+     * - **Serialized, latest-wins**: a new landing cancels the previous in-flight write
+     *   ([saveJob]), so a save delayed by IO can never overwrite a more recent position
+     *   (the cancelled write either never commits or had already committed BEFORE the newer
+     *   one — Room serializes writers).
+     * - **Sealed to the loading session**: [owner] is the pseudo snapshotted when the fetch
+     *   started; if the active session changed before this write fires, it is dropped (the
+     *   store also re-resolves the active session and no-ops when none is left).
+     */
+    private fun savePosition(page: Int, owner: String) {
+        saveJob?.cancel()
+        saveJob = viewModelScope.launch {
+            if (owner != authenticatedPseudo) return@launch
             try {
-                val thread = repository.getPrivateMessageThread(
-                    threadId = request.threadId,
-                    page = page,
-                    fallbackCorrespondent = null,
-                )
-                _state.update {
-                    it.copy(
-                        mode = PrivateMessageThreadUiState.Mode.Content(thread),
-                        page = thread.page,
-                        totalPages = thread.totalPages,
-                        isRefreshing = false,
-                    )
-                }
+                readPositionStore.savePage(request.threadId, page)
             } catch (cancellation: CancellationException) {
-                // Deliberately does NOT clear isRefreshing: a cancellation only comes from a
-                // superseding load() (which owns the flag from its own start) or from
-                // clearPrivateState() (which resets the whole state) — clearing it here could
-                // race the superseding load and hide its in-flight indicator.
                 throw cancellation
-            } catch (
-                // The throwable MESSAGE is intentionally NOT propagated to the UI state — it can
-                // embed the private forum2.php?cat=prive&post=<id> URL (#316), so it must reach
-                // neither the screen nor the exportable DiagnosticsLog. The Error state only
-                // carries the #324 kind, a closed enum derived from the exception TYPE
-                // (classifyHfrError) so the screen can tell an HFR 5xx outage from a network cut.
-                @Suppress("TooGenericExceptionCaught") error: Exception,
-            ) {
-                if (keepContent) {
-                    // #351 — the page on screen stays put (it is still valid); the screen surfaces
-                    // a one-shot Toast instead of swapping a readable conversation for an Error
-                    // placeholder. Initial loads (nothing on screen) keep the Error + Retry path.
-                    _state.update { it.copy(isRefreshing = false) }
-                    _effects.send(PrivateMessageThreadEffect.RefreshFailed)
-                } else {
-                    _state.update {
-                        it.copy(mode = PrivateMessageThreadUiState.Mode.Error(classifyHfrError(error)))
-                    }
-                }
+            } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+                // Swallowed: the resume position is a nicety, never worth surfacing an error.
             }
         }
     }
