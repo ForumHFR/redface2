@@ -1412,6 +1412,10 @@ class PostEditorViewModelTest {
         override fun observeMpUnreadBadge(): Flow<Boolean> = MutableStateFlow(true)
 
         override suspend fun setMpUnreadBadge(enabled: Boolean) = Unit
+
+        override fun observeTopicPollsExpanded(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
     }
 
     private companion object {

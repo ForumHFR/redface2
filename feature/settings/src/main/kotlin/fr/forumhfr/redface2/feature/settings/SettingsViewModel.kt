@@ -36,129 +36,87 @@ class SettingsViewModel @Inject constructor(
             val config = userPreferencesRepository.observeProxyConfig().first()
             _state.update { it.copyFromProxy(config) }
         }
+        hydratePreference(
+            read = { userPreferencesRepository.observeIgnoreTopicCache().first() },
+            isLocked = { it.ignoreTopicCacheTouchedLocally || it.isUpdatingIgnoreTopicCache },
+            apply = { state, value -> state.copy(ignoreTopicCache = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeFlagsGroupByCategory().first() },
+            isLocked = { it.flagsGroupByCategoryTouchedLocally || it.isUpdatingFlagsGroupByCategory },
+            apply = { state, value -> state.copy(flagsGroupByCategory = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeFlagsHideReadCategories().first() },
+            isLocked = { it.flagsHideReadCategoriesTouchedLocally || it.isUpdatingFlagsHideReadCategories },
+            apply = { state, value -> state.copy(flagsHideReadCategories = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeFlagsPerTabOverride().first() },
+            isLocked = { it.flagsPerTabOverrideTouchedLocally || it.isUpdatingFlagsPerTabOverride },
+            apply = { state, value -> state.copy(flagsPerTabOverride = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeThemeMode().first() },
+            isLocked = { it.themeModeTouchedLocally || it.isUpdatingThemeMode },
+            apply = { state, value -> state.copy(themeMode = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeAmoledEnabled().first() },
+            isLocked = { it.amoledTouchedLocally || it.isUpdatingAmoled },
+            apply = { state, value -> state.copy(amoledEnabled = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeTopicTopBarAutoHide().first() },
+            isLocked = { it.topicTopBarAutoHideTouchedLocally || it.isUpdatingTopicTopBarAutoHide },
+            apply = { state, value -> state.copy(topicTopBarAutoHide = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeTopicPageFabs().first() },
+            isLocked = { it.topicPageFabsTouchedLocally || it.isUpdatingTopicPageFabs },
+            apply = { state, value -> state.copy(topicPageFabs = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeMpUnreadBadge().first() },
+            isLocked = { it.mpUnreadBadgeTouchedLocally || it.isUpdatingMpUnreadBadge },
+            apply = { state, value -> state.copy(mpUnreadBadge = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeTopicPollsExpanded().first() },
+            isLocked = { it.topicPollsExpandedTouchedLocally || it.isUpdatingTopicPollsExpanded },
+            apply = { state, value -> state.copy(topicPollsExpanded = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeConfirmBeforePosting().first() },
+            isLocked = { it.confirmBeforePostingTouchedLocally || it.isUpdatingConfirmBeforePosting },
+            apply = { state, value -> state.copy(confirmBeforePosting = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeShowDtSection().first() },
+            isLocked = { it.showDtSectionTouchedLocally || it.isUpdatingShowDtSection },
+            apply = { state, value -> state.copy(showDtSection = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeFlagsAutoRefresh().first() },
+            isLocked = { it.flagsAutoRefreshTouchedLocally || it.isUpdatingFlagsAutoRefresh },
+            apply = { state, value -> state.copy(flagsAutoRefresh = value) },
+        )
+    }
+
+    /**
+     * One-shot hydration of a persisted preference into [_state] (point-in-time `first()`,
+     * cf. the init comment). [isLocked] is the startup-race guard: if the user already
+     * flipped the toggle (or a write is in flight) while this coroutine was suspended on
+     * the read, the stale snapshot must NOT overwrite the local change.
+     */
+    private fun <T> hydratePreference(
+        read: suspend () -> T,
+        isLocked: (SettingsState) -> Boolean,
+        apply: (SettingsState, T) -> SettingsState,
+    ) {
         viewModelScope.launch {
-            val ignore = userPreferencesRepository.observeIgnoreTopicCache().first()
-            _state.update { current ->
-                // Startup race guard: if the user already flipped the toggle (or a write is in
-                // flight) while this hydration coroutine was suspended on `.first()`, do NOT
-                // overwrite the local change with the stale snapshot we just collected. The
-                // toggle is an alpha diagnostic — it must not lie about its own state.
-                if (current.ignoreTopicCacheTouchedLocally || current.isUpdatingIgnoreTopicCache) {
-                    current
-                } else {
-                    current.copy(ignoreTopicCache = ignore)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val grouped = userPreferencesRepository.observeFlagsGroupByCategory().first()
-            _state.update { current ->
-                if (current.flagsGroupByCategoryTouchedLocally || current.isUpdatingFlagsGroupByCategory) {
-                    current
-                } else {
-                    current.copy(flagsGroupByCategory = grouped)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val hideRead = userPreferencesRepository.observeFlagsHideReadCategories().first()
-            _state.update { current ->
-                if (current.flagsHideReadCategoriesTouchedLocally || current.isUpdatingFlagsHideReadCategories) {
-                    current
-                } else {
-                    current.copy(flagsHideReadCategories = hideRead)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val perTab = userPreferencesRepository.observeFlagsPerTabOverride().first()
-            _state.update { current ->
-                if (current.flagsPerTabOverrideTouchedLocally || current.isUpdatingFlagsPerTabOverride) {
-                    current
-                } else {
-                    current.copy(flagsPerTabOverride = perTab)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val mode = userPreferencesRepository.observeThemeMode().first()
-            _state.update { current ->
-                if (current.themeModeTouchedLocally || current.isUpdatingThemeMode) {
-                    current
-                } else {
-                    current.copy(themeMode = mode)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val amoled = userPreferencesRepository.observeAmoledEnabled().first()
-            _state.update { current ->
-                if (current.amoledTouchedLocally || current.isUpdatingAmoled) {
-                    current
-                } else {
-                    current.copy(amoledEnabled = amoled)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val autoHide = userPreferencesRepository.observeTopicTopBarAutoHide().first()
-            _state.update { current ->
-                if (current.topicTopBarAutoHideTouchedLocally || current.isUpdatingTopicTopBarAutoHide) {
-                    current
-                } else {
-                    current.copy(topicTopBarAutoHide = autoHide)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val pageFabs = userPreferencesRepository.observeTopicPageFabs().first()
-            _state.update { current ->
-                if (current.topicPageFabsTouchedLocally || current.isUpdatingTopicPageFabs) {
-                    current
-                } else {
-                    current.copy(topicPageFabs = pageFabs)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val mpBadge = userPreferencesRepository.observeMpUnreadBadge().first()
-            _state.update { current ->
-                if (current.mpUnreadBadgeTouchedLocally || current.isUpdatingMpUnreadBadge) {
-                    current
-                } else {
-                    current.copy(mpUnreadBadge = mpBadge)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val confirm = userPreferencesRepository.observeConfirmBeforePosting().first()
-            _state.update { current ->
-                if (current.confirmBeforePostingTouchedLocally || current.isUpdatingConfirmBeforePosting) {
-                    current
-                } else {
-                    current.copy(confirmBeforePosting = confirm)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val showDt = userPreferencesRepository.observeShowDtSection().first()
-            _state.update { current ->
-                if (current.showDtSectionTouchedLocally || current.isUpdatingShowDtSection) {
-                    current
-                } else {
-                    current.copy(showDtSection = showDt)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val autoRefresh = userPreferencesRepository.observeFlagsAutoRefresh().first()
-            _state.update { current ->
-                if (current.flagsAutoRefreshTouchedLocally || current.isUpdatingFlagsAutoRefresh) {
-                    current
-                } else {
-                    current.copy(flagsAutoRefresh = autoRefresh)
-                }
-            }
+            val value = read()
+            _state.update { current -> if (isLocked(current)) current else apply(current, value) }
         }
     }
 
@@ -204,6 +162,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
             is SettingsIntent.TopicPageFabsChanged -> updateTopicPageFabs(intent.enabled)
             is SettingsIntent.MpUnreadBadgeChanged -> updateMpUnreadBadge(intent.enabled)
+            is SettingsIntent.TopicPollsExpandedChanged -> updateTopicPollsExpanded(intent.enabled)
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
@@ -534,6 +493,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setTopicPageFabs,
+        )
+    }
+
+    private fun updateTopicPollsExpanded(desired: Boolean) {
+        val previous = _state.value.topicPollsExpanded
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    topicPollsExpanded = desired,
+                    isUpdatingTopicPollsExpanded = true,
+                    topicPollsExpandedError = false,
+                    topicPollsExpandedTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(topicPollsExpanded = desired, isUpdatingTopicPollsExpanded = false)
+                } else {
+                    state.copy(
+                        topicPollsExpanded = previous,
+                        isUpdatingTopicPollsExpanded = false,
+                        topicPollsExpandedError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setTopicPollsExpanded,
         )
     }
 

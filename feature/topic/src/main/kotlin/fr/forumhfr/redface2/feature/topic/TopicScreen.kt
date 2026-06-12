@@ -1113,7 +1113,7 @@ private fun TopicHeaderCard(
                 onOpenPage = onOpenPage,
             )
             topic.poll?.let { poll ->
-                TopicPollCard(poll)
+                TopicPollCard(poll, expandedDefault = state.pollsExpandedDefault)
             }
             Button(
                 onClick = { onReply(topic.subcat, topic.page) },
@@ -1240,8 +1240,11 @@ private fun TopicPageJumpField(
 }
 
 @Composable
-private fun TopicPollCard(poll: Poll) {
-    var revealed by rememberSaveable(poll) { mutableStateOf(true) }
+private fun TopicPollCard(poll: Poll, expandedDefault: Boolean) {
+    // #456 — the preference seeds the initial state only; the tap toggle stays per-topic and
+    // survives rotation (rememberSaveable). Keyed on the poll AND the seed so the card follows
+    // a Settings change without restart (the saved value wins otherwise).
+    var revealed by rememberSaveable(poll, expandedDefault) { mutableStateOf(expandedDefault) }
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,

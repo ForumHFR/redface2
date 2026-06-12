@@ -860,6 +860,45 @@ class SettingsViewModelTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────
+    // Sondages dépliés par défaut (#456)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates topicPollsExpanded from a persisted true`() = runTest {
+        // Default is false — only a persisted opt-in exercises the hydration path.
+        repository.emitTopicPollsExpanded(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.topicPollsExpanded)
+        assertFalse(viewModel.state.value.topicPollsExpandedError)
+    }
+
+    @Test
+    fun `TopicPollsExpandedChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("polls are collapsed by default", viewModel.state.value.topicPollsExpanded)
+
+        viewModel.submit(SettingsIntent.TopicPollsExpandedChanged(true))
+
+        assertTrue(viewModel.state.value.topicPollsExpanded)
+        assertFalse(viewModel.state.value.isUpdatingTopicPollsExpanded)
+        assertEquals(1, repository.topicPollsExpandedSetCalls)
+    }
+
+    @Test
+    fun `TopicPollsExpandedChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnTopicPollsExpandedSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.TopicPollsExpandedChanged(true))
+
+        assertFalse("failed persist must revert to the previous value", viewModel.state.value.topicPollsExpanded)
+        assertFalse(viewModel.state.value.isUpdatingTopicPollsExpanded)
+        assertTrue(viewModel.state.value.topicPollsExpandedError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Confirm before posting (#312)
     // ──────────────────────────────────────────────────────────────────────
 
@@ -1115,6 +1154,24 @@ class SettingsViewModelTest {
 
         fun emitMpUnreadBadge(value: Boolean) {
             mpUnreadBadge.value = value
+        }
+
+        // #456 — sondages dépliés par défaut. Même seam optimistic-flip que mpUnreadBadge.
+        private val topicPollsExpanded = MutableStateFlow(false)
+        var topicPollsExpandedSetCalls: Int = 0
+            private set
+        var failOnTopicPollsExpandedSet: Boolean = false
+
+        override fun observeTopicPollsExpanded(): Flow<Boolean> = topicPollsExpanded
+
+        override suspend fun setTopicPollsExpanded(enabled: Boolean) {
+            topicPollsExpandedSetCalls += 1
+            check(!failOnTopicPollsExpandedSet) { "boom" }
+            topicPollsExpanded.value = enabled
+        }
+
+        fun emitTopicPollsExpanded(value: Boolean) {
+            topicPollsExpanded.value = value
         }
 
         // #312 — confirm-before-posting. Same optimistic-flip seam as the topic top-bar toggle.

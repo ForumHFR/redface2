@@ -579,6 +579,16 @@ private fun TopicPreferencesCard(
             if (state.topicPageFabsError) {
                 PreferencePersistError(R.string.settings_topic_page_fabs_persist_failed)
             }
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_topic_polls_expanded_title),
+                description = stringResource(R.string.settings_topic_polls_expanded_description),
+                checked = state.topicPollsExpanded,
+                enabled = state.canToggleTopicPollsExpanded,
+                onCheckedChange = { onIntent(SettingsIntent.TopicPollsExpandedChanged(it)) },
+            )
+            if (state.topicPollsExpandedError) {
+                PreferencePersistError(R.string.settings_topic_polls_expanded_persist_failed)
+            }
         }
     }
 }
