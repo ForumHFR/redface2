@@ -57,6 +57,10 @@ class SmileyPickerController(
     }
 
     fun onQueryChanged(query: String) {
+        // A late callback landing after dismiss() must not arm a search : Hidden means
+        // "no live work", and the debounce below would otherwise fire a network call whose
+        // result is only THEN dropped by the Open guards (Codex review, PR #440).
+        if (_state.value !is SmileyPickerState.Open) return
         _state.update { current ->
             val open = current as? SmileyPickerState.Open ?: return@update current
             open.copy(query = query)

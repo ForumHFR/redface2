@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -92,6 +93,23 @@ class PrivateMessageReplyViewModelTest {
         assertFalse(state.formError)
         // The quick-reply form carries signature as a hidden `=1`, so the toggle defaults on.
         assertTrue("signature default should be hydrated from the hidden field", state.signatureEnabled)
+    }
+
+    @Test
+    fun `the wiki search carries the loaded form's userId (#440)`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns form().copy(userId = 54596)
+        val smileys = smileyRepository()
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), smileys,
+        )
+
+        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.onQueryChanged("jap")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { smileys.searchWiki(54596, "jap") }
     }
 
     @Test

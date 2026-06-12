@@ -171,12 +171,15 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     /**
      * #387 — smiley picker (Standard + Wiki), same sheet as the post editors. The controller owns
      * the picker state machine (debounce, race guards) ; this ViewModel only handles insertion.
-     * userId stays at the controller's 0 fallback : the MP write flow never resolves a numeric
-     * user id, and the wiki endpoint accepts 0 (same fallback as PostEditorViewModel).
+     * userId comes from the loaded compose form ([ReplyForm.userId], HFR's `find_smilies_timer`
+     * second argument) so the wiki search prioritizes the user's own smileys exactly like the
+     * post editors do ; the controller falls back to 0 while the form is still loading
+     * (Codex review, PR #440).
      */
     val smileyPicker = SmileyPickerController(
         scope = viewModelScope,
         searchWiki = smileyRepository::searchWiki,
+        userId = { loadedForm?.userId },
     )
 
     fun onSmileySelected(token: String) {

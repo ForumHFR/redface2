@@ -126,6 +126,20 @@ class SmileyPickerControllerTest {
     }
 
     @Test
+    fun `a query change landing after dismiss is ignored — no search while Hidden`() = runTest {
+        var calls = 0
+        val controller = SmileyPickerController(this, { _, _ -> calls++; emptyList() })
+
+        controller.open()
+        controller.dismiss()
+        controller.onQueryChanged("jap") // late UI callback after the sheet closed
+        advanceUntilIdle()
+
+        assertEquals(SmileyPickerState.Hidden, controller.state.value)
+        assertEquals("Hidden means no live work — the debounce must not arm", 0, calls)
+    }
+
+    @Test
     fun `a null user id falls back to 0 (PostEditorViewModel parity)`() = runTest {
         var seenUserId: Int? = null
         val controller = SmileyPickerController(

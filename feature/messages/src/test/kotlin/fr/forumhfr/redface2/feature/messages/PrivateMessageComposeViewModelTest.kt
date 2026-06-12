@@ -4,6 +4,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -17,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -74,13 +76,29 @@ class PrivateMessageComposeViewModelTest {
         repository: PrivateMessageWriteRepository,
         initialRecipient: String? = null,
         confirmBeforePosting: Boolean = false,
+        smileyRepository: SmileyRepository = mockk(relaxed = true),
     ): PrivateMessageComposeViewModel = PrivateMessageComposeViewModel(
         initialRecipient = initialRecipient,
         repository = repository,
         previewParser = previewParser,
         userPreferencesRepository = userPreferences(confirmBeforePosting),
-        smileyRepository = mockk(relaxed = true),
+        smileyRepository = smileyRepository,
     )
+
+    @Test
+    fun `the wiki search carries the loaded form's userId (#440)`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm().copy(userId = 54596)
+        val smileys = mockk<SmileyRepository>(relaxed = true)
+
+        val vm = viewModel(repository, smileyRepository = smileys)
+
+        vm.smileyPicker.open()
+        vm.smileyPicker.onQueryChanged("jap")
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { smileys.searchWiki(54596, "jap") }
+    }
 
     @Test
     fun `loads the composer form on init and hydrates the signature default`() = runTest {
