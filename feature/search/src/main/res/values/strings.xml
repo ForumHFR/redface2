@@ -6,6 +6,10 @@
     <string name="search_pseudo_placeholder">Topics où ce membre a posté…</string>
     <string name="search_back">Retour</string>
     <string name="search_submit">Rechercher</string>
+    <!-- #433 — bandeau compact des critères, affiché une fois la recherche lancée. -->
+    <string name="search_criteria_edit">Modifier</string>
+    <string name="search_criteria_query">« %1$s »</string>
+    <string name="search_criteria_author">par %1$s</string>
     <string name="search_retry">Réessayer</string>
     <string name="search_idle_hint">Saisissez un mot-clé et/ou un pseudo. Le pseudo seul liste les topics où ce membre a posté. Quand HFR fournit un extrait, le résultat ouvre le message correspondant ; sinon il ouvre le topic.</string>
     <string name="search_loading">Recherche en cours…</string>
