@@ -1,10 +1,11 @@
-Redface 2 v0.5.1 — beta.
+Redface 2 v0.10.0 — beta.
 
 New:
-- Private messages (read-only): your inbox and conversations in the Messages tab.
-- Swipe left/right to change page within a topic (the page follows your finger).
-- Flags: group by category, per-type display settings, "unread only" filter.
+- Private messages: compose new PMs, smiley picker, unread badge, page swipe, pull-to-refresh.
+- Multi-quote, with visual marking of picked posts.
+- Search: author filter, collapsible form.
+- Reading: end-of-topic marker, display options.
 
-Fixed: a private-message error message could reveal a private conversation's address.
+Fixes: editor follows the cursor while typing, flags/favorites, keyboard, theme, rendering.
 
-Report bugs via beta or GitHub.
+Report bugs via the beta or GitHub.

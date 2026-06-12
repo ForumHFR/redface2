@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -99,11 +101,12 @@ private fun PostEditorContent(
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             // No outer scroll : the draft field is weighted so it stretches to fill every
             // free pixel down to the bottom bar (dogfooding v108 — the column used to leave
-            // a large blank under « Afficher l'aperçu »). Long content scrolls INSIDE the
-            // field (and inside the preview pane), which is also why weight() is usable at
-            // all — it needs the bounded height an outer verticalScroll would destroy.
-            // Keyboard handling is unchanged : the bar's IME inset grows, this column
-            // shrinks by the same amount (weight absorbs), the field compresses.
+            // a large blank under « Afficher l'aperçu »). Long content scrolls in the field's
+            // own fillViewport column (#275/#410) and inside the preview pane, which is also
+            // why weight() is usable at all — it needs the bounded height an outer
+            // verticalScroll would destroy. Keyboard handling : the bar's IME inset grows,
+            // this column shrinks by the same amount (weight absorbs), and the field's
+            // viewport re-anchors the cursor line.
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -128,6 +131,9 @@ private fun PostEditorContent(
                     label = stringResource(R.string.editor_field_label),
                     placeholder = stringResource(R.string.editor_field_placeholder),
                     modifier = Modifier.weight(1f),
+                    // #275/#410 — grow-with-content field in its own scrollable viewport so the
+                    // cursor stays visible under the IME (typing AND refocus after the preview).
+                    fillViewport = true,
                 )
 
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {

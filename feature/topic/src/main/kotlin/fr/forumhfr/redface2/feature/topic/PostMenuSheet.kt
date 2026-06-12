@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -65,11 +68,38 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("LongParameterList") // contextual-menu surface: each optional action (delete #418,
+// profile #395) is a defaulted nullable param — the idiomatic Compose API, same as TopicBottomActions.
 internal fun PostMenuSheet(
     post: Post,
     permalink: String,
     citedCount: Int,
     onDismiss: () -> Unit,
+    /**
+     * #418 — « Supprimer ce message », moved here from the post card's action row (beta
+     * feedback by nicko : a destructive one-tap button under every own post invites
+     * accidental taps). Null hides the entry — same #292 gates as before (own editable
+     * post, postable topic, never the first post, no deletion in flight). The existing
+     * #292 confirmation dialog still guards the actual POST.
+     */
+    onDelete: (() -> Unit)? = null,
+    /**
+     * #395 — opens the author's profile from the hero row (avatar + pseudo), parity with
+     * the #208 tap on the post card. Null keeps the hero inert — same gate as the card
+     * (`Post.profileId == null` : Publicité rows, anonymous reads). The sheet plays its
+     * hide animation first so the profile sheet never stacks over this one.
+     */
+    onOpenProfile: (() -> Unit)? = null,
+    /**
+     * #291 — whether this post already sits in the multi-quote basket; flips the entry's
+     * label between « Ajouter à » and « Retirer de » la citation multiple.
+     */
+    multiQuoteSelected: Boolean = false,
+    /**
+     * #291 — toggles this post in the multi-quote basket. Null hides the entry — same gate
+     * as « Citer » (`shouldShowQuoteAction`): locked topic or anonymous session.
+     */
+    onToggleMultiQuote: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState()
     val coroutineScope = rememberCoroutineScope()
@@ -88,7 +118,19 @@ internal fun PostMenuSheet(
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .navigationBarsPadding(),
         ) {
-            PostMenuHero(post = post)
+            PostMenuHero(
+                post = post,
+                onClick = onOpenProfile?.let { openProfile ->
+                    {
+                        // Hide first, then dismiss AND navigate — the profile bottom sheet
+                        // must not stack over a still-visible menu sheet.
+                        hideThenDismiss(coroutineScope, sheetState) {
+                            onDismiss()
+                            openProfile()
+                        }
+                    }
+                },
+            )
 
             if (post.editedAt != null || citedCount > 0) {
                 Spacer(Modifier.height(12.dp))
@@ -143,6 +185,29 @@ internal fun PostMenuSheet(
                 Text(stringResource(R.string.topic_post_menu_open_in_browser))
             }
 
+            if (onToggleMultiQuote != null) {
+                Spacer(Modifier.height(8.dp))
+                // #291 — adds/removes this post in the multi-quote basket. The sheet closes on
+                // tap so the « Citer N » FAB count is immediately visible as feedback.
+                OutlinedButton(
+                    onClick = {
+                        onToggleMultiQuote()
+                        hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        stringResource(
+                            if (multiQuoteSelected) {
+                                R.string.topic_post_menu_multi_quote_remove
+                            } else {
+                                R.string.topic_post_menu_multi_quote_add
+                            },
+                        ),
+                    )
+                }
+            }
+
             Spacer(Modifier.height(8.dp))
 
             // Report flow not implemented yet — greyed « menu vitrine » placeholder (#288
@@ -156,6 +221,24 @@ internal fun PostMenuSheet(
                 Text(stringResource(R.string.topic_post_menu_report_soon))
             }
 
+            if (onDelete != null) {
+                Spacer(Modifier.height(8.dp))
+                // #418 — destructive action LAST (M3 idiom), error-tinted. The tap closes the
+                // sheet and hands over to the #292 confirmation dialog owned by TopicScreen.
+                OutlinedButton(
+                    onClick = {
+                        onDelete()
+                        hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                    },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.topic_post_menu_delete))
+                }
+            }
+
             Spacer(Modifier.height(8.dp))
         }
     }
@@ -165,13 +248,29 @@ internal fun PostMenuSheet(
  * Hero row of the sheet — avatar + author with the post identity (number, date)
  * underneath, mirroring `ProfilePreviewHero`. [RedfaceUserAvatar] handles the
  * `avatarUrl == null` / load-error placeholder on its own.
+ *
+ * #395 — when [onClick] is non-null the WHOLE row is one « Voir le profil » tap target:
+ * in a menu sheet a row reads as one action (M3 list-item idiom), unlike the post card
+ * where the date had to stay inert (#208 review I6) because it sits in flowing content.
  */
 @Composable
-private fun PostMenuHero(post: Post) {
+private fun PostMenuHero(post: Post, onClick: (() -> Unit)?) {
+    val openProfileLabel = stringResource(R.string.topic_open_profile_action)
+    val clickModifier = if (onClick != null) {
+        Modifier.clickable(
+            onClick = onClick,
+            role = Role.Button,
+            onClickLabel = openProfileLabel,
+        )
+    } else {
+        Modifier
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(clickModifier),
     ) {
         RedfaceUserAvatar(
             avatarUrl = post.avatarUrl,

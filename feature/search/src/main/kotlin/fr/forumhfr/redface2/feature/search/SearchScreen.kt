@@ -28,6 +28,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -38,7 +40,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,8 +77,15 @@ fun SearchScreen(
     onOpenTopic: (cat: Int, post: Int, page: Int, scrollTo: Int?) -> Unit,
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
-    viewModel: SearchViewModel = hiltViewModel(),
+    initialPseudo: String? = null,
+    onBack: (() -> Unit)? = null,
 ) {
+    // AssistedInject (same pattern as ProfileRoute) : `initialPseudo` is only known at
+    // construction time. The nav-entry-scoped ViewModelStore already gives the profile
+    // entry point its own instance, distinct from the search tab's idle one.
+    val viewModel = hiltViewModel<SearchViewModel, SearchViewModel.Factory>(
+        creationCallback = { factory -> factory.create(initialPseudo) },
+    )
     val state by viewModel.state.collectAsStateWithLifecycle()
     // Same one-shot collection pattern as TopicScreen : the Channel-backed flow
     // delivers each navigation effect exactly once.
@@ -91,9 +103,11 @@ fun SearchScreen(
         onOpenTopic = { result -> viewModel.submit(SearchIntent.OpenResult(result)) },
         modifier = modifier,
         topBarActions = topBarActions,
+        onBack = onBack,
     )
 }
 
+@Suppress("LongParameterList") // Screen surface : state + intent sink + 2 nav callbacks + chrome slots.
 @Composable
 internal fun SearchContent(
     state: SearchUiState,
@@ -101,6 +115,7 @@ internal fun SearchContent(
     onOpenTopic: (SearchTopicResult) -> Unit,
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
+    onBack: (() -> Unit)? = null,
 ) {
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -123,11 +138,32 @@ internal fun SearchContent(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(
-                    text = stringResource(R.string.search_title),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Profile entry point (« Derniers messages ») : the screen is pushed
+                    // onto the current tab's back stack instead of living at the search
+                    // tab root, so it needs its own back affordance. Same dp-sized vector
+                    // as ProfileScreen (material-icons is detekt-banned).
+                    if (onBack != null) {
+                        val backLabel = stringResource(R.string.search_back)
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.semantics { contentDescription = backLabel },
+                        ) {
+                            Icon(
+                                painter = painterResource(
+                                    fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back,
+                                ),
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+                    Text(
+                        text = stringResource(R.string.search_title),
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
                 topBarActions?.invoke()
             }
             Column(
@@ -136,16 +172,32 @@ internal fun SearchContent(
                     .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                SearchField(
-                    query = state.query,
-                    isSubmitEnabled = !state.isLoading && state.query.isNotBlank(),
-                    onQueryChange = { onIntent(SearchIntent.QueryChanged(it)) },
-                    onSubmit = { onIntent(SearchIntent.Submit) },
-                )
-                SearchOptions(
-                    textScope = state.textScope,
-                    onTextScopeSelected = { onIntent(SearchIntent.TextScopeSelected(it)) },
-                )
+                // #433 — once a search is launched, the form gives the screen back to the
+                // results : a one-line criteria banner replaces the two fields + scope
+                // chips, and tapping it (or « Modifier ») re-expands the full form. The
+                // pivot chips stay visible in both modes — re-scoping is a consultation
+                // action on the CURRENT results, not an edit of the criteria.
+                if (state.formCollapsed) {
+                    CollapsedCriteriaBanner(
+                        state = state,
+                        onEdit = { onIntent(SearchIntent.EditCriteria) },
+                    )
+                } else {
+                    SearchField(
+                        query = state.query,
+                        pseudo = state.pseudo,
+                        // HFR accepts query-only, author-only, and combined searches.
+                        isSubmitEnabled = !state.isLoading &&
+                            (state.query.isNotBlank() || state.pseudo.isNotBlank()),
+                        onQueryChange = { onIntent(SearchIntent.QueryChanged(it)) },
+                        onPseudoChange = { onIntent(SearchIntent.PseudoChanged(it)) },
+                        onSubmit = { onIntent(SearchIntent.Submit) },
+                    )
+                    SearchOptions(
+                        textScope = state.textScope,
+                        onTextScopeSelected = { onIntent(SearchIntent.TextScopeSelected(it)) },
+                    )
+                }
                 if (state.pivotCategories.isNotEmpty()) {
                     PivotChips(
                         pivot = state.pivotCategories,
@@ -168,6 +220,62 @@ internal fun SearchContent(
             }
         }
     }
+}
+
+/**
+ * #433 — compact summary of the launched search : `« query » · par pseudo · scope`,
+ * single line, the whole card is the « edit » affordance. The scope segment only
+ * shows when it differs from the default (no noise on the nominal case).
+ */
+@Composable
+private fun CollapsedCriteriaBanner(
+    state: SearchUiState,
+    onEdit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        onClick = onEdit,
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = collapsedCriteriaSummary(state),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource(R.string.search_criteria_edit),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun collapsedCriteriaSummary(state: SearchUiState): String {
+    val parts = buildList {
+        if (state.query.isNotBlank()) {
+            add(stringResource(R.string.search_criteria_query, state.query))
+        }
+        if (state.pseudo.isNotBlank()) {
+            add(stringResource(R.string.search_criteria_author, state.pseudo))
+        }
+        if (state.textScope != SearchTextScope.TitlesAndPosts) {
+            add(stringResource(state.textScope.labelResId()))
+        }
+    }
+    return parts.joinToString(separator = " · ")
 }
 
 @Composable
@@ -207,11 +315,14 @@ private fun SearchOptions(
     }
 }
 
+@Suppress("LongParameterList") // Two text fields + their change callbacks + the shared submit pair.
 @Composable
 private fun SearchField(
     query: String,
+    pseudo: String,
     isSubmitEnabled: Boolean,
     onQueryChange: (String) -> Unit,
+    onPseudoChange: (String) -> Unit,
     onSubmit: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -221,6 +332,16 @@ private fun SearchField(
             singleLine = true,
             label = { Text(stringResource(R.string.search_field_label)) },
             placeholder = { Text(stringResource(R.string.search_field_placeholder)) },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { if (isSubmitEnabled) onSubmit() }),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = pseudo,
+            onValueChange = onPseudoChange,
+            singleLine = true,
+            label = { Text(stringResource(R.string.search_pseudo_label)) },
+            placeholder = { Text(stringResource(R.string.search_pseudo_placeholder)) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { if (isSubmitEnabled) onSubmit() }),
             modifier = Modifier.fillMaxWidth(),

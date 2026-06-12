@@ -5,7 +5,17 @@
     <string name="topic_fab_reply">Répondre</string>
     <string name="topic_fab_previous_page">Page précédente</string>
     <string name="topic_fab_next_page">Page suivante</string>
+    <!-- #291 — FAB « Citer N » : ouvre l'éditeur pré-rempli avec les citations sélectionnées. -->
+    <plurals name="topic_fab_multi_quote">
+        <item quantity="one">Citer %1$d message sélectionné</item>
+        <item quantity="other">Citer %1$d messages sélectionnés</item>
+    </plurals>
+    <!-- #291 — entrée du menu contextuel : ajoute/retire le post du panier de citation multiple. -->
+    <string name="topic_post_menu_multi_quote_add">Ajouter à la citation multiple</string>
+    <string name="topic_post_menu_multi_quote_remove">Retirer de la citation multiple</string>
     <string name="topic_loading">Chargement…</string>
+    <!-- #379 — marqueur explicite de fin de sujet, rendu après le dernier post de la DERNIÈRE page. -->
+    <string name="topic_end_of_topic">Dernier message du sujet</string>
     <!-- #285 — top app bar : back affordance (content description) + fallback title shown while
          the topic page has not loaded yet (or errored), so the bar never reads blank. -->
     <string name="topic_back">Retour</string>
@@ -15,6 +25,8 @@
     <string name="topic_caption">post %1$d • page %2$d / %3$d</string>
     <string name="topic_post_index_prefix">#%1$d • </string>
     <!-- #362 — per-post contextual menu (post number, permalink copy, edit marker, citations). -->
+    <!-- #436 — pastille de la bande d'identité quand le post est au panier multi-quote (#291). -->
+    <string name="topic_post_multiquote_selected">Ajouté à la citation</string>
     <string name="topic_post_menu_action">Options du post</string>
     <string name="topic_post_menu_number">Post n°%1$d</string>
     <string name="topic_post_menu_copy_link">Copier le lien de ce post</string>
@@ -51,8 +63,10 @@
     <string name="topic_refresh_failed">Le rafraîchissement a échoué. Réessayez.</string>
     <string name="topic_open_profile_action">Voir le profil</string>
 
-    <!-- #292 — suppression d'un de ses propres posts (post normal). -->
+    <!-- #292 — suppression d'un de ses propres posts (post normal). #418 : l'action vit dans
+         le menu contextuel du post (anti appui intempestif), plus dans la rangée d'actions. -->
     <string name="topic_post_delete">Supprimer</string>
+    <string name="topic_post_menu_delete">Supprimer ce message</string>
     <string name="topic_post_delete_confirm_title">Effacer ce message ?</string>
     <string name="topic_post_delete_confirm_message">Cette action est irréversible.</string>
     <string name="topic_post_delete_confirm_action">Supprimer</string>

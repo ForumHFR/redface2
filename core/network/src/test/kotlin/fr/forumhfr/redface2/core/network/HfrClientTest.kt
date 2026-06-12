@@ -151,6 +151,29 @@ class HfrClientTest {
     }
 
     @Test
+    fun `searchTopics encodes the author filter on the anonymous client even with an empty query`() = runTest {
+        // #402 — author-only search (« Derniers messages » from the profile) : pseud= carries the
+        // pseudo (space and all, OkHttp-encoded), search= rides along empty.
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>ok</body></html>"))
+
+        client.searchTopics(
+            query = "",
+            cat = null,
+            page = 1,
+            date = LocalDate.of(2026, 6, 11),
+            textScope = SearchTextScope.TitlesAndPosts,
+            pseudo = "Lt Ripley",
+        )
+
+        val request = server.takeRequest()
+        val url = requireNotNull(request.requestUrl)
+        assertEquals("anonymous", request.headers["X-RF2-Client"])
+        assertEquals("Lt Ripley", url.queryParameter("pseud"))
+        assertEquals("", url.queryParameter("search"))
+        assertNull("page=1 should use HFR's implicit first page", url.queryParameter("page"))
+    }
+
+    @Test
     fun `searchTopics encodes posts-only scope`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>ok</body></html>"))
 

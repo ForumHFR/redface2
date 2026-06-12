@@ -78,6 +78,17 @@ data class SettingsState(
     val isUpdatingTopicTopBarAutoHide: Boolean = false,
     val topicTopBarAutoHideError: Boolean = false,
     val topicTopBarAutoHideTouchedLocally: Boolean = false,
+    // Topic — #383 floating ‹/› page FABs (#283). Same machinery. Default TRUE (historical
+    // cluster); the toggle is the opt-out for swipe-only readers. « Répondre » is not governed.
+    val topicPageFabs: Boolean = true,
+    val isUpdatingTopicPageFabs: Boolean = false,
+    val topicPageFabsError: Boolean = false,
+    val topicPageFabsTouchedLocally: Boolean = false,
+    // #313 — badge MP non lus sur l'item Messages de la barre de navigation.
+    val mpUnreadBadge: Boolean = true,
+    val isUpdatingMpUnreadBadge: Boolean = false,
+    val mpUnreadBadgeError: Boolean = false,
+    val mpUnreadBadgeTouchedLocally: Boolean = false,
     // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
     // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
     // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
@@ -92,6 +103,12 @@ data class SettingsState(
     val isUpdatingShowDtSection: Boolean = false,
     val showDtSectionError: Boolean = false,
     val showDtSectionTouchedLocally: Boolean = false,
+    // Drapeaux — #378 auto-refresh on landing (app open / back from a topic). Same machinery.
+    // Default TRUE: the staleness was the complaint, the toggle is the opt-out.
+    val flagsAutoRefresh: Boolean = true,
+    val isUpdatingFlagsAutoRefresh: Boolean = false,
+    val flagsAutoRefreshError: Boolean = false,
+    val flagsAutoRefreshTouchedLocally: Boolean = false,
 ) {
     val canSave: Boolean
         get() = !isSaving
@@ -128,6 +145,13 @@ data class SettingsState(
     val canToggleTopicTopBarAutoHide: Boolean
         get() = !isUpdatingTopicTopBarAutoHide
 
+    // #383 — the page-FABs toggle is gated only by its own write.
+    val canToggleTopicPageFabs: Boolean
+        get() = !isUpdatingTopicPageFabs
+
+    val canToggleMpUnreadBadge: Boolean
+        get() = !isUpdatingMpUnreadBadge
+
     // #312 — the confirm-before-posting toggle is gated only by its own write.
     val canToggleConfirmBeforePosting: Boolean
         get() = !isUpdatingConfirmBeforePosting
@@ -135,6 +159,10 @@ data class SettingsState(
     // DT tab — gated only by its own write.
     val canToggleShowDtSection: Boolean
         get() = !isUpdatingShowDtSection
+
+    // #378 — flags auto-refresh, gated only by its own write.
+    val canToggleFlagsAutoRefresh: Boolean
+        get() = !isUpdatingFlagsAutoRefresh
 }
 
 sealed interface SettingsError {
@@ -207,6 +235,13 @@ sealed interface SettingsIntent {
     // flags toggles: the boolean is the desired post-flip state.
     data class TopicTopBarAutoHideChanged(val enabled: Boolean) : SettingsIntent
 
+    // #383 — topic floating ‹/› page FABs toggle. Optimistic-flip contract, like the flags
+    // toggles: the boolean is the desired post-flip state.
+    data class TopicPageFabsChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #313 — badge MP non lus (barre de navigation). */
+    data class MpUnreadBadgeChanged(val enabled: Boolean) : SettingsIntent
+
     // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
     // the boolean is the desired post-flip state.
     data class ConfirmBeforePostingChanged(val enabled: Boolean) : SettingsIntent
@@ -214,4 +249,8 @@ sealed interface SettingsIntent {
     // Drapeaux — opt-in « DT » placeholder tab (MPStorage sync #6 lands later). Optimistic-flip
     // contract, like the flags toggles: the boolean is the desired post-flip state.
     data class ShowDtSectionChanged(val enabled: Boolean) : SettingsIntent
+
+    // Drapeaux — #378 auto-refresh on landing. Optimistic-flip contract, like the flags
+    // toggles: the boolean is the desired post-flip state.
+    data class FlagsAutoRefreshChanged(val enabled: Boolean) : SettingsIntent
 }

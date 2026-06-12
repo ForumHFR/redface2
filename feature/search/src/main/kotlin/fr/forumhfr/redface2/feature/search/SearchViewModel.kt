@@ -2,6 +2,9 @@ package fr.forumhfr.redface2.feature.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
@@ -11,7 +14,6 @@ import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
 import fr.forumhfr.redface2.core.model.search.SearchRequest
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.search.SearchTopicResult
-import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -45,13 +47,20 @@ import kotlinx.coroutines.launch
  * result's real topic page (HFR's search hrefs always carry `page=1`) and emits a
  * one-shot [SearchEffect.NavigateToTopic] through [effects] (Channel +
  * `receiveAsFlow`, same pattern as `TopicViewModel`).
+ *
+ * [initialPseudo] supports the profile's « Derniers messages » entry point : a
+ * non-blank value pre-fills the author field and fires the search immediately
+ * (author-only, all categories — cf. [SearchRequest.pseudo]). `@AssistedInject`
+ * (same pattern as `ProfileViewModel`) because the value comes from the nav
+ * route at construction time ; the search tab passes `null` and starts idle.
  */
-@HiltViewModel
-class SearchViewModel @Inject constructor(
+@HiltViewModel(assistedFactory = SearchViewModel.Factory::class)
+class SearchViewModel @AssistedInject constructor(
     private val searchRepository: SearchRepository,
+    @Assisted private val initialPseudo: String?,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(SearchUiState())
+    private val _state = MutableStateFlow(SearchUiState(pseudo = initialPseudo.orEmpty().trim()))
     val state: StateFlow<SearchUiState> = _state.asStateFlow()
 
     private val _effects: Channel<SearchEffect> = Channel(capacity = Channel.BUFFERED)
@@ -65,6 +74,9 @@ class SearchViewModel @Inject constructor(
 
     /** The text scope that was last actually submitted, used by [retry] and pivot changes. */
     private var lastSubmittedTextScope: SearchTextScope = SearchTextScope.TitlesAndPosts
+
+    /** The author filter that was last actually submitted, used by [retry] and pivot changes. */
+    private var lastSubmittedPseudo: String? = null
 
     private var searchJob: Job? = null
 
@@ -82,14 +94,31 @@ class SearchViewModel @Inject constructor(
      */
     private var isOpeningResult = false
 
+    init {
+        // Profile entry point : land directly on the author's recent posts. The
+        // init-time submit mirrors what the user would do by hand (fill the author
+        // field, tap « Rechercher ») so retry/pivot/scope flows behave identically.
+        val prefilled = _state.value.pseudo
+        if (prefilled.isNotEmpty()) {
+            launchSearch(
+                query = "",
+                scope = SearchCategoryScope.All,
+                textScope = _state.value.textScope,
+                pseudo = prefilled,
+            )
+        }
+    }
+
     fun submit(intent: SearchIntent) {
         when (intent) {
             is SearchIntent.QueryChanged -> onQueryChanged(intent.query)
+            is SearchIntent.PseudoChanged -> onPseudoChanged(intent.pseudo)
             is SearchIntent.TextScopeSelected -> onTextScopeSelected(intent.scope)
             SearchIntent.Submit -> onSubmit()
             SearchIntent.Retry -> onRetry()
             is SearchIntent.CategorySelected -> onCategorySelected(intent.category)
             is SearchIntent.OpenResult -> onOpenResult(intent.result)
+            SearchIntent.EditCriteria -> _state.update { it.copy(formCollapsed = false) }
         }
     }
 
@@ -97,11 +126,20 @@ class SearchViewModel @Inject constructor(
         // A typed-but-not-submitted query invalidates the currently displayed
         // search. Keeping the old list under the new field value is misleading
         // and can let an in-flight response land as stale results.
+        invalidateDisplayedSearch { it.copy(query = query) }
+    }
+
+    private fun onPseudoChanged(pseudo: String) {
+        // Same invalidation contract as onQueryChanged : the author filter is part
+        // of the search identity, so editing it orphans the displayed results.
+        invalidateDisplayedSearch { it.copy(pseudo = pseudo) }
+    }
+
+    private inline fun invalidateDisplayedSearch(transform: (SearchUiState) -> SearchUiState) {
         searchGeneration += 1
         searchJob?.cancel()
         _state.update {
-            it.copy(
-                query = query,
+            transform(it).copy(
                 selectedCategory = null,
                 pivotCategories = emptyList(),
                 results = emptyList(),
@@ -113,9 +151,17 @@ class SearchViewModel @Inject constructor(
     }
 
     private fun onSubmit() {
-        val trimmed = _state.value.query.trim()
-        if (trimmed.isEmpty()) return
-        launchSearch(trimmed, SearchCategoryScope.All, _state.value.textScope)
+        val trimmedQuery = _state.value.query.trim()
+        val trimmedPseudo = _state.value.pseudo.trim()
+        // HFR accepts query-only, author-only, and combined searches — but at least
+        // one of the two must be set (cf. SearchRequest.pseudo).
+        if (trimmedQuery.isEmpty() && trimmedPseudo.isEmpty()) return
+        launchSearch(
+            query = trimmedQuery,
+            scope = SearchCategoryScope.All,
+            textScope = _state.value.textScope,
+            pseudo = trimmedPseudo.takeIf { it.isNotEmpty() },
+        )
     }
 
     private fun onTextScopeSelected(scope: SearchTextScope) {
@@ -123,22 +169,28 @@ class SearchViewModel @Inject constructor(
         if (current.textScope == scope) return
         _state.update { it.copy(textScope = scope) }
         val query = current.query.trim()
-        if (current.hasSearched && query.isNotEmpty()) {
-            launchSearch(query, lastSubmittedCategory, scope)
+        val pseudo = current.pseudo.trim()
+        if (current.hasSearched && (query.isNotEmpty() || pseudo.isNotEmpty())) {
+            launchSearch(query, lastSubmittedCategory, scope, pseudo.takeIf { it.isNotEmpty() })
         }
     }
 
     private fun onRetry() {
         val query = lastSubmittedQuery ?: return
-        launchSearch(query, lastSubmittedCategory, lastSubmittedTextScope)
+        launchSearch(query, lastSubmittedCategory, lastSubmittedTextScope, lastSubmittedPseudo)
     }
 
     private fun onCategorySelected(category: SearchPivotCategory) {
-        val query = lastSubmittedQuery ?: _state.value.query.trim().takeIf { it.isNotEmpty() } ?: return
+        // `lastSubmittedQuery` can legitimately be "" after an author-only search ;
+        // re-scope with whatever (query, pseudo) pair the listing on screen came from.
+        val query = lastSubmittedQuery ?: _state.value.query.trim()
+        val pseudo = lastSubmittedPseudo
+        if (query.isEmpty() && pseudo.isNullOrEmpty()) return
         launchSearch(
             query = query,
             scope = SearchCategoryScope.Category(id = category.id, name = category.label),
             textScope = lastSubmittedTextScope,
+            pseudo = pseudo,
         )
     }
 
@@ -212,7 +264,12 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    private fun launchSearch(query: String, scope: SearchCategoryScope, textScope: SearchTextScope) {
+    private fun launchSearch(
+        query: String,
+        scope: SearchCategoryScope,
+        textScope: SearchTextScope,
+        pseudo: String? = null,
+    ) {
         // Cancel any in-flight search ; a newer query must take precedence.
         searchJob?.cancel()
         val generation = searchGeneration + 1
@@ -220,18 +277,25 @@ class SearchViewModel @Inject constructor(
         lastSubmittedQuery = query
         lastSubmittedCategory = scope
         lastSubmittedTextScope = textScope
+        lastSubmittedPseudo = pseudo
         _state.update {
             it.copy(
                 query = query,
+                pseudo = pseudo.orEmpty(),
                 textScope = textScope,
                 isLoading = true,
                 errorMessage = null,
                 hasSearched = true,
+                // #433 — every launched search collapses the form ; the single
+                // launch point keeps submit/retry/pivot/profile-entry consistent.
+                formCollapsed = true,
             )
         }
         searchJob = viewModelScope.launch {
             val outcome = runCatching {
-                searchRepository.search(SearchRequest(query = query, category = scope, textScope = textScope))
+                searchRepository.search(
+                    SearchRequest(query = query, category = scope, textScope = textScope, pseudo = pseudo),
+                )
             }
             val cancellation = outcome.exceptionOrNull() as? CancellationException
             if (cancellation != null) {
@@ -268,6 +332,11 @@ class SearchViewModel @Inject constructor(
                 },
             )
         }
+    }
+
+    @AssistedFactory
+    interface Factory {
+        fun create(initialPseudo: String?): SearchViewModel
     }
 
     private companion object {

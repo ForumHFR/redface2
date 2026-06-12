@@ -160,4 +160,40 @@ interface UserPreferencesRepository {
 
     /** Persists [observeShowDtSection]. Default `false` until the first call. */
     suspend fun setShowDtSection(enabled: Boolean)
+
+    /**
+     * Auto-refresh of the Drapeaux lists (#378): when `true`, landing on the flags screen
+     * (app open, back from a topic, return from another tab) silently re-fetches the current
+     * tab — throttled by the ViewModel so rapid back-and-forth does not hammer the REST
+     * fan-out — with the pull-to-refresh indicator as the visual cue. Default `true` (the
+     * feature exists because the lists went stale without it); the toggle is the opt-OUT
+     * requested in the beta thread. Observed by `:feature:flags`, toggled in Settings.
+     */
+    fun observeFlagsAutoRefresh(): Flow<Boolean>
+
+    /** Persists [observeFlagsAutoRefresh]. Default `true` until the first call. */
+    suspend fun setFlagsAutoRefresh(enabled: Boolean)
+
+    /**
+     * Floating previous/next page buttons at the bottom of a topic (#283): when `false`, the
+     * ‹/› mini-FABs are hidden — the page swipe (#282) and the header pager already cover
+     * page-change, and some readers find the cluster intrusive (#383). The « Répondre » FAB
+     * is NOT governed by this preference and stays visible. Default `true` (historical
+     * behaviour). Observed by `:feature:topic`, toggled in Settings.
+     */
+    fun observeTopicPageFabs(): Flow<Boolean>
+
+    /** Persists [observeTopicPageFabs]. Default `true` until the first call. */
+    suspend fun setTopicPageFabs(enabled: Boolean)
+
+    /**
+     * #313 — unread-MP badge on the « Messages » destination of the navigation bar. When
+     * `true` (default) the badge shows the count of unread conversations for the authenticated
+     * session ; `false` hides it entirely (no fetch is saved — the underlying count flow is
+     * shared with other consumers). Observed by `:app`, toggled in Settings.
+     */
+    fun observeMpUnreadBadge(): Flow<Boolean>
+
+    /** Persists [observeMpUnreadBadge]. Default `true` until the first call. */
+    suspend fun setMpUnreadBadge(enabled: Boolean)
 }

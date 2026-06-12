@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.ui.editor.WikiSearchState
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel

@@ -1,4 +1,6 @@
-package fr.forumhfr.redface2.feature.editor
+package fr.forumhfr.redface2.core.ui.editor
+
+import fr.forumhfr.redface2.core.ui.R
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -38,7 +40,8 @@ import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.model.EditorSmiley
 
 /**
- * Phase 2F-B (#11 partial) — bottom-sheet smiley picker.
+ * Phase 2F-B (#11 partial) — bottom-sheet smiley picker. Promoted from `:feature:editor`
+ * to `:core:ui` for the MP editors (#387) — same pattern as `EditorOptionsSheet` (#388).
  *
  * Two tabs :
  *  - **Standard** : the canonical `BUILTIN_HFR_SMILEYS` constant, ~25 entries, available
@@ -53,7 +56,7 @@ import fr.forumhfr.redface2.core.model.EditorSmiley
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SmileyPickerSheet(
+fun SmileyPickerSheet(
     state: SmileyPickerState.Open,
     onDismiss: () -> Unit,
     onQueryChange: (String) -> Unit,

@@ -3,12 +3,17 @@ package fr.forumhfr.redface2.core.model
 /**
  * One row of the user's HFR drapeaux page. Phase 1D-1 reads this from the REST API
  * (`forums/hardwarefr/topics/{participated,read,favorites}/`) per ADR-003 — `forum1f.php`
- * HTML scraping has been retired. HFR exposes three drapeau buckets, mapped 1:1 to the
- * REST `flag_owntopic` integer :
+ * HTML scraping has been retired. HFR exposes three drapeau buckets:
  *
- * - `flag_owntopic=1` → [FlagType.CYAN] — sujets participés
- * - `flag_owntopic=2` → [FlagType.RED] — lus uniquement
- * - `flag_owntopic=3` → [FlagType.FAVORITE] — favoris
+ * - `participated/` → [FlagType.CYAN] — sujets participés
+ * - `read/` → [FlagType.RED] — lus uniquement
+ * - `favorites/` → [FlagType.FAVORITE] — favoris
+ *
+ * [type] is the **bucket the row was fetched from**, NOT the REST `flag_owntopic` integer.
+ * Live-verified 2026-06-11 (#384, fixture `rest_cat13_participated_favorites.json`): the
+ * `participated` bucket returns participated-AND-favorited topics with `flag_owntopic=3`, and
+ * the `read` bucket returns `flag_owntopic=0` — the field describes the strongest flag ON the
+ * topic, not bucket membership. Mapping it to [type] corrupted the per-type Room cache.
  *
  * Differences with the legacy HTML model :
  * - `views` was sourced from a column on `forum1f.php`. The REST flag listings do not
@@ -29,6 +34,14 @@ data class Flag(
     val totalPages: Int,
     val replyCount: Int,
     val type: FlagType,
+    /**
+     * True when the topic ALSO carries the favori/étoile flag (REST `flag_owntopic == 3`),
+     * regardless of the bucket this row was fetched from. [type] stays the bucket (#384 — mapping
+     * `flag_owntopic` to [type] corrupted the per-type cache); this field only carries the
+     * decoration: a favorited topic listed under « Mes sujets » keeps its yellow dot (web parity,
+     * regression reported on dev v118). `false` when REST omits the field.
+     */
+    val isFavorite: Boolean = false,
     val hasUnread: Boolean,
     /**
      * Page where the user's last read marker is set, derived from
@@ -53,11 +66,17 @@ data class Flag(
     val lastReplyAt: String,
 )
 
+/**
+ * The REST bucket a flag row belongs to. NOT a mirror of the REST `flag_owntopic` response
+ * field — that field describes the strongest flag ON the topic, not bucket membership (see
+ * the [Flag] KDoc). The 1/2/3 integers only reappear as the WRITE-side `owntopic` selector
+ * of `delflag.php` (cf. `HfrClient.removeFlag`).
+ */
 enum class FlagType {
-    /** Cyan drapeau — sujets participés (`flag_owntopic=1`). */
+    /** Cyan drapeau — bucket `participated/` (sujets participés). */
     CYAN,
-    /** Red drapeau — lus uniquement (`flag_owntopic=2`). */
+    /** Red drapeau — bucket `read/` (lus uniquement). */
     RED,
-    /** Yellow star — favoris (`flag_owntopic=3`). */
+    /** Yellow star — bucket `favorites/` (favoris). */
     FAVORITE,
 }

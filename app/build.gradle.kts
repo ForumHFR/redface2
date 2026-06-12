@@ -53,7 +53,7 @@ android {
         // versionName is also surfaced in the app footer via BuildConfig.VERSION_NAME so
         // dogfood builds advertise their lineage to the user.
         versionCode = cliVersionCode ?: 72
-        versionName = "0.9.0"
+        versionName = "0.10.0"
 
         // Manifest placeholder so a side-by-side install (dogfood/preview overlay)
         // can override the launcher label without touching tracked manifest/strings.
@@ -149,6 +149,13 @@ android {
             dimension = "channel"
             applicationIdSuffix = ".dev"
             manifestPlaceholders["appLabel"] = cliAppLabel ?: "Redface 2 dev"
+            // Stamp the CI build number into the dev versionName (XaTriX, 2026-06-12) : the base
+            // versionName stayed « 0.9.0 » across v114→v123, so F-Droid .dev (which displays
+            // versions by versionName) listed ten identical-looking entries and the app footer
+            // could not tell builds apart. Same idea as the debug buildType's `+debug.<sha>`
+            // stamp ; release.md already documented this suffix — it now actually exists. The CD
+            // injects -PversionCodeOverride at dispatch ; a local dev build stamps `local`.
+            versionNameSuffix = "-dev." + (cliVersionCode?.toString() ?: "local")
         }
     }
 

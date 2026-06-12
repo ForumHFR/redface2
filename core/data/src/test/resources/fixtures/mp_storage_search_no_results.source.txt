@@ -1,0 +1,10 @@
+Source: forum.hardware.fr (capture authentifiee live, compte XaTriX). 2026-06-11
+Captured page: forum1.php?recherches=1&cat=prive&config=hfr.inc&search=a2bcc09b796b8c6fab77058ff8446c34&titre=1&orderSearch=1&resSearch=50&daterange=2&searchtype=1&jour=11&mois=6&annee=2026&pseud=&subcat=0&trash=0&trash_post=0&moderation=0
+Methode: curl GET authentifie (login POST login_validation.php -> cookies md_user/md_passs/md_id), User-Agent navigateur.
+Notes: decouverte du MP storage MPStorage v0.1 (#6) — recherche par sujet (= le hash fixe
+  a2bcc09b796b8c6fab77058ff8446c34) dans cat=prive. Le compte n'a PAS de MP storage : HFR repond
+  la page minimale « Désolé, aucune réponse n'a été trouvée ! » (.hop), MEME shape que la recherche
+  publique sans resultat (fixture search_no_results.html). Verifie au passage : la recherche GET
+  cat=prive est ACCEPTEE en authentifie (la REST API la rejette, cf. reference cat-values).
+Privacy: scrubbe. hash_check -> SCRUBBED_HASH_CHECK. Aucun sujet/pseudo/correspondant dans la page
+  (zero resultat). AUCUN POST emis (GET only).

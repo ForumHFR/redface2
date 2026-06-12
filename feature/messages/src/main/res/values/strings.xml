@@ -9,6 +9,7 @@
     <string name="messages_thread_title">Conversation privée</string>
     <string name="messages_thread_error_load">Impossible de charger la conversation.</string>
     <string name="messages_retry">Réessayer</string>
+    <string name="messages_thread_refresh_failed">Le rafraîchissement a échoué. Réessayez.</string>
     <string name="messages_state_read">Lu</string>
     <string name="messages_state_unread">Non lu</string>
     <string name="messages_back">Retour</string>
@@ -19,6 +20,14 @@
     <!-- #301 — réponse à une conversation privée (écriture MP). -->
     <string name="messages_reply">Répondre</string>
     <string name="messages_reply_title">Répondre</string>
+    <string name="messages_compose_title">Nouveau message</string>
+    <string name="messages_compose_new">Nouveau</string>
+    <string name="messages_compose_recipients_label">Destinataire(s)</string>
+    <string name="messages_compose_recipients_placeholder">Pseudo(s), séparés par des virgules…</string>
+    <string name="messages_compose_subject_label">Sujet</string>
+    <string name="messages_compose_subject_counter">%1$d/%2$d</string>
+    <string name="messages_compose_form_error">Impossible d\'ouvrir le formulaire de nouveau message. Réessayez.</string>
+    <string name="messages_compose_error_unexpected">Réponse inattendue de HFR. Votre message a peut-être été envoyé : vérifiez votre liste de messages privés avant de renvoyer.</string>
     <string name="messages_reply_field_label">Votre réponse</string>
     <string name="messages_reply_field_placeholder">Écrivez votre message…</string>
     <string name="messages_reply_preview_show">Aperçu</string>
@@ -26,6 +35,8 @@
     <string name="messages_reply_submit">Envoyer</string>
     <string name="messages_reply_submit_confirm">Confirmer</string>
     <string name="messages_reply_actions_options">Options</string>
+    <!-- #387 — picker de smileys dans les éditeurs MP (demande de tinc). -->
+    <string name="messages_reply_actions_smileys">Smileys</string>
     <string name="messages_reply_options_title">Options</string>
     <string name="messages_reply_option_signature">Activer la signature</string>
     <string name="messages_reply_option_smiley_disabled">Désactiver les smileys</string>

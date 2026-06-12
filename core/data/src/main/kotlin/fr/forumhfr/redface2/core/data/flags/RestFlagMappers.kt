@@ -23,9 +23,16 @@ import kotlin.math.max
  * without re-deriving the parsing.
  *
  * Mapping rules :
- * - `flag_owntopic` → [FlagType] (1=CYAN, 2=RED, 3=FAVORITE) ; unknown / null buckets
- *   fall back to the [defaultType] passed by the caller (the bucket the request was
- *   issued for) so a future server-side bucket addition does not crash the screen.
+ * - [Flag.type] is the **requested bucket** ([type]), never derived from `flag_owntopic`.
+ *   Live-verified 2026-06-11 (#384, fixture `rest_cat13_participated_favorites.json`) :
+ *   the `participated` bucket returns participated-AND-favorited topics with
+ *   `flag_owntopic = 3`, and the `read` bucket returns `flag_owntopic = 0` — the field
+ *   describes the strongest flag ON the topic (3 = favori/étoile), NOT which bucket the
+ *   row belongs to. Mapping it to [Flag.type] made `replaceForType(CYAN)` persist those
+ *   rows under FAVORITE in Room, so a Room-served « Mes sujets » list silently lost its
+ *   favorited topics (the #384 amputation) and a swipe-removal on such a row deleted the
+ *   favori instead of the cyan drapeau. A future « étoile » badge can surface
+ *   `flag_owntopic == 3` as a separate field if needed.
  * - `is_read == false` → `hasUnread = true`. When `is_read` is missing (defensive
  *   path, REST flag responses always carry it for an authenticated request) we
  *   default to `true` because surfacing a likely-stale "read" badge is a worse UX
@@ -55,20 +62,27 @@ internal object RestFlagMappers {
      */
     private const val POSTS_PER_PAGE_FALLBACK = 40
 
+    /**
+     * REST `flag_owntopic` value meaning « favori/étoile » (the strongest flag on the topic,
+     * live-verified on the `rest_cat13_participated_favorites.json` fixture, #384). Mirrors
+     * `RestForumMappers`' reading of the same field.
+     */
+    private const val FLAG_OWNTOPIC_FAVORITE = 3
+
     private val CAT_FROM_HREF = Regex("/categories/(\\d+)/")
     private val SUBCAT_FROM_HREF = Regex("/categories/\\d+/subcategories/(\\d+)/")
 
     fun toFlags(
         envelope: RestListEnvelope<RestTopic>,
-        defaultType: FlagType,
+        type: FlagType,
         fallbackCat: Int? = null,
     ): List<Flag> = envelope.resource.resources.mapNotNull { dto ->
-        toFlag(dto, defaultType, fallbackCat)
+        toFlag(dto, type, fallbackCat)
     }
 
     private fun toFlag(
         dto: RestTopic,
-        defaultType: FlagType,
+        type: FlagType,
         fallbackCat: Int?,
     ): Flag? {
         val cat = fallbackCat
@@ -100,7 +114,12 @@ internal object RestFlagMappers {
             title = dto.title.decodeHtmlEntities(),
             totalPages = totalPages,
             replyCount = replyCount,
-            type = toFlagType(dto.flagOwntopic) ?: defaultType,
+            // #384 — the requested bucket IS the type; `flag_owntopic` describes the strongest
+            // flag on the topic (3 = favori), not bucket membership. See the object KDoc.
+            type = type,
+            // The « étoile » decoration the object KDoc anticipated: surfaced as its own field so
+            // a favorited topic keeps its yellow dot in « Mes sujets » without touching the type.
+            isFavorite = dto.flagOwntopic == FLAG_OWNTOPIC_FAVORITE,
             hasUnread = dto.isRead?.let { !it } ?: true,
             lastReadPage = lastReadPage,
             lastPostReadId = dto.lastPostReadId,
@@ -108,13 +127,6 @@ internal object RestFlagMappers {
             lastReplyAuthor = dto.links.lastAuthor?.title.orEmpty(),
             lastReplyAt = dto.lastPostDate,
         )
-    }
-
-    private fun toFlagType(rawFlagOwntopic: Int?): FlagType? = when (rawFlagOwntopic) {
-        1 -> FlagType.CYAN
-        2 -> FlagType.RED
-        3 -> FlagType.FAVORITE
-        else -> null
     }
 
     private fun extractCatId(href: String): Int? =

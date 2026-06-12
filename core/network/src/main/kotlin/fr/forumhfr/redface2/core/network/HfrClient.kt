@@ -122,6 +122,93 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * #301 follow-up — GET the « new private message » composer. The URL is the one HFR's own
+     * « Créer un nouveau message » buttons carry on the MP list (captured live 2026-06-11,
+     * fixture `mp_compose_form.html`) : `message.php?config=hfr.inc&cat=prive&sond=0&p=1
+     * &subcat=0&dest=&subcatgroup=0` — `message.php` **without** `post=` opens the standalone
+     * MP composer. [prefilledDest] pre-fills the recipient field server-side (verified live :
+     * `dest=foo` renders `<input name="dest" value="foo">`), handy for a future « send a MP to
+     * this user » entry point ; the empty default mirrors HFR's own buttons.
+     *
+     * Always authenticated : composing toward the anonymous form would only produce a
+     * [ReplyForm.isAnonymous] refusal downstream — surface [SessionExpiredException] instead.
+     */
+    suspend fun getPrivateMessageComposePage(prefilledDest: String? = null): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("message.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", "prive")
+            .addQueryParameter("sond", "0")
+            .addQueryParameter("p", "1")
+            .addQueryParameter("subcat", "0")
+            .addQueryParameter("dest", prefilledDest.orEmpty())
+            .addQueryParameter("subcatgroup", "0")
+            .build()
+
+        val request = Request.Builder().url(url).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
+     * MPStorage discovery (#6, ADR-014) — authenticated subject search inside `cat=prive`.
+     * Same `recherches=1` wire as the public search, but scoped to the private inbox :
+     * verified live 2026-06-11 (fixtures `mp_storage_search_*`) — the GET variant is
+     * accepted while the REST API rejects `cat=prive`. `titre=1` (subjects only) because
+     * the storage MP is identified by its fixed hash SUBJECT.
+     *
+     * [date] mirrors [searchTopics] : HFR's form serialises today's date even though
+     * `daterange=2` makes it irrelevant — injectable for test determinism.
+     */
+    suspend fun searchPrivateMessagesBySubject(subject: String, date: java.time.LocalDate): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("forum1.php")
+            .addQueryParameter("recherches", "1")
+            .addQueryParameter("cat", "prive")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("search", subject)
+            .addQueryParameter("titre", "1")
+            .addQueryParameter("orderSearch", "1")
+            .addQueryParameter("resSearch", "50")
+            .addQueryParameter("daterange", "2")
+            .addQueryParameter("searchtype", "1")
+            .addQueryParameter("jour", date.dayOfMonth.toString())
+            .addQueryParameter("mois", date.monthValue.toString())
+            .addQueryParameter("annee", date.year.toString())
+            .addQueryParameter("pseud", "")
+            .addQueryParameter("subcat", "0")
+            .addQueryParameter("trash", "0")
+            .addQueryParameter("trash_post", "0")
+            .addQueryParameter("moderation", "0")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
+     * MPStorage read (#6, ADR-014) — GET the edit form of a private-message post the user
+     * owns. The textarea `content_form` carries the RAW storage document (not rendered
+     * HTML), exactly how `MPStorage.user.js` reads it. Same `message.php` family as
+     * [getEditForm], with `cat=prive` (a String — the typed public variant cannot carry it).
+     */
+    suspend fun getPrivateMessageEditForm(threadId: Int, numreponse: Int): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("message.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("cat", "prive")
+            .addQueryParameter("post", threadId.toString())
+            .addQueryParameter("numreponse", numreponse.toString())
+            .addQueryParameter("page", "1")
+            .addQueryParameter("p", "1")
+            .addQueryParameter("subcat", "0")
+            .addQueryParameter("sondage", "0")
+            .addQueryParameter("owntopic", "0")
+            .addQueryParameter("new", "0")
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Phase 2C — GET the HFR reply or quote form. The shape is the same in both
      * cases (`/message.php?cat=…&post=…&page=…&p=1&subcat=…&sondage=0&owntopic=0
      * &new=0`); a quote carries `numrep={quotedNumreponse}` and may additionally
@@ -341,6 +428,10 @@ class HfrClient @Inject constructor(
      *                 computes it from an injectable [java.time.Clock] so tests are
      *                 reproducible.
      * - [textScope] : HFR's `titre` field (`1` titles, `3` titles + posts, `0` posts).
+     * - [pseudo]    : HFR's `pseud` field — author filter. `null`/blank = no filter (encoded
+     *                 as the empty `pseud=` the form always carries). Author-only searches
+     *                 (empty [query]) are supported by HFR ; all-categories author searches
+     *                 answer a 302 onto the multi-cat pivot, which OkHttp follows.
      *
      * Uses the **anonymous** client : the search endpoint is public and we don't want the
      * user's session cookies attached to a request whose URL contains the search payload
@@ -348,12 +439,14 @@ class HfrClient @Inject constructor(
      * failures to typed errors and is responsible for stripping the `search=` parameter
      * before logging.
      */
+    @Suppress("LongParameterList") // HFR search form : one parameter per wire field.
     suspend fun searchTopics(
         query: String,
         cat: Int?,
         page: Int,
         date: java.time.LocalDate,
         textScope: SearchTextScope,
+        pseudo: String? = null,
     ): String {
         val orderSearch = if (textScope == SearchTextScope.TitlesOnly) {
             ORDER_BY_LAST_TOPIC_REPLY
@@ -366,7 +459,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("cat", cat?.let { "$it*hfr.inc" } ?: "")
             .addQueryParameter("orderSearch", orderSearch)
             .addQueryParameter("config", "hfr.inc")
-            .addQueryParameter("pseud", "")
+            .addQueryParameter("pseud", pseudo.orEmpty())
             .addQueryParameter("search", query)
             .addQueryParameter("titre", textScope.hfrTitreValue.toString())
             .addQueryParameter("jour", date.dayOfMonth.toString())
@@ -398,8 +491,10 @@ class HfrClient @Inject constructor(
      * &page={page}&p=1&sondage=0&owntopic={1|2|3}&new=0`
      *
      * - [type] maps to the `owntopic` discriminator that identifies the drapeau bucket :
-     *   `CYAN → 1`, `RED → 2`, `FAVORITE → 3` (same mapping as the REST `flag_owntopic`,
-     *   cf. `Flag.kt`). Targeting the right bucket matters : HFR keys the deletion on it.
+     *   `CYAN → 1`, `RED → 2`, `FAVORITE → 3`. This is a WRITE-side bucket selector only —
+     *   do not read it back from the REST `flag_owntopic` response field, which describes
+     *   the strongest flag ON the topic, not bucket membership (cf. `Flag.kt`, #384).
+     *   Targeting the right bucket matters : HFR keys the deletion on it.
      *   The `FAVORITE` branch is proven by a destructive capture ; `CYAN` / `RED` reuse the
      *   same proven `owntopic` discriminant and should be recaptured when safe.
      * - [subcat] is nullable. REST flag listings do not always carry a sub-category, so we
@@ -546,9 +641,11 @@ class HfrClient @Inject constructor(
     }
 
     /**
-     * Maps [FlagType] to the HFR `owntopic` discriminator used by `delflag.php` / `addflag.php`
-     * and the REST `flag_owntopic` field. Kept private to the network layer : the mapping is a
-     * wire detail of the HFR contract, not a domain concept the rest of the app should know.
+     * Maps [FlagType] to the WRITE-side `owntopic` bucket selector of `delflag.php` — and that
+     * endpoint only (`addflag.php` ignores `owntopic` : favori-only, live-verified ; and the REST
+     * `flag_owntopic` response field describes the strongest flag ON the topic, not the bucket,
+     * cf. `Flag.kt`). Kept private to the network layer : the mapping is a wire detail of the
+     * HFR contract, not a domain concept the rest of the app should know.
      */
     private fun FlagType.toOwntopic(): Int = when (this) {
         FlagType.CYAN -> 1

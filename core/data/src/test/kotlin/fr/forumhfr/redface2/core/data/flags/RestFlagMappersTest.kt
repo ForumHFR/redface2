@@ -33,7 +33,7 @@ class RestFlagMappersTest {
 
         val flags = RestFlagMappers.toFlags(
             envelope = envelope,
-            defaultType = FlagType.CYAN,
+            type = FlagType.CYAN,
             fallbackCat = 23,
         )
 
@@ -95,7 +95,7 @@ class RestFlagMappersTest {
 
         val flags = RestFlagMappers.toFlags(
             envelope = envelope,
-            defaultType = FlagType.RED,
+            type = FlagType.RED,
             fallbackCat = null,
         )
 
@@ -133,13 +133,48 @@ class RestFlagMappersTest {
         """.trimIndent()
         val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(payload)
 
-        val flags = RestFlagMappers.toFlags(envelope, defaultType = FlagType.CYAN, fallbackCat = null)
+        val flags = RestFlagMappers.toFlags(envelope, type = FlagType.CYAN, fallbackCat = null)
 
         assertTrue("orphaned topic must be dropped", flags.isEmpty())
     }
 
     @Test
-    fun `unknown flag_owntopic falls back to defaultType not crash`() {
+    fun `participated bucket types favorited rows as the requested bucket - regression 384`() {
+        // Live-captured proof (2026-06-11): the participated bucket returns
+        // participated-AND-favorited topics with flag_owntopic=3. Typing them FAVORITE made
+        // replaceForType(CYAN) persist them under the wrong Room type, so a Room-served
+        // « Mes sujets » silently lost its favorited topics after a tab round-trip (#384).
+        val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(
+            fixture("rest_cat13_participated_favorites.json"),
+        )
+
+        val flags = RestFlagMappers.toFlags(
+            envelope = envelope,
+            type = FlagType.CYAN,
+            fallbackCat = 13,
+        )
+
+        assertEquals(3, flags.size)
+        val favorited = flags.filter { it.topicId == 26595 || it.topicId == 55667 }
+        assertEquals("the two flag_owntopic=3 rows must be present", 2, favorited.size)
+        assertTrue(
+            "every row of a CYAN fetch is typed CYAN, whatever flag_owntopic says",
+            flags.all { it.type == FlagType.CYAN },
+        )
+        // #384 follow-up (dev v118 feedback) — the favori decoration survives as its OWN field:
+        // the yellow dot of « Mes sujets » reads it, the type stays the bucket.
+        assertTrue(
+            "flag_owntopic=3 rows carry isFavorite",
+            favorited.all { it.isFavorite },
+        )
+        assertTrue(
+            "non-favorited rows do not",
+            flags.filterNot { it.topicId == 26595 || it.topicId == 55667 }.none { it.isFavorite },
+        )
+    }
+
+    @Test
+    fun `flag_owntopic never drives the type - the requested bucket does`() {
         val payload = """
             {
               "resource": {
@@ -163,7 +198,7 @@ class RestFlagMappersTest {
         """.trimIndent()
         val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(payload)
 
-        val flags = RestFlagMappers.toFlags(envelope, defaultType = FlagType.FAVORITE, fallbackCat = null)
+        val flags = RestFlagMappers.toFlags(envelope, type = FlagType.FAVORITE, fallbackCat = null)
 
         val flag = flags.single()
         assertEquals(FlagType.FAVORITE, flag.type)
@@ -194,7 +229,7 @@ class RestFlagMappersTest {
         """.trimIndent()
         val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(payload)
 
-        val flag = RestFlagMappers.toFlags(envelope, defaultType = FlagType.CYAN, fallbackCat = null).single()
+        val flag = RestFlagMappers.toFlags(envelope, type = FlagType.CYAN, fallbackCat = null).single()
         assertNull(flag.lastPostReadId)
         // hasUnread defensively false when REST tells us is_read=true
         assertFalse(flag.hasUnread)
@@ -224,7 +259,7 @@ class RestFlagMappersTest {
         """.trimIndent()
         val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(payload)
 
-        val flag = RestFlagMappers.toFlags(envelope, defaultType = FlagType.CYAN, fallbackCat = null).single()
+        val flag = RestFlagMappers.toFlags(envelope, type = FlagType.CYAN, fallbackCat = null).single()
         // ceil(81/20) = 5 — not ceil(81/40) = 3 — confirms the mapper trusts the href bucket.
         assertEquals(5, flag.totalPages)
     }
@@ -252,7 +287,7 @@ class RestFlagMappersTest {
         """.trimIndent()
         val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(payload)
 
-        val flag = RestFlagMappers.toFlags(envelope, defaultType = FlagType.CYAN, fallbackCat = null).single()
+        val flag = RestFlagMappers.toFlags(envelope, type = FlagType.CYAN, fallbackCat = null).single()
         assertNotNull(flag)
         assertEquals(FlagType.CYAN, flag.type)
         // Defensive: missing is_read → assume hasUnread (worse to claim "all read" than the inverse).

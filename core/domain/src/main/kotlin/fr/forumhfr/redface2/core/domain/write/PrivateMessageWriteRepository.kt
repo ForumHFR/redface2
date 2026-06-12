@@ -24,6 +24,13 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
  *   party was intentionally avoided), so callers must treat an unrecognised
  *   ([fr.forumhfr.redface2.core.model.write.ReplyFailureReason.Unknown]) response as non-destructive
  *   — keep the draft and let the user verify the conversation — rather than asserting a hard failure.
+ *
+ * Composing a **new** conversation (#301 follow-up) rides the same family : HFR's standalone MP
+ * composer (`message.php?cat=prive` without `post=`) posts to the same `bddpost.php` endpoint with
+ * `post`/`numrep` empty and two user-typed routing fields — `dest` (recipient pseudos,
+ * comma-separated for a MultiMP) and `sujet` (free subject, HFR caps it at 70 chars). Contract
+ * captured live 2026-06-11 (fixture `mp_compose_form.html`) ; the POST response was deliberately
+ * never exercised, so the same non-destructive-Unknown rule applies to [submitNewMessage].
  */
 interface PrivateMessageWriteRepository {
 
@@ -32,6 +39,29 @@ interface PrivateMessageWriteRepository {
     suspend fun submitReply(
         context: PrivateMessageReplyContext,
         form: ReplyForm,
+        bbcodeContent: String,
+        options: ReplyFormOptions = ReplyFormOptions(),
+    ): ReplySubmitResult
+
+    /**
+     * GETs the standalone MP composer and parses its `bddpost.php` form. [prefilledRecipient]
+     * pre-fills HFR's `dest` field server-side (future « send a MP to this user » entry points) ;
+     * the parsed prefill comes back inside [ReplyForm.hiddenFields]'s `dest` entry.
+     */
+    suspend fun fetchComposeForm(prefilledRecipient: String? = null): ReplyForm
+
+    /**
+     * POSTs a new private conversation. [recipients] lands in HFR's `dest` field verbatim —
+     * multiple pseudos are comma-separated (HFR's own field help) ; [subject] in `sujet`.
+     * Blank [recipients] / [subject] / [bbcodeContent] short-circuit to an
+     * [fr.forumhfr.redface2.core.model.write.ReplyFailureReason.EmptyMessage] failure (HFR's own
+     * « remplir tous les champs » rule) without touching the network.
+     */
+    @Suppress("LongParameterList") // One parameter per user-typed wire field.
+    suspend fun submitNewMessage(
+        form: ReplyForm,
+        recipients: String,
+        subject: String,
         bbcodeContent: String,
         options: ReplyFormOptions = ReplyFormOptions(),
     ): ReplySubmitResult

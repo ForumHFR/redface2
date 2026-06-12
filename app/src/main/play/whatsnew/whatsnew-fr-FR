@@ -1,10 +1,11 @@
-Redface 2 v0.5.1 — bêta.
+Redface 2 v0.10.0 — bêta.
 
 Nouveautés :
-- Messages privés en lecture : ta boîte de réception et tes conversations dans l'onglet Messages.
-- Swipe gauche/droite pour changer de page dans un sujet (la page suit le doigt).
-- Drapeaux : regroupement par catégorie, réglages d'affichage par type, filtre « non-lus uniquement ».
+- Messages privés : rédaction d'un nouveau MP, smileys dans l'éditeur, badge de non-lus, swipe de pages, pull-to-refresh.
+- Citation multiple, avec marquage des posts ajoutés.
+- Recherche : filtre par auteur, formulaire repliable.
+- Lecture : marqueur de fin de sujet, options d'affichage.
 
-Corrigé : un message d'erreur des MP pouvait laisser apparaître l'adresse d'une conversation privée.
+Correctifs : l'éditeur suit le curseur en frappe, drapeaux/favoris, clavier, thème, rendu.
 
 Signale les bugs via la bêta ou GitHub.

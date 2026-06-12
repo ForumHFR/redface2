@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
+import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -29,6 +31,18 @@ class DataStoreUserPreferencesRepositoryTest {
     private lateinit var repository: DataStoreUserPreferencesRepository
     private val dispatcher = UnconfinedTestDispatcher()
 
+    /** In-memory [ThemeBootstrapStore] — the SharedPreferences impl has its own Robolectric test. */
+    private val themeBootstrapStore = object : ThemeBootstrapStore {
+        var stored = ThemeBootstrap()
+        override fun read(): ThemeBootstrap = stored
+        override fun writeThemeMode(mode: ThemeMode) {
+            stored = stored.copy(themeMode = mode)
+        }
+        override fun writeAmoledEnabled(enabled: Boolean) {
+            stored = stored.copy(amoledEnabled = enabled)
+        }
+    }
+
     @Before
     fun setUp() {
         dataStore = PreferenceDataStoreFactory.create(
@@ -36,6 +50,7 @@ class DataStoreUserPreferencesRepositoryTest {
         )
         repository = DataStoreUserPreferencesRepository(
             dataStore = dataStore,
+            themeBootstrapStore = themeBootstrapStore,
             ioDispatcher = dispatcher,
         )
     }
@@ -337,6 +352,39 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `setThemeMode mirrors the value into the bootstrap store`() = runTest(dispatcher) {
+        // #386 — the synchronous cold-start mirror must follow every theme write.
+        repository.setThemeMode(ThemeMode.DARK)
+        assertEquals(ThemeMode.DARK, themeBootstrapStore.read().themeMode)
+
+        repository.setThemeMode(ThemeMode.LIGHT)
+        assertEquals(ThemeMode.LIGHT, themeBootstrapStore.read().themeMode)
+    }
+
+    @Test
+    fun `setAmoledEnabled mirrors the flag without clobbering the mirrored theme mode`() = runTest(dispatcher) {
+        repository.setThemeMode(ThemeMode.DARK)
+        repository.setAmoledEnabled(true)
+
+        assertEquals(ThemeBootstrap(ThemeMode.DARK, amoledEnabled = true), themeBootstrapStore.read())
+    }
+
+    @Test
+    fun `observing the theme backfills an empty mirror from the persisted value`() = runTest(dispatcher) {
+        // #386 (Codex review) — users who picked their theme BEFORE the mirror existed must
+        // converge on first observation, not keep flashing until they touch the setting again.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("theme_mode")] = ThemeMode.DARK.name }
+        assertEquals(ThemeMode.SYSTEM, themeBootstrapStore.read().themeMode)
+
+        repository.observeThemeMode().test {
+            assertEquals(ThemeMode.DARK, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(ThemeMode.DARK, themeBootstrapStore.read().themeMode)
+    }
+
+    @Test
     fun `observeAmoledEnabled defaults to false then persists true`() = runTest(dispatcher) {
         repository.observeAmoledEnabled().test {
             assertFalse(awaitItem())
@@ -366,6 +414,27 @@ class DataStoreUserPreferencesRepositoryTest {
         repository.setTopicTopBarAutoHide(false)
         repository.observeTopicTopBarAutoHide().test {
             assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeTopicPageFabs defaults to true then persists false and true`() = runTest(dispatcher) {
+        // #383 — the ‹/› cluster is the historical behaviour; hiding it is the opt-out.
+        repository.observeTopicPageFabs().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setTopicPageFabs(false)
+        repository.observeTopicPageFabs().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setTopicPageFabs(true)
+        repository.observeTopicPageFabs().test {
+            assertTrue(awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

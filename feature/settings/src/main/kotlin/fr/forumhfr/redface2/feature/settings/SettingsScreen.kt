@@ -241,7 +241,6 @@ internal fun SettingsContent(
             )
             FutureSettingsCard(
                 items = listOf(
-                    R.string.settings_future_scroll_memory to issueTag(307),
                     R.string.settings_future_prefetch to stringResource(R.string.settings_phase_future),
                 ),
             )
@@ -258,9 +257,12 @@ internal fun SettingsContent(
             )
 
             SettingsSectionHeader(stringResource(R.string.settings_section_mp))
+            MessagesPreferencesCard(
+                state = state,
+                onIntent = onIntent,
+            )
             FutureSettingsCard(
                 items = listOf(
-                    R.string.settings_future_mp_write to issueTag(301),
                     R.string.settings_future_mp_notifications to issueTag(313),
                 ),
             )
@@ -515,15 +517,32 @@ private fun FlagsPreferencesCard(
             if (state.showDtSectionError) {
                 PreferencePersistError(R.string.settings_flags_show_dt_section_persist_failed)
             }
+            // #378 — auto-refresh on landing (app open / back from a topic). Opt-OUT: default on.
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_flags_auto_refresh_title),
+                description = stringResource(R.string.settings_flags_auto_refresh_description),
+                checked = state.flagsAutoRefresh,
+                enabled = state.canToggleFlagsAutoRefresh,
+                onCheckedChange = { onIntent(SettingsIntent.FlagsAutoRefreshChanged(it)) },
+            )
+            if (state.flagsAutoRefreshError) {
+                PreferencePersistError(R.string.settings_flags_auto_refresh_persist_failed)
+            }
         }
     }
 }
 
 /**
- * Topic reading preferences (build 89 follow-up): the « masquer la barre du haut en défilant »
- * toggle. When on, the topic top app bar (title + page counter) collapses on scroll-down and snaps
- * back on the first scroll-up (Material3 `enterAlways`), freeing reading space. Persisted via
- * DataStore and observed live by the topic screen, so a flip here applies without reopening a topic.
+ * Topic reading preferences:
+ *
+ * - « masquer la barre du haut en défilant » (build 89 follow-up) — when on, the topic top app
+ *   bar (title + page counter) collapses on scroll-down and snaps back on the first scroll-up
+ *   (Material3 `enterAlways`), freeing reading space;
+ * - « boutons de changement de page » (#383) — when off, the floating ‹/› mini-FABs (#283) are
+ *   hidden for swipe-only readers; « Répondre » keeps its own gates and stays.
+ *
+ * Both persisted via DataStore and observed live by the topic screen, so a flip here applies
+ * without reopening a topic.
  */
 @Composable
 private fun TopicPreferencesCard(
@@ -550,6 +569,16 @@ private fun TopicPreferencesCard(
             if (state.topicTopBarAutoHideError) {
                 PreferencePersistError(R.string.settings_topic_topbar_auto_hide_persist_failed)
             }
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_topic_page_fabs_title),
+                description = stringResource(R.string.settings_topic_page_fabs_description),
+                checked = state.topicPageFabs,
+                enabled = state.canToggleTopicPageFabs,
+                onCheckedChange = { onIntent(SettingsIntent.TopicPageFabsChanged(it)) },
+            )
+            if (state.topicPageFabsError) {
+                PreferencePersistError(R.string.settings_topic_page_fabs_persist_failed)
+            }
         }
     }
 }
@@ -560,6 +589,35 @@ private fun TopicPreferencesCard(
  * first shows a confirmation dialog. Persisted via DataStore and observed live by the editor
  * ViewModels, so a flip here applies without reopening an editor.
  */
+@Composable
+private fun MessagesPreferencesCard(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_mp_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_mp_unread_badge_title),
+                description = stringResource(R.string.settings_mp_unread_badge_description),
+                checked = state.mpUnreadBadge,
+                enabled = state.canToggleMpUnreadBadge,
+                onCheckedChange = { onIntent(SettingsIntent.MpUnreadBadgeChanged(it)) },
+            )
+            if (state.mpUnreadBadgeError) {
+                PreferencePersistError(R.string.settings_mp_unread_badge_persist_failed)
+            }
+        }
+    }
+}
+
 @Composable
 private fun EditingPreferencesCard(
     state: SettingsState,

@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.FlagType
@@ -20,12 +21,14 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 @Singleton
 class DataStoreUserPreferencesRepository @Inject constructor(
     @param:UserPreferencesDataStore private val dataStore: DataStore<Preferences>,
+    private val themeBootstrapStore: ThemeBootstrapStore,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : UserPreferencesRepository {
 
@@ -151,6 +154,13 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             // `dataStore.data` re-emits on ANY write; keep the theme flow quiet unless the mode
             // actually changes so RedfaceApp doesn't recompose the whole tree on unrelated edits.
             .distinctUntilChanged()
+            // #386 backfill : users who picked their theme BEFORE the mirror existed start with
+            // an empty mirror — converge it from the observed truth (idempotent, write-on-diff).
+            .onEach { mode ->
+                if (themeBootstrapStore.read().themeMode != mode) {
+                    themeBootstrapStore.writeThemeMode(mode)
+                }
+            }
             .catch { emit(ThemeMode.SYSTEM) }
 
     override suspend fun setThemeMode(mode: ThemeMode) {
@@ -158,6 +168,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             dataStore.edit { prefs ->
                 prefs[KEY_THEME_MODE] = mode.name
             }
+            // Mirror for the synchronous cold-start read (#386) — DataStore stays the source
+            // of truth, the mirror only seeds the first frame.
+            themeBootstrapStore.writeThemeMode(mode)
         }
     }
 
@@ -166,6 +179,11 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             // Default `false`: AMOLED is opt-in and only meaningful in dark (#286).
             .map { prefs -> prefs[KEY_AMOLED_ENABLED] ?: false }
             .distinctUntilChanged()
+            .onEach { enabled ->
+                if (themeBootstrapStore.read().amoledEnabled != enabled) {
+                    themeBootstrapStore.writeAmoledEnabled(enabled)
+                }
+            }
             .catch { emit(false) }
 
     override suspend fun setAmoledEnabled(enabled: Boolean) {
@@ -173,6 +191,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             dataStore.edit { prefs ->
                 prefs[KEY_AMOLED_ENABLED] = enabled
             }
+            themeBootstrapStore.writeAmoledEnabled(enabled)
         }
     }
 
@@ -217,6 +236,53 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         withContext(ioDispatcher) {
             dataStore.edit { prefs ->
                 prefs[KEY_FLAGS_SHOW_DT_SECTION] = enabled
+            }
+        }
+    }
+
+    override fun observeFlagsAutoRefresh(): Flow<Boolean> =
+        dataStore.data
+            // Default `true`: the lists going stale is the #378 complaint — the toggle is an
+            // opt-out for users who prefer pull-to-refresh only.
+            .map { prefs -> prefs[KEY_FLAGS_AUTO_REFRESH] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setFlagsAutoRefresh(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_AUTO_REFRESH] = enabled
+            }
+        }
+    }
+
+    override fun observeTopicPageFabs(): Flow<Boolean> =
+        dataStore.data
+            // Default `true`: the ‹/› cluster (#283) predates the swipe (#282); hiding it is the
+            // #383 opt-out for readers who navigate by swipe only.
+            .map { prefs -> prefs[KEY_TOPIC_PAGE_FABS] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setTopicPageFabs(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_TOPIC_PAGE_FABS] = enabled
+            }
+        }
+    }
+
+    override fun observeMpUnreadBadge(): Flow<Boolean> =
+        dataStore.data
+            // Default `true` (#313): the badge is the feature; opting OUT is the preference.
+            .map { prefs -> prefs[KEY_MP_UNREAD_BADGE] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setMpUnreadBadge(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_MP_UNREAD_BADGE] = enabled
             }
         }
     }
@@ -315,5 +381,10 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // Opt-in « DT » placeholder tab on the Drapeaux screen (MPStorage sync lands later, #6).
         val KEY_FLAGS_SHOW_DT_SECTION = booleanPreferencesKey("flags_show_dt_section")
+
+        // #378 — auto-refresh of the flags lists on landing (default ON; Settings opt-out).
+        val KEY_FLAGS_AUTO_REFRESH = booleanPreferencesKey("flags_auto_refresh")
+        val KEY_TOPIC_PAGE_FABS = booleanPreferencesKey("topic_page_fabs")
+        val KEY_MP_UNREAD_BADGE = booleanPreferencesKey("mp_unread_badge")
     }
 }

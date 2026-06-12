@@ -111,6 +111,26 @@ class SettingsViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            val pageFabs = userPreferencesRepository.observeTopicPageFabs().first()
+            _state.update { current ->
+                if (current.topicPageFabsTouchedLocally || current.isUpdatingTopicPageFabs) {
+                    current
+                } else {
+                    current.copy(topicPageFabs = pageFabs)
+                }
+            }
+        }
+        viewModelScope.launch {
+            val mpBadge = userPreferencesRepository.observeMpUnreadBadge().first()
+            _state.update { current ->
+                if (current.mpUnreadBadgeTouchedLocally || current.isUpdatingMpUnreadBadge) {
+                    current
+                } else {
+                    current.copy(mpUnreadBadge = mpBadge)
+                }
+            }
+        }
+        viewModelScope.launch {
             val confirm = userPreferencesRepository.observeConfirmBeforePosting().first()
             _state.update { current ->
                 if (current.confirmBeforePostingTouchedLocally || current.isUpdatingConfirmBeforePosting) {
@@ -127,6 +147,16 @@ class SettingsViewModel @Inject constructor(
                     current
                 } else {
                     current.copy(showDtSection = showDt)
+                }
+            }
+        }
+        viewModelScope.launch {
+            val autoRefresh = userPreferencesRepository.observeFlagsAutoRefresh().first()
+            _state.update { current ->
+                if (current.flagsAutoRefreshTouchedLocally || current.isUpdatingFlagsAutoRefresh) {
+                    current
+                } else {
+                    current.copy(flagsAutoRefresh = autoRefresh)
                 }
             }
         }
@@ -172,8 +202,11 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.ThemeModeChanged -> updateThemeMode(intent.mode)
             is SettingsIntent.AmoledEnabledChanged -> updateAmoled(intent.enabled)
             is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
+            is SettingsIntent.TopicPageFabsChanged -> updateTopicPageFabs(intent.enabled)
+            is SettingsIntent.MpUnreadBadgeChanged -> updateMpUnreadBadge(intent.enabled)
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
+            is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
         }
     }
 
@@ -477,6 +510,60 @@ class SettingsViewModel @Inject constructor(
         )
     }
 
+    private fun updateTopicPageFabs(desired: Boolean) {
+        val previous = _state.value.topicPageFabs
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    topicPageFabs = desired,
+                    isUpdatingTopicPageFabs = true,
+                    topicPageFabsError = false,
+                    topicPageFabsTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(topicPageFabs = desired, isUpdatingTopicPageFabs = false)
+                } else {
+                    state.copy(
+                        topicPageFabs = previous,
+                        isUpdatingTopicPageFabs = false,
+                        topicPageFabsError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setTopicPageFabs,
+        )
+    }
+
+    private fun updateMpUnreadBadge(desired: Boolean) {
+        val previous = _state.value.mpUnreadBadge
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    mpUnreadBadge = desired,
+                    isUpdatingMpUnreadBadge = true,
+                    mpUnreadBadgeError = false,
+                    mpUnreadBadgeTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(mpUnreadBadge = desired, isUpdatingMpUnreadBadge = false)
+                } else {
+                    state.copy(
+                        mpUnreadBadge = previous,
+                        isUpdatingMpUnreadBadge = false,
+                        mpUnreadBadgeError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setMpUnreadBadge,
+        )
+    }
+
     private fun updateShowDtSection(desired: Boolean) {
         val previous = _state.value.showDtSection
         updateBooleanPreference(
@@ -501,6 +588,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setShowDtSection,
+        )
+    }
+
+    private fun updateFlagsAutoRefresh(desired: Boolean) {
+        val previous = _state.value.flagsAutoRefresh
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    flagsAutoRefresh = desired,
+                    isUpdatingFlagsAutoRefresh = true,
+                    flagsAutoRefreshError = false,
+                    flagsAutoRefreshTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(flagsAutoRefresh = desired, isUpdatingFlagsAutoRefresh = false)
+                } else {
+                    state.copy(
+                        flagsAutoRefresh = previous,
+                        isUpdatingFlagsAutoRefresh = false,
+                        flagsAutoRefreshError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setFlagsAutoRefresh,
         )
     }
 

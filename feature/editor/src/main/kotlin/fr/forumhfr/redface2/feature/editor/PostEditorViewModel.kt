@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.ui.editor.WikiSearchState
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
@@ -325,7 +327,48 @@ class PostEditorViewModel @AssistedInject constructor(
             _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
             return
         }
-        launchFormFetch { replyRepository.fetchReplyForm(context) }
+        launchFormFetch { fetchReplyFormWithExtraQuotes(context) }
+    }
+
+    /**
+     * #291 multi-quote — the quote form fetch (#146) returns ONE `[quotemsg]` prefill per
+     * `numrep`, so additional quoted posts are fetched by replaying the same contract with
+     * `quotedNumreponse` swapped, then concatenated into the first form's [ReplyForm.initialContent]
+     * in selection order. Client-side only: HFR never sees a multi-numrep request, and the
+     * submit still rides the FIRST form's `hash_check`/hidden fields (per-session, not
+     * per-post — the single-quote and plain-reply paths already share them).
+     *
+     * Sequential on purpose: N is tiny (a handful of posts), order must be deterministic, and
+     * a failed extra fails the whole fetch — silently dropping a quote the user explicitly
+     * selected would be worse than the retryable form-fetch error.
+     */
+    private suspend fun fetchReplyFormWithExtraQuotes(context: ReplyContext): ReplyForm {
+        val form = replyRepository.fetchReplyForm(context)
+        val extras = request.extraQuoteNumreponses
+        if (extras.isEmpty() || !context.isQuote) return form
+        val prefills = buildList {
+            add(form.initialContent)
+            extras.forEach { numreponse ->
+                // quoteRef is positional/cosmetic and belongs to the FIRST post only.
+                add(
+                    replyRepository
+                        .fetchReplyForm(context.copy(quotedNumreponse = numreponse, quoteRef = null))
+                        .initialContent,
+                )
+            }
+        }
+        val merged = prefills
+            .map { prefill ->
+                prefill.trimEnd().also { trimmed ->
+                    // Codex review — a 200-OK form whose prefill came back BLANK would silently
+                    // drop a quote the user explicitly selected (the exact failure mode the
+                    // sequential design refuses). Fail the whole fetch instead; the mapped
+                    // SubmitError keeps the editor on its retryable error path.
+                    check(trimmed.isNotBlank()) { "multi-quote prefill came back blank" }
+                }
+            }
+            .joinToString(separator = "\n\n", postfix = "\n\n")
+        return form.copy(initialContent = merged)
     }
 
     private fun loadEditFormIfPossible() {

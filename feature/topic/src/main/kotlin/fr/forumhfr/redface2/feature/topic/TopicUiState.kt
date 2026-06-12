@@ -33,6 +33,13 @@ data class TopicUiState(
      */
     val topBarAutoHide: Boolean = false,
     /**
+     * #383 — mirrors `UserPreferencesRepository.observeTopicPageFabs()`. When `false`, the
+     * floating ‹/› page mini-FABs (#283) are hidden — the page swipe (#282) and the header
+     * pager still cover page-change. The « Répondre » FAB is not governed by this flag.
+     * Default `true` keeps the historical cluster until the first preference emission.
+     */
+    val showPageFabs: Boolean = true,
+    /**
      * #335 — `true` while a manual pull-to-refresh of the current page is in flight. Drives the
      * Material3 `PullToRefreshBox` spinner. Set on the `Refresh` intent, cleared in the refresh
      * coroutine's `finally` (so a cancellation — e.g. a delete starting mid-refresh — never leaves

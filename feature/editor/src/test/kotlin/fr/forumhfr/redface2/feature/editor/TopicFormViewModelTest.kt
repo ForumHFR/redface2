@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.ui.editor.WikiSearchState
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
@@ -1251,6 +1253,18 @@ class TopicFormViewModelTest {
         override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setShowDtSection(enabled: Boolean) = Unit
+
+        override fun observeFlagsAutoRefresh(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setFlagsAutoRefresh(enabled: Boolean) = Unit
+
+        override fun observeTopicPageFabs(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setTopicPageFabs(enabled: Boolean) = Unit
+
+        override fun observeMpUnreadBadge(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setMpUnreadBadge(enabled: Boolean) = Unit
     }
 
     private companion object {

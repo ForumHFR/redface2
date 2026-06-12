@@ -52,6 +52,9 @@ import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
  *  to keep this PR focused).
  *
  * @param onBack  Navigation callback — pops back to the previous screen.
+ * @param onShowUserPosts  Navigation callback for « Derniers messages » — pushes the
+ *   author-only search pre-filled with the profile's canonical pseudo. Hoisted to `:app`
+ *   like [onBack] so the feature module stays navigation-graph-free.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,6 +63,7 @@ fun ProfileRoute(
     pseudoHint: String,
     avatarUrlHint: String?,
     onBack: () -> Unit,
+    onShowUserPosts: (String) -> Unit,
 ) {
     // `key = "profile-$userId"` derives a distinct VM per profile in the nav entry's
     // ViewModelStore. Even though each `ProfileFullRoute` navigation creates its own back
@@ -81,6 +85,7 @@ fun ProfileRoute(
         state = state,
         onIntent = viewModel::onIntent,
         onBack = onBack,
+        onShowUserPosts = onShowUserPosts,
     )
 }
 
@@ -90,6 +95,7 @@ internal fun ProfileScreen(
     state: ProfileUiState,
     onIntent: (ProfileIntent) -> Unit,
     onBack: () -> Unit,
+    onShowUserPosts: (String) -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -170,7 +176,10 @@ internal fun ProfileScreen(
 
                 is ProfileUiState.Mode.Loaded -> {
                     Spacer(Modifier.height(16.dp))
-                    ProfileFullContent(profile = mode.profile)
+                    ProfileFullContent(
+                        profile = mode.profile,
+                        onShowUserPosts = onShowUserPosts,
+                    )
                 }
             }
         }
@@ -200,7 +209,10 @@ private fun ProfileLoadingHero(pseudo: String, avatarUrl: String?) {
  * Avatars are square/rounded as per brief constraint — [RedfaceUserAvatar] enforces this.
  */
 @Composable
-private fun ProfileFullContent(profile: UserProfile) {
+private fun ProfileFullContent(
+    profile: UserProfile,
+    onShowUserPosts: (String) -> Unit,
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -257,13 +269,18 @@ private fun ProfileFullContent(profile: UserProfile) {
 
     Spacer(Modifier.height(24.dp))
 
-    // « Derniers messages » is disabled — no stable route exists yet.
+    // Author-only search (« topics where this user posted ») pre-filled with the
+    // CANONICAL pseudo from the loaded profile — not the tap-site hint, whose casing
+    // can drift from the real account name. Disabled on ProfileParser's defensive
+    // sentinel ("?", served when even the page title gave no pseudo) — searching it
+    // would fire a pointless author query (Codex review of #403).
+    val hasUsablePseudo = profile.pseudo.isNotBlank() && profile.pseudo != "?"
     OutlinedButton(
-        onClick = {},
-        enabled = false,
+        onClick = { onShowUserPosts(profile.pseudo) },
+        enabled = hasUsablePseudo,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(stringResource(R.string.profile_action_recent_posts_coming_soon))
+        Text(stringResource(R.string.profile_action_recent_posts))
     }
 
     Spacer(Modifier.height(16.dp))

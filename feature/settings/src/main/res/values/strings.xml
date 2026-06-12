@@ -9,6 +9,11 @@
     <string name="settings_section_topic">Sujet et lecture</string>
     <string name="settings_section_editing">Édition et publication</string>
     <string name="settings_section_mp">Messages privés</string>
+    <!-- #313 — carte « Messages privés » : badge MP non lus. -->
+    <string name="settings_mp_title">Notifications</string>
+    <string name="settings_mp_unread_badge_title">Badge de MP non lus</string>
+    <string name="settings_mp_unread_badge_description">Affiche le nombre de conversations non lues sur l\'onglet Messages. Actualisé à l\'ouverture de l\'app et à chaque visite de la liste.</string>
+    <string name="settings_mp_unread_badge_persist_failed">Impossible d\'enregistrer ce réglage pour le moment.</string>
     <string name="settings_section_hfr_account">Compte HFR</string>
     <string name="settings_section_notifications">Notifications</string>
     <string name="settings_section_accessibility">Accessibilité</string>
@@ -25,12 +30,8 @@
     <string name="settings_future_material_you">Material You (thème dynamique)</string>
     <string name="settings_future_classic_theme">Thème HFR Classique</string>
     <string name="settings_future_flags_on_listing">Poser les drapeaux en listant une catégorie</string>
-    <string name="settings_future_scroll_memory">Retenir la position de lecture par page</string>
     <string name="settings_future_prefetch">Préchargement de la page suivante</string>
     <string name="settings_future_signature">Signature automatique et notification e-mail</string>
-    <!-- #301 — la réponse à une conversation existante est livrée ; reste « à venir » la
-         composition d'un nouveau MP depuis zéro (new-MP), encore non observée côté HFR. -->
-    <string name="settings_future_mp_write">Composer un nouveau message privé</string>
     <string name="settings_future_mp_notifications">Notifications et badge de MP non lus</string>
     <string name="settings_future_data_saver">Mode économie de données</string>
     <string name="settings_future_hfr_profile">Avatars, signatures, messages par page</string>
@@ -110,6 +111,12 @@
     <string name="settings_flags_show_dt_section_description">Affiche un onglet « DT » dans l\'écran Drapeaux. Le contenu (discussions suivies avec drapeaux synchronisés via MPStorage) arrivera dans une prochaine version.</string>
     <string name="settings_flags_show_dt_section_persist_failed">Impossible de mémoriser la section DT. Réessayez.</string>
 
+    <!-- #378 — auto-refresh des listes de drapeaux à l'arrivée sur l'écran (ouverture de l'app,
+         retour d'un sujet). Activé par défaut ; ce réglage est l'opt-out. -->
+    <string name="settings_flags_auto_refresh_title">Actualisation automatique</string>
+    <string name="settings_flags_auto_refresh_description">Rafraîchit la liste des drapeaux à l\'ouverture de l\'app et au retour d\'un sujet. L\'indicateur de rafraîchissement signale l\'actualisation en cours.</string>
+    <string name="settings_flags_auto_refresh_persist_failed">Impossible de mémoriser l\'actualisation automatique. Réessayez.</string>
+
     <!-- #286 — Thème. Sélecteur Clair/Système/Sombre (Système = suit l'OS) + thème AMOLED (vrai
          noir), persistés en DataStore et appliqués à toute l'app en direct. -->
     <string name="settings_theme_title">Thème</string>
@@ -128,6 +135,12 @@
     <string name="settings_topic_topbar_auto_hide_title">Masquer la barre en défilant</string>
     <string name="settings_topic_topbar_auto_hide_description">La barre du haut (titre du sujet et numéro de page) disparaît quand vous faites défiler vers le bas et réapparaît dès que vous remontez.</string>
     <string name="settings_topic_topbar_auto_hide_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+
+    <!-- #383 — Boutons flottants ‹/› de changement de page (#283). Le swipe (#282) couvre déjà le
+         changement de page ; ce réglage est l'opt-out demandé en bêta. « Répondre » reste affiché. -->
+    <string name="settings_topic_page_fabs_title">Boutons de changement de page</string>
+    <string name="settings_topic_page_fabs_description">Affiche les boutons flottants ‹ et › en bas du sujet. Désactivez-les si vous changez de page au glissement ; le bouton Répondre reste affiché.</string>
+    <string name="settings_topic_page_fabs_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- #312 — Publication. Confirmation avant chaque envoi (réponse/édition de message, sujet,
          message privé) ; persisté en DataStore et lu en direct par les éditeurs.

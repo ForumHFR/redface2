@@ -21,12 +21,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,15 +56,28 @@ import java.util.Locale
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("LongParameterList") // Tab surface : nav callbacks + chrome slots + the sent signal.
 fun MessagesScreen(
     // isMultiRecipient is an ephemeral UI hint forwarded to the thread screen (the route stays
     // opaque — it never persists this private metadata in the back stack).
     onOpenThread: (threadId: Int, isMultiRecipient: Boolean) -> Unit,
     readThreadIds: Set<Int> = emptySet(),
     topBarActions: @Composable (() -> Unit)? = null,
+    // #301 follow-up — opens the new-conversation composer. Null hides the button.
+    onComposeNew: (() -> Unit)? = null,
+    // #301 follow-up — bumped by the host after a successful new-conversation send : the created
+    // thread id is unknown, so the list simply re-fetches and shows the conversation at the top.
+    sentSignal: Long? = null,
     viewModel: MessagesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(sentSignal) {
+        if (sentSignal != null) {
+            // Page 1 always : the created conversation lands at the top of the inbox, and a
+            // plain current-page refresh from page 2+ would never surface it.
+            viewModel.showFreshInbox()
+        }
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -86,7 +101,19 @@ fun MessagesScreen(
                     style = MaterialTheme.typography.headlineMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                topBarActions?.invoke()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // Mirrors HFR's own « Créer un nouveau message » button on the MP list. Only
+                    // offered when the inbox actually loaded — composing requires the same session.
+                    if (onComposeNew != null && state.mode is MessagesUiState.Mode.Content) {
+                        FilledTonalButton(onClick = onComposeNew) {
+                            Text(text = stringResource(R.string.messages_compose_new))
+                        }
+                    }
+                    topBarActions?.invoke()
+                }
             }
 
             PullToRefreshBox(

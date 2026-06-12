@@ -233,6 +233,52 @@ class ReplyFormParserTest {
         assertTrue(result.isFailure)
     }
 
+    // #301 follow-up — the standalone « new private message » composer
+    // (message.php?cat=prive without post=) is parsed by the same parser : its form
+    // also targets bddpost.php. Captured live 2026-06-11, fixture mp_compose_form.html.
+
+    @Test
+    fun `parses the standalone MP composer with its empty routing and typed fields`() {
+        val html = readFixture("mp_compose_form.html")
+        val form = parser.parse(html).getOrThrow()
+
+        assertFalse("Authenticated composer must not flag as anonymous", form.isAnonymous)
+        assertEquals("SCRUBBED_HASH_CHECK", form.hashCheck)
+
+        // New-conversation routing : cat=prive as a STRING, post/numrep/numreponse empty.
+        assertEquals("prive", form.hiddenFields["cat"])
+        assertEquals("", form.hiddenFields["post"])
+        assertEquals("", form.hiddenFields["numrep"])
+        assertEquals("", form.hiddenFields["numreponse"])
+
+        // The two user-typed routing fields are *text* inputs ; the parser collects their
+        // empty values, and the repository overrides them at POST time (buildComposeFormBody).
+        assertEquals("", form.hiddenFields["dest"])
+        assertEquals("", form.hiddenFields["sujet"])
+
+        // Composer-only hidden fields, undocumented server-side — forwarded verbatim.
+        assertEquals("", form.hiddenFields["parents"])
+        assertEquals("", form.hiddenFields["stickold"])
+
+        // Authenticated pseudo is forwarded ; password never.
+        assertEquals("TestUser", form.hiddenFields["pseudo"])
+        assertFalse("password must be stripped", form.hiddenFields.containsKey("password"))
+
+        // HFR pre-checks the signature checkbox and the default MsgIcon on the composer.
+        assertTrue("signature default must hydrate from the checked checkbox", form.options.signatureEnabled)
+        assertEquals("1", form.msgIcon)
+    }
+
+    @Test
+    fun `MP composer dest prefill from the URL survives into hiddenFields`() {
+        // Verified live : GET message.php?…&dest=bozoleclown renders
+        // <input name="dest" value="bozoleclown">. Future « send a MP to this user »
+        // entry points rely on the parsed prefill reaching the form state.
+        val html = readFixture("mp_compose_form_dest_prefilled.html")
+        val form = parser.parse(html).getOrThrow()
+        assertEquals("bozoleclown", form.hiddenFields["dest"])
+    }
+
     private fun readFixture(name: String): String {
         val stream = requireNotNull(
             ReplyFormParserTest::class.java.classLoader?.getResourceAsStream("fixtures/$name"),

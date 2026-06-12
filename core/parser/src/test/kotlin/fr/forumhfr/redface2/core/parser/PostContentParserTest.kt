@@ -195,6 +195,64 @@ class PostContentParserTest {
     }
 
     @Test
+    fun `a quote whose quoted content embeds a spoiler stays a Quote`() {
+        // #393 — post t2787065 (topic RF2-DEV page 6, the live repro) : XaTriX cites a post
+        // shaped "Test / [spoiler]caca rose[/spoiler] / Suite". The container div used to be
+        // classified SPOILER (descendant-matching selectFirst with spoiler tested first), so
+        // the whole quote was swallowed and only its spoiler part rendered.
+        val topic = pageParser.parse(fixture("topic_redface_dev_quote_spoiler_p6.html"))
+        val post = requireNotNull(topic.posts.firstOrNull { it.numreponse == 2787065 }) {
+            "fixture should contain the repro post t2787065"
+        }
+
+        val quotes = post.content.blocks.filterIsInstance<PostBlock.Quote>()
+        assertTrue("the citation must surface as a Quote, not be swallowed by its inner spoiler", quotes.isNotEmpty())
+        val quote = quotes.first()
+        assertEquals("XaTriX", quote.author)
+
+        val quotedText = quote.content.allInlines()
+            .filterIsInstance<PostInline.Text>()
+            .joinToString(" ") { it.value }
+        assertTrue("text BEFORE the spoiler must survive, got=$quotedText", quotedText.contains("Test"))
+        assertTrue("text AFTER the spoiler must survive, got=$quotedText", quotedText.contains("Suite"))
+        assertTrue(
+            "the embedded spoiler must stay a Spoiler block inside the quote",
+            quote.content.allBlocks().filterIsInstance<PostBlock.Spoiler>().isNotEmpty(),
+        )
+
+        val replyText = post.content.allInlines()
+            .filterIsInstance<PostInline.Text>()
+            .joinToString(" ") { it.value }
+        assertTrue("the reply below the quote must remain, got=$replyText", replyText.contains("Caca rose rose"))
+    }
+
+    @Test
+    fun `a spoiler whose hidden content embeds a quote stays a Spoiler`() {
+        // #393 counterpart — the OUTERMOST block table decides the kind in document order.
+        // Synthetic fragment assembled from the two real shapes above (citation header from the
+        // oldcitation test, spoiler wrapper from the khakha fixture) ; pins the inverse nesting
+        // so the #393 fix cannot regress CitationIndex's "quote inside a spoiler" support.
+        val spoilerWrappingQuoteHtml = """
+            <div id="para999"><p></p><div class="container"><table class="spoiler">
+            <tr class="none"><td><b class="s1Topic">Spoiler :</b>
+            <div class="Topic masque"><div class="container"><table class="citation">
+            <tr class="none"><td><b class="s1"><a href="/hfr/gsmgpspda/redface-dev-sujet_35421_6.htm#t2787063" class="Topic">XaTriX a écrit :</a></b>
+            <hr size="1" /><p>caché</p><hr size="1" /></td></tr></table></div></div>
+            </td></tr></table></div><p><br />après le spoiler</p></div>
+        """.trimIndent()
+        val contentElement = Jsoup.parse(spoilerWrappingQuoteHtml).selectFirst("div[id^=para]")
+
+        val ast = PostContentParser().parse(contentElement).ast
+
+        val topLevelSpoilers = ast.blocks.filterIsInstance<PostBlock.Spoiler>()
+        assertTrue("the outer spoiler must stay a Spoiler", topLevelSpoilers.isNotEmpty())
+        assertTrue(
+            "the quote hidden inside the spoiler must surface as a nested Quote",
+            topLevelSpoilers.first().content.allBlocks().filterIsInstance<PostBlock.Quote>().isNotEmpty(),
+        )
+    }
+
+    @Test
     fun `mono-character builtin smileys are recognised with their BBCode token`() {
         val topic = pageParser.parse(fixture("topic_khakha_page_146.html"))
 
@@ -281,6 +339,90 @@ class PostContentParserTest {
             "Strong children should expose a LineBreak between the two Text fragments, got=$kinds",
             strong.children.any { it is PostInline.LineBreak },
         )
+    }
+
+    @Test
+    fun `deliberate empty line survives as two LineBreaks inside one paragraph`() {
+        // #333/#280 — an authored empty line is emitted by HFR as `<br /><br />` between the two
+        // text lines. The parser used to FLUSH the paragraph on every top-level <br>, so each
+        // line became its own Paragraph block: the empty line collapsed into a dropped empty
+        // paragraph (#333) and the renderer's inter-block gap replaced the natural line height
+        // between every line (#280).
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            """
+            <div id="para123"><p>ligne1<br /><br />ligne2</p></div>
+            """.trimIndent(),
+        )
+
+        val result = parser.parse(element)
+
+        val paragraphs = result.ast.blocks.filterIsInstance<PostBlock.Paragraph>()
+        assertEquals(
+            "both lines and the empty line belong to ONE paragraph, got=${result.ast.blocks}",
+            1,
+            paragraphs.size,
+        )
+        assertEquals(
+            "the empty line must survive as two consecutive LineBreaks between the Text lines",
+            listOf(
+                PostInline.Text("ligne1"),
+                PostInline.LineBreak,
+                PostInline.LineBreak,
+                PostInline.Text("ligne2"),
+            ),
+            paragraphs.single().inlines,
+        )
+    }
+
+    @Test
+    fun `single br keeps consecutive authored lines in the same paragraph`() {
+        // #280 — real fixture witness: the answer post on the single-page topic separates its
+        // sentences with single <br />s (`…comprendre le problème.<br />Je te propose…`). They
+        // must stay in ONE paragraph with LineBreaks, not become one block per line.
+        val topic = pageParser.parse(fixture("topic_page_single.html"))
+
+        val paragraph = topic.posts
+            .flatMap { it.content.allBlocks() }
+            .filterIsInstance<PostBlock.Paragraph>()
+            .firstOrNull { block ->
+                block.inlines.filterIsInstance<PostInline.Text>()
+                    .any { it.value.contains("comprendre le problème") }
+            }
+
+        assertNotNull("fixture should contain the multi-line answer paragraph", paragraph)
+        assertTrue(
+            "the next authored line stays in the SAME paragraph, got=${paragraph!!.inlines}",
+            paragraph.inlines.filterIsInstance<PostInline.Text>()
+                .any { it.value.contains("Je te propose") },
+        )
+        assertTrue(
+            "the authored line boundary survives as an inline LineBreak",
+            paragraph.inlines.any { it is PostInline.LineBreak },
+        )
+    }
+
+    @Test
+    fun `breaks adjacent to block boundaries never leak to paragraph edges`() {
+        // #333 — edge-trim invariant over real pages. The fixtures carry both directions:
+        // `a écrit :</a></b><br /><br /><p>…` (leading, quote header, topic_page_single) and
+        // `…:o" /><br /><br /></p>` (trailing, end of quoted content, topic_redface2_p24).
+        // Breaks at a paragraph edge would duplicate the renderer's inter-block spacing.
+        listOf("topic_page_single.html", "topic_redface2_p24.html").forEach { name ->
+            val topic = pageParser.parse(fixture(name))
+
+            topic.posts.flatMap { it.content.allBlocks() }
+                .filterIsInstance<PostBlock.Paragraph>()
+                .forEach { block ->
+                    val edges = listOfNotNull(block.inlines.firstOrNull(), block.inlines.lastOrNull())
+                    assertTrue(
+                        "$name: paragraph edges must not be breaks or blank text, got=${block.inlines}",
+                        edges.none {
+                            it is PostInline.LineBreak || (it is PostInline.Text && it.value.isBlank())
+                        },
+                    )
+                }
+        }
     }
 
     @Test

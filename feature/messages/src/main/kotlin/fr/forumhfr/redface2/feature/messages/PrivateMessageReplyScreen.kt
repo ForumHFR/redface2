@@ -3,32 +3,15 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,23 +22,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitLabels
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitState
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 
 /**
  * Reply editor for a private-message conversation (#301). Reuses the shared `:core:ui` BBCode
@@ -97,6 +76,8 @@ fun PrivateMessageReplyScreen(
         onSubmitConfirmed = viewModel::onSubmitConfirmed,
         onSubmitConfirmationDismissed = viewModel::onSubmitConfirmationDismissed,
         onRetryFormLoad = viewModel::retryFormLoad,
+        smileyPicker = viewModel.smileyPicker,
+        onSmileySelected = viewModel::onSmileySelected,
         modifier = modifier,
     )
 }
@@ -117,15 +98,17 @@ private fun PrivateMessageReplyContent(
     onSubmitConfirmed: () -> Unit,
     onSubmitConfirmationDismissed: () -> Unit,
     onRetryFormLoad: () -> Unit,
+    smileyPicker: SmileyPickerController,
+    onSmileySelected: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var optionsSheetOpen by remember { mutableStateOf(false) }
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-            ReplyHeader(onBack = onBack)
+            MessageEditorHeader(title = stringResource(R.string.messages_reply_title), onBack = onBack)
             when {
-                state.formError -> FormErrorState(onRetry = onRetryFormLoad)
-                state.isLoadingForm && !state.formAvailable -> FormLoadingState()
+                state.formError -> MessageFormErrorState(onRetry = onRetryFormLoad)
+                state.isLoadingForm && !state.formAvailable -> MessageFormLoadingState()
                 else -> {
                     ReplyEditorBody(
                         state = state,
@@ -135,7 +118,7 @@ private fun PrivateMessageReplyContent(
                         onErrorDismissed = onErrorDismissed,
                         modifier = Modifier.weight(1f),
                     )
-                    ReplySubmitBar(
+                    MessageSubmitBar(
                         canSubmit = state.canSubmit,
                         isSubmitting = state.isSubmitting,
                         confirmArmed = state.showSubmitConfirmation,
@@ -143,6 +126,7 @@ private fun PrivateMessageReplyContent(
                         onConfirmSubmit = onSubmitConfirmed,
                         onDisarmConfirm = onSubmitConfirmationDismissed,
                         onOpenOptions = { optionsSheetOpen = true },
+                        onOpenSmileys = smileyPicker::open,
                     )
                 }
             }
@@ -151,7 +135,7 @@ private fun PrivateMessageReplyContent(
         // same surface as the post editor / topic form (shared EditorOptionsSheet).
         if (optionsSheetOpen) {
             EditorOptionsSheet(onDismiss = { optionsSheetOpen = false }) {
-                ReplyOptions(
+                MessageEditorOptions(
                     signatureEnabled = state.signatureEnabled,
                     smileyDisabled = state.smileyDisabled,
                     emailNotificationEnabled = state.emailNotificationEnabled,
@@ -162,59 +146,15 @@ private fun PrivateMessageReplyContent(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun ReplyHeader(onBack: () -> Unit) {
-    val backLabel = stringResource(R.string.messages_back)
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(
-            onClick = onBack,
-            modifier = Modifier.semantics { contentDescription = backLabel },
-        ) {
-            // dp-sized vector instead of a text « ← » glyph (font/baseline-dependent, cf. Codex
-            // review). a11y label on the IconButton; the icon is decorative.
-            Icon(
-                painter = painterResource(fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back),
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
+        // #387 — smiley picker sheet (Standard + Wiki), same component as the post editors.
+        val pickerState by smileyPicker.state.collectAsStateWithLifecycle()
+        (pickerState as? SmileyPickerState.Open)?.let { open ->
+            SmileyPickerSheet(
+                state = open,
+                onDismiss = smileyPicker::dismiss,
+                onQueryChange = smileyPicker::onQueryChanged,
+                onSmileyClicked = onSmileySelected,
             )
-        }
-        Text(
-            text = stringResource(R.string.messages_reply_title),
-            style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-    }
-}
-
-@Composable
-private fun FormLoadingState() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
-    }
-}
-
-@Composable
-private fun FormErrorState(onRetry: () -> Unit) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(horizontal = 24.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.messages_reply_form_error),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.error,
-            )
-            Button(onClick = onRetry) {
-                Text(text = stringResource(R.string.messages_retry))
-            }
         }
     }
 }
@@ -230,8 +170,8 @@ private fun ReplyEditorBody(
     modifier: Modifier = Modifier,
 ) {
     // No outer scroll : the draft field is weighted so it stretches down to the bar (same
-    // extensible-field design as the post editor) ; long content scrolls INSIDE the field
-    // and inside the preview pane.
+    // extensible-field design as the post editor) ; long content scrolls in the field's own
+    // fillViewport column (#275/#410) and inside the preview pane.
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -246,6 +186,9 @@ private fun ReplyEditorBody(
             label = stringResource(R.string.messages_reply_field_label),
             placeholder = stringResource(R.string.messages_reply_field_placeholder),
             modifier = Modifier.weight(1f),
+            // #275/#410 — grow-with-content field in its own scrollable viewport so the
+            // cursor stays visible under the IME (typing AND refocus after the preview).
+            fillViewport = true,
         )
 
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
@@ -286,137 +229,3 @@ private fun ReplyEditorBody(
         }
     }
 }
-
-/**
- * Send button pinned to the bottom, lifted above the IME so the user never dismisses the keyboard to
- * reach « Envoyer ». Mirrors the post editor's submit bar (the editor's `EditorSubmitBar` is module-
- * private, so the window-insets pattern is replicated here). Requires `windowSoftInputMode=adjustNothing`.
- * The armed-confirmation behaviour (#312 v2, countdown drain included) lives in the shared
- * [ArmedSubmitButton].
- */
-@Composable
-@Suppress("LongParameterList") // Mirrors the editor bar's state + actions.
-private fun ReplySubmitBar(
-    canSubmit: Boolean,
-    isSubmitting: Boolean,
-    confirmArmed: Boolean,
-    onSubmit: () -> Unit,
-    onConfirmSubmit: () -> Unit,
-    onDisarmConfirm: () -> Unit,
-    onOpenOptions: () -> Unit,
-) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 3.dp) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            HorizontalDivider()
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    // Single bottom inset = max(navBar, ime) via union(), so the two never stack into a
-                    // phantom gap. Keyboard closed → clears the gesture nav bar; open → rides on the IME.
-                    .windowInsetsPadding(
-                        WindowInsets.navigationBars
-                            .union(WindowInsets.ime)
-                            .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
-                    )
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Tonal container for the secondary trigger, filled for « Envoyer » — same M3
-                // emphasis pair as the post editor's bar. Hidden while the confirmation is
-                // armed so the armed label never wraps (same fix as the editor bar).
-                if (!confirmArmed) {
-                    FilledTonalButton(onClick = onOpenOptions) {
-                        Text(text = stringResource(R.string.messages_reply_actions_options))
-                    }
-                }
-                Spacer(modifier = Modifier.weight(1f))
-                if (isSubmitting) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(12.dp))
-                }
-                ArmedSubmitButton(
-                    state = ArmedSubmitState(armed = confirmArmed, enabled = canSubmit),
-                    labels = ArmedSubmitLabels(
-                        submit = stringResource(R.string.messages_reply_submit),
-                        confirm = stringResource(R.string.messages_reply_submit_confirm),
-                    ),
-                    actions = ArmedSubmitActions(
-                        onSubmit = onSubmit,
-                        onConfirmSubmit = onConfirmSubmit,
-                        onDisarm = onDisarmConfirm,
-                    ),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-@Suppress("LongParameterList") // 3 toggles + 3 callbacks + enabled — each call-site distinct.
-private fun ReplyOptions(
-    signatureEnabled: Boolean,
-    smileyDisabled: Boolean,
-    emailNotificationEnabled: Boolean,
-    enabled: Boolean,
-    onSignatureChanged: (Boolean) -> Unit,
-    onSmileyDisabledChanged: (Boolean) -> Unit,
-    onEmailNotificationChanged: (Boolean) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = stringResource(R.string.messages_reply_options_title),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OptionToggle(
-            label = stringResource(R.string.messages_reply_option_signature),
-            checked = signatureEnabled,
-            enabled = enabled,
-            onCheckedChange = onSignatureChanged,
-        )
-        OptionToggle(
-            label = stringResource(R.string.messages_reply_option_smiley_disabled),
-            checked = smileyDisabled,
-            enabled = enabled,
-            onCheckedChange = onSmileyDisabledChanged,
-        )
-        OptionToggle(
-            label = stringResource(R.string.messages_reply_option_email_notification),
-            checked = emailNotificationEnabled,
-            enabled = enabled,
-            onCheckedChange = onEmailNotificationChanged,
-        )
-    }
-}
-
-@Composable
-private fun OptionToggle(
-    label: String,
-    checked: Boolean,
-    enabled: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(end = 16.dp),
-        )
-        Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
-    }
-}
-
-private val PrivateMessageReplyError.bannerResId: Int
-    get() = when (this) {
-        PrivateMessageReplyError.Empty -> R.string.messages_reply_error_empty
-        PrivateMessageReplyError.InvalidHashCheck -> R.string.messages_reply_error_invalid_hash
-        PrivateMessageReplyError.AntiFlood -> R.string.messages_reply_error_anti_flood
-        PrivateMessageReplyError.LoginRequired -> R.string.messages_reply_error_login_required
-        PrivateMessageReplyError.Network -> R.string.messages_reply_error_network
-        PrivateMessageReplyError.SessionExpired -> R.string.messages_reply_error_session_expired
-        PrivateMessageReplyError.Unexpected -> R.string.messages_reply_error_unexpected
-    }

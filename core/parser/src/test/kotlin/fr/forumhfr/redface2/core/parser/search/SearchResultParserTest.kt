@@ -115,6 +115,47 @@ class SearchResultParserTest {
     }
 
     @Test
+    fun `author-only fixture (empty query, pseud filter) parses like a regular listing`() {
+        // #402 — the profile's « Derniers messages » flow : `pseud=Lt+Ripley` with an EMPTY
+        // `search=`. The filter lives entirely in the request layer ; the response listing
+        // must parse like any explicit-cat page (no pivot, plain rows).
+        val html = readFixture("search_pseud_filter_lt_ripley.html")
+        val page = parser.parse(
+            html,
+            query = "",
+            requestedCategory = SearchCategoryScope.Category(id = 10, name = "Programmation"),
+        )
+
+        assertEquals(emptyList<Any>(), page.pivotCategories)
+        assertNull(page.selectedCategory)
+        assertEquals(20, page.topics.size)
+        assertTrue("all rows should inherit the requested cat", page.topics.all { it.cat == 10 })
+        // The listing is « topics where this user posted » : rows whose AUTHOR is someone
+        // else are legitimate (Lt Ripley only participated) — the parser must keep them.
+        assertTrue(
+            "expected at least one row authored by the searched user",
+            page.topics.any { it.author == "Lt Ripley" },
+        )
+    }
+
+    @Test
+    fun `author-only all-categories fixture parses the followed pivot page`() {
+        // #402 — the EXACT wire shape of the profile's « Derniers messages » button :
+        // pseud + empty search + cat= (all). HFR 302-redirects onto the multi-cat pivot ;
+        // this fixture is the followed page, i.e. what OkHttp hands the parser.
+        val html = readFixture("search_pseud_all_categories_pivot.html")
+        val page = parser.parse(
+            html,
+            query = "",
+            requestedCategory = SearchCategoryScope.All,
+        )
+
+        assertEquals(20, page.topics.size)
+        assertTrue("the author search must surface the multi-cat pivot", page.pivotCategories.isNotEmpty())
+        assertNotNull("the first pivot category must come back selected", page.selectedCategory)
+    }
+
+    @Test
     fun `content-only fixture exposes matched post anchor and excerpt`() {
         val html = readFixture("search_content_kotlin_explicit_cat.html")
         val page = parser.parse(

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -26,6 +27,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -78,6 +80,8 @@ import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
+import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
+import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -164,13 +168,29 @@ fun TopicScreen(
     /**
      * #307 — saved read position to restore for THIS `(cat, post, page)` landing, or `null` when
      * nothing should be restored. `:app` resolves the full priority chain
-     * (`resolveTopicScrollRestoration`: route `scrollTo` > post-submit landing > saved anchor > top)
-     * BEFORE threading the value here, so a non-null anchor already means « the saved position won »
+     * (`resolveTopicScrollRestoration`: route `scrollTo` > post-submit landing > saved anchor >
+     * previous-page bottom (#412) > top) BEFORE threading the value here, so a non-null anchor
+     * already means « the saved position won »
      * — the screen applies it once the first `Loaded` emission lands, exactly once per landing, and
      * it can never compete with the `ScrollToPost` / `ScrollToEndOfPage` effects (their routes
      * resolve to `null` here).
      */
     restoreScrollAnchor: TopicScrollAnchor? = null,
+    /**
+     * #412 — `true` when this landing is a « page précédente » navigation with no saved anchor
+     * (resolved by `:app`, mutually exclusive with a non-null [restoreScrollAnchor]): once the
+     * first `Loaded` emission lands, scroll to the LAST item of the page — reading backwards,
+     * the next posts to read are at the bottom (HFR web's `#bas` landing). One-shot, same
+     * contract as the anchor restore.
+     */
+    startAtBottom: Boolean = false,
+    /**
+     * #412 — invoked once the bottom landing for this page has been executed (or skipped on an
+     * empty page), right after the first `Loaded` emission. `:app` uses it to clear the transient
+     * « page précédente » marker so the landing can never replay on a later visit to the same page
+     * (the marker is nav state, not a route field — cf. Codex review on PR #420).
+     */
+    onStartAtBottomConsumed: () -> Unit = {},
     /**
      * #307 — reports the read position when the screen leaves the composition, so `:app` can cache
      * it per `(cat, post, page)` (twin of [onTitleLoaded] / the title cache). Fired from a single
@@ -179,6 +199,23 @@ fun TopicScreen(
      * still `Loading` never clobbers a previously saved position with `(0, 0)`.
      */
     onScrollAnchorSaved: (TopicScrollAnchor) -> Unit = {},
+    /**
+     * #291 — numreponses currently selected for multi-quote in THIS topic, in selection order.
+     * Owned by `:app` (the basket must survive the per-page entry swap, like the title cache);
+     * the screen only renders the count and the per-post toggle state.
+     */
+    multiQuoteSelection: List<Int> = emptyList(),
+    /**
+     * #291 — toggles a post in the multi-quote basket. Only invoked under the same gate as
+     * [onQuote] (`shouldShowQuoteAction`): a topic the user cannot reply to has nothing to quote.
+     */
+    onToggleMultiQuote: (numreponse: Int) -> Unit = {},
+    /**
+     * #291 — opens the editor pre-filled with every selected quote (same destination as
+     * [onQuote]; `:app` rides the selection on the route and clears the basket). Receives the
+     * topic's `(subcat, page)` like [onReply].
+     */
+    onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
 ) {
     val viewModel = hiltViewModel<TopicViewModel, TopicViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -217,6 +254,8 @@ fun TopicScreen(
         lazyListState = lazyListState,
         request = request,
         restoreScrollAnchor = restoreScrollAnchor,
+        startAtBottom = startAtBottom,
+        onStartAtBottomConsumed = onStartAtBottomConsumed,
         onScrollAnchorSaved = onScrollAnchorSaved,
     )
 
@@ -328,6 +367,9 @@ fun TopicScreen(
         onOpenPage = onOpenPage,
         onOpenProfile = onOpenProfile,
         onDeleteRequest = { numreponse -> deleteCandidate = numreponse },
+        multiQuoteSelection = multiQuoteSelection,
+        onToggleMultiQuote = onToggleMultiQuote,
+        onMultiQuote = onMultiQuote,
     )
 
     // #292 — confirmation before the (irreversible, no-undo) deletion. Only « Supprimer » sends the
@@ -415,10 +457,11 @@ private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int) {
  *
  * RESTORE: waits for the FIRST `Loaded` emission (same timing as the `ScrollToPost` effect, and read
  * from the [state] flow — not a recomposition-captured snapshot — for the same race-free reason),
- * then applies the anchor exactly once per route landing. Subsequent `Loaded` emissions
- * (cache→network refresh of the stale path, manual pull-to-refresh, post-delete reload) never
- * re-scroll: the effect has already completed, mirroring the one-shot contract of the scroll
- * effects. The priority chain was resolved by `:app` — see `restoreScrollAnchor` on [TopicScreen].
+ * then applies the anchor — or the #412 bottom landing when `startAtBottom` won the resolution —
+ * exactly once per route landing. Subsequent `Loaded` emissions (cache→network refresh of the stale
+ * path, manual pull-to-refresh, post-delete reload) never re-scroll: the effect has already
+ * completed, mirroring the one-shot contract of the scroll effects. The priority chain was resolved
+ * by `:app` — see `restoreScrollAnchor` / `startAtBottom` on [TopicScreen].
  *
  * SAVE: `onDispose` is the ONE save point. `onOpenPage` is shared by swipe, header, pager and
  * FAB, so saving per trigger would multiply call sites (and race); disposal of this composition
@@ -426,19 +469,35 @@ private suspend fun LazyListState.reanchorWhileMediaSettles(target: Int) {
  * `scrollAnchorSettled` gates the save: a page abandoned while still Loading reads (0, 0) from
  * a list that never rendered, and must not clobber the real position saved by an earlier visit.
  */
+@Suppress("LongParameterList") // Private effect holder: the params are TopicScreen's own
+// restoration inputs threaded as-is; grouping them into a holder type would only add indirection.
 @Composable
 private fun TopicScrollRestorationEffects(
     state: StateFlow<TopicUiState>,
     lazyListState: LazyListState,
     request: TopicRequest,
     restoreScrollAnchor: TopicScrollAnchor?,
+    startAtBottom: Boolean,
+    onStartAtBottomConsumed: () -> Unit,
     onScrollAnchorSaved: (TopicScrollAnchor) -> Unit,
 ) {
     var scrollAnchorSettled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        state.first { it.mode is TopicUiState.Mode.Loaded }
-        restoreScrollAnchor?.let { anchor ->
-            lazyListState.scrollToItem(anchor.index, anchor.offset)
+        val loadedMode = state.first { it.mode is TopicUiState.Mode.Loaded }.mode
+                as TopicUiState.Mode.Loaded
+        when {
+            restoreScrollAnchor != null ->
+                lazyListState.scrollToItem(restoreScrollAnchor.index, restoreScrollAnchor.offset)
+            // #412 — « page précédente » without a saved anchor: land on the last item (reading
+            // direction). Same `posts.size` target as the ScrollToEndOfPage handler — the +1
+            // header card at index 0 makes the last post index == posts.size.
+            startAtBottom && loadedMode.topic.posts.isNotEmpty() ->
+                lazyListState.scrollToItem(loadedMode.topic.posts.size)
+        }
+        if (startAtBottom) {
+            // Consume even when the empty-page guard skipped the scroll: the landing decision for
+            // this page is spent either way.
+            onStartAtBottomConsumed()
         }
         scrollAnchorSettled = true
     }
@@ -535,6 +594,11 @@ internal fun TopicContent(
     // #292 — a per-post « Supprimer » tap; the screen owns the confirmation dialog, so this only
     // requests it (carrying the post's numreponse). Never invoked for the first post (excluded).
     onDeleteRequest: (numreponse: Int) -> Unit = {},
+    // #291 — multi-quote selection (owned by :app) + its two actions, threaded to the post menu
+    // (toggle) and the floating cluster (« Citer N »).
+    multiQuoteSelection: List<Int> = emptyList(),
+    onToggleMultiQuote: (numreponse: Int) -> Unit = {},
+    onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
 ) {
     // #285 — the topic title and #284 — the page counter live in a persistent top app bar so they
     // stay visible while the user scrolls (the in-card title/caption scrolls away). When the page
@@ -615,8 +679,15 @@ internal fun TopicContent(
             if (current != null) {
                 TopicBottomActions(
                     showReply = shouldEnableReply(current.topic, state.isAuthenticated),
+                    showPageFabs = state.showPageFabs,
                     canGoPrevious = state.canGoPrevious,
                     canGoNext = state.canGoNext,
+                    // #291 — the « Citer N » FAB shares the reply gate: quoting IS replying.
+                    multiQuoteCount = effectiveMultiQuoteCount(
+                        current.topic,
+                        state.isAuthenticated,
+                        multiQuoteSelection,
+                    ),
                     // Clamp to [1, totalPages]: `canGoPrevious/Next` are derived from `request.page`
                     // while the target is computed from the parsed `topic.page`; if those ever desync
                     // (HFR clamps an out-of-range page to the last one), the clamp keeps navigation in
@@ -624,6 +695,7 @@ internal fun TopicContent(
                     onPreviousPage = { onOpenPage((current.topic.page - 1).coerceAtLeast(1)) },
                     onNextPage = { onOpenPage((current.topic.page + 1).coerceAtMost(current.topic.totalPages)) },
                     onReply = { onReply(current.topic.subcat, current.topic.page) },
+                    onMultiQuote = { onMultiQuote(current.topic.subcat, current.topic.page) },
                 )
             }
         },
@@ -701,8 +773,10 @@ internal fun TopicContent(
                                 onDeleteRequest = onDeleteRequest,
                                 onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
                                 listState = listState,
+                                multiQuoteSelection = multiQuoteSelection,
+                                onToggleMultiQuote = onToggleMultiQuote,
                             )
-                            TopicScrollbar(
+                            LazyListScrollbar(
                                 listState = listState,
                                 modifier = Modifier.align(Alignment.CenterEnd),
                             )
@@ -729,6 +803,9 @@ private fun TopicLoadedContent(
     /** #382 — double-tap anywhere on the list refreshes the current page (RF1 parity). */
     onDoubleTapRefresh: () -> Unit = {},
     listState: LazyListState,
+    // #291 — selection state + toggle for the post menu's multi-quote entry.
+    multiQuoteSelection: List<Int> = emptyList(),
+    onToggleMultiQuote: (numreponse: Int) -> Unit = {},
 ) {
     val highlight = state.request.scrollTo
     // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
@@ -775,11 +852,11 @@ private fun TopicLoadedContent(
             // longer adds statusBarsPadding()/navigationBarsPadding() here to avoid double-insetting.
             // #282 — horizontal swipe changes page via the existing route-driven onOpenPage, with
             // drag-follow feedback: the page tracks the finger (graphicsLayer inside topicPageSwipe)
-            // and topicPageSwipeEdge paints an edge glow as the swipe arms. topicPageSwipeEdge must
+            // and pageSwipeEdgeHint (shared, :core:ui) paints an edge glow as the swipe arms. It must
             // precede topicPageSwipe so the glow draws in untranslated (screen) space.
             // Engages on horizontal slop only, so vertical scroll and the page-grid's own
             // horizontalScroll keep their gestures; edges are a damped no-op.
-            .topicPageSwipeEdge(
+            .pageSwipeEdgeHint(
                 currentPage = topic.page,
                 totalPages = { currentTotalPages },
                 dragOffset = dragOffset,
@@ -820,11 +897,12 @@ private fun TopicLoadedContent(
         // #283 — extra bottom padding so the last post's right-aligned actions clear the floating
         // bottom-action cluster (the Scaffold FAB slot floats over the content). Harmless extra
         // breathing room when the cluster is absent (anon + single page).
-        // 8 dp gutters (was 16) — posts are the app's main reading surface, every horizontal
-        // pixel counts on a phone ; the cards keep their own inner padding for breathing room.
-        contentPadding = PaddingValues(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 88.dp),
-        // 8 dp vertical rhythm, matching the 8 dp side gutters above — a uniform grid (and a
-        // denser feed, cf. the #287 density feedback) instead of the previous 12/8 mismatch.
+        // NO side gutters here : the nav host already pads every screen by 8 dp per side
+        // (RedfaceNavigation's global Surface) — adding 8 more made the real gutter 16 dp
+        // (dogfooding v111). 0 + 8 (host) = the intended 8 dp, matching the vertical rhythm.
+        contentPadding = PaddingValues(start = 0.dp, top = 16.dp, end = 0.dp, bottom = 88.dp),
+        // 8 dp vertical rhythm, matching the 8 dp effective side gutters — a uniform grid (and
+        // a denser feed, cf. the #287 density feedback).
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
@@ -882,22 +960,6 @@ private fun TopicLoadedContent(
             } else {
                 null
             }
-            // #292 — « Supprimer » uses the same gate as « Modifier » (HFR allows deletion via the
-            // edit form), EXCEPT it is never offered on the topic's first post: deleting that would
-            // remove the entire topic, an out-of-scope destructive path for this MVP. The first post
-            // is `topic.posts.first()` on page 1.
-            // Disable every delete affordance while a deletion is in flight (state.deletingNumreponse
-            // != null) so a second tap can't queue another POST mid-request (the ViewModel also
-            // guards, but hiding the button is the honest UI signal).
-            val deleteAction: (() -> Unit)? = if (
-                state.deletingNumreponse == null &&
-                !isFirstPostOfTopic(topic, post) &&
-                shouldShowDeleteAction(topic, post, state.isAuthenticated)
-            ) {
-                { onDeleteRequest(post.numreponse) }
-            } else {
-                null
-            }
             // Phase 2 finish (#208) — profile tap is enabled only when HFR exposed
             // a profile link for this post (Post.profileId != null). Posts without a
             // profile link (Publicité rows, anonymous reads) keep the tap hidden.
@@ -910,16 +972,44 @@ private fun TopicLoadedContent(
                 citedCount = citationCounts[post.numreponse] ?: 0,
                 onQuote = quoteAction,
                 onEdit = editAction,
-                onDelete = deleteAction,
                 onOpenProfile = profileAction,
                 onOpenMenu = { menuPost = post },
+                // #436 — same membership source as the menu entry (PostMenuSheet).
+                multiQuoteSelected = post.numreponse in multiQuoteSelection,
             )
+        }
+        // #379 — explicit end-of-topic marker after the last post of the LAST page. The
+        // « page X/Y » counter (#284) lets the reader deduce it; this says it. Reflects the
+        // LOADED page (same contract as the counter): replies posted since the fetch surface
+        // on the next refresh. Intermediate pages keep their natural « more below » flow.
+        // NO explicit key (Codex review): a stable key would make Lazy track the footer
+        // across an insertion — a reader parked on the marker would keep it in view while a
+        // freshly fetched post lands above the viewport, unseen. Positional identity is
+        // correct for a stateless sentinel.
+        if (topic.page == topic.totalPages) {
+            item {
+                EndOfTopicFooter()
+            }
         }
     }
     // #362 — per-post contextual menu. The permalink is rebuilt from the LOADED topic's
     // (cat, post, page) — not the request — so it always reflects the page HFR actually
     // served (HFR clamps out-of-range pages). citedCount reuses the page-scoped #239 index.
     menuPost?.let { post ->
+        // #292 → #418 — « Supprimer » lives in the contextual menu now (anti accidental tap,
+        // beta feedback by nicko). Same gates as before : « Modifier »'s gate (HFR allows
+        // deletion via the edit form), never the topic's first post (deleting it would remove
+        // the whole topic — out-of-scope destructive path), and no delete affordance while a
+        // deletion is in flight (the ViewModel also guards ; hiding is the honest UI signal).
+        val menuDeleteAction: (() -> Unit)? = if (
+            state.deletingNumreponse == null &&
+            !isFirstPostOfTopic(topic, post) &&
+            shouldShowDeleteAction(topic, post, state.isAuthenticated)
+        ) {
+            { onDeleteRequest(post.numreponse) }
+        } else {
+            null
+        }
         PostMenuSheet(
             post = post,
             permalink = buildPostPermalink(
@@ -930,6 +1020,50 @@ private fun TopicLoadedContent(
             ),
             citedCount = citationCounts[post.numreponse] ?: 0,
             onDismiss = { menuPost = null },
+            onDelete = menuDeleteAction,
+            // #395 — same profileId gate as the post card (#208): Publicité rows and
+            // anonymous reads expose no profile link, the hero stays inert.
+            onOpenProfile = post.profileId?.let { profileId ->
+                { onOpenProfile(profileId, post.author, post.avatarUrl) }
+            },
+            // #291 — multi-quote toggle, same gate as « Citer » (quoting is a flavour of
+            // replying; a locked topic or an anonymous session has nothing to quote).
+            multiQuoteSelected = post.numreponse in multiQuoteSelection,
+            onToggleMultiQuote = if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
+                { onToggleMultiQuote(post.numreponse) }
+            } else {
+                null
+            },
+        )
+    }
+}
+
+/**
+ * #379 — sober end-of-topic marker: a centred label between two hairlines, rendered as the
+ * LAST LazyColumn item of the topic's last page only. Pure presentation — the condition
+ * (`topic.page == topic.totalPages`) lives at the call site.
+ */
+@Composable
+private fun EndOfTopicFooter() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+        Text(
+            text = stringResource(R.string.topic_end_of_topic),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant,
         )
     }
 }
@@ -1183,11 +1317,6 @@ private fun TopicPostCard(
     onQuote: (() -> Unit)?,
     onEdit: (() -> Unit)?,
     /**
-     * #292 — « Supprimer » this post. Null hides the button (not the user's own post, locked topic,
-     * logged out, or the topic's first post — which is excluded to avoid whole-topic deletion).
-     */
-    onDelete: (() -> Unit)? = null,
-    /**
      * Phase 2 finish (#208) — tapping the avatar or author opens the profile bottom sheet.
      * Null when [Post.profileId] is null (Publicité rows, anonymous reads).
      */
@@ -1197,8 +1326,21 @@ private fun TopicPostCard(
      * of the header bar), permalink copy, edit marker, citation count.
      */
     onOpenMenu: () -> Unit = {},
+    /**
+     * #436 — true when this post sits in the multi-quote basket (#291). Marks the card with a
+     * primary border + an « Ajouté à la citation » pill in the identity band, so the selection
+     * is visible without opening the per-post menu (dev feedback by Dintr-un lemn). Orthogonal
+     * to [highlighted] (the scroll anchor) : both can be true at once, the border and the
+     * container tint compose without colliding.
+     */
+    multiQuoteSelected: Boolean = false,
 ) {
     Card(
+        border = if (multiQuoteSelected) {
+            BorderStroke(width = 2.dp, color = MaterialTheme.colorScheme.primary)
+        } else {
+            null
+        },
         colors = CardDefaults.cardColors(
             containerColor = if (highlighted) {
                 MaterialTheme.colorScheme.secondaryContainer
@@ -1332,6 +1474,23 @@ private fun TopicPostCard(
                             )
                         }
                     }
+                    if (multiQuoteSelected) {
+                        // #436 — basket-membership pill, same shape family as the #239 pill above.
+                        // primaryContainer : distinct from the band (secondaryContainer) AND from a
+                        // highlighted band (tertiaryContainer), and it echoes the primary border so
+                        // the two marks read as one signal.
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text(
+                                text = stringResource(R.string.topic_post_multiquote_selected),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
                 }
                 // #362 — per-post contextual menu trigger, flush right of the header. The post
                 // number that used to trail the pseudo lives in the menu now. A text glyph, not a
@@ -1366,30 +1525,18 @@ private fun TopicPostCard(
         ) {
             // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
             PostRenderer(content = post.content, selectable = true)
-            if (onQuote != null || onEdit != null || onDelete != null) {
+            if (onQuote != null || onEdit != null) {
                 // Actions row at the bottom of the post card, sober TextButtons
                 // so they stay subordinate to the post content. « Modifier »
-                // (Phase 2D, #147) and « Supprimer » (#292) appear only on the
-                // user's own editable posts when the topic is still postable
-                // (« Supprimer » additionally excludes the first post). « Citer »
-                // (Phase 2C, #146) appears whenever the topic is postable, even
-                // when the per-post `quoteRef` link was obfuscated and parsed as
-                // null (#227). Any can be absent — we render the row only if at
-                // least one action is provided.
+                // (Phase 2D, #147) appears only on the user's own editable posts
+                // when the topic is still postable. « Citer » (Phase 2C, #146)
+                // appears whenever the topic is postable, even when the per-post
+                // `quoteRef` link was obfuscated and parsed as null (#227).
+                // « Supprimer » (#292) moved to the contextual menu (#418).
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                 ) {
-                    if (onDelete != null) {
-                        TextButton(
-                            onClick = onDelete,
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error,
-                            ),
-                        ) {
-                            Text(text = stringResource(R.string.topic_post_delete))
-                        }
-                    }
                     if (onEdit != null) {
                         TextButton(onClick = onEdit) {
                             Text(text = stringResource(R.string.topic_post_edit))
@@ -1456,29 +1603,57 @@ private fun DeletePostConfirmDialog(
 @Suppress("LongParameterList") // hoisted action cluster, mirrors other hoisted composables in this file
 private fun TopicBottomActions(
     showReply: Boolean,
+    showPageFabs: Boolean,
     canGoPrevious: Boolean,
     canGoNext: Boolean,
+    multiQuoteCount: Int,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
     onReply: () -> Unit,
+    onMultiQuote: () -> Unit,
 ) {
     val previousLabel = stringResource(R.string.topic_fab_previous_page)
     val nextLabel = stringResource(R.string.topic_fab_next_page)
-    if (showReply || canGoPrevious || canGoNext) {
+    // #383 — the preference only governs the ‹/› page FABs; « Répondre » keeps its own gate.
+    val showPrevious = showPageFabs && canGoPrevious
+    val showNext = showPageFabs && canGoNext
+    // #291 — appears as soon as the basket holds one post of this topic (call-site zeroes the
+    // count when quoting is unavailable). NOT governed by the #383 page-FABs preference: it is
+    // a write affordance the user explicitly armed, not page navigation.
+    val showMultiQuote = multiQuoteCount > 0
+    val showAnyAction = showReply || showPrevious || showNext || showMultiQuote
+    if (showAnyAction) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (canGoPrevious) {
+            if (showPrevious) {
                 PageFab(description = previousLabel, glyph = "‹", onClick = onPreviousPage)
             }
-            if (canGoNext) {
+            if (showNext) {
                 PageFab(description = nextLabel, glyph = "›", onClick = onNextPage)
+            }
+            if (showMultiQuote) {
+                MultiQuoteFab(count = multiQuoteCount, onClick = onMultiQuote)
             }
             if (showReply) {
                 ReplyFab(onClick = onReply)
             }
         }
+    }
+}
+
+@Composable
+private fun MultiQuoteFab(count: Int, onClick: () -> Unit) {
+    // #291 — same SmallFloatingActionButton footprint as PageFab/ReplyFab; the glyph is a
+    // decorative « ❝N » (no Material icons — detekt ForbiddenImport blocks
+    // androidx.compose.material.*) and the real label rides on contentDescription for TalkBack.
+    val label = pluralStringResource(R.plurals.topic_fab_multi_quote, count, count)
+    SmallFloatingActionButton(
+        onClick = onClick,
+        modifier = Modifier.semantics { contentDescription = label },
+    ) {
+        Text("❝$count")
     }
 }
 
@@ -1520,6 +1695,12 @@ private fun ReplyFab(onClick: () -> Unit) {
 // (CategoryViewModel.canCreateTopic).
 internal fun shouldEnableReply(topic: Topic, isAuthenticated: Boolean): Boolean =
     topic.canReply && isAuthenticated
+
+// #291 — the « Citer N » FAB count, zeroed when quoting is unavailable (locked topic, anonymous
+// session): the basket may still hold posts, but advertising an unusable action would be a lie.
+// Extracted from TopicContent for the detekt cyclomatic-complexity budget.
+internal fun effectiveMultiQuoteCount(topic: Topic, isAuthenticated: Boolean, selection: List<Int>): Int =
+    if (shouldShowQuoteAction(topic, isAuthenticated)) selection.size else 0
 
 internal fun shouldShowQuoteAction(topic: Topic, isAuthenticated: Boolean): Boolean =
     topic.canReply && isAuthenticated

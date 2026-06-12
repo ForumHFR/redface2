@@ -59,6 +59,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
@@ -222,6 +223,17 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     }
     val measuredSizes: Map<String, IntSize?> = measurableUrls.associateWith { sizeCache.get(it) }
 
+    // #416 — a smiley URL with a FRESH FAILURE on record is DEAD (HFR's BBCode engine turns any
+    // unknown `:code:` into an <img> that 404s) : its token replaces the sprite as body-sized text.
+    // Failures land from two writers — the #175 measurement effect below (perso smileys) and the
+    // render-time error slot of smileyInlineContent (builtins, which are deliberately not measured).
+    // isFailureFresh reads the same SnapshotStateMap as the sizes, so a failure landing recomposes
+    // this block ; the AnnotatedString stays invariant (#175 pivot), only the inline-content map
+    // and the placeholder box change.
+    val allSmileyUrls = remember(inlines) { collectSmileyUrls(inlines) }
+    val deadSmileyUrls: Set<String> =
+        allSmileyUrls.filterTo(HashSet()) { sizeCache.isFailureFresh(it, System.currentTimeMillis()) }
+
     // Measure the not-yet-known URLs. Coil's execute() is a main-safe suspend call (it dispatches its
     // own I/O), and reuses the shared SingletonImageLoader caches the rendering AsyncImage hits — so no
     // double network fetch. A dead URL is recorded as a failure (TTL) so it is not re-fetched.
@@ -274,11 +286,21 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
         val maxMediaWidthSp = with(LocalDensity.current) {
             (maxWidth.toSp().value * SMILEY_RELATIVE_MAX_WIDTH_FRACTION).roundToInt()
         }
-        val inlineContent = remember(inlines, measuredSizes, maxMediaWidthSp) {
+        val inlineContent = remember(inlines, measuredSizes, deadSmileyUrls, maxMediaWidthSp) {
             collectInlineMedia(
                 inlines,
-                smileyBox = { smiley -> smileyDisplayBox(smiley, measuredSizes, maxMediaWidthSp) },
+                smileyBox = { smiley ->
+                    val url = smiley.imageUrl
+                    if (url != null && url in deadSmileyUrls) {
+                        // #416 — the box must fit the body-sized token BEFORE the placeholder is
+                        // laid out, otherwise the text is clipped to the sprite footprint.
+                        PostMediaDisplayPolicy.deadSmileyTokenBox(smiley.kind.token(), maxMediaWidthSp)
+                    } else {
+                        smileyDisplayBox(smiley, measuredSizes, maxMediaWidthSp)
+                    }
+                },
                 imageBox = { image -> imageDisplayBox(image, measuredSizes, maxMediaWidthSp) },
+                deadSmileyUrls = deadSmileyUrls,
             )
         }
         Text(
@@ -792,19 +814,22 @@ internal fun collectInlineMedia(
     inlines: List<PostInline>,
     smileyBox: (PostInline.Smiley) -> InlineMediaBox = { PostMediaDisplayPolicy.smileyBox(it) },
     imageBox: (PostInline.InlineImage) -> InlineMediaBox = { PostMediaDisplayPolicy.inlineImage },
+    deadSmileyUrls: Set<String> = emptySet(),
 ): Map<String, InlineTextContent> {
     val out = mutableMapOf<String, InlineTextContent>()
     val media = MediaCounter()
-    walkInlinesForMedia(inlines, out, media, smileyBox, imageBox)
+    walkInlinesForMedia(inlines, out, media, smileyBox, imageBox, deadSmileyUrls)
     return out
 }
 
+@Suppress("LongParameterList") // Recursive walker — every param is the same threaded context.
 private fun walkInlinesForMedia(
     inlines: List<PostInline>,
     out: MutableMap<String, InlineTextContent>,
     media: MediaCounter,
     smileyBox: (PostInline.Smiley) -> InlineMediaBox,
     imageBox: (PostInline.InlineImage) -> InlineMediaBox,
+    deadSmileyUrls: Set<String>,
 ) {
     inlines.forEach { inline ->
         when (inline) {
@@ -812,16 +837,23 @@ private fun walkInlinesForMedia(
                 out += media.nextImage() to imageInlineContent(inline, imageBox(inline))
 
             is PostInline.Smiley -> {
-                if (inline.imageUrl == null) return@forEach
-                out += media.nextSmiley() to smileyInlineContent(inline, smileyBox(inline))
+                val url = inline.imageUrl ?: return@forEach
+                out += media.nextSmiley() to
+                    smileyInlineContent(inline, smileyBox(inline), dead = url in deadSmileyUrls)
             }
 
-            is PostInline.Strong -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
-            is PostInline.Emphasis -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
-            is PostInline.Underline -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
-            is PostInline.Strike -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
-            is PostInline.Color -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
-            is PostInline.Link -> walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox)
+            is PostInline.Strong ->
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+            is PostInline.Emphasis ->
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+            is PostInline.Underline ->
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+            is PostInline.Strike ->
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+            is PostInline.Color ->
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
+            is PostInline.Link ->
+                walkInlinesForMedia(inline.children, out, media, smileyBox, imageBox, deadSmileyUrls)
             else -> Unit
         }
     }
@@ -842,6 +874,33 @@ internal fun collectMeasurableSmileyUrls(inlines: List<PostInline>): Set<String>
 
 private fun collectMeasurableSmileyUrlsInto(inlines: List<PostInline>, urls: MutableSet<String>) {
     inlines.forEach { inline -> collectMeasurableSmileyUrl(inline, urls) }
+}
+
+/**
+ * #416 — collects EVERY smiley image URL (builtins included), unlike [collectMeasurableSmileyUrls]
+ * which deliberately skips builtins for the measurement pre-seed contract. The dead-sprite check
+ * needs the full set : an unknown `:code:` is served by HFR as a 404 builtin-style sprite, and its
+ * failure is recorded at render time (error slot), not by the measurement effect.
+ */
+internal fun collectSmileyUrls(inlines: List<PostInline>): Set<String> {
+    val urls = LinkedHashSet<String>()
+    collectSmileyUrlsInto(inlines, urls)
+    return urls
+}
+
+private fun collectSmileyUrlsInto(inlines: List<PostInline>, urls: MutableSet<String>) {
+    inlines.forEach { inline ->
+        when (inline) {
+            is PostInline.Smiley -> inline.imageUrl?.let { urls += it }
+            is PostInline.Strong -> collectSmileyUrlsInto(inline.children, urls)
+            is PostInline.Emphasis -> collectSmileyUrlsInto(inline.children, urls)
+            is PostInline.Underline -> collectSmileyUrlsInto(inline.children, urls)
+            is PostInline.Strike -> collectSmileyUrlsInto(inline.children, urls)
+            is PostInline.Color -> collectSmileyUrlsInto(inline.children, urls)
+            is PostInline.Link -> collectSmileyUrlsInto(inline.children, urls)
+            else -> Unit
+        }
+    }
 }
 
 private fun collectMeasurableSmileyUrl(inline: PostInline, urls: MutableSet<String>) {
@@ -1078,7 +1137,11 @@ internal fun imageInlineContent(image: PostInline.InlineImage, box: InlineMediaB
     }
 }
 
-internal fun smileyInlineContent(smiley: PostInline.Smiley, box: InlineMediaBox): InlineTextContent {
+internal fun smileyInlineContent(
+    smiley: PostInline.Smiley,
+    box: InlineMediaBox,
+    dead: Boolean = false,
+): InlineTextContent {
     val description = smiley.kind.token()
     return InlineTextContent(
         placeholder = Placeholder(
@@ -1092,14 +1155,53 @@ internal fun smileyInlineContent(smiley: PostInline.Smiley, box: InlineMediaBox)
             placeholderVerticalAlign = PlaceholderVerticalAlign.TextBottom,
         ),
     ) {
-        AsyncImage(
+        if (dead) {
+            // #416 (round 2, retour dev v118) — the sprite is KNOWN dead (fresh failure on record :
+            // HFR 404s any unknown `:code:`) and the box was sized for the token by deadSmileyTokenBox,
+            // so render the token at body size — no image attempt, no ellipsis budget needed (Clip is
+            // a guard for extreme fontScale).
+            Text(
+                text = description,
+                fontSize = DEAD_SMILEY_TOKEN_FONT_SP.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Clip,
+            )
+            return@InlineTextContent
+        }
+        SubcomposeAsyncImage(
             model = smiley.imageUrl,
             contentDescription = description,
             contentScale = PostMediaDisplayPolicy.smileyContentScale,
             modifier = Modifier.fillMaxSize(),
+            success = { SubcomposeAsyncImageContent() },
+            error = {
+                // #416 — first failure of a sprite that was NOT known dead when this content was
+                // built (builtins are never measured ; a perso can die between measure and render).
+                // Record the failure so the paragraph recomposes onto the dead-token path above
+                // (readable, body-sized) ; the tiny ellipsised token below is only the transient
+                // frame between this error and that recomposition.
+                val cache = LocalIntrinsicMediaSizeCache.current
+                val url = smiley.imageUrl
+                if (url != null) {
+                    LaunchedEffect(url) {
+                        if (!cache.isFailureFresh(url, System.currentTimeMillis())) {
+                            cache.putFailure(url, System.currentTimeMillis())
+                        }
+                    }
+                }
+                Text(
+                    text = description,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
         )
     }
 }
+
+/** #416 — body-sized token for a dead sprite (bodyMedium is 14 sp ; keep in sync with the box). */
+private const val DEAD_SMILEY_TOKEN_FONT_SP = 14
 
 private fun SmileyKind.token(): String = when (this) {
     is SmileyKind.Builtin -> code

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.database.entities
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import fr.forumhfr.redface2.core.model.FlagType
@@ -35,6 +36,14 @@ data class FlagTopicEntity(
     val title: String,
     val totalPages: Int,
     val replyCount: Int,
+    /**
+     * Favori/étoile decoration (REST `flag_owntopic == 3`), independent of [type] (the bucket).
+     * Drives the yellow dot of a favorited topic listed under another bucket (« Mes sujets »).
+     * `defaultValue` matches the v9 migration's `DEFAULT 0` so the exported schema and a
+     * migrated database agree.
+     */
+    @ColumnInfo(defaultValue = "0")
+    val isFavorite: Boolean = false,
     val hasUnread: Boolean,
     val lastReadPage: Int,
     /**

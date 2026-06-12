@@ -64,6 +64,14 @@ internal sealed interface TopicScrollRestoration {
     /** A position was saved for this exact `(cat, post, page)` — restore it once loaded. */
     data class RestoreSaved(val anchor: TopicScrollAnchor) : TopicScrollRestoration
 
+    /**
+     * #412 — « page précédente » navigation onto a page with no saved anchor: land at the BOTTOM.
+     * Reading a thread backwards, the posts that chronologically follow what the user just read
+     * are the LAST ones of the previous page (same landing HFR's own `#bas` anchor gives on the
+     * web). A saved anchor still wins — this only replaces the [StartAtTop] fallback.
+     */
+    data object StartAtBottom : TopicScrollRestoration
+
     /** Never-visited page (or evicted anchor): keep the default top-of-page landing. */
     data object StartAtTop : TopicScrollRestoration
 }
@@ -76,17 +84,21 @@ internal sealed interface TopicScrollRestoration {
  *  2. post-submit route (`submitSignal != null`, covers the #344 `ScrollToEndOfPage` path and the
  *     #226 overflow landing) → [TopicScrollRestoration.FollowSubmitLanding] ;
  *  3. saved anchor for the page → [TopicScrollRestoration.RestoreSaved] ;
- *  4. nothing → [TopicScrollRestoration.StartAtTop].
+ *  4. « page précédente » navigation (#412, `previousPageLanding`) →
+ *     [TopicScrollRestoration.StartAtBottom] ;
+ *  5. nothing → [TopicScrollRestoration.StartAtTop].
  *
- * Pure so the four levels are unit-testable without Compose/nav3 (cf. `TopicScrollRestorationTest`).
+ * Pure so the five levels are unit-testable without Compose/nav3 (cf. `TopicScrollRestorationTest`).
  */
 internal fun resolveTopicScrollRestoration(
     scrollTo: Int?,
     submitSignal: Long?,
     savedAnchor: TopicScrollAnchor?,
+    previousPageLanding: Boolean = false,
 ): TopicScrollRestoration = when {
     scrollTo != null -> TopicScrollRestoration.FollowScrollTo
     submitSignal != null -> TopicScrollRestoration.FollowSubmitLanding
     savedAnchor != null -> TopicScrollRestoration.RestoreSaved(savedAnchor)
+    previousPageLanding -> TopicScrollRestoration.StartAtBottom
     else -> TopicScrollRestoration.StartAtTop
 }

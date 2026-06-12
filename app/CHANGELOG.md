@@ -16,10 +16,38 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v126 — `0.10.0` — 2026-06-12
+
+**Statut** : `local` (candidat bêta — numéro anticipé ledger 125+1, à confirmer au dispatch `channel=beta`)
+**Commit** : à venir (promotion dev→main)
+**Fichier** : AAB `bundleProdRelease` → track open testing + tag pour F-Droid beta
+
+**Contenu depuis la 0.9.0/v113** : night-run 2026-06-11→12 + arbitrages du 12 + dernier round, dogfoodés sur le canal dev (v114 → v125).
+
+### Added
+- **Messages privés — écriture complète** : composer un nouveau MP (#301/#404) ; **picker de smileys** (Standard + recherche wiki, favoris priorisés) dans les deux éditeurs MP (#387) ; **badge de MP non lus** sur l'onglet Messages, cap « 9+ », désactivable (Réglages › Notifications, #313).
+- **Messages privés — gestes de lecture** (#351 a+b) : pull-to-refresh, ascenseur, swipe de pages in-place ; chargement keep-content (la page affichée reste visible pendant le rechargement).
+- **Citation multiple** (#291) + **marquage visuel** des posts ajoutés au panier — bordure + pastille « Ajouté à la citation » (#436, point 1).
+- **Recherche** : filtre par auteur (`pseud=`) + « Derniers messages » depuis le profil (#403) ; **repli du formulaire en bandeau compact** une fois la recherche lancée, résultats pleine hauteur, « Modifier » ré-étend (#433).
+- **Lecture topic** : marqueur « Dernier message du sujet » (#379) ; réglage pour masquer les boutons flottants de page (#383) ; pseudo cliquable vers le profil dans le menu de post (#395) ; « Supprimer » dans le menu de post (#418) ; palette smileys complète dans l'éditeur (#415).
+- **MPStorage lecture seule v0.1** (#406, ADR-014) — fondation de l'onglet DT.
+
+### Fixed
+- **Saisie du nouveau MP sous le clavier** (#434, #275, #410) + curseur visible dans les éditeurs (#422) ; **le champ suit le curseur pendant la frappe** (#447 point 1, retour bêta-dev — le viewport défile pour garder le caret visible sous le clavier).
+- **Parser** : lignes vides préservées et interligne naturel (#333, #280) ; citation contenant un spoiler (#393) ; **smiley inexistant rendu en token texte lisible** (#416).
+- **Drapeaux** : favoris perdus au retour d'onglet (#384) ; pastille favori jaune dans « Mes sujets » (#432, Room v9) ; auto-refresh au retour d'un sujet (#431, #378, #331) ; snackbar invisible (#417) ; « +lus » masqués (#385) ; onglet « Mes sujets » sans retour à la ligne (ellipse, #446).
+- Flash de thème clair au lancement (#407) ; un résultat de recherche atterrit sur le bon post via la redirection HFR (#277) ; « page précédente » atterrit en bas (#412) ; fuite inter-session du compteur de MP non lus (review PR #439).
+
+### Changed
+- **`versionName` 0.9.0 → 0.10.0**.
+- **Le flavor dev ajoute `-dev.<build>` au versionName** (ex. `0.10.0-dev.124`) : les builds du canal dev sont enfin distinguables dans F-Droid et dans le footer (avant : dix entrées « 0.9.0 » identiques v114→v123).
+
+---
+
 ## v113 — `0.9.0` — 2026-06-11
 
-**Statut** : `local` (candidat — promotion `promote/0.9.0` figée sur dev `bb3ee57b`, en attente de review Codex)
-**Commit** : candidat depuis dev `bb3ee57b` (build dev 112), versionCode anticipé 113 (ledger 112+1)
+**Statut** : `open` (track open testing) + F-Droid `.beta`
+**Commit** : merge de promotion `0313e8f4` (#400, candidat dev `bb3ee57b` + review Codex SHIP), tag `app-v113` (versionCode 113, ledger 112→113)
 **Fichier** : AAB `bundleProdRelease` (`fr.forumhfr.redface2`) → track open testing + tag pour F-Droid beta
 
 **Lot dogfooding du 2026-06-10 soir** : 7 PR mergées sur dev (#388–#392, #397, #399), dogfoodées en continu sur le canal dev (v106 → v112).

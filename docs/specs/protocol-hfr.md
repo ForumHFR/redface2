@@ -590,7 +590,18 @@ Le contrat se ramène à un **flag de booléen** côté caller : `useAuth = true
 
 Confirmé par Corran Horn sur le topic HFR Redface 2 : *« en utilisant un cookie d'un compte anonyme pour pas péter les drapeaux »*.
 
-> **Proposition en cours — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (statut Proposé, non acté)** : exception **bornée aux MP** — prefetch authentifié limité aux pages de la conversation `cat=prive` actuellement ouverte. Justification mesurée live dans [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132) : l'état lu/non-lu MP est un dot **binaire par conversation**, effacé par le GET d'ouverture (le prefetch intra-conversation n'a donc pas d'effet supplémentaire dans le cas nominal ; reste une race nouveau-message documentée et assumée dans l'ADR) ; le GET de la liste est inerte ; « marquer comme non lu » = `GET /user/nonlu.php` sans `hash_check`, granularité conversation entière ; aucune position de lecture serveur n'existe pour les MP. Cette section sera complétée (contrat `nonlu.php`) si l'ADR est acceptée.
+> **Acté — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (accepté 2026-06-12)** : exception **bornée aux MP** — prefetch authentifié limité aux pages adjacentes (N−1/N+1) de la conversation `cat=prive` actuellement ouverte ; prefetch depuis la liste interdit. Justification mesurée live dans [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132) : l'état lu/non-lu MP est un dot **binaire par conversation**, effacé par le GET d'ouverture (le prefetch intra-conversation n'a donc pas d'effet supplémentaire dans le cas nominal ; reste une race nouveau-message documentée et assumée dans l'ADR) ; le GET de la liste est inerte ; aucune position de lecture serveur n'existe pour les MP. La règle générale ci-dessus reste en vigueur partout ailleurs.
+
+### Marquer un MP comme non lu — `nonlu.php` (vérifié live 2026-06-11, #361)
+
+```
+GET /user/nonlu.php?config=hfr.inc&cat=prive&subcat=0&post={threadId}&page={N}&p=1&sondage=0&owntopic=0&new=0
+```
+
+- Lien unique dans l'en-tête de chaque page de conversation (icône œil) ; mutation par **GET simple, sans `hash_check`**.
+- **Granularité binaire, conversation entière** : le paramètre `page` n'encode aucune position — nonlu posé depuis la page 3 puis lecture de la seule page 2 → conversation entièrement « lue ». Pas d'état intermédiaire.
+- Séquence exercée live (post=3161381) : `nonlu` → NON-LU ; GET page 1 → lu ; `nonlu` → NON-LU ; GET page 3 → lu. État final identique à l'état initial : la compensation est **sans perte** précisément parce que l'état est binaire.
+- Conséquence ADR-013 : un « marquer comme non lu » manuel **suspend le prefetch** de la conversation jusqu'à sa réouverture (sinon le prefetch adjacent effacerait le non-lu que l'utilisateur vient de poser).
 
 ---
 
@@ -670,15 +681,15 @@ Implémenté de façon validante (host + scheme + préfixe `/api/` enforcés) da
 - `views` (compteur de vues) : absent du JSON. Si on a besoin du chiffre, c'est HTML uniquement.
 - `total_pages` (topic) : déductible via `ceil(links.posts.count / N)`, où `N` est la valeur du query param `results_per_page` exposé par `links.posts.href` du payload (typiquement 40 dans les fixtures actuelles, mais ne **jamais** le hardcoder — c'est l'API qui décide). C'est différent du réglage HTML utilisateur `postsPerPage` (cf. § *postsPerPage configurable*) qui s'applique au rendu de `forum2.php`, pas à la liste de topics REST.
 - `last_position` ≠ page : `last_position` est l'**index/offset du dernier post lu dans le topic global** (et non un numéro de page). La page de reprise est exposée séparément, encodée dans `links.posts.href?page=N` du même topic auth ; c'est cette valeur qu'il faut consommer pour `TopicSummary.lastReadPage`.
-- `flag_owntopic` (auth uniquement) : numéro de bucket drapeau côté HFR — `1` = sujets participés (cyan), `2` = lus uniquement (rouge), `3` = favoris (jaune). Mapping canonique :
+- `flag_owntopic` (auth uniquement) : **drapeau le plus fort SUR le sujet, PAS le bucket d'appartenance** (vérifié live 2026-06-11, #384, fixture `rest_cat13_participated_favorites.json` : le bucket `participated` renvoie des sujets participés-ET-favoris avec `flag_owntopic=3`, et le bucket `read` renvoie `flag_owntopic=0`). Valeurs observées : `1` = participé (cyan), `2` = lu uniquement (rouge), `3` = favori/étoile (jaune), `0` = aucun/lu. Conséquences côté Redface 2 :
 
-  | `flag_owntopic` | `FlagType` (côté Redface 2) | Bucket HFR (legacy `forum1f.php?owntopic=N`) |
+  | Donnée | Source | Usage |
   |---|---|---|
-  | `1` | `CYAN` | « Mes sujets » (sujets participés) |
-  | `2` | `RED` | « Lus uniquement » |
-  | `3` | `FAVORITE` | « Favoris » |
-  | `null` / absent | `null` | payload anonyme |
-  | autre (`0`, `4`, négatif…) | `null` | bucket inconnu — l'UI dégrade silencieusement, pas de crash |
+  | `Flag.type` | **bucket REST demandé** au fetch (`participated`/`read`/`favorites`) — jamais `flag_owntopic` | routage, filtres, clé du cache Room par type (#384) |
+  | `Flag.isFavorite` | `flag_owntopic == 3` | décoration seule : pastille jaune d'un favori listé dans « Mes sujets » (parité site) |
+  | autre valeur (`0`, `4`, négatif, `null`) | — | dégrade silencieusement (`isFavorite = false`), pas de crash |
+
+  Pour les listings de topics (`TopicSummary`, hors listes de drapeaux), le mapping direct `1→CYAN / 2→RED / 3→FAVORITE / sinon null` reste valable : là le champ décrit bien le drapeau du sujet, il n'y a pas de bucket demandé.
 
   Indépendant de `is_read` : un sujet drapeau cyan peut être lu (`is_read = true`, `hasUnread = false`) ou non lu — les deux axes coexistent dans `TopicSummary`.
 
