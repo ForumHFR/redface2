@@ -1,12 +1,11 @@
-Redface 2 v0.9.0 — bêta.
+Redface 2 v0.10.0 — bêta.
 
 Nouveautés :
-- Éditeur : barre Options/Smileys/Envoyer au-dessus du clavier, confirmation avant publication (option).
-- Thème clair/sombre/système + AMOLED.
-- Menu d'actions rapides sur un post.
-- La recherche ouvre le message correspondant.
-- Position de lecture retenue par page.
+- Messages privés : rédaction d'un nouveau MP, smileys dans l'éditeur, badge de non-lus, swipe de pages, pull-to-refresh.
+- Citation multiple, avec marquage des posts ajoutés.
+- Recherche : filtre par auteur, formulaire repliable, résultats pleine hauteur.
+- Lecture : marqueur de fin de sujet, options d'affichage.
 
-Améliorations lecture, horodatages, cache d'images, erreurs réseau plus claires, pseudos accentués.
+Nombreux correctifs : drapeaux/favoris, clavier, thème, rendu des posts.
 
 Signale les bugs via la bêta ou GitHub.

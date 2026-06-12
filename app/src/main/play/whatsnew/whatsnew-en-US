@@ -1,12 +1,11 @@
-Redface 2 v0.9.0 — beta.
+Redface 2 v0.10.0 — beta.
 
 New:
-- Editor: Options/Smileys/Send bar pinned above the keyboard, optional confirm-before-posting.
-- Light/dark/system theme + AMOLED.
-- Quick actions menu on a post.
-- Search opens the matching message.
-- Reading position remembered per page.
+- Private messages: compose new PMs, smiley picker, unread badge, page swipe, pull-to-refresh.
+- Multi-quote, with visual marking of picked posts.
+- Search: author filter, collapsible form, full-height results.
+- Reading: end-of-topic marker, display options.
 
-Better topic reading, list timestamps, image cache, clearer network errors, accented usernames.
+Many fixes: flags/favorites, keyboard, theme, post rendering.
 
-Report bugs via beta or GitHub.
+Report bugs via the beta or GitHub.
