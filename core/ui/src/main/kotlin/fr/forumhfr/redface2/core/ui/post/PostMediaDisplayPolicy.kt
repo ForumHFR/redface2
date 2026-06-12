@@ -120,6 +120,28 @@ internal object PostMediaDisplayPolicy {
         is SmileyKind.Builtin -> builtinSmiley
         is SmileyKind.Perso -> persoSmiley
     }
+
+    /**
+     * #416 — box for a DEAD smiley sprite (recorded as a fresh measurement failure). HFR's BBCode
+     * engine turns ANY `:word:` into an `<img>` without checking existence, so an unknown code is
+     * served as a 404 gif : web/RF1 then show the typed token at text size. The token replaces the
+     * sprite in the inline content, so its placeholder must fit body-sized text, not a 16-px
+     * sprite — width scales with the token length, clamped to the same relative cap as sprites
+     * (the token of a long perso name must not overflow a narrow quote).
+     */
+    fun deadSmileyTokenBox(token: String, maxWidthSp: Int): InlineMediaBox {
+        val width = (token.length * DEAD_SMILEY_TOKEN_CHAR_SP).coerceAtMost(maxWidthSp)
+        return InlineMediaBox(width.sp, DEAD_SMILEY_TOKEN_HEIGHT_SP.sp)
+    }
+
+    /**
+     * Generous bodyMedium average glyph advance (the token is mostly lowercase + `:`/`[]`) — a
+     * slightly wide box only adds whitespace, a narrow one clips the token (the #416 symptom).
+     */
+    internal const val DEAD_SMILEY_TOKEN_CHAR_SP = 8
+
+    /** One bodyMedium line (14 sp glyphs + breathing room), matching the surrounding text. */
+    internal const val DEAD_SMILEY_TOKEN_HEIGHT_SP = 20
 }
 
 internal data class InlineMediaBox(
