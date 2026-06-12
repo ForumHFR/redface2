@@ -1299,9 +1299,10 @@ private class FakeStreamingTopicRepository(
 
 /**
  * No-op preferences fake for the topic ViewModel tests. Only [observeTopicTopBarAutoHide]
- * (build 89 follow-up) and [observeTopicPageFabs] (#383) are read by [TopicViewModel] —
- * everything else returns the DataStore default so the fake stays a thin stand-in. The two
- * relevant values are constructor-injectable so tests can assert they reach state.
+ * (build 89 follow-up), [observeTopicPageFabs] (#383) and [observeTopicPollsExpanded] (#456)
+ * are read by [TopicViewModel] — everything else returns the DataStore default so the fake
+ * stays a thin stand-in. The three relevant values are constructor-injectable so tests can
+ * assert they reach state.
  */
 private class FakeUserPreferencesRepository(
     private val topicTopBarAutoHide: Boolean = false,
