@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -55,6 +57,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -567,11 +570,30 @@ private fun ColumnScope.AuthenticatedBody(
             } else {
                 label
             }
+            // Low-level `content` overload INSTEAD of the `text` slot : the text slot pads a
+            // non-configurable 16 dp each side, which left « Mes sujets » with exactly its own
+            // measured width in a 4-tab equal-width PrimaryTabRow — wrapping it to two lines
+            // on a density-dependent pixel boundary. 8 dp gutters + single line + ellipsis
+            // (the « +lus » suffixed label ellipsizes by design — arbitrage XaTriX 2026-06-12).
+            // Colors are passed explicitly because this overload defaults BOTH states to
+            // LocalContentColor (no selected/unselected distinction out of the box).
             Tab(
                 selected = index == selectedIndex,
                 onClick = { actions.onSelectTab(tab) },
-                text = { Text(displayLabel, style = MaterialTheme.typography.labelLarge) },
-            )
+                selectedContentColor = MaterialTheme.colorScheme.primary,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Text(
+                    text = displayLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .height(48.dp)
+                        .wrapContentHeight()
+                        .padding(horizontal = 8.dp),
+                )
+            }
         }
     }
 
