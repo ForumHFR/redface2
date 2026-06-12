@@ -316,6 +316,56 @@ class PrivateMessageThreadViewModelTest {
         assertEquals(5, store.saved[42])
     }
 
+    @Test
+    fun `an account switch seals the previous session's load and position save (#462)`() = runTest {
+        // Authenticated(A) → Authenticated(B) without an Anonymous hop: A's in-flight fetch must
+        // be cancelled BEFORE the new session's first suspension point, so its result can never
+        // pose state — nor save a position — under B (Codex review on PR #462).
+        val repository = mockk<MessagesRepository>()
+        val gate = CompletableDeferred<PrivateMessageThread>()
+        var calls = 0
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } coAnswers { if (calls++ == 0) gate.await() else thread(page = 1, totalPages = 1) }
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        val store = FakeReadPositionStore()
+
+        threadViewModel(repository, authRepository, store)
+        // alice's fetch is parked on the gate; switch the account.
+        authRepository.emit(AuthState.Authenticated("bob"))
+        advanceUntilIdle()
+        // Releasing alice's gate must be inert — her job was cancelled at the switch.
+        gate.complete(thread(page = 3, totalPages = 9))
+        advanceUntilIdle()
+
+        assertEquals("only bob's landing may be recorded", 1, store.saved[42])
+    }
+
+    @Test
+    fun `a stale position save cannot overwrite a newer landing (#462)`() = runTest {
+        // save(1) parks on IO while page 5 lands: the newer landing must cancel the stale write
+        // (latest-wins serialization), otherwise a delayed upsert would regress the position.
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 9)
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 5, fallbackCorrespondent = null)
+        } returns thread(page = 5, totalPages = 9)
+        val store = FakeReadPositionStore()
+        val saveGate = CompletableDeferred<Unit>()
+        store.blockNextSave = saveGate
+
+        val viewModel = threadViewModel(repository, readPositionStore = store)
+        viewModel.selectPage(5)
+        advanceUntilIdle()
+        // Releasing the parked save(1) must NOT resurrect it after save(5) committed.
+        saveGate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(5, store.saved[42])
+    }
+
     private fun thread(page: Int, totalPages: Int) = PrivateMessageThread(
         threadId = 42,
         subject = "Sujet",
@@ -351,9 +401,16 @@ class PrivateMessageThreadViewModelTest {
     ) : PrivateMessageReadPositionStore {
         val saved = initial.toMutableMap()
 
+        /** When set, the NEXT [savePage] parks on it before writing (cleared on consumption). */
+        var blockNextSave: CompletableDeferred<Unit>? = null
+
         override suspend fun readPage(threadId: Int): Int? = saved[threadId]
 
         override suspend fun savePage(threadId: Int, page: Int) {
+            blockNextSave?.let { gate ->
+                blockNextSave = null
+                gate.await()
+            }
             saved[threadId] = page
         }
     }
