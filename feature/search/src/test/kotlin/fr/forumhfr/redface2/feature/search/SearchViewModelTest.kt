@@ -71,6 +71,52 @@ class SearchViewModelTest {
     }
 
     @Test
+    fun `a launched search collapses the form and EditCriteria re-expands it (#433)`() = runTest {
+        coEvery { repo.search(any()) } returns fakePage(topics = emptyList(), pivot = emptyList())
+        val vm = SearchViewModel(repo, initialPseudo = null)
+        assertFalse(vm.state.value.formCollapsed)
+
+        vm.submit(SearchIntent.QueryChanged("kotlin"))
+        vm.submit(SearchIntent.Submit)
+        assertTrue("every launched search must collapse the form", vm.state.value.formCollapsed)
+
+        vm.submit(SearchIntent.EditCriteria)
+        assertFalse(vm.state.value.formCollapsed)
+    }
+
+    @Test
+    fun `a blank Submit does not collapse the form (#433)`() = runTest {
+        val vm = SearchViewModel(repo, initialPseudo = null)
+        vm.submit(SearchIntent.QueryChanged("   "))
+        vm.submit(SearchIntent.Submit)
+        assertFalse(vm.state.value.formCollapsed)
+    }
+
+    @Test
+    fun `a pivot re-scope launched from the expanded form collapses it again (#433)`() = runTest {
+        val pivot = SearchPivotCategory(id = 10, label = "Hardware", isSelected = false)
+        coEvery { repo.search(any()) } returns fakePage(topics = emptyList(), pivot = listOf(pivot))
+        val vm = SearchViewModel(repo, initialPseudo = null)
+        vm.submit(SearchIntent.QueryChanged("kotlin"))
+        vm.submit(SearchIntent.Submit)
+        vm.submit(SearchIntent.EditCriteria)
+
+        vm.submit(SearchIntent.CategorySelected(pivot))
+
+        assertTrue("a re-scope IS a launched search", vm.state.value.formCollapsed)
+    }
+
+    @Test
+    fun `the profile author entry point starts collapsed (#433)`() = runTest {
+        coEvery { repo.search(any()) } returns fakePage(topics = emptyList(), pivot = emptyList())
+        val vm = SearchViewModel(repo, initialPseudo = "Marc")
+        assertTrue(
+            "the init-time author search must land on results, not on the form",
+            vm.state.value.formCollapsed,
+        )
+    }
+
+    @Test
     fun `Submit success populates results pivot and selectedCategory`() = runTest {
         coEvery { repo.search(any()) } returns fakePage(
             topics = listOf(fakeTopic(topicId = 1, title = "Hello kotlin")),

@@ -118,6 +118,7 @@ class SearchViewModel @AssistedInject constructor(
             SearchIntent.Retry -> onRetry()
             is SearchIntent.CategorySelected -> onCategorySelected(intent.category)
             is SearchIntent.OpenResult -> onOpenResult(intent.result)
+            SearchIntent.EditCriteria -> _state.update { it.copy(formCollapsed = false) }
         }
     }
 
@@ -285,6 +286,9 @@ class SearchViewModel @AssistedInject constructor(
                 isLoading = true,
                 errorMessage = null,
                 hasSearched = true,
+                // #433 — every launched search collapses the form ; the single
+                // launch point keeps submit/retry/pivot/profile-entry consistent.
+                formCollapsed = true,
             )
         }
         searchJob = viewModelScope.launch {

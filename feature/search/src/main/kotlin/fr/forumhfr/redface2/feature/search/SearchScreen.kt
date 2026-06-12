@@ -172,20 +172,32 @@ internal fun SearchContent(
                     .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                SearchField(
-                    query = state.query,
-                    pseudo = state.pseudo,
-                    // HFR accepts query-only, author-only, and combined searches.
-                    isSubmitEnabled = !state.isLoading &&
-                        (state.query.isNotBlank() || state.pseudo.isNotBlank()),
-                    onQueryChange = { onIntent(SearchIntent.QueryChanged(it)) },
-                    onPseudoChange = { onIntent(SearchIntent.PseudoChanged(it)) },
-                    onSubmit = { onIntent(SearchIntent.Submit) },
-                )
-                SearchOptions(
-                    textScope = state.textScope,
-                    onTextScopeSelected = { onIntent(SearchIntent.TextScopeSelected(it)) },
-                )
+                // #433 — once a search is launched, the form gives the screen back to the
+                // results : a one-line criteria banner replaces the two fields + scope
+                // chips, and tapping it (or « Modifier ») re-expands the full form. The
+                // pivot chips stay visible in both modes — re-scoping is a consultation
+                // action on the CURRENT results, not an edit of the criteria.
+                if (state.formCollapsed) {
+                    CollapsedCriteriaBanner(
+                        state = state,
+                        onEdit = { onIntent(SearchIntent.EditCriteria) },
+                    )
+                } else {
+                    SearchField(
+                        query = state.query,
+                        pseudo = state.pseudo,
+                        // HFR accepts query-only, author-only, and combined searches.
+                        isSubmitEnabled = !state.isLoading &&
+                            (state.query.isNotBlank() || state.pseudo.isNotBlank()),
+                        onQueryChange = { onIntent(SearchIntent.QueryChanged(it)) },
+                        onPseudoChange = { onIntent(SearchIntent.PseudoChanged(it)) },
+                        onSubmit = { onIntent(SearchIntent.Submit) },
+                    )
+                    SearchOptions(
+                        textScope = state.textScope,
+                        onTextScopeSelected = { onIntent(SearchIntent.TextScopeSelected(it)) },
+                    )
+                }
                 if (state.pivotCategories.isNotEmpty()) {
                     PivotChips(
                         pivot = state.pivotCategories,
@@ -208,6 +220,62 @@ internal fun SearchContent(
             }
         }
     }
+}
+
+/**
+ * #433 — compact summary of the launched search : `« query » · par pseudo · scope`,
+ * single line, the whole card is the « edit » affordance. The scope segment only
+ * shows when it differs from the default (no noise on the nominal case).
+ */
+@Composable
+private fun CollapsedCriteriaBanner(
+    state: SearchUiState,
+    onEdit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        onClick = onEdit,
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = collapsedCriteriaSummary(state),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource(R.string.search_criteria_edit),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun collapsedCriteriaSummary(state: SearchUiState): String {
+    val parts = buildList {
+        if (state.query.isNotBlank()) {
+            add(stringResource(R.string.search_criteria_query, state.query))
+        }
+        if (state.pseudo.isNotBlank()) {
+            add(stringResource(R.string.search_criteria_author, state.pseudo))
+        }
+        if (state.textScope != SearchTextScope.TitlesAndPosts) {
+            add(stringResource(state.textScope.labelResId()))
+        }
+    }
+    return parts.joinToString(separator = " · ")
 }
 
 @Composable

@@ -32,6 +32,13 @@ data class SearchUiState(
     val isLoading: Boolean = false,
     val errorMessage: HfrErrorKind? = null,
     val hasSearched: Boolean = false,
+    /**
+     * #433 — once a search is launched the form collapses into a compact one-line
+     * criteria banner so the results own the screen height. EVERY search path flips
+     * it to `true` (submit, retry, pivot re-scope, text-scope re-search, the
+     * profile's author entry point) ; [SearchIntent.EditCriteria] re-expands.
+     */
+    val formCollapsed: Boolean = false,
 )
 
 /**
@@ -50,6 +57,9 @@ sealed interface SearchIntent {
     data object Retry : SearchIntent
     data class CategorySelected(val category: SearchPivotCategory) : SearchIntent
     data class OpenResult(val result: SearchTopicResult) : SearchIntent
+
+    /** #433 — re-expand the collapsed criteria banner back into the full form. */
+    data object EditCriteria : SearchIntent
 }
 
 /**
