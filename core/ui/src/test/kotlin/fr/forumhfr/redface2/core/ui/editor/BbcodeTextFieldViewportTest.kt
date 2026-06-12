@@ -5,11 +5,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.requestFocus
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -76,6 +81,57 @@ class BbcodeTextFieldViewportTest {
             field.size.height > viewport.size.height,
         )
     }
+
+    @Test
+    fun `moving the cursor to the end of long content scrolls the viewport to reveal it`() {
+        // #447 — the field grows in external-scroll mode, so Compose never asks the wrapping
+        // column to follow the caret on its own; this pins the explicit bring-into-view wiring.
+        lateinit var value: MutableState<TextFieldValue>
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                Surface(color = MaterialTheme.colorScheme.surface) {
+                    Box(Modifier.size(320.dp, 400.dp)) {
+                        value = remember {
+                            mutableStateOf(
+                                TextFieldValue(
+                                    text = (1..200).joinToString("\n") { "ligne $it" },
+                                    selection = TextRange.Zero,
+                                ),
+                            )
+                        }
+                        BbcodeTextField(
+                            value = value.value,
+                            onValueChange = { value.value = it },
+                            label = "Message",
+                            modifier = Modifier.fillMaxSize(),
+                            fillViewport = true,
+                        )
+                    }
+                }
+            }
+        }
+
+        composeTestRule.onNode(hasSetTextAction()).requestFocus()
+        composeTestRule.waitForIdle()
+        val scrollBefore = viewportScrollValue()
+
+        composeTestRule.runOnIdle {
+            value.value = value.value.copy(selection = TextRange(value.value.text.length))
+        }
+        composeTestRule.waitForIdle()
+
+        val scrollAfter = viewportScrollValue()
+        assertTrue(
+            "the viewport scrolled toward the caret (before=$scrollBefore after=$scrollAfter)",
+            scrollAfter > scrollBefore && scrollAfter > 0f,
+        )
+    }
+
+    private fun viewportScrollValue(): Float = composeTestRule
+        .onNodeWithTag(BBCODE_FIELD_VIEWPORT_TAG)
+        .fetchSemanticsNode()
+        .config[SemanticsProperties.VerticalScrollAxisRange]
+        .value()
 
     @Test
     fun `default mode keeps the plain bounded field`() {
