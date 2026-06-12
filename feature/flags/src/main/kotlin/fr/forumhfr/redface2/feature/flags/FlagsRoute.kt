@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.flags
 import android.annotation.SuppressLint
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -105,6 +107,7 @@ import kotlinx.coroutines.launch
 fun FlagsRoute(
     onOpenFlag: (Flag) -> Unit,
     onLoginRequested: () -> Unit,
+    onOpenCategory: (Int) -> Unit = {},
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel: FlagsViewModel = hiltViewModel()
@@ -237,6 +240,7 @@ fun FlagsRoute(
                                 onRefresh = viewModel::refresh,
                                 onLoginRequested = onLoginRequested,
                                 onRequestRemoveFlag = viewModel::requestRemoveFlag,
+                                onOpenCategory = onOpenCategory,
                             ),
                             listState = flagsListState,
                         )
@@ -781,6 +785,8 @@ private fun CategorySectionedFlagList(
                 CategoryHeaderBand(
                     label = section.catName
                         ?: stringResource(R.string.flags_category_fallback, section.catId),
+                    // #414 — parité RF1 : the band navigates to the category's topic listing.
+                    onClick = { actions.onOpenCategory(section.catId) },
                 )
             }
 
@@ -821,18 +827,37 @@ private fun CategorySectionedFlagList(
  * Opaque category separator band for the grouped list (#179). Uses `surfaceVariant` /
  * `onSurfaceVariant` from the theme (no hardcoded color) so it reads as a sticky header over
  * the scrolling rows without bleed-through.
+ *
+ * #414 — the whole band is tappable and opens the category's topic listing (RF1 parity); the
+ * trailing « › » glyph (same vector-text pattern as the page FABs, #283) is the affordance.
+ * Foundation [clickable] does not enforce the 48dp Material touch-target minimum, hence the
+ * explicit [heightIn].
  */
 @Composable
-private fun CategoryHeaderBand(label: String) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+private fun CategoryHeaderBand(label: String, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceVariant)
+            .heightIn(min = 48.dp)
+            .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) {
+                onClick()
+            }
             .padding(horizontal = 24.dp, vertical = 8.dp),
-    )
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = "›",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 /**
@@ -1096,6 +1121,8 @@ private data class AuthenticatedActions(
     val onRefresh: () -> Unit,
     val onLoginRequested: () -> Unit,
     val onRequestRemoveFlag: (Flag) -> Unit,
+    /** #414 — tap on a category band opens that category's topic listing. */
+    val onOpenCategory: (Int) -> Unit,
 )
 
 /**
