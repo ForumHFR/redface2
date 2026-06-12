@@ -821,6 +821,45 @@ class SettingsViewModelTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────
+    // Badge MP non lus (#313)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates mpUnreadBadge from a persisted false`() = runTest {
+        // Default is true — only a persisted opt-out exercises the hydration path.
+        repository.emitMpUnreadBadge(false)
+
+        val viewModel = newViewModel()
+
+        assertFalse(viewModel.state.value.mpUnreadBadge)
+        assertFalse(viewModel.state.value.mpUnreadBadgeError)
+    }
+
+    @Test
+    fun `MpUnreadBadgeChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertTrue("badge is on by default", viewModel.state.value.mpUnreadBadge)
+
+        viewModel.submit(SettingsIntent.MpUnreadBadgeChanged(false))
+
+        assertFalse(viewModel.state.value.mpUnreadBadge)
+        assertFalse(viewModel.state.value.isUpdatingMpUnreadBadge)
+        assertEquals(1, repository.mpUnreadBadgeSetCalls)
+    }
+
+    @Test
+    fun `MpUnreadBadgeChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnMpUnreadBadgeSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.MpUnreadBadgeChanged(false))
+
+        assertTrue("failed persist must revert to the previous value", viewModel.state.value.mpUnreadBadge)
+        assertFalse(viewModel.state.value.isUpdatingMpUnreadBadge)
+        assertTrue(viewModel.state.value.mpUnreadBadgeError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Confirm before posting (#312)
     // ──────────────────────────────────────────────────────────────────────
 
@@ -1058,6 +1097,24 @@ class SettingsViewModelTest {
 
         fun emitTopicPageFabs(value: Boolean) {
             topicPageFabs.value = value
+        }
+
+        // #313 — badge MP non lus. Même seam optimistic-flip que topicPageFabs.
+        private val mpUnreadBadge = MutableStateFlow(true)
+        var mpUnreadBadgeSetCalls: Int = 0
+            private set
+        var failOnMpUnreadBadgeSet: Boolean = false
+
+        override fun observeMpUnreadBadge(): Flow<Boolean> = mpUnreadBadge
+
+        override suspend fun setMpUnreadBadge(enabled: Boolean) {
+            mpUnreadBadgeSetCalls += 1
+            check(!failOnMpUnreadBadgeSet) { "boom" }
+            mpUnreadBadge.value = enabled
+        }
+
+        fun emitMpUnreadBadge(value: Boolean) {
+            mpUnreadBadge.value = value
         }
 
         // #312 — confirm-before-posting. Same optimistic-flip seam as the topic top-bar toggle.

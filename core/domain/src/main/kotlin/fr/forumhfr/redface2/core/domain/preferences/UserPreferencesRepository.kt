@@ -185,4 +185,15 @@ interface UserPreferencesRepository {
 
     /** Persists [observeTopicPageFabs]. Default `true` until the first call. */
     suspend fun setTopicPageFabs(enabled: Boolean)
+
+    /**
+     * #313 — unread-MP badge on the « Messages » destination of the navigation bar. When
+     * `true` (default) the badge shows the count of unread conversations for the authenticated
+     * session ; `false` hides it entirely (no fetch is saved — the underlying count flow is
+     * shared with other consumers). Observed by `:app`, toggled in Settings.
+     */
+    fun observeMpUnreadBadge(): Flow<Boolean>
+
+    /** Persists [observeMpUnreadBadge]. Default `true` until the first call. */
+    suspend fun setMpUnreadBadge(enabled: Boolean)
 }

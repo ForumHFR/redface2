@@ -23,6 +23,18 @@ interface MessagesRepository {
     fun observeUnreadMpCount(): Flow<Int?>
 
     /**
+     * #313 — asks for a re-fetch of the unread count on the NEXT occasion (fire-and-forget,
+     * non-suspending : safe from a lifecycle callback). No-op while the user is anonymous or
+     * nobody collects [observeUnreadMpCount]. Caller : app-foreground (`ON_START`) so the
+     * badge catches MPs received while the app was backgrounded.
+     *
+     * The count also refreshes for free whenever page 1 of the inbox is fetched through
+     * [getPrivateMessageList] (the badge piggybacks on the Messages tab's own loads — no
+     * second network call).
+     */
+    fun requestUnreadRefresh()
+
+    /**
      * Fetches one page of the private-message inbox (`forum1.php?cat=prive`). Throws on
      * network / session errors (e.g. [fr.forumhfr.redface2.core.domain.auth.SessionExpiredException]);
      * the caller maps the failure to its UI state.

@@ -121,6 +121,16 @@ class SettingsViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            val mpBadge = userPreferencesRepository.observeMpUnreadBadge().first()
+            _state.update { current ->
+                if (current.mpUnreadBadgeTouchedLocally || current.isUpdatingMpUnreadBadge) {
+                    current
+                } else {
+                    current.copy(mpUnreadBadge = mpBadge)
+                }
+            }
+        }
+        viewModelScope.launch {
             val confirm = userPreferencesRepository.observeConfirmBeforePosting().first()
             _state.update { current ->
                 if (current.confirmBeforePostingTouchedLocally || current.isUpdatingConfirmBeforePosting) {
@@ -193,6 +203,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.AmoledEnabledChanged -> updateAmoled(intent.enabled)
             is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
             is SettingsIntent.TopicPageFabsChanged -> updateTopicPageFabs(intent.enabled)
+            is SettingsIntent.MpUnreadBadgeChanged -> updateMpUnreadBadge(intent.enabled)
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
@@ -523,6 +534,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setTopicPageFabs,
+        )
+    }
+
+    private fun updateMpUnreadBadge(desired: Boolean) {
+        val previous = _state.value.mpUnreadBadge
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    mpUnreadBadge = desired,
+                    isUpdatingMpUnreadBadge = true,
+                    mpUnreadBadgeError = false,
+                    mpUnreadBadgeTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(mpUnreadBadge = desired, isUpdatingMpUnreadBadge = false)
+                } else {
+                    state.copy(
+                        mpUnreadBadge = previous,
+                        isUpdatingMpUnreadBadge = false,
+                        mpUnreadBadgeError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setMpUnreadBadge,
         )
     }
 

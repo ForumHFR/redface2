@@ -84,6 +84,11 @@ data class SettingsState(
     val isUpdatingTopicPageFabs: Boolean = false,
     val topicPageFabsError: Boolean = false,
     val topicPageFabsTouchedLocally: Boolean = false,
+    // #313 — badge MP non lus sur l'item Messages de la barre de navigation.
+    val mpUnreadBadge: Boolean = true,
+    val isUpdatingMpUnreadBadge: Boolean = false,
+    val mpUnreadBadgeError: Boolean = false,
+    val mpUnreadBadgeTouchedLocally: Boolean = false,
     // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
     // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
     // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
@@ -143,6 +148,9 @@ data class SettingsState(
     // #383 — the page-FABs toggle is gated only by its own write.
     val canToggleTopicPageFabs: Boolean
         get() = !isUpdatingTopicPageFabs
+
+    val canToggleMpUnreadBadge: Boolean
+        get() = !isUpdatingMpUnreadBadge
 
     // #312 — the confirm-before-posting toggle is gated only by its own write.
     val canToggleConfirmBeforePosting: Boolean
@@ -230,6 +238,9 @@ sealed interface SettingsIntent {
     // #383 — topic floating ‹/› page FABs toggle. Optimistic-flip contract, like the flags
     // toggles: the boolean is the desired post-flip state.
     data class TopicPageFabsChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #313 — badge MP non lus (barre de navigation). */
+    data class MpUnreadBadgeChanged(val enabled: Boolean) : SettingsIntent
 
     // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
     // the boolean is the desired post-flip state.

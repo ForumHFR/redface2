@@ -1259,6 +1259,10 @@ class TopicFormViewModelTest {
         override fun observeTopicPageFabs(): Flow<Boolean> = MutableStateFlow(true)
 
         override suspend fun setTopicPageFabs(enabled: Boolean) = Unit
+
+        override fun observeMpUnreadBadge(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setMpUnreadBadge(enabled: Boolean) = Unit
     }
 
     private companion object {

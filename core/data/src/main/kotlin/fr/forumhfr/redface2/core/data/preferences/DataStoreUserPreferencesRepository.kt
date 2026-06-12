@@ -272,6 +272,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeMpUnreadBadge(): Flow<Boolean> =
+        dataStore.data
+            // Default `true` (#313): the badge is the feature; opting OUT is the preference.
+            .map { prefs -> prefs[KEY_MP_UNREAD_BADGE] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setMpUnreadBadge(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_MP_UNREAD_BADGE] = enabled
+            }
+        }
+    }
+
     /**
      * Reads [KEY_THEME_MODE] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [ThemeMode.SYSTEM] instead of crashing on
@@ -370,5 +385,6 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // #378 — auto-refresh of the flags lists on landing (default ON; Settings opt-out).
         val KEY_FLAGS_AUTO_REFRESH = booleanPreferencesKey("flags_auto_refresh")
         val KEY_TOPIC_PAGE_FABS = booleanPreferencesKey("topic_page_fabs")
+        val KEY_MP_UNREAD_BADGE = booleanPreferencesKey("mp_unread_badge")
     }
 }

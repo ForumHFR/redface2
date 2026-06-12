@@ -1593,6 +1593,10 @@ class FlagsViewModelTest {
 
         override suspend fun setTopicPageFabs(enabled: Boolean) = Unit
 
+        override fun observeMpUnreadBadge(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setMpUnreadBadge(enabled: Boolean) = Unit
+
         // #312 — confirm-before-posting is irrelevant to FlagsViewModel; stubbed at its default.
         override fun observeConfirmBeforePosting(): Flow<Boolean> = MutableStateFlow(false)
 

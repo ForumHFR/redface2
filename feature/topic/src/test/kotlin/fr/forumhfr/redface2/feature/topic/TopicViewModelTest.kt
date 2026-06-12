@@ -1347,4 +1347,8 @@ private class FakeUserPreferencesRepository(
     override fun observeTopicPageFabs(): Flow<Boolean> = MutableStateFlow(topicPageFabs)
 
     override suspend fun setTopicPageFabs(enabled: Boolean) = Unit
+
+    override fun observeMpUnreadBadge(): Flow<Boolean> = MutableStateFlow(true)
+
+    override suspend fun setMpUnreadBadge(enabled: Boolean) = Unit
 }
