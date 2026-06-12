@@ -575,7 +575,7 @@ reply/quote MP, MultiMP et MPStorage restent dans la suite Phase 3.
 
 ## MPStorage
 
-MPStorage est une bibliothèque cross-plateforme (HFRGMTools/Wiripse, en production depuis ~2019) qui utilise un **MP HFR dédié** comme backend de stockage : sujet = hash fixe `a2bcc09b796b8c6fab77058ff8446c34`, destinataire = compte tiers `MultiMP`. Le **premier post** de ce MP contient un document JSON **partagé par tous les userscripts** (DTCloud pour les drapeaux DT, HFR4K, …). Redface 2 adopte **l'enveloppe v0.1 de facto telle quelle** (cf. exploration [#6](https://github.com/ForumHFR/redface2/issues/6)) : toute extension Redface 2 passe par de **nouvelles clés additives** dans l'entrée v0.1, jamais par un nouveau format — la compatibilité avec les userscripts existants est non négociable.
+MPStorage est une bibliothèque cross-plateforme (HFRGMTools/Wiripse, en production depuis ~2019) qui utilise un **MP HFR dédié** comme backend de stockage : sujet = hash fixe `a2bcc09b796b8c6fab77058ff8446c34`, destinataire = compte tiers `MultiMP`. Le **premier post** de ce MP contient un document JSON **partagé par tous les userscripts** (DTCloud pour les drapeaux DT, HFR4K, …). Redface 2 adopte **l'enveloppe v0.1 de facto telle quelle** — décision actée dans [ADR-014]({{ site.baseurl }}/adr/014-mpstorage-v01-de-facto) (accepté 2026-06-12, cf. exploration [#6](https://github.com/ForumHFR/redface2/issues/6)) : toute extension Redface 2 passe par de **nouvelles clés additives** dans l'entrée v0.1, jamais par un nouveau format — la compatibilité avec les userscripts existants est non négociable.
 
 Enveloppe réelle (source : `MPStorage.user.js` + doc Wiripse, confrontées le 2026-06-10) :
 

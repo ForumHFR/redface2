@@ -590,7 +590,18 @@ Le contrat se ramène à un **flag de booléen** côté caller : `useAuth = true
 
 Confirmé par Corran Horn sur le topic HFR Redface 2 : *« en utilisant un cookie d'un compte anonyme pour pas péter les drapeaux »*.
 
-> **Proposition en cours — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (statut Proposé, non acté)** : exception **bornée aux MP** — prefetch authentifié limité aux pages de la conversation `cat=prive` actuellement ouverte. Justification mesurée live dans [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132) : l'état lu/non-lu MP est un dot **binaire par conversation**, effacé par le GET d'ouverture (le prefetch intra-conversation n'a donc pas d'effet supplémentaire dans le cas nominal ; reste une race nouveau-message documentée et assumée dans l'ADR) ; le GET de la liste est inerte ; « marquer comme non lu » = `GET /user/nonlu.php` sans `hash_check`, granularité conversation entière ; aucune position de lecture serveur n'existe pour les MP. Cette section sera complétée (contrat `nonlu.php`) si l'ADR est acceptée.
+> **Acté — [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) (accepté 2026-06-12)** : exception **bornée aux MP** — prefetch authentifié limité aux pages adjacentes (N−1/N+1) de la conversation `cat=prive` actuellement ouverte ; prefetch depuis la liste interdit. Justification mesurée live dans [#361](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132) : l'état lu/non-lu MP est un dot **binaire par conversation**, effacé par le GET d'ouverture (le prefetch intra-conversation n'a donc pas d'effet supplémentaire dans le cas nominal ; reste une race nouveau-message documentée et assumée dans l'ADR) ; le GET de la liste est inerte ; aucune position de lecture serveur n'existe pour les MP. La règle générale ci-dessus reste en vigueur partout ailleurs.
+
+### Marquer un MP comme non lu — `nonlu.php` (vérifié live 2026-06-11, #361)
+
+```
+GET /user/nonlu.php?config=hfr.inc&cat=prive&subcat=0&post={threadId}&page={N}&p=1&sondage=0&owntopic=0&new=0
+```
+
+- Lien unique dans l'en-tête de chaque page de conversation (icône œil) ; mutation par **GET simple, sans `hash_check`**.
+- **Granularité binaire, conversation entière** : le paramètre `page` n'encode aucune position — nonlu posé depuis la page 3 puis lecture de la seule page 2 → conversation entièrement « lue ». Pas d'état intermédiaire.
+- Séquence exercée live (post=3161381) : `nonlu` → NON-LU ; GET page 1 → lu ; `nonlu` → NON-LU ; GET page 3 → lu. État final identique à l'état initial : la compensation est **sans perte** précisément parce que l'état est binaire.
+- Conséquence ADR-013 : un « marquer comme non lu » manuel **suspend le prefetch** de la conversation jusqu'à sa réouverture (sinon le prefetch adjacent effacerait le non-lu que l'utilisateur vient de poser).
 
 ---
 
