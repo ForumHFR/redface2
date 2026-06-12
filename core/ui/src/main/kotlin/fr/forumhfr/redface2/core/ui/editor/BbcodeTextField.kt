@@ -78,8 +78,9 @@ import androidx.compose.ui.unit.isFinite
  * [OutlinedTextFieldDefaults.DecorationBox] for pixel parity, and issues an explicit
  * [BringIntoViewRequester.bringIntoView] on the caret rect (`TextLayoutResult.getCursorRect`)
  * whenever the selection or the text layout changes while the field is focused. The requester
- * is attached to the INNER text node — the caret rect is in its coordinate space, not the
- * decorated box's.
+ * lives on a wrapper `Box` around the inner text field; that wrapper MUST stay offset-free
+ * (no padding/alignment of its own) so its coordinate space coincides with the text layout's —
+ * the caret rect is expressed there, not in the decorated box's space.
  */
 @Suppress("LongParameterList") // Compose component API: optional defaulted params (modifier,
 // placeholder, fillViewport) are the idiomatic surface — a config holder would hurt call-sites.
@@ -179,6 +180,8 @@ private fun BbcodeFieldImpl(
             OutlinedTextFieldDefaults.DecorationBox(
                 value = value.text,
                 innerTextField = {
+                    // Offset-free wrapper by contract (see KDoc): its origin must coincide
+                    // with the text layout's so the caret rect needs no translation.
                     Box(Modifier.bringIntoViewRequester(bringCursorIntoView)) {
                         innerTextField()
                     }

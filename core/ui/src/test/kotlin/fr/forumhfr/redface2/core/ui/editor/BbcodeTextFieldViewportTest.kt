@@ -1,14 +1,18 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -48,6 +52,10 @@ class BbcodeTextFieldViewportTest {
 
     @get:Rule
     val composeTestRule = createComposeRule()
+
+    private companion object {
+        const val OUTER_SCROLL_TAG = "outer_scroll"
+    }
 
     @Test
     fun `short content - the field fills the viewport and nothing scrolls`() {
@@ -113,22 +121,78 @@ class BbcodeTextFieldViewportTest {
 
         composeTestRule.onNode(hasSetTextAction()).requestFocus()
         composeTestRule.waitForIdle()
-        val scrollBefore = viewportScrollValue()
+        assertCaretEndRevealed(BBCODE_FIELD_VIEWPORT_TAG, value)
+    }
+
+    @Test
+    fun `default mode in an outer scrollable also follows the caret to the end`() {
+        // #447 — same contract for the grow-with-content default inside an external
+        // verticalScroll (the TopicFormScreen layout): the caret request must reach the
+        // OUTER scrollable, which the field knows nothing about.
+        lateinit var value: MutableState<TextFieldValue>
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                Surface(color = MaterialTheme.colorScheme.surface) {
+                    Box(Modifier.size(320.dp, 400.dp)) {
+                        value = remember {
+                            mutableStateOf(
+                                TextFieldValue(
+                                    text = (1..200).joinToString("\n") { "ligne $it" },
+                                    selection = TextRange.Zero,
+                                ),
+                            )
+                        }
+                        Column(
+                            modifier = Modifier
+                                .verticalScroll(rememberScrollState())
+                                .testTag(OUTER_SCROLL_TAG),
+                        ) {
+                            BbcodeTextField(
+                                value = value.value,
+                                onValueChange = { value.value = it },
+                                label = "Message",
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        composeTestRule.onNode(hasSetTextAction()).requestFocus()
+        composeTestRule.waitForIdle()
+        assertCaretEndRevealed(OUTER_SCROLL_TAG, value)
+    }
+
+    /**
+     * Moves the caret to the very end of [value] and asserts the scrollable [scrollableTag]
+     * landed near its max range — the caret lives on the LAST line, so revealing it means
+     * scrolling within one viewport-fraction of the bottom. A requester attached to the wrong
+     * ancestor (or a rect read in the decorated box's coordinate space) under-scrolls by a
+     * constant offset and fails the 95% bar; `> scrollBefore` alone would still pass.
+     */
+    private fun assertCaretEndRevealed(scrollableTag: String, value: MutableState<TextFieldValue>) {
+        val scrollBefore = scrollValue(scrollableTag)
 
         composeTestRule.runOnIdle {
             value.value = value.value.copy(selection = TextRange(value.value.text.length))
         }
         composeTestRule.waitForIdle()
 
-        val scrollAfter = viewportScrollValue()
+        val range = composeTestRule
+            .onNodeWithTag(scrollableTag)
+            .fetchSemanticsNode()
+            .config[SemanticsProperties.VerticalScrollAxisRange]
+        val scrollAfter = range.value()
+        val maxValue = range.maxValue()
         assertTrue(
-            "the viewport scrolled toward the caret (before=$scrollBefore after=$scrollAfter)",
-            scrollAfter > scrollBefore && scrollAfter > 0f,
+            "the scrollable followed the caret to the end " +
+                "(before=$scrollBefore after=$scrollAfter max=$maxValue)",
+            scrollAfter > scrollBefore && maxValue > 0f && scrollAfter >= maxValue * 0.95f,
         )
     }
 
-    private fun viewportScrollValue(): Float = composeTestRule
-        .onNodeWithTag(BBCODE_FIELD_VIEWPORT_TAG)
+    private fun scrollValue(tag: String): Float = composeTestRule
+        .onNodeWithTag(tag)
         .fetchSemanticsNode()
         .config[SemanticsProperties.VerticalScrollAxisRange]
         .value()
