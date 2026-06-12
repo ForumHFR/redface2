@@ -16,13 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
-## v124 — `0.10.0` — 2026-06-12
+## v126 — `0.10.0` — 2026-06-12
 
-**Statut** : `local` (candidat bêta — numéro anticipé ledger 123+1, à confirmer au dispatch `channel=beta`)
+**Statut** : `local` (candidat bêta — numéro anticipé ledger 125+1, à confirmer au dispatch `channel=beta`)
 **Commit** : à venir (promotion dev→main)
 **Fichier** : AAB `bundleProdRelease` → track open testing + tag pour F-Droid beta
 
-**Contenu depuis la 0.9.0/v113** : night-run 2026-06-11→12 + arbitrages du 12, dogfoodés sur le canal dev (v114 → v123).
+**Contenu depuis la 0.9.0/v113** : night-run 2026-06-11→12 + arbitrages du 12 + dernier round, dogfoodés sur le canal dev (v114 → v125).
 
 ### Added
 - **Messages privés — écriture complète** : composer un nouveau MP (#301/#404) ; **picker de smileys** (Standard + recherche wiki, favoris priorisés) dans les deux éditeurs MP (#387) ; **badge de MP non lus** sur l'onglet Messages, cap « 9+ », désactivable (Réglages › Notifications, #313).
@@ -33,9 +33,9 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 - **MPStorage lecture seule v0.1** (#406, ADR-014) — fondation de l'onglet DT.
 
 ### Fixed
-- **Saisie du nouveau MP sous le clavier** (#434, #275, #410) + curseur visible dans les éditeurs (#422).
+- **Saisie du nouveau MP sous le clavier** (#434, #275, #410) + curseur visible dans les éditeurs (#422) ; **le champ suit le curseur pendant la frappe** (#447 point 1, retour bêta-dev — le viewport défile pour garder le caret visible sous le clavier).
 - **Parser** : lignes vides préservées et interligne naturel (#333, #280) ; citation contenant un spoiler (#393) ; **smiley inexistant rendu en token texte lisible** (#416).
-- **Drapeaux** : favoris perdus au retour d'onglet (#384) ; pastille favori jaune dans « Mes sujets » (#432, Room v9) ; auto-refresh au retour d'un sujet (#431, #378, #331) ; snackbar invisible (#417) ; « +lus » masqués (#385).
+- **Drapeaux** : favoris perdus au retour d'onglet (#384) ; pastille favori jaune dans « Mes sujets » (#432, Room v9) ; auto-refresh au retour d'un sujet (#431, #378, #331) ; snackbar invisible (#417) ; « +lus » masqués (#385) ; onglet « Mes sujets » sans retour à la ligne (ellipse, #446).
 - Flash de thème clair au lancement (#407) ; un résultat de recherche atterrit sur le bon post via la redirection HFR (#277) ; « page précédente » atterrit en bas (#412) ; fuite inter-session du compteur de MP non lus (review PR #439).
 
 ### Changed

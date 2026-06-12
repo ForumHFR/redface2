@@ -3,9 +3,9 @@ Redface 2 v0.10.0 — beta.
 New:
 - Private messages: compose new PMs, smiley picker, unread badge, page swipe, pull-to-refresh.
 - Multi-quote, with visual marking of picked posts.
-- Search: author filter, collapsible form, full-height results.
+- Search: author filter, collapsible form.
 - Reading: end-of-topic marker, display options.
 
-Many fixes: flags/favorites, keyboard, theme, post rendering.
+Fixes: editor follows the cursor while typing, flags/favorites, keyboard, theme, rendering.
 
 Report bugs via the beta or GitHub.
