@@ -906,6 +906,11 @@ private fun RedfaceNavHost(
                     onLoginRequested = {
                         backStack.add(LoginRoute)
                     },
+                    // #414 — category band tap: push the listing INSIDE the Flags tab so back
+                    // returns to the flags list (less surprising than switching to the Forum tab).
+                    onOpenCategory = { catId ->
+                        backStack.add(CategoryRoute(cat = catId, subcat = null, page = 1))
+                    },
                     topBarActions = accountMenu,
                 )
             }
