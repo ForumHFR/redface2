@@ -199,6 +199,43 @@ class DefaultMessagesRepositoryTest {
     }
 
     @Test
+    fun `a page-1 fetch in flight across an account switch cannot feed the new badge (#439)`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageListPage(page = 1) } returns FAKE_HTML
+        val parser = mockk<PrivateMessageListParser>()
+        coEvery { parser.countUnread(FAKE_HTML) } returnsMany listOf(2, 3)
+        lateinit var authStates: MutableSharedFlow<AuthState>
+        coEvery { parser.parseList(FAKE_HTML) } coAnswers {
+            // The account switch lands while the page-1 fetch is in flight : the session pseudo
+            // was snapshotted at call-time (A), but by the time the response is parsed the
+            // collector is already running under B. parseList is only on the
+            // getPrivateMessageList path, so the badge's own countUnread fetches run free.
+            authStates.emit(AuthState.Authenticated("B"))
+            PrivateMessageListPage(
+                page = 1,
+                totalPages = 1,
+                items = listOf(summary(threadId = 1, hasUnread = true)),
+            )
+        }
+
+        val (repo, states) = buildRepository(hfrClient = hfrClient, parser = parser)
+        authStates = states
+
+        repo.observeUnreadMpCount().test {
+            authStates.emit(AuthState.Authenticated("A"))
+            assertEquals(2, awaitItem())
+
+            // Starts under A (snapshot), completes under B (the coAnswers above switched).
+            repo.getPrivateMessageList(page = 1)
+
+            assertEquals("B's own initial fetch", 3, awaitItem())
+            // The late piggyback (sealed for A) must NOT feed B's badge.
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `requestUnreadRefresh re-fetches the count (#313)`() = runTest {
         val hfrClient = mockk<HfrClient>()
         coEvery { hfrClient.getPrivateMessageListPage(page = 1) } returns FAKE_HTML
@@ -273,7 +310,9 @@ class DefaultMessagesRepositoryTest {
         parser: PrivateMessageListParser = mockk(relaxed = true),
         threadParser: PrivateMessageThreadParser = mockk(relaxed = true),
     ): Pair<DefaultMessagesRepository, MutableSharedFlow<AuthState>> {
-        val authStates = MutableSharedFlow<AuthState>(replay = 0)
+        // replay=1 mirrors production (the current auth state is readable at any time) : the
+        // repository snapshots the session pseudo via `first()` at fetch call-time (#439).
+        val authStates = MutableSharedFlow<AuthState>(replay = 1)
         val authRepository = object : AuthRepository {
             override fun observeAuthState(): Flow<AuthState> = authStates
 

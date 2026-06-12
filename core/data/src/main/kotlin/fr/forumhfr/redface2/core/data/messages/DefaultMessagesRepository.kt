@@ -17,8 +17,10 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -53,8 +55,12 @@ class DefaultMessagesRepository @Inject constructor(
     // opens the Messages tab or comes back from a conversation, without a second network call.
     // tryEmit + extraBufferCapacity=1 : ticks may fire with no collector (badge disabled) — they
     // must never suspend or throw, and one pending tick is enough (they coalesce).
+    // Piggyback emissions are SEALED to the session that started the fetch (pseudo snapshotted
+    // at call-time) : the repository is a singleton, so a page-1 fetch started under account A
+    // that lands after a logout/login to B must not feed B's badge with A's private metadata
+    // (Codex review, PR #439). The collector filters on the pseudo of ITS auth session.
     private val unreadRefreshTicks = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    private val inboxDerivedUnread = MutableSharedFlow<Int>(extraBufferCapacity = 1)
+    private val inboxDerivedUnread = MutableSharedFlow<Pair<String, Int>>(extraBufferCapacity = 1)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun observeUnreadMpCount(): Flow<Int?> = authRepository.observeAuthState()
@@ -66,7 +72,11 @@ class DefaultMessagesRepository @Inject constructor(
                     emitAll(
                         merge(
                             unreadRefreshTicks.map { fetchUnreadCount() },
-                            inboxDerivedUnread,
+                            inboxDerivedUnread.mapNotNull { (pseudo, count) ->
+                                // Drop emissions sealed for another session (account switch
+                                // while the page-1 fetch was in flight).
+                                if (pseudo == state.pseudo) count else null
+                            },
                         ),
                     )
                 }
@@ -103,15 +113,22 @@ class DefaultMessagesRepository @Inject constructor(
     // call per the repository contract (cf. NetworkOnMainThreadException regression, PR #162).
     override suspend fun getPrivateMessageList(page: Int): PrivateMessageListPage =
         withContext(ioDispatcher) {
+            // Session snapshot at call-time, BEFORE the network call (same pattern as the flags
+            // generation counter of #431) : tagging after the fetch could stamp account B's
+            // pseudo on a response served under account A's cookies.
+            val sessionPseudo = if (page == FIRST_PAGE) currentPseudo() else null
             val result = parser.parseList(hfrClient.getPrivateMessageListPage(page = page))
-            if (page == FIRST_PAGE) {
+            if (page == FIRST_PAGE && sessionPseudo != null) {
                 // #313 — page 1 is the same proxy fetchUnreadCount uses (newest-first, unread
                 // float to the top), so its dots refresh the badge for free. Deeper pages are
                 // NOT representative (their count would clobber a real one with a partial view).
-                inboxDerivedUnread.tryEmit(result.items.count { it.hasUnread })
+                inboxDerivedUnread.tryEmit(sessionPseudo to result.items.count { it.hasUnread })
             }
             result
         }
+
+    private suspend fun currentPseudo(): String? =
+        (authRepository.observeAuthState().first() as? AuthState.Authenticated)?.pseudo
 
     override suspend fun getPrivateMessageThread(
         threadId: Int,
