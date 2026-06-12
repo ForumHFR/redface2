@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -829,6 +830,8 @@ private fun CategorySectionedFlagList(
  *
  * #414 — the whole band is tappable and opens the category's topic listing (RF1 parity); the
  * trailing « › » glyph (same vector-text pattern as the page FABs, #283) is the affordance.
+ * Foundation [clickable] does not enforce the 48dp Material touch-target minimum, hence the
+ * explicit [heightIn].
  */
 @Composable
 private fun CategoryHeaderBand(label: String, onClick: () -> Unit) {
@@ -837,6 +840,7 @@ private fun CategoryHeaderBand(label: String, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceVariant)
+            .heightIn(min = 48.dp)
             .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) {
                 onClick()
             }
