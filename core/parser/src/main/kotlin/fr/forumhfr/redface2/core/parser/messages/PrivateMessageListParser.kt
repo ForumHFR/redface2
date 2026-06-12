@@ -90,6 +90,14 @@ class PrivateMessageListParser(
             ?.let(::isUnreadIcon)
             ?: false
 
+        // "Pages" cell (#430): a link to the conversation's last page, rendered by HFR only for
+        // multi-page conversations — its absence means the conversation fits on one page.
+        val lastPage = row.selectFirst(HfrSelectors.MP_LIST_LAST_PAGE_LINK)
+            ?.let { PAGE_REGEX.find(it.attr("href")) }
+            ?.groupValues?.getOrNull(1)
+            ?.toIntOrNull()
+            ?: 1
+
         return PrivateMessageSummary(
             threadId = threadId,
             correspondent = correspondent,
@@ -97,6 +105,7 @@ class PrivateMessageListParser(
             date = date,
             hasUnread = hasUnread,
             isMultiRecipient = isMultiRecipient,
+            lastPage = lastPage,
         )
     }
 
@@ -128,5 +137,6 @@ class PrivateMessageListParser(
         // (MultiMP / "DT"), in place of a profile link.
         const val MULTI_RECIPIENT_MARKER = "Interlocuteurs multiples"
         val THREAD_ID_REGEX = Regex("""[?&]post=(\d+)""")
+        val PAGE_REGEX = Regex("""[?&]page=(\d+)""")
     }
 }

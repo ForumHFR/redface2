@@ -255,3 +255,25 @@ val MIGRATION_8_9: Migration = object : Migration(8, 9) {
         db.execSQL("ALTER TABLE flag_topics ADD COLUMN isFavorite INTEGER NOT NULL DEFAULT 0")
     }
 }
+
+/**
+ * v9 → v10 — `mp_read_positions` (#430, ADR-013 stage 1): per-account last-displayed page of
+ * each private-message conversation, so reopening (or restoring after process death) lands past
+ * the route's frozen opening page. Pure DDL, no backfill: positions only exist once the user
+ * navigates with the new build, and the opening fallback (the inbox's last-page link) covers
+ * absent rows.
+ */
+val MIGRATION_9_10: Migration = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `mp_read_positions` (
+                `userId` TEXT NOT NULL,
+                `threadId` INTEGER NOT NULL,
+                `page` INTEGER NOT NULL,
+                PRIMARY KEY(`userId`, `threadId`)
+            )
+            """.trimIndent(),
+        )
+    }
+}

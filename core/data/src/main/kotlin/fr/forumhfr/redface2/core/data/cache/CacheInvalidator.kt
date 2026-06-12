@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.data.cache
 
 import android.util.Log
 import fr.forumhfr.redface2.core.database.dao.FlagDao
+import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
@@ -31,6 +32,10 @@ import kotlinx.coroutines.plus
  *    them on disk grows the table indefinitely; we wipe `userId = previous`
  *    on transition.
  *
+ * The same two reasons apply to `mp_read_positions` (#430): the rows only hold page numbers,
+ * but they reveal which conversations exist for the previous account, so they are wiped on the
+ * same transition.
+ *
  * On a `Authenticated(A) → Authenticated(B)` switch (login, then logout, then
  * login as someone else), we wipe rows owned by A explicitly. The session
  * cache held in [FlagRepository.clearSessionCache] is also flushed so that the
@@ -47,6 +52,7 @@ import kotlinx.coroutines.plus
 class CacheInvalidator @Inject constructor(
     private val authRepository: AuthRepository,
     private val flagDao: FlagDao,
+    private val mpReadPositionDao: MpReadPositionDao,
     private val flagRepository: FlagRepository,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
@@ -72,6 +78,8 @@ class CacheInvalidator @Inject constructor(
                 if (state.shouldPurge) {
                     runCatching { flagDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge flag cache for $previousPseudo", it) }
+                    runCatching { mpReadPositionDao.deleteAllForUser(previousPseudo) }
+                        .onFailure { Log.w(LOG_TAG, "Failed to purge MP positions for $previousPseudo", it) }
                     flagRepository.clearSessionCache()
                 }
             }

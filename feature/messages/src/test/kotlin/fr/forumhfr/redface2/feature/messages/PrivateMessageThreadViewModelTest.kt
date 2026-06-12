@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import io.mockk.coEvery
@@ -47,6 +48,12 @@ class PrivateMessageThreadViewModelTest {
         page = 1,
     )
 
+    private fun threadViewModel(
+        repository: MessagesRepository,
+        authRepository: AuthRepository = FakeAuthRepository(),
+        readPositionStore: PrivateMessageReadPositionStore = FakeReadPositionStore(),
+    ) = PrivateMessageThreadViewModel(request, repository, authRepository, readPositionStore)
+
     @Test
     fun `loads the thread on init without private route metadata fallback`() = runTest {
         val repository = mockk<MessagesRepository>()
@@ -55,7 +62,7 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } returns thread
 
-        val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
+        val viewModel = threadViewModel(repository)
 
         val state = viewModel.state.value
         assertTrue(state.mode is PrivateMessageThreadUiState.Mode.Content)
@@ -75,6 +82,7 @@ class PrivateMessageThreadViewModelTest {
             request = request,
             repository = repository,
             authRepository = FakeAuthRepository(AuthState.Anonymous),
+            readPositionStore = FakeReadPositionStore(),
         )
 
         assertEquals(PrivateMessageThreadUiState.Mode.RequiresLogin, viewModel.state.value.mode)
@@ -90,7 +98,7 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } throws IOException("offline")
 
-        val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
+        val viewModel = threadViewModel(repository)
 
         // #316: the Error mode carries NO raw throwable message (privacy — it can embed the private
         // conversation URL). The only detail is the #324 type-derived kind (safe closed enum).
@@ -109,7 +117,7 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } throws HfrServerException(code = 500, url = "https://forum.hardware.fr/forum2.php")
 
-        val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
+        val viewModel = threadViewModel(repository)
 
         val mode = viewModel.state.value.mode
         assertTrue(mode is PrivateMessageThreadUiState.Mode.Error)
@@ -126,7 +134,7 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
         } returns thread(page = 2, totalPages = 2)
 
-        val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
+        val viewModel = threadViewModel(repository)
         viewModel.selectPage(2)
 
         val state = viewModel.state.value
@@ -150,7 +158,7 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 2, fallbackCorrespondent = null)
         } coAnswers { gate.await() }
 
-        val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
+        val viewModel = threadViewModel(repository)
         viewModel.selectPage(2)
 
         // Page 2 is in flight: page 1 is still what the user sees.
@@ -176,7 +184,7 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } returns first andThen updated
 
-        val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
+        val viewModel = threadViewModel(repository)
         viewModel.refresh()
 
         val state = viewModel.state.value
@@ -198,7 +206,7 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } returns pageOne andThenThrows IOException("offline")
 
-        val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
+        val viewModel = threadViewModel(repository)
         viewModel.refresh()
 
         val state = viewModel.state.value
@@ -214,7 +222,7 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } throws IOException("offline")
 
-        val viewModel = PrivateMessageThreadViewModel(request, repository, FakeAuthRepository())
+        val viewModel = threadViewModel(repository)
         assertTrue(viewModel.state.value.mode is PrivateMessageThreadUiState.Mode.Error)
         viewModel.refresh()
 
@@ -233,7 +241,7 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } returns thread(page = 1, totalPages = 1)
 
-        val viewModel = PrivateMessageThreadViewModel(request, repository, authRepository)
+        val viewModel = threadViewModel(repository, authRepository)
         assertTrue(viewModel.state.value.mode is PrivateMessageThreadUiState.Mode.Content)
 
         authRepository.emit(AuthState.Anonymous)
@@ -243,6 +251,69 @@ class PrivateMessageThreadViewModelTest {
         authRepository.emit(AuthState.Authenticated("other"))
         advanceUntilIdle()
         assertTrue(viewModel.state.value.mode is PrivateMessageThreadUiState.Mode.Content)
+    }
+
+    @Test
+    fun `opening resumes from the saved position when it is past the route page (#430)`() = runTest {
+        // Process-death restoration: the route is frozen on the page the conversation was opened
+        // on, the local store remembers the page actually displayed last — the store wins.
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 7, fallbackCorrespondent = null)
+        } returns thread(page = 7, totalPages = 9)
+
+        PrivateMessageThreadViewModel(
+            request = request,
+            repository = repository,
+            authRepository = FakeAuthRepository(),
+            readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 7)),
+        )
+
+        coVerify(exactly = 1) {
+            repository.getPrivateMessageThread(threadId = 42, page = 7, fallbackCorrespondent = null)
+        }
+    }
+
+    @Test
+    fun `opening prefers a route page past the saved position (#430)`() = runTest {
+        // The conversation grew since the last visit: the inbox's fresh last-page link (carried
+        // by the route) is further than the stale resume point — new messages win.
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 9, fallbackCorrespondent = null)
+        } returns thread(page = 9, totalPages = 9)
+
+        PrivateMessageThreadViewModel(
+            request = PrivateMessageThreadRequest(threadId = 42, page = 9),
+            repository = repository,
+            authRepository = FakeAuthRepository(),
+            readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 3)),
+        )
+
+        coVerify(exactly = 1) {
+            repository.getPrivateMessageThread(threadId = 42, page = 9, fallbackCorrespondent = null)
+        }
+    }
+
+    @Test
+    fun `a landed page is saved as the reading position (#430)`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 9)
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 5, fallbackCorrespondent = null)
+        } returns thread(page = 5, totalPages = 9)
+        val store = FakeReadPositionStore()
+
+        val viewModel =
+            PrivateMessageThreadViewModel(request, repository, FakeAuthRepository(), store)
+        assertEquals(1, store.saved[42])
+
+        viewModel.selectPage(5)
+        advanceUntilIdle()
+
+        assertEquals(5, store.saved[42])
     }
 
     private fun thread(page: Int, totalPages: Int) = PrivateMessageThread(
@@ -271,6 +342,19 @@ class PrivateMessageThreadViewModelTest {
 
         suspend fun emit(authState: AuthState) {
             state.emit(authState)
+        }
+    }
+
+    /** In-memory [PrivateMessageReadPositionStore] — `saved` exposes writes for assertions. */
+    private class FakeReadPositionStore(
+        initial: Map<Int, Int> = emptyMap(),
+    ) : PrivateMessageReadPositionStore {
+        val saved = initial.toMutableMap()
+
+        override suspend fun readPage(threadId: Int): Int? = saved[threadId]
+
+        override suspend fun savePage(threadId: Int, page: Int) {
+            saved[threadId] = page
         }
     }
 }

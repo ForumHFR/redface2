@@ -9,6 +9,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
 import fr.forumhfr.redface2.core.model.AuthState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -33,6 +34,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     @Assisted private val request: PrivateMessageThreadRequest,
     private val repository: MessagesRepository,
     private val authRepository: AuthRepository,
+    private val readPositionStore: PrivateMessageReadPositionStore,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PrivateMessageThreadUiState.initial(request))
@@ -55,7 +57,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                         AuthState.Anonymous -> clearPrivateState()
                         is AuthState.Authenticated -> {
                             authenticatedPseudo = authState.pseudo
-                            load(request.page.coerceAtLeast(1))
+                            load(openingPage())
                         }
                     }
                 }
@@ -87,6 +89,24 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         loadJob?.cancel()
         _state.value = PrivateMessageThreadUiState.initial(request)
             .copy(mode = PrivateMessageThreadUiState.Mode.RequiresLogin)
+    }
+
+    /**
+     * Page the conversation opens on (#430). The route freezes the page known at opening time
+     * (the inbox passes its last-page link — web parity), while the local per-account store
+     * remembers the page actually displayed last (it survives process death, the original #430
+     * bug). `max` of the two: a conversation that grew since the last visit opens on its NEW
+     * last page (fresh messages win over an older resume point), and a reader who advanced past
+     * the frozen opening page resumes where they actually were. A store failure falls back to
+     * the route — opening the conversation must never break on a local read.
+     */
+    private suspend fun openingPage(): Int {
+        val saved = try {
+            readPositionStore.readPage(request.threadId)
+        } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+            null
+        }
+        return maxOf(saved ?: 1, request.page.coerceAtLeast(1))
     }
 
     private fun load(page: Int) {
@@ -123,6 +143,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                         isRefreshing = false,
                     )
                 }
+                savePosition(thread.page)
             } catch (cancellation: CancellationException) {
                 // Deliberately does NOT clear isRefreshing: a cancellation only comes from a
                 // superseding load() (which owns the flag from its own start) or from
@@ -149,6 +170,18 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * #430 — records the landed page so the next opening (or a process-death restoration)
+     * resumes here. Launched in its own coroutine so a quick page change cancelling [loadJob]
+     * cannot abort a write for a page that WAS displayed; best-effort (a lost write only costs
+     * the resume position, the store itself no-ops when the session ended meanwhile).
+     */
+    private fun savePosition(page: Int) {
+        viewModelScope.launch {
+            runCatching { readPositionStore.savePage(request.threadId, page) }
         }
     }
 
