@@ -35,6 +35,8 @@
     <string name="messages_reply_submit">Envoyer</string>
     <string name="messages_reply_submit_confirm">Confirmer</string>
     <string name="messages_reply_actions_options">Options</string>
+    <!-- #387 — picker de smileys dans les éditeurs MP (demande de tinc). -->
+    <string name="messages_reply_actions_smileys">Smileys</string>
     <string name="messages_reply_options_title">Options</string>
     <string name="messages_reply_option_signature">Activer la signature</string>
     <string name="messages_reply_option_smiley_disabled">Désactiver les smileys</string>
