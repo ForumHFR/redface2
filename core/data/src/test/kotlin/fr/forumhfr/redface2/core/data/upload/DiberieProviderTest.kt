@@ -126,8 +126,10 @@ class DiberieProviderTest {
         assertEquals(503, (error as UploadException.Server).code)
         assertEquals(UploadProviderId.DIBERIE, error.providerId)
         assertTrue(
-            "a rejected upload must leave a WARN trail",
-            diagnostics.entries.value.any { it.level == DiagnosticsLog.Level.WARN && it.message.contains("503") },
+            "a rejected upload must leave a WARN trail carrying the HTTP code and the host body",
+            diagnostics.entries.value.any {
+                it.level == DiagnosticsLog.Level.WARN && it.message.contains("503") && it.message.contains("down")
+            },
         )
     }
 
@@ -139,8 +141,10 @@ class DiberieProviderTest {
 
         assertTrue(error is UploadException.Malformed)
         assertTrue(
-            "an unparseable response must record the raw body for diagnosis",
-            diagnostics.entries.value.any { it.message.contains("unparseable") && it.message.contains("not json") },
+            "an unparseable response must record the HTTP code and the raw body for diagnosis",
+            diagnostics.entries.value.any {
+                it.message.contains("unparseable") && it.message.contains("HTTP 200") && it.message.contains("not json")
+            },
         )
     }
 

@@ -58,11 +58,11 @@ internal class DiberieProvider @Inject constructor(
         val response = runCatching { client.newCall(request).execute() }
             .getOrElse { throw UploadException.Network(it) }
         response.use { resp ->
+            val raw = resp.body.string()
             if (!resp.isSuccessful) {
-                diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, "diberie upload rejected: HTTP ${resp.code}")
+                diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, serverErrorMessage(resp.code, raw))
                 throw UploadException.Server(resp.code, id)
             }
-            val raw = resp.body.string()
             val dto = runCatching { json.decodeFromString<DiberieResponse>(raw) }
                 .getOrElse { error ->
                     diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, parseFailureMessage(resp.code, raw))
@@ -97,6 +97,9 @@ internal class DiberieProvider @Inject constructor(
 
     // Diagnostic trail (surfaced in the in-app viewer, #445) — the raw body is truncated so a huge
     // HTML error page never floods the ring buffer. These are pure builders; the call site records.
+    private fun serverErrorMessage(code: Int, raw: String): String =
+        "diberie upload rejected: HTTP $code: ${raw.take(MAX_LOGGED_BODY)}"
+
     private fun parseFailureMessage(code: Int, raw: String): String =
         "diberie upload: unparseable response (HTTP $code): ${raw.take(MAX_LOGGED_BODY)}"
 
