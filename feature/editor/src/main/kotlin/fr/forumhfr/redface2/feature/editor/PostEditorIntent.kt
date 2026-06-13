@@ -65,6 +65,14 @@ sealed interface PostEditorIntent {
      */
     data class ImagePicked(val uri: String) : PostEditorIntent
 
+    /**
+     * Multi-image upload — the user picked several local images at once from the system photo
+     * picker. [uris] holds each `Uri.toString()`, in pick order. The ViewModel uploads them
+     * sequentially and inserts an `[img]url[/img]` at the caret for each success (order preserved);
+     * the batch stops at the first failure, leaving the already-inserted images in place.
+     */
+    data class ImagesPicked(val uris: List<String>) : PostEditorIntent
+
     /** #459 PR2 — user dismissed the upload-error banner. Clears [PostEditorState.uploadError]. */
     data object UploadErrorDismissed : PostEditorIntent
 

@@ -1205,6 +1205,128 @@ class PostEditorViewModelTest {
         assertNull("dismissing clears the upload error", viewModel.state.value.uploadError)
     }
 
+    @Test
+    fun `ImagesPicked uploads every image and inserts an img per success in pick order`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        uploadRepository.uploadResults = listOf(
+            Result.success(uploadedImage("https://h/Picture/Get/f/1")),
+            Result.success(uploadedImage("https://h/Picture/Get/f/2")),
+            Result.success(uploadedImage("https://h/Picture/Get/f/3")),
+        )
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(
+            PostEditorIntent.ImagesPicked(listOf("content://x/1", "content://x/2", "content://x/3")),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("every picked image is uploaded", 3, uploadRepository.uploadCalls)
+        assertEquals(
+            "images are read in pick order (sequential, not reordered)",
+            listOf("content://x/1", "content://x/2", "content://x/3"),
+            imageUploadReader.readUris,
+        )
+        val state = viewModel.state.value
+        val expected = "[img]https://h/Picture/Get/f/1[/img]" +
+            "[img]https://h/Picture/Get/f/2[/img]" +
+            "[img]https://h/Picture/Get/f/3[/img]"
+        assertEquals("one [img] per image, concatenated in pick order", expected, state.draft.text)
+        assertFalse("upload flag cleared at the end of the batch", state.isUploading)
+        assertNull("progress cleared at the end of the batch", state.uploadProgress)
+        assertNull("no error on a fully successful batch", state.uploadError)
+    }
+
+    @Test
+    fun `ImagesPicked increments n of N as each image completes and clears it at the end`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        val gate = CompletableDeferred<Unit>()
+        uploadRepository.uploadGate = gate
+        // Hold ONLY the 2nd upload so the batch settles at 1/2 — proving the counter increments
+        // past its initial 0/N (not just set-then-cleared).
+        uploadRepository.gateOnCall = 2
+        uploadRepository.uploadResults = listOf(
+            Result.success(uploadedImage("https://h/1")),
+            Result.success(uploadedImage("https://h/2")),
+        )
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ImagesPicked(listOf("content://x/1", "content://x/2")))
+        testScheduler.advanceUntilIdle()
+        assertEquals(
+            "after the first image completes the counter shows 1/2",
+            UploadProgress(completed = 1, total = 2),
+            viewModel.state.value.uploadProgress,
+        )
+        assertTrue("still uploading while the 2nd image is in flight", viewModel.state.value.isUploading)
+
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+        assertNull("progress cleared once the batch resolves", viewModel.state.value.uploadProgress)
+        assertFalse("isUploading cleared once the batch resolves", viewModel.state.value.isUploading)
+    }
+
+    @Test
+    fun `ImagesPicked stops at the first failure and keeps the earlier images inserted`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        uploadRepository.uploadResults = listOf(
+            Result.success(uploadedImage("https://h/Picture/Get/f/1")),
+            Result.failure(UploadException.Server(code = 500, providerId = UploadProviderId.DIBERIE)),
+            Result.success(uploadedImage("https://h/Picture/Get/f/3")),
+        )
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(
+            PostEditorIntent.ImagesPicked(listOf("content://x/1", "content://x/2", "content://x/3")),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("the batch stops after the failing upload — no 3rd attempt", 2, uploadRepository.uploadCalls)
+        val state = viewModel.state.value
+        assertEquals(
+            "only the image uploaded before the failure is inserted",
+            "[img]https://h/Picture/Get/f/1[/img]",
+            state.draft.text,
+        )
+        assertEquals(
+            "the typed error from the failing upload surfaces",
+            UploadError.Server(code = 500, providerId = UploadProviderId.DIBERIE),
+            state.uploadError,
+        )
+        assertFalse("upload flag cleared on failure", state.isUploading)
+        assertNull("progress cleared on failure", state.uploadProgress)
+    }
+
+    @Test
+    fun `ImagesPicked autosaves the images inserted before a later image fails`() = runTest {
+        // Codex review #490 — a mid-batch failure must not lose the already-inserted images from
+        // draft persistence: each successful insert schedules an autosave, not just the whole batch.
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        uploadRepository.uploadResults = listOf(
+            Result.success(uploadedImage("https://h/Picture/Get/f/1")),
+            Result.failure(UploadException.Network(java.io.IOException("down"))),
+        )
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ImagesPicked(listOf("content://x/1", "content://x/2")))
+        testScheduler.advanceUntilIdle() // uploads run; 1st inserts + schedules autosave, 2nd fails; debounce elapses
+
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        assertEquals(
+            "the image inserted before the failure must be persisted",
+            "[img]https://h/Picture/Get/f/1[/img]",
+            draftStore.saved[key]?.body,
+        )
+    }
+
     private fun newEditViewModel(
         subcat: Int? = SAMPLE_SUBCAT,
         numreponse: Int? = SAMPLE_EDITED_NUMREPONSE,
@@ -1871,9 +1993,13 @@ class PostEditorViewModelTest {
         var readCalls: Int = 0
             private set
 
+        /** Multi-image upload — every uri passed to [read], in call order, to assert pick order. */
+        val readUris: MutableList<String> = mutableListOf()
+
         override suspend fun read(uri: String): ImageUpload {
             readCalls += 1
             lastUri = uri
+            readUris += uri
             exception?.let { throw it }
             return result
         }
@@ -1894,6 +2020,20 @@ class PostEditorViewModelTest {
         )
         var uploadException: Throwable? = null
         var uploadGate: CompletableDeferred<Unit>? = null
+
+        /**
+         * Multi-image upload — when set, [uploadGate] is awaited ONLY on this 1-based call index
+         * (e.g. 2 holds the 2nd upload so a test can observe the « 1/2 » progress after the 1st).
+         * Null = the gate is awaited on every call (single-image gate tests).
+         */
+        var gateOnCall: Int? = null
+
+        /**
+         * Multi-image upload — per-call outcomes, consumed in order (call N → `uploadResults[N-1]`).
+         * When set it takes precedence over [uploadResult] / [uploadException], so a test can make
+         * the 2nd of three uploads fail and assert the batch stops there.
+         */
+        var uploadResults: List<Result<UploadedImage>>? = null
         var uploadCalls: Int = 0
             private set
         var lastUserId: String? = null
@@ -1902,7 +2042,8 @@ class PostEditorViewModelTest {
         override suspend fun uploadWithCurrentProvider(image: ImageUpload, userId: String): UploadedImage {
             uploadCalls += 1
             lastUserId = userId
-            uploadGate?.await()
+            if (gateOnCall == null || gateOnCall == uploadCalls) uploadGate?.await()
+            uploadResults?.let { return it[uploadCalls - 1].getOrThrow() }
             uploadException?.let { throw it }
             return uploadResult
         }
