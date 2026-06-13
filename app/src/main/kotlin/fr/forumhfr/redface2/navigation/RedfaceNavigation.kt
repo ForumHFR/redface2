@@ -79,6 +79,7 @@ import fr.forumhfr.redface2.feature.profile.ProfilePreviewSheet
 import fr.forumhfr.redface2.feature.profile.ProfileRoute
 import fr.forumhfr.redface2.feature.profile.ProfileViewModel
 import fr.forumhfr.redface2.feature.search.SearchScreen
+import fr.forumhfr.redface2.feature.settings.MesImagesScreen
 import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
@@ -263,6 +264,13 @@ data object DiagnosticsRoute : RedfaceNavKey
 
 @Serializable
 data object SettingsRoute : RedfaceNavKey
+
+/**
+ * #459 PR3 — « Mes images uploadées » screen (lists previously uploaded images + delete). Reached
+ * from the Settings screen ; lives in `:feature:settings` (settings-adjacent), opaque route.
+ */
+@Serializable
+data object MesImagesRoute : RedfaceNavKey
 
 /**
  * Phase 2 finish (#208) — full profile page route.
@@ -1125,7 +1133,18 @@ private fun RedfaceNavHost(
                 )
             }
             entry<SettingsRoute> {
-                SettingsScreen()
+                SettingsScreen(
+                    onOpenMyImages = { backStack.add(MesImagesRoute) },
+                )
+            }
+            entry<MesImagesRoute> {
+                MesImagesScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                )
             }
             entry<CategoryRoute> { route ->
                 ForumCategoryScreen(
