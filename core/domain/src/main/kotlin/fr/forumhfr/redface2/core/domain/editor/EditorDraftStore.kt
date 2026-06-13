@@ -37,7 +37,12 @@ interface EditorDraftStore {
      */
     suspend fun save(owner: String?, key: String, draft: Draft)
 
-    /** Deletes [owner]'s draft under [key] (called on a successful POST). No-op when [owner] is null. */
+    /**
+     * Deletes [owner]'s draft under [key] (called on a successful POST). No-op when [owner] is null.
+     * Best-effort: it is awaited on the post-success path, so it MUST NOT throw on a local DB
+     * failure — a surviving row only costs a spurious restore prompt and must never abort a
+     * successful post. (Genuine coroutine cancellation still propagates.)
+     */
     suspend fun delete(owner: String?, key: String)
 
     data class Draft(

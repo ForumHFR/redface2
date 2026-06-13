@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.model.AuthState
 import java.time.Clock
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -71,7 +72,19 @@ class RoomEditorDraftStore @Inject constructor(
     override suspend fun delete(owner: String?, key: String) {
         withContext(ioDispatcher) {
             if (owner == null) return@withContext
-            editorDraftDao.deleteByKey(rowKey(owner, key))
+            // Best-effort: callers AWAIT this on the post-success path (so the nav pop can't cancel
+            // the delete before the row is gone), which means a throw here would abort the success
+            // flow on a message HFR already accepted — crashing or stranding the editor. A local
+            // DELETE-by-key can still fail (disk full / DB locked); swallow it. A surviving row only
+            // costs a spurious « restore draft » prompt. CancellationException is rethrown so genuine
+            // coroutine cancellation still propagates.
+            try {
+                editorDraftDao.deleteByKey(rowKey(owner, key))
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+                // Best-effort cleanup — never block a successful post on a failed local delete.
+            }
         }
     }
 
