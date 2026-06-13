@@ -201,6 +201,22 @@ class PrivateMessageListParserTest {
         assertTrue(items.all { it.threadId > 0 })
     }
 
+    @Test
+    fun `parseList reads the last-page link and defaults to 1 without one (#430)`() {
+        val html = readFixture("private_messages_list_multi.html")
+
+        val items = parser.parseList(html).items
+
+        // Web parity: the "Pages" cell (sujetCase4) links the conversation's LAST page while the
+        // subject link always points to page 1 — the parser must read the dedicated cell, never
+        // the subject href's page parameter.
+        assertEquals(24, items.first { it.threadId == 3195369 }.lastPage)
+        assertEquals(876, items.first { it.threadId == 2716413 }.lastPage)
+        // HFR renders a bare `&nbsp;` cell for a single-page conversation → default 1.
+        assertEquals(1, items.first { it.threadId == 3195237 }.lastPage)
+        assertTrue(items.all { it.lastPage >= 1 })
+    }
+
     private fun readFixture(name: String): String {
         val resource = javaClass.classLoader.getResourceAsStream("fixtures/$name")
             ?: error("Missing fixture: fixtures/$name")

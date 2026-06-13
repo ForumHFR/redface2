@@ -13,8 +13,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -45,6 +48,8 @@ fun BbcodeToolbar(
     onAction: (BbcodeAction) -> Unit,
     modifier: Modifier = Modifier,
     onImageUrlRequested: (() -> Unit)? = null,
+    onImageUploadRequested: (() -> Unit)? = null,
+    uploading: Boolean = false,
 ) {
     Row(
         modifier = modifier
@@ -60,8 +65,41 @@ fun BbcodeToolbar(
                 onImageUrlRequested = onImageUrlRequested,
             )
         }
+        // #459 PR2 — image-upload affordance, rendered only when the host screen wires the picker
+        // (the post editor) ; MP / topic-form surfaces pass null and keep the toolbar unchanged.
+        onImageUploadRequested?.let { ImageUploadChip(onClick = it, uploading = uploading) }
         ColorChip(onAction = onAction)
     }
+}
+
+/**
+ * #459 PR2 — chip launching the system photo picker (the upload itself is the host ViewModel's job).
+ * While an upload is in flight it shows a small [CircularProgressIndicator] and is disabled so a
+ * second pick cannot race the first. M3-only icon (a `:core:ui` vector + [Icon]) — material-icons is
+ * forbidden by detekt.
+ */
+@Composable
+private fun ImageUploadChip(
+    onClick: () -> Unit,
+    uploading: Boolean,
+) {
+    AssistChip(
+        enabled = !uploading,
+        onClick = onClick,
+        label = { Text(stringResource(R.string.bbcode_action_image_upload)) },
+        leadingIcon = {
+            if (uploading) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(
+                    painter = painterResource(R.drawable.ic_image_upload),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        },
+        border = AssistChipDefaults.assistChipBorder(enabled = !uploading),
+    )
 }
 
 /**

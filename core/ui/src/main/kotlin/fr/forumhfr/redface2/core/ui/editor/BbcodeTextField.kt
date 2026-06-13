@@ -92,6 +92,9 @@ fun BbcodeTextField(
     modifier: Modifier = Modifier,
     placeholder: String? = null,
     fillViewport: Boolean = false,
+    // Multi-image upload — true makes the field non-editable while a batch is in flight so the user
+    // cannot move the caret between two programmatic [img] insertions. Default false = editable.
+    readOnly: Boolean = false,
 ) {
     if (fillViewport) {
         BoxWithConstraints(modifier = modifier) {
@@ -111,6 +114,7 @@ fun BbcodeTextField(
                     onValueChange = onValueChange,
                     label = label,
                     placeholder = placeholder,
+                    readOnly = readOnly,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = viewportMinHeight),
@@ -123,6 +127,7 @@ fun BbcodeTextField(
             onValueChange = onValueChange,
             label = label,
             placeholder = placeholder,
+            readOnly = readOnly,
             modifier = modifier.fillMaxWidth(),
         )
     }
@@ -131,6 +136,8 @@ fun BbcodeTextField(
 /** Test tag of the #275/#410 scrollable viewport wrapping the grown field. */
 const val BBCODE_FIELD_VIEWPORT_TAG = "bbcode_field_viewport"
 
+@Suppress("LongParameterList") // Compose component impl: mirrors BbcodeTextField's idiomatic surface
+// (value/onValueChange/label/placeholder/modifier + readOnly) — a config holder would hurt clarity.
 @Composable
 private fun BbcodeFieldImpl(
     value: TextFieldValue,
@@ -138,6 +145,7 @@ private fun BbcodeFieldImpl(
     label: String,
     placeholder: String?,
     modifier: Modifier,
+    readOnly: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
@@ -158,6 +166,7 @@ private fun BbcodeFieldImpl(
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
+        readOnly = readOnly,
         // The real M3 OutlinedTextField merges the label into the field's semantics node and
         // reserves 8.dp above the box for the floating label's upper half (internal
         // `OutlinedTextFieldTopPadding`) — without it the minimized label is clipped at the top.

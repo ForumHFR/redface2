@@ -9,12 +9,17 @@ import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
@@ -1471,6 +1476,13 @@ class FlagsViewModelTest {
         override suspend fun refreshTopicList(cat: Int, subcat: Int?, page: Int) = Unit
 
         override suspend fun prefetchTopicList(cat: Int, subcat: Int?, page: Int) = Unit
+
+        // #455 — not exercised by FlagsViewModel (the Drapeaux tab uses FlagRepository).
+        override suspend fun getFlagFilteredTopics(
+            cat: Int,
+            subcat: Int?,
+            bucket: FlagFilterBucket,
+        ): ForumResult<TopicListPage> = ForumResult.Failure(UnsupportedOperationException())
     }
 
     /**
@@ -1597,6 +1609,25 @@ class FlagsViewModelTest {
 
         override suspend fun setMpUnreadBadge(enabled: Boolean) = Unit
 
+        override fun observeTopicPollsExpanded(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
+
+        override fun observeStartScreen(): Flow<StartScreenPreference> =
+            MutableStateFlow(StartScreenPreference())
+
+        override suspend fun setStartScreen(preference: StartScreenPreference) = Unit
+
+        // #459 — upload provider / imgur Client-ID are irrelevant to FlagsViewModel; default stubs.
+        override fun observeUploadProvider(): Flow<UploadProviderId> =
+            MutableStateFlow(UploadProviderId.DIBERIE)
+
+        override suspend fun setUploadProvider(provider: UploadProviderId) = Unit
+
+        override fun observeImgurClientId(): Flow<String> = MutableStateFlow("")
+
+        override suspend fun setImgurClientId(clientId: String) = Unit
+
         // #312 — confirm-before-posting is irrelevant to FlagsViewModel; stubbed at its default.
         override fun observeConfirmBeforePosting(): Flow<Boolean> = MutableStateFlow(false)
 
@@ -1626,5 +1657,14 @@ class FlagsViewModelTest {
         fun setPerTabOverride(value: Boolean) {
             perTab.value = value
         }
+
+        // #287 — reading display presets are irrelevant to FlagsViewModel; stubbed at defaults.
+        override fun observeDisplayDensity(): Flow<DisplayDensity> = MutableStateFlow(DisplayDensity.COMFORT)
+
+        override suspend fun setDisplayDensity(density: DisplayDensity) = Unit
+
+        override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
+
+        override suspend fun setFontScale(scale: FontScalePreference) = Unit
     }
 }

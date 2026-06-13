@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.navigation
 
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -47,6 +49,9 @@ class AppThemeViewModelTest {
             // A SharedFlow that never emits = DataStore still hydrating on a cold start.
             every { observeThemeMode() } returns MutableSharedFlow()
             every { observeAmoledEnabled() } returns MutableSharedFlow()
+            // #287 — eagerly collected by the VM; defaults are enough for this theme-focused test.
+            every { observeDisplayDensity() } returns MutableStateFlow(DisplayDensity.COMFORT)
+            every { observeFontScale() } returns MutableStateFlow(FontScalePreference.M)
         }
 
         val vm = AppThemeViewModel(
@@ -64,6 +69,8 @@ class AppThemeViewModelTest {
         val repository = mockk<UserPreferencesRepository> {
             every { observeThemeMode() } returns MutableStateFlow(ThemeMode.LIGHT)
             every { observeAmoledEnabled() } returns MutableStateFlow(false)
+            every { observeDisplayDensity() } returns MutableStateFlow(DisplayDensity.COMFORT)
+            every { observeFontScale() } returns MutableStateFlow(FontScalePreference.M)
         }
 
         val vm = AppThemeViewModel(

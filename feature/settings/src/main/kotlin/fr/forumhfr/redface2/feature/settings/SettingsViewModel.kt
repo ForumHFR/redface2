@@ -5,10 +5,15 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,6 +21,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+// Flat MVI dispatcher: one small, near-identical optimistic-flip handler per user preference.
+// The size comes from breadth (many independent settings live here cohesively), not from deep
+// logic — same reason `submit()` carries @Suppress("CyclomaticComplexMethod"). A generic
+// `updateEnumPreference` helper could fold the enum handlers together later (see PR notes).
+@Suppress("LargeClass")
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
@@ -36,129 +46,109 @@ class SettingsViewModel @Inject constructor(
             val config = userPreferencesRepository.observeProxyConfig().first()
             _state.update { it.copyFromProxy(config) }
         }
+        hydratePreference(
+            read = { userPreferencesRepository.observeIgnoreTopicCache().first() },
+            isLocked = { it.ignoreTopicCacheTouchedLocally || it.isUpdatingIgnoreTopicCache },
+            apply = { state, value -> state.copy(ignoreTopicCache = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeFlagsGroupByCategory().first() },
+            isLocked = { it.flagsGroupByCategoryTouchedLocally || it.isUpdatingFlagsGroupByCategory },
+            apply = { state, value -> state.copy(flagsGroupByCategory = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeFlagsHideReadCategories().first() },
+            isLocked = { it.flagsHideReadCategoriesTouchedLocally || it.isUpdatingFlagsHideReadCategories },
+            apply = { state, value -> state.copy(flagsHideReadCategories = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeFlagsPerTabOverride().first() },
+            isLocked = { it.flagsPerTabOverrideTouchedLocally || it.isUpdatingFlagsPerTabOverride },
+            apply = { state, value -> state.copy(flagsPerTabOverride = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeThemeMode().first() },
+            isLocked = { it.themeModeTouchedLocally || it.isUpdatingThemeMode },
+            apply = { state, value -> state.copy(themeMode = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeAmoledEnabled().first() },
+            isLocked = { it.amoledTouchedLocally || it.isUpdatingAmoled },
+            apply = { state, value -> state.copy(amoledEnabled = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeTopicTopBarAutoHide().first() },
+            isLocked = { it.topicTopBarAutoHideTouchedLocally || it.isUpdatingTopicTopBarAutoHide },
+            apply = { state, value -> state.copy(topicTopBarAutoHide = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeTopicPageFabs().first() },
+            isLocked = { it.topicPageFabsTouchedLocally || it.isUpdatingTopicPageFabs },
+            apply = { state, value -> state.copy(topicPageFabs = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeMpUnreadBadge().first() },
+            isLocked = { it.mpUnreadBadgeTouchedLocally || it.isUpdatingMpUnreadBadge },
+            apply = { state, value -> state.copy(mpUnreadBadge = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeTopicPollsExpanded().first() },
+            isLocked = { it.topicPollsExpandedTouchedLocally || it.isUpdatingTopicPollsExpanded },
+            apply = { state, value -> state.copy(topicPollsExpanded = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeConfirmBeforePosting().first() },
+            isLocked = { it.confirmBeforePostingTouchedLocally || it.isUpdatingConfirmBeforePosting },
+            apply = { state, value -> state.copy(confirmBeforePosting = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeShowDtSection().first() },
+            isLocked = { it.showDtSectionTouchedLocally || it.isUpdatingShowDtSection },
+            apply = { state, value -> state.copy(showDtSection = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeFlagsAutoRefresh().first() },
+            isLocked = { it.flagsAutoRefreshTouchedLocally || it.isUpdatingFlagsAutoRefresh },
+            apply = { state, value -> state.copy(flagsAutoRefresh = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeDisplayDensity().first() },
+            isLocked = { it.displayDensityTouchedLocally || it.isUpdatingDisplayDensity },
+            apply = { state, value -> state.copy(displayDensity = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeFontScale().first() },
+            isLocked = { it.fontScaleTouchedLocally || it.isUpdatingFontScale },
+            apply = { state, value -> state.copy(fontScale = value) },
+        )
+        // #459 — Hébergeur d'images : provider (enum) + imgur Client-ID (text). Same one-shot
+        // hydration + touched-locally guard as the other prefs.
+        hydratePreference(
+            read = { userPreferencesRepository.observeUploadProvider().first() },
+            isLocked = { it.uploadProviderTouchedLocally || it.isUpdatingUploadProvider },
+            apply = { state, value -> state.copy(uploadProvider = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeImgurClientId().first() },
+            isLocked = { it.imgurClientIdTouchedLocally },
+            apply = { state, value -> state.copy(imgurClientId = value) },
+        )
+    }
+
+    /**
+     * One-shot hydration of a persisted preference into [_state] (point-in-time `first()`,
+     * cf. the init comment). [isLocked] is the startup-race guard: if the user already
+     * flipped the toggle (or a write is in flight) while this coroutine was suspended on
+     * the read, the stale snapshot must NOT overwrite the local change.
+     */
+    private fun <T> hydratePreference(
+        read: suspend () -> T,
+        isLocked: (SettingsState) -> Boolean,
+        apply: (SettingsState, T) -> SettingsState,
+    ) {
         viewModelScope.launch {
-            val ignore = userPreferencesRepository.observeIgnoreTopicCache().first()
-            _state.update { current ->
-                // Startup race guard: if the user already flipped the toggle (or a write is in
-                // flight) while this hydration coroutine was suspended on `.first()`, do NOT
-                // overwrite the local change with the stale snapshot we just collected. The
-                // toggle is an alpha diagnostic — it must not lie about its own state.
-                if (current.ignoreTopicCacheTouchedLocally || current.isUpdatingIgnoreTopicCache) {
-                    current
-                } else {
-                    current.copy(ignoreTopicCache = ignore)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val grouped = userPreferencesRepository.observeFlagsGroupByCategory().first()
-            _state.update { current ->
-                if (current.flagsGroupByCategoryTouchedLocally || current.isUpdatingFlagsGroupByCategory) {
-                    current
-                } else {
-                    current.copy(flagsGroupByCategory = grouped)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val hideRead = userPreferencesRepository.observeFlagsHideReadCategories().first()
-            _state.update { current ->
-                if (current.flagsHideReadCategoriesTouchedLocally || current.isUpdatingFlagsHideReadCategories) {
-                    current
-                } else {
-                    current.copy(flagsHideReadCategories = hideRead)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val perTab = userPreferencesRepository.observeFlagsPerTabOverride().first()
-            _state.update { current ->
-                if (current.flagsPerTabOverrideTouchedLocally || current.isUpdatingFlagsPerTabOverride) {
-                    current
-                } else {
-                    current.copy(flagsPerTabOverride = perTab)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val mode = userPreferencesRepository.observeThemeMode().first()
-            _state.update { current ->
-                if (current.themeModeTouchedLocally || current.isUpdatingThemeMode) {
-                    current
-                } else {
-                    current.copy(themeMode = mode)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val amoled = userPreferencesRepository.observeAmoledEnabled().first()
-            _state.update { current ->
-                if (current.amoledTouchedLocally || current.isUpdatingAmoled) {
-                    current
-                } else {
-                    current.copy(amoledEnabled = amoled)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val autoHide = userPreferencesRepository.observeTopicTopBarAutoHide().first()
-            _state.update { current ->
-                if (current.topicTopBarAutoHideTouchedLocally || current.isUpdatingTopicTopBarAutoHide) {
-                    current
-                } else {
-                    current.copy(topicTopBarAutoHide = autoHide)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val pageFabs = userPreferencesRepository.observeTopicPageFabs().first()
-            _state.update { current ->
-                if (current.topicPageFabsTouchedLocally || current.isUpdatingTopicPageFabs) {
-                    current
-                } else {
-                    current.copy(topicPageFabs = pageFabs)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val mpBadge = userPreferencesRepository.observeMpUnreadBadge().first()
-            _state.update { current ->
-                if (current.mpUnreadBadgeTouchedLocally || current.isUpdatingMpUnreadBadge) {
-                    current
-                } else {
-                    current.copy(mpUnreadBadge = mpBadge)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val confirm = userPreferencesRepository.observeConfirmBeforePosting().first()
-            _state.update { current ->
-                if (current.confirmBeforePostingTouchedLocally || current.isUpdatingConfirmBeforePosting) {
-                    current
-                } else {
-                    current.copy(confirmBeforePosting = confirm)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val showDt = userPreferencesRepository.observeShowDtSection().first()
-            _state.update { current ->
-                if (current.showDtSectionTouchedLocally || current.isUpdatingShowDtSection) {
-                    current
-                } else {
-                    current.copy(showDtSection = showDt)
-                }
-            }
-        }
-        viewModelScope.launch {
-            val autoRefresh = userPreferencesRepository.observeFlagsAutoRefresh().first()
-            _state.update { current ->
-                if (current.flagsAutoRefreshTouchedLocally || current.isUpdatingFlagsAutoRefresh) {
-                    current
-                } else {
-                    current.copy(flagsAutoRefresh = autoRefresh)
-                }
-            }
+            val value = read()
+            _state.update { current -> if (isLocked(current)) current else apply(current, value) }
         }
     }
 
@@ -204,9 +194,14 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
             is SettingsIntent.TopicPageFabsChanged -> updateTopicPageFabs(intent.enabled)
             is SettingsIntent.MpUnreadBadgeChanged -> updateMpUnreadBadge(intent.enabled)
+            is SettingsIntent.TopicPollsExpandedChanged -> updateTopicPollsExpanded(intent.enabled)
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
+            is SettingsIntent.DisplayDensityChanged -> updateDisplayDensity(intent.density)
+            is SettingsIntent.FontScaleChanged -> updateFontScale(intent.scale)
+            is SettingsIntent.SetUploadProvider -> updateUploadProvider(intent.provider)
+            is SettingsIntent.SetImgurClientId -> updateImgurClientId(intent.text)
         }
     }
 
@@ -460,6 +455,119 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    // #287 — display density is an enum, so it uses the bespoke optimistic-flip shape (like
+    // updateThemeMode) rather than updateBooleanPreference. previous is captured for revert.
+    private fun updateDisplayDensity(desired: DisplayDensity) {
+        val previous = _state.value.displayDensity
+        _state.update {
+            it.copy(
+                displayDensity = desired,
+                isUpdatingDisplayDensity = true,
+                displayDensityError = false,
+                displayDensityTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setDisplayDensity(desired) }
+                .onSuccess {
+                    _state.update { it.copy(displayDensity = desired, isUpdatingDisplayDensity = false) }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            displayDensity = previous,
+                            isUpdatingDisplayDensity = false,
+                            displayDensityError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // #287 — font scale is an enum too; same bespoke optimistic-flip shape as updateDisplayDensity.
+    private fun updateFontScale(desired: FontScalePreference) {
+        val previous = _state.value.fontScale
+        _state.update {
+            it.copy(
+                fontScale = desired,
+                isUpdatingFontScale = true,
+                fontScaleError = false,
+                fontScaleTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setFontScale(desired) }
+                .onSuccess {
+                    _state.update { it.copy(fontScale = desired, isUpdatingFontScale = false) }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            fontScale = previous,
+                            isUpdatingFontScale = false,
+                            fontScaleError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // #459 — upload provider is an enum, same bespoke optimistic-flip shape as updateThemeMode.
+    private fun updateUploadProvider(desired: UploadProviderId) {
+        val previous = _state.value.uploadProvider
+        _state.update {
+            it.copy(
+                uploadProvider = desired,
+                isUpdatingUploadProvider = true,
+                uploadProviderError = false,
+                uploadProviderTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setUploadProvider(desired) }
+                .onSuccess {
+                    _state.update { it.copy(uploadProvider = desired, isUpdatingUploadProvider = false) }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            uploadProvider = previous,
+                            isUpdatingUploadProvider = false,
+                            uploadProviderError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // #459 — imgur Client-ID is a free-text preference persisted on each change (no save button).
+    // The optimistic value is shown immediately and the touched-locally guard blocks a late
+    // hydration from clobbering in-progress typing; a persist failure raises the error flag without
+    // reverting the typed text (it would be hostile to wipe what the user just typed).
+    // Persist-on-keystroke writes are serialised : each keystroke cancels the previous in-flight write
+    // so a slower/older write (or its failure) can never land after a newer one and strand a stale
+    // Client-ID or a spurious error flag (review #459). CancellationException is rethrown, not treated
+    // as a persistence failure.
+    private var imgurClientIdJob: Job? = null
+
+    private fun updateImgurClientId(text: String) {
+        _state.update {
+            it.copy(
+                imgurClientId = text,
+                imgurClientIdError = false,
+                imgurClientIdTouchedLocally = true,
+            )
+        }
+        imgurClientIdJob?.cancel()
+        imgurClientIdJob = viewModelScope.launch {
+            runCatching { userPreferencesRepository.setImgurClientId(text) }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    _state.update { it.copy(imgurClientIdError = true) }
+                }
+        }
+    }
+
     private fun updateAmoled(desired: Boolean) {
         val previous = _state.value.amoledEnabled
         updateBooleanPreference(
@@ -534,6 +642,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setTopicPageFabs,
+        )
+    }
+
+    private fun updateTopicPollsExpanded(desired: Boolean) {
+        val previous = _state.value.topicPollsExpanded
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    topicPollsExpanded = desired,
+                    isUpdatingTopicPollsExpanded = true,
+                    topicPollsExpandedError = false,
+                    topicPollsExpandedTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(topicPollsExpanded = desired, isUpdatingTopicPollsExpanded = false)
+                } else {
+                    state.copy(
+                        topicPollsExpanded = previous,
+                        isUpdatingTopicPollsExpanded = false,
+                        topicPollsExpandedError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setTopicPollsExpanded,
         )
     }
 

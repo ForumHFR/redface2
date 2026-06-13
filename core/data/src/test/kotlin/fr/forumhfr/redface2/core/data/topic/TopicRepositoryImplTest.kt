@@ -6,10 +6,14 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.HfrParser
@@ -563,5 +567,33 @@ class TopicRepositoryImplTest {
         override fun observeMpUnreadBadge(): Flow<Boolean> = MutableStateFlow(true)
 
         override suspend fun setMpUnreadBadge(enabled: Boolean) = Unit
+
+        override fun observeTopicPollsExpanded(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
+
+        override fun observeStartScreen(): Flow<StartScreenPreference> =
+            MutableStateFlow(StartScreenPreference())
+
+        override suspend fun setStartScreen(preference: StartScreenPreference) = Unit
+
+        // #459 — upload provider / imgur Client-ID are irrelevant to this repository; default stubs.
+        override fun observeUploadProvider(): Flow<UploadProviderId> =
+            MutableStateFlow(UploadProviderId.DIBERIE)
+
+        override suspend fun setUploadProvider(provider: UploadProviderId) = Unit
+
+        override fun observeImgurClientId(): Flow<String> = MutableStateFlow("")
+
+        override suspend fun setImgurClientId(clientId: String) = Unit
+
+        // #287 — reading display presets are irrelevant to TopicRepository; stubbed at defaults.
+        override fun observeDisplayDensity(): Flow<DisplayDensity> = MutableStateFlow(DisplayDensity.COMFORT)
+
+        override suspend fun setDisplayDensity(density: DisplayDensity) = Unit
+
+        override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
+
+        override suspend fun setFontScale(scale: FontScalePreference) = Unit
     }
 }

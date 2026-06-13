@@ -33,6 +33,14 @@ data class PrivateMessageComposeUiState(
     val isSubmitting: Boolean = false,
     val submitError: PrivateMessageReplyError? = null,
     val showSubmitConfirmation: Boolean = false,
+    /**
+     * #405 — body of a previously-cached new-conversation draft, surfaced on init when a non-empty
+     * draft was found. [restorableSubject] / [restorableRecipients] carry the cached routing fields.
+     * « Restaurer » pre-fills the composer ; « Ignorer » deletes the cached row. Never silently lost.
+     */
+    val restorableDraft: String? = null,
+    val restorableSubject: String? = null,
+    val restorableRecipients: String? = null,
 ) {
     /** All three user-typed fields are required — HFR's « remplir tous les champs » rule. */
     val canSubmit: Boolean

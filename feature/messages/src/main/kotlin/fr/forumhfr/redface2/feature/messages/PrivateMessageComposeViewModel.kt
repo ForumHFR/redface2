@@ -10,6 +10,8 @@ import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -25,6 +27,7 @@ import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +56,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     private val repository: PrivateMessageWriteRepository,
     private val previewParser: BbcodePreviewParser,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val draftStore: EditorDraftStore,
     smileyRepository: SmileyRepository,
 ) : ViewModel() {
 
@@ -68,6 +72,19 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     private var formJob: Job? = null
     private var submitJob: Job? = null
 
+    /** #405 — single content-free key for the new-conversation composer (private → wiped on logout). */
+    private val draftKey: String = EditorDraftKey.mpCompose()
+
+    /** #405 — debounced autosave coroutine ; relaunched (cancelling the previous) on each edit. */
+    private var autosaveJob: Job? = null
+
+    /**
+     * #405 — account that owned this MP composer when it opened, snapshotted from [draftStore] so a
+     * mid-edit account switch can't write this session's PRIVATE draft (recipients + body) under
+     * another account (Codex beta review). Captured in [restoreDraftIfAny]; null until then.
+     */
+    private var draftOwner: String? = null
+
     /** #312 — mirror of the persisted « Confirmation avant publication » preference. */
     private var confirmBeforePosting: Boolean = false
 
@@ -77,10 +94,89 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 confirmBeforePosting = enabled
             }
         }
+        restoreDraftIfAny()
         loadForm()
     }
 
     fun retryFormLoad() = loadForm()
+
+    /**
+     * #405 — surface a cached draft (body + subject + recipients) on the banner, never auto-applied
+     * (a server-side `dest` prefill or seeded recipient would otherwise be clobbered). A draft is
+     * considered restorable when any of the three fields is non-blank.
+     */
+    private fun restoreDraftIfAny() {
+        viewModelScope.launch {
+            draftOwner = draftStore.currentOwner()
+            val draft = draftStore.load(draftOwner, draftKey) ?: return@launch
+            val hasContent = draft.body.isNotBlank() ||
+                !draft.subject.isNullOrBlank() ||
+                !draft.recipients.isNullOrBlank()
+            if (hasContent) {
+                _state.update {
+                    it.copy(
+                        restorableDraft = draft.body,
+                        restorableSubject = draft.subject,
+                        restorableRecipients = draft.recipients,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * #405 — debounced autosave of recipients + subject + body, flagged `isPrivate = true` so the
+     * logout purge wipes it. Empty across all three fields → delete the row. No-op without a session.
+     */
+    private fun scheduleAutosave() {
+        val snapshot = _state.value
+        val body = snapshot.draft.text
+        val subject = snapshot.subject
+        val recipients = snapshot.recipients
+        autosaveJob?.cancel()
+        autosaveJob = viewModelScope.launch {
+            delay(AUTOSAVE_DEBOUNCE_MS)
+            if (body.isBlank() && subject.isBlank() && recipients.isBlank()) {
+                draftStore.delete(draftOwner, draftKey)
+            } else {
+                draftStore.save(
+                    draftOwner,
+                    draftKey,
+                    EditorDraftStore.Draft(
+                        body = body,
+                        subject = subject.ifBlank { null },
+                        recipients = recipients.ifBlank { null },
+                        isPrivate = true,
+                    ),
+                )
+            }
+        }
+    }
+
+    /** #405 — apply the cached recipients + subject + body and clear the banner. */
+    fun onDraftRestoreRequested() {
+        val snapshot = _state.value
+        val body = snapshot.restorableDraft.orEmpty()
+        _state.update {
+            it.withDraftPreview(TextFieldValue(text = body, selection = TextRange(body.length)))
+                .copy(
+                    subject = snapshot.restorableSubject.orEmpty(),
+                    recipients = snapshot.restorableRecipients.orEmpty(),
+                    restorableDraft = null,
+                    restorableSubject = null,
+                    restorableRecipients = null,
+                )
+        }
+        scheduleAutosave()
+    }
+
+    /** #405 — discard the cached draft : delete the row and clear the banner. */
+    fun onDraftDiscardRequested() {
+        _state.update {
+            it.copy(restorableDraft = null, restorableSubject = null, restorableRecipients = null)
+        }
+        viewModelScope.launch { draftStore.delete(draftOwner, draftKey) }
+    }
 
     private fun loadForm() {
         formJob?.cancel()
@@ -140,15 +236,22 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         }
     }
 
-    fun onRecipientsChanged(value: String) = _state.update { it.copy(recipients = value) }
+    fun onRecipientsChanged(value: String) {
+        _state.update { it.copy(recipients = value) }
+        scheduleAutosave()
+    }
 
-    fun onSubjectChanged(value: String) = _state.update {
-        // HFR's maxlength=70 — truncate instead of erroring so pasted text just clips.
-        it.copy(subject = value.take(PrivateMessageComposeUiState.SUBJECT_MAX_LENGTH))
+    fun onSubjectChanged(value: String) {
+        _state.update {
+            // HFR's maxlength=70 — truncate instead of erroring so pasted text just clips.
+            it.copy(subject = value.take(PrivateMessageComposeUiState.SUBJECT_MAX_LENGTH))
+        }
+        scheduleAutosave()
     }
 
     fun onContentChanged(value: TextFieldValue) {
         _state.update { it.withDraftPreview(value) }
+        scheduleAutosave()
     }
 
     fun onToolbarAction(action: BbcodeAction) {
@@ -166,6 +269,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 ),
             )
         }
+        scheduleAutosave()
     }
 
     /**
@@ -198,6 +302,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
             )
         }
         smileyPicker.dismiss()
+        scheduleAutosave()
     }
 
     fun onTogglePreview() {
@@ -263,15 +368,20 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 )
             }
             outcome.fold(
-                onSuccess = ::handleSubmitOutcome,
+                onSuccess = { handleSubmitOutcome(it) },
                 onFailure = ::handleSubmitFailure,
             )
         }
     }
 
-    private fun handleSubmitOutcome(result: ReplySubmitResult) {
+    private suspend fun handleSubmitOutcome(result: ReplySubmitResult) {
         when (result) {
             is ReplySubmitResult.Success -> {
+                // #405 — the conversation reached HFR ; the cached draft is now obsolete. Cancel any
+                // pending autosave first so a debounced save can't resurrect the row after delete.
+                // AWAITED (not launched) so the nav pop on SubmitSucceeded can't cancel it (Codex).
+                autosaveJob?.cancel()
+                draftStore.delete(draftOwner, draftKey)
                 _state.update { it.copy(isSubmitting = false, submitError = null) }
                 // The success response of a NEW conversation is not topic-shaped, so the created
                 // threadId is unknown — the host pops back to the MP list and refreshes it.
@@ -320,6 +430,11 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     @AssistedFactory
     interface Factory {
         fun create(initialRecipient: String?): PrivateMessageComposeViewModel
+    }
+
+    private companion object {
+        // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
+        private const val AUTOSAVE_DEBOUNCE_MS = 750L
     }
 }
 

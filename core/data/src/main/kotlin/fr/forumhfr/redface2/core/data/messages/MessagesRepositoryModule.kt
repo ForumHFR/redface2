@@ -5,6 +5,7 @@ import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
 import javax.inject.Singleton
 
 @Module
@@ -14,4 +15,10 @@ abstract class MessagesRepositoryModule {
     @Binds
     @Singleton
     abstract fun bindMessagesRepository(impl: DefaultMessagesRepository): MessagesRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindPrivateMessageReadPositionStore(
+        impl: RoomPrivateMessageReadPositionStore,
+    ): PrivateMessageReadPositionStore
 }

@@ -40,6 +40,12 @@ data class PrivateMessageReplyUiState(
      * [PrivateMessageReplyViewModel.onSubmitConfirmed] / [PrivateMessageReplyViewModel.onSubmitConfirmationDismissed].
      */
     val showSubmitConfirmation: Boolean = false,
+    /**
+     * #405 — body of a previously-cached private-reply draft for this thread, surfaced on init when
+     * a non-empty draft was found. Non-null means « propose a restore » : « Restaurer » pre-fills
+     * the editor, « Ignorer » deletes the cached row. Never silently applied nor lost.
+     */
+    val restorableDraft: String? = null,
 ) {
     val canSubmit: Boolean
         get() = formAvailable && !isLoadingForm && !isSubmitting && draft.text.isNotBlank()

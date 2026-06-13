@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -94,13 +95,39 @@ data class PostEditorState(
      * [PostEditorIntent.SubmitConfirmed] / [PostEditorIntent.SubmitConfirmationDismissed].
      */
     val showSubmitConfirmation: Boolean = false,
+    /**
+     * #405 — the body of a previously-cached draft for this editor's key, surfaced on init when a
+     * non-empty draft was found. Non-null means « propose a restore » : the UI shows a banner with
+     * « Restaurer » ([PostEditorIntent.DraftRestoreRequested]) and « Ignorer »
+     * ([PostEditorIntent.DraftDiscardRequested]). The draft is never silently applied so a fresh
+     * quote prefill is not clobbered ; it is also never silently lost — discarding deletes the row.
+     */
+    val restorableDraft: String? = null,
+    /**
+     * #459 PR2 — `true` while an image picked from the photo picker is being read + uploaded to the
+     * selected host. The toolbar's image-upload affordance shows a progress indicator and is
+     * disabled so a second pick cannot race the in-flight upload.
+     */
+    val isUploading: Boolean = false,
+    /**
+     * #459 PR2 — typed upload failure surfaced after a failed pick→read→upload. Null means « no
+     * error to show ». Cleared on a fresh content mutation or via [PostEditorIntent.UploadErrorDismissed].
+     */
+    val uploadError: UploadError? = null,
+    /**
+     * Multi-image upload — progress of the in-flight batch, or null when no batch (or a single
+     * image) is uploading. [UploadProgress.total] > 1 is what the editor uses to show an « n/N »
+     * counter; a one-image upload keeps this null and only flips [isUploading].
+     */
+    val uploadProgress: UploadProgress? = null,
 ) {
     /**
      * Submission is allowed when : we know the routing context (page + subcat + topicId),
      * the user has typed something non-blank, the editor is not already submitting,
-     * and we are not still fetching the form. Phase 2D (#147) additionally requires
-     * `numreponse` for [PostEditorMode.Edit] — without it we cannot identify which
-     * post HFR should rewrite.
+     * we are not still fetching the form, and no image upload is in flight. Phase 2D (#147)
+     * additionally requires `numreponse` for [PostEditorMode.Edit] — without it we cannot
+     * identify which post HFR should rewrite. The [isUploading] guard (#459) stops a tap on
+     * « Envoyer » from racing an in-flight upload and posting before the image markup is inserted.
      */
     val canSubmit: Boolean
         get() = (mode == PostEditorMode.Reply || (mode == PostEditorMode.Edit && numreponse != null)) &&
@@ -112,7 +139,8 @@ data class PostEditorState(
             topicId != null &&
             draft.text.isNotBlank() &&
             !isSubmitting &&
-            !isLoadingForm
+            !isLoadingForm &&
+            !isUploading
 
     val isSubmitEnabled: Boolean get() = canSubmit
 }
@@ -139,6 +167,38 @@ sealed interface SubmitError {
     data object MissingSubcat : SubmitError
 }
 
+/**
+ * #459 PR2 / #474 — UI-facing image-upload failure. Maps the `:core:domain`
+ * [fr.forumhfr.redface2.core.domain.upload.UploadException] variants onto an actionable message
+ * (too large / unsupported type / host HTTP error / unreadable host response / network) instead of
+ * a generic « erreur de l'hébergeur ». The HTTP [Server] case carries the status [code] and the
+ * [providerId] so the banner can name the host and the exact code (#474); [Malformed] stays distinct
+ * so an unreadable-but-2xx body reads differently from a flat HTTP refusal. Anonymous clients never
+ * get here — the ViewModel ignores a pick without a userId.
+ */
+sealed interface UploadError {
+    /** The picked image exceeds the host's accepted size. */
+    data object TooLarge : UploadError
+
+    /** The host rejected the MIME type. */
+    data object UnsupportedType : UploadError
+
+    /** The host answered a non-2xx HTTP status. [code] is the status, [providerId] the host (#474). */
+    data class Server(val code: Int, val providerId: UploadProviderId) : UploadError
+
+    /** The host answered 2xx but the body could not be parsed into the expected shape (#474). */
+    data class Malformed(val providerId: UploadProviderId) : UploadError
+
+    /** No network / DNS / timeout — also covers an unreadable picked Uri (mapped to Network). */
+    data object Network : UploadError
+}
+
+/**
+ * Progress of a multi-image upload batch: [completed] images uploaded and inserted out of [total]
+ * picked. Surfaced as an « n/N » counter while [PostEditorState.isUploading] is true.
+ */
+data class UploadProgress(val completed: Int, val total: Int)
+
 
 
 internal fun PostEditorState.withDraft(updated: TextFieldValue): PostEditorState =
@@ -149,4 +209,7 @@ internal fun PostEditorState.withDraft(updated: TextFieldValue): PostEditorState
         // accepted that we will try again. Keep it on toolbar-only mutations though
         // (caller resets `submitError` directly when needed).
         submitError = if (updated.text != draft.text) null else submitError,
+        // #459 PR2 — same rule for the image-upload error : a fresh text edit dismisses the stale
+        // banner. A successful upload INSERTS text via this path, which also clears any prior error.
+        uploadError = if (updated.text != draft.text) null else uploadError,
     )

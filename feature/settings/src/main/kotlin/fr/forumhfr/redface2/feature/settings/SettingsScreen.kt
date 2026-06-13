@@ -43,26 +43,45 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 
 @Composable
 fun SettingsScreen(
     modifier: Modifier = Modifier,
+    // #459 PR3 — navigates to the « Mes images uploadées » screen. Default no-op so previews and
+    // the multi-pane illustrative call sites stay valid ; wired from RedfaceApp.
+    onOpenMyImages: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
+    // #458 — the « Démarrage » section has its own ViewModel (cf. its KDoc).
+    startScreenViewModel: StartScreenSettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val startScreenState by startScreenViewModel.state.collectAsStateWithLifecycle()
     SettingsContent(
         state = state,
         onIntent = viewModel::submit,
         modifier = modifier,
+        onOpenMyImages = onOpenMyImages,
+        startScreenState = startScreenState,
+        onStartScreenIntent = startScreenViewModel::submit,
     )
 }
 
+// MVI screen content : state + intent + modifier + rappels de navigation/feature (#458 démarrage,
+// #459 « Mes images »). 6 paramètres = la surface complète de l'écran ; les regrouper derrière un
+// objet masquerait le site d'appel sans gain réel. Seuil detekt LongParameterList à 6.
+@Suppress("LongParameterList")
 @Composable
 internal fun SettingsContent(
     state: SettingsState,
     onIntent: (SettingsIntent) -> Unit,
     modifier: Modifier = Modifier,
+    onOpenMyImages: () -> Unit = {},
+    startScreenState: StartScreenSettingsState = StartScreenSettingsState(),
+    onStartScreenIntent: (StartScreenSettingsIntent) -> Unit = {},
 ) {
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -209,14 +228,23 @@ internal fun SettingsContent(
                 ),
             )
 
+            SettingsSectionHeader(stringResource(R.string.settings_section_start))
+            StartScreenPreferencesCard(
+                state = startScreenState,
+                onIntent = onStartScreenIntent,
+            )
+
             SettingsSectionHeader(stringResource(R.string.settings_section_display))
             ThemePreferencesCard(
                 state = state,
                 onIntent = onIntent,
             )
+            DisplayPreferencesCard(
+                state = state,
+                onIntent = onIntent,
+            )
             FutureSettingsCard(
                 items = listOf(
-                    R.string.settings_future_reading_density to issueTag(287),
                     R.string.settings_future_ui_colors to issueTag(296),
                     R.string.settings_future_material_you to stringResource(R.string.settings_phase_future),
                     R.string.settings_future_classic_theme to stringResource(R.string.settings_phase_future_far),
@@ -255,6 +283,13 @@ internal fun SettingsContent(
                     R.string.settings_future_signature to stringResource(R.string.settings_phase_planned),
                 ),
             )
+
+            SettingsSectionHeader(stringResource(R.string.settings_section_images))
+            UploadProviderPreferencesCard(
+                state = state,
+                onIntent = onIntent,
+            )
+            MyImagesCard(onOpenMyImages = onOpenMyImages)
 
             SettingsSectionHeader(stringResource(R.string.settings_section_mp))
             MessagesPreferencesCard(
@@ -458,6 +493,80 @@ private fun ThemePreferencesCard(
 }
 
 /**
+ * Reading display presets (#287): a density preset (Confort / Compact, structural spacing) and a
+ * reading font-size preset (S / M / L). Both are persisted via DataStore and observed at the app
+ * root, so a change here re-themes the whole app live. Text-only segmented buttons (no Material
+ * icons — the `androidx.compose.material.*` import is forbidden project-wide).
+ */
+@Composable
+private fun DisplayPreferencesCard(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    val densityOptions = listOf(
+        DisplayDensity.COMFORT to stringResource(R.string.settings_display_density_comfort),
+        DisplayDensity.COMPACT to stringResource(R.string.settings_display_density_compact),
+    )
+    val fontScaleOptions = listOf(
+        FontScalePreference.S to stringResource(R.string.settings_display_font_scale_small),
+        FontScalePreference.M to stringResource(R.string.settings_display_font_scale_medium),
+        FontScalePreference.L to stringResource(R.string.settings_display_font_scale_large),
+    )
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_display_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.settings_display_density_intro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                densityOptions.forEachIndexed { index, (density, label) ->
+                    SegmentedButton(
+                        selected = state.displayDensity == density,
+                        enabled = state.canChangeDisplayDensity,
+                        onClick = { onIntent(SettingsIntent.DisplayDensityChanged(density)) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = densityOptions.size),
+                    ) {
+                        Text(label)
+                    }
+                }
+            }
+            if (state.displayDensityError) {
+                PreferencePersistError(R.string.settings_display_density_persist_failed)
+            }
+            Text(
+                text = stringResource(R.string.settings_display_font_scale_intro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                fontScaleOptions.forEachIndexed { index, (scale, label) ->
+                    SegmentedButton(
+                        selected = state.fontScale == scale,
+                        enabled = state.canChangeFontScale,
+                        onClick = { onIntent(SettingsIntent.FontScaleChanged(scale)) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = fontScaleOptions.size),
+                    ) {
+                        Text(label)
+                    }
+                }
+            }
+            if (state.fontScaleError) {
+                PreferencePersistError(R.string.settings_display_font_scale_persist_failed)
+            }
+        }
+    }
+}
+
+/**
  * Drapeaux display preferences (#179 follow-up): grouped-vs-flat layout and the « masquer les
  * catégories sans non-lu » filter. Persisted via DataStore and observed live by the Flags screen,
  * so a flip here re-renders the list without a refetch.
@@ -579,6 +688,16 @@ private fun TopicPreferencesCard(
             if (state.topicPageFabsError) {
                 PreferencePersistError(R.string.settings_topic_page_fabs_persist_failed)
             }
+            PreferenceSwitchRow(
+                title = stringResource(R.string.settings_topic_polls_expanded_title),
+                description = stringResource(R.string.settings_topic_polls_expanded_description),
+                checked = state.topicPollsExpanded,
+                enabled = state.canToggleTopicPollsExpanded,
+                onCheckedChange = { onIntent(SettingsIntent.TopicPollsExpandedChanged(it)) },
+            )
+            if (state.topicPollsExpandedError) {
+                PreferencePersistError(R.string.settings_topic_polls_expanded_persist_failed)
+            }
         }
     }
 }
@@ -613,6 +732,104 @@ private fun MessagesPreferencesCard(
             )
             if (state.mpUnreadBadgeError) {
                 PreferencePersistError(R.string.settings_mp_unread_badge_persist_failed)
+            }
+        }
+    }
+}
+
+/**
+ * #459 PR3 — entry point to the « Mes images uploadées » screen. A short description plus a button
+ * that navigates out of Settings (the screen itself is a standalone route, not a sub-form), mirroring
+ * how the maintenance actions read but routing instead of mutating a preference.
+ */
+@Composable
+private fun MyImagesCard(onOpenMyImages: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_my_images_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.settings_my_images_description),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = onOpenMyImages,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.settings_my_images_open))
+            }
+        }
+    }
+}
+
+/**
+ * #459 — « Hébergeur d'images » : choisit l'hébergeur des uploads de l'éditeur (diberie sans
+ * compte, imgur avec un Client-ID que l'utilisateur colle). Le champ Client-ID n'apparaît que pour
+ * imgur. Persisté en DataStore et lu par l'éditeur à chaque upload. Boutons segmentés en texte seul
+ * (pas d'icônes Material — l'import `androidx.compose.material.*` est interdit dans le projet).
+ */
+@Composable
+private fun UploadProviderPreferencesCard(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    val options = listOf(
+        UploadProviderId.DIBERIE to stringResource(R.string.settings_upload_provider_diberie),
+        UploadProviderId.IMGUR to stringResource(R.string.settings_upload_provider_imgur),
+    )
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_upload_provider_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.settings_upload_provider_intro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                options.forEachIndexed { index, (provider, label) ->
+                    SegmentedButton(
+                        selected = state.uploadProvider == provider,
+                        enabled = state.canChangeUploadProvider,
+                        onClick = { onIntent(SettingsIntent.SetUploadProvider(provider)) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                    ) {
+                        Text(label)
+                    }
+                }
+            }
+            if (state.uploadProviderError) {
+                PreferencePersistError(R.string.settings_upload_provider_persist_failed)
+            }
+            // The Client-ID field is only meaningful for imgur (diberie needs no credentials).
+            if (state.uploadProvider == UploadProviderId.IMGUR) {
+                OutlinedTextField(
+                    value = state.imgurClientId,
+                    onValueChange = { onIntent(SettingsIntent.SetImgurClientId(it)) },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.settings_upload_imgur_client_id_label)) },
+                    supportingText = {
+                        Text(stringResource(R.string.settings_upload_imgur_client_id_helper))
+                    },
+                    isError = state.imgurClientIdError,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (state.imgurClientIdError) {
+                    PreferencePersistError(R.string.settings_upload_imgur_client_id_persist_failed)
+                }
             }
         }
     }
@@ -690,7 +907,7 @@ private fun PreferenceSwitchRow(
 
 /** Inline persist-failure message for a [PreferenceSwitchRow], shown below the row. */
 @Composable
-private fun PreferencePersistError(messageRes: Int) {
+internal fun PreferencePersistError(messageRes: Int) {
     Text(
         text = stringResource(messageRes),
         style = MaterialTheme.typography.bodySmall,

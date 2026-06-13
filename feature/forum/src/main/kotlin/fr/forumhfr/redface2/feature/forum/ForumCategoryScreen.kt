@@ -28,6 +28,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -50,6 +53,7 @@ import fr.forumhfr.redface2.core.model.TopicSummary
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
+import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 
 /**
  * Per-category screen: chip row of subcategories ("Toutes" + each subcat) on top, list
@@ -113,18 +117,31 @@ fun ForumCategoryScreen(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+            // #455 — « Mes drapeaux » filter, mirroring the web `owntopic` toolbar. Only an
+            // authenticated session has flags, so the selector is hidden for anonymous users.
+            if (state.canCreateTopic) {
+                FlagFilterSelector(
+                    selected = state.flagFilter,
+                    onSelect = viewModel::selectFlagFilter,
+                )
+            }
+
             SearchField(
                 query = state.searchQuery,
                 onQueryChange = viewModel::updateSearchQuery,
             )
 
+            // In flag-filter mode the bucket listing is the source (and the pager is hidden,
+            // buckets are not paginated); ALL keeps the normal paginated listing.
+            val filterActive = state.flagFilter != CategoryFlagFilter.ALL
+            val activeTopics = if (filterActive) state.flagFilterTopics else state.topics
             PullToRefreshBox(
                 isRefreshing = state.isRefreshing,
                 onRefresh = viewModel::refresh,
                 modifier = Modifier.fillMaxSize(),
             ) {
                 TopicsBody(
-                    state = state.topics,
+                    state = activeTopics,
                     filteredTopics = state.filteredTopics,
                     searchQuery = state.searchQuery,
                     onOpenTopic = onOpenTopic,
@@ -132,6 +149,7 @@ fun ForumCategoryScreen(
                     onSelectPage = viewModel::selectPage,
                     currentPage = state.page,
                     pageCount = state.pageCount,
+                    showPager = !filterActive,
                     // #206 workaround — highlight only on the listing page/subcat reached
                     // immediately after create. If the user changes page or subcat, the route
                     // hint is ignored so an unrelated same-title topic is not highlighted there.
@@ -161,6 +179,39 @@ private fun SearchField(
         label = { Text(stringResource(R.string.category_search_label)) },
         placeholder = { Text(stringResource(R.string.category_search_placeholder)) },
     )
+}
+
+/**
+ * #455 — single-choice segmented row replicating the web `owntopic` toolbar: Tous /
+ * Participé / Lus / Favoris. No Material icon (detekt `ForbiddenImport` bans
+ * `androidx.compose.material.*`), labels only.
+ */
+@Composable
+private fun FlagFilterSelector(
+    selected: CategoryFlagFilter,
+    onSelect: (CategoryFlagFilter) -> Unit,
+) {
+    val options = listOf(
+        CategoryFlagFilter.ALL to R.string.category_flag_filter_all,
+        CategoryFlagFilter.PARTICIPATED to R.string.category_flag_filter_participated,
+        CategoryFlagFilter.READ to R.string.category_flag_filter_read,
+        CategoryFlagFilter.FAVORITES to R.string.category_flag_filter_favorites,
+    )
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        options.forEachIndexed { index, (mode, labelRes) ->
+            SegmentedButton(
+                selected = selected == mode,
+                onClick = { onSelect(mode) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+            ) {
+                Text(text = stringResource(labelRes), maxLines = 1)
+            }
+        }
+    }
 }
 
 @Composable
@@ -238,6 +289,7 @@ private fun TopicsBody(
     onSelectPage: (Int) -> Unit,
     currentPage: Int,
     pageCount: Int,
+    showPager: Boolean,
     highlightTitle: String?,
 ) {
     when (state) {
@@ -294,12 +346,14 @@ private fun TopicsBody(
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
-                item {
-                    PagerRow(
-                        currentPage = currentPage,
-                        pageCount = pageCount,
-                        onSelectPage = onSelectPage,
-                    )
+                if (showPager) {
+                    item {
+                        PagerRow(
+                            currentPage = currentPage,
+                            pageCount = pageCount,
+                            onSelectPage = onSelectPage,
+                        )
+                    }
                 }
             }
         }
@@ -355,6 +409,8 @@ private fun TopicRow(
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
+    // #287 — listing-row vertical rhythm from the density preset (Comfort = 10 dp, the lot A value).
+    val m = LocalDisplayMetrics.current
     val rowModifier = Modifier
         .fillMaxWidth()
         .then(
@@ -367,7 +423,7 @@ private fun TopicRow(
             },
         )
         .clickable(onClick = onClick)
-        .padding(horizontal = 24.dp, vertical = 12.dp)
+        .padding(horizontal = 24.dp, vertical = m.listRowVertical)
     Row(
         modifier = rowModifier,
         verticalAlignment = Alignment.CenterVertically,

@@ -4,11 +4,15 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
@@ -444,6 +448,25 @@ class TopicViewModelTest {
             userPreferencesRepository = FakeUserPreferencesRepository(topicPageFabs = true),
         )
         assertEquals(true, shown.state.value.showPageFabs)
+    }
+
+    @Test
+    fun `state pollsExpandedDefault reflects the user preference (#456)`() = runTest {
+        val collapsed = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicPollsExpanded = false),
+        )
+        assertEquals(false, collapsed.state.value.pollsExpandedDefault)
+
+        val expanded = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicPollsExpanded = true),
+        )
+        assertEquals(true, expanded.state.value.pollsExpandedDefault)
     }
 
     @Test
@@ -1280,13 +1303,15 @@ private class FakeStreamingTopicRepository(
 
 /**
  * No-op preferences fake for the topic ViewModel tests. Only [observeTopicTopBarAutoHide]
- * (build 89 follow-up) and [observeTopicPageFabs] (#383) are read by [TopicViewModel] —
- * everything else returns the DataStore default so the fake stays a thin stand-in. The two
- * relevant values are constructor-injectable so tests can assert they reach state.
+ * (build 89 follow-up), [observeTopicPageFabs] (#383) and [observeTopicPollsExpanded] (#456)
+ * are read by [TopicViewModel] — everything else returns the DataStore default so the fake
+ * stays a thin stand-in. The three relevant values are constructor-injectable so tests can
+ * assert they reach state.
  */
 private class FakeUserPreferencesRepository(
     private val topicTopBarAutoHide: Boolean = false,
     private val topicPageFabs: Boolean = true,
+    private val topicPollsExpanded: Boolean = false,
 ) : UserPreferencesRepository {
     override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
 
@@ -1351,4 +1376,32 @@ private class FakeUserPreferencesRepository(
     override fun observeMpUnreadBadge(): Flow<Boolean> = MutableStateFlow(true)
 
     override suspend fun setMpUnreadBadge(enabled: Boolean) = Unit
+
+    override fun observeTopicPollsExpanded(): Flow<Boolean> = MutableStateFlow(topicPollsExpanded)
+
+    override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
+
+    override fun observeStartScreen(): Flow<StartScreenPreference> =
+        MutableStateFlow(StartScreenPreference())
+
+    override suspend fun setStartScreen(preference: StartScreenPreference) = Unit
+
+    // #459 — upload provider / imgur Client-ID are irrelevant to TopicViewModel; default stubs.
+    override fun observeUploadProvider(): Flow<UploadProviderId> =
+        MutableStateFlow(UploadProviderId.DIBERIE)
+
+    override suspend fun setUploadProvider(provider: UploadProviderId) = Unit
+
+    override fun observeImgurClientId(): Flow<String> = MutableStateFlow("")
+
+    override suspend fun setImgurClientId(clientId: String) = Unit
+
+    // #287 — reading display presets are irrelevant to TopicViewModel; stubbed at defaults.
+    override fun observeDisplayDensity(): Flow<DisplayDensity> = MutableStateFlow(DisplayDensity.COMFORT)
+
+    override suspend fun setDisplayDensity(density: DisplayDensity) = Unit
+
+    override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
+
+    override suspend fun setFontScale(scale: FontScalePreference) = Unit
 }

@@ -9,6 +9,8 @@ import fr.forumhfr.redface2.core.network.HfrConstants
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
+import fr.forumhfr.redface2.core.network.qualifiers.UploadClient
+import java.time.Duration
 import javax.inject.Singleton
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -51,4 +53,22 @@ object NetworkModule {
     fun provideAnonymousClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
         .cookieJar(CookieJar.NO_COOKIES)
         .build()
+
+    /**
+     * Image-host client (#459). Reuses the base client (proxy + user-agent) but strips cookies so
+     * the HFR session is never sent to imgur / diberie, and lengthens the write/call timeouts:
+     * [HfrConstants.WriteTimeout] / [HfrConstants.CallTimeout] are dimensioned for short urlencoded
+     * `FormBody` POSTs, not a multipart binary up to 20 MB.
+     */
+    @Provides
+    @Singleton
+    @UploadClient
+    fun provideUploadClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
+        .cookieJar(CookieJar.NO_COOKIES)
+        .writeTimeout(Duration.ofSeconds(UPLOAD_WRITE_TIMEOUT_SECONDS))
+        .callTimeout(Duration.ofSeconds(UPLOAD_CALL_TIMEOUT_SECONDS))
+        .build()
+
+    private const val UPLOAD_WRITE_TIMEOUT_SECONDS = 60L
+    private const val UPLOAD_CALL_TIMEOUT_SECONDS = 90L
 }

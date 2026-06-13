@@ -16,10 +16,39 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v132 — `0.11.0` — 2026-06-13
+
+**Statut** : `local` (candidat bêta — numéro anticipé ledger 131+1, à confirmer au dispatch `channel=beta`)
+**Commit** : à venir (promotion dev→main)
+**Fichier** : AAB `bundleProdRelease` → track open testing + tag pour F-Droid beta
+
+**Contenu depuis la 0.10.0/v126** : dogfoodé sur le canal dev (v127 → v131).
+
+### Added
+- **Upload d'images depuis l'éditeur** (#459) : bouton « Uploader » → sélection galerie, upload chez l'hébergeur, insertion `[img]` au curseur.
+- **Upload multi-images** (#490) : sélecteur multi (jusqu'à 10), upload séquentiel dans l'ordre de sélection, compteur « n/N », arrêt à la première erreur (images déjà insérées conservées) ; validé sur S10e.
+- **Choix de l'hébergeur d'images** dans les Réglages (#459/#474) : diberie ou imgur (Client-ID Imgur perso) ; message d'erreur d'upload précis (hébergeur + code HTTP).
+- **Écran « Mes images uploadées »** avec suppression (#459).
+- **Brouillons d'éditeur** (#405) : sauvegarde et restauration automatiques (cache Room).
+- **Multi-quote** : bouton « + » par post pour empiler des citations (#436).
+- **Sondages** : repliés par défaut + réglage « Déplier les sondages » (#456).
+- **Drapeaux** : swipe entre les onglets + suppression par appui long (#457) ; filtre « Mes drapeaux » par (sous-)catégorie (#455) ; bandeau de catégorie cliquable vers le listing (#414).
+- **Messages privés** : ouverture d'un MP sur sa dernière page + reprise de lecture locale (#430).
+- **Affichage** : préréglages de densité + taille de police de lecture sur 3 crans (#287) ; écran de démarrage configurable — onglet + catégorie Forum au lancement (#458).
+
+### Fixed
+- **Upload diberie cassé** (#459/#474) : le `picID` renvoyé par diberie est un nombre JSON (pas une chaîne) — chaque upload échouait au parsing. Corrigé + test de régression sur fixture réelle.
+
+### Changed
+- **`versionName` 0.10.0 → 0.11.0**.
+- Listes densifiées : gouttière globale du NavHost retirée (#398/#287).
+
+---
+
 ## v126 — `0.10.0` — 2026-06-12
 
-**Statut** : `local` (candidat bêta — numéro anticipé ledger 125+1, à confirmer au dispatch `channel=beta`)
-**Commit** : à venir (promotion dev→main)
+**Statut** : `open` (track open testing) + F-Droid `.beta`
+**Commit** : merge de promotion `fe6bda5e` (#451), tag `app-v126` (versionCode 126)
 **Fichier** : AAB `bundleProdRelease` → track open testing + tag pour F-Droid beta
 
 **Contenu depuis la 0.9.0/v113** : night-run 2026-06-11→12 + arbitrages du 12 + dernier round, dogfoodés sur le canal dev (v114 → v125).

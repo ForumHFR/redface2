@@ -2,10 +2,14 @@ package fr.forumhfr.redface2.feature.settings
 
 import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -733,6 +737,75 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `init hydrates reading display presets from storage`() = runTest {
+        repository.emitDisplayDensity(DisplayDensity.COMPACT)
+        repository.emitFontScale(FontScalePreference.L)
+
+        val viewModel = newViewModel()
+        val state = viewModel.state.value
+
+        assertEquals(DisplayDensity.COMPACT, state.displayDensity)
+        assertEquals(FontScalePreference.L, state.fontScale)
+    }
+
+    @Test
+    fun `DisplayDensityChanged persists the new preset and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals("COMFORT is the default", DisplayDensity.COMFORT, viewModel.state.value.displayDensity)
+
+        viewModel.submit(SettingsIntent.DisplayDensityChanged(DisplayDensity.COMPACT))
+
+        val state = viewModel.state.value
+        assertEquals(DisplayDensity.COMPACT, state.displayDensity)
+        assertFalse(state.isUpdatingDisplayDensity)
+        assertFalse(state.displayDensityError)
+        assertEquals(1, repository.displayDensitySetCalls)
+        assertEquals(DisplayDensity.COMPACT, repository.lastDisplayDensitySet)
+    }
+
+    @Test
+    fun `DisplayDensityChanged reverts to the previous preset and raises the error flag on persist failure`() =
+        runTest {
+            repository.failOnDisplayDensitySet = true
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.DisplayDensityChanged(DisplayDensity.COMPACT))
+
+            val state = viewModel.state.value
+            assertEquals("must revert to the previous preset on failure", DisplayDensity.COMFORT, state.displayDensity)
+            assertFalse(state.isUpdatingDisplayDensity)
+            assertTrue(state.displayDensityError)
+        }
+
+    @Test
+    fun `FontScaleChanged persists the new preset and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals("M is the default", FontScalePreference.M, viewModel.state.value.fontScale)
+
+        viewModel.submit(SettingsIntent.FontScaleChanged(FontScalePreference.L))
+
+        val state = viewModel.state.value
+        assertEquals(FontScalePreference.L, state.fontScale)
+        assertFalse(state.isUpdatingFontScale)
+        assertFalse(state.fontScaleError)
+        assertEquals(1, repository.fontScaleSetCalls)
+        assertEquals(FontScalePreference.L, repository.lastFontScaleSet)
+    }
+
+    @Test
+    fun `FontScaleChanged reverts to the previous preset and raises the error flag on persist failure`() = runTest {
+        repository.failOnFontScaleSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.FontScaleChanged(FontScalePreference.S))
+
+        val state = viewModel.state.value
+        assertEquals("must revert to the previous preset on failure", FontScalePreference.M, state.fontScale)
+        assertFalse(state.isUpdatingFontScale)
+        assertTrue(state.fontScaleError)
+    }
+
+    @Test
     fun `TopicTopBarAutoHideChanged persists the flip`() = runTest {
         val viewModel = newViewModel()
         assertFalse("auto-hide is off by default", viewModel.state.value.topicTopBarAutoHide)
@@ -860,6 +933,45 @@ class SettingsViewModelTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────
+    // Sondages dépliés par défaut (#456)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates topicPollsExpanded from a persisted true`() = runTest {
+        // Default is false — only a persisted opt-in exercises the hydration path.
+        repository.emitTopicPollsExpanded(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.topicPollsExpanded)
+        assertFalse(viewModel.state.value.topicPollsExpandedError)
+    }
+
+    @Test
+    fun `TopicPollsExpandedChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("polls are collapsed by default", viewModel.state.value.topicPollsExpanded)
+
+        viewModel.submit(SettingsIntent.TopicPollsExpandedChanged(true))
+
+        assertTrue(viewModel.state.value.topicPollsExpanded)
+        assertFalse(viewModel.state.value.isUpdatingTopicPollsExpanded)
+        assertEquals(1, repository.topicPollsExpandedSetCalls)
+    }
+
+    @Test
+    fun `TopicPollsExpandedChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnTopicPollsExpandedSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.TopicPollsExpandedChanged(true))
+
+        assertFalse("failed persist must revert to the previous value", viewModel.state.value.topicPollsExpanded)
+        assertFalse(viewModel.state.value.isUpdatingTopicPollsExpanded)
+        assertTrue(viewModel.state.value.topicPollsExpandedError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Confirm before posting (#312)
     // ──────────────────────────────────────────────────────────────────────
 
@@ -931,6 +1043,162 @@ class SettingsViewModelTest {
             assertFalse(finalState.themeModeError)
             assertEquals(1, repository.themeModeSetCalls)
             assertEquals(ThemeMode.DARK, repository.lastThemeModeSet)
+        }
+
+    @Test
+    fun `displayDensity hydration race - a stale initial emission must not overwrite a local change`() =
+        runTest {
+            // Same startup-race contract as ThemeMode (#287): the user picks COMPACT while init is
+            // still suspended on observeDisplayDensity().first(); the late stale COMFORT must be
+            // skipped by the touchedLocally guard.
+            val initialHydrationFlow = MutableSharedFlow<DisplayDensity>(replay = 0)
+            repository.displayDensityObserveOverride = initialHydrationFlow
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.DisplayDensityChanged(DisplayDensity.COMPACT))
+            assertEquals(DisplayDensity.COMPACT, viewModel.state.value.displayDensity)
+            assertTrue(viewModel.state.value.displayDensityTouchedLocally)
+
+            initialHydrationFlow.emit(DisplayDensity.COMFORT)
+
+            val finalState = viewModel.state.value
+            assertEquals(
+                "stale hydration must NOT overwrite the local density change",
+                DisplayDensity.COMPACT,
+                finalState.displayDensity,
+            )
+            assertFalse(finalState.isUpdatingDisplayDensity)
+            assertFalse(finalState.displayDensityError)
+            assertEquals(1, repository.displayDensitySetCalls)
+            assertEquals(DisplayDensity.COMPACT, repository.lastDisplayDensitySet)
+        }
+
+    @Test
+    fun `fontScale hydration race - a stale initial emission must not overwrite a local change`() =
+        runTest {
+            val initialHydrationFlow = MutableSharedFlow<FontScalePreference>(replay = 0)
+            repository.fontScaleObserveOverride = initialHydrationFlow
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.FontScaleChanged(FontScalePreference.L))
+            assertEquals(FontScalePreference.L, viewModel.state.value.fontScale)
+            assertTrue(viewModel.state.value.fontScaleTouchedLocally)
+
+            initialHydrationFlow.emit(FontScalePreference.M)
+
+            val finalState = viewModel.state.value
+            assertEquals(
+                "stale hydration must NOT overwrite the local font-scale change",
+                FontScalePreference.L,
+                finalState.fontScale,
+            )
+            assertFalse(finalState.isUpdatingFontScale)
+            assertFalse(finalState.fontScaleError)
+            assertEquals(1, repository.fontScaleSetCalls)
+            assertEquals(FontScalePreference.L, repository.lastFontScaleSet)
+        }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Hébergeur d'images — provider + imgur Client-ID (#459)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates upload provider and imgur client id from storage`() = runTest {
+        repository.emitUploadProvider(UploadProviderId.IMGUR)
+        repository.emitImgurClientId("abc123")
+
+        val viewModel = newViewModel()
+        val state = viewModel.state.value
+
+        assertEquals(UploadProviderId.IMGUR, state.uploadProvider)
+        assertEquals("abc123", state.imgurClientId)
+    }
+
+    @Test
+    fun `SetUploadProvider persists the new provider and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals("DIBERIE is the default", UploadProviderId.DIBERIE, viewModel.state.value.uploadProvider)
+
+        viewModel.submit(SettingsIntent.SetUploadProvider(UploadProviderId.IMGUR))
+
+        val state = viewModel.state.value
+        assertEquals(UploadProviderId.IMGUR, state.uploadProvider)
+        assertFalse(state.isUpdatingUploadProvider)
+        assertFalse(state.uploadProviderError)
+        assertEquals(1, repository.uploadProviderSetCalls)
+        assertEquals(UploadProviderId.IMGUR, repository.lastUploadProviderSet)
+    }
+
+    @Test
+    fun `SetUploadProvider reverts to the previous provider and raises the error flag on persist failure`() =
+        runTest {
+            repository.failOnUploadProviderSet = true
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.SetUploadProvider(UploadProviderId.IMGUR))
+
+            val state = viewModel.state.value
+            assertEquals(
+                "must revert to the previous provider on failure",
+                UploadProviderId.DIBERIE,
+                state.uploadProvider,
+            )
+            assertFalse(state.isUpdatingUploadProvider)
+            assertTrue(state.uploadProviderError)
+        }
+
+    @Test
+    fun `SetImgurClientId persists the text and exposes it`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals("client id is empty by default", "", viewModel.state.value.imgurClientId)
+
+        viewModel.submit(SettingsIntent.SetImgurClientId("CID-42"))
+
+        val state = viewModel.state.value
+        assertEquals("CID-42", state.imgurClientId)
+        assertFalse(state.imgurClientIdError)
+        assertEquals(1, repository.imgurClientIdSetCalls)
+        assertEquals("CID-42", repository.lastImgurClientIdSet)
+    }
+
+    @Test
+    fun `SetImgurClientId raises the error flag on persist failure but keeps the typed text`() = runTest {
+        repository.failOnImgurClientIdSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.SetImgurClientId("CID-42"))
+
+        val state = viewModel.state.value
+        // The optimistic value is kept — wiping what the user just typed would be hostile.
+        assertEquals("typed text is preserved on persist failure", "CID-42", state.imgurClientId)
+        assertTrue(state.imgurClientIdError)
+        assertEquals(1, repository.imgurClientIdSetCalls)
+    }
+
+    @Test
+    fun `upload provider hydration race - a stale initial emission must not overwrite a local change`() =
+        runTest {
+            // Same startup-race contract as ThemeMode (#459): the user picks IMGUR while init is still
+            // suspended on observeUploadProvider().first(); the late stale DIBERIE must be skipped by
+            // the touchedLocally guard.
+            val initialHydrationFlow = MutableSharedFlow<UploadProviderId>(replay = 0)
+            repository.uploadProviderObserveOverride = initialHydrationFlow
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.SetUploadProvider(UploadProviderId.IMGUR))
+            assertEquals(UploadProviderId.IMGUR, viewModel.state.value.uploadProvider)
+            assertTrue(viewModel.state.value.uploadProviderTouchedLocally)
+
+            initialHydrationFlow.emit(UploadProviderId.DIBERIE)
+
+            val finalState = viewModel.state.value
+            assertEquals(
+                "stale hydration must NOT overwrite the local provider change",
+                UploadProviderId.IMGUR,
+                finalState.uploadProvider,
+            )
+            assertEquals(1, repository.uploadProviderSetCalls)
+            assertEquals(UploadProviderId.IMGUR, repository.lastUploadProviderSet)
         }
 
     private fun newViewModel(): SettingsViewModel =
@@ -1064,6 +1332,55 @@ class SettingsViewModelTest {
             amoledEnabled.value = enabled
         }
 
+        // #287 — reading display presets. Same optimistic-flip seams as the theme controls.
+        private val displayDensity = MutableStateFlow(DisplayDensity.COMFORT)
+        var displayDensitySetCalls: Int = 0
+            private set
+        var lastDisplayDensitySet: DisplayDensity? = null
+            private set
+        var failOnDisplayDensitySet: Boolean = false
+
+        /** Startup-race seam, mirroring [themeModeObserveOverride] (#287). */
+        var displayDensityObserveOverride: Flow<DisplayDensity>? = null
+
+        override fun observeDisplayDensity(): Flow<DisplayDensity> =
+            displayDensityObserveOverride ?: displayDensity
+
+        override suspend fun setDisplayDensity(density: DisplayDensity) {
+            displayDensitySetCalls += 1
+            check(!failOnDisplayDensitySet) { "boom" }
+            lastDisplayDensitySet = density
+            displayDensity.value = density
+        }
+
+        fun emitDisplayDensity(value: DisplayDensity) {
+            displayDensity.value = value
+        }
+
+        private val fontScale = MutableStateFlow(FontScalePreference.M)
+        var fontScaleSetCalls: Int = 0
+            private set
+        var lastFontScaleSet: FontScalePreference? = null
+            private set
+        var failOnFontScaleSet: Boolean = false
+
+        /** Startup-race seam, mirroring [themeModeObserveOverride] (#287). */
+        var fontScaleObserveOverride: Flow<FontScalePreference>? = null
+
+        override fun observeFontScale(): Flow<FontScalePreference> =
+            fontScaleObserveOverride ?: fontScale
+
+        override suspend fun setFontScale(scale: FontScalePreference) {
+            fontScaleSetCalls += 1
+            check(!failOnFontScaleSet) { "boom" }
+            lastFontScaleSet = scale
+            fontScale.value = scale
+        }
+
+        fun emitFontScale(value: FontScalePreference) {
+            fontScale.value = value
+        }
+
         // Build 89 follow-up — topic top-bar auto-hide. Same optimistic-flip seam as amoled.
         private val topicTopBarAutoHide = MutableStateFlow(false)
         var topicTopBarAutoHideSetCalls: Int = 0
@@ -1115,6 +1432,77 @@ class SettingsViewModelTest {
 
         fun emitMpUnreadBadge(value: Boolean) {
             mpUnreadBadge.value = value
+        }
+
+        // #456 — sondages dépliés par défaut. Même seam optimistic-flip que mpUnreadBadge.
+        private val topicPollsExpanded = MutableStateFlow(false)
+        var topicPollsExpandedSetCalls: Int = 0
+            private set
+        var failOnTopicPollsExpandedSet: Boolean = false
+
+        override fun observeTopicPollsExpanded(): Flow<Boolean> = topicPollsExpanded
+
+        override suspend fun setTopicPollsExpanded(enabled: Boolean) {
+            topicPollsExpandedSetCalls += 1
+            check(!failOnTopicPollsExpandedSet) { "boom" }
+            topicPollsExpanded.value = enabled
+        }
+
+        fun emitTopicPollsExpanded(value: Boolean) {
+            topicPollsExpanded.value = value
+        }
+
+        // #458 — start screen lives on its own StartScreenSettingsViewModel; this fake only
+        // satisfies the interface for the main Settings ViewModel under test.
+        override fun observeStartScreen(): Flow<StartScreenPreference> =
+            MutableStateFlow(StartScreenPreference())
+
+        override suspend fun setStartScreen(preference: StartScreenPreference) = Unit
+
+        // #459 — upload provider / imgur Client-ID. Same optimistic-flip seam as the theme controls
+        // so the Settings tests can assert hydration, the repo call, and the revert-on-failure path.
+        private val uploadProvider = MutableStateFlow(UploadProviderId.DIBERIE)
+        var uploadProviderSetCalls: Int = 0
+            private set
+        var lastUploadProviderSet: UploadProviderId? = null
+            private set
+        var failOnUploadProviderSet: Boolean = false
+
+        /** Startup-race seam, mirroring [themeModeObserveOverride] (#459). */
+        var uploadProviderObserveOverride: Flow<UploadProviderId>? = null
+
+        override fun observeUploadProvider(): Flow<UploadProviderId> =
+            uploadProviderObserveOverride ?: uploadProvider
+
+        override suspend fun setUploadProvider(provider: UploadProviderId) {
+            uploadProviderSetCalls += 1
+            check(!failOnUploadProviderSet) { "boom" }
+            lastUploadProviderSet = provider
+            uploadProvider.value = provider
+        }
+
+        fun emitUploadProvider(value: UploadProviderId) {
+            uploadProvider.value = value
+        }
+
+        private val imgurClientId = MutableStateFlow("")
+        var imgurClientIdSetCalls: Int = 0
+            private set
+        var lastImgurClientIdSet: String? = null
+            private set
+        var failOnImgurClientIdSet: Boolean = false
+
+        override fun observeImgurClientId(): Flow<String> = imgurClientId
+
+        override suspend fun setImgurClientId(clientId: String) {
+            imgurClientIdSetCalls += 1
+            check(!failOnImgurClientIdSet) { "boom" }
+            lastImgurClientIdSet = clientId
+            imgurClientId.value = clientId
+        }
+
+        fun emitImgurClientId(value: String) {
+            imgurClientId.value = value
         }
 
         // #312 — confirm-before-posting. Same optimistic-flip seam as the topic top-bar toggle.

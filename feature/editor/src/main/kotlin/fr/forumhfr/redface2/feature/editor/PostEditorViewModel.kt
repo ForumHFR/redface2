@@ -10,13 +10,20 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
+import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
+import fr.forumhfr.redface2.core.domain.upload.UploadException
+import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyContext
@@ -57,7 +64,12 @@ import kotlinx.coroutines.launch
  * by the repository are surfaced via [SubmitError]; the draft is preserved.
  */
 @HiltViewModel(assistedFactory = PostEditorViewModel.Factory::class)
-@Suppress("LongParameterList") // Hilt constructor injection — one dependency per collaborator.
+@Suppress("LongParameterList", "LargeClass")
+// LongParameterList — Hilt constructor injection, one dependency per collaborator (#459 PR2 adds
+// the upload reader + repository + auth source for the in-editor image upload).
+// LargeClass — one class per ViewModel co-locates every code path (#145 reply / #146 quote /
+// #147 edit / #11 smiley / #189 image-url / #405 draft / #459 image-upload) with its dispatcher ;
+// splitting per phase would shred the shared state transformers (same rationale as TopicFormVM).
 class PostEditorViewModel @AssistedInject constructor(
     @Assisted private val request: PostEditorRequest,
     private val previewParser: BbcodePreviewParser,
@@ -65,7 +77,11 @@ class PostEditorViewModel @AssistedInject constructor(
     private val editPostRepository: EditPostRepository,
     private val smileyRepository: SmileyRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val draftStore: EditorDraftStore,
     private val diagnostics: DiagnosticsLog,
+    private val uploadRepository: UploadRepository,
+    private val imageUploadReader: ImageUploadReader,
+    private val authRepository: AuthRepository,
 ) : ViewModel() {
 
     private val _state: MutableStateFlow<PostEditorState> = MutableStateFlow(
@@ -96,6 +112,19 @@ class PostEditorViewModel @AssistedInject constructor(
     private var smileySearchJob: Job? = null
 
     /**
+     * #405 — stable, content-free draft key for this editor session, or null when the routing args
+     * cannot identify a target (no autosave/restore then). Reply ignores the quoted numreponse on
+     * purpose (cf. [EditorDraftKey]). Edit needs the numreponse to identify the post.
+     */
+    private val draftKey: String? = when (request.mode) {
+        PostEditorMode.Reply -> request.topicId?.let { EditorDraftKey.reply(request.cat, it) }
+        PostEditorMode.Edit -> request.numreponse?.let { EditorDraftKey.editPost(request.cat, it) }
+    }
+
+    /** #405 — debounced autosave coroutine ; relaunched (cancelling the previous) on each edit. */
+    private var autosaveJob: Job? = null
+
+    /**
      * #312 — mirror of the persisted « Confirmation avant publication » preference. Collected on
      * init (same DataStore-consumption shape as `TopicViewModel.observeTopicTopBarAutoHide`) and
      * read synchronously at submit time. Kept off [PostEditorState] because the UI never renders
@@ -103,15 +132,86 @@ class PostEditorViewModel @AssistedInject constructor(
      */
     private var confirmBeforePosting: Boolean = false
 
+    /**
+     * #459 PR2 — active lowercased HFR pseudo (the upload `userId`), or null when anonymous.
+     * Captured from the auth stream exactly like `MyImagesViewModel` / `FlagsViewModel` so an
+     * [PostEditorIntent.ImagePicked] can scope the upload to the right owner without re-reading the
+     * flow. Kept off [PostEditorState] : the editor never renders the pseudo, only gates on its
+     * presence.
+     */
+    private var activeUserId: String? = null
+
+    /**
+     * #405 — account that owned this editor when it opened, snapshotted from [draftStore] so a
+     * mid-edit account switch can't write this session's body under another account (Codex beta
+     * review). Captured in [restoreDraftIfAny]; null until then / for an anonymous session.
+     */
+    private var draftOwner: String? = null
+
+    /** #459 PR2 — in-flight image upload job ; one at a time, cancelled on [onCleared]. */
+    private var uploadJob: Job? = null
+
     init {
         viewModelScope.launch {
             userPreferencesRepository.observeConfirmBeforePosting().collect { enabled ->
                 confirmBeforePosting = enabled
             }
         }
+        viewModelScope.launch {
+            authRepository.observeAuthState().collect { authState ->
+                val newUserId = when (authState) {
+                    AuthState.Anonymous -> null
+                    is AuthState.Authenticated -> authState.pseudo.lowercase()
+                }
+                // Account switched/logged out mid-session: cancel any in-flight upload and pending
+                // autosave so this session's image URL / body is never attributed to the new
+                // account (Codex beta review). The draft store also drops the now-stale save.
+                if (activeUserId != null && newUserId != activeUserId) {
+                    uploadJob?.cancel()
+                    autosaveJob?.cancel()
+                    _state.update { it.copy(isUploading = false, uploadProgress = null) }
+                }
+                activeUserId = newUserId
+            }
+        }
+        restoreDraftIfAny()
         when (request.mode) {
             PostEditorMode.Reply -> loadReplyFormIfPossible()
             PostEditorMode.Edit -> loadEditFormIfPossible()
+        }
+    }
+
+    /**
+     * #405 — surface a cached draft for [draftKey] on the banner (never auto-apply : a quote prefill
+     * or an edit body would otherwise be silently clobbered). Empty drafts are ignored.
+     */
+    private fun restoreDraftIfAny() {
+        val key = draftKey ?: return
+        viewModelScope.launch {
+            draftOwner = draftStore.currentOwner()
+            val body = draftStore.load(draftOwner, key)?.body
+            if (!body.isNullOrBlank()) {
+                _state.update { it.copy(restorableDraft = body) }
+            }
+        }
+    }
+
+    /**
+     * #405 — debounced autosave of the current body. Blank body → delete the row so an emptied
+     * editor never leaves a stale draft behind. The store stamps `updatedAt` and is a no-op without
+     * an active session, so nothing is persisted for an anonymous client.
+     */
+    private fun scheduleAutosave() {
+        val key = draftKey ?: return
+        val body = _state.value.draft.text
+        autosaveJob?.cancel()
+        autosaveJob = viewModelScope.launch {
+            delay(AUTOSAVE_DEBOUNCE_MS)
+            if (body.isBlank()) {
+                draftStore.delete(draftOwner, key)
+            } else {
+                draftStore.save(draftOwner, key, EditorDraftStore.Draft(body = body))
+            }
         }
     }
 
@@ -137,7 +237,33 @@ class PostEditorViewModel @AssistedInject constructor(
             is PostEditorIntent.SmileySearchQueryChanged -> onSmileySearchQueryChanged(intent.query)
             is PostEditorIntent.SmileySelected -> onSmileySelected(intent.token)
             is PostEditorIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
+            is PostEditorIntent.ImagePicked -> onImagePicked(intent.uri)
+            is PostEditorIntent.ImagesPicked -> onImagesPicked(intent.uris)
+            PostEditorIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
+            PostEditorIntent.DraftRestoreRequested -> onDraftRestoreRequested()
+            PostEditorIntent.DraftDiscardRequested -> onDraftDiscardRequested()
         }
+    }
+
+    /**
+     * #405 — apply the cached body to the draft (caret at the end, like form hydration) and clear
+     * the banner. Marks the draft hydrated so a late form fetch cannot overwrite the restored text.
+     */
+    private fun onDraftRestoreRequested() {
+        val body = _state.value.restorableDraft ?: return
+        _state.update { current ->
+            current
+                .withDraft(TextFieldValue(text = body, selection = TextRange(body.length)))
+                .copy(restorableDraft = null, draftHydratedFromForm = true)
+        }
+        scheduleAutosave()
+    }
+
+    /** #405 — discard the cached draft : delete the row and clear the banner. */
+    private fun onDraftDiscardRequested() {
+        _state.update { it.copy(restorableDraft = null) }
+        val key = draftKey ?: return
+        viewModelScope.launch { draftStore.delete(draftOwner, key) }
     }
 
     private fun onSmileyPickerOpened() {
@@ -251,10 +377,23 @@ class PostEditorViewModel @AssistedInject constructor(
             // sheet from squatting the screen between two distant insertions.
             withPreview.copy(smileyPicker = SmileyPickerState.Hidden)
         }
+        scheduleAutosave()
     }
 
     private fun onImageUrlInserted(url: String) {
-        val token = imageBbcodeTokenOrNull(url) ?: return
+        if (insertImageUrlAtCaret(url)) scheduleAutosave()
+    }
+
+    /**
+     * #189 / #459 PR2 — shared `[img]url[/img]` insertion at the caret. Reuses the smiley path's
+     * pure helpers ([imageBbcodeTokenOrNull] validates the scheme, [insertBbcodeToken] inserts while
+     * preserving the selection) so the cursor-insertion contract is identical to `onSmileySelected`.
+     * The image token is inserted WITHOUT surrounding spaces (an `[img]` is a self-contained block,
+     * unlike a smiley which would fuse with an adjacent one). Returns `true` when the URL was valid
+     * and inserted (so callers can decide whether to schedule an autosave), `false` otherwise.
+     */
+    private fun insertImageUrlAtCaret(url: String): Boolean {
+        val token = imageBbcodeTokenOrNull(url) ?: return false
         _state.update { current ->
             val draft = current.draft
             val selection = draft.selection
@@ -276,6 +415,87 @@ class PostEditorViewModel @AssistedInject constructor(
                 withDraft
             }
         }
+        return true
+    }
+
+    /**
+     * #459 PR2 — pick→read→upload→insert. Reads the picked Uri's bytes (off-platform via
+     * [ImageUploadReader]), uploads to the host of the current preference scoped to the active
+     * [activeUserId] (lowercased pseudo), and on success inserts `[img]imageUrl[/img]` at the caret
+     * via [insertImageUrlAtCaret] (same cursor contract as the smiley / URL paths). A typed
+     * [UploadException] is mapped onto [UploadError] ; an anonymous client (no userId) is ignored —
+     * the providers require an HFR session for the trace, and surfacing « connectez-vous » here
+     * would duplicate the submit-time LoginRequired surface.
+     */
+    private fun onImagePicked(uri: String) = onImagesPicked(listOf(uri))
+
+    /**
+     * Multi-image upload — uploads the picked [uris] sequentially (one in-flight at a time, same
+     * job/gate as the single path) and inserts `[img]url[/img]` at the caret for each success, in
+     * pick order (each insertion advances the caret so the next lands after it). The batch stops at
+     * the first failure: the already-inserted images stay and the typed [UploadError] is surfaced —
+     * the user fixes the cause and re-picks the rest. A blank list, an anonymous client (no userId),
+     * or an upload already in flight are ignored. [PostEditorState.uploadProgress] carries an « n/N »
+     * counter while more than one image is in the batch (null for a single image).
+     */
+    private fun onImagesPicked(uris: List<String>) {
+        val userId = activeUserId
+        val targets = uris.filter { it.isNotBlank() }
+        // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.
+        if (uploadJob?.isActive == true || userId == null || targets.isEmpty()) return
+        val multiple = targets.size > 1
+        _state.update {
+            it.copy(
+                isUploading = true,
+                uploadError = null,
+                uploadProgress = if (multiple) UploadProgress(completed = 0, total = targets.size) else null,
+            )
+        }
+        uploadJob = viewModelScope.launch {
+            var completed = 0
+            for (uri in targets) {
+                val outcome = runCatching {
+                    val image = imageUploadReader.read(uri)
+                    uploadRepository.uploadWithCurrentProvider(image, userId)
+                }
+                val uploaded = outcome.getOrElse { error ->
+                    handleUploadFailure(error)
+                    return@launch
+                }
+                insertImageUrlAtCaret(uploaded.imageUrl)
+                // Persist after EACH insert, not once at the end: a later image failing must not
+                // lose the images already inserted into the draft (Codex review #490).
+                scheduleAutosave()
+                completed += 1
+                if (multiple) {
+                    _state.update { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
+                }
+            }
+            _state.update { it.copy(isUploading = false, uploadError = null, uploadProgress = null) }
+        }
+    }
+
+    private fun handleUploadFailure(error: Throwable) {
+        if (error is CancellationException) {
+            _state.update { it.copy(isUploading = false, uploadProgress = null) }
+            throw error
+        }
+        val mapped = when (error) {
+            is UploadException.TooLarge -> UploadError.TooLarge
+            is UploadException.UnsupportedType -> UploadError.UnsupportedType
+            // #474 — keep Server and Malformed distinct so the banner names the host + HTTP code
+            // (Server) vs. an unreadable host response (Malformed), instead of one vague message.
+            is UploadException.Server -> UploadError.Server(code = error.code, providerId = error.providerId)
+            is UploadException.Malformed -> UploadError.Malformed(providerId = error.providerId)
+            is UploadException.Network -> UploadError.Network
+            else -> UploadError.Network
+        }
+        diagnostics.record(
+            DiagnosticsLog.Level.WARN,
+            LOG_TAG_VM,
+            "image upload failed: ${error::class.simpleName} → ${mapped::class.simpleName}",
+        )
+        _state.update { it.copy(isUploading = false, uploadError = mapped, uploadProgress = null) }
     }
 
     private fun onContentChanged(value: TextFieldValue) {
@@ -287,6 +507,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 refreshed
             }
         }
+        scheduleAutosave()
     }
 
     private fun onToolbarActionClicked(action: BbcodeAction) {
@@ -310,6 +531,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 withDraft
             }
         }
+        scheduleAutosave()
     }
 
     private fun onTogglePreview() {
@@ -588,7 +810,7 @@ class PostEditorViewModel @AssistedInject constructor(
         }
     }
 
-    private fun handleSubmitOutcome(
+    private suspend fun handleSubmitOutcome(
         mode: PostEditorMode,
         numreponse: Int?,
         result: ReplySubmitResult,
@@ -603,6 +825,12 @@ class PostEditorViewModel @AssistedInject constructor(
                 // index. Falls back to the locally-known numreponse for edit so existing
                 // tests that don't populate the parser numreponse still scroll to the post.
                 val scrollTo = result.numreponse ?: numreponse.takeIf { mode == PostEditorMode.Edit }
+                // #405 — the message reached HFR ; the cached draft is now obsolete. Cancel any
+                // pending autosave first so a debounced save cannot resurrect the row after delete.
+                // The delete is AWAITED inside the submit coroutine (not launched) so the immediate
+                // nav pop driven by SubmitSucceeded cannot cancel it before the row is gone (Codex).
+                autosaveJob?.cancel()
+                draftKey?.let { key -> draftStore.delete(draftOwner, key) }
                 _effects.trySend(
                     PostEditorEffect.SubmitSucceeded(targetPage = result.targetPage, scrollTo = scrollTo),
                 )
@@ -687,6 +915,17 @@ class PostEditorViewModel @AssistedInject constructor(
         )
     }
 
+    /**
+     * #459 PR2 — cancel any in-flight image upload when the editor is torn down. `viewModelScope`
+     * is already cancelled by the lifecycle, so this is belt-and-braces (the read/upload is then a
+     * no-op against a dead state) — but it makes the « one upload, no leak » contract explicit and
+     * lets a future non-viewModelScope job stay covered.
+     */
+    override fun onCleared() {
+        uploadJob?.cancel()
+        super.onCleared()
+    }
+
     @AssistedFactory
     interface Factory {
         fun create(request: PostEditorRequest): PostEditorViewModel
@@ -701,5 +940,10 @@ class PostEditorViewModel @AssistedInject constructor(
         // `find_smilies`, cf. `/compressed/message.js`. Mirror it so the wiki endpoint
         // sees roughly the same query rate as the web client.
         private const val SMILEY_SEARCH_DEBOUNCE_MS = 300L
+
+        // #405 — idle window after the last edit before the draft is persisted. Long enough to
+        // coalesce a burst of keystrokes into a single Room write, short enough that an accidental
+        // navigation / process death right after typing still keeps the content.
+        private const val AUTOSAVE_DEBOUNCE_MS = 750L
     }
 }

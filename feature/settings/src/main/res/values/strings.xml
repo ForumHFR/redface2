@@ -4,6 +4,18 @@
          et catalogue des réglages futurs (grisés, avec tag d’issue ou de phase). -->
     <string name="settings_intro">La plupart des réglages sont enregistrés sur cet appareil. Ceux du compte HFR (section dédiée) seront synchronisés depuis votre profil et arriveront plus tard. Les réglages à venir sont affichés en grisé avec leur étiquette.</string>
     <string name="settings_section_network">Réseau et cache</string>
+    <!-- #458 — écran de démarrage (onglet + catégorie Forum optionnelle, appliqué au prochain lancement). -->
+    <string name="settings_section_start">Démarrage</string>
+    <string name="settings_start_screen_title">Écran de démarrage</string>
+    <string name="settings_start_screen_intro">Choisissez ce que l\'app ouvre au lancement. Appliqué au prochain démarrage.</string>
+    <string name="settings_start_screen_flags">Drapeaux</string>
+    <string name="settings_start_screen_forum">Forum</string>
+    <string name="settings_start_screen_messages">Messages</string>
+    <string name="settings_start_screen_category_label">Catégorie à l\'ouverture</string>
+    <string name="settings_start_screen_category_root">Accueil du forum</string>
+    <string name="settings_start_screen_category_unresolved">Catégorie %1$d</string>
+    <string name="settings_start_screen_categories_error">Liste des catégories indisponible pour le moment — « Accueil du forum » reste utilisable.</string>
+    <string name="settings_start_screen_persist_failed">Impossible d\'enregistrer ce réglage pour le moment.</string>
     <string name="settings_section_display">Affichage</string>
     <string name="settings_section_flags">Drapeaux</string>
     <string name="settings_section_topic">Sujet et lecture</string>
@@ -25,7 +37,6 @@
     <string name="settings_phase_5">Phase 5</string>
     <!-- Pastille de tag d'un réglage à venir rattaché à une issue GitHub (identifiant technique). -->
     <string name="settings_future_issue_tag">#%1$d</string>
-    <string name="settings_future_reading_density">Densité et compacité de lecture</string>
     <string name="settings_future_ui_colors">Personnalisation des couleurs</string>
     <string name="settings_future_material_you">Material You (thème dynamique)</string>
     <string name="settings_future_classic_theme">Thème HFR Classique</string>
@@ -129,6 +140,20 @@
     <string name="settings_theme_amoled_description">Fond noir pur pour les écrans OLED. S\'applique uniquement en thème sombre.</string>
     <string name="settings_theme_amoled_persist_failed">Impossible de mémoriser le réglage AMOLED. Réessayez.</string>
 
+    <!-- #287 — Préréglages de lecture. Densité (Confort/Compact = espacement des listes et des
+         messages) + taille de la police de lecture (S/M/L, appliquée en plus du zoom du système),
+         persistés en DataStore et appliqués à toute l'app en direct. -->
+    <string name="settings_display_title">Densité et police de lecture</string>
+    <string name="settings_display_density_intro">Réglez l\'espacement des listes et des messages.</string>
+    <string name="settings_display_density_comfort">Confort</string>
+    <string name="settings_display_density_compact">Compact</string>
+    <string name="settings_display_density_persist_failed">Impossible de mémoriser la densité. Réessayez.</string>
+    <string name="settings_display_font_scale_intro">Taille de la police de lecture. Elle s\'ajoute au zoom du système.</string>
+    <string name="settings_display_font_scale_small">Petite</string>
+    <string name="settings_display_font_scale_medium">Moyenne</string>
+    <string name="settings_display_font_scale_large">Grande</string>
+    <string name="settings_display_font_scale_persist_failed">Impossible de mémoriser la taille de police. Réessayez.</string>
+
     <!-- Build 89 follow-up — Lecture des sujets. Masquer la barre du haut (titre + numéro de page)
          en défilant vers le bas pour libérer de la place ; persisté en DataStore et appliqué en direct. -->
     <string name="settings_topic_title">Lecture des sujets</string>
@@ -141,6 +166,10 @@
     <string name="settings_topic_page_fabs_title">Boutons de changement de page</string>
     <string name="settings_topic_page_fabs_description">Affiche les boutons flottants ‹ et › en bas du sujet. Désactivez-les si vous changez de page au glissement ; le bouton Répondre reste affiché.</string>
     <string name="settings_topic_page_fabs_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+    <!-- #456 — sondages dépliés par défaut dans la lecture de sujet. -->
+    <string name="settings_topic_polls_expanded_title">Déplier les sondages</string>
+    <string name="settings_topic_polls_expanded_description">Affiche les sondages dépliés en haut des sujets. Désactivé : une ligne « Sondage » repliée, à déplier d\'un appui.</string>
+    <string name="settings_topic_polls_expanded_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- #312 — Publication. Confirmation avant chaque envoi (réponse/édition de message, sujet,
          message privé) ; persisté en DataStore et lu en direct par les éditeurs.
@@ -150,4 +179,39 @@
     <string name="settings_confirm_before_posting_title">Confirmation avant publication</string>
     <string name="settings_confirm_before_posting_description">Demande une confirmation avant d\'envoyer une réponse, un sujet ou un message privé.</string>
     <string name="settings_confirm_before_posting_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+
+    <!-- #459 PR3 — entrée vers l'écran « Mes images uploadées » depuis le catalogue de réglages. -->
+    <string name="settings_section_images">Images</string>
+    <string name="settings_my_images_title">Mes images uploadées</string>
+    <string name="settings_my_images_description">Consultez les images que vous avez envoyées et supprimez-les.</string>
+    <string name="settings_my_images_open">Voir mes images</string>
+
+    <!-- #459 — Hébergeur d'images. Choisit l'hébergeur des uploads de l'éditeur ; le Client-ID
+         imgur n'apparaît que pour imgur. Persisté en DataStore, lu par l'éditeur à chaque upload. -->
+    <string name="settings_upload_provider_title">Hébergeur d\'images</string>
+    <string name="settings_upload_provider_intro">Choisissez où envoyer les images insérées dans vos messages. Diberie fonctionne sans compte ; imgur nécessite un Client-ID d\'application.</string>
+    <string name="settings_upload_provider_diberie">diberie (sans compte)</string>
+    <string name="settings_upload_provider_imgur">imgur (Client-ID requis)</string>
+    <string name="settings_upload_provider_persist_failed">Impossible de mémoriser l\'hébergeur. Réessayez.</string>
+    <string name="settings_upload_imgur_client_id_label">Client-ID imgur</string>
+    <string name="settings_upload_imgur_client_id_helper">Client-ID d\'application Imgur</string>
+    <string name="settings_upload_imgur_client_id_persist_failed">Impossible de mémoriser le Client-ID. Réessayez.</string>
+
+    <!-- #459 PR3 — écran « Mes images uploadées » (liste + suppression). -->
+    <string name="my_images_title">Mes images uploadées</string>
+    <string name="my_images_back">Retour</string>
+    <string name="my_images_requires_login">Connecte-toi pour voir tes images uploadées.</string>
+    <string name="my_images_empty">Aucune image uploadée pour le moment.</string>
+    <string name="my_images_thumbnail_description">Aperçu de l\'image uploadée</string>
+    <string name="my_images_uploaded_at">Envoyée le %1$s</string>
+    <string name="my_images_provider_diberie">Diberie</string>
+    <string name="my_images_provider_imgur">Imgur</string>
+    <string name="my_images_delete_action">Supprimer</string>
+    <string name="my_images_delete_confirm_title">Supprimer cette image ?</string>
+    <string name="my_images_delete_confirm_body">L\'image sera supprimée de l\'hébergeur et retirée de cette liste. Cette action est irréversible.</string>
+    <string name="my_images_delete_confirm_body_no_handle">L\'image sera retirée de cette liste. La suppression côté hébergeur ne peut pas être garantie : l\'image peut rester accessible.</string>
+    <string name="my_images_delete_confirm_action">Supprimer</string>
+    <string name="my_images_delete_confirm_cancel">Annuler</string>
+    <string name="my_images_delete_confirmed">Image supprimée de l\'hébergeur.</string>
+    <string name="my_images_delete_best_effort">Image retirée de la liste. La suppression côté hébergeur n\'a pas pu être confirmée.</string>
 </resources>

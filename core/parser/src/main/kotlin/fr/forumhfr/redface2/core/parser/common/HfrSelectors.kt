@@ -40,6 +40,9 @@ object HfrSelectors {
     const val MP_LIST_ROW = "tr.sujet"
     const val MP_LIST_ICON = "td.sujetCase1 img[src]"
     const val MP_LIST_SUBJECT_LINK = "td.sujetCase3 a.cCatTopic"
+    // "Pages" cell: HFR renders a link to the conversation's LAST page there, but only when the
+    // conversation spans several pages — a single-page row holds a bare `&nbsp;` (#430).
+    const val MP_LIST_LAST_PAGE_LINK = "td.sujetCase4 a.cCatTopic"
     const val MP_LIST_CORRESPONDENT = "td.sujetCase6 a"
     // Multi-recipient (MultiMP / "DT") rows have no profile link: the Interlocuteur cell is a
     // `<span title="…truncated participant list…">Interlocuteurs multiples</span>` instead.

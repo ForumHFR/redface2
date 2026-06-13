@@ -29,4 +29,10 @@
     <string name="category_flag_cyan">Drapeau mes sujets</string>
     <string name="category_flag_red">Drapeau lu uniquement</string>
     <string name="category_flag_favorite">Favori</string>
+
+    <!-- #455 — « Mes drapeaux » filter (web owntopic toolbar) -->
+    <string name="category_flag_filter_all">Tous</string>
+    <string name="category_flag_filter_participated">Participé</string>
+    <string name="category_flag_filter_read">Lus</string>
+    <string name="category_flag_filter_favorites">Favoris</string>
 </resources>

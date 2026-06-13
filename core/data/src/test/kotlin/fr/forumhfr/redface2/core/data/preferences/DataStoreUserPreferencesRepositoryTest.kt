@@ -6,10 +6,16 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -43,6 +49,15 @@ class DataStoreUserPreferencesRepositoryTest {
         }
     }
 
+    /** In-memory [StartScreenBootstrapStore] (#458) — same stance as the theme mirror above. */
+    private val startScreenBootstrapStore = object : StartScreenBootstrapStore {
+        var stored = StartScreenPreference()
+        override fun read(): StartScreenPreference = stored
+        override fun write(preference: StartScreenPreference) {
+            stored = preference
+        }
+    }
+
     @Before
     fun setUp() {
         dataStore = PreferenceDataStoreFactory.create(
@@ -51,6 +66,7 @@ class DataStoreUserPreferencesRepositoryTest {
         repository = DataStoreUserPreferencesRepository(
             dataStore = dataStore,
             themeBootstrapStore = themeBootstrapStore,
+            startScreenBootstrapStore = startScreenBootstrapStore,
             ioDispatcher = dispatcher,
         )
     }
@@ -385,6 +401,64 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeStartScreen defaults to the Drapeaux tab on an empty store`() = runTest(dispatcher) {
+        repository.observeStartScreen().test {
+            assertEquals(StartScreenPreference(), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setStartScreen round-trips a Forum category and mirrors it (#458)`() = runTest(dispatcher) {
+        val forumHardware = StartScreenPreference(StartScreenChoice.FORUM, forumCatId = 13)
+        repository.setStartScreen(forumHardware)
+
+        repository.observeStartScreen().test {
+            assertEquals(forumHardware, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(forumHardware, startScreenBootstrapStore.read())
+    }
+
+    @Test
+    fun `setStartScreen drops the category when the screen is not FORUM`() = runTest(dispatcher) {
+        repository.setStartScreen(StartScreenPreference(StartScreenChoice.FORUM, forumCatId = 13))
+        repository.setStartScreen(StartScreenPreference(StartScreenChoice.MESSAGES, forumCatId = 13))
+
+        repository.observeStartScreen().test {
+            // The stale category id must not resurface on a later FLAGS/MESSAGES read.
+            assertEquals(StartScreenPreference(StartScreenChoice.MESSAGES), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt start_screen value falls back to FLAGS instead of crashing`() = runTest(dispatcher) {
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("start_screen")] = "DESKTOP" }
+
+        repository.observeStartScreen().test {
+            assertEquals(StartScreenPreference(), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observing the start screen backfills an empty mirror from the persisted value`() = runTest(dispatcher) {
+        // #458 — same convergence contract as the theme mirror (#386).
+        dataStore.edit { prefs ->
+            prefs[stringPreferencesKey("start_screen")] = StartScreenChoice.MESSAGES.name
+        }
+        assertEquals(StartScreenPreference(), startScreenBootstrapStore.read())
+
+        repository.observeStartScreen().test {
+            assertEquals(StartScreenPreference(StartScreenChoice.MESSAGES), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(StartScreenPreference(StartScreenChoice.MESSAGES), startScreenBootstrapStore.read())
+    }
+
+    @Test
     fun `observeAmoledEnabled defaults to false then persists true`() = runTest(dispatcher) {
         repository.observeAmoledEnabled().test {
             assertFalse(awaitItem())
@@ -480,5 +554,124 @@ class DataStoreUserPreferencesRepositoryTest {
         assertEquals(null, config.port)
         assertEquals(null, config.username)
         assertEquals(null, config.password)
+    }
+
+    @Test
+    fun `observeUploadProvider defaults to DIBERIE on an empty store`() = runTest(dispatcher) {
+        // #459 — DIBERIE is the default (no auth, no Client-ID), never the enum's first ordinal alone.
+        repository.observeUploadProvider().test {
+            assertEquals(UploadProviderId.DIBERIE, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeDisplayDensity defaults to COMFORT on an empty store`() = runTest(dispatcher) {
+        // #287 — COMFORT is the default (historical rhythm), never the enum's first ordinal by chance.
+        repository.observeDisplayDensity().test {
+            assertEquals(DisplayDensity.COMFORT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setUploadProvider persists and round-trips IMGUR then DIBERIE`() = runTest(dispatcher) {
+        repository.setUploadProvider(UploadProviderId.IMGUR)
+        repository.observeUploadProvider().test {
+            assertEquals(UploadProviderId.IMGUR, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setUploadProvider(UploadProviderId.DIBERIE)
+        repository.observeUploadProvider().test {
+            assertEquals(UploadProviderId.DIBERIE, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setDisplayDensity persists and round-trips COMPACT then COMFORT`() = runTest(dispatcher) {
+        repository.setDisplayDensity(DisplayDensity.COMPACT)
+        repository.observeDisplayDensity().test {
+            assertEquals(DisplayDensity.COMPACT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setDisplayDensity(DisplayDensity.COMFORT)
+        repository.observeDisplayDensity().test {
+            assertEquals(DisplayDensity.COMFORT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt upload_provider value falls back to DIBERIE instead of crashing`() = runTest(dispatcher) {
+        // A value from an older build / manual edit that no longer maps to a UploadProviderId must
+        // not crash observeUploadProvider on valueOf — it degrades to the DIBERIE default.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("upload_provider")] = "PHOTOBUCKET" }
+
+        repository.observeUploadProvider().test {
+            assertEquals(UploadProviderId.DIBERIE, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt display_density value falls back to COMFORT instead of crashing`() = runTest(dispatcher) {
+        // An unknown value (older build / manual edit) must degrade to COMFORT, not crash valueOf.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("display_density")] = "ULTRA" }
+
+        repository.observeDisplayDensity().test {
+            assertEquals(DisplayDensity.COMFORT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeImgurClientId defaults to empty then round-trips a trimmed value`() = runTest(dispatcher) {
+        // #459 (option B) — empty means imgur is unconfigured; the value is stored trimmed.
+        repository.observeImgurClientId().test {
+            assertEquals("", awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImgurClientId("  abc123  ")
+        repository.observeImgurClientId().test {
+            assertEquals("abc123", awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeFontScale defaults to M on an empty store`() = runTest(dispatcher) {
+        repository.observeFontScale().test {
+            assertEquals(FontScalePreference.M, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFontScale persists and round-trips S then L`() = runTest(dispatcher) {
+        repository.setFontScale(FontScalePreference.S)
+        repository.observeFontScale().test {
+            assertEquals(FontScalePreference.S, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setFontScale(FontScalePreference.L)
+        repository.observeFontScale().test {
+            assertEquals(FontScalePreference.L, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt font_scale value falls back to M instead of crashing`() = runTest(dispatcher) {
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("font_scale")] = "XXL" }
+
+        repository.observeFontScale().test {
+            assertEquals(FontScalePreference.M, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 }

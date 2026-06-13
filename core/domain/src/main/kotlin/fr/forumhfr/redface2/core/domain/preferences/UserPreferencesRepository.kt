@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.domain.preferences
 
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.flow.Flow
 
@@ -187,6 +188,29 @@ interface UserPreferencesRepository {
     suspend fun setTopicPageFabs(enabled: Boolean)
 
     /**
+     * #456 — whether topic polls render EXPANDED by default. Default `false` (collapsed to the
+     * one-line « Sondage — afficher » card): most readers scroll past the poll, and a long
+     * option list pushes the first post below the fold. The per-topic reveal toggle in the
+     * poll card keeps working either way — this only seeds its initial state. Observed by
+     * `:feature:topic`, toggled in Settings.
+     */
+    fun observeTopicPollsExpanded(): Flow<Boolean>
+
+    /** Persists [observeTopicPollsExpanded]. Default `false` until the first call. */
+    suspend fun setTopicPollsExpanded(enabled: Boolean)
+
+    /**
+     * #458 — which top-level tab (and optional Forum category) a cold start opens on. Default
+     * [StartScreenChoice.FLAGS] (historical behaviour). The navigation reads the SYNCHRONOUS
+     * [StartScreenBootstrapStore] mirror at cold start; this flow is the source of truth and
+     * feeds the Settings screen.
+     */
+    fun observeStartScreen(): Flow<StartScreenPreference>
+
+    /** Persists [observeStartScreen] (both fields atomically) and refreshes the mirror. */
+    suspend fun setStartScreen(preference: StartScreenPreference)
+
+    /**
      * #313 — unread-MP badge on the « Messages » destination of the navigation bar. When
      * `true` (default) the badge shows the count of unread conversations for the authenticated
      * session ; `false` hides it entirely (no fetch is saved — the underlying count flow is
@@ -196,4 +220,46 @@ interface UserPreferencesRepository {
 
     /** Persists [observeMpUnreadBadge]. Default `true` until the first call. */
     suspend fun setMpUnreadBadge(enabled: Boolean)
+
+    /**
+     * Default image host for editor uploads (#459). Default [UploadProviderId.DIBERIE] (no auth, no
+     * Client-ID required). Observed by the editor (which provider to upload through) and the
+     * Settings screen. A corrupt / unknown stored value degrades to the DIBERIE default.
+     */
+    fun observeUploadProvider(): Flow<UploadProviderId>
+
+    /** Persists [observeUploadProvider]. Default [UploadProviderId.DIBERIE] until the first call. */
+    suspend fun setUploadProvider(provider: UploadProviderId)
+
+    /**
+     * The user's own imgur Client-ID (#459, option B): imgur uploads require a public Client-ID, and
+     * the app commits none — the user pastes their own in Settings. Empty (the default) means imgur
+     * is NOT configured, so the provider selector hides IMGUR (DIBERIE works without any Client-ID).
+     */
+    fun observeImgurClientId(): Flow<String>
+
+    /** Persists [observeImgurClientId]. Default empty string until the first call. */
+    suspend fun setImgurClientId(clientId: String)
+
+    /**
+     * Reading-density preset (#287): [DisplayDensity.COMFORT] (default) keeps the historical
+     * structural rhythm; [DisplayDensity.COMPACT] tightens the listing-row and post-body paddings
+     * for a denser feed. Observed at the app root ([fr.forumhfr.redface2.navigation.RedfaceApp]) to
+     * provide `LocalDisplayMetrics` to the whole tree, and mirrored in Settings.
+     */
+    fun observeDisplayDensity(): Flow<DisplayDensity>
+
+    /** Persists [observeDisplayDensity]. Default [DisplayDensity.COMFORT] until the first call. */
+    suspend fun setDisplayDensity(density: DisplayDensity)
+
+    /**
+     * Reading font-size preset (#287): [FontScalePreference.M] (default) is the M3 reference size;
+     * [FontScalePreference.S] / [FontScalePreference.L] scale the reading typography by the preset
+     * [FontScalePreference.factor], applied ON TOP of the OS font zoom (never replacing it).
+     * Observed at the app root to scale the theme `Typography`, and mirrored in Settings.
+     */
+    fun observeFontScale(): Flow<FontScalePreference>
+
+    /** Persists [observeFontScale]. Default [FontScalePreference.M] until the first call. */
+    suspend fun setFontScale(scale: FontScalePreference)
 }

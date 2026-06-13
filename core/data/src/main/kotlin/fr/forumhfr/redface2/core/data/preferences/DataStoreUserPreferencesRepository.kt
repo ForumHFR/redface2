@@ -7,11 +7,17 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -29,6 +35,7 @@ import kotlinx.coroutines.withContext
 class DataStoreUserPreferencesRepository @Inject constructor(
     @param:UserPreferencesDataStore private val dataStore: DataStore<Preferences>,
     private val themeBootstrapStore: ThemeBootstrapStore,
+    private val startScreenBootstrapStore: StartScreenBootstrapStore,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : UserPreferencesRepository {
 
@@ -272,6 +279,67 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeTopicPollsExpanded(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#456): polls start collapsed — the in-card toggle still reveals
+            // them per topic; this preference only seeds the initial state.
+            .map { prefs -> prefs[KEY_TOPIC_POLLS_EXPANDED] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setTopicPollsExpanded(enabled: Boolean) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_TOPIC_POLLS_EXPANDED] = enabled
+            }
+        }
+    }
+
+    override fun observeStartScreen(): Flow<StartScreenPreference> =
+        dataStore.data
+            .map(::readStartScreen)
+            .distinctUntilChanged()
+            // #458 backfill, same contract as the theme mirror (#386): converge the synchronous
+            // bootstrap copy from the observed truth (idempotent, write-on-diff). Hops to IO
+            // because the mirror write is a synchronous commit() (cf. its KDoc) and this flow
+            // is collected on Main by the Settings ViewModel.
+            .onEach { preference ->
+                withContext(ioDispatcher) {
+                    if (startScreenBootstrapStore.read() != preference) {
+                        startScreenBootstrapStore.write(preference)
+                    }
+                }
+            }
+            .catch { emit(StartScreenPreference()) }
+
+    override suspend fun setStartScreen(preference: StartScreenPreference) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_START_SCREEN] = preference.screen.name
+                val catId = preference.forumCatId
+                if (preference.screen == StartScreenChoice.FORUM && catId != null) {
+                    prefs[KEY_START_FORUM_CAT] = catId
+                } else {
+                    prefs.remove(KEY_START_FORUM_CAT)
+                }
+            }
+            // Mirror for the synchronous cold-start read (#458) — DataStore stays the source
+            // of truth, the mirror only seeds the first frame.
+            startScreenBootstrapStore.write(preference)
+        }
+    }
+
+    private fun readStartScreen(prefs: Preferences): StartScreenPreference {
+        // Defensive read: an unknown stored value (downgrade, manual edit) falls back to the
+        // FLAGS default instead of crashing, same stance as readThemeMode.
+        val screen = prefs[KEY_START_SCREEN]
+            ?.let { stored -> StartScreenChoice.entries.firstOrNull { it.name == stored } }
+            ?: StartScreenChoice.FLAGS
+        val catId = prefs[KEY_START_FORUM_CAT]
+            ?.takeIf { screen == StartScreenChoice.FORUM && it > 0 }
+        return StartScreenPreference(screen = screen, forumCatId = catId)
+    }
+
     override fun observeMpUnreadBadge(): Flow<Boolean> =
         dataStore.data
             // Default `true` (#313): the badge is the feature; opting OUT is the preference.
@@ -286,6 +354,97 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             }
         }
     }
+
+    override fun observeUploadProvider(): Flow<UploadProviderId> =
+        dataStore.data
+            // Default DIBERIE (#459): no auth, no Client-ID required.
+            .map(::readUploadProvider)
+            .distinctUntilChanged()
+            .catch { emit(UploadProviderId.DIBERIE) }
+
+    override suspend fun setUploadProvider(provider: UploadProviderId) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_UPLOAD_PROVIDER] = provider.name
+            }
+        }
+    }
+
+    override fun observeDisplayDensity(): Flow<DisplayDensity> =
+        dataStore.data
+            // Default COMFORT (#287): the historical structural rhythm unless the user opts into
+            // the denser COMPACT preset. No bootstrap mirror — this preset does not paint the
+            // pre-first-frame window, so a SYSTEM-style cold-start flash is not a concern here.
+            .map(::readDisplayDensity)
+            .distinctUntilChanged()
+            .catch { emit(DisplayDensity.COMFORT) }
+
+    override suspend fun setDisplayDensity(density: DisplayDensity) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_DISPLAY_DENSITY] = density.name
+            }
+        }
+    }
+
+    override fun observeImgurClientId(): Flow<String> =
+        dataStore.data
+            // Default empty (#459): imgur is unconfigured until the user pastes their Client-ID.
+            .map { prefs -> prefs[KEY_IMGUR_CLIENT_ID].orEmpty() }
+            .distinctUntilChanged()
+            .catch { emit("") }
+
+    override suspend fun setImgurClientId(clientId: String) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_IMGUR_CLIENT_ID] = clientId.trim()
+            }
+        }
+    }
+
+    override fun observeFontScale(): Flow<FontScalePreference> =
+        dataStore.data
+            // Default M (#287): the M3 reference sizes unless the user picks S / L.
+            .map(::readFontScale)
+            .distinctUntilChanged()
+            .catch { emit(FontScalePreference.M) }
+
+    override suspend fun setFontScale(scale: FontScalePreference) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_FONT_SCALE] = scale.name
+            }
+        }
+    }
+
+    /**
+     * Reads [KEY_UPLOAD_PROVIDER] defensively: an unknown / corrupt stored value (older build with a
+     * renamed enum, manual edit) falls back to [UploadProviderId.DIBERIE] instead of crashing on
+     * `UploadProviderId.valueOf`, same stance as [readThemeMode].
+     */
+    private fun readUploadProvider(prefs: Preferences): UploadProviderId =
+        prefs[KEY_UPLOAD_PROVIDER]
+            ?.let { stored -> runCatching { UploadProviderId.valueOf(stored) }.getOrNull() }
+            ?: UploadProviderId.DIBERIE
+
+    /**
+     * Reads [KEY_DISPLAY_DENSITY] defensively (#287): an unknown / corrupt stored value (older
+     * build, manual edit) falls back to [DisplayDensity.COMFORT] instead of crashing on
+     * `DisplayDensity.valueOf`, same stance as [readThemeMode].
+     */
+    private fun readDisplayDensity(prefs: Preferences): DisplayDensity =
+        prefs[KEY_DISPLAY_DENSITY]
+            ?.let { stored -> runCatching { DisplayDensity.valueOf(stored) }.getOrNull() }
+            ?: DisplayDensity.COMFORT
+
+    /**
+     * Reads [KEY_FONT_SCALE] defensively (#287): an unknown / corrupt stored value falls back to
+     * [FontScalePreference.M] instead of crashing on `FontScalePreference.valueOf`.
+     */
+    private fun readFontScale(prefs: Preferences): FontScalePreference =
+        prefs[KEY_FONT_SCALE]
+            ?.let { stored -> runCatching { FontScalePreference.valueOf(stored) }.getOrNull() }
+            ?: FontScalePreference.M
 
     /**
      * Reads [KEY_THEME_MODE] defensively: an unknown / corrupt stored value (older build with a
@@ -386,5 +545,23 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FLAGS_AUTO_REFRESH = booleanPreferencesKey("flags_auto_refresh")
         val KEY_TOPIC_PAGE_FABS = booleanPreferencesKey("topic_page_fabs")
         val KEY_MP_UNREAD_BADGE = booleanPreferencesKey("mp_unread_badge")
+
+        // #456 — polls expanded by default in topic reading (default false = collapsed).
+        val KEY_TOPIC_POLLS_EXPANDED = booleanPreferencesKey("topic_polls_expanded")
+
+        // #458 — cold-start tab (StartScreenChoice.name, defensively parsed) + optional Forum
+        // category id (absent unless screen == FORUM and a category was picked).
+        val KEY_START_SCREEN = stringPreferencesKey("start_screen")
+        val KEY_START_FORUM_CAT = intPreferencesKey("start_forum_cat")
+
+        // #459 — default image host (UploadProviderId.name, defensively parsed) + the user's own
+        // imgur Client-ID (empty = imgur unconfigured, option B: never committed).
+        val KEY_UPLOAD_PROVIDER = stringPreferencesKey("upload_provider")
+        val KEY_IMGUR_CLIENT_ID = stringPreferencesKey("imgur_client_id")
+
+        // #287 — reading display presets: density (DisplayDensity.name) + font scale
+        // (FontScalePreference.name), both defensively parsed. No bootstrap mirror (cf. observers).
+        val KEY_DISPLAY_DENSITY = stringPreferencesKey("display_density")
+        val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
     }
 }

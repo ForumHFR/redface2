@@ -36,6 +36,26 @@ interface ForumRepository {
     suspend fun refreshTopicList(cat: Int, subcat: Int?, page: Int)
 
     /**
+     * Listing of the user's flagged topics for a (sub)category and the given [bucket] —
+     * the REST equivalent of the web `owntopic` filter (#455). Authenticated by nature
+     * (HFR has no flags for an anonymous session). The server returns the whole bucket in
+     * a single response (no real pagination), so this is a one-shot `suspend` call rather
+     * than an observable flow : the screen re-fetches on filter change / pull-to-refresh.
+     *
+     * Returns a [TopicListPage] — the SAME model as the regular listing — so the category
+     * screen reuses its row composable and the "resume at last read page" navigation
+     * contract unchanged (the flag bucket payload carries `last_post_read_id` and the
+     * last-read page, mapped exactly like the normal listing).
+     *
+     * [subcat] `null` queries the whole category, non-null narrows to the subcategory.
+     */
+    suspend fun getFlagFilteredTopics(
+        cat: Int,
+        subcat: Int?,
+        bucket: FlagFilterBucket,
+    ): ForumResult<TopicListPage>
+
+    /**
      * Anonymous prefetch — unauthenticated REST request (cf. ADR-003 §
      * Prefetch) for `(cat, subcat, page)`. The response payload is
      * **intentionally discarded** : there is no client-side cache populated
@@ -59,6 +79,14 @@ interface ForumRepository {
      */
     suspend fun prefetchTopicList(cat: Int, subcat: Int?, page: Int)
 }
+
+/**
+ * The three HFR drapeaux buckets, as a domain type so the ViewModel never depends on the
+ * `:core:network` `HfrRestFlagBucket` enum. Mirrors the web `owntopic` filter (#455):
+ * PARTICIPATED = `owntopic=1` (« sujets auxquels j'ai participé »), READ = `owntopic=2`
+ * (« lus uniquement »), FAVORITES = `owntopic=3` (« mes favoris »).
+ */
+enum class FlagFilterBucket { PARTICIPATED, READ, FAVORITES }
 
 /**
  * Tri-state outcome of a forum browsing fetch. The domain layer stays Compose-free so

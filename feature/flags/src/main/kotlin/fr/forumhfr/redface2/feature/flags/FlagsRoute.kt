@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.flags
 import android.annotation.SuppressLint
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -33,30 +35,29 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -69,6 +70,7 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.ui.FlagItem
 import fr.forumhfr.redface2.core.ui.FlagItemDivider
+import fr.forumhfr.redface2.core.ui.FlagItemLongPress
 import fr.forumhfr.redface2.core.ui.FlagMetadata
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
@@ -90,11 +92,10 @@ import kotlinx.coroutines.launch
  * - Refresh is now a Material 3 `PullToRefreshBox` (swipe down) instead of a header button,
  *   matching `feature/forum`. The error state still surfaces a `Retry` affordance because
  *   it's a recovery action, not a permanent secondary control.
- * - Flag removal (#99) is now a Material 3 `SwipeToDismissBox` (swipe end-to-start) instead
- *   of a trailing « Retirer » button. The swipe only *opens* the existing confirmation dialog
- *   ([requestRemoveFlag]) — it never dismisses the row on its own. See [SwipeableFlagItem] for
- *   the « confirm before network » detail (the row is reset to settled, so it stays in place
- *   until the user confirms and the repository evicts it from the cache).
+ * - Flag removal went trailing button → swipe-to-dismiss (#99) → **long-press** (#457): the
+ *   horizontal swipe now changes the flag tab ([flagsTabSwipe]), so the row-level dismiss
+ *   gesture was retired. The long-press only *opens* the existing confirmation dialog
+ *   ([requestRemoveFlag]) — see [RemovableFlagItem].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 // Intentional: the Scaffold here only anchors the SnackbarHost above system bars; the inner
@@ -105,6 +106,7 @@ import kotlinx.coroutines.launch
 fun FlagsRoute(
     onOpenFlag: (Flag) -> Unit,
     onLoginRequested: () -> Unit,
+    onOpenCategory: (Int) -> Unit = {},
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel: FlagsViewModel = hiltViewModel()
@@ -237,6 +239,7 @@ fun FlagsRoute(
                                 onRefresh = viewModel::refresh,
                                 onLoginRequested = onLoginRequested,
                                 onRequestRemoveFlag = viewModel::requestRemoveFlag,
+                                onOpenCategory = onOpenCategory,
                             ),
                             listState = flagsListState,
                         )
@@ -597,28 +600,67 @@ private fun ColumnScope.AuthenticatedBody(
         }
     }
 
-    if (selectedTab == FlagTab.Super) {
-        // Placeholder — no backend, no fetch, no pull-to-refresh (cf. FlagTab.Super KDoc).
-        SuperPlaceholderBody()
-        return
+    // #457 — horizontal swipe between flag tabs, carried by the whole body under the tab row
+    // (placeholders included, so a swipe can leave Super/DT too). The committed target INDEX is
+    // mapped back to a FlagTab against the same `tabs` list the row renders — read through
+    // rememberUpdatedState because the gesture is keyed on Unit and never restarts, while the
+    // tab list itself can change (the DT tab is a Settings toggle).
+    val haptics = LocalHapticFeedback.current
+    val dragOffset = remember { mutableFloatStateOf(0f) }
+    val updatedTabs = rememberUpdatedState(tabs)
+    val updatedSelectedIndex = rememberUpdatedState(selectedIndex)
+    val updatedActions = rememberUpdatedState(actions)
+    val swipeHandlers = remember(haptics) {
+        FlagsTabSwipeHandlers(
+            haptics = haptics,
+            onSelectTab = { index ->
+                updatedTabs.value.getOrNull(index)
+                    ?.let { (tab, _) -> updatedActions.value.onSelectTab(tab) }
+            },
+        )
     }
-    if (selectedTab == FlagTab.Dt) {
-        // Placeholder — content arrives with the MPStorage sync (#6), cf. FlagTab.Dt KDoc.
-        DtPlaceholderBody()
-        return
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            // Without weight(1f) the box would not claim the remaining vertical space inside
+            // the parent Column, breaking the gesture areas on short lists.
+            .weight(1f)
+            .flagsTabSwipe(
+                currentIndex = { updatedSelectedIndex.value },
+                tabCount = { updatedTabs.value.size },
+                dragOffset = dragOffset,
+                handlers = swipeHandlers,
+            ),
+    ) {
+        when (selectedTab) {
+            // Placeholders — no backend, no fetch, no pull-to-refresh (cf. their KDoc).
+            FlagTab.Super -> SuperPlaceholderBody()
+            FlagTab.Dt -> DtPlaceholderBody()
+            else -> FlagListBody(state = state, actions = actions, listState = listState)
+        }
     }
+}
 
+/**
+ * The real flag-list body of a [FlagTab] with a backend (Cyan/Red/Favorite) — extracted from
+ * [AuthenticatedBody] when the #457 tab-swipe wrapper landed, so the swipe surface (placeholders
+ * included) and the pull-to-refresh surface stay two distinct layers.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FlagListBody(
+    state: FlagsBodyState,
+    actions: AuthenticatedActions,
+    listState: LazyListState,
+) {
+    val selectedTab = state.selectedTab
     // Pull-to-refresh (swipe down) replaces the legacy header « Actualiser » button, matching
     // feature/forum. It wraps the whole flag body so the indicator stays anchored over the
     // existing content during the refresh round-trip (Material 3 stable, cf. Context7).
     PullToRefreshBox(
         isRefreshing = state.isRefreshing,
         onRefresh = actions.onRefresh,
-        modifier = Modifier
-            .fillMaxWidth()
-            // Without weight(1f) the box would not claim the remaining vertical space inside
-            // the parent Column, breaking the swipe gesture area on short lists.
-            .weight(1f),
+        modifier = Modifier.fillMaxSize(),
     ) {
         when (val current = state.flagsState) {
             null, FlagsListUiState.Loading -> Box(
@@ -781,6 +823,8 @@ private fun CategorySectionedFlagList(
                 CategoryHeaderBand(
                     label = section.catName
                         ?: stringResource(R.string.flags_category_fallback, section.catId),
+                    // #414 — parité RF1 : the band navigates to the category's topic listing.
+                    onClick = { actions.onOpenCategory(section.catId) },
                 )
             }
 
@@ -803,7 +847,7 @@ private fun CategorySectionedFlagList(
                     // across the list. `removeFlagState` is Removing only between confirm and the
                     // repository result (a brief window); the modal dialog already blocks the
                     // Confirming phase and the ViewModel rejects re-entry.
-                    SwipeableFlagItem(
+                    RemovableFlagItem(
                         flag = flag,
                         metadata = flagRowMetadata(flag),
                         removalInFlight = removalInFlight,
@@ -821,18 +865,37 @@ private fun CategorySectionedFlagList(
  * Opaque category separator band for the grouped list (#179). Uses `surfaceVariant` /
  * `onSurfaceVariant` from the theme (no hardcoded color) so it reads as a sticky header over
  * the scrolling rows without bleed-through.
+ *
+ * #414 — the whole band is tappable and opens the category's topic listing (RF1 parity); the
+ * trailing « › » glyph (same vector-text pattern as the page FABs, #283) is the affordance.
+ * Foundation [clickable] does not enforce the 48dp Material touch-target minimum, hence the
+ * explicit [heightIn].
  */
 @Composable
-private fun CategoryHeaderBand(label: String) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+private fun CategoryHeaderBand(label: String, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceVariant)
+            .heightIn(min = 48.dp)
+            .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) {
+                onClick()
+            }
             .padding(horizontal = 24.dp, vertical = 8.dp),
-    )
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = "›",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 /**
@@ -851,8 +914,8 @@ private fun emptySectionLabel(tab: FlagTab): Int = when (tab) {
  * with no category bands. Like [CategorySectionedFlagList] it is a single [LazyColumn] so the
  * surrounding `PullToRefreshBox` keeps a scrollable child to anchor the pull gesture on (#229);
  * an empty list still emits one placeholder item so the « rien à afficher » wording is shown and
- * the pull gesture has a target. Rows reuse [SwipeableFlagItem] so the #99 swipe-to-remove and
- * accessibility action behave identically to the grouped view.
+ * the pull gesture has a target. Rows reuse [RemovableFlagItem] so the long-press removal (#457)
+ * and accessibility action behave identically to the grouped view.
  */
 @Composable
 private fun FlatFlagList(
@@ -883,7 +946,7 @@ private fun FlatFlagList(
                 key = { "${it.cat}-${it.topicId}" },
                 contentType = { CONTENT_TYPE_ROW },
             ) { flag ->
-                SwipeableFlagItem(
+                RemovableFlagItem(
                     flag = flag,
                     metadata = flagRowMetadata(flag),
                     removalInFlight = removalInFlight,
@@ -907,104 +970,47 @@ private fun flatEmptyLabel(tab: FlagTab): Int = when (tab) {
 }
 
 /**
- * One swipeable flag row (#99). Wraps [FlagItem] in a Material 3 [SwipeToDismissBox] so a swipe
- * **end-to-start** raises the existing confirmation dialog via [onRequestRemove].
+ * One removable flag row. The « Retirer » affordance went swipe-to-dismiss (#99) → **long-press**
+ * (#457): the horizontal swipe now changes the flag tab, and a row-level `SwipeToDismissBox`
+ * would consume the horizontal drag first and steal the tab gesture. The long-press only
+ * *raises* the existing confirmation dialog via [onRequestRemove] — the actual removal still
+ * happens after the user confirms (the repository then evicts the item from the cache, which
+ * recomposes the list away). Arbitrage XaTriX (#457): the swipe-to-remove may come back later
+ * in another form.
  *
- * Crucial « confirm before network » detail: the swipe must **not** dismiss the row on its own.
- * The actual removal only happens after the user confirms in the dialog (the repository then
- * evicts the item from the cache, which recomposes the list away). So from the non-deprecated
- * [SwipeToDismissBox] `onDismiss` callback we both fire [onRequestRemove] **and** immediately
- * `reset()` the box back to [SwipeToDismissBoxValue.Settled] — the row snaps back whether the user
- * confirms or cancels. This is the canonical Material 3 stable pattern (cf. Context7
- * `SwipeToDismissBox` sample).
- *
- * Resetting from a separate `LaunchedEffect` keyed on `currentValue` looks equivalent but is
- * racy: `reset()` = `animateTo(Settled)` flips `currentValue` early, re-keying the effect and
- * cancelling the reset mid-animation, which leaves the row **stuck at the dismissed offset** once
- * the dialog grabs focus (reproduced on device). Resetting inside `onDismiss` avoids the race.
- *
- * We do **not** use the `confirmValueChange` veto overload of [rememberSwipeToDismissBoxState]:
- * it is deprecated in the locked Material 3 (BOM 2026.04.01) — the verified message is
- * « confirmValueChange is deprecated without replacement ». `onDismiss` + `reset()` is the
- * supported equivalent (cf. Context7 + the locked material3 classes.jar).
- *
- * Only swipe-to-start is enabled ([enableDismissFromStartToEnd] = false): a single, predictable
- * gesture, with no accidental removal on a start-to-end pan. The swipe is also the *only* removal
- * affordance, so the row carries a TalkBack/switch-access `customActions` entry mirroring it.
- * While a removal is in flight ([removalInFlight]), gestures are disabled across the list (the
- * ViewModel also guards re-entry) — `Removing` is only the brief confirm→result window.
+ * The long-press being invisible, the row keeps the TalkBack/switch-access `customActions`
+ * entry (#99) in addition to the `onLongClickLabel` semantics. While a removal is in flight
+ * ([removalInFlight]) the long-press is a no-op — the ViewModel also guards re-entry;
+ * `Removing` is only the brief confirm→result window.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SwipeableFlagItem(
+private fun RemovableFlagItem(
     flag: Flag,
     metadata: FlagMetadata,
     removalInFlight: Boolean,
     onClick: () -> Unit,
     onRequestRemove: () -> Unit,
 ) {
-    val dismissState = rememberSwipeToDismissBoxState()
-    val scope = rememberCoroutineScope()
     val removeLabel = stringResource(R.string.flags_remove_action)
 
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromStartToEnd = false,
-        enableDismissFromEndToStart = true,
-        gesturesEnabled = !removalInFlight,
-        // The swipe only *triggers* the confirmation — it must never dismiss the row itself.
-        // Raise the dialog and snap the box back from the SAME callback (canonical M3 stable
-        // pattern). Doing the reset() here instead of a LaunchedEffect(currentValue) avoids the
-        // re-key race that otherwise leaves the row stuck at the dismissed offset.
-        onDismiss = {
-            onRequestRemove()
-            scope.launch { dismissState.reset() }
+    FlagItem(
+        flag = flag,
+        metadata = metadata,
+        onClick = onClick,
+        longPress = FlagItemLongPress(label = removeLabel) {
+            if (!removalInFlight) onRequestRemove()
         },
-        backgroundContent = { SwipeRemoveBackground() },
-    ) {
-        FlagItem(
-            flag = flag,
-            metadata = metadata,
-            onClick = onClick,
-            // Opaque background so the destructive backdrop never bleeds through the row while
-            // it is animating back to settled. Swipe is the only removal affordance now, so we
-            // also expose a TalkBack/switch-access custom action mirroring it.
-            modifier = Modifier
-                .background(MaterialTheme.colorScheme.surface)
-                .semantics {
-                    customActions = listOf(
-                        CustomAccessibilityAction(removeLabel) {
-                            onRequestRemove()
-                            true
-                        },
-                    )
-                },
-        )
-    }
-}
-
-/**
- * Destructive M3 backdrop revealed under a flag row while swiping end-to-start (#99). Uses
- * `errorContainer` / `onErrorContainer` from the theme — no hardcoded color — and a text label
- * (« Retirer ») rather than a Material Icons glyph, because the icons-extended dependency is not
- * on the classpath in this module.
- */
-@Composable
-private fun SwipeRemoveBackground() {
-    Box(
         modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.errorContainer)
-            .padding(horizontal = 24.dp),
-        contentAlignment = Alignment.CenterEnd,
-    ) {
-        Text(
-            text = stringResource(R.string.flags_remove_action),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onErrorContainer,
-            textAlign = TextAlign.End,
-        )
-    }
+            .background(MaterialTheme.colorScheme.surface)
+            .semantics {
+                customActions = listOf(
+                    CustomAccessibilityAction(removeLabel) {
+                        onRequestRemove()
+                        true
+                    },
+                )
+            },
+    )
 }
 
 /**
@@ -1012,11 +1018,10 @@ private fun SwipeRemoveBackground() {
  * network call — just an explanatory message until the feature ships.
  */
 @Composable
-private fun ColumnScope.SuperPlaceholderBody() {
+private fun SuperPlaceholderBody() {
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .weight(1f)
+            .fillMaxSize()
             .padding(horizontal = 24.dp, vertical = 32.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -1054,11 +1059,10 @@ private fun DtTabFallbackEffect(
  * discussions whose flags sync through the MPStorage document, #6) lands later.
  */
 @Composable
-private fun ColumnScope.DtPlaceholderBody() {
+private fun DtPlaceholderBody() {
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .weight(1f)
+            .fillMaxSize()
             .padding(horizontal = 24.dp, vertical = 32.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -1096,6 +1100,8 @@ private data class AuthenticatedActions(
     val onRefresh: () -> Unit,
     val onLoginRequested: () -> Unit,
     val onRequestRemoveFlag: (Flag) -> Unit,
+    /** #414 — tap on a category band opens that category's topic listing. */
+    val onOpenCategory: (Int) -> Unit,
 )
 
 /**

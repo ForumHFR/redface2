@@ -88,6 +88,14 @@ data class TopicFormState(
      * [canSubmit] already validated the form (we never confirm an unsendable form).
      */
     val showSubmitConfirmation: Boolean = false,
+    /**
+     * #405 — the body of a previously-cached draft for this form's key, surfaced on init when a
+     * non-empty draft was found. Mirrors [PostEditorState.restorableDraft]. [restorableSubject]
+     * carries the cached subject (topic-level forms have one) ; both fill the editor on
+     * « Restaurer » and are dropped on « Ignorer ».
+     */
+    val restorableDraft: String? = null,
+    val restorableSubject: String? = null,
 ) {
     /**
      * Submit is allowed when the mode-specific routing context is complete,
@@ -175,6 +183,12 @@ sealed interface TopicFormIntent {
 
     /** Phase 2F-E (#189) — insert `[img]url[/img]` for a validated remote image URL. */
     data class ImageUrlInserted(val url: String) : TopicFormIntent
+
+    /** #405 — restore the editor from the cached draft (subject + body). */
+    data object DraftRestoreRequested : TopicFormIntent
+
+    /** #405 — discard the cached draft : delete the row and clear the banner. */
+    data object DraftDiscardRequested : TopicFormIntent
 }
 
 /**

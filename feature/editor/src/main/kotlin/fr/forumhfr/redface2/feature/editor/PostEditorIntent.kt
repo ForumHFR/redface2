@@ -57,6 +57,30 @@ sealed interface PostEditorIntent {
 
     /** Phase 2F-E (#189) — insert `[img]url[/img]` for a validated remote image URL. */
     data class ImageUrlInserted(val url: String) : PostEditorIntent
+
+    /**
+     * #459 PR2 — the user picked a local image from the system photo picker. [uri] is the
+     * picker's `Uri.toString()`. The ViewModel reads the bytes (off the platform layer), uploads
+     * to the selected host, and inserts the resulting `[img]url[/img]` at the caret on success.
+     */
+    data class ImagePicked(val uri: String) : PostEditorIntent
+
+    /**
+     * Multi-image upload — the user picked several local images at once from the system photo
+     * picker. [uris] holds each `Uri.toString()`, in pick order. The ViewModel uploads them
+     * sequentially and inserts an `[img]url[/img]` at the caret for each success (order preserved);
+     * the batch stops at the first failure, leaving the already-inserted images in place.
+     */
+    data class ImagesPicked(val uris: List<String>) : PostEditorIntent
+
+    /** #459 PR2 — user dismissed the upload-error banner. Clears [PostEditorState.uploadError]. */
+    data object UploadErrorDismissed : PostEditorIntent
+
+    /** #405 — user tapped « Restaurer » on the draft banner: pre-fill the editor from the cached draft. */
+    data object DraftRestoreRequested : PostEditorIntent
+
+    /** #405 — user tapped « Ignorer » on the draft banner: delete the cached draft and clear the banner. */
+    data object DraftDiscardRequested : PostEditorIntent
 }
 
 /**

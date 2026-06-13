@@ -59,8 +59,10 @@ import java.util.Locale
 @Suppress("LongParameterList") // Tab surface : nav callbacks + chrome slots + the sent signal.
 fun MessagesScreen(
     // isMultiRecipient is an ephemeral UI hint forwarded to the thread screen (the route stays
-    // opaque — it never persists this private metadata in the back stack).
-    onOpenThread: (threadId: Int, isMultiRecipient: Boolean) -> Unit,
+    // opaque — it never persists this private metadata in the back stack). openAtPage is the
+    // conversation's last page read from the inbox (#430, web parity: the inbox "Pages" cell
+    // links the last page) — a bare page number is not private metadata.
+    onOpenThread: (threadId: Int, isMultiRecipient: Boolean, openAtPage: Int) -> Unit,
     readThreadIds: Set<Int> = emptySet(),
     topBarActions: @Composable (() -> Unit)? = null,
     // #301 follow-up — opens the new-conversation composer. Null hides the button.
@@ -178,7 +180,11 @@ fun MessagesScreen(
                         ),
                         onSelectPage = viewModel::selectPage,
                         onConversationClick = { conversation ->
-                            onOpenThread(conversation.threadId, conversation.isMultiRecipient)
+                            onOpenThread(
+                                conversation.threadId,
+                                conversation.isMultiRecipient,
+                                conversation.lastPage,
+                            )
                         },
                     )
                 }

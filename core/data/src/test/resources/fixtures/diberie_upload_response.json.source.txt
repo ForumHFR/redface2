@@ -1,0 +1,13 @@
+Source: rehost.diberie.com (hôte de rehosting d'images, public, sans authentification). 2026-06-13
+Captured endpoint: POST https://rehost.diberie.com/Host/UploadFiles
+  ?SelectedAlbumId=0&PrivateMode=false&SendMail=false&KeepTags=&Comment=&SelectedExpiryType=0
+  (exactement les query params + le champ multipart `image` que DiberieProvider.upload envoie)
+Méthode: curl POST multipart/form-data, partie `image` = un vrai PNG 100x100 généré pour le test,
+  User-Agent navigateur. Réponse HTTP 200, content-type application/json; charset=utf-8.
+  Commande (reconstituée) :
+    curl -F "image=@test.png;type=image/png;filename=upload.png" \
+      "https://rehost.diberie.com/Host/UploadFiles?SelectedAlbumId=0&PrivateMode=false&SendMail=false&KeepTags=&Comment=&SelectedExpiryType=0"
+Notes: capture qui a révélé le bug #459 — `picID` est un ENTIER JSON (521196), pas une string ;
+  `previewWidht`/`previewHeight` sont des strings ("300"). picID 521196 = l'upload de test réel.
+Privacy: rien à scrubber — aucune donnée d'authentification ni personnelle (hôte public sans cookie).
+  La réponse ne contient que des URLs d'images publiques et l'ID séquentiel de l'image.

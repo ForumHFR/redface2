@@ -255,3 +255,91 @@ val MIGRATION_8_9: Migration = object : Migration(8, 9) {
         db.execSQL("ALTER TABLE flag_topics ADD COLUMN isFavorite INTEGER NOT NULL DEFAULT 0")
     }
 }
+
+/**
+ * v9 → v10 — `mp_read_positions` (#430, ADR-013 stage 1): per-account last-displayed page of
+ * each private-message conversation, so reopening (or restoring after process death) lands past
+ * the route's frozen opening page. Pure DDL, no backfill: positions only exist once the user
+ * navigates with the new build, and the opening fallback (the inbox's last-page link) covers
+ * absent rows.
+ */
+val MIGRATION_9_10: Migration = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `mp_read_positions` (
+                `userId` TEXT NOT NULL,
+                `threadId` INTEGER NOT NULL,
+                `page` INTEGER NOT NULL,
+                PRIMARY KEY(`userId`, `threadId`)
+            )
+            """.trimIndent(),
+        )
+    }
+}
+
+/**
+ * v10 → v11 — `editor_drafts` (#405): per-account cache of in-progress editor content so a
+ * draft survives nav-entry destruction / process death. Pure DDL, no backfill. MP drafts
+ * (`isPrivate = 1`) are purged on logout / account switch; every row is bounded by a 30-day
+ * retention purge run on app start. The `draftKey` PK is `"<ownerId>|<contextKey>"` and the
+ * dedicated `ownerId` column lets the logout purge target one account exactly (no LIKE scan).
+ * The DDL matches the exported `11.json` `createSql` (column order, NOT NULL, nullable
+ * `subject`/`recipients`, PK) so `runMigrationsAndValidate` is satisfied.
+ */
+val MIGRATION_10_11: Migration = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `editor_drafts` (
+                `draftKey` TEXT NOT NULL,
+                `ownerId` TEXT NOT NULL,
+                `body` TEXT NOT NULL,
+                `subject` TEXT,
+                `recipients` TEXT,
+                `updatedAt` INTEGER NOT NULL,
+                `isPrivate` INTEGER NOT NULL,
+                PRIMARY KEY(`draftKey`)
+            )
+            """.trimIndent(),
+        )
+    }
+}
+
+/**
+ * v11 → v12 — `uploaded_images` (#459): per-account history of images uploaded through the editor
+ * (provider, deletion handle, full + thumbnail URLs, dates), backing the « Mes images uploadées »
+ * screen and deferred deletion. Pure DDL, no backfill — rows only exist once the user uploads with
+ * the new build. Like `mp_read_positions` the rows are private per account and wiped on logout /
+ * account switch (cf. `CacheInvalidator`).
+ *
+ * The DDL is hand-written to match the exported `12.json` `createSql` (column order = entity field
+ * order, NOT NULL flags, nullable `thumbnailUrl` / `deleteHandle` / `expiresAt`, composite PK, and
+ * the `userId, uploadedAt` index) so `runMigrationsAndValidate` is satisfied.
+ *
+ * NOTE orchestrateur: régénérer `12.json` via ksp (`./gradlew :core:database:kspDebugKotlin`) puis
+ * vérifier que ce DDL correspond exactement au `createSql` exporté avant merge.
+ */
+val MIGRATION_11_12: Migration = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `uploaded_images` (
+                `userId` TEXT NOT NULL,
+                `provider` TEXT NOT NULL,
+                `picId` TEXT NOT NULL,
+                `imageUrl` TEXT NOT NULL,
+                `thumbnailUrl` TEXT,
+                `deleteHandle` TEXT,
+                `uploadedAt` INTEGER NOT NULL,
+                `expiresAt` INTEGER,
+                PRIMARY KEY(`userId`, `provider`, `picId`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_uploaded_images_userId_uploadedAt` " +
+                "ON `uploaded_images` (`userId`, `uploadedAt`)",
+        )
+    }
+}

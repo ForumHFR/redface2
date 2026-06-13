@@ -8,6 +8,7 @@ import coil3.gif.AnimatedImageDecoder
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import dagger.hilt.android.HiltAndroidApp
 import fr.forumhfr.redface2.core.data.cache.CacheInvalidator
+import fr.forumhfr.redface2.core.data.editor.DraftRetentionPurger
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import javax.inject.Inject
 import okhttp3.OkHttpClient
@@ -34,6 +35,8 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
 
     @Inject lateinit var cacheInvalidator: CacheInvalidator
 
+    @Inject lateinit var draftRetentionPurger: DraftRetentionPurger
+
     @Inject
     @AnonymousClient
     lateinit var imageClient: OkHttpClient
@@ -56,5 +59,8 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
         // is alive for the full process lifetime — there is no point trying to
         // stop it before the process dies.
         cacheInvalidator.start()
+        // One-shot retention sweep dropping editor drafts older than the TTL (#405). Independent
+        // of the auth state, so it runs alongside the invalidator rather than inside it.
+        draftRetentionPurger.purge()
     }
 }

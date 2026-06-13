@@ -7,11 +7,17 @@ import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
@@ -55,6 +61,7 @@ class TopicFormViewModelTest {
     private val previewParser = FakePreviewParser()
     private val topicFormRepository = FakeTopicFormRepository()
     private val smileyRepository = FakeSmileyRepository()
+    private val draftStore = FakeEditorDraftStore()
 
     @Before
     fun setUp() {
@@ -977,6 +984,93 @@ class TopicFormViewModelTest {
         assertFalse(viewModel.state.value.isSubmitting)
     }
 
+    // ----- #405 : draft autosave / restore -----------------------------------
+
+    @Test
+    fun `New autosave persists subject and body under the newTopic key`() = runTest {
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("My title")))
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("My body")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        assertEquals("My body", draftStore.saved[key]?.body)
+        assertEquals("My title", draftStore.saved[key]?.subject)
+        assertFalse("topic drafts are not private", draftStore.saved[key]?.isPrivate == true)
+    }
+
+    @Test
+    fun `New restore surfaces and applies the cached subject and body`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.newTopic(SAMPLE_CAT),
+            EditorDraftStore.Draft(body = "rescued body", subject = "rescued title"),
+        )
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+        assertEquals("rescued body", viewModel.state.value.restorableDraft)
+        assertEquals("rescued title", viewModel.state.value.restorableSubject)
+        assertEquals("draft is not auto-applied", "", viewModel.state.value.draft.text)
+
+        viewModel.submit(TopicFormIntent.DraftRestoreRequested)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("rescued body", viewModel.state.value.draft.text)
+        assertEquals("rescued title", viewModel.state.value.subject.text)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `New discard deletes the cached draft and clears the banner`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued body"))
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(TopicFormIntent.DraftDiscardRequested)
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(draftStore.deletedKeys.contains(key))
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `a successful new-topic submit deletes the cached draft`() = runTest {
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("My title")))
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("My body")))
+
+        viewModel.submit(TopicFormIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("submit must have happened", 1, topicFormRepository.newTopicSubmitCalls)
+        assertTrue(
+            "a created topic must drop its draft",
+            draftStore.deletedKeys.contains(EditorDraftKey.newTopic(SAMPLE_CAT)),
+        )
+    }
+
+    @Test
+    fun `EditFirstPost autosave and delete-on-submit use the editFirstPost key`() = runTest {
+        val viewModel = newViewModel()
+        testScheduler.advanceUntilIdle()
+
+        // The FP form hydrated subject + body ; change the body so a draft is worth saving.
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("rewritten FP body")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+        val key = EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+        assertEquals("rewritten FP body", draftStore.saved[key]?.body)
+
+        viewModel.submit(TopicFormIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, topicFormRepository.submitCalls)
+        assertTrue("a saved FP must drop its draft", draftStore.deletedKeys.contains(key))
+    }
+
     private fun newTopicViewModel(
         entrySubcat: Int?,
         cat: Int = SAMPLE_CAT,
@@ -995,6 +1089,7 @@ class TopicFormViewModelTest {
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
         userPreferencesRepository = userPreferencesRepository,
+        draftStore = draftStore,
         diagnostics = diagnostics,
     )
 
@@ -1025,6 +1120,7 @@ class TopicFormViewModelTest {
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
         userPreferencesRepository = userPreferencesRepository,
+        draftStore = draftStore,
         diagnostics = diagnostics,
     )
 
@@ -1265,6 +1361,60 @@ class TopicFormViewModelTest {
         override fun observeMpUnreadBadge(): Flow<Boolean> = MutableStateFlow(true)
 
         override suspend fun setMpUnreadBadge(enabled: Boolean) = Unit
+
+        override fun observeTopicPollsExpanded(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
+
+        override fun observeStartScreen(): Flow<StartScreenPreference> =
+            MutableStateFlow(StartScreenPreference())
+
+        override suspend fun setStartScreen(preference: StartScreenPreference) = Unit
+
+        // #459 — upload provider / imgur Client-ID are irrelevant to this ViewModel; default stubs.
+        override fun observeUploadProvider(): Flow<UploadProviderId> =
+            MutableStateFlow(UploadProviderId.DIBERIE)
+
+        override suspend fun setUploadProvider(provider: UploadProviderId) = Unit
+
+        override fun observeImgurClientId(): Flow<String> = MutableStateFlow("")
+
+        override suspend fun setImgurClientId(clientId: String) = Unit
+
+        // #287 — reading display presets are irrelevant to the topic form; stubbed at defaults.
+        override fun observeDisplayDensity(): Flow<DisplayDensity> = MutableStateFlow(DisplayDensity.COMFORT)
+
+        override suspend fun setDisplayDensity(density: DisplayDensity) = Unit
+
+        override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
+
+        override suspend fun setFontScale(scale: FontScalePreference) = Unit
+    }
+
+    /** #405 — in-memory fake [EditorDraftStore], same shape as the one in `PostEditorViewModelTest`. */
+    private class FakeEditorDraftStore : EditorDraftStore {
+        val saved: MutableMap<String, EditorDraftStore.Draft> = mutableMapOf()
+        val deletedKeys: MutableList<String> = mutableListOf()
+        var saveCount: Int = 0
+            private set
+
+        fun preload(key: String, draft: EditorDraftStore.Draft) {
+            saved[key] = draft
+        }
+
+        override suspend fun currentOwner(): String? = "tester"
+
+        override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? = saved[key]
+
+        override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
+            saveCount += 1
+            saved[key] = draft
+        }
+
+        override suspend fun delete(owner: String?, key: String) {
+            deletedKeys += key
+            saved.remove(key)
+        }
     }
 
     private companion object {

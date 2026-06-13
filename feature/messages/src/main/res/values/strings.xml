@@ -50,4 +50,8 @@
     <string name="messages_reply_error_network">Problème de connexion. Vérifiez votre réseau puis réessayez.</string>
     <string name="messages_reply_error_session_expired">La session a expiré. Reconnectez-vous puis réessayez.</string>
     <string name="messages_reply_error_unexpected">Réponse inattendue de HFR. Votre message a peut-être été envoyé : vérifiez la conversation.</string>
+    <!-- #405 — bannière de restauration de brouillon (réponse MP et nouveau message). -->
+    <string name="messages_draft_restore_message">Un brouillon non envoyé a été retrouvé.</string>
+    <string name="messages_draft_restore">Restaurer</string>
+    <string name="messages_draft_discard">Ignorer</string>
 </resources>

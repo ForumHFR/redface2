@@ -25,13 +25,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
@@ -56,9 +53,11 @@ import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.account.RedfaceAccountMenu
+import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import fr.forumhfr.redface2.feature.auth.LoginScreen
 import fr.forumhfr.redface2.feature.editor.PostEditorMode
 import fr.forumhfr.redface2.feature.editor.PostEditorRequest
@@ -80,6 +79,7 @@ import fr.forumhfr.redface2.feature.profile.ProfilePreviewSheet
 import fr.forumhfr.redface2.feature.profile.ProfileRoute
 import fr.forumhfr.redface2.feature.profile.ProfileViewModel
 import fr.forumhfr.redface2.feature.search.SearchScreen
+import fr.forumhfr.redface2.feature.settings.MyImagesScreen
 import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
@@ -266,6 +266,13 @@ data object DiagnosticsRoute : RedfaceNavKey
 data object SettingsRoute : RedfaceNavKey
 
 /**
+ * #459 PR3 — « Mes images uploadées » screen (lists previously uploaded images + delete). Reached
+ * from the Settings screen ; lives in `:feature:settings` (settings-adjacent), opaque route.
+ */
+@Serializable
+data object MyImagesRoute : RedfaceNavKey
+
+/**
  * Phase 2 finish (#208) — full profile page route.
  *
  * Navigation is always [userId]-first. [pseudo] and [avatarUrl] are display hints shown
@@ -304,6 +311,13 @@ internal enum class TopLevelDestination(
     Forum(R.string.nav_forum, ForumRoute),
     Search(R.string.nav_search, SearchRoute),
     Messages(R.string.nav_messages, MessagesRoute),
+}
+
+/** #458 — maps the persisted cold-start choice onto the navigation's own destination enum. */
+private fun StartScreenChoice.toTopLevelDestination(): TopLevelDestination = when (this) {
+    StartScreenChoice.FLAGS -> TopLevelDestination.Flags
+    StartScreenChoice.FORUM -> TopLevelDestination.Forum
+    StartScreenChoice.MESSAGES -> TopLevelDestination.Messages
 }
 
 /** #313 — badge cap : beyond this the badge shows « 9+ » (page-1 proxy, cf. MpUnreadBadgeViewModel). */
@@ -399,6 +413,9 @@ fun RedfaceApp(intent: Intent?) {
     val themeViewModel: AppThemeViewModel = hiltViewModel()
     val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
     val amoledEnabled by themeViewModel.amoledEnabled.collectAsStateWithLifecycle()
+    // #287 — reading presets (density + font scale) resolved at the root and bundled for RedfaceTheme.
+    val displayDensity by themeViewModel.displayDensity.collectAsStateWithLifecycle()
+    val fontScale by themeViewModel.fontScale.collectAsStateWithLifecycle()
     val darkTheme = when (themeMode) {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
@@ -421,13 +438,41 @@ fun RedfaceApp(intent: Intent?) {
             controller.isAppearanceLightNavigationBars = !darkTheme
         }
     }
-    RedfaceTheme(darkTheme = darkTheme, amoledTheme = amoledEnabled) {
+    RedfaceTheme(
+        darkTheme = darkTheme,
+        amoledTheme = amoledEnabled,
+        reading = ReadingDisplaySettings(density = displayDensity, fontScale = fontScale),
+    ) {
+        // #458 — cold-start screen, read synchronously from the bootstrap mirror and frozen for
+        // the session. Only the INITIAL values below consume it: rememberSaveable and
+        // rememberNavBackStack restore saved state first, so rotations / process restores keep
+        // the user where they were, and a Settings change only applies on the next launch.
+        val startScreenViewModel: StartScreenViewModel = hiltViewModel()
+        val startScreen = startScreenViewModel.startScreen
+
         val flagsBackStack = rememberNavBackStack(FlagsListRoute)
-        val forumBackStack = rememberNavBackStack(ForumRoute)
+        val forumStartCat = startScreen.forumCatId
+            ?.takeIf { startScreen.screen == StartScreenChoice.FORUM }
+        // SINGLE rememberNavBackStack call site on purpose (review Codex PR #464): two
+        // conditional calls would occupy different saveable slots, so flipping the preference
+        // between launches could orphan the saved Forum stack and reset it to the seed instead
+        // of restoring. The pre-stacked category listing means back from it lands on the forum
+        // root, like a manual navigation would.
+        val forumInitialStack = if (forumStartCat != null) {
+            arrayOf<NavKey>(ForumRoute, CategoryRoute(cat = forumStartCat))
+        } else {
+            arrayOf<NavKey>(ForumRoute)
+        }
+        // The spread copies a 1-2 element array once per cold start — the price of keeping the
+        // single call site (rememberNavBackStack only has a vararg overload).
+        @Suppress("SpreadOperator")
+        val forumBackStack = rememberNavBackStack(*forumInitialStack)
         val searchBackStack = rememberNavBackStack(SearchRoute)
         val messagesBackStack = rememberNavBackStack(MessagesRoute)
 
-        var currentDestination by rememberSaveable { mutableStateOf(TopLevelDestination.Flags) }
+        var currentDestination by rememberSaveable {
+            mutableStateOf(startScreen.screen.toTopLevelDestination())
+        }
 
         // Phase 2 finish (#208) — profile bottom sheet state, hoisted to `:app` so that
         // `:feature:topic` never depends on `:feature:profile`. The sheet is opened from
@@ -563,7 +608,11 @@ fun RedfaceApp(intent: Intent?) {
                 }
             },
         ) {
-            Surface(modifier = Modifier.padding(horizontal = 8.dp)) {
+            // #398 — no global side gutter here. Each screen owns its own lateral rhythm
+            // (listings keep their 16/24 dp content padding, readers compensate explicitly),
+            // so the nav host no longer steals 8 dp/side from every screen. The Surface is kept
+            // for the theme background/elevation; only its horizontal padding was removed.
+            Surface {
                 val activeBackStack = backStacks.getValue(currentDestination)
                 val accountMenu: @Composable () -> Unit = {
                     RedfaceAccountMenu(
@@ -906,6 +955,11 @@ private fun RedfaceNavHost(
                     onLoginRequested = {
                         backStack.add(LoginRoute)
                     },
+                    // #414 — category band tap: push the listing INSIDE the Flags tab so back
+                    // returns to the flags list (less surprising than switching to the Forum tab).
+                    onOpenCategory = { catId ->
+                        backStack.add(CategoryRoute(cat = catId, subcat = null, page = 1))
+                    },
                     topBarActions = accountMenu,
                 )
             }
@@ -987,7 +1041,7 @@ private fun RedfaceNavHost(
             entry<MessagesRoute> {
                 MessagesScreen(
                     readThreadIds = privateMessageNavState.readThreadIds,
-                    onOpenThread = { threadId, isMultiRecipient ->
+                    onOpenThread = { threadId, isMultiRecipient, openAtPage ->
                         // Record the multi-recipient hint in memory only; the route stays opaque.
                         if (isMultiRecipient) {
                             privateMessageNavState.onThreadOpenedAsMulti(threadId)
@@ -995,6 +1049,10 @@ private fun RedfaceNavHost(
                         backStack.add(
                             PrivateMessageThreadRoute(
                                 threadId = threadId,
+                                // #430 — web parity: open on the conversation's last page (the
+                                // inbox "Pages" link), not page 1. The ViewModel may still land
+                                // further via the locally saved reading position.
+                                page = openAtPage,
                             ),
                         )
                     },
@@ -1075,7 +1133,18 @@ private fun RedfaceNavHost(
                 )
             }
             entry<SettingsRoute> {
-                SettingsScreen()
+                SettingsScreen(
+                    onOpenMyImages = { backStack.add(MyImagesRoute) },
+                )
+            }
+            entry<MyImagesRoute> {
+                MyImagesScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                )
             }
             entry<CategoryRoute> { route ->
                 ForumCategoryScreen(

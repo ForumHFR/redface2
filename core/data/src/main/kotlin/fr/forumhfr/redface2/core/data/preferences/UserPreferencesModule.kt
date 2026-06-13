@@ -11,6 +11,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import javax.inject.Singleton
@@ -45,4 +46,10 @@ abstract class UserPreferencesBindingsModule {
     abstract fun bindThemeBootstrapStore(
         impl: SharedPreferencesThemeBootstrapStore,
     ): ThemeBootstrapStore
+
+    @Binds
+    @Singleton
+    abstract fun bindStartScreenBootstrapStore(
+        impl: SharedPreferencesStartScreenBootstrapStore,
+    ): StartScreenBootstrapStore
 }

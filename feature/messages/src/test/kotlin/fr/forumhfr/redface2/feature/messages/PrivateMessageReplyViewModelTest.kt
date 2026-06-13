@@ -3,6 +3,8 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
@@ -22,6 +24,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -57,6 +60,13 @@ class PrivateMessageReplyViewModelTest {
      */
     private fun smileyRepository(): SmileyRepository = mockk(relaxed = true)
 
+    /**
+     * #405 — in-memory fake [EditorDraftStore]. Records save / delete and serves preloaded drafts
+     * for the restore-on-init test. A fresh instance per test (held on the class) keeps assertions
+     * isolated ; the existing tests ignore it (no draft preloaded → restore is a no-op).
+     */
+    private val draftStore = FakeEditorDraftStore()
+
     private fun userPreferences(confirmBeforePosting: Boolean = false): UserPreferencesRepository =
         mockk {
             every { observeConfirmBeforePosting() } returns MutableStateFlow(confirmBeforePosting)
@@ -84,7 +94,7 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.fetchReplyForm(any()) } returns form()
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
         )
 
         val state = viewModel.state.value
@@ -102,7 +112,7 @@ class PrivateMessageReplyViewModelTest {
         val smileys = smileyRepository()
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), smileys,
+            request, repository, previewParser, userPreferences(), draftStore, smileys,
         )
 
         viewModel.smileyPicker.open()
@@ -120,7 +130,7 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
 
@@ -144,7 +154,7 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("non-blank"))
         viewModel.onSubmit()
@@ -163,7 +173,7 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("hello"))
         viewModel.onSubmit()
@@ -181,7 +191,7 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
         )
         // First load hydrates signature ON (hidden `signature=1`); the user turns it OFF.
         viewModel.onToggleSignature(false)
@@ -205,7 +215,7 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("hello"))
         viewModel.onSubmit()
@@ -222,7 +232,7 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.fetchReplyForm(any()) } throws IOException("network down")
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
         )
 
         val state = viewModel.state.value
@@ -237,7 +247,7 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.fetchReplyForm(any()) } returns form(isAnonymous = true)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
         )
 
         assertTrue(viewModel.state.value.formError)
@@ -262,7 +272,7 @@ class PrivateMessageReplyViewModelTest {
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
         val viewModel = PrivateMessageReplyViewModel(
-            request, repository, previewParser, userPreferences(), smileyRepository(),
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
         viewModel.onSubmit()
@@ -281,6 +291,7 @@ class PrivateMessageReplyViewModelTest {
             repository,
             previewParser,
             userPreferences(confirmBeforePosting = true),
+            draftStore,
             smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
@@ -303,6 +314,7 @@ class PrivateMessageReplyViewModelTest {
             repository,
             previewParser,
             userPreferences(confirmBeforePosting = true),
+            draftStore,
             smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
@@ -332,6 +344,7 @@ class PrivateMessageReplyViewModelTest {
             repository,
             previewParser,
             userPreferences(confirmBeforePosting = true),
+            draftStore,
             smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
@@ -357,6 +370,7 @@ class PrivateMessageReplyViewModelTest {
             repository,
             previewParser,
             userPreferences(confirmBeforePosting = true),
+            draftStore,
             smileyRepository(),
         )
         viewModel.onSubmit()
@@ -375,6 +389,7 @@ class PrivateMessageReplyViewModelTest {
             repository,
             previewParser,
             userPreferences(confirmBeforePosting = true),
+            draftStore,
             smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
@@ -408,6 +423,7 @@ class PrivateMessageReplyViewModelTest {
             repository,
             previewParser,
             userPreferences(confirmBeforePosting = true),
+            draftStore,
             smileyRepository(),
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
@@ -422,5 +438,100 @@ class PrivateMessageReplyViewModelTest {
         coVerify(exactly = 1) { repository.submitReply(any(), any(), any(), any()) }
         assertFalse(viewModel.state.value.showSubmitConfirmation)
         assertFalse(viewModel.state.value.isSubmitting)
+    }
+
+    // ----- #405 : draft autosave / restore -----------------------------------
+
+    @Test
+    fun `autosave persists the private body under the mpReply key after the debounce`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns form()
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+
+        viewModel.onContentChanged(TextFieldValue("private draft"))
+        advanceTimeBy(800L)
+
+        val key = EditorDraftKey.mpReply(request.threadId)
+        assertEquals("private draft", draftStore.saved[key]?.body)
+        assertTrue("MP drafts must be flagged private for the logout purge", draftStore.saved[key]?.isPrivate == true)
+    }
+
+    @Test
+    fun `a stored MP draft is surfaced as restorable on init`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns form()
+        draftStore.preload(
+            EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = "rescued MP", isPrivate = true),
+        )
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+
+        assertEquals("rescued MP", viewModel.state.value.restorableDraft)
+        assertEquals("draft is not auto-applied", "", viewModel.state.value.draft.text)
+
+        viewModel.onDraftRestoreRequested()
+        assertEquals("rescued MP", viewModel.state.value.draft.text)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `discarding deletes the cached MP draft`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns form()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued MP", isPrivate = true))
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+
+        viewModel.onDraftDiscardRequested()
+        advanceUntilIdle()
+
+        assertTrue(draftStore.deletedKeys.contains(key))
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `a successful MP reply submit deletes the cached draft`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.submitReply(any(), any(), any(), any()) } returns
+            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+        viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
+
+        viewModel.onSubmit()
+        advanceUntilIdle()
+
+        assertTrue(draftStore.deletedKeys.contains(EditorDraftKey.mpReply(request.threadId)))
+    }
+
+    /** #405 — in-memory fake [EditorDraftStore], same shape as the one in `PostEditorViewModelTest`. */
+    private class FakeEditorDraftStore : EditorDraftStore {
+        val saved: MutableMap<String, EditorDraftStore.Draft> = mutableMapOf()
+        val deletedKeys: MutableList<String> = mutableListOf()
+
+        fun preload(key: String, draft: EditorDraftStore.Draft) {
+            saved[key] = draft
+        }
+
+        override suspend fun currentOwner(): String? = "tester"
+
+        override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? = saved[key]
+
+        override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
+            saved[key] = draft
+        }
+
+        override suspend fun delete(owner: String?, key: String) {
+            deletedKeys += key
+            saved.remove(key)
+        }
     }
 }

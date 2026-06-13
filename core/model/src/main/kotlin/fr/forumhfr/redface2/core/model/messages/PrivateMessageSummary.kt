@@ -18,6 +18,11 @@ import java.time.Instant
  *   [fr.forumhfr.redface2.core.parser.messages.PrivateMessageListParser].
  * @property isMultiRecipient `true` for a multi-recipient conversation (MultiMP / "DT"): the
  *   `Interlocuteur` cell is a "Interlocuteurs multiples" label rather than a profile link.
+ * @property lastPage number of the conversation's last page, read from the inbox "Pages" cell
+ *   (`td.sujetCase4`). HFR only renders that link for conversations spanning several pages, so a
+ *   single-page conversation stays at the default `1`. Web parity (#430): the web inbox subject
+ *   link goes to page 1 and the trailing page number goes to the last page — the app uses
+ *   [lastPage] as the opening page so a long conversation lands on its most recent messages.
  */
 data class PrivateMessageSummary(
     val threadId: Int,
@@ -26,4 +31,5 @@ data class PrivateMessageSummary(
     val date: Instant,
     val hasUnread: Boolean,
     val isMultiRecipient: Boolean = false,
+    val lastPage: Int = 1,
 )
