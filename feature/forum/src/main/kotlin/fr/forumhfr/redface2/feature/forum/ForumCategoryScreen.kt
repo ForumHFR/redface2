@@ -53,6 +53,7 @@ import fr.forumhfr.redface2.core.model.TopicSummary
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
+import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 
 /**
  * Per-category screen: chip row of subcategories ("Toutes" + each subcat) on top, list
@@ -408,6 +409,8 @@ private fun TopicRow(
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }
+    // #287 — listing-row vertical rhythm from the density preset (Comfort = 10 dp, the lot A value).
+    val m = LocalDisplayMetrics.current
     val rowModifier = Modifier
         .fillMaxWidth()
         .then(
@@ -420,8 +423,7 @@ private fun TopicRow(
             },
         )
         .clickable(onClick = onClick)
-        // #287 — denser feed: tighter vertical rhythm on listing rows (12 → 10 dp).
-        .padding(horizontal = 24.dp, vertical = 10.dp)
+        .padding(horizontal = 24.dp, vertical = m.listRowVertical)
     Row(
         modifier = rowModifier,
         verticalAlignment = Alignment.CenterVertically,

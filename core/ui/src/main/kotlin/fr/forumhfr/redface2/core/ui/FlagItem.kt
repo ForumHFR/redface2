@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
+import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 
 /**
  * Renders one row of the user's drapeaux list.
@@ -69,12 +70,13 @@ fun FlagItem(
     } else {
         Modifier.clickable(onClick = onClick)
     }
+    // #287 — listing-row vertical rhythm from the density preset (Comfort = 10 dp, the lot A value).
+    val m = LocalDisplayMetrics.current
     Row(
         modifier = modifier
             .fillMaxWidth()
             .then(rowInteraction)
-            // #287 — denser feed: tighter vertical rhythm on listing rows (12 → 10 dp).
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = m.listRowVertical),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
