@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.cache
 
 import android.util.Log
+import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
@@ -36,6 +37,11 @@ import kotlinx.coroutines.plus
  * but they reveal which conversations exist for the previous account, so they are wiped on the
  * same transition.
  *
+ * MP editor drafts (`editor_drafts` rows with `isPrivate = 1`, #405) are wiped on the same
+ * transition too: an unsent MP draft reveals a recipient and a private message. Public post
+ * drafts (`isPrivate = 0`) are NOT purged here — they survive logout and are bounded only by the
+ * app-start retention sweep (cf. `DraftRetentionPurger`).
+ *
  * On a `Authenticated(A) → Authenticated(B)` switch (login, then logout, then
  * login as someone else), we wipe rows owned by A explicitly. The session
  * cache held in [FlagRepository.clearSessionCache] is also flushed so that the
@@ -53,6 +59,7 @@ class CacheInvalidator @Inject constructor(
     private val authRepository: AuthRepository,
     private val flagDao: FlagDao,
     private val mpReadPositionDao: MpReadPositionDao,
+    private val editorDraftDao: EditorDraftDao,
     private val flagRepository: FlagRepository,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
@@ -80,6 +87,8 @@ class CacheInvalidator @Inject constructor(
                         .onFailure { Log.w(LOG_TAG, "Failed to purge flag cache for $previousPseudo", it) }
                     runCatching { mpReadPositionDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge MP positions for $previousPseudo", it) }
+                    runCatching { editorDraftDao.deletePrivateForUser(previousPseudo) }
+                        .onFailure { Log.w(LOG_TAG, "Failed to purge MP drafts for $previousPseudo", it) }
                     flagRepository.clearSessionCache()
                 }
             }

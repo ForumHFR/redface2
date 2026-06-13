@@ -277,3 +277,31 @@ val MIGRATION_9_10: Migration = object : Migration(9, 10) {
         )
     }
 }
+
+/**
+ * v10 → v11 — `editor_drafts` (#405): per-account cache of in-progress editor content so a
+ * draft survives nav-entry destruction / process death. Pure DDL, no backfill. MP drafts
+ * (`isPrivate = 1`) are purged on logout / account switch; every row is bounded by a 30-day
+ * retention purge run on app start. The `draftKey` PK is `"<ownerId>|<contextKey>"` and the
+ * dedicated `ownerId` column lets the logout purge target one account exactly (no LIKE scan).
+ * The DDL matches the exported `11.json` `createSql` (column order, NOT NULL, nullable
+ * `subject`/`recipients`, PK) so `runMigrationsAndValidate` is satisfied.
+ */
+val MIGRATION_10_11: Migration = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `editor_drafts` (
+                `draftKey` TEXT NOT NULL,
+                `ownerId` TEXT NOT NULL,
+                `body` TEXT NOT NULL,
+                `subject` TEXT,
+                `recipients` TEXT,
+                `updatedAt` INTEGER NOT NULL,
+                `isPrivate` INTEGER NOT NULL,
+                PRIMARY KEY(`draftKey`)
+            )
+            """.trimIndent(),
+        )
+    }
+}
