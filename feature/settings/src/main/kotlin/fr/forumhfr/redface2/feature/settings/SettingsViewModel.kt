@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -16,6 +18,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+// Flat MVI dispatcher: one small, near-identical optimistic-flip handler per user preference.
+// The size comes from breadth (many independent settings live here cohesively), not from deep
+// logic — same reason `submit()` carries @Suppress("CyclomaticComplexMethod"). A generic
+// `updateEnumPreference` helper could fold the enum handlers together later (see PR notes).
+@Suppress("LargeClass")
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
@@ -101,6 +108,16 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.flagsAutoRefreshTouchedLocally || it.isUpdatingFlagsAutoRefresh },
             apply = { state, value -> state.copy(flagsAutoRefresh = value) },
         )
+        hydratePreference(
+            read = { userPreferencesRepository.observeDisplayDensity().first() },
+            isLocked = { it.displayDensityTouchedLocally || it.isUpdatingDisplayDensity },
+            apply = { state, value -> state.copy(displayDensity = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeFontScale().first() },
+            isLocked = { it.fontScaleTouchedLocally || it.isUpdatingFontScale },
+            apply = { state, value -> state.copy(fontScale = value) },
+        )
     }
 
     /**
@@ -166,6 +183,8 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
+            is SettingsIntent.DisplayDensityChanged -> updateDisplayDensity(intent.density)
+            is SettingsIntent.FontScaleChanged -> updateFontScale(intent.scale)
         }
     }
 
@@ -413,6 +432,63 @@ class SettingsViewModel @Inject constructor(
                             themeMode = previous,
                             isUpdatingThemeMode = false,
                             themeModeError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // #287 — display density is an enum, so it uses the bespoke optimistic-flip shape (like
+    // updateThemeMode) rather than updateBooleanPreference. previous is captured for revert.
+    private fun updateDisplayDensity(desired: DisplayDensity) {
+        val previous = _state.value.displayDensity
+        _state.update {
+            it.copy(
+                displayDensity = desired,
+                isUpdatingDisplayDensity = true,
+                displayDensityError = false,
+                displayDensityTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setDisplayDensity(desired) }
+                .onSuccess {
+                    _state.update { it.copy(displayDensity = desired, isUpdatingDisplayDensity = false) }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            displayDensity = previous,
+                            isUpdatingDisplayDensity = false,
+                            displayDensityError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // #287 — font scale is an enum too; same bespoke optimistic-flip shape as updateDisplayDensity.
+    private fun updateFontScale(desired: FontScalePreference) {
+        val previous = _state.value.fontScale
+        _state.update {
+            it.copy(
+                fontScale = desired,
+                isUpdatingFontScale = true,
+                fontScaleError = false,
+                fontScaleTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setFontScale(desired) }
+                .onSuccess {
+                    _state.update { it.copy(fontScale = desired, isUpdatingFontScale = false) }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            fontScale = previous,
+                            isUpdatingFontScale = false,
+                            fontScaleError = true,
                         )
                     }
                 }

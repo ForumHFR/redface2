@@ -37,7 +37,6 @@
     <string name="settings_phase_5">Phase 5</string>
     <!-- Pastille de tag d'un réglage à venir rattaché à une issue GitHub (identifiant technique). -->
     <string name="settings_future_issue_tag">#%1$d</string>
-    <string name="settings_future_reading_density">Densité et compacité de lecture</string>
     <string name="settings_future_ui_colors">Personnalisation des couleurs</string>
     <string name="settings_future_material_you">Material You (thème dynamique)</string>
     <string name="settings_future_classic_theme">Thème HFR Classique</string>
@@ -140,6 +139,20 @@
     <string name="settings_theme_amoled_title">Thème AMOLED (vrai noir)</string>
     <string name="settings_theme_amoled_description">Fond noir pur pour les écrans OLED. S\'applique uniquement en thème sombre.</string>
     <string name="settings_theme_amoled_persist_failed">Impossible de mémoriser le réglage AMOLED. Réessayez.</string>
+
+    <!-- #287 — Préréglages de lecture. Densité (Confort/Compact = espacement des listes et des
+         messages) + taille de la police de lecture (S/M/L, appliquée en plus du zoom du système),
+         persistés en DataStore et appliqués à toute l'app en direct. -->
+    <string name="settings_display_title">Densité et police de lecture</string>
+    <string name="settings_display_density_intro">Réglez l\'espacement des listes et des messages.</string>
+    <string name="settings_display_density_comfort">Confort</string>
+    <string name="settings_display_density_compact">Compact</string>
+    <string name="settings_display_density_persist_failed">Impossible de mémoriser la densité. Réessayez.</string>
+    <string name="settings_display_font_scale_intro">Taille de la police de lecture. Elle s\'ajoute au zoom du système.</string>
+    <string name="settings_display_font_scale_small">Petite</string>
+    <string name="settings_display_font_scale_medium">Moyenne</string>
+    <string name="settings_display_font_scale_large">Grande</string>
+    <string name="settings_display_font_scale_persist_failed">Impossible de mémoriser la taille de police. Réessayez.</string>
 
     <!-- Build 89 follow-up — Lecture des sujets. Masquer la barre du haut (titre + numéro de page)
          en défilant vers le bas pour libérer de la place ; persisté en DataStore et appliqué en direct. -->

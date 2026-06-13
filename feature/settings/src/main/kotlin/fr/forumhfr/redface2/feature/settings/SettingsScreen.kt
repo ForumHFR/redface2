@@ -43,6 +43,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 
 @Composable
@@ -227,9 +229,12 @@ internal fun SettingsContent(
                 state = state,
                 onIntent = onIntent,
             )
+            DisplayPreferencesCard(
+                state = state,
+                onIntent = onIntent,
+            )
             FutureSettingsCard(
                 items = listOf(
-                    R.string.settings_future_reading_density to issueTag(287),
                     R.string.settings_future_ui_colors to issueTag(296),
                     R.string.settings_future_material_you to stringResource(R.string.settings_phase_future),
                     R.string.settings_future_classic_theme to stringResource(R.string.settings_phase_future_far),
@@ -465,6 +470,80 @@ private fun ThemePreferencesCard(
             )
             if (state.amoledError) {
                 PreferencePersistError(R.string.settings_theme_amoled_persist_failed)
+            }
+        }
+    }
+}
+
+/**
+ * Reading display presets (#287): a density preset (Confort / Compact, structural spacing) and a
+ * reading font-size preset (S / M / L). Both are persisted via DataStore and observed at the app
+ * root, so a change here re-themes the whole app live. Text-only segmented buttons (no Material
+ * icons — the `androidx.compose.material.*` import is forbidden project-wide).
+ */
+@Composable
+private fun DisplayPreferencesCard(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    val densityOptions = listOf(
+        DisplayDensity.COMFORT to stringResource(R.string.settings_display_density_comfort),
+        DisplayDensity.COMPACT to stringResource(R.string.settings_display_density_compact),
+    )
+    val fontScaleOptions = listOf(
+        FontScalePreference.S to stringResource(R.string.settings_display_font_scale_small),
+        FontScalePreference.M to stringResource(R.string.settings_display_font_scale_medium),
+        FontScalePreference.L to stringResource(R.string.settings_display_font_scale_large),
+    )
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_display_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.settings_display_density_intro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                densityOptions.forEachIndexed { index, (density, label) ->
+                    SegmentedButton(
+                        selected = state.displayDensity == density,
+                        enabled = state.canChangeDisplayDensity,
+                        onClick = { onIntent(SettingsIntent.DisplayDensityChanged(density)) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = densityOptions.size),
+                    ) {
+                        Text(label)
+                    }
+                }
+            }
+            if (state.displayDensityError) {
+                PreferencePersistError(R.string.settings_display_density_persist_failed)
+            }
+            Text(
+                text = stringResource(R.string.settings_display_font_scale_intro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                fontScaleOptions.forEachIndexed { index, (scale, label) ->
+                    SegmentedButton(
+                        selected = state.fontScale == scale,
+                        enabled = state.canChangeFontScale,
+                        onClick = { onIntent(SettingsIntent.FontScaleChanged(scale)) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = fontScaleOptions.size),
+                    ) {
+                        Text(label)
+                    }
+                }
+            }
+            if (state.fontScaleError) {
+                PreferencePersistError(R.string.settings_display_font_scale_persist_failed)
             }
         }
     }

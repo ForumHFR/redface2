@@ -4,7 +4,9 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -1382,4 +1384,13 @@ private class FakeUserPreferencesRepository(
         MutableStateFlow(StartScreenPreference())
 
     override suspend fun setStartScreen(preference: StartScreenPreference) = Unit
+
+    // #287 — reading display presets are irrelevant to TopicViewModel; stubbed at defaults.
+    override fun observeDisplayDensity(): Flow<DisplayDensity> = MutableStateFlow(DisplayDensity.COMFORT)
+
+    override suspend fun setDisplayDensity(density: DisplayDensity) = Unit
+
+    override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
+
+    override suspend fun setFontScale(scale: FontScalePreference) = Unit
 }

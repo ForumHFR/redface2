@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.settings
 
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 
 data class SettingsState(
@@ -115,6 +117,19 @@ data class SettingsState(
     val isUpdatingFlagsAutoRefresh: Boolean = false,
     val flagsAutoRefreshError: Boolean = false,
     val flagsAutoRefreshTouchedLocally: Boolean = false,
+    // Reading display presets (#287). Same optimistic-flip + startup-race-guard machinery as the
+    // theme controls (both are enums, so the bespoke shape): the value is the displayed selection,
+    // `isUpdating*` gates the control while DataStore writes, `*Error` surfaces a persist failure,
+    // `*TouchedLocally` forbids a late `init` hydration from clobbering a fast user change. Defaults
+    // match the DataStore defaults (COMFORT density, M font scale).
+    val displayDensity: DisplayDensity = DisplayDensity.COMFORT,
+    val isUpdatingDisplayDensity: Boolean = false,
+    val displayDensityError: Boolean = false,
+    val displayDensityTouchedLocally: Boolean = false,
+    val fontScale: FontScalePreference = FontScalePreference.M,
+    val isUpdatingFontScale: Boolean = false,
+    val fontScaleError: Boolean = false,
+    val fontScaleTouchedLocally: Boolean = false,
 ) {
     val canSave: Boolean
         get() = !isSaving
@@ -173,6 +188,13 @@ data class SettingsState(
     // #378 — flags auto-refresh, gated only by its own write.
     val canToggleFlagsAutoRefresh: Boolean
         get() = !isUpdatingFlagsAutoRefresh
+
+    // #287 — the reading-density / font-scale selectors are each gated only by their own write.
+    val canChangeDisplayDensity: Boolean
+        get() = !isUpdatingDisplayDensity
+
+    val canChangeFontScale: Boolean
+        get() = !isUpdatingFontScale
 }
 
 sealed interface SettingsError {
@@ -266,4 +288,9 @@ sealed interface SettingsIntent {
     // Drapeaux — #378 auto-refresh on landing. Optimistic-flip contract, like the flags
     // toggles: the boolean is the desired post-flip state.
     data class FlagsAutoRefreshChanged(val enabled: Boolean) : SettingsIntent
+
+    // #287 — reading display presets. `density` / `scale` are the desired selections, applied
+    // optimistically with revert-on-failure, like ThemeModeChanged.
+    data class DisplayDensityChanged(val density: DisplayDensity) : SettingsIntent
+    data class FontScaleChanged(val scale: FontScalePreference) : SettingsIntent
 }

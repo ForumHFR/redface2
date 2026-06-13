@@ -83,6 +83,7 @@ import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
+import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -1337,6 +1338,8 @@ private fun TopicPostCard(
      */
     multiQuoteSelected: Boolean = false,
 ) {
+    // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
+    val m = LocalDisplayMetrics.current
     Card(
         border = if (multiQuoteSelected) {
             BorderStroke(width = 2.dp, color = MaterialTheme.colorScheme.primary)
@@ -1409,7 +1412,8 @@ private fun TopicPostCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    // #287 — header band vertical padding tightens under the Compact preset.
+                    .padding(horizontal = 12.dp, vertical = m.cardHeaderVertical),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 // Centre the avatar against the name+date block so the identity line reads as one
                 // tidy unit (the previous Top alignment + the inflated pseudo made the pseudo look
@@ -1520,10 +1524,16 @@ private fun TopicPostCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                // 12 dp inner gutters (was 16) — combined with the list's 8 dp this buys the
-                // post body ~24 dp of extra reading width per line on a phone.
-                .padding(start = 12.dp, top = 10.dp, end = 12.dp, bottom = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                // #287 — post-body inner gutters from the density preset. Comfort = the lot A
+                // values (12/10/12/8) that buy the body ~24 dp of extra reading width per line;
+                // Compact tightens them for a denser feed.
+                .padding(
+                    start = m.cardBodyHorizontal,
+                    top = m.cardBodyTop,
+                    end = m.cardBodyHorizontal,
+                    bottom = m.cardBodyBottom,
+                ),
+            verticalArrangement = Arrangement.spacedBy(m.postSpacing),
         ) {
             // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
             PostRenderer(content = post.content, selectable = true)

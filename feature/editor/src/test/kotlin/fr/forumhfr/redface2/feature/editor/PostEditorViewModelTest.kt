@@ -8,7 +8,9 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -1422,6 +1424,15 @@ class PostEditorViewModelTest {
             MutableStateFlow(StartScreenPreference())
 
         override suspend fun setStartScreen(preference: StartScreenPreference) = Unit
+
+        // #287 — reading display presets are irrelevant to the editor; stubbed at defaults.
+        override fun observeDisplayDensity(): Flow<DisplayDensity> = MutableStateFlow(DisplayDensity.COMFORT)
+
+        override suspend fun setDisplayDensity(density: DisplayDensity) = Unit
+
+        override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
+
+        override suspend fun setFontScale(scale: FontScalePreference) = Unit
     }
 
     private companion object {

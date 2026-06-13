@@ -2,7 +2,9 @@ package fr.forumhfr.redface2.feature.settings
 
 import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -734,6 +736,75 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `init hydrates reading display presets from storage`() = runTest {
+        repository.emitDisplayDensity(DisplayDensity.COMPACT)
+        repository.emitFontScale(FontScalePreference.L)
+
+        val viewModel = newViewModel()
+        val state = viewModel.state.value
+
+        assertEquals(DisplayDensity.COMPACT, state.displayDensity)
+        assertEquals(FontScalePreference.L, state.fontScale)
+    }
+
+    @Test
+    fun `DisplayDensityChanged persists the new preset and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals("COMFORT is the default", DisplayDensity.COMFORT, viewModel.state.value.displayDensity)
+
+        viewModel.submit(SettingsIntent.DisplayDensityChanged(DisplayDensity.COMPACT))
+
+        val state = viewModel.state.value
+        assertEquals(DisplayDensity.COMPACT, state.displayDensity)
+        assertFalse(state.isUpdatingDisplayDensity)
+        assertFalse(state.displayDensityError)
+        assertEquals(1, repository.displayDensitySetCalls)
+        assertEquals(DisplayDensity.COMPACT, repository.lastDisplayDensitySet)
+    }
+
+    @Test
+    fun `DisplayDensityChanged reverts to the previous preset and raises the error flag on persist failure`() =
+        runTest {
+            repository.failOnDisplayDensitySet = true
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.DisplayDensityChanged(DisplayDensity.COMPACT))
+
+            val state = viewModel.state.value
+            assertEquals("must revert to the previous preset on failure", DisplayDensity.COMFORT, state.displayDensity)
+            assertFalse(state.isUpdatingDisplayDensity)
+            assertTrue(state.displayDensityError)
+        }
+
+    @Test
+    fun `FontScaleChanged persists the new preset and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals("M is the default", FontScalePreference.M, viewModel.state.value.fontScale)
+
+        viewModel.submit(SettingsIntent.FontScaleChanged(FontScalePreference.L))
+
+        val state = viewModel.state.value
+        assertEquals(FontScalePreference.L, state.fontScale)
+        assertFalse(state.isUpdatingFontScale)
+        assertFalse(state.fontScaleError)
+        assertEquals(1, repository.fontScaleSetCalls)
+        assertEquals(FontScalePreference.L, repository.lastFontScaleSet)
+    }
+
+    @Test
+    fun `FontScaleChanged reverts to the previous preset and raises the error flag on persist failure`() = runTest {
+        repository.failOnFontScaleSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.FontScaleChanged(FontScalePreference.S))
+
+        val state = viewModel.state.value
+        assertEquals("must revert to the previous preset on failure", FontScalePreference.M, state.fontScale)
+        assertFalse(state.isUpdatingFontScale)
+        assertTrue(state.fontScaleError)
+    }
+
+    @Test
     fun `TopicTopBarAutoHideChanged persists the flip`() = runTest {
         val viewModel = newViewModel()
         assertFalse("auto-hide is off by default", viewModel.state.value.topicTopBarAutoHide)
@@ -973,6 +1044,59 @@ class SettingsViewModelTest {
             assertEquals(ThemeMode.DARK, repository.lastThemeModeSet)
         }
 
+    @Test
+    fun `displayDensity hydration race - a stale initial emission must not overwrite a local change`() =
+        runTest {
+            // Same startup-race contract as ThemeMode (#287): the user picks COMPACT while init is
+            // still suspended on observeDisplayDensity().first(); the late stale COMFORT must be
+            // skipped by the touchedLocally guard.
+            val initialHydrationFlow = MutableSharedFlow<DisplayDensity>(replay = 0)
+            repository.displayDensityObserveOverride = initialHydrationFlow
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.DisplayDensityChanged(DisplayDensity.COMPACT))
+            assertEquals(DisplayDensity.COMPACT, viewModel.state.value.displayDensity)
+            assertTrue(viewModel.state.value.displayDensityTouchedLocally)
+
+            initialHydrationFlow.emit(DisplayDensity.COMFORT)
+
+            val finalState = viewModel.state.value
+            assertEquals(
+                "stale hydration must NOT overwrite the local density change",
+                DisplayDensity.COMPACT,
+                finalState.displayDensity,
+            )
+            assertFalse(finalState.isUpdatingDisplayDensity)
+            assertFalse(finalState.displayDensityError)
+            assertEquals(1, repository.displayDensitySetCalls)
+            assertEquals(DisplayDensity.COMPACT, repository.lastDisplayDensitySet)
+        }
+
+    @Test
+    fun `fontScale hydration race - a stale initial emission must not overwrite a local change`() =
+        runTest {
+            val initialHydrationFlow = MutableSharedFlow<FontScalePreference>(replay = 0)
+            repository.fontScaleObserveOverride = initialHydrationFlow
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.FontScaleChanged(FontScalePreference.L))
+            assertEquals(FontScalePreference.L, viewModel.state.value.fontScale)
+            assertTrue(viewModel.state.value.fontScaleTouchedLocally)
+
+            initialHydrationFlow.emit(FontScalePreference.M)
+
+            val finalState = viewModel.state.value
+            assertEquals(
+                "stale hydration must NOT overwrite the local font-scale change",
+                FontScalePreference.L,
+                finalState.fontScale,
+            )
+            assertFalse(finalState.isUpdatingFontScale)
+            assertFalse(finalState.fontScaleError)
+            assertEquals(1, repository.fontScaleSetCalls)
+            assertEquals(FontScalePreference.L, repository.lastFontScaleSet)
+        }
+
     private fun newViewModel(): SettingsViewModel =
         SettingsViewModel(repository, topicCacheMaintenance, imageCacheMaintenance)
 
@@ -1102,6 +1226,55 @@ class SettingsViewModelTest {
             amoledSetCalls += 1
             check(!failOnAmoledSet) { "boom" }
             amoledEnabled.value = enabled
+        }
+
+        // #287 — reading display presets. Same optimistic-flip seams as the theme controls.
+        private val displayDensity = MutableStateFlow(DisplayDensity.COMFORT)
+        var displayDensitySetCalls: Int = 0
+            private set
+        var lastDisplayDensitySet: DisplayDensity? = null
+            private set
+        var failOnDisplayDensitySet: Boolean = false
+
+        /** Startup-race seam, mirroring [themeModeObserveOverride] (#287). */
+        var displayDensityObserveOverride: Flow<DisplayDensity>? = null
+
+        override fun observeDisplayDensity(): Flow<DisplayDensity> =
+            displayDensityObserveOverride ?: displayDensity
+
+        override suspend fun setDisplayDensity(density: DisplayDensity) {
+            displayDensitySetCalls += 1
+            check(!failOnDisplayDensitySet) { "boom" }
+            lastDisplayDensitySet = density
+            displayDensity.value = density
+        }
+
+        fun emitDisplayDensity(value: DisplayDensity) {
+            displayDensity.value = value
+        }
+
+        private val fontScale = MutableStateFlow(FontScalePreference.M)
+        var fontScaleSetCalls: Int = 0
+            private set
+        var lastFontScaleSet: FontScalePreference? = null
+            private set
+        var failOnFontScaleSet: Boolean = false
+
+        /** Startup-race seam, mirroring [themeModeObserveOverride] (#287). */
+        var fontScaleObserveOverride: Flow<FontScalePreference>? = null
+
+        override fun observeFontScale(): Flow<FontScalePreference> =
+            fontScaleObserveOverride ?: fontScale
+
+        override suspend fun setFontScale(scale: FontScalePreference) {
+            fontScaleSetCalls += 1
+            check(!failOnFontScaleSet) { "boom" }
+            lastFontScaleSet = scale
+            fontScale.value = scale
+        }
+
+        fun emitFontScale(value: FontScalePreference) {
+            fontScale.value = value
         }
 
         // Build 89 follow-up — topic top-bar auto-hide. Same optimistic-flip seam as amoled.

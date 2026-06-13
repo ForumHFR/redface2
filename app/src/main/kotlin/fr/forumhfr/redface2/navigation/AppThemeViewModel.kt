@@ -3,6 +3,8 @@ package fr.forumhfr.redface2.navigation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -24,7 +26,7 @@ import kotlinx.coroutines.flow.stateIn
  */
 @HiltViewModel
 class AppThemeViewModel @Inject constructor(
-    userPreferencesRepository: UserPreferencesRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
     themeBootstrapStore: ThemeBootstrapStore,
 ) : ViewModel() {
 
@@ -37,4 +39,14 @@ class AppThemeViewModel @Inject constructor(
     val amoledEnabled: StateFlow<Boolean> =
         userPreferencesRepository.observeAmoledEnabled()
             .stateIn(viewModelScope, SharingStarted.Eagerly, bootstrap.amoledEnabled)
+
+    // #287 — reading presets. No bootstrap mirror (they do not paint the pre-first-frame window),
+    // so the seed is just the enum default; DataStore resolves on the first Eagerly read.
+    val displayDensity: StateFlow<DisplayDensity> =
+        userPreferencesRepository.observeDisplayDensity()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, DisplayDensity.COMFORT)
+
+    val fontScale: StateFlow<FontScalePreference> =
+        userPreferencesRepository.observeFontScale()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, FontScalePreference.M)
 }
