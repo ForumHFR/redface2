@@ -50,6 +50,9 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 @Composable
 fun SettingsScreen(
     modifier: Modifier = Modifier,
+    // #459 PR3 — navigates to the « Mes images uploadées » screen. Default no-op so previews and
+    // the multi-pane illustrative call sites stay valid ; wired from RedfaceApp.
+    onOpenMyImages: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
     // #458 — the « Démarrage » section has its own ViewModel (cf. its KDoc).
     startScreenViewModel: StartScreenSettingsViewModel = hiltViewModel(),
@@ -60,16 +63,22 @@ fun SettingsScreen(
         state = state,
         onIntent = viewModel::submit,
         modifier = modifier,
+        onOpenMyImages = onOpenMyImages,
         startScreenState = startScreenState,
         onStartScreenIntent = startScreenViewModel::submit,
     )
 }
 
+// MVI screen content : state + intent + modifier + rappels de navigation/feature (#458 démarrage,
+// #459 « Mes images »). 6 paramètres = la surface complète de l'écran ; les regrouper derrière un
+// objet masquerait le site d'appel sans gain réel. Seuil detekt LongParameterList à 6.
+@Suppress("LongParameterList")
 @Composable
 internal fun SettingsContent(
     state: SettingsState,
     onIntent: (SettingsIntent) -> Unit,
     modifier: Modifier = Modifier,
+    onOpenMyImages: () -> Unit = {},
     startScreenState: StartScreenSettingsState = StartScreenSettingsState(),
     onStartScreenIntent: (StartScreenSettingsIntent) -> Unit = {},
 ) {
@@ -273,6 +282,9 @@ internal fun SettingsContent(
                     R.string.settings_future_signature to stringResource(R.string.settings_phase_planned),
                 ),
             )
+
+            SettingsSectionHeader(stringResource(R.string.settings_section_images))
+            MyImagesCard(onOpenMyImages = onOpenMyImages)
 
             SettingsSectionHeader(stringResource(R.string.settings_section_mp))
             MessagesPreferencesCard(
@@ -715,6 +727,38 @@ private fun MessagesPreferencesCard(
             )
             if (state.mpUnreadBadgeError) {
                 PreferencePersistError(R.string.settings_mp_unread_badge_persist_failed)
+            }
+        }
+    }
+}
+
+/**
+ * #459 PR3 — entry point to the « Mes images uploadées » screen. A short description plus a button
+ * that navigates out of Settings (the screen itself is a standalone route, not a sub-form), mirroring
+ * how the maintenance actions read but routing instead of mutating a preference.
+ */
+@Composable
+private fun MyImagesCard(onOpenMyImages: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_my_images_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.settings_my_images_description),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = onOpenMyImages,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.settings_my_images_open))
             }
         }
     }

@@ -179,4 +179,28 @@
     <string name="settings_confirm_before_posting_title">Confirmation avant publication</string>
     <string name="settings_confirm_before_posting_description">Demande une confirmation avant d\'envoyer une réponse, un sujet ou un message privé.</string>
     <string name="settings_confirm_before_posting_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+
+    <!-- #459 PR3 — entrée vers l'écran « Mes images uploadées » depuis le catalogue de réglages. -->
+    <string name="settings_section_images">Images</string>
+    <string name="settings_my_images_title">Mes images uploadées</string>
+    <string name="settings_my_images_description">Consultez les images que vous avez envoyées et supprimez-les.</string>
+    <string name="settings_my_images_open">Voir mes images</string>
+
+    <!-- #459 PR3 — écran « Mes images uploadées » (liste + suppression). -->
+    <string name="my_images_title">Mes images uploadées</string>
+    <string name="my_images_back">Retour</string>
+    <string name="my_images_requires_login">Connecte-toi pour voir tes images uploadées.</string>
+    <string name="my_images_empty">Aucune image uploadée pour le moment.</string>
+    <string name="my_images_thumbnail_description">Aperçu de l\'image uploadée</string>
+    <string name="my_images_uploaded_at">Envoyée le %1$s</string>
+    <string name="my_images_provider_diberie">Diberie</string>
+    <string name="my_images_provider_imgur">Imgur</string>
+    <string name="my_images_delete_action">Supprimer</string>
+    <string name="my_images_delete_confirm_title">Supprimer cette image ?</string>
+    <string name="my_images_delete_confirm_body">L\'image sera supprimée de l\'hébergeur et retirée de cette liste. Cette action est irréversible.</string>
+    <string name="my_images_delete_confirm_body_no_handle">L\'image sera retirée de cette liste. La suppression côté hébergeur ne peut pas être garantie : l\'image peut rester accessible.</string>
+    <string name="my_images_delete_confirm_action">Supprimer</string>
+    <string name="my_images_delete_confirm_cancel">Annuler</string>
+    <string name="my_images_delete_confirmed">Image supprimée de l\'hébergeur.</string>
+    <string name="my_images_delete_best_effort">Image retirée de la liste. La suppression côté hébergeur n\'a pas pu être confirmée.</string>
 </resources>
