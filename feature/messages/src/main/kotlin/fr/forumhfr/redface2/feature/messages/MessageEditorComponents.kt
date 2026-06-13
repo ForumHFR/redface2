@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +72,40 @@ internal fun MessageEditorHeader(title: String, onBack: () -> Unit) {
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onSurface,
         )
+    }
+}
+
+/**
+ * #405 — non-destructive draft-restore banner shared by the two private-message editors.
+ * « Restaurer » pre-fills the editor from the cached draft ; « Ignorer » deletes the cached row.
+ * The draft is never silently applied nor lost.
+ */
+@Composable
+internal fun MessageDraftRestoreBanner(
+    onRestore: () -> Unit,
+    onDiscard: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        tonalElevation = 2.dp,
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(
+                text = stringResource(R.string.messages_draft_restore_message),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onRestore) {
+                    Text(text = stringResource(R.string.messages_draft_restore))
+                }
+                TextButton(onClick = onDiscard) {
+                    Text(text = stringResource(R.string.messages_draft_discard))
+                }
+            }
+        }
     }
 }
 

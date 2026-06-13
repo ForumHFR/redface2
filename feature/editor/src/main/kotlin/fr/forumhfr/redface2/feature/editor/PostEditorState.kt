@@ -94,6 +94,14 @@ data class PostEditorState(
      * [PostEditorIntent.SubmitConfirmed] / [PostEditorIntent.SubmitConfirmationDismissed].
      */
     val showSubmitConfirmation: Boolean = false,
+    /**
+     * #405 — the body of a previously-cached draft for this editor's key, surfaced on init when a
+     * non-empty draft was found. Non-null means « propose a restore » : the UI shows a banner with
+     * « Restaurer » ([PostEditorIntent.DraftRestoreRequested]) and « Ignorer »
+     * ([PostEditorIntent.DraftDiscardRequested]). The draft is never silently applied so a fresh
+     * quote prefill is not clobbered ; it is also never silently lost — discarding deletes the row.
+     */
+    val restorableDraft: String? = null,
 ) {
     /**
      * Submission is allowed when : we know the routing context (page + subcat + topicId),

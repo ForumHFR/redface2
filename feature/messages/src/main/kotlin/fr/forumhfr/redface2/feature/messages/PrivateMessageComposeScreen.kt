@@ -80,6 +80,8 @@ fun PrivateMessageComposeScreen(
         onSubmitConfirmed = viewModel::onSubmitConfirmed,
         onSubmitConfirmationDismissed = viewModel::onSubmitConfirmationDismissed,
         onRetryFormLoad = viewModel::retryFormLoad,
+        onDraftRestore = viewModel::onDraftRestoreRequested,
+        onDraftDiscard = viewModel::onDraftDiscardRequested,
         smileyPicker = viewModel.smileyPicker,
         onSmileySelected = viewModel::onSmileySelected,
         modifier = modifier,
@@ -104,6 +106,8 @@ private fun PrivateMessageComposeContent(
     onSubmitConfirmed: () -> Unit,
     onSubmitConfirmationDismissed: () -> Unit,
     onRetryFormLoad: () -> Unit,
+    onDraftRestore: () -> Unit,
+    onDraftDiscard: () -> Unit,
     smileyPicker: SmileyPickerController,
     onSmileySelected: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -130,6 +134,8 @@ private fun PrivateMessageComposeContent(
                         onToolbarAction = onToolbarAction,
                         onTogglePreview = onTogglePreview,
                         onErrorDismissed = onErrorDismissed,
+                        onDraftRestore = onDraftRestore,
+                        onDraftDiscard = onDraftDiscard,
                         modifier = Modifier.weight(1f),
                     )
                     MessageSubmitBar(
@@ -181,6 +187,8 @@ private fun ComposeEditorBody(
     onToolbarAction: (BbcodeAction) -> Unit,
     onTogglePreview: () -> Unit,
     onErrorDismissed: () -> Unit,
+    onDraftRestore: () -> Unit,
+    onDraftDiscard: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // #275/#410 follow-up (dev v118 feedback, screen 520813) — compose is the ONE editor whose
@@ -259,6 +267,13 @@ private fun ComposeEditorBody(
             // Plain block inside the outer scroll (a nested same-direction verticalScroll is a
             // Compose error) — same shape as TopicFormScreen's preview.
             BbcodePreview(content = state.preview, modifier = Modifier.fillMaxWidth())
+        }
+
+        if (state.restorableDraft != null ||
+            state.restorableSubject != null ||
+            state.restorableRecipients != null
+        ) {
+            MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
         }
 
         state.submitError?.let { error ->

@@ -3,6 +3,8 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
@@ -18,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -72,6 +75,8 @@ class PrivateMessageComposeViewModelTest {
         isAnonymous = isAnonymous,
     )
 
+    private val draftStore = FakeEditorDraftStore()
+
     private fun viewModel(
         repository: PrivateMessageWriteRepository,
         initialRecipient: String? = null,
@@ -82,6 +87,7 @@ class PrivateMessageComposeViewModelTest {
         repository = repository,
         previewParser = previewParser,
         userPreferencesRepository = userPreferences(confirmBeforePosting),
+        draftStore = draftStore,
         smileyRepository = smileyRepository,
     )
 
@@ -299,5 +305,91 @@ class PrivateMessageComposeViewModelTest {
 
         assertTrue(vm.state.value.showSubmitConfirmation)
         coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    // ----- #405 : draft autosave / restore -----------------------------------
+
+    @Test
+    fun `autosave persists the private recipients subject and body under the mpCompose key`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val vm = viewModel(repository)
+
+        vm.onRecipientsChanged("bozoleclown")
+        vm.onSubjectChanged("Salut")
+        vm.onContentChanged(TextFieldValue("Bonjour."))
+        advanceTimeBy(800L)
+
+        val key = EditorDraftKey.mpCompose()
+        val saved = draftStore.saved[key]
+        assertEquals("Bonjour.", saved?.body)
+        assertEquals("Salut", saved?.subject)
+        assertEquals("bozoleclown", saved?.recipients)
+        assertTrue("MP drafts must be flagged private for the logout purge", saved?.isPrivate == true)
+    }
+
+    @Test
+    fun `a stored compose draft is surfaced as restorable on init`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        draftStore.preload(
+            EditorDraftKey.mpCompose(),
+            EditorDraftStore.Draft(
+                body = "rescued body",
+                subject = "rescued subject",
+                recipients = "rescued dest",
+                isPrivate = true,
+            ),
+        )
+        val vm = viewModel(repository)
+
+        assertEquals("rescued body", vm.state.value.restorableDraft)
+        assertEquals("rescued subject", vm.state.value.restorableSubject)
+        assertEquals("rescued dest", vm.state.value.restorableRecipients)
+        assertEquals("draft is not auto-applied", "", vm.state.value.draft.text)
+
+        vm.onDraftRestoreRequested()
+        assertEquals("rescued body", vm.state.value.draft.text)
+        assertEquals("rescued subject", vm.state.value.subject)
+        assertEquals("rescued dest", vm.state.value.recipients)
+        assertEquals(null, vm.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `a successful new-conversation submit deletes the cached draft`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val vm = viewModel(repository)
+        vm.onRecipientsChanged("bozoleclown")
+        vm.onSubjectChanged("Sujet")
+        vm.onContentChanged(TextFieldValue("Bonjour."))
+
+        vm.onSubmit()
+        advanceUntilIdle()
+
+        assertTrue(draftStore.deletedKeys.contains(EditorDraftKey.mpCompose()))
+    }
+
+    /** #405 — in-memory fake [EditorDraftStore], same shape as the one in `PostEditorViewModelTest`. */
+    private class FakeEditorDraftStore : EditorDraftStore {
+        val saved: MutableMap<String, EditorDraftStore.Draft> = mutableMapOf()
+        val deletedKeys: MutableList<String> = mutableListOf()
+
+        fun preload(key: String, draft: EditorDraftStore.Draft) {
+            saved[key] = draft
+        }
+
+        override suspend fun load(key: String): EditorDraftStore.Draft? = saved[key]
+
+        override suspend fun save(key: String, draft: EditorDraftStore.Draft) {
+            saved[key] = draft
+        }
+
+        override suspend fun delete(key: String) {
+            deletedKeys += key
+            saved.remove(key)
+        }
     }
 }

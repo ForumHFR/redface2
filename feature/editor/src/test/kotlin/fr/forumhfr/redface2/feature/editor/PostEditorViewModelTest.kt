@@ -8,6 +8,8 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
@@ -58,6 +60,7 @@ class PostEditorViewModelTest {
     private val replyRepository = FakeReplyRepository()
     private val editPostRepository = FakeEditPostRepository()
     private val smileyRepository = FakeSmileyRepository()
+    private val draftStore = FakeEditorDraftStore()
 
     @Before
     fun setUp() {
@@ -787,6 +790,7 @@ class PostEditorViewModelTest {
             editPostRepository = editPostRepository,
             smileyRepository = smileyRepository,
             userPreferencesRepository = userPreferencesRepository,
+            draftStore = draftStore,
             diagnostics = diagnostics,
         )
 
@@ -1005,6 +1009,7 @@ class PostEditorViewModelTest {
             editPostRepository = editPostRepository,
             smileyRepository = smileyRepository,
             userPreferencesRepository = userPreferencesRepository,
+            draftStore = draftStore,
             diagnostics = diagnostics,
         )
 
@@ -1171,6 +1176,153 @@ class PostEditorViewModelTest {
         assertEquals("rapid double confirm must POST exactly once", 1, replyRepository.submitCalls)
         assertFalse(viewModel.state.value.showSubmitConfirmation)
         assertFalse(viewModel.state.value.isSubmitting)
+    }
+
+    // ----- #405 : draft autosave / restore -----------------------------------
+
+    @Test
+    fun `autosave persists the body under the reply key after the debounce`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("draft body", TextRange(10))))
+        // Below the 750 ms debounce nothing is written yet.
+        testScheduler.advanceTimeBy(300L)
+        testScheduler.runCurrent()
+        assertEquals("no save before the debounce window elapses", 0, draftStore.saveCount)
+
+        testScheduler.advanceTimeBy(500L)
+        testScheduler.runCurrent()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        assertEquals("draft body", draftStore.saved[key]?.body)
+        assertFalse("reply drafts are not private", draftStore.saved[key]?.isPrivate == true)
+    }
+
+    @Test
+    fun `autosave coalesces a burst of keystrokes into a single write`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("a")))
+        testScheduler.advanceTimeBy(200L)
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("ab")))
+        testScheduler.advanceTimeBy(200L)
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("abc")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        assertEquals("only the final value survives the debounce", 1, draftStore.saveCount)
+        assertEquals("abc", draftStore.saved[key]?.body)
+    }
+
+    @Test
+    fun `emptying the draft deletes the cached row instead of saving a blank`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("something")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        assertTrue("blank draft must delete the row", draftStore.deletedKeys.contains(key))
+    }
+
+    @Test
+    fun `a stored draft is surfaced as restorable on init (never auto-applied)`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
+            EditorDraftStore.Draft(body = "rescued text"),
+        )
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals("draft is offered, not silently applied", "rescued text", settled.restorableDraft)
+            assertEquals("the live draft stays empty until the user restores", "", settled.draft.text)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `restoring fills the draft and clears the banner`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
+            EditorDraftStore.Draft(body = "rescued text"),
+        )
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.DraftRestoreRequested)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val settled = expectMostRecentItem()
+            assertEquals("rescued text", settled.draft.text)
+            assertEquals("caret lands at the end of the restored body", 12, settled.draft.selection.start)
+            assertNull("the banner is cleared after restoring", settled.restorableDraft)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `discarding deletes the cached draft and clears the banner`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued text"))
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.DraftDiscardRequested)
+        testScheduler.advanceUntilIdle()
+
+        assertTrue("discard deletes the row", draftStore.deletedKeys.contains(key))
+        assertNull("the banner is cleared after discarding", viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `a successful reply submit deletes the cached draft`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
+
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        assertTrue("a sent reply must drop its draft", draftStore.deletedKeys.contains(key))
+    }
+
+    @Test
+    fun `Edit autosave and delete-on-submit use the editPost key`() = runTest {
+        editPostRepository.submitResult = ReplySubmitResult.Success(
+            refreshUrl = "/hfr/foo/bar-sujet_35395_20.htm#t100",
+            targetPage = 20,
+        )
+        val viewModel = newEditViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("rewritten body")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+        val key = EditorDraftKey.editPost(SAMPLE_CAT, SAMPLE_EDITED_NUMREPONSE)
+        assertEquals("rewritten body", draftStore.saved[key]?.body)
+
+        viewModel.submit(PostEditorIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+        assertTrue("a saved edit must drop its draft", draftStore.deletedKeys.contains(key))
     }
 
     private fun authenticatedForm(initialContent: String = ""): ReplyForm = ReplyForm(
@@ -1444,6 +1596,35 @@ class PostEditorViewModelTest {
         override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
 
         override suspend fun setFontScale(scale: FontScalePreference) = Unit
+    }
+
+    /**
+     * #405 — in-memory fake [EditorDraftStore]. Records the last save / delete per key and serves
+     * preloaded drafts for the restore-on-init tests. `updatedAt` is irrelevant to the ViewModel
+     * (the store stamps it in production), so it is left at 0.
+     */
+    private class FakeEditorDraftStore : EditorDraftStore {
+        val saved: MutableMap<String, EditorDraftStore.Draft> = mutableMapOf()
+        val deletedKeys: MutableList<String> = mutableListOf()
+        var saveCount: Int = 0
+            private set
+
+        /** Preload a draft so a VM created afterwards restores it on init. */
+        fun preload(key: String, draft: EditorDraftStore.Draft) {
+            saved[key] = draft
+        }
+
+        override suspend fun load(key: String): EditorDraftStore.Draft? = saved[key]
+
+        override suspend fun save(key: String, draft: EditorDraftStore.Draft) {
+            saveCount += 1
+            saved[key] = draft
+        }
+
+        override suspend fun delete(key: String) {
+            deletedKeys += key
+            saved.remove(key)
+        }
     }
 
     private companion object {
