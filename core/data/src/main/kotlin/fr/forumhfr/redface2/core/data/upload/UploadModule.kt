@@ -8,6 +8,7 @@ import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.IntoMap
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadProvider
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
@@ -42,6 +43,12 @@ internal interface UploadProviderBindingsModule {
     @Binds
     @Singleton
     fun bindUploadRepository(impl: DefaultUploadRepository): UploadRepository
+
+    // PR2 (#459) — the editor reads the picked Uri's bytes through this seam ; the Android impl
+    // lives here (it needs ContentResolver) so the editor ViewModel stays platform-free.
+    @Binds
+    @Singleton
+    fun bindImageUploadReader(impl: AndroidImageUploadReader): ImageUploadReader
 
     @Binds
     @IntoMap
