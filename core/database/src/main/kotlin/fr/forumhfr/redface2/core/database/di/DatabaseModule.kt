@@ -8,9 +8,11 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
+import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
 import fr.forumhfr.redface2.core.database.dao.TopicDao
+import fr.forumhfr.redface2.core.database.migrations.MIGRATION_10_11
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_1_2
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_2_3
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_3_4
@@ -44,6 +46,7 @@ object DatabaseModule {
             MIGRATION_7_8,
             MIGRATION_8_9,
             MIGRATION_9_10,
+            MIGRATION_10_11,
         )
         .build()
 
@@ -56,4 +59,8 @@ object DatabaseModule {
     @Provides
     fun provideMpReadPositionDao(database: RedfaceDatabase): MpReadPositionDao =
         database.mpReadPositionDao()
+
+    @Provides
+    fun provideEditorDraftDao(database: RedfaceDatabase): EditorDraftDao =
+        database.editorDraftDao()
 }
