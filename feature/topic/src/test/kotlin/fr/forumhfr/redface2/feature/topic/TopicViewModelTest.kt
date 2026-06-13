@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
@@ -1376,4 +1377,9 @@ private class FakeUserPreferencesRepository(
     override fun observeTopicPollsExpanded(): Flow<Boolean> = MutableStateFlow(topicPollsExpanded)
 
     override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
+
+    override fun observeStartScreen(): Flow<StartScreenPreference> =
+        MutableStateFlow(StartScreenPreference())
+
+    override suspend fun setStartScreen(preference: StartScreenPreference) = Unit
 }

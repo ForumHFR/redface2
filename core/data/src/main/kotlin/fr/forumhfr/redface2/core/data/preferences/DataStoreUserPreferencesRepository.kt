@@ -9,6 +9,9 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -29,6 +32,7 @@ import kotlinx.coroutines.withContext
 class DataStoreUserPreferencesRepository @Inject constructor(
     @param:UserPreferencesDataStore private val dataStore: DataStore<Preferences>,
     private val themeBootstrapStore: ThemeBootstrapStore,
+    private val startScreenBootstrapStore: StartScreenBootstrapStore,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : UserPreferencesRepository {
 
@@ -288,6 +292,47 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeStartScreen(): Flow<StartScreenPreference> =
+        dataStore.data
+            .map(::readStartScreen)
+            .distinctUntilChanged()
+            // #458 backfill, same contract as the theme mirror (#386): converge the synchronous
+            // bootstrap copy from the observed truth (idempotent, write-on-diff).
+            .onEach { preference ->
+                if (startScreenBootstrapStore.read() != preference) {
+                    startScreenBootstrapStore.write(preference)
+                }
+            }
+            .catch { emit(StartScreenPreference()) }
+
+    override suspend fun setStartScreen(preference: StartScreenPreference) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_START_SCREEN] = preference.screen.name
+                val catId = preference.forumCatId
+                if (preference.screen == StartScreenChoice.FORUM && catId != null) {
+                    prefs[KEY_START_FORUM_CAT] = catId
+                } else {
+                    prefs.remove(KEY_START_FORUM_CAT)
+                }
+            }
+            // Mirror for the synchronous cold-start read (#458) — DataStore stays the source
+            // of truth, the mirror only seeds the first frame.
+            startScreenBootstrapStore.write(preference)
+        }
+    }
+
+    private fun readStartScreen(prefs: Preferences): StartScreenPreference {
+        // Defensive read: an unknown stored value (downgrade, manual edit) falls back to the
+        // FLAGS default instead of crashing, same stance as readThemeMode.
+        val screen = prefs[KEY_START_SCREEN]
+            ?.let { stored -> StartScreenChoice.entries.firstOrNull { it.name == stored } }
+            ?: StartScreenChoice.FLAGS
+        val catId = prefs[KEY_START_FORUM_CAT]
+            ?.takeIf { screen == StartScreenChoice.FORUM && it > 0 }
+        return StartScreenPreference(screen = screen, forumCatId = catId)
+    }
+
     override fun observeMpUnreadBadge(): Flow<Boolean> =
         dataStore.data
             // Default `true` (#313): the badge is the feature; opting OUT is the preference.
@@ -405,5 +450,10 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #456 — polls expanded by default in topic reading (default false = collapsed).
         val KEY_TOPIC_POLLS_EXPANDED = booleanPreferencesKey("topic_polls_expanded")
+
+        // #458 — cold-start tab (StartScreenChoice.name, defensively parsed) + optional Forum
+        // category id (absent unless screen == FORUM and a category was picked).
+        val KEY_START_SCREEN = stringPreferencesKey("start_screen")
+        val KEY_START_FORUM_CAT = intPreferencesKey("start_forum_cat")
     }
 }
