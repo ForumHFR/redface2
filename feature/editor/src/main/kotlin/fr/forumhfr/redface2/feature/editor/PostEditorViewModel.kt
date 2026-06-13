@@ -13,6 +13,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
@@ -65,6 +67,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private val editPostRepository: EditPostRepository,
     private val smileyRepository: SmileyRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val draftStore: EditorDraftStore,
     private val diagnostics: DiagnosticsLog,
 ) : ViewModel() {
 
@@ -96,6 +99,19 @@ class PostEditorViewModel @AssistedInject constructor(
     private var smileySearchJob: Job? = null
 
     /**
+     * #405 — stable, content-free draft key for this editor session, or null when the routing args
+     * cannot identify a target (no autosave/restore then). Reply ignores the quoted numreponse on
+     * purpose (cf. [EditorDraftKey]). Edit needs the numreponse to identify the post.
+     */
+    private val draftKey: String? = when (request.mode) {
+        PostEditorMode.Reply -> request.topicId?.let { EditorDraftKey.reply(request.cat, it) }
+        PostEditorMode.Edit -> request.numreponse?.let { EditorDraftKey.editPost(request.cat, it) }
+    }
+
+    /** #405 — debounced autosave coroutine ; relaunched (cancelling the previous) on each edit. */
+    private var autosaveJob: Job? = null
+
+    /**
      * #312 — mirror of the persisted « Confirmation avant publication » preference. Collected on
      * init (same DataStore-consumption shape as `TopicViewModel.observeTopicTopBarAutoHide`) and
      * read synchronously at submit time. Kept off [PostEditorState] because the UI never renders
@@ -109,9 +125,43 @@ class PostEditorViewModel @AssistedInject constructor(
                 confirmBeforePosting = enabled
             }
         }
+        restoreDraftIfAny()
         when (request.mode) {
             PostEditorMode.Reply -> loadReplyFormIfPossible()
             PostEditorMode.Edit -> loadEditFormIfPossible()
+        }
+    }
+
+    /**
+     * #405 — surface a cached draft for [draftKey] on the banner (never auto-apply : a quote prefill
+     * or an edit body would otherwise be silently clobbered). Empty drafts are ignored.
+     */
+    private fun restoreDraftIfAny() {
+        val key = draftKey ?: return
+        viewModelScope.launch {
+            val body = draftStore.load(key)?.body
+            if (!body.isNullOrBlank()) {
+                _state.update { it.copy(restorableDraft = body) }
+            }
+        }
+    }
+
+    /**
+     * #405 — debounced autosave of the current body. Blank body → delete the row so an emptied
+     * editor never leaves a stale draft behind. The store stamps `updatedAt` and is a no-op without
+     * an active session, so nothing is persisted for an anonymous client.
+     */
+    private fun scheduleAutosave() {
+        val key = draftKey ?: return
+        val body = _state.value.draft.text
+        autosaveJob?.cancel()
+        autosaveJob = viewModelScope.launch {
+            delay(AUTOSAVE_DEBOUNCE_MS)
+            if (body.isBlank()) {
+                draftStore.delete(key)
+            } else {
+                draftStore.save(key, EditorDraftStore.Draft(body = body))
+            }
         }
     }
 
@@ -137,7 +187,30 @@ class PostEditorViewModel @AssistedInject constructor(
             is PostEditorIntent.SmileySearchQueryChanged -> onSmileySearchQueryChanged(intent.query)
             is PostEditorIntent.SmileySelected -> onSmileySelected(intent.token)
             is PostEditorIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
+            PostEditorIntent.DraftRestoreRequested -> onDraftRestoreRequested()
+            PostEditorIntent.DraftDiscardRequested -> onDraftDiscardRequested()
         }
+    }
+
+    /**
+     * #405 — apply the cached body to the draft (caret at the end, like form hydration) and clear
+     * the banner. Marks the draft hydrated so a late form fetch cannot overwrite the restored text.
+     */
+    private fun onDraftRestoreRequested() {
+        val body = _state.value.restorableDraft ?: return
+        _state.update { current ->
+            current
+                .withDraft(TextFieldValue(text = body, selection = TextRange(body.length)))
+                .copy(restorableDraft = null, draftHydratedFromForm = true)
+        }
+        scheduleAutosave()
+    }
+
+    /** #405 — discard the cached draft : delete the row and clear the banner. */
+    private fun onDraftDiscardRequested() {
+        _state.update { it.copy(restorableDraft = null) }
+        val key = draftKey ?: return
+        viewModelScope.launch { draftStore.delete(key) }
     }
 
     private fun onSmileyPickerOpened() {
@@ -251,6 +324,7 @@ class PostEditorViewModel @AssistedInject constructor(
             // sheet from squatting the screen between two distant insertions.
             withPreview.copy(smileyPicker = SmileyPickerState.Hidden)
         }
+        scheduleAutosave()
     }
 
     private fun onImageUrlInserted(url: String) {
@@ -276,6 +350,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 withDraft
             }
         }
+        scheduleAutosave()
     }
 
     private fun onContentChanged(value: TextFieldValue) {
@@ -287,6 +362,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 refreshed
             }
         }
+        scheduleAutosave()
     }
 
     private fun onToolbarActionClicked(action: BbcodeAction) {
@@ -310,6 +386,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 withDraft
             }
         }
+        scheduleAutosave()
     }
 
     private fun onTogglePreview() {
@@ -603,6 +680,10 @@ class PostEditorViewModel @AssistedInject constructor(
                 // index. Falls back to the locally-known numreponse for edit so existing
                 // tests that don't populate the parser numreponse still scroll to the post.
                 val scrollTo = result.numreponse ?: numreponse.takeIf { mode == PostEditorMode.Edit }
+                // #405 — the message reached HFR ; the cached draft is now obsolete. Cancel any
+                // pending autosave first so a debounced save cannot resurrect the row after delete.
+                autosaveJob?.cancel()
+                draftKey?.let { key -> viewModelScope.launch { draftStore.delete(key) } }
                 _effects.trySend(
                     PostEditorEffect.SubmitSucceeded(targetPage = result.targetPage, scrollTo = scrollTo),
                 )
@@ -701,5 +782,10 @@ class PostEditorViewModel @AssistedInject constructor(
         // `find_smilies`, cf. `/compressed/message.js`. Mirror it so the wiki endpoint
         // sees roughly the same query rate as the web client.
         private const val SMILEY_SEARCH_DEBOUNCE_MS = 300L
+
+        // #405 — idle window after the last edit before the draft is persisted. Long enough to
+        // coalesce a burst of keystrokes into a single Room write, short enough that an accidental
+        // navigation / process death right after typing still keeps the content.
+        private const val AUTOSAVE_DEBOUNCE_MS = 750L
     }
 }

@@ -76,6 +76,8 @@ fun PrivateMessageReplyScreen(
         onSubmitConfirmed = viewModel::onSubmitConfirmed,
         onSubmitConfirmationDismissed = viewModel::onSubmitConfirmationDismissed,
         onRetryFormLoad = viewModel::retryFormLoad,
+        onDraftRestore = viewModel::onDraftRestoreRequested,
+        onDraftDiscard = viewModel::onDraftDiscardRequested,
         smileyPicker = viewModel.smileyPicker,
         onSmileySelected = viewModel::onSmileySelected,
         modifier = modifier,
@@ -98,6 +100,8 @@ private fun PrivateMessageReplyContent(
     onSubmitConfirmed: () -> Unit,
     onSubmitConfirmationDismissed: () -> Unit,
     onRetryFormLoad: () -> Unit,
+    onDraftRestore: () -> Unit,
+    onDraftDiscard: () -> Unit,
     smileyPicker: SmileyPickerController,
     onSmileySelected: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -116,6 +120,8 @@ private fun PrivateMessageReplyContent(
                         onToolbarAction = onToolbarAction,
                         onTogglePreview = onTogglePreview,
                         onErrorDismissed = onErrorDismissed,
+                        onDraftRestore = onDraftRestore,
+                        onDraftDiscard = onDraftDiscard,
                         modifier = Modifier.weight(1f),
                     )
                     MessageSubmitBar(
@@ -167,6 +173,8 @@ private fun ReplyEditorBody(
     onToolbarAction: (BbcodeAction) -> Unit,
     onTogglePreview: () -> Unit,
     onErrorDismissed: () -> Unit,
+    onDraftRestore: () -> Unit,
+    onDraftDiscard: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // No outer scroll : the draft field is weighted so it stretches down to the bar (same
@@ -215,6 +223,10 @@ private fun ReplyEditorBody(
             ) {
                 BbcodePreview(content = state.preview)
             }
+        }
+
+        if (state.restorableDraft != null) {
+            MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
         }
 
         state.submitError?.let { error ->

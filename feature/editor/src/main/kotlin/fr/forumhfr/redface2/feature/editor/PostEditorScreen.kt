@@ -163,6 +163,13 @@ private fun PostEditorContent(
                     }
                 }
 
+                if (state.restorableDraft != null) {
+                    DraftRestoreBanner(
+                        onRestore = { onIntent(PostEditorIntent.DraftRestoreRequested) },
+                        onDiscard = { onIntent(PostEditorIntent.DraftDiscardRequested) },
+                    )
+                }
+
                 state.submitError?.let { error ->
                     Text(
                         text = stringResource(error.bannerResId),
@@ -243,6 +250,41 @@ private fun PostEditorContent(
                     onSmileyDisabledChanged = { onIntent(PostEditorIntent.ToggleSmileyDisabled(it)) },
                     onEmailNotificationChanged = { onIntent(PostEditorIntent.ToggleEmailNotification(it)) },
                 )
+            }
+        }
+    }
+}
+
+/**
+ * #405 — non-destructive draft-restore banner. Shown when a cached draft was found on init
+ * ([PostEditorState.restorableDraft] / [TopicFormState] equivalent). « Restaurer » pre-fills the
+ * editor ; « Ignorer » deletes the cached row. The draft is never silently applied nor lost.
+ * Shared by [PostEditorContent] and `TopicFormContent` (same string resources).
+ */
+@Composable
+internal fun DraftRestoreBanner(
+    onRestore: () -> Unit,
+    onDiscard: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        tonalElevation = 2.dp,
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(
+                text = stringResource(R.string.editor_draft_restore_message),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onRestore) {
+                    Text(text = stringResource(R.string.editor_draft_restore))
+                }
+                TextButton(onClick = onDiscard) {
+                    Text(text = stringResource(R.string.editor_draft_discard))
+                }
             }
         }
     }

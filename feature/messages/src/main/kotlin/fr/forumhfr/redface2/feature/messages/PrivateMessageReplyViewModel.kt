@@ -10,6 +10,8 @@ import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
@@ -26,6 +28,7 @@ import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +56,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val repository: PrivateMessageWriteRepository,
     private val previewParser: BbcodePreviewParser,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val draftStore: EditorDraftStore,
     smileyRepository: SmileyRepository,
 ) : ViewModel() {
 
@@ -71,6 +75,12 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private var formJob: Job? = null
     private var submitJob: Job? = null
 
+    /** #405 — content-free draft key for this conversation (private → wiped on logout). */
+    private val draftKey: String = EditorDraftKey.mpReply(request.threadId)
+
+    /** #405 — debounced autosave coroutine ; relaunched (cancelling the previous) on each edit. */
+    private var autosaveJob: Job? = null
+
     /**
      * #312 — mirror of the persisted « Confirmation avant publication » preference. Collected on
      * init (same DataStore-consumption shape as `TopicViewModel.observeTopicTopBarAutoHide`) and
@@ -84,10 +94,54 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 confirmBeforePosting = enabled
             }
         }
+        restoreDraftIfAny()
         loadForm()
     }
 
     fun retryFormLoad() = loadForm()
+
+    /** #405 — surface a cached draft on the banner (never auto-applied). Empty drafts are ignored. */
+    private fun restoreDraftIfAny() {
+        viewModelScope.launch {
+            val body = draftStore.load(draftKey)?.body
+            if (!body.isNullOrBlank()) {
+                _state.update { it.copy(restorableDraft = body) }
+            }
+        }
+    }
+
+    /**
+     * #405 — debounced autosave of the body, flagged `isPrivate = true` so the logout purge wipes
+     * it. Blank body → delete the row. The store is a no-op without an active session.
+     */
+    private fun scheduleAutosave() {
+        val body = _state.value.draft.text
+        autosaveJob?.cancel()
+        autosaveJob = viewModelScope.launch {
+            delay(AUTOSAVE_DEBOUNCE_MS)
+            if (body.isBlank()) {
+                draftStore.delete(draftKey)
+            } else {
+                draftStore.save(draftKey, EditorDraftStore.Draft(body = body, isPrivate = true))
+            }
+        }
+    }
+
+    /** #405 — apply the cached body to the draft and clear the banner. */
+    fun onDraftRestoreRequested() {
+        val body = _state.value.restorableDraft ?: return
+        _state.update {
+            it.withDraftPreview(TextFieldValue(text = body, selection = TextRange(body.length)))
+                .copy(restorableDraft = null)
+        }
+        scheduleAutosave()
+    }
+
+    /** #405 — discard the cached draft : delete the row and clear the banner. */
+    fun onDraftDiscardRequested() {
+        _state.update { it.copy(restorableDraft = null) }
+        viewModelScope.launch { draftStore.delete(draftKey) }
+    }
 
     private fun loadForm() {
         formJob?.cancel()
@@ -150,6 +204,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     fun onContentChanged(value: TextFieldValue) {
         _state.update { it.withDraftPreview(value) }
+        scheduleAutosave()
     }
 
     fun onToolbarAction(action: BbcodeAction) {
@@ -167,6 +222,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 ),
             )
         }
+        scheduleAutosave()
     }
 
     /**
@@ -199,6 +255,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             )
         }
         smileyPicker.dismiss()
+        scheduleAutosave()
     }
 
     fun onTogglePreview() {
@@ -282,6 +339,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private fun handleSubmitOutcome(result: ReplySubmitResult) {
         when (result) {
             is ReplySubmitResult.Success -> {
+                // #405 — the reply reached HFR ; the cached draft is now obsolete. Cancel any
+                // pending autosave first so a debounced save can't resurrect the row after delete.
+                autosaveJob?.cancel()
+                viewModelScope.launch { draftStore.delete(draftKey) }
                 _state.update { it.copy(isSubmitting = false, submitError = null) }
                 _effects.trySend(
                     PrivateMessageReplyEffect.SubmitSucceeded(
@@ -335,6 +396,11 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     @AssistedFactory
     interface Factory {
         fun create(request: PrivateMessageReplyRequest): PrivateMessageReplyViewModel
+    }
+
+    private companion object {
+        // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
+        private const val AUTOSAVE_DEBOUNCE_MS = 750L
     }
 }
 

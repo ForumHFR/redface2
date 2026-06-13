@@ -39,4 +39,8 @@
     <string name="editor_image_url_cancel">Annuler</string>
     <!-- Label du bouton « Smileys » de la barre éditeur (le sheet vit dans :core:ui, #387). -->
     <string name="editor_smiley_open">Smileys</string>
+    <!-- #405 — bannière de restauration de brouillon. -->
+    <string name="editor_draft_restore_message">Un brouillon non envoyé a été retrouvé pour ce message.</string>
+    <string name="editor_draft_restore">Restaurer</string>
+    <string name="editor_draft_discard">Ignorer</string>
 </resources>

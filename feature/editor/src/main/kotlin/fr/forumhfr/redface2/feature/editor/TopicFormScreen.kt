@@ -199,6 +199,12 @@ internal fun TopicFormContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (state.restorableDraft != null || state.restorableSubject != null) {
+                    DraftRestoreBanner(
+                        onRestore = { onIntent(TopicFormIntent.DraftRestoreRequested) },
+                        onDiscard = { onIntent(TopicFormIntent.DraftDiscardRequested) },
+                    )
+                }
                 state.submitError?.let { error ->
                     Text(
                         text = stringResource(error.bannerResId),

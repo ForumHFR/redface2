@@ -13,6 +13,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
@@ -57,12 +59,14 @@ import kotlinx.coroutines.launch
  *    [TopicFormEffect.NewTopicCreated] for create-topic navigation.
  */
 @HiltViewModel(assistedFactory = TopicFormViewModel.Factory::class)
+@Suppress("LongParameterList") // Hilt constructor injection — one dependency per collaborator (#405 added draftStore).
 class TopicFormViewModel @AssistedInject constructor(
     @Assisted private val request: TopicFormRequest,
     private val previewParser: BbcodePreviewParser,
     private val topicFormRepository: TopicFormRepository,
     private val smileyRepository: SmileyRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val draftStore: EditorDraftStore,
     private val diagnostics: DiagnosticsLog,
 ) : ViewModel() {
 
@@ -95,6 +99,20 @@ class TopicFormViewModel @AssistedInject constructor(
     private var smileySearchJob: Job? = null
 
     /**
+     * #405 — stable, content-free draft key. New uses the category key ; EditFirstPost needs the
+     * numreponse of the first post. Null when the routing args can't identify a target.
+     */
+    private val draftKey: String? = when (request.mode) {
+        TopicFormMode.New -> request.cat?.let { EditorDraftKey.newTopic(it) }
+        TopicFormMode.EditFirstPost -> request.numreponse?.let {
+            EditorDraftKey.editFirstPost(request.cat ?: 0, it)
+        }
+    }
+
+    /** #405 — debounced autosave coroutine ; relaunched (cancelling the previous) on each edit. */
+    private var autosaveJob: Job? = null
+
+    /**
      * #312 — mirror of the persisted « Confirmation avant publication » preference. Collected on
      * init (same DataStore-consumption shape as `TopicViewModel.observeTopicTopBarAutoHide`) and
      * read synchronously at submit time, identical to `PostEditorViewModel`.
@@ -107,9 +125,50 @@ class TopicFormViewModel @AssistedInject constructor(
                 confirmBeforePosting = enabled
             }
         }
+        restoreDraftIfAny()
         when (request.mode) {
             TopicFormMode.EditFirstPost -> loadEditFirstPostFormIfPossible()
             TopicFormMode.New -> loadNewTopicFormIfPossible()
+        }
+    }
+
+    /**
+     * #405 — surface a cached draft (subject + body) on the banner, never auto-applied (a server
+     * EditFirstPost prefill would otherwise be clobbered). Empty drafts (blank body AND subject)
+     * are ignored.
+     */
+    private fun restoreDraftIfAny() {
+        val key = draftKey ?: return
+        viewModelScope.launch {
+            val draft = draftStore.load(key) ?: return@launch
+            if (draft.body.isNotBlank() || !draft.subject.isNullOrBlank()) {
+                _state.update {
+                    it.copy(restorableDraft = draft.body, restorableSubject = draft.subject)
+                }
+            }
+        }
+    }
+
+    /**
+     * #405 — debounced autosave of subject + body. Blank body AND blank subject → delete the row.
+     * The store stamps `updatedAt` and is a no-op without an active session.
+     */
+    private fun scheduleAutosave() {
+        val key = draftKey ?: return
+        val snapshot = _state.value
+        val body = snapshot.draft.text
+        val subject = snapshot.subject.text
+        autosaveJob?.cancel()
+        autosaveJob = viewModelScope.launch {
+            delay(AUTOSAVE_DEBOUNCE_MS)
+            if (body.isBlank() && subject.isBlank()) {
+                draftStore.delete(key)
+            } else {
+                draftStore.save(
+                    key,
+                    EditorDraftStore.Draft(body = body, subject = subject.ifBlank { null }),
+                )
+            }
         }
     }
 
@@ -138,7 +197,47 @@ class TopicFormViewModel @AssistedInject constructor(
             is TopicFormIntent.SmileySearchQueryChanged -> onSmileySearchQueryChanged(intent.query)
             is TopicFormIntent.SmileySelected -> onSmileySelected(intent.token)
             is TopicFormIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
+            TopicFormIntent.DraftRestoreRequested -> onDraftRestoreRequested()
+            TopicFormIntent.DraftDiscardRequested -> onDraftDiscardRequested()
         }
+    }
+
+    /**
+     * #405 — apply the cached subject + body (caret at the end, like form hydration) and clear the
+     * banner. Marks both fields hydrated so a late EditFirstPost form fetch cannot overwrite them.
+     */
+    private fun onDraftRestoreRequested() {
+        val snapshot = _state.value
+        val body = snapshot.restorableDraft.orEmpty()
+        val subject = snapshot.restorableSubject.orEmpty()
+        _state.update { current ->
+            current
+                .withDraft(TextFieldValue(text = body, selection = TextRange(body.length)))
+                .copy(
+                    subject = TextFieldValue(text = subject, selection = TextRange(subject.length)),
+                    restorableDraft = null,
+                    restorableSubject = null,
+                    draftHydratedFromServer = true,
+                    subjectHydratedFromServer = true,
+                )
+        }
+        scheduleAutosave()
+    }
+
+    /** #405 — discard the cached draft : delete the row and clear the banner. */
+    private fun onDraftDiscardRequested() {
+        _state.update { it.copy(restorableDraft = null, restorableSubject = null) }
+        val key = draftKey ?: return
+        viewModelScope.launch { draftStore.delete(key) }
+    }
+
+    /**
+     * #405 — the topic reached HFR ; the cached draft is now obsolete. Cancel any pending autosave
+     * first so a debounced save can't resurrect the row after delete.
+     */
+    private fun deleteDraftOnSuccess() {
+        autosaveJob?.cancel()
+        draftKey?.let { key -> viewModelScope.launch { draftStore.delete(key) } }
     }
 
     private fun onSmileyPickerOpened() {
@@ -241,6 +340,7 @@ class TopicFormViewModel @AssistedInject constructor(
             }
             withPreview.copy(smileyPicker = SmileyPickerState.Hidden)
         }
+        scheduleAutosave()
     }
 
     private fun onImageUrlInserted(url: String) {
@@ -266,6 +366,7 @@ class TopicFormViewModel @AssistedInject constructor(
                 withDraft
             }
         }
+        scheduleAutosave()
     }
 
     private fun onSubjectChanged(value: TextFieldValue) {
@@ -275,6 +376,7 @@ class TopicFormViewModel @AssistedInject constructor(
                 submitError = if (value.text != current.subject.text) null else current.submitError,
             )
         }
+        scheduleAutosave()
     }
 
     private fun onContentChanged(value: TextFieldValue) {
@@ -286,6 +388,7 @@ class TopicFormViewModel @AssistedInject constructor(
                 refreshed
             }
         }
+        scheduleAutosave()
     }
 
     private fun onToolbarActionClicked(action: BbcodeAction) {
@@ -309,6 +412,7 @@ class TopicFormViewModel @AssistedInject constructor(
                 withDraft
             }
         }
+        scheduleAutosave()
     }
 
     private fun onTogglePreview() {
@@ -527,6 +631,7 @@ class TopicFormViewModel @AssistedInject constructor(
     ) {
         when (result) {
             is NewTopicSubmitResult.Success -> {
+                deleteDraftOnSuccess()
                 _effects.trySend(
                     TopicFormEffect.NewTopicCreated(
                         cat = context.cat,
@@ -560,6 +665,7 @@ class TopicFormViewModel @AssistedInject constructor(
     ) {
         when (result) {
             is ReplySubmitResult.Success -> {
+                deleteDraftOnSuccess()
                 _effects.trySend(
                     TopicFormEffect.SubmitSucceeded(
                         targetPage = result.targetPage,
@@ -726,5 +832,8 @@ class TopicFormViewModel @AssistedInject constructor(
         // `find_smilies`, cf. `/compressed/message.js`. Mirror it so the wiki endpoint
         // sees roughly the same query rate as the web client.
         private const val SMILEY_SEARCH_DEBOUNCE_MS = 300L
+
+        // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
+        private const val AUTOSAVE_DEBOUNCE_MS = 750L
     }
 }

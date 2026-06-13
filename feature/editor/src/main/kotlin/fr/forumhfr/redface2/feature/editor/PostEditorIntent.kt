@@ -57,6 +57,12 @@ sealed interface PostEditorIntent {
 
     /** Phase 2F-E (#189) — insert `[img]url[/img]` for a validated remote image URL. */
     data class ImageUrlInserted(val url: String) : PostEditorIntent
+
+    /** #405 — user tapped « Restaurer » on the draft banner: pre-fill the editor from the cached draft. */
+    data object DraftRestoreRequested : PostEditorIntent
+
+    /** #405 — user tapped « Ignorer » on the draft banner: delete the cached draft and clear the banner. */
+    data object DraftDiscardRequested : PostEditorIntent
 }
 
 /**
