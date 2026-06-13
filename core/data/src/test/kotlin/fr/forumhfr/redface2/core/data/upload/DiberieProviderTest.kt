@@ -1,8 +1,10 @@
 package fr.forumhfr.redface2.core.data.upload
 
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.upload.ImageUpload
 import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -16,23 +18,30 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * MockWebServer-driven tests for [DiberieProvider] (#459). The diberie response contract is NOT
- * captured from a live host here (no live access in CI) — the JSON fixtures below are minimal,
- * hand-built snapshots documenting the field set the provider reads (`picID` / `picURL` / `thumbURL`);
- * the user confirms the real shape end-to-end with `dib91`.
+ * MockWebServer-driven tests for [DiberieProvider] (#459).
+ *
+ * The headline fixture [REAL_RESPONSE] is **captured live** (2026-06-13) — see
+ * `core/data/src/test/resources/fixtures/diberie_upload_response.json`. It pins the one detail the
+ * hand-built fixtures used to get wrong: `picID` is a JSON **number**, not a quoted string. Parsed
+ * with the very same `@UploadJson` profile production uses (`ignoreUnknownKeys`, no `isLenient`), so
+ * a type drift here fails the test exactly as it failed every real upload before the fix.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class DiberieProviderTest {
 
     private lateinit var server: MockWebServer
+    private lateinit var diagnostics: DiagnosticsLog
     private lateinit var provider: DiberieProvider
 
     @Before
     fun setUp() {
         server = MockWebServer().apply { start() }
+        diagnostics = DiagnosticsLog()
         provider = DiberieProvider(
             client = OkHttpClient(),
             json = Json { ignoreUnknownKeys = true; explicitNulls = false },
             ioDispatcher = UnconfinedTestDispatcher(),
+            diagnostics = diagnostics,
             baseUrl = server.url("/").toString().trimEnd('/'),
         )
     }
@@ -43,38 +52,56 @@ class DiberieProviderTest {
     }
 
     @Test
+    fun `upload parses the live-captured response (picID as a JSON number)`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody(readFixture(REAL_RESPONSE)))
+
+        val result = provider.upload(sampleImage())
+
+        assertEquals(UploadProviderId.DIBERIE, result.provider)
+        assertEquals("https://rehost.diberie.com/Picture/Get/f/521196", result.imageUrl)
+        assertEquals("https://rehost.diberie.com/Picture/Get/t/521196", result.thumbnailUrl)
+        // picID is the integer 521196 on the wire; the delete handle is its string form.
+        assertEquals("521196", result.deleteHandle)
+        assertEquals(null, result.expiresAt)
+        assertTrue(
+            "a successful upload must leave an INFO trail in the diagnostics viewer",
+            diagnostics.entries.value.any { it.level == DiagnosticsLog.Level.INFO && it.message.contains("521196") },
+        )
+    }
+
+    @Test
     fun `upload parses picID, picURL and thumbURL and uses picID as the delete handle`() = runTest {
         server.enqueue(
             MockResponse()
                 .setResponseCode(200)
                 .setBody(
-                    """{"picID":"ABC123","picURL":"https://host/Picture/Get/f/ABC123",
-                       "thumbURL":"https://host/Picture/Get/t/ABC123"}""",
+                    """{"picID":521196,"picURL":"https://host/Picture/Get/f/521196",
+                       "thumbURL":"https://host/Picture/Get/t/521196"}""",
                 ),
         )
 
         val result = provider.upload(sampleImage())
 
         assertEquals(UploadProviderId.DIBERIE, result.provider)
-        assertEquals("https://host/Picture/Get/f/ABC123", result.imageUrl)
-        assertEquals("https://host/Picture/Get/t/ABC123", result.thumbnailUrl)
-        assertEquals("ABC123", result.deleteHandle)
+        assertEquals("https://host/Picture/Get/f/521196", result.imageUrl)
+        assertEquals("https://host/Picture/Get/t/521196", result.thumbnailUrl)
+        assertEquals("521196", result.deleteHandle)
         assertEquals(null, result.expiresAt)
     }
 
     @Test
     fun `upload falls back to derived URLs when only picID is returned`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"picID":"XYZ"}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"picID":777}"""))
 
         val result = provider.upload(sampleImage())
 
-        assertTrue("imageUrl must be derived from picID", result.imageUrl.endsWith("/Picture/Get/f/XYZ"))
-        assertTrue("thumbnailUrl must be derived from picID", result.thumbnailUrl!!.endsWith("/Picture/Get/t/XYZ"))
+        assertTrue("imageUrl must be derived from picID", result.imageUrl.endsWith("/Picture/Get/f/777"))
+        assertTrue("thumbnailUrl must be derived from picID", result.thumbnailUrl!!.endsWith("/Picture/Get/t/777"))
     }
 
     @Test
     fun `upload sends a multipart FORM request with an image part`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"picID":"ABC123"}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"picID":123}"""))
 
         provider.upload(sampleImage())
 
@@ -98,15 +125,23 @@ class DiberieProviderTest {
         assertTrue(error is UploadException.Server)
         assertEquals(503, (error as UploadException.Server).code)
         assertEquals(UploadProviderId.DIBERIE, error.providerId)
+        assertTrue(
+            "a rejected upload must leave a WARN trail",
+            diagnostics.entries.value.any { it.level == DiagnosticsLog.Level.WARN && it.message.contains("503") },
+        )
     }
 
     @Test
-    fun `upload maps broken JSON to UploadException Malformed`() = runTest {
+    fun `upload maps broken JSON to UploadException Malformed and records the body`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("not json"))
 
         val error = runCatching { provider.upload(sampleImage()) }.exceptionOrNull()
 
         assertTrue(error is UploadException.Malformed)
+        assertTrue(
+            "an unparseable response must record the raw body for diagnosis",
+            diagnostics.entries.value.any { it.message.contains("unparseable") && it.message.contains("not json") },
+        )
     }
 
     @Test
@@ -116,6 +151,10 @@ class DiberieProviderTest {
         val error = runCatching { provider.upload(sampleImage()) }.exceptionOrNull()
 
         assertTrue(error is UploadException.Malformed)
+        assertTrue(
+            "a missing picID must record the raw body for diagnosis",
+            diagnostics.entries.value.any { it.message.contains("without picID") },
+        )
     }
 
     @Test
@@ -136,7 +175,7 @@ class DiberieProviderTest {
     fun `delete is best-effort - true when the host confirms`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("ok"))
 
-        assertTrue(provider.delete("ABC123"))
+        assertTrue(provider.delete("521196"))
         val recorded = server.takeRequest()
         assertEquals("POST", recorded.method)
         assertTrue(recorded.path!!.endsWith("/Host/DeletePhoto"))
@@ -146,7 +185,7 @@ class DiberieProviderTest {
     fun `delete returns false when the host rejects, never throwing`() = runTest {
         server.enqueue(MockResponse().setResponseCode(500))
 
-        assertEquals(false, provider.delete("ABC123"))
+        assertEquals(false, provider.delete("521196"))
     }
 
     private fun sampleImage(): ImageUpload = ImageUpload(
@@ -154,4 +193,13 @@ class DiberieProviderTest {
         mimeType = "image/jpeg",
         displayName = "photo.jpg",
     )
+
+    private fun readFixture(name: String): String =
+        requireNotNull(javaClass.classLoader?.getResourceAsStream("fixtures/$name")) {
+            "missing test fixture: fixtures/$name"
+        }.bufferedReader().use { it.readText() }
+
+    private companion object {
+        const val REAL_RESPONSE = "diberie_upload_response.json"
+    }
 }
