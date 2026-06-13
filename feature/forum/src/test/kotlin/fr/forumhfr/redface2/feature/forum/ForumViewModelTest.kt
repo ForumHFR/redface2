@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.forum
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.Category
@@ -183,6 +184,13 @@ class ForumViewModelTest {
         override suspend fun refreshTopicList(cat: Int, subcat: Int?, page: Int) = Unit
 
         override suspend fun prefetchTopicList(cat: Int, subcat: Int?, page: Int) = Unit
+
+        // #455 — not exercised by ForumViewModel (Forum home lists categories, not flags).
+        override suspend fun getFlagFilteredTopics(
+            cat: Int,
+            subcat: Int?,
+            bucket: FlagFilterBucket,
+        ): ForumResult<TopicListPage> = ForumResult.Failure(UnsupportedOperationException())
 
         suspend fun emitCategories(result: ForumResult<List<Category>>) {
             categories.emit(result)

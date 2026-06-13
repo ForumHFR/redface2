@@ -8,6 +8,7 @@ import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
+import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.AuthState
@@ -71,6 +72,14 @@ class CategoryViewModel @AssistedInject constructor(
     private val page: MutableStateFlow<Int> = MutableStateFlow(request.initialPage.coerceAtLeast(1))
     private val searchQuery: MutableStateFlow<String> = MutableStateFlow("")
     private val isRefreshing: MutableStateFlow<Boolean> = MutableStateFlow(false)
+
+    // #455 — « Mes drapeaux » filter. Pushed state (not flatMapLatest) so refresh() can
+    // await the bucket fetch and drive [isRefreshing] correctly, and so a refresh keeps the
+    // current content instead of flashing Loading. ALL = the normal listing is the source;
+    // the bucket fetch only runs for the three flag modes. Seeded ALL, not from the route.
+    private val flagFilter: MutableStateFlow<CategoryFlagFilter> = MutableStateFlow(CategoryFlagFilter.ALL)
+    private val flagFilterTopics: MutableStateFlow<TopicsUiState> = MutableStateFlow(TopicsUiState.Loading)
+    private var flagFilterJob: Job? = null
 
     // scan keeps the last non-null name across `Loading` / `Failure` re-emissions so a
     // global refreshCategories() round-trip does not reflash the screen title back to
@@ -137,25 +146,41 @@ class CategoryViewModel @AssistedInject constructor(
         CoreCategoryState(subcat, currentPage, categoryName, subcategories, topics)
     }
 
+    // Fold the flag filter (#455) into a single slice so the final `combine` stays within
+    // the 5-arg typed overload (coreState already aggregates the 5 core sources).
+    private val filterSlice: Flow<FilterSlice> = combine(flagFilter, flagFilterTopics) { filter, topics ->
+        FilterSlice(filter, topics)
+    }
+
     val uiState: StateFlow<CategoryUiState> = combine(
         coreState,
+        filterSlice,
         searchQuery,
         isRefreshing,
         isAuthenticated,
-    ) { core, query, refreshing, authenticated ->
+    ) { core, filter, query, refreshing, authenticated ->
+        val filterActive = filter.flagFilter != CategoryFlagFilter.ALL
         CategoryUiState(
             cat = request.cat,
             categoryName = core.categoryName,
             initialSubcat = request.initialSubcat,
             selectedSubcat = core.subcat,
             page = core.page,
-            pageCount = core.topics.pageCount(),
+            // No pager in flag-filter mode: the buckets are not paginated server-side.
+            pageCount = if (filterActive) 1 else core.topics.pageCount(),
             subcategories = core.subcategories,
             topics = core.topics,
             searchQuery = query,
-            filteredTopics = core.topics.filterTopics(query),
+            // The text search applies to whichever listing is active (bucket or normal).
+            filteredTopics = if (filterActive) {
+                filter.flagFilterTopics.filterTopics(query)
+            } else {
+                core.topics.filterTopics(query)
+            },
             isRefreshing = refreshing,
             canCreateTopic = authenticated,
+            flagFilter = filter.flagFilter,
+            flagFilterTopics = filter.flagFilterTopics,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -199,6 +224,17 @@ class CategoryViewModel @AssistedInject constructor(
                     prefetchJob?.cancel()
                 } else {
                     schedulePrefetch(trigger)
+                }
+            }
+            .launchIn(viewModelScope)
+
+        // #455 — re-fetch the active flag bucket for the new (sub)category when the user
+        // switches subcat. At init the filter is ALL, so the first (initial) emission is a
+        // no-op; only a genuine subcat change with a filter active triggers a fetch.
+        selectedSubcat
+            .onEach {
+                if (flagFilter.value != CategoryFlagFilter.ALL) {
+                    launchFlagFilterFetch(keepContent = false)
                 }
             }
             .launchIn(viewModelScope)
@@ -249,6 +285,49 @@ class CategoryViewModel @AssistedInject constructor(
     }
 
     /**
+     * #455 — selects the « Mes drapeaux » filter. [CategoryFlagFilter.ALL] restores the
+     * normal listing; any other value fetches the matching bucket for the current
+     * (sub)category. No-op when the value is unchanged.
+     */
+    fun selectFlagFilter(filter: CategoryFlagFilter) {
+        if (flagFilter.value == filter) return
+        flagFilter.value = filter
+        launchFlagFilterFetch(keepContent = false)
+    }
+
+    private fun launchFlagFilterFetch(keepContent: Boolean) {
+        flagFilterJob?.cancel()
+        flagFilterJob = viewModelScope.launch { fetchFlagFilter(keepContent) }
+    }
+
+    /**
+     * Fetches the active flag bucket for the current (sub)category and pushes it into
+     * [flagFilterTopics]. ALL resets the slot to `Loading` (not consumed in that case).
+     * [keepContent] `true` (pull-to-refresh of the same bucket) skips the intermediate
+     * `Loading` so the list does not blank; `false` (filter change / subcat switch) shows it.
+     */
+    private suspend fun fetchFlagFilter(keepContent: Boolean) {
+        val bucket = flagFilter.value.toDomainBucket()
+        if (bucket == null) {
+            flagFilterTopics.value = TopicsUiState.Loading
+            return
+        }
+        if (!keepContent || flagFilterTopics.value !is TopicsUiState.Content) {
+            flagFilterTopics.value = TopicsUiState.Loading
+        }
+        flagFilterTopics.value = forumRepository
+            .getFlagFilteredTopics(cat = request.cat, subcat = selectedSubcat.value, bucket = bucket)
+            .toTopicsUiState()
+    }
+
+    private fun CategoryFlagFilter.toDomainBucket(): FlagFilterBucket? = when (this) {
+        CategoryFlagFilter.ALL -> null
+        CategoryFlagFilter.PARTICIPATED -> FlagFilterBucket.PARTICIPATED
+        CategoryFlagFilter.READ -> FlagFilterBucket.READ
+        CategoryFlagFilter.FAVORITES -> FlagFilterBucket.FAVORITES
+    }
+
+    /**
      * Triggers a network refresh of the subcategories AND the current topic list.
      * Toggles [isRefreshing] for the duration so the PullToRefresh indicator stays
      * anchored. The repository's refresh* methods broadcast `Loading` then the
@@ -260,11 +339,19 @@ class CategoryViewModel @AssistedInject constructor(
             isRefreshing.value = true
             try {
                 forumRepository.refreshSubcategories(request.cat)
-                forumRepository.refreshTopicList(
-                    cat = request.cat,
-                    subcat = selectedSubcat.value,
-                    page = page.value,
-                )
+                if (flagFilter.value == CategoryFlagFilter.ALL) {
+                    forumRepository.refreshTopicList(
+                        cat = request.cat,
+                        subcat = selectedSubcat.value,
+                        page = page.value,
+                    )
+                } else {
+                    // #455 — re-fetch the active bucket inline (keep content) so [isRefreshing]
+                    // brackets the round-trip. Cancel any pending filter job to avoid a double
+                    // fetch racing this one.
+                    flagFilterJob?.cancel()
+                    fetchFlagFilter(keepContent = true)
+                }
             } finally {
                 isRefreshing.value = false
             }
@@ -322,6 +409,11 @@ class CategoryViewModel @AssistedInject constructor(
         val subcat: Int?,
         val currentPage: Int,
         val pageCount: Int,
+    )
+
+    private data class FilterSlice(
+        val flagFilter: CategoryFlagFilter,
+        val flagFilterTopics: TopicsUiState,
     )
 
     private companion object {

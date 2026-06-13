@@ -1,8 +1,10 @@
 package fr.forumhfr.redface2.core.data.forum
 
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.network.HfrApiClient
+import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -207,6 +209,74 @@ class DefaultForumRepositoryTest {
         coVerify(exactly = 1) {
             apiClient.getTopicList(cat = 23, subcat = 550, page = 1, resultsPerPage = 50, useAuth = true)
         }
+    }
+
+    @Test
+    fun `getFlagFilteredTopics maps the participated bucket to a TopicListPage`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery {
+                getCategoryFlagTopics(
+                    cat = 23,
+                    bucket = HfrRestFlagBucket.PARTICIPATED,
+                    subcat = null,
+                    page = any(),
+                    resultsPerPage = any(),
+                    useAuth = true,
+                )
+            } returns fixture("rest_cat23_participated.json")
+        }
+        val repo = repository(apiClient)
+
+        val result = repo.getFlagFilteredTopics(cat = 23, subcat = null, bucket = FlagFilterBucket.PARTICIPATED)
+
+        assertTrue("expected Success, got $result", result is ForumResult.Success)
+        val page = (result as ForumResult.Success).value
+        assertEquals(23, page.cat)
+        assertTrue("the bucket fixture should map at least one topic", page.topics.isNotEmpty())
+    }
+
+    @Test
+    fun `getFlagFilteredTopics forwards the subcat and bucket to the api client`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery {
+                getCategoryFlagTopics(
+                    cat = 23,
+                    bucket = HfrRestFlagBucket.FAVORITES,
+                    subcat = 550,
+                    page = any(),
+                    resultsPerPage = any(),
+                    useAuth = true,
+                )
+            } returns fixture("rest_cat23_participated.json")
+        }
+        val repo = repository(apiClient)
+
+        repo.getFlagFilteredTopics(cat = 23, subcat = 550, bucket = FlagFilterBucket.FAVORITES)
+
+        coVerify(exactly = 1) {
+            apiClient.getCategoryFlagTopics(
+                cat = 23,
+                bucket = HfrRestFlagBucket.FAVORITES,
+                subcat = 550,
+                page = any(),
+                resultsPerPage = any(),
+                useAuth = true,
+            )
+        }
+    }
+
+    @Test
+    fun `getFlagFilteredTopics returns Failure on a network error`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery {
+                getCategoryFlagTopics(any(), any(), any(), any(), any(), any())
+            } throws RuntimeException("boom")
+        }
+        val repo = repository(apiClient)
+
+        val result = repo.getFlagFilteredTopics(cat = 23, subcat = null, bucket = FlagFilterBucket.READ)
+
+        assertTrue("expected Failure, got $result", result is ForumResult.Failure)
     }
 
     private fun repository(

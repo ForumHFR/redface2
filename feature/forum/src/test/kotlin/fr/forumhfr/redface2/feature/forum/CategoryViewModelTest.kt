@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.forum
 
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.AuthState
@@ -567,6 +568,125 @@ class CategoryViewModelTest {
         )
     }
 
+    // ---- #455 — « Mes drapeaux » filter ----------------------------------------------
+
+    @Test
+    fun `flag filter defaults to ALL and shows the normal listing`() = runTest {
+        val repo = FakeForumRepository()
+        val vm = categoryVm(repo)
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(pageOf(topicSummary(1, "Normal"))))
+            val content = awaitContent { it.topics is TopicsUiState.Content }
+            assertEquals(CategoryFlagFilter.ALL, content.flagFilter)
+            assertEquals(listOf(1), content.filteredTopics.map { it.topicId })
+            assertTrue("no bucket fetch in ALL mode", repo.getFlagFilteredTopicsCalls.isEmpty())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `selecting a flag filter fetches the bucket and shows only its topics`() = runTest {
+        val repo = FakeForumRepository()
+        repo.flagFilterResponder = { _, _, _ -> ForumResult.Success(pageOf(topicSummary(99, "Flagged"))) }
+        val vm = categoryVm(repo)
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(pageOf(topicSummary(1, "Normal"))))
+            awaitContent { it.topics is TopicsUiState.Content }
+            vm.selectFlagFilter(CategoryFlagFilter.PARTICIPATED)
+            val filtered = awaitContent {
+                it.flagFilter == CategoryFlagFilter.PARTICIPATED && it.flagFilterTopics is TopicsUiState.Content
+            }
+            assertEquals(listOf(99), filtered.filteredTopics.map { it.topicId })
+            assertEquals(
+                listOf(Triple(23, null, FlagFilterBucket.PARTICIPATED)),
+                repo.getFlagFilteredTopicsCalls,
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `switching back to ALL restores the normal listing`() = runTest {
+        val repo = FakeForumRepository()
+        repo.flagFilterResponder = { _, _, _ -> ForumResult.Success(pageOf(topicSummary(99, "Flagged"))) }
+        val vm = categoryVm(repo)
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(pageOf(topicSummary(1, "Normal"))))
+            awaitContent { it.topics is TopicsUiState.Content }
+            vm.selectFlagFilter(CategoryFlagFilter.FAVORITES)
+            awaitContent {
+                it.flagFilter == CategoryFlagFilter.FAVORITES && it.flagFilterTopics is TopicsUiState.Content
+            }
+            vm.selectFlagFilter(CategoryFlagFilter.ALL)
+            val back = awaitContent { it.flagFilter == CategoryFlagFilter.ALL }
+            assertEquals(listOf(1), back.filteredTopics.map { it.topicId })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `changing subcat while a filter is active refetches the bucket for the new subcat`() = runTest {
+        val repo = FakeForumRepository()
+        repo.flagFilterResponder = { _, subcat, _ -> ForumResult.Success(pageOf(topicSummary(subcat ?: 0, "x"))) }
+        val vm = categoryVm(repo)
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE))
+            awaitContent { it.topics is TopicsUiState.Content }
+            vm.selectFlagFilter(CategoryFlagFilter.READ)
+            awaitContent { it.flagFilter == CategoryFlagFilter.READ && it.flagFilterTopics is TopicsUiState.Content }
+            vm.selectSubcategory(550)
+            awaitContent { it.selectedSubcat == 550 && it.flagFilterTopics is TopicsUiState.Content }
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(
+            listOf(Triple(23, null, FlagFilterBucket.READ), Triple(23, 550, FlagFilterBucket.READ)),
+            repo.getFlagFilteredTopicsCalls,
+        )
+    }
+
+    @Test
+    fun `a failed bucket fetch surfaces an Error state`() = runTest {
+        val repo = FakeForumRepository()
+        repo.flagFilterResponder = { _, _, _ -> ForumResult.Failure(RuntimeException("boom")) }
+        val vm = categoryVm(repo)
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE))
+            awaitContent { it.topics is TopicsUiState.Content }
+            vm.selectFlagFilter(CategoryFlagFilter.PARTICIPATED)
+            val errored = awaitContent {
+                it.flagFilter == CategoryFlagFilter.PARTICIPATED && it.flagFilterTopics is TopicsUiState.Error
+            }
+            assertTrue(errored.flagFilterTopics is TopicsUiState.Error)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `reselecting the active filter does not refetch`() = runTest {
+        val repo = FakeForumRepository()
+        repo.flagFilterResponder = { _, _, _ -> ForumResult.Success(EMPTY_PAGE) }
+        val vm = categoryVm(repo)
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE))
+            awaitContent { it.topics is TopicsUiState.Content }
+            vm.selectFlagFilter(CategoryFlagFilter.PARTICIPATED)
+            awaitContent { it.flagFilterTopics is TopicsUiState.Content }
+            vm.selectFlagFilter(CategoryFlagFilter.PARTICIPATED)
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(1, repo.getFlagFilteredTopicsCalls.size)
+    }
+
+    private fun categoryVm(
+        repo: FakeForumRepository,
+        auth: AuthRepository = FakeAuthRepository(),
+        request: CategoryRequest = CategoryRequest(cat = 23, initialSubcat = null),
+    ): CategoryViewModel = CategoryViewModel(
+        request = request,
+        forumRepository = repo,
+        authRepository = auth,
+    )
+
     private companion object {
         val SUBCAT_550 = SubCategory(id = 550, name = "Android", parentCategoryId = 23)
         val EMPTY_PAGE = TopicListPage(
@@ -578,6 +698,15 @@ class CategoryViewModelTest {
             topics = emptyList<TopicSummary>(),
         )
         const val AWAIT_CONTENT_TIMEOUT_MS = 2_000L
+
+        fun pageOf(vararg topics: TopicSummary): TopicListPage = TopicListPage(
+            cat = 23,
+            subcat = null,
+            page = 1,
+            resultsPerPage = 100,
+            totalTopics = topics.size,
+            topics = topics.toList(),
+        )
 
         fun topicSummary(
             id: Int,
@@ -635,6 +764,14 @@ class CategoryViewModelTest {
         var prefetchTopicListCalls: List<Triple<Int, Int?, Int>> = emptyList()
             private set
 
+        // #455 — flag-filter fetch. [flagFilterResponder] lets a test return Success/Failure
+        // per (cat, subcat, bucket); [getFlagFilteredTopicsCalls] records the args so a test
+        // can assert the right bucket / subcat were requested. Default = empty Success page.
+        var flagFilterResponder: (Int, Int?, FlagFilterBucket) -> ForumResult<TopicListPage> =
+            { cat, subcat, _ -> ForumResult.Success(TopicListPage(cat, subcat, 1, 100, 0, emptyList())) }
+        var getFlagFilteredTopicsCalls: List<Triple<Int, Int?, FlagFilterBucket>> = emptyList()
+            private set
+
         /**
          * Optional gate consumed by [refreshSubcategories] — when set, the suspending
          * stub awaits the gate before recording the call and returning. Lets a test
@@ -675,6 +812,15 @@ class CategoryViewModelTest {
         override suspend fun prefetchTopicList(cat: Int, subcat: Int?, page: Int) {
             prefetchTopicListCalls = prefetchTopicListCalls + Triple(cat, subcat, page)
             prefetchHook?.invoke(cat, subcat, page)
+        }
+
+        override suspend fun getFlagFilteredTopics(
+            cat: Int,
+            subcat: Int?,
+            bucket: FlagFilterBucket,
+        ): ForumResult<TopicListPage> {
+            getFlagFilteredTopicsCalls = getFlagFilteredTopicsCalls + Triple(cat, subcat, bucket)
+            return flagFilterResponder(cat, subcat, bucket)
         }
 
         suspend fun emitCategories(result: ForumResult<List<Category>>) {
