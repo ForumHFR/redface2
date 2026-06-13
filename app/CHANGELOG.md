@@ -18,9 +18,9 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ## v132 — `0.11.0` — 2026-06-13
 
-**Statut** : `local` (candidat bêta — numéro anticipé ledger 131+1, à confirmer au dispatch `channel=beta`)
-**Commit** : à venir (promotion dev→main)
-**Fichier** : AAB `bundleProdRelease` → track open testing + tag pour F-Droid beta
+**Statut** : `open` (track open testing — canal beta, Play Edit committed) + F-Droid `.beta`
+**Commit** : `4fd2fb02` (promotion #493 dev→main)
+**Fichier** : AAB `redface2-beta-v132-4fd2fb0.aab` → track open testing + tag `app-v132` pour F-Droid beta
 
 **Contenu depuis la 0.10.0/v126** : dogfoodé sur le canal dev (v127 → v131).
 
@@ -38,6 +38,9 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ### Fixed
 - **Upload diberie cassé** (#459/#474) : le `picID` renvoyé par diberie est un nombre JSON (pas une chaîne) — chaque upload échouait au parsing. Corrigé + test de régression sur fixture réelle.
+- **Cloisonnement par compte** (#495/#496) : brouillons d'éditeur et positions de lecture MP liés au compte qui les a écrits — un changement de compte ne fuite plus le brouillon ni la position d'un compte vers l'autre.
+- **Suppression de brouillon best-effort** (#497) : un post réussi n'est plus jamais bloqué (ni le brouillon laissé restaurable) si le nettoyage local échoue.
+- **Garde-fous d'upload** (#496) : « Envoyer » désactivé tant qu'une image est en cours d'upload ; suppression diberie honnête (jamais annoncée « confirmée » côté hôte).
 
 ### Changed
 - **`versionName` 0.10.0 → 0.11.0**.
