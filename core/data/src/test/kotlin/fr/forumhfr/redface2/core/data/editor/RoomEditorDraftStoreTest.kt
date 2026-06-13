@@ -143,4 +143,16 @@ class RoomEditorDraftStoreTest {
 
         coVerify { dao.deleteByKey("xatrix|edit:23:35395") }
     }
+
+    @Test
+    fun `delete swallows a DAO failure so a successful post is never aborted`() = runTest {
+        // delete is awaited on the post-success path (before the nav pop), so a local DB failure
+        // must NOT propagate and abort the success flow on a message HFR already accepted.
+        val store = store(AuthState.Authenticated("xatrix"))
+        coEvery { dao.deleteByKey(any()) } throws RuntimeException("db locked")
+
+        store.delete(owner = "xatrix", key = "reply:29:123456")
+
+        coVerify { dao.deleteByKey("xatrix|reply:29:123456") }
+    }
 }
