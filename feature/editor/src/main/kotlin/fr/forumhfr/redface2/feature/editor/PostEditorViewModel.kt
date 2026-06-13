@@ -446,13 +446,15 @@ class PostEditorViewModel @AssistedInject constructor(
                     return@launch
                 }
                 insertImageUrlAtCaret(uploaded.imageUrl)
+                // Persist after EACH insert, not once at the end: a later image failing must not
+                // lose the images already inserted into the draft (Codex review #490).
+                scheduleAutosave()
                 completed += 1
                 if (multiple) {
                     _state.update { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
                 }
             }
             _state.update { it.copy(isUploading = false, uploadError = null, uploadProgress = null) }
-            scheduleAutosave()
         }
     }
 

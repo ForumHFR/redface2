@@ -176,6 +176,9 @@ private fun PostEditorContent(
                     // #275/#410 — grow-with-content field in its own scrollable viewport so the
                     // cursor stays visible under the IME (typing AND refocus after the preview).
                     fillViewport = true,
+                    // Multi-image upload — lock editing during a batch so the user can't move the
+                    // caret between two programmatic [img] insertions (keeps them in pick order).
+                    readOnly = state.isUploading,
                 )
 
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
