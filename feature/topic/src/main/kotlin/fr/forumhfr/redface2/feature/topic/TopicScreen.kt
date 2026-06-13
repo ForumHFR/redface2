@@ -947,10 +947,18 @@ private fun TopicLoadedContent(
             // pinned topics ship them as `md_noclass_cryptlink`, cf. #227) no longer
             // hides Citer. `quoteRef` is forwarded when known (positional, cosmetic)
             // and may be null — the whole quote chain tolerates it.
-            val quoteAction: (() -> Unit)? = if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
-                { onQuote(topic.subcat, topic.page, post.numreponse, post.quoteRef) }
+            // « Citer » and the « + » multi-quote affordance share ONE gate (multi-quote is a
+            // flavour of quoting : a topic the user cannot reply to has nothing to quote). Deriving
+            // both inside the same branch keeps them in lock-step — they can never drift apart — and
+            // avoids a second decision point in this already-dense list builder.
+            val quoteAction: (() -> Unit)?
+            val multiQuoteToggle: (() -> Unit)?
+            if (shouldShowQuoteAction(topic, state.isAuthenticated)) {
+                quoteAction = { onQuote(topic.subcat, topic.page, post.numreponse, post.quoteRef) }
+                multiQuoteToggle = { onToggleMultiQuote(post.numreponse) }
             } else {
-                null
+                quoteAction = null
+                multiQuoteToggle = null
             }
             // Phase 2D (#147) — « Modifier » is exposed by HFR only on the
             // user's own posts of an unlocked topic. Same canReply gate as
@@ -976,6 +984,10 @@ private fun TopicLoadedContent(
                 onOpenMenu = { menuPost = post },
                 // #436 — same membership source as the menu entry (PostMenuSheet).
                 multiQuoteSelected = post.numreponse in multiQuoteSelection,
+                // #436 — per-post add/remove affordance (RF1 quote+/quote- parity), reachable
+                // without opening the « … » menu. Null/non-null under the SAME gate as « Citer »
+                // (derived together above), so the « + » and « Citer » always appear as a pair.
+                onToggleMultiQuote = multiQuoteToggle,
             )
         }
         // #379 — explicit end-of-topic marker after the last post of the LAST page. The
@@ -1309,8 +1321,15 @@ private fun TopicPollCard(poll: Poll, expandedDefault: Boolean) {
 }
 
 @Composable
-@Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
-private fun TopicPostCard(
+// Rich post card : each optional affordance (highlight anchor, multi-quote border + pill + « + »
+// toggle, citation badge, profile tap, contextual menu, edit, quote) is its own guarded branch, so
+// the cyclomatic count is inherently high — same call as PostRenderer. Splitting it would scatter a
+// single visual unit across helpers. LongParameterList : state-hoisted, each param has a distinct
+// call-site.
+@Suppress("LongParameterList", "CyclomaticComplexMethod")
+// `internal` (#436): TopicPostCardMultiQuoteTest mounts the card directly to assert the per-post
+// « + » affordance (gating, label flip, tap). Same visibility relaxation as other tested internals.
+internal fun TopicPostCard(
     post: Post,
     highlighted: Boolean,
     /**
@@ -1337,6 +1356,14 @@ private fun TopicPostCard(
      * container tint compose without colliding.
      */
     multiQuoteSelected: Boolean = false,
+    /**
+     * #436 — toggles this post in/out of the multi-quote basket directly from the card footer
+     * (RF1 quote+/quote- parity), without opening the « … » menu. Null under the same gate as
+     * [onQuote] (a non-postable topic has nothing to quote), so the « + » action and « Citer »
+     * appear together or not at all. The same [multiQuoteSelected] flag drives the glyph/label
+     * here, the border, and the pill — one source of truth, they can never desynchronise.
+     */
+    onToggleMultiQuote: (() -> Unit)? = null,
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
@@ -1537,7 +1564,7 @@ private fun TopicPostCard(
         ) {
             // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
             PostRenderer(content = post.content, selectable = true)
-            if (onQuote != null || onEdit != null) {
+            if (onQuote != null || onEdit != null || onToggleMultiQuote != null) {
                 // Actions row at the bottom of the post card, sober TextButtons
                 // so they stay subordinate to the post content. « Modifier »
                 // (Phase 2D, #147) appears only on the user's own editable posts
@@ -1552,6 +1579,43 @@ private fun TopicPostCard(
                     if (onEdit != null) {
                         TextButton(onClick = onEdit) {
                             Text(text = stringResource(R.string.topic_post_edit))
+                        }
+                    }
+                    if (onToggleMultiQuote != null) {
+                        // #436 — per-post add/remove to the multi-quote basket (RF1
+                        // quote+/quote- parity), next to « Citer » (same gate). The glyph +
+                        // word switch on multiQuoteSelected, echoing the card border + pill.
+                        // The colour (muted onSurfaceVariant when absent, primary when present)
+                        // is a SECONDARY cue : the « + »/« ✓ » glyph and the word change carry
+                        // the state without relying on colour. TalkBack reads the long add/remove
+                        // label via contentDescription, not the terse glyph.
+                        val mqContentDesc = stringResource(
+                            if (multiQuoteSelected) {
+                                R.string.topic_post_menu_multi_quote_remove
+                            } else {
+                                R.string.topic_post_menu_multi_quote_add
+                            },
+                        )
+                        TextButton(
+                            onClick = onToggleMultiQuote,
+                            colors = if (multiQuoteSelected) {
+                                ButtonDefaults.textButtonColors()
+                            } else {
+                                ButtonDefaults.textButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                            modifier = Modifier.semantics { contentDescription = mqContentDesc },
+                        ) {
+                            Text(
+                                text = stringResource(
+                                    if (multiQuoteSelected) {
+                                        R.string.topic_post_multiquote_remove_short
+                                    } else {
+                                        R.string.topic_post_multiquote_add_short
+                                    },
+                                ),
+                            )
                         }
                     }
                     if (onQuote != null) {

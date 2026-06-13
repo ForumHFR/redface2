@@ -27,6 +27,11 @@
     <!-- #362 — per-post contextual menu (post number, permalink copy, edit marker, citations). -->
     <!-- #436 — pastille de la bande d'identité quand le post est au panier multi-quote (#291). -->
     <string name="topic_post_multiquote_selected">Ajouté à la citation</string>
+    <!-- #436 — libellés courts du bouton « + » en pied de carte (parité web quote+/quote-). Le
+         glyphe et le mot basculent avec l'appartenance au panier ; le contentDescription long
+         réutilise topic_post_menu_multi_quote_add/remove pour TalkBack. -->
+    <string name="topic_post_multiquote_add_short">+ Citer</string>
+    <string name="topic_post_multiquote_remove_short">✓ Cité</string>
     <string name="topic_post_menu_action">Options du post</string>
     <string name="topic_post_menu_number">Post n°%1$d</string>
     <string name="topic_post_menu_copy_link">Copier le lien de ce post</string>
