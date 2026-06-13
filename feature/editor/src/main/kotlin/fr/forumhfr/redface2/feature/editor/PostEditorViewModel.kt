@@ -437,7 +437,10 @@ class PostEditorViewModel @AssistedInject constructor(
         val mapped = when (error) {
             is UploadException.TooLarge -> UploadError.TooLarge
             is UploadException.UnsupportedType -> UploadError.UnsupportedType
-            is UploadException.Server, is UploadException.Malformed -> UploadError.Host
+            // #474 — keep Server and Malformed distinct so the banner names the host + HTTP code
+            // (Server) vs. an unreadable host response (Malformed), instead of one vague message.
+            is UploadException.Server -> UploadError.Server(code = error.code, providerId = error.providerId)
+            is UploadException.Malformed -> UploadError.Malformed(providerId = error.providerId)
             is UploadException.Network -> UploadError.Network
             else -> UploadError.Network
         }

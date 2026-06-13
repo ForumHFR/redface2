@@ -45,6 +45,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
@@ -201,7 +202,7 @@ private fun PostEditorContent(
 
                 state.uploadError?.let { error ->
                     Text(
-                        text = stringResource(error.bannerResId),
+                        text = error.bannerText(),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -497,13 +498,28 @@ private val PostEditorMode.titleResId: Int
         PostEditorMode.Edit -> R.string.editor_post_edit_title
     }
 
-private val UploadError.bannerResId: Int
-    get() = when (this) {
-        UploadError.TooLarge -> R.string.editor_upload_error_too_large
-        UploadError.UnsupportedType -> R.string.editor_upload_error_unsupported_type
-        UploadError.Host -> R.string.editor_upload_error_host
-        UploadError.Network -> R.string.editor_upload_error_network
-    }
+/**
+ * #474 — resolves the upload-error banner text. [UploadError.Server] / [UploadError.Malformed] carry
+ * the host (and the HTTP code for Server), so they need string args and a `@Composable` resolver
+ * rather than a plain `@StringRes Int` — the others stay argument-free.
+ */
+@Composable
+private fun UploadError.bannerText(): String = when (this) {
+    UploadError.TooLarge -> stringResource(R.string.editor_upload_error_too_large)
+    UploadError.UnsupportedType -> stringResource(R.string.editor_upload_error_unsupported_type)
+    is UploadError.Server ->
+        stringResource(R.string.editor_upload_error_server, providerId.displayName(), code)
+    is UploadError.Malformed ->
+        stringResource(R.string.editor_upload_error_malformed, providerId.displayName())
+    UploadError.Network -> stringResource(R.string.editor_upload_error_network)
+}
+
+/** French display name of an image host, for the upload-error banner (#474). */
+@Composable
+private fun UploadProviderId.displayName(): String = when (this) {
+    UploadProviderId.DIBERIE -> stringResource(R.string.editor_upload_provider_diberie)
+    UploadProviderId.IMGUR -> stringResource(R.string.editor_upload_provider_imgur)
+}
 
 private val SubmitError.bannerResId: Int
     get() = when (this) {

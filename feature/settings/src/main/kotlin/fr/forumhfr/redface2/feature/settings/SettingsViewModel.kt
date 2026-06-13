@@ -10,7 +10,10 @@ import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -118,6 +121,18 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.fontScaleTouchedLocally || it.isUpdatingFontScale },
             apply = { state, value -> state.copy(fontScale = value) },
         )
+        // #459 — Hébergeur d'images : provider (enum) + imgur Client-ID (text). Same one-shot
+        // hydration + touched-locally guard as the other prefs.
+        hydratePreference(
+            read = { userPreferencesRepository.observeUploadProvider().first() },
+            isLocked = { it.uploadProviderTouchedLocally || it.isUpdatingUploadProvider },
+            apply = { state, value -> state.copy(uploadProvider = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeImgurClientId().first() },
+            isLocked = { it.imgurClientIdTouchedLocally },
+            apply = { state, value -> state.copy(imgurClientId = value) },
+        )
     }
 
     /**
@@ -185,6 +200,8 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
             is SettingsIntent.DisplayDensityChanged -> updateDisplayDensity(intent.density)
             is SettingsIntent.FontScaleChanged -> updateFontScale(intent.scale)
+            is SettingsIntent.SetUploadProvider -> updateUploadProvider(intent.provider)
+            is SettingsIntent.SetImgurClientId -> updateImgurClientId(intent.text)
         }
     }
 
@@ -491,6 +508,62 @@ class SettingsViewModel @Inject constructor(
                             fontScaleError = true,
                         )
                     }
+                }
+        }
+    }
+
+    // #459 — upload provider is an enum, same bespoke optimistic-flip shape as updateThemeMode.
+    private fun updateUploadProvider(desired: UploadProviderId) {
+        val previous = _state.value.uploadProvider
+        _state.update {
+            it.copy(
+                uploadProvider = desired,
+                isUpdatingUploadProvider = true,
+                uploadProviderError = false,
+                uploadProviderTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setUploadProvider(desired) }
+                .onSuccess {
+                    _state.update { it.copy(uploadProvider = desired, isUpdatingUploadProvider = false) }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            uploadProvider = previous,
+                            isUpdatingUploadProvider = false,
+                            uploadProviderError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // #459 — imgur Client-ID is a free-text preference persisted on each change (no save button).
+    // The optimistic value is shown immediately and the touched-locally guard blocks a late
+    // hydration from clobbering in-progress typing; a persist failure raises the error flag without
+    // reverting the typed text (it would be hostile to wipe what the user just typed).
+    // Persist-on-keystroke writes are serialised : each keystroke cancels the previous in-flight write
+    // so a slower/older write (or its failure) can never land after a newer one and strand a stale
+    // Client-ID or a spurious error flag (review #459). CancellationException is rethrown, not treated
+    // as a persistence failure.
+    private var imgurClientIdJob: Job? = null
+
+    private fun updateImgurClientId(text: String) {
+        _state.update {
+            it.copy(
+                imgurClientId = text,
+                imgurClientIdError = false,
+                imgurClientIdTouchedLocally = true,
+            )
+        }
+        imgurClientIdJob?.cancel()
+        imgurClientIdJob = viewModelScope.launch {
+            runCatching { userPreferencesRepository.setImgurClientId(text) }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    _state.update { it.copy(imgurClientIdError = true) }
                 }
         }
     }

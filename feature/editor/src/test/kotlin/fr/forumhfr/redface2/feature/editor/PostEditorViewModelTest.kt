@@ -1050,10 +1050,40 @@ class PostEditorViewModelTest {
         viewModel.state.test {
             val state = expectMostRecentItem()
             assertEquals("draft is untouched on failure", "photo: ", state.draft.text)
-            assertEquals("Server failure maps to the Host error surface", UploadError.Host, state.uploadError)
+            // #474 — a non-2xx response maps to a Server error carrying the HTTP code + host, so the
+            // banner can name « diberie » and « HTTP 503 » instead of one vague « erreur de l'hébergeur ».
+            assertEquals(
+                "Server failure maps to a Server upload error with the code + provider",
+                UploadError.Server(code = 503, providerId = UploadProviderId.DIBERIE),
+                state.uploadError,
+            )
             assertFalse("upload flag cleared on failure", state.isUploading)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `ImagePicked maps a Malformed host response onto a distinct Malformed error`() = runTest {
+        // #474 — a 2xx-but-unreadable body must NOT collapse into the same surface as an HTTP refusal:
+        // it carries the host so the banner reads « Réponse illisible de l'hébergeur imgur ».
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        uploadRepository.uploadException = UploadException.Malformed(providerId = UploadProviderId.IMGUR)
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("photo: ", TextRange(7))))
+        viewModel.submit(PostEditorIntent.ImagePicked("content://media/external/images/2"))
+        testScheduler.advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertEquals("draft is untouched on a malformed response", "photo: ", state.draft.text)
+        assertEquals(
+            "Malformed maps to a distinct Malformed upload error carrying the provider",
+            UploadError.Malformed(providerId = UploadProviderId.IMGUR),
+            state.uploadError,
+        )
+        assertFalse("upload flag cleared on failure", state.isUploading)
     }
 
     @Test

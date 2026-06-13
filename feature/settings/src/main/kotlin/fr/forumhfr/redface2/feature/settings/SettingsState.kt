@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.settings
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 
 data class SettingsState(
     val proxyEnabled: Boolean = false,
@@ -130,6 +131,21 @@ data class SettingsState(
     val isUpdatingFontScale: Boolean = false,
     val fontScaleError: Boolean = false,
     val fontScaleTouchedLocally: Boolean = false,
+    // #459 — Hébergeur d'images. The provider is an enum, so it uses the bespoke optimistic-flip
+    // shape (like themeMode): `uploadProvider` is the displayed selection, `isUpdating*` gates the
+    // control while DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids
+    // a late `init` hydration from clobbering a fast user change. Default DIBERIE (no Client-ID).
+    val uploadProvider: UploadProviderId = UploadProviderId.DIBERIE,
+    val isUpdatingUploadProvider: Boolean = false,
+    val uploadProviderError: Boolean = false,
+    val uploadProviderTouchedLocally: Boolean = false,
+    // #459 — imgur Client-ID text field. `imgurClientId` is the displayed/edited value, persisted on
+    // each change (no save button — same as the optimistic prefs). `*Error` surfaces a persist
+    // failure; `*TouchedLocally` forbids the late hydration from overwriting in-progress typing.
+    // Default empty = imgur not configured.
+    val imgurClientId: String = "",
+    val imgurClientIdError: Boolean = false,
+    val imgurClientIdTouchedLocally: Boolean = false,
 ) {
     val canSave: Boolean
         get() = !isSaving
@@ -195,6 +211,10 @@ data class SettingsState(
 
     val canChangeFontScale: Boolean
         get() = !isUpdatingFontScale
+
+    // #459 — the provider selector is gated only by its own in-flight write.
+    val canChangeUploadProvider: Boolean
+        get() = !isUpdatingUploadProvider
 }
 
 sealed interface SettingsError {
@@ -293,4 +313,11 @@ sealed interface SettingsIntent {
     // optimistically with revert-on-failure, like ThemeModeChanged.
     data class DisplayDensityChanged(val density: DisplayDensity) : SettingsIntent
     data class FontScaleChanged(val scale: FontScalePreference) : SettingsIntent
+
+    // #459 — Hébergeur d'images. `provider` is the desired selection (applied optimistically with
+    // revert-on-failure, like ThemeModeChanged); `text` is the desired imgur Client-ID (persisted on
+    // each change). Selecting IMGUR reveals the Client-ID field ; an empty Client-ID is NOT blocked at
+    // the UI layer — the upload then fails with a precise host error (cf. #474) instead of silently.
+    data class SetUploadProvider(val provider: UploadProviderId) : SettingsIntent
+    data class SetImgurClientId(val text: String) : SettingsIntent
 }
