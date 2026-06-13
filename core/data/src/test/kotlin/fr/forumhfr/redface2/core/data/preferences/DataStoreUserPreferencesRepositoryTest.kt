@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
@@ -564,6 +566,15 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeDisplayDensity defaults to COMFORT on an empty store`() = runTest(dispatcher) {
+        // #287 — COMFORT is the default (historical rhythm), never the enum's first ordinal by chance.
+        repository.observeDisplayDensity().test {
+            assertEquals(DisplayDensity.COMFORT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `setUploadProvider persists and round-trips IMGUR then DIBERIE`() = runTest(dispatcher) {
         repository.setUploadProvider(UploadProviderId.IMGUR)
         repository.observeUploadProvider().test {
@@ -574,6 +585,21 @@ class DataStoreUserPreferencesRepositoryTest {
         repository.setUploadProvider(UploadProviderId.DIBERIE)
         repository.observeUploadProvider().test {
             assertEquals(UploadProviderId.DIBERIE, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setDisplayDensity persists and round-trips COMPACT then COMFORT`() = runTest(dispatcher) {
+        repository.setDisplayDensity(DisplayDensity.COMPACT)
+        repository.observeDisplayDensity().test {
+            assertEquals(DisplayDensity.COMPACT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setDisplayDensity(DisplayDensity.COMFORT)
+        repository.observeDisplayDensity().test {
+            assertEquals(DisplayDensity.COMFORT, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -591,6 +617,17 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `corrupt display_density value falls back to COMFORT instead of crashing`() = runTest(dispatcher) {
+        // An unknown value (older build / manual edit) must degrade to COMFORT, not crash valueOf.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("display_density")] = "ULTRA" }
+
+        repository.observeDisplayDensity().test {
+            assertEquals(DisplayDensity.COMFORT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeImgurClientId defaults to empty then round-trips a trimmed value`() = runTest(dispatcher) {
         // #459 (option B) — empty means imgur is unconfigured; the value is stored trimmed.
         repository.observeImgurClientId().test {
@@ -601,6 +638,39 @@ class DataStoreUserPreferencesRepositoryTest {
         repository.setImgurClientId("  abc123  ")
         repository.observeImgurClientId().test {
             assertEquals("abc123", awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeFontScale defaults to M on an empty store`() = runTest(dispatcher) {
+        repository.observeFontScale().test {
+            assertEquals(FontScalePreference.M, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFontScale persists and round-trips S then L`() = runTest(dispatcher) {
+        repository.setFontScale(FontScalePreference.S)
+        repository.observeFontScale().test {
+            assertEquals(FontScalePreference.S, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setFontScale(FontScalePreference.L)
+        repository.observeFontScale().test {
+            assertEquals(FontScalePreference.L, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt font_scale value falls back to M instead of crashing`() = runTest(dispatcher) {
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("font_scale")] = "XXL" }
+
+        repository.observeFontScale().test {
+            assertEquals(FontScalePreference.M, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

@@ -57,6 +57,7 @@ import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.account.RedfaceAccountMenu
+import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import fr.forumhfr.redface2.feature.auth.LoginScreen
 import fr.forumhfr.redface2.feature.editor.PostEditorMode
 import fr.forumhfr.redface2.feature.editor.PostEditorRequest
@@ -404,6 +405,9 @@ fun RedfaceApp(intent: Intent?) {
     val themeViewModel: AppThemeViewModel = hiltViewModel()
     val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
     val amoledEnabled by themeViewModel.amoledEnabled.collectAsStateWithLifecycle()
+    // #287 — reading presets (density + font scale) resolved at the root and bundled for RedfaceTheme.
+    val displayDensity by themeViewModel.displayDensity.collectAsStateWithLifecycle()
+    val fontScale by themeViewModel.fontScale.collectAsStateWithLifecycle()
     val darkTheme = when (themeMode) {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
@@ -426,7 +430,11 @@ fun RedfaceApp(intent: Intent?) {
             controller.isAppearanceLightNavigationBars = !darkTheme
         }
     }
-    RedfaceTheme(darkTheme = darkTheme, amoledTheme = amoledEnabled) {
+    RedfaceTheme(
+        darkTheme = darkTheme,
+        amoledTheme = amoledEnabled,
+        reading = ReadingDisplaySettings(density = displayDensity, fontScale = fontScale),
+    ) {
         // #458 — cold-start screen, read synchronously from the bootstrap mirror and frozen for
         // the session. Only the INITIAL values below consume it: rememberSaveable and
         // rememberNavBackStack restore saved state first, so rotations / process restores keep

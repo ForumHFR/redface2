@@ -7,7 +7,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
@@ -368,6 +370,23 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeDisplayDensity(): Flow<DisplayDensity> =
+        dataStore.data
+            // Default COMFORT (#287): the historical structural rhythm unless the user opts into
+            // the denser COMPACT preset. No bootstrap mirror — this preset does not paint the
+            // pre-first-frame window, so a SYSTEM-style cold-start flash is not a concern here.
+            .map(::readDisplayDensity)
+            .distinctUntilChanged()
+            .catch { emit(DisplayDensity.COMFORT) }
+
+    override suspend fun setDisplayDensity(density: DisplayDensity) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_DISPLAY_DENSITY] = density.name
+            }
+        }
+    }
+
     override fun observeImgurClientId(): Flow<String> =
         dataStore.data
             // Default empty (#459): imgur is unconfigured until the user pastes their Client-ID.
@@ -383,6 +402,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeFontScale(): Flow<FontScalePreference> =
+        dataStore.data
+            // Default M (#287): the M3 reference sizes unless the user picks S / L.
+            .map(::readFontScale)
+            .distinctUntilChanged()
+            .catch { emit(FontScalePreference.M) }
+
+    override suspend fun setFontScale(scale: FontScalePreference) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_FONT_SCALE] = scale.name
+            }
+        }
+    }
+
     /**
      * Reads [KEY_UPLOAD_PROVIDER] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [UploadProviderId.DIBERIE] instead of crashing on
@@ -392,6 +426,25 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_UPLOAD_PROVIDER]
             ?.let { stored -> runCatching { UploadProviderId.valueOf(stored) }.getOrNull() }
             ?: UploadProviderId.DIBERIE
+
+    /**
+     * Reads [KEY_DISPLAY_DENSITY] defensively (#287): an unknown / corrupt stored value (older
+     * build, manual edit) falls back to [DisplayDensity.COMFORT] instead of crashing on
+     * `DisplayDensity.valueOf`, same stance as [readThemeMode].
+     */
+    private fun readDisplayDensity(prefs: Preferences): DisplayDensity =
+        prefs[KEY_DISPLAY_DENSITY]
+            ?.let { stored -> runCatching { DisplayDensity.valueOf(stored) }.getOrNull() }
+            ?: DisplayDensity.COMFORT
+
+    /**
+     * Reads [KEY_FONT_SCALE] defensively (#287): an unknown / corrupt stored value falls back to
+     * [FontScalePreference.M] instead of crashing on `FontScalePreference.valueOf`.
+     */
+    private fun readFontScale(prefs: Preferences): FontScalePreference =
+        prefs[KEY_FONT_SCALE]
+            ?.let { stored -> runCatching { FontScalePreference.valueOf(stored) }.getOrNull() }
+            ?: FontScalePreference.M
 
     /**
      * Reads [KEY_THEME_MODE] defensively: an unknown / corrupt stored value (older build with a
@@ -505,5 +558,10 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // imgur Client-ID (empty = imgur unconfigured, option B: never committed).
         val KEY_UPLOAD_PROVIDER = stringPreferencesKey("upload_provider")
         val KEY_IMGUR_CLIENT_ID = stringPreferencesKey("imgur_client_id")
+
+        // #287 — reading display presets: density (DisplayDensity.name) + font scale
+        // (FontScalePreference.name), both defensively parsed. No bootstrap mirror (cf. observers).
+        val KEY_DISPLAY_DENSITY = stringPreferencesKey("display_density")
+        val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
     }
 }

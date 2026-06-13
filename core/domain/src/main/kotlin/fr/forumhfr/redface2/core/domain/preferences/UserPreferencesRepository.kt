@@ -240,4 +240,26 @@ interface UserPreferencesRepository {
 
     /** Persists [observeImgurClientId]. Default empty string until the first call. */
     suspend fun setImgurClientId(clientId: String)
+
+    /**
+     * Reading-density preset (#287): [DisplayDensity.COMFORT] (default) keeps the historical
+     * structural rhythm; [DisplayDensity.COMPACT] tightens the listing-row and post-body paddings
+     * for a denser feed. Observed at the app root ([fr.forumhfr.redface2.navigation.RedfaceApp]) to
+     * provide `LocalDisplayMetrics` to the whole tree, and mirrored in Settings.
+     */
+    fun observeDisplayDensity(): Flow<DisplayDensity>
+
+    /** Persists [observeDisplayDensity]. Default [DisplayDensity.COMFORT] until the first call. */
+    suspend fun setDisplayDensity(density: DisplayDensity)
+
+    /**
+     * Reading font-size preset (#287): [FontScalePreference.M] (default) is the M3 reference size;
+     * [FontScalePreference.S] / [FontScalePreference.L] scale the reading typography by the preset
+     * [FontScalePreference.factor], applied ON TOP of the OS font zoom (never replacing it).
+     * Observed at the app root to scale the theme `Typography`, and mirrored in Settings.
+     */
+    fun observeFontScale(): Flow<FontScalePreference>
+
+    /** Persists [observeFontScale]. Default [FontScalePreference.M] until the first call. */
+    suspend fun setFontScale(scale: FontScalePreference)
 }

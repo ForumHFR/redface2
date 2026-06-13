@@ -6,7 +6,9 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -584,5 +586,14 @@ class TopicRepositoryImplTest {
         override fun observeImgurClientId(): Flow<String> = MutableStateFlow("")
 
         override suspend fun setImgurClientId(clientId: String) = Unit
+
+        // #287 — reading display presets are irrelevant to TopicRepository; stubbed at defaults.
+        override fun observeDisplayDensity(): Flow<DisplayDensity> = MutableStateFlow(DisplayDensity.COMFORT)
+
+        override suspend fun setDisplayDensity(density: DisplayDensity) = Unit
+
+        override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
+
+        override suspend fun setFontScale(scale: FontScalePreference) = Unit
     }
 }
