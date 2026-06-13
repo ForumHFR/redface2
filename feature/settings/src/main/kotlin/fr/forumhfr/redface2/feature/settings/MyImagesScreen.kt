@@ -234,9 +234,11 @@ private fun DeleteConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    // Best-effort hosts (diberie) can never confirm a server-side deletion ; warn the user that
-    // the image may linger on the host even though the local trace will be removed.
-    val bodyRes = if (record.deleteHandle != null) {
+    // The "removed from the host" wording is only honest for a host that CONFIRMS deletion (imgur).
+    // Best-effort hosts (diberie) have a delete handle (the picID) but never confirm a server-side
+    // deletion, so they fall back to the no-handle wording that only promises the local trace is
+    // removed and warns the image may linger on the host (Codex beta review).
+    val bodyRes = if (record.deleteHandle != null && record.provider.confirmsHostDeletion) {
         R.string.my_images_delete_confirm_body
     } else {
         R.string.my_images_delete_confirm_body_no_handle

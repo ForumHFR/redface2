@@ -1,9 +1,14 @@
 package fr.forumhfr.redface2.core.domain.editor
 
 /**
- * Per-account local cache of in-progress editor content (#405). Implementations resolve the
- * active account themselves and MUST be a no-op (read returns null / save & delete do nothing)
- * when no session is active — drafts are private per-account data.
+ * Per-account local cache of in-progress editor content (#405).
+ *
+ * Drafts are bound to the account that OWNED the editor session, not to whatever account happens
+ * to be active when a (debounced) write lands. The caller snapshots [currentOwner] once when the
+ * editor opens and threads it through every [load]/[save]/[delete] of that session. This closes a
+ * cross-account leak: a logout or account switch between opening the editor and a late autosave
+ * could otherwise write account A's body/recipients under account B's row key — B would then read
+ * A's private draft, and A's logout purge (keyed by A) would miss it.
  *
  * [load]/[save]/[delete] take a stable, content-free context [key] built by [EditorDraftKey]; it
  * never embeds message bodies, subjects or recipients. MP drafts ([Draft.isPrivate] == true) are
@@ -12,18 +17,28 @@ package fr.forumhfr.redface2.core.domain.editor
  */
 interface EditorDraftStore {
 
-    /** One-shot read of the draft stored under [key] for the active account, or null. */
-    suspend fun load(key: String): Draft?
+    /**
+     * Snapshot of the account that owns drafts written right now (lowercased pseudo), or null when
+     * anonymous. Capture this ONCE when the editor opens and pass it back to [load]/[save]/[delete];
+     * a later account change then cannot attribute this session's content to a different account.
+     */
+    suspend fun currentOwner(): String?
+
+    /** One-shot read of [owner]'s draft under [key], or null (incl. when [owner] is null). */
+    suspend fun load(owner: String?, key: String): Draft?
 
     /**
-     * Upserts [draft] under [key] for the active account, stamping `updatedAt` from the clock.
-     * No-op without an active session. [Draft.body]/[Draft.subject]/[Draft.recipients] are the
-     * raw editor fields; [Draft.isPrivate] marks MP drafts for the logout purge.
+     * Upserts [draft] under [key] for [owner], stamping `updatedAt` from the clock. No-op when
+     * [owner] is null (anonymous session) OR when [owner] is no longer the active account: the
+     * draft belongs to a session whose account has switched or logged out, so persisting it would
+     * either leak it to the new account or revive a row the logout purge already swept.
+     * [Draft.body]/[Draft.subject]/[Draft.recipients] are the raw editor fields; [Draft.isPrivate]
+     * marks MP drafts for the logout purge.
      */
-    suspend fun save(key: String, draft: Draft)
+    suspend fun save(owner: String?, key: String, draft: Draft)
 
-    /** Deletes the draft under [key] for the active account (called on a successful POST). */
-    suspend fun delete(key: String)
+    /** Deletes [owner]'s draft under [key] (called on a successful POST). No-op when [owner] is null. */
+    suspend fun delete(owner: String?, key: String)
 
     data class Draft(
         val body: String,

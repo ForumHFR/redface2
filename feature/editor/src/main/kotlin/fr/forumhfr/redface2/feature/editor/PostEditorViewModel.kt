@@ -141,6 +141,13 @@ class PostEditorViewModel @AssistedInject constructor(
      */
     private var activeUserId: String? = null
 
+    /**
+     * #405 — account that owned this editor when it opened, snapshotted from [draftStore] so a
+     * mid-edit account switch can't write this session's body under another account (Codex beta
+     * review). Captured in [restoreDraftIfAny]; null until then / for an anonymous session.
+     */
+    private var draftOwner: String? = null
+
     /** #459 PR2 — in-flight image upload job ; one at a time, cancelled on [onCleared]. */
     private var uploadJob: Job? = null
 
@@ -152,10 +159,19 @@ class PostEditorViewModel @AssistedInject constructor(
         }
         viewModelScope.launch {
             authRepository.observeAuthState().collect { authState ->
-                activeUserId = when (authState) {
+                val newUserId = when (authState) {
                     AuthState.Anonymous -> null
                     is AuthState.Authenticated -> authState.pseudo.lowercase()
                 }
+                // Account switched/logged out mid-session: cancel any in-flight upload and pending
+                // autosave so this session's image URL / body is never attributed to the new
+                // account (Codex beta review). The draft store also drops the now-stale save.
+                if (activeUserId != null && newUserId != activeUserId) {
+                    uploadJob?.cancel()
+                    autosaveJob?.cancel()
+                    _state.update { it.copy(isUploading = false, uploadProgress = null) }
+                }
+                activeUserId = newUserId
             }
         }
         restoreDraftIfAny()
@@ -172,7 +188,8 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun restoreDraftIfAny() {
         val key = draftKey ?: return
         viewModelScope.launch {
-            val body = draftStore.load(key)?.body
+            draftOwner = draftStore.currentOwner()
+            val body = draftStore.load(draftOwner, key)?.body
             if (!body.isNullOrBlank()) {
                 _state.update { it.copy(restorableDraft = body) }
             }
@@ -191,9 +208,9 @@ class PostEditorViewModel @AssistedInject constructor(
         autosaveJob = viewModelScope.launch {
             delay(AUTOSAVE_DEBOUNCE_MS)
             if (body.isBlank()) {
-                draftStore.delete(key)
+                draftStore.delete(draftOwner, key)
             } else {
-                draftStore.save(key, EditorDraftStore.Draft(body = body))
+                draftStore.save(draftOwner, key, EditorDraftStore.Draft(body = body))
             }
         }
     }
@@ -246,7 +263,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun onDraftDiscardRequested() {
         _state.update { it.copy(restorableDraft = null) }
         val key = draftKey ?: return
-        viewModelScope.launch { draftStore.delete(key) }
+        viewModelScope.launch { draftStore.delete(draftOwner, key) }
     }
 
     private fun onSmileyPickerOpened() {
@@ -811,7 +828,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 // #405 — the message reached HFR ; the cached draft is now obsolete. Cancel any
                 // pending autosave first so a debounced save cannot resurrect the row after delete.
                 autosaveJob?.cancel()
-                draftKey?.let { key -> viewModelScope.launch { draftStore.delete(key) } }
+                draftKey?.let { key -> viewModelScope.launch { draftStore.delete(draftOwner, key) } }
                 _effects.trySend(
                     PostEditorEffect.SubmitSucceeded(targetPage = result.targetPage, scrollTo = scrollTo),
                 )
