@@ -14,6 +14,10 @@ android {
             // no-ops in JVM tests instead of throwing "not mocked". Same convention as
             // :core:network and :core:data.
             isReturnDefaultValues = true
+            // #436 — TopicPostCardMultiQuoteTest mounts the card via `createComposeRule()` and
+            // reads `stringResource`, so the host activity needs the merged Android resources at
+            // JVM unit-test time. Same convention as :core:ui (Compose UI tests).
+            isIncludeAndroidResources = true
         }
     }
 }
@@ -38,4 +42,15 @@ dependencies {
     testImplementation(libs.junit4)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
+    // #436 — Robolectric hosts `createComposeRule()` on the JVM so TopicPostCardMultiQuoteTest
+    // can exercise the per-post « + » affordance (gating, label flip, tap callback) without a
+    // device. Non-roborazzi (no screenshot baseline), so the AGP-9 roborazzi plugin gap does not
+    // apply. The BOM aligns the ui-test artifacts with the production Compose versions; the
+    // ui-test-manifest (debug-only) pulls the Activity surrogate the rule mounts internally.
+    // Same harness as :core:ui.
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
