@@ -65,6 +65,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -1605,7 +1606,15 @@ internal fun TopicPostCard(
                                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             },
-                            modifier = Modifier.semantics { contentDescription = mqContentDesc },
+                            // #436 — the contentDescription carries the ACTION (« Ajouter/Retirer
+                            // de la citation multiple »); `selected` carries the STATE so TalkBack
+                            // announces « sélectionné » independently of the action verb (a real
+                            // toggle, not a one-shot button). Sighted state stays non-colour-only
+                            // via the glyph + word + border + pill.
+                            modifier = Modifier.semantics {
+                                contentDescription = mqContentDesc
+                                selected = multiQuoteSelected
+                            },
                         ) {
                             Text(
                                 text = stringResource(

@@ -3,6 +3,8 @@ package fr.forumhfr.redface2.feature.topic
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -57,6 +59,8 @@ class TopicPostCardMultiQuoteTest {
         composeTestRule.onNodeWithText(ADD_LABEL).assertIsDisplayed()
         composeTestRule.onNodeWithContentDescription(ADD_DESC)
             .assertHasClickAction()
+            // #436 — a11y : the toggle exposes its state, not just the action verb.
+            .assertIsNotSelected()
             .performClick()
         assertEquals(1, toggles)
     }
@@ -78,7 +82,9 @@ class TopicPostCardMultiQuoteTest {
         }
 
         composeTestRule.onNodeWithText(REMOVE_LABEL).assertIsDisplayed()
-        composeTestRule.onNodeWithContentDescription(REMOVE_DESC).assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription(REMOVE_DESC)
+            // #436 — a11y : TalkBack hears « sélectionné », not only the « Retirer » verb.
+            .assertIsSelected()
         // The add state must be gone — the control is a single toggle, not two buttons.
         composeTestRule.onNodeWithText(ADD_LABEL).assertDoesNotExist()
     }
