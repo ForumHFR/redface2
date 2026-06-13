@@ -305,3 +305,41 @@ val MIGRATION_10_11: Migration = object : Migration(10, 11) {
         )
     }
 }
+
+/**
+ * v11 → v12 — `uploaded_images` (#459): per-account history of images uploaded through the editor
+ * (provider, deletion handle, full + thumbnail URLs, dates), backing the « Mes images uploadées »
+ * screen and deferred deletion. Pure DDL, no backfill — rows only exist once the user uploads with
+ * the new build. Like `mp_read_positions` the rows are private per account and wiped on logout /
+ * account switch (cf. `CacheInvalidator`).
+ *
+ * The DDL is hand-written to match the exported `12.json` `createSql` (column order = entity field
+ * order, NOT NULL flags, nullable `thumbnailUrl` / `deleteHandle` / `expiresAt`, composite PK, and
+ * the `userId, uploadedAt` index) so `runMigrationsAndValidate` is satisfied.
+ *
+ * NOTE orchestrateur: régénérer `12.json` via ksp (`./gradlew :core:database:kspDebugKotlin`) puis
+ * vérifier que ce DDL correspond exactement au `createSql` exporté avant merge.
+ */
+val MIGRATION_11_12: Migration = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `uploaded_images` (
+                `userId` TEXT NOT NULL,
+                `provider` TEXT NOT NULL,
+                `picId` TEXT NOT NULL,
+                `imageUrl` TEXT NOT NULL,
+                `thumbnailUrl` TEXT,
+                `deleteHandle` TEXT,
+                `uploadedAt` INTEGER NOT NULL,
+                `expiresAt` INTEGER,
+                PRIMARY KEY(`userId`, `provider`, `picId`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_uploaded_images_userId_uploadedAt` " +
+                "ON `uploaded_images` (`userId`, `uploadedAt`)",
+        )
+    }
+}

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.domain.preferences
 
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.flow.Flow
 
@@ -219,6 +220,26 @@ interface UserPreferencesRepository {
 
     /** Persists [observeMpUnreadBadge]. Default `true` until the first call. */
     suspend fun setMpUnreadBadge(enabled: Boolean)
+
+    /**
+     * Default image host for editor uploads (#459). Default [UploadProviderId.DIBERIE] (no auth, no
+     * Client-ID required). Observed by the editor (which provider to upload through) and the
+     * Settings screen. A corrupt / unknown stored value degrades to the DIBERIE default.
+     */
+    fun observeUploadProvider(): Flow<UploadProviderId>
+
+    /** Persists [observeUploadProvider]. Default [UploadProviderId.DIBERIE] until the first call. */
+    suspend fun setUploadProvider(provider: UploadProviderId)
+
+    /**
+     * The user's own imgur Client-ID (#459, option B): imgur uploads require a public Client-ID, and
+     * the app commits none — the user pastes their own in Settings. Empty (the default) means imgur
+     * is NOT configured, so the provider selector hides IMGUR (DIBERIE works without any Client-ID).
+     */
+    fun observeImgurClientId(): Flow<String>
+
+    /** Persists [observeImgurClientId]. Default empty string until the first call. */
+    suspend fun setImgurClientId(clientId: String)
 
     /**
      * Reading-density preset (#287): [DisplayDensity.COMFORT] (default) keeps the historical

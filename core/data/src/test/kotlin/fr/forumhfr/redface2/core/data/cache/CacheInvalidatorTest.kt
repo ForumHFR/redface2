@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.data.cache
 import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
+import fr.forumhfr.redface2.core.database.dao.UploadedImageDao
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.model.AuthState
@@ -31,11 +32,12 @@ class CacheInvalidatorTest {
         coVerify(exactly = 0) { fixture.flagDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.mpReadPositionDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.editorDraftDao.deletePrivateForUser(any()) }
+        coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser(any()) }
         verify(exactly = 0) { fixture.flagRepository.clearSessionCache() }
     }
 
     @Test
-    fun `logout purges the previous user's flag rows, MP positions, MP drafts and session cache`() = runTest {
+    fun `logout purges the previous user's flag rows, MP positions, MP drafts, uploads and session`() = runTest {
         val state = MutableStateFlow<AuthState>(AuthState.Authenticated("alice"))
         val fixture = invalidator(state)
         fixture.invalidator.start()
@@ -46,6 +48,7 @@ class CacheInvalidatorTest {
             fixture.flagDao.deleteAllForUser("alice")
             fixture.mpReadPositionDao.deleteAllForUser("alice")
             fixture.editorDraftDao.deletePrivateForUser("alice")
+            fixture.uploadedImageDao.deleteAllForUser("alice")
         }
         verify { fixture.flagRepository.clearSessionCache() }
     }
@@ -63,9 +66,11 @@ class CacheInvalidatorTest {
         coVerify { fixture.flagDao.deleteAllForUser("alice") }
         coVerify { fixture.mpReadPositionDao.deleteAllForUser("alice") }
         coVerify { fixture.editorDraftDao.deletePrivateForUser("alice") }
+        coVerify { fixture.uploadedImageDao.deleteAllForUser("alice") }
         coVerify(exactly = 0) { fixture.flagDao.deleteAllForUser("bob") }
         coVerify(exactly = 0) { fixture.mpReadPositionDao.deleteAllForUser("bob") }
         coVerify(exactly = 0) { fixture.editorDraftDao.deletePrivateForUser("bob") }
+        coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser("bob") }
         verify { fixture.flagRepository.clearSessionCache() }
     }
 
@@ -82,6 +87,7 @@ class CacheInvalidatorTest {
         coVerify(exactly = 0) { fixture.flagDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.mpReadPositionDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.editorDraftDao.deletePrivateForUser(any()) }
+        coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser(any()) }
         verify(exactly = 0) { fixture.flagRepository.clearSessionCache() }
     }
 
@@ -90,6 +96,7 @@ class CacheInvalidatorTest {
         val flagDao: FlagDao,
         val mpReadPositionDao: MpReadPositionDao,
         val editorDraftDao: EditorDraftDao,
+        val uploadedImageDao: UploadedImageDao,
         val flagRepository: FlagRepository,
     )
 
@@ -100,15 +107,24 @@ class CacheInvalidatorTest {
         val flagDao = mockk<FlagDao>(relaxed = true)
         val mpReadPositionDao = mockk<MpReadPositionDao>(relaxed = true)
         val editorDraftDao = mockk<EditorDraftDao>(relaxed = true)
+        val uploadedImageDao = mockk<UploadedImageDao>(relaxed = true)
         val flagRepository = mockk<FlagRepository>(relaxed = true)
         val invalidator = CacheInvalidator(
             authRepository = authRepository,
             flagDao = flagDao,
             mpReadPositionDao = mpReadPositionDao,
             editorDraftDao = editorDraftDao,
+            uploadedImageDao = uploadedImageDao,
             flagRepository = flagRepository,
             ioDispatcher = UnconfinedTestDispatcher(),
         )
-        return Fixture(invalidator, flagDao, mpReadPositionDao, editorDraftDao, flagRepository)
+        return Fixture(
+            invalidator,
+            flagDao,
+            mpReadPositionDao,
+            editorDraftDao,
+            uploadedImageDao,
+            flagRepository,
+        )
     }
 }

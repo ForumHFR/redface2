@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -556,10 +557,34 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeUploadProvider defaults to DIBERIE on an empty store`() = runTest(dispatcher) {
+        // #459 — DIBERIE is the default (no auth, no Client-ID), never the enum's first ordinal alone.
+        repository.observeUploadProvider().test {
+            assertEquals(UploadProviderId.DIBERIE, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeDisplayDensity defaults to COMFORT on an empty store`() = runTest(dispatcher) {
         // #287 — COMFORT is the default (historical rhythm), never the enum's first ordinal by chance.
         repository.observeDisplayDensity().test {
             assertEquals(DisplayDensity.COMFORT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setUploadProvider persists and round-trips IMGUR then DIBERIE`() = runTest(dispatcher) {
+        repository.setUploadProvider(UploadProviderId.IMGUR)
+        repository.observeUploadProvider().test {
+            assertEquals(UploadProviderId.IMGUR, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setUploadProvider(UploadProviderId.DIBERIE)
+        repository.observeUploadProvider().test {
+            assertEquals(UploadProviderId.DIBERIE, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -580,12 +605,39 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `corrupt upload_provider value falls back to DIBERIE instead of crashing`() = runTest(dispatcher) {
+        // A value from an older build / manual edit that no longer maps to a UploadProviderId must
+        // not crash observeUploadProvider on valueOf — it degrades to the DIBERIE default.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("upload_provider")] = "PHOTOBUCKET" }
+
+        repository.observeUploadProvider().test {
+            assertEquals(UploadProviderId.DIBERIE, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `corrupt display_density value falls back to COMFORT instead of crashing`() = runTest(dispatcher) {
         // An unknown value (older build / manual edit) must degrade to COMFORT, not crash valueOf.
         dataStore.edit { prefs -> prefs[stringPreferencesKey("display_density")] = "ULTRA" }
 
         repository.observeDisplayDensity().test {
             assertEquals(DisplayDensity.COMFORT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeImgurClientId defaults to empty then round-trips a trimmed value`() = runTest(dispatcher) {
+        // #459 (option B) — empty means imgur is unconfigured; the value is stored trimmed.
+        repository.observeImgurClientId().test {
+            assertEquals("", awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImgurClientId("  abc123  ")
+        repository.observeImgurClientId().test {
+            assertEquals("abc123", awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

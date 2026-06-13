@@ -24,8 +24,9 @@ import org.robolectric.annotation.Config
  * `MIGRATION_5_6` (Phase 2 finish #208 added `Post.profileId` in v6), `MIGRATION_6_7`
  * (#213 added `Topic.canReply` in v7), `MIGRATION_7_8` (#362 added `Post.editedAt`
  * in v8), `MIGRATION_8_9` (#384 follow-up added `FlagTopic.isFavorite` in v9),
- * `MIGRATION_9_10` (#430 added the `mp_read_positions` table in v10) and
- * `MIGRATION_10_11` (#405 added the `editor_drafts` table in v11).
+ * `MIGRATION_9_10` (#430 added the `mp_read_positions` table in v10),
+ * `MIGRATION_10_11` (#405 added the `editor_drafts` table in v11) and
+ * `MIGRATION_11_12` (#459 added the `uploaded_images` table in v12).
  * Without these tests a typo (missing column, wrong index name, wrong default)
  * would only crash on a real upgrade-in-place install, where the diagnostic loop is
  * days long. The tests take seconds.
@@ -121,6 +122,7 @@ class MigrationTest {
                 MIGRATION_8_9,
                 MIGRATION_9_10,
                 MIGRATION_10_11,
+                MIGRATION_11_12,
             )
             .build()
 
@@ -262,6 +264,7 @@ class MigrationTest {
                 MIGRATION_8_9,
                 MIGRATION_9_10,
                 MIGRATION_10_11,
+                MIGRATION_11_12,
             )
             .build()
 
@@ -363,6 +366,7 @@ class MigrationTest {
                 MIGRATION_8_9,
                 MIGRATION_9_10,
                 MIGRATION_10_11,
+                MIGRATION_11_12,
             )
             .build()
 
@@ -436,6 +440,7 @@ class MigrationTest {
                 MIGRATION_8_9,
                 MIGRATION_9_10,
                 MIGRATION_10_11,
+                MIGRATION_11_12,
             )
             .build()
 
@@ -505,6 +510,7 @@ class MigrationTest {
                 MIGRATION_8_9,
                 MIGRATION_9_10,
                 MIGRATION_10_11,
+                MIGRATION_11_12,
             )
             .build()
 
@@ -565,6 +571,7 @@ class MigrationTest {
                 MIGRATION_8_9,
                 MIGRATION_9_10,
                 MIGRATION_10_11,
+                MIGRATION_11_12,
             )
             .build()
 
@@ -639,6 +646,7 @@ class MigrationTest {
                 MIGRATION_8_9,
                 MIGRATION_9_10,
                 MIGRATION_10_11,
+                MIGRATION_11_12,
             )
             .build()
 
@@ -700,6 +708,7 @@ class MigrationTest {
                 MIGRATION_8_9,
                 MIGRATION_9_10,
                 MIGRATION_10_11,
+                MIGRATION_11_12,
             )
             .build()
 
@@ -751,6 +760,7 @@ class MigrationTest {
                 MIGRATION_8_9,
                 MIGRATION_9_10,
                 MIGRATION_10_11,
+                MIGRATION_11_12,
             )
             .build()
 
@@ -806,6 +816,7 @@ class MigrationTest {
                 MIGRATION_8_9,
                 MIGRATION_9_10,
                 MIGRATION_10_11,
+                MIGRATION_11_12,
             )
             .build()
 
@@ -824,6 +835,68 @@ class MigrationTest {
                 assertTrue("subject must round-trip NULL", cursor.isNull(1))
                 assertTrue("recipients must round-trip NULL", cursor.isNull(2))
                 assertEquals("MP draft must persist isPrivate = 1", 1, cursor.getInt(3))
+            }
+        } finally {
+            migrated.close()
+        }
+    }
+
+    /**
+     * #459 — v11 → v12 creates `uploaded_images` (per-account uploaded-image history).
+     *
+     * Verifies:
+     * 1. The migration runs cleanly against the v11 fixture and matches the exported v12 schema.
+     * 2. The production Room database (full migration chain) can write and read an image row through
+     *    the new table, including the nullable `thumbnailUrl` / `deleteHandle` / `expiresAt` columns.
+     */
+    @Test
+    fun migrate_11_to_12_creates_uploaded_images() {
+        val dbName = "migration_11_12_test"
+
+        // 1. Create a v11 database (no uploaded-image rows can pre-exist the table).
+        helper.createDatabase(dbName, 11).close()
+
+        // 2. Run MIGRATION_11_12 and validate against the exported v12 schema.
+        helper.runMigrationsAndValidate(dbName, 12, true, MIGRATION_11_12).close()
+
+        // 3. Open the production Room database (which chains every migration).
+        val migrated = Room.databaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java,
+            dbName,
+        )
+            .allowMainThreadQueries()
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+                MIGRATION_7_8,
+                MIGRATION_8_9,
+                MIGRATION_9_10,
+                MIGRATION_10_11,
+                MIGRATION_11_12,
+            )
+            .build()
+
+        try {
+            migrated.openHelper.writableDatabase.execSQL(
+                "INSERT INTO uploaded_images (userId, provider, picId, imageUrl, thumbnailUrl, " +
+                    "deleteHandle, uploadedAt, expiresAt) " +
+                    "VALUES ('xatrix', 'DIBERIE', 'ABC123', 'https://host/f/ABC123', NULL, " +
+                    "'ABC123', 1000, NULL)",
+            )
+            migrated.openHelper.readableDatabase.query(
+                "SELECT imageUrl, thumbnailUrl, deleteHandle, expiresAt FROM uploaded_images " +
+                    "WHERE userId = 'xatrix' AND provider = 'DIBERIE' AND picId = 'ABC123'",
+            ).use { cursor ->
+                assertTrue("the migrated table must accept and return a row", cursor.moveToFirst())
+                assertEquals("https://host/f/ABC123", cursor.getString(0))
+                assertTrue("thumbnailUrl must round-trip NULL", cursor.isNull(1))
+                assertEquals("ABC123", cursor.getString(2))
+                assertTrue("expiresAt must round-trip NULL", cursor.isNull(3))
             }
         } finally {
             migrated.close()

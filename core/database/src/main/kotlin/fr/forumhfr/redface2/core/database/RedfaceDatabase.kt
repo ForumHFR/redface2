@@ -8,11 +8,13 @@ import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
 import fr.forumhfr.redface2.core.database.dao.TopicDao
+import fr.forumhfr.redface2.core.database.dao.UploadedImageDao
 import fr.forumhfr.redface2.core.database.entities.EditorDraftEntity
 import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.database.entities.MpReadPositionEntity
 import fr.forumhfr.redface2.core.database.entities.PostEntity
 import fr.forumhfr.redface2.core.database.entities.TopicEntity
+import fr.forumhfr.redface2.core.database.entities.UploadedImageEntity
 
 @Database(
     entities = [
@@ -21,8 +23,9 @@ import fr.forumhfr.redface2.core.database.entities.TopicEntity
         FlagTopicEntity::class,
         MpReadPositionEntity::class,
         EditorDraftEntity::class,
+        UploadedImageEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -31,6 +34,7 @@ abstract class RedfaceDatabase : RoomDatabase() {
     abstract fun flagDao(): FlagDao
     abstract fun mpReadPositionDao(): MpReadPositionDao
     abstract fun editorDraftDao(): EditorDraftDao
+    abstract fun uploadedImageDao(): UploadedImageDao
 
     companion object {
         const val DATABASE_NAME: String = "redface.db"

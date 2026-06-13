@@ -17,6 +17,7 @@ import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -354,6 +355,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeUploadProvider(): Flow<UploadProviderId> =
+        dataStore.data
+            // Default DIBERIE (#459): no auth, no Client-ID required.
+            .map(::readUploadProvider)
+            .distinctUntilChanged()
+            .catch { emit(UploadProviderId.DIBERIE) }
+
+    override suspend fun setUploadProvider(provider: UploadProviderId) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_UPLOAD_PROVIDER] = provider.name
+            }
+        }
+    }
+
     override fun observeDisplayDensity(): Flow<DisplayDensity> =
         dataStore.data
             // Default COMFORT (#287): the historical structural rhythm unless the user opts into
@@ -367,6 +383,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         withContext(ioDispatcher) {
             dataStore.edit { prefs ->
                 prefs[KEY_DISPLAY_DENSITY] = density.name
+            }
+        }
+    }
+
+    override fun observeImgurClientId(): Flow<String> =
+        dataStore.data
+            // Default empty (#459): imgur is unconfigured until the user pastes their Client-ID.
+            .map { prefs -> prefs[KEY_IMGUR_CLIENT_ID].orEmpty() }
+            .distinctUntilChanged()
+            .catch { emit("") }
+
+    override suspend fun setImgurClientId(clientId: String) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_IMGUR_CLIENT_ID] = clientId.trim()
             }
         }
     }
@@ -385,6 +416,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             }
         }
     }
+
+    /**
+     * Reads [KEY_UPLOAD_PROVIDER] defensively: an unknown / corrupt stored value (older build with a
+     * renamed enum, manual edit) falls back to [UploadProviderId.DIBERIE] instead of crashing on
+     * `UploadProviderId.valueOf`, same stance as [readThemeMode].
+     */
+    private fun readUploadProvider(prefs: Preferences): UploadProviderId =
+        prefs[KEY_UPLOAD_PROVIDER]
+            ?.let { stored -> runCatching { UploadProviderId.valueOf(stored) }.getOrNull() }
+            ?: UploadProviderId.DIBERIE
 
     /**
      * Reads [KEY_DISPLAY_DENSITY] defensively (#287): an unknown / corrupt stored value (older
@@ -512,6 +553,11 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // category id (absent unless screen == FORUM and a category was picked).
         val KEY_START_SCREEN = stringPreferencesKey("start_screen")
         val KEY_START_FORUM_CAT = intPreferencesKey("start_forum_cat")
+
+        // #459 — default image host (UploadProviderId.name, defensively parsed) + the user's own
+        // imgur Client-ID (empty = imgur unconfigured, option B: never committed).
+        val KEY_UPLOAD_PROVIDER = stringPreferencesKey("upload_provider")
+        val KEY_IMGUR_CLIENT_ID = stringPreferencesKey("imgur_client_id")
 
         // #287 — reading display presets: density (DisplayDensity.name) + font scale
         // (FontScalePreference.name), both defensively parsed. No bootstrap mirror (cf. observers).
