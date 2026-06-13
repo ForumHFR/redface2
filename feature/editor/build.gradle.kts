@@ -15,6 +15,9 @@ dependencies {
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    // #459 PR2 — rememberLauncherForActivityResult + ActivityResultContracts.PickVisualMedia for the
+    // in-editor photo picker (modern Android photo picker, no runtime permission).
+    implementation(libs.androidx.activity.compose)
     implementation(libs.kotlinx.coroutines.android)
     // Phase 2F-B (#11) — the smiley picker renders perso smileys served from the HFR CDN ;
     // Coil's AsyncImage is the same code path :core:ui already uses for post rendering.

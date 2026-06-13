@@ -58,6 +58,16 @@ sealed interface PostEditorIntent {
     /** Phase 2F-E (#189) — insert `[img]url[/img]` for a validated remote image URL. */
     data class ImageUrlInserted(val url: String) : PostEditorIntent
 
+    /**
+     * #459 PR2 — the user picked a local image from the system photo picker. [uri] is the
+     * picker's `Uri.toString()`. The ViewModel reads the bytes (off the platform layer), uploads
+     * to the selected host, and inserts the resulting `[img]url[/img]` at the caret on success.
+     */
+    data class ImagePicked(val uri: String) : PostEditorIntent
+
+    /** #459 PR2 — user dismissed the upload-error banner. Clears [PostEditorState.uploadError]. */
+    data object UploadErrorDismissed : PostEditorIntent
+
     /** #405 — user tapped « Restaurer » on the draft banner: pre-fill the editor from the cached draft. */
     data object DraftRestoreRequested : PostEditorIntent
 

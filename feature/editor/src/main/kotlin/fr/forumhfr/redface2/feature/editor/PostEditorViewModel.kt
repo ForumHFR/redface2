@@ -10,6 +10,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
@@ -17,8 +18,12 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
+import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
+import fr.forumhfr.redface2.core.domain.upload.UploadException
+import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyContext
@@ -59,7 +64,12 @@ import kotlinx.coroutines.launch
  * by the repository are surfaced via [SubmitError]; the draft is preserved.
  */
 @HiltViewModel(assistedFactory = PostEditorViewModel.Factory::class)
-@Suppress("LongParameterList") // Hilt constructor injection — one dependency per collaborator.
+@Suppress("LongParameterList", "LargeClass")
+// LongParameterList — Hilt constructor injection, one dependency per collaborator (#459 PR2 adds
+// the upload reader + repository + auth source for the in-editor image upload).
+// LargeClass — one class per ViewModel co-locates every code path (#145 reply / #146 quote /
+// #147 edit / #11 smiley / #189 image-url / #405 draft / #459 image-upload) with its dispatcher ;
+// splitting per phase would shred the shared state transformers (same rationale as TopicFormVM).
 class PostEditorViewModel @AssistedInject constructor(
     @Assisted private val request: PostEditorRequest,
     private val previewParser: BbcodePreviewParser,
@@ -69,6 +79,9 @@ class PostEditorViewModel @AssistedInject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val draftStore: EditorDraftStore,
     private val diagnostics: DiagnosticsLog,
+    private val uploadRepository: UploadRepository,
+    private val imageUploadReader: ImageUploadReader,
+    private val authRepository: AuthRepository,
 ) : ViewModel() {
 
     private val _state: MutableStateFlow<PostEditorState> = MutableStateFlow(
@@ -119,10 +132,30 @@ class PostEditorViewModel @AssistedInject constructor(
      */
     private var confirmBeforePosting: Boolean = false
 
+    /**
+     * #459 PR2 — active lowercased HFR pseudo (the upload `userId`), or null when anonymous.
+     * Captured from the auth stream exactly like `MyImagesViewModel` / `FlagsViewModel` so an
+     * [PostEditorIntent.ImagePicked] can scope the upload to the right owner without re-reading the
+     * flow. Kept off [PostEditorState] : the editor never renders the pseudo, only gates on its
+     * presence.
+     */
+    private var activeUserId: String? = null
+
+    /** #459 PR2 — in-flight image upload job ; one at a time, cancelled on [onCleared]. */
+    private var uploadJob: Job? = null
+
     init {
         viewModelScope.launch {
             userPreferencesRepository.observeConfirmBeforePosting().collect { enabled ->
                 confirmBeforePosting = enabled
+            }
+        }
+        viewModelScope.launch {
+            authRepository.observeAuthState().collect { authState ->
+                activeUserId = when (authState) {
+                    AuthState.Anonymous -> null
+                    is AuthState.Authenticated -> authState.pseudo.lowercase()
+                }
             }
         }
         restoreDraftIfAny()
@@ -187,6 +220,8 @@ class PostEditorViewModel @AssistedInject constructor(
             is PostEditorIntent.SmileySearchQueryChanged -> onSmileySearchQueryChanged(intent.query)
             is PostEditorIntent.SmileySelected -> onSmileySelected(intent.token)
             is PostEditorIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
+            is PostEditorIntent.ImagePicked -> onImagePicked(intent.uri)
+            PostEditorIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
             PostEditorIntent.DraftRestoreRequested -> onDraftRestoreRequested()
             PostEditorIntent.DraftDiscardRequested -> onDraftDiscardRequested()
         }
@@ -328,7 +363,19 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun onImageUrlInserted(url: String) {
-        val token = imageBbcodeTokenOrNull(url) ?: return
+        if (insertImageUrlAtCaret(url)) scheduleAutosave()
+    }
+
+    /**
+     * #189 / #459 PR2 — shared `[img]url[/img]` insertion at the caret. Reuses the smiley path's
+     * pure helpers ([imageBbcodeTokenOrNull] validates the scheme, [insertBbcodeToken] inserts while
+     * preserving the selection) so the cursor-insertion contract is identical to `onSmileySelected`.
+     * The image token is inserted WITHOUT surrounding spaces (an `[img]` is a self-contained block,
+     * unlike a smiley which would fuse with an adjacent one). Returns `true` when the URL was valid
+     * and inserted (so callers can decide whether to schedule an autosave), `false` otherwise.
+     */
+    private fun insertImageUrlAtCaret(url: String): Boolean {
+        val token = imageBbcodeTokenOrNull(url) ?: return false
         _state.update { current ->
             val draft = current.draft
             val selection = draft.selection
@@ -350,7 +397,56 @@ class PostEditorViewModel @AssistedInject constructor(
                 withDraft
             }
         }
-        scheduleAutosave()
+        return true
+    }
+
+    /**
+     * #459 PR2 — pick→read→upload→insert. Reads the picked Uri's bytes (off-platform via
+     * [ImageUploadReader]), uploads to the host of the current preference scoped to the active
+     * [activeUserId] (lowercased pseudo), and on success inserts `[img]imageUrl[/img]` at the caret
+     * via [insertImageUrlAtCaret] (same cursor contract as the smiley / URL paths). A typed
+     * [UploadException] is mapped onto [UploadError] ; an anonymous client (no userId) is ignored —
+     * the providers require an HFR session for the trace, and surfacing « connectez-vous » here
+     * would duplicate the submit-time LoginRequired surface.
+     */
+    private fun onImagePicked(uri: String) {
+        if (uploadJob?.isActive == true) return
+        val userId = activeUserId ?: return
+        _state.update { it.copy(isUploading = true, uploadError = null) }
+        uploadJob = viewModelScope.launch {
+            val outcome = runCatching {
+                val image = imageUploadReader.read(uri)
+                uploadRepository.uploadWithCurrentProvider(image, userId)
+            }
+            outcome.fold(
+                onSuccess = { uploaded ->
+                    insertImageUrlAtCaret(uploaded.imageUrl)
+                    _state.update { it.copy(isUploading = false, uploadError = null) }
+                    scheduleAutosave()
+                },
+                onFailure = ::handleUploadFailure,
+            )
+        }
+    }
+
+    private fun handleUploadFailure(error: Throwable) {
+        if (error is CancellationException) {
+            _state.update { it.copy(isUploading = false) }
+            throw error
+        }
+        val mapped = when (error) {
+            is UploadException.TooLarge -> UploadError.TooLarge
+            is UploadException.UnsupportedType -> UploadError.UnsupportedType
+            is UploadException.Server, is UploadException.Malformed -> UploadError.Host
+            is UploadException.Network -> UploadError.Network
+            else -> UploadError.Network
+        }
+        diagnostics.record(
+            DiagnosticsLog.Level.WARN,
+            LOG_TAG_VM,
+            "image upload failed: ${error::class.simpleName} → ${mapped::class.simpleName}",
+        )
+        _state.update { it.copy(isUploading = false, uploadError = mapped) }
     }
 
     private fun onContentChanged(value: TextFieldValue) {
@@ -766,6 +862,17 @@ class PostEditorViewModel @AssistedInject constructor(
             quotedNumreponse = snapshot.quotedNumreponse,
             quoteRef = snapshot.quoteRef,
         )
+    }
+
+    /**
+     * #459 PR2 — cancel any in-flight image upload when the editor is torn down. `viewModelScope`
+     * is already cancelled by the lifecycle, so this is belt-and-braces (the read/upload is then a
+     * no-op against a dead state) — but it makes the « one upload, no leak » contract explicit and
+     * lets a future non-viewModelScope job stay covered.
+     */
+    override fun onCleared() {
+        uploadJob?.cancel()
+        super.onCleared()
     }
 
     @AssistedFactory
