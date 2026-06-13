@@ -49,12 +49,17 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 fun SettingsScreen(
     modifier: Modifier = Modifier,
     viewModel: SettingsViewModel = hiltViewModel(),
+    // #458 — the « Démarrage » section has its own ViewModel (cf. its KDoc).
+    startScreenViewModel: StartScreenSettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val startScreenState by startScreenViewModel.state.collectAsStateWithLifecycle()
     SettingsContent(
         state = state,
         onIntent = viewModel::submit,
         modifier = modifier,
+        startScreenState = startScreenState,
+        onStartScreenIntent = startScreenViewModel::submit,
     )
 }
 
@@ -63,6 +68,8 @@ internal fun SettingsContent(
     state: SettingsState,
     onIntent: (SettingsIntent) -> Unit,
     modifier: Modifier = Modifier,
+    startScreenState: StartScreenSettingsState = StartScreenSettingsState(),
+    onStartScreenIntent: (StartScreenSettingsIntent) -> Unit = {},
 ) {
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -207,6 +214,12 @@ internal fun SettingsContent(
                 items = listOf(
                     R.string.settings_future_data_saver to issueTag(310),
                 ),
+            )
+
+            SettingsSectionHeader(stringResource(R.string.settings_section_start))
+            StartScreenPreferencesCard(
+                state = startScreenState,
+                onIntent = onStartScreenIntent,
             )
 
             SettingsSectionHeader(stringResource(R.string.settings_section_display))
@@ -700,7 +713,7 @@ private fun PreferenceSwitchRow(
 
 /** Inline persist-failure message for a [PreferenceSwitchRow], shown below the row. */
 @Composable
-private fun PreferencePersistError(messageRes: Int) {
+internal fun PreferencePersistError(messageRes: Int) {
     Text(
         text = stringResource(messageRes),
         style = MaterialTheme.typography.bodySmall,

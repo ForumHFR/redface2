@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
@@ -1416,6 +1417,11 @@ class PostEditorViewModelTest {
         override fun observeTopicPollsExpanded(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
+
+        override fun observeStartScreen(): Flow<StartScreenPreference> =
+            MutableStateFlow(StartScreenPreference())
+
+        override suspend fun setStartScreen(preference: StartScreenPreference) = Unit
     }
 
     private companion object {

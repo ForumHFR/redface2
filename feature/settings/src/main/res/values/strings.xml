@@ -4,6 +4,18 @@
          et catalogue des réglages futurs (grisés, avec tag d’issue ou de phase). -->
     <string name="settings_intro">La plupart des réglages sont enregistrés sur cet appareil. Ceux du compte HFR (section dédiée) seront synchronisés depuis votre profil et arriveront plus tard. Les réglages à venir sont affichés en grisé avec leur étiquette.</string>
     <string name="settings_section_network">Réseau et cache</string>
+    <!-- #458 — écran de démarrage (onglet + catégorie Forum optionnelle, appliqué au prochain lancement). -->
+    <string name="settings_section_start">Démarrage</string>
+    <string name="settings_start_screen_title">Écran de démarrage</string>
+    <string name="settings_start_screen_intro">Choisissez ce que l\'app ouvre au lancement. Appliqué au prochain démarrage.</string>
+    <string name="settings_start_screen_flags">Drapeaux</string>
+    <string name="settings_start_screen_forum">Forum</string>
+    <string name="settings_start_screen_messages">Messages</string>
+    <string name="settings_start_screen_category_label">Catégorie à l\'ouverture</string>
+    <string name="settings_start_screen_category_root">Accueil du forum</string>
+    <string name="settings_start_screen_category_unresolved">Catégorie %1$d</string>
+    <string name="settings_start_screen_categories_error">Liste des catégories indisponible pour le moment — « Accueil du forum » reste utilisable.</string>
+    <string name="settings_start_screen_persist_failed">Impossible d\'enregistrer ce réglage pour le moment.</string>
     <string name="settings_section_display">Affichage</string>
     <string name="settings_section_flags">Drapeaux</string>
     <string name="settings_section_topic">Sujet et lecture</string>

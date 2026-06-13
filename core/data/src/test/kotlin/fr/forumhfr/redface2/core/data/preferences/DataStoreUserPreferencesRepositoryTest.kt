@@ -7,6 +7,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -43,6 +46,15 @@ class DataStoreUserPreferencesRepositoryTest {
         }
     }
 
+    /** In-memory [StartScreenBootstrapStore] (#458) — same stance as the theme mirror above. */
+    private val startScreenBootstrapStore = object : StartScreenBootstrapStore {
+        var stored = StartScreenPreference()
+        override fun read(): StartScreenPreference = stored
+        override fun write(preference: StartScreenPreference) {
+            stored = preference
+        }
+    }
+
     @Before
     fun setUp() {
         dataStore = PreferenceDataStoreFactory.create(
@@ -51,6 +63,7 @@ class DataStoreUserPreferencesRepositoryTest {
         repository = DataStoreUserPreferencesRepository(
             dataStore = dataStore,
             themeBootstrapStore = themeBootstrapStore,
+            startScreenBootstrapStore = startScreenBootstrapStore,
             ioDispatcher = dispatcher,
         )
     }
@@ -382,6 +395,64 @@ class DataStoreUserPreferencesRepositoryTest {
         }
 
         assertEquals(ThemeMode.DARK, themeBootstrapStore.read().themeMode)
+    }
+
+    @Test
+    fun `observeStartScreen defaults to the Drapeaux tab on an empty store`() = runTest(dispatcher) {
+        repository.observeStartScreen().test {
+            assertEquals(StartScreenPreference(), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setStartScreen round-trips a Forum category and mirrors it (#458)`() = runTest(dispatcher) {
+        val forumHardware = StartScreenPreference(StartScreenChoice.FORUM, forumCatId = 13)
+        repository.setStartScreen(forumHardware)
+
+        repository.observeStartScreen().test {
+            assertEquals(forumHardware, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(forumHardware, startScreenBootstrapStore.read())
+    }
+
+    @Test
+    fun `setStartScreen drops the category when the screen is not FORUM`() = runTest(dispatcher) {
+        repository.setStartScreen(StartScreenPreference(StartScreenChoice.FORUM, forumCatId = 13))
+        repository.setStartScreen(StartScreenPreference(StartScreenChoice.MESSAGES, forumCatId = 13))
+
+        repository.observeStartScreen().test {
+            // The stale category id must not resurface on a later FLAGS/MESSAGES read.
+            assertEquals(StartScreenPreference(StartScreenChoice.MESSAGES), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt start_screen value falls back to FLAGS instead of crashing`() = runTest(dispatcher) {
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("start_screen")] = "DESKTOP" }
+
+        repository.observeStartScreen().test {
+            assertEquals(StartScreenPreference(), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observing the start screen backfills an empty mirror from the persisted value`() = runTest(dispatcher) {
+        // #458 — same convergence contract as the theme mirror (#386).
+        dataStore.edit { prefs ->
+            prefs[stringPreferencesKey("start_screen")] = StartScreenChoice.MESSAGES.name
+        }
+        assertEquals(StartScreenPreference(), startScreenBootstrapStore.read())
+
+        repository.observeStartScreen().test {
+            assertEquals(StartScreenPreference(StartScreenChoice.MESSAGES), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        assertEquals(StartScreenPreference(StartScreenChoice.MESSAGES), startScreenBootstrapStore.read())
     }
 
     @Test

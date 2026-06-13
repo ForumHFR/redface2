@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.FlagType
@@ -1173,6 +1174,13 @@ class SettingsViewModelTest {
         fun emitTopicPollsExpanded(value: Boolean) {
             topicPollsExpanded.value = value
         }
+
+        // #458 — start screen lives on its own StartScreenSettingsViewModel; this fake only
+        // satisfies the interface for the main Settings ViewModel under test.
+        override fun observeStartScreen(): Flow<StartScreenPreference> =
+            MutableStateFlow(StartScreenPreference())
+
+        override suspend fun setStartScreen(preference: StartScreenPreference) = Unit
 
         // #312 — confirm-before-posting. Same optimistic-flip seam as the topic top-bar toggle.
         private val confirmBeforePosting = MutableStateFlow(false)

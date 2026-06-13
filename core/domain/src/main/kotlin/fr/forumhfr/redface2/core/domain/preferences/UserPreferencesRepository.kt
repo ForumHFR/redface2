@@ -199,6 +199,17 @@ interface UserPreferencesRepository {
     suspend fun setTopicPollsExpanded(enabled: Boolean)
 
     /**
+     * #458 — which top-level tab (and optional Forum category) a cold start opens on. Default
+     * [StartScreenChoice.FLAGS] (historical behaviour). The navigation reads the SYNCHRONOUS
+     * [StartScreenBootstrapStore] mirror at cold start; this flow is the source of truth and
+     * feeds the Settings screen.
+     */
+    fun observeStartScreen(): Flow<StartScreenPreference>
+
+    /** Persists [observeStartScreen] (both fields atomically) and refreshes the mirror. */
+    suspend fun setStartScreen(preference: StartScreenPreference)
+
+    /**
      * #313 — unread-MP badge on the « Messages » destination of the navigation bar. When
      * `true` (default) the badge shows the count of unread conversations for the authenticated
      * session ; `false` hides it entirely (no fetch is saved — the underlying count flow is
