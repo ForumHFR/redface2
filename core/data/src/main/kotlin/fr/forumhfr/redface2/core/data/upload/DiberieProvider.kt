@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.upload
 
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.upload.ImageUpload
 import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadProvider
@@ -37,6 +38,7 @@ internal class DiberieProvider @Inject constructor(
     @param:UploadClient private val client: OkHttpClient,
     @param:UploadJson private val json: Json,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val diagnostics: DiagnosticsLog,
     @param:Named(DIBERIE_BASE_URL) private val baseUrl: String,
 ) : UploadProvider {
 
@@ -56,15 +58,27 @@ internal class DiberieProvider @Inject constructor(
         val response = runCatching { client.newCall(request).execute() }
             .getOrElse { throw UploadException.Network(it) }
         response.use { resp ->
-            if (!resp.isSuccessful) throw UploadException.Server(resp.code, id)
-            val dto = runCatching { json.decodeFromString<DiberieResponse>(resp.body.string()) }
-                .getOrElse { throw UploadException.Malformed(id, it) }
-            val picId = dto.picId ?: throw UploadException.Malformed(id)
+            val raw = resp.body.string()
+            if (!resp.isSuccessful) {
+                diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, serverErrorMessage(resp.code, raw))
+                throw UploadException.Server(resp.code, id)
+            }
+            val dto = runCatching { json.decodeFromString<DiberieResponse>(raw) }
+                .getOrElse { error ->
+                    diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, parseFailureMessage(resp.code, raw))
+                    throw UploadException.Malformed(id, error)
+                }
+            val picId = dto.picId
+            if (picId == null) {
+                diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, missingPicIdMessage(raw))
+                throw UploadException.Malformed(id)
+            }
+            diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, "diberie upload ok: picID=$picId")
             UploadedImage(
                 provider = id,
                 imageUrl = dto.picUrl ?: "$baseUrl/Picture/Get/f/$picId",
                 thumbnailUrl = dto.thumbUrl ?: "$baseUrl/Picture/Get/t/$picId",
-                deleteHandle = picId,
+                deleteHandle = picId.toString(),
                 // SelectedExpiryType=0 in the upload query → no advertised expiration.
                 expiresAt = null,
             )
@@ -81,10 +95,23 @@ internal class DiberieProvider @Inject constructor(
     private fun uploadUrl(): String = "$baseUrl/Host/UploadFiles?SelectedAlbumId=0&PrivateMode=false" +
         "&SendMail=false&KeepTags=&Comment=&SelectedExpiryType=0"
 
+    // Diagnostic trail (surfaced in the in-app viewer, #445) — the raw body is truncated so a huge
+    // HTML error page never floods the ring buffer. These are pure builders; the call site records.
+    private fun serverErrorMessage(code: Int, raw: String): String =
+        "diberie upload rejected: HTTP $code: ${raw.take(MAX_LOGGED_BODY)}"
+
+    private fun parseFailureMessage(code: Int, raw: String): String =
+        "diberie upload: unparseable response (HTTP $code): ${raw.take(MAX_LOGGED_BODY)}"
+
+    private fun missingPicIdMessage(raw: String): String =
+        "diberie upload: response without picID: ${raw.take(MAX_LOGGED_BODY)}"
+
     internal companion object {
         /** Named binding key for the diberie base URL (overridden in tests). */
         const val DIBERIE_BASE_URL = "diberie_base_url"
         const val DEFAULT_BASE_URL = "https://rehost.diberie.com"
+        private const val LOG_TAG = "DiberieProvider"
+        private const val MAX_LOGGED_BODY = 300
         private const val DEFAULT_FILENAME = "upload"
         private const val MAX_BYTES = 20L * 1024 * 1024
     }
