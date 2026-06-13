@@ -314,6 +314,8 @@ class PrivateMessageThreadViewModelTest {
         advanceUntilIdle()
 
         assertEquals(5, store.saved[42])
+        // #462 — the write is attributed to the reading account, not a re-resolved active user.
+        assertEquals("xaat", store.lastSaveOwner)
     }
 
     @Test
@@ -401,16 +403,20 @@ class PrivateMessageThreadViewModelTest {
     ) : PrivateMessageReadPositionStore {
         val saved = initial.toMutableMap()
 
+        /** Owner (lowercased) the most recent save was attributed to — for #430/#462 assertions. */
+        var lastSaveOwner: String? = null
+
         /** When set, the NEXT [savePage] parks on it before writing (cleared on consumption). */
         var blockNextSave: CompletableDeferred<Unit>? = null
 
-        override suspend fun readPage(threadId: Int): Int? = saved[threadId]
+        override suspend fun readPage(owner: String?, threadId: Int): Int? = saved[threadId]
 
-        override suspend fun savePage(threadId: Int, page: Int) {
+        override suspend fun savePage(owner: String?, threadId: Int, page: Int) {
             blockNextSave?.let { gate ->
                 blockNextSave = null
                 gate.await()
             }
+            lastSaveOwner = owner?.lowercase()
             saved[threadId] = page
         }
     }

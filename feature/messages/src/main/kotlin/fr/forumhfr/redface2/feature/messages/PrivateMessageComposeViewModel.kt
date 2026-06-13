@@ -368,19 +368,20 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 )
             }
             outcome.fold(
-                onSuccess = ::handleSubmitOutcome,
+                onSuccess = { handleSubmitOutcome(it) },
                 onFailure = ::handleSubmitFailure,
             )
         }
     }
 
-    private fun handleSubmitOutcome(result: ReplySubmitResult) {
+    private suspend fun handleSubmitOutcome(result: ReplySubmitResult) {
         when (result) {
             is ReplySubmitResult.Success -> {
                 // #405 — the conversation reached HFR ; the cached draft is now obsolete. Cancel any
                 // pending autosave first so a debounced save can't resurrect the row after delete.
+                // AWAITED (not launched) so the nav pop on SubmitSucceeded can't cancel it (Codex).
                 autosaveJob?.cancel()
-                viewModelScope.launch { draftStore.delete(draftOwner, draftKey) }
+                draftStore.delete(draftOwner, draftKey)
                 _state.update { it.copy(isSubmitting = false, submitError = null) }
                 // The success response of a NEW conversation is not topic-shaped, so the created
                 // threadId is unknown — the host pops back to the MP list and refreshes it.

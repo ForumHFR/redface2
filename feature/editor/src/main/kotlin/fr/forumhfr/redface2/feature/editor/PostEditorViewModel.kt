@@ -810,7 +810,7 @@ class PostEditorViewModel @AssistedInject constructor(
         }
     }
 
-    private fun handleSubmitOutcome(
+    private suspend fun handleSubmitOutcome(
         mode: PostEditorMode,
         numreponse: Int?,
         result: ReplySubmitResult,
@@ -827,8 +827,10 @@ class PostEditorViewModel @AssistedInject constructor(
                 val scrollTo = result.numreponse ?: numreponse.takeIf { mode == PostEditorMode.Edit }
                 // #405 — the message reached HFR ; the cached draft is now obsolete. Cancel any
                 // pending autosave first so a debounced save cannot resurrect the row after delete.
+                // The delete is AWAITED inside the submit coroutine (not launched) so the immediate
+                // nav pop driven by SubmitSucceeded cannot cancel it before the row is gone (Codex).
                 autosaveJob?.cancel()
-                draftKey?.let { key -> viewModelScope.launch { draftStore.delete(draftOwner, key) } }
+                draftKey?.let { key -> draftStore.delete(draftOwner, key) }
                 _effects.trySend(
                     PostEditorEffect.SubmitSucceeded(targetPage = result.targetPage, scrollTo = scrollTo),
                 )

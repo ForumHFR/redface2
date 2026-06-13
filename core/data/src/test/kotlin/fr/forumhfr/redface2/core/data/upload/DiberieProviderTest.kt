@@ -176,13 +176,16 @@ class DiberieProviderTest {
     }
 
     @Test
-    fun `delete is best-effort - true when the host confirms`() = runTest {
+    fun `delete fires the call but never claims confirmation, even on a 2xx`() = runTest {
+        // diberie can never confirm host-side removal (a 2xx may merely swap a placeholder), so the
+        // provider POSTs the courtesy request but always reports false. confirmsHostDeletion = false.
         server.enqueue(MockResponse().setResponseCode(200).setBody("ok"))
 
-        assertTrue(provider.delete("521196"))
+        assertEquals(false, provider.delete("521196"))
         val recorded = server.takeRequest()
         assertEquals("POST", recorded.method)
         assertTrue(recorded.path!!.endsWith("/Host/DeletePhoto"))
+        assertTrue("the courtesy delete must carry the picID", recorded.body.readUtf8().contains("521196"))
     }
 
     @Test
