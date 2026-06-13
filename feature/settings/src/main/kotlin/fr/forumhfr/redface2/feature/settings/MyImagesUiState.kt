@@ -8,11 +8,11 @@ import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
  * [fr.forumhfr.redface2.core.domain.upload.UploadRepository.observeUploads] for the active HFR
  * pseudo ; an anonymous session surfaces [Mode.RequiresLogin] (never a crash).
  */
-data class MesImagesUiState(
+data class MyImagesUiState(
     val mode: Mode = Mode.Loading,
     /** The record awaiting deletion confirmation ; non-null drives the confirm dialog. */
     val pendingDeletion: UploadedImageRecord? = null,
-    /** One-shot deletion outcome reflected in a snackbar, then cleared via [MesImagesIntent.MessageShown]. */
+    /** One-shot deletion outcome reflected in a snackbar, then cleared via [MyImagesIntent.MessageShown]. */
     val deletionMessage: DeletionMessage? = null,
 ) {
     sealed interface Mode {
@@ -35,16 +35,16 @@ data class MesImagesUiState(
     enum class DeletionMessage { Confirmed, BestEffort }
 }
 
-sealed interface MesImagesIntent {
+sealed interface MyImagesIntent {
     /** Open the confirm dialog for [record] (deferred delete). */
-    data class RequestDelete(val record: UploadedImageRecord) : MesImagesIntent
+    data class RequestDelete(val record: UploadedImageRecord) : MyImagesIntent
 
     /** Confirm the pending deletion → calls the repository. */
-    data object ConfirmDelete : MesImagesIntent
+    data object ConfirmDelete : MyImagesIntent
 
     /** Dismiss the confirm dialog without deleting. */
-    data object CancelDelete : MesImagesIntent
+    data object CancelDelete : MyImagesIntent
 
     /** Acknowledge the one-shot deletion snackbar so it is not shown again. */
-    data object MessageShown : MesImagesIntent
+    data object MessageShown : MyImagesIntent
 }

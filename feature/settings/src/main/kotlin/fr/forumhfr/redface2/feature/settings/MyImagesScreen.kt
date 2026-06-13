@@ -53,16 +53,16 @@ import java.util.Locale
  * « Mes images uploadées » screen (#459 PR3). Lists the images previously uploaded by the active
  * HFR pseudo and lets the user delete them (deferred delete: confirm dialog → repository call).
  * Loading / empty / connexion-requise states are handled. Stateful entry point ; the layout lives
- * in [MesImagesContent] so it stays previewable / testable without Hilt.
+ * in [MyImagesContent] so it stays previewable / testable without Hilt.
  */
 @Composable
-fun MesImagesScreen(
+fun MyImagesScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    viewModel: MesImagesViewModel = hiltViewModel(),
+    viewModel: MyImagesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    MesImagesContent(
+    MyImagesContent(
         state = state,
         onIntent = viewModel::submit,
         onBack = onBack,
@@ -72,9 +72,9 @@ fun MesImagesScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun MesImagesContent(
-    state: MesImagesUiState,
-    onIntent: (MesImagesIntent) -> Unit,
+internal fun MyImagesContent(
+    state: MyImagesUiState,
+    onIntent: (MyImagesIntent) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -82,7 +82,7 @@ internal fun MesImagesContent(
     DeletionMessageEffect(
         message = state.deletionMessage,
         snackbarHostState = snackbarHostState,
-        onShown = { onIntent(MesImagesIntent.MessageShown) },
+        onShown = { onIntent(MyImagesIntent.MessageShown) },
     )
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -116,16 +116,16 @@ internal fun MesImagesContent(
                 .padding(innerPadding),
         ) {
             when (val mode = state.mode) {
-                MesImagesUiState.Mode.Loading -> CenteredProgress()
-                MesImagesUiState.Mode.RequiresLogin ->
+                MyImagesUiState.Mode.Loading -> CenteredProgress()
+                MyImagesUiState.Mode.RequiresLogin ->
                     CenteredMessage(stringResource(R.string.my_images_requires_login))
-                is MesImagesUiState.Mode.Content ->
+                is MyImagesUiState.Mode.Content ->
                     if (mode.images.isEmpty()) {
                         CenteredMessage(stringResource(R.string.my_images_empty))
                     } else {
                         ImagesList(
                             images = mode.images,
-                            onRequestDelete = { onIntent(MesImagesIntent.RequestDelete(it)) },
+                            onRequestDelete = { onIntent(MyImagesIntent.RequestDelete(it)) },
                         )
                     }
             }
@@ -136,15 +136,15 @@ internal fun MesImagesContent(
     if (pending != null) {
         DeleteConfirmDialog(
             record = pending,
-            onConfirm = { onIntent(MesImagesIntent.ConfirmDelete) },
-            onDismiss = { onIntent(MesImagesIntent.CancelDelete) },
+            onConfirm = { onIntent(MyImagesIntent.ConfirmDelete) },
+            onDismiss = { onIntent(MyImagesIntent.CancelDelete) },
         )
     }
 }
 
 @Composable
 private fun DeletionMessageEffect(
-    message: MesImagesUiState.DeletionMessage?,
+    message: MyImagesUiState.DeletionMessage?,
     snackbarHostState: SnackbarHostState,
     onShown: () -> Unit,
 ) {
@@ -153,8 +153,8 @@ private fun DeletionMessageEffect(
     LaunchedEffect(message) {
         if (message != null) {
             val text = when (message) {
-                MesImagesUiState.DeletionMessage.Confirmed -> confirmedText
-                MesImagesUiState.DeletionMessage.BestEffort -> bestEffortText
+                MyImagesUiState.DeletionMessage.Confirmed -> confirmedText
+                MyImagesUiState.DeletionMessage.BestEffort -> bestEffortText
             }
             snackbarHostState.showSnackbar(text)
             onShown()

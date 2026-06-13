@@ -25,14 +25,14 @@ import kotlinx.coroutines.launch
  * delete: [requestDelete] opens a confirmation, [confirmDelete] calls the repository.
  *
  * The history flow is driven by [AuthRepository.observeAuthState] so the list re-scopes when the
- * session changes and clears (→ [MesImagesUiState.Mode.RequiresLogin]) on logout — same shape as
+ * session changes and clears (→ [MyImagesUiState.Mode.RequiresLogin]) on logout — same shape as
  * `FlagsViewModel` / `MessagesViewModel`. The repository wraps its own I/O on the IO dispatcher
  * (project rule: data sources hop to IO), so the ViewModel only collects / suspends on
  * `viewModelScope` and injects no dispatcher itself.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
-class MesImagesViewModel @Inject constructor(
+class MyImagesViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val uploadRepository: UploadRepository,
 ) : ViewModel() {
@@ -45,8 +45,8 @@ class MesImagesViewModel @Inject constructor(
     // confirm cannot retarget the deletion at a different account (Codex review, #459 PR3).
     private var pendingDeletionUserId: String? = null
 
-    private val _state = MutableStateFlow(MesImagesUiState())
-    val state: StateFlow<MesImagesUiState> = _state.asStateFlow()
+    private val _state = MutableStateFlow(MyImagesUiState())
+    val state: StateFlow<MyImagesUiState> = _state.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -63,9 +63,9 @@ class MesImagesViewModel @Inject constructor(
                 .collect { records ->
                     _state.update { current ->
                         if (records == null) {
-                            current.copy(mode = MesImagesUiState.Mode.RequiresLogin, pendingDeletion = null)
+                            current.copy(mode = MyImagesUiState.Mode.RequiresLogin, pendingDeletion = null)
                         } else {
-                            current.copy(mode = MesImagesUiState.Mode.Content(records))
+                            current.copy(mode = MyImagesUiState.Mode.Content(records))
                         }
                     }
                 }
@@ -113,9 +113,9 @@ class MesImagesViewModel @Inject constructor(
             _state.update {
                 it.copy(
                     deletionMessage = if (confirmed) {
-                        MesImagesUiState.DeletionMessage.Confirmed
+                        MyImagesUiState.DeletionMessage.Confirmed
                     } else {
-                        MesImagesUiState.DeletionMessage.BestEffort
+                        MyImagesUiState.DeletionMessage.BestEffort
                     },
                 )
             }
@@ -127,13 +127,13 @@ class MesImagesViewModel @Inject constructor(
         _state.update { it.copy(deletionMessage = null) }
     }
 
-    /** MVI dispatcher mirroring the other screens — maps an [MesImagesIntent] to the handler. */
-    fun submit(intent: MesImagesIntent) {
+    /** MVI dispatcher mirroring the other screens — maps an [MyImagesIntent] to the handler. */
+    fun submit(intent: MyImagesIntent) {
         when (intent) {
-            is MesImagesIntent.RequestDelete -> requestDelete(intent.record)
-            MesImagesIntent.ConfirmDelete -> confirmDelete()
-            MesImagesIntent.CancelDelete -> cancelDelete()
-            MesImagesIntent.MessageShown -> consumeDeletionMessage()
+            is MyImagesIntent.RequestDelete -> requestDelete(intent.record)
+            MyImagesIntent.ConfirmDelete -> confirmDelete()
+            MyImagesIntent.CancelDelete -> cancelDelete()
+            MyImagesIntent.MessageShown -> consumeDeletionMessage()
         }
     }
 }

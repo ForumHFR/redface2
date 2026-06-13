@@ -79,7 +79,7 @@ import fr.forumhfr.redface2.feature.profile.ProfilePreviewSheet
 import fr.forumhfr.redface2.feature.profile.ProfileRoute
 import fr.forumhfr.redface2.feature.profile.ProfileViewModel
 import fr.forumhfr.redface2.feature.search.SearchScreen
-import fr.forumhfr.redface2.feature.settings.MesImagesScreen
+import fr.forumhfr.redface2.feature.settings.MyImagesScreen
 import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
@@ -270,7 +270,7 @@ data object SettingsRoute : RedfaceNavKey
  * from the Settings screen ; lives in `:feature:settings` (settings-adjacent), opaque route.
  */
 @Serializable
-data object MesImagesRoute : RedfaceNavKey
+data object MyImagesRoute : RedfaceNavKey
 
 /**
  * Phase 2 finish (#208) — full profile page route.
@@ -1134,11 +1134,11 @@ private fun RedfaceNavHost(
             }
             entry<SettingsRoute> {
                 SettingsScreen(
-                    onOpenMyImages = { backStack.add(MesImagesRoute) },
+                    onOpenMyImages = { backStack.add(MyImagesRoute) },
                 )
             }
-            entry<MesImagesRoute> {
-                MesImagesScreen(
+            entry<MyImagesRoute> {
+                MyImagesScreen(
                     onBack = {
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)

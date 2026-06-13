@@ -29,7 +29,7 @@ import org.junit.Before
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class MesImagesViewModelTest {
+class MyImagesViewModelTest {
 
     @Before
     fun setUp() {
@@ -48,11 +48,11 @@ class MesImagesViewModelTest {
         // The active pseudo is "XaaT" ; the screen must scope to its lowercased form.
         coEvery { upload.observeUploads("xaat") } returns flowOf(records)
 
-        val viewModel = MesImagesViewModel(FakeAuthRepository(AuthState.Authenticated("XaaT")), upload)
+        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("XaaT")), upload)
 
         val mode = viewModel.state.value.mode
-        assertTrue(mode is MesImagesUiState.Mode.Content)
-        assertEquals(records, (mode as MesImagesUiState.Mode.Content).images)
+        assertTrue(mode is MyImagesUiState.Mode.Content)
+        assertEquals(records, (mode as MyImagesUiState.Mode.Content).images)
         coVerify(exactly = 1) { upload.observeUploads("xaat") }
     }
 
@@ -61,20 +61,20 @@ class MesImagesViewModelTest {
         val upload = mockk<UploadRepository>()
         coEvery { upload.observeUploads(any()) } returns flowOf(emptyList())
 
-        val viewModel = MesImagesViewModel(FakeAuthRepository(), upload)
+        val viewModel = MyImagesViewModel(FakeAuthRepository(), upload)
 
         val mode = viewModel.state.value.mode
-        assertTrue(mode is MesImagesUiState.Mode.Content)
-        assertTrue((mode as MesImagesUiState.Mode.Content).images.isEmpty())
+        assertTrue(mode is MyImagesUiState.Mode.Content)
+        assertTrue((mode as MyImagesUiState.Mode.Content).images.isEmpty())
     }
 
     @Test
     fun `shows RequiresLogin and never reads uploads when anonymous`() = runTest {
         val upload = mockk<UploadRepository>()
 
-        val viewModel = MesImagesViewModel(FakeAuthRepository(AuthState.Anonymous), upload)
+        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Anonymous), upload)
 
-        assertEquals(MesImagesUiState.Mode.RequiresLogin, viewModel.state.value.mode)
+        assertEquals(MyImagesUiState.Mode.RequiresLogin, viewModel.state.value.mode)
         coVerify(exactly = 0) { upload.observeUploads(any()) }
     }
 
@@ -84,7 +84,7 @@ class MesImagesViewModelTest {
             val upload = mockk<UploadRepository>()
             coEvery { upload.observeUploads(any()) } returns flowOf(listOf(record("a")))
 
-            val viewModel = MesImagesViewModel(FakeAuthRepository(), upload)
+            val viewModel = MyImagesViewModel(FakeAuthRepository(), upload)
             val target = record("a")
 
             viewModel.requestDelete(target)
@@ -103,7 +103,7 @@ class MesImagesViewModelTest {
             coEvery { upload.observeUploads("xaat") } returns flowOf(listOf(target))
             coEvery { upload.delete(target, "xaat") } returns true
 
-            val viewModel = MesImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload)
+            val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload)
 
             viewModel.requestDelete(target)
             viewModel.confirmDelete()
@@ -111,7 +111,7 @@ class MesImagesViewModelTest {
 
             coVerify(exactly = 1) { upload.delete(target, "xaat") }
             assertNull(viewModel.state.value.pendingDeletion)
-            assertEquals(MesImagesUiState.DeletionMessage.Confirmed, viewModel.state.value.deletionMessage)
+            assertEquals(MyImagesUiState.DeletionMessage.Confirmed, viewModel.state.value.deletionMessage)
         }
 
     @Test
@@ -121,13 +121,13 @@ class MesImagesViewModelTest {
         coEvery { upload.observeUploads(any()) } returns flowOf(listOf(target))
         coEvery { upload.delete(target, "xaat") } returns false
 
-        val viewModel = MesImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload)
+        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload)
 
         viewModel.requestDelete(target)
         viewModel.confirmDelete()
         advanceUntilIdle()
 
-        assertEquals(MesImagesUiState.DeletionMessage.BestEffort, viewModel.state.value.deletionMessage)
+        assertEquals(MyImagesUiState.DeletionMessage.BestEffort, viewModel.state.value.deletionMessage)
     }
 
     @Test
@@ -137,11 +137,11 @@ class MesImagesViewModelTest {
         coEvery { upload.observeUploads(any()) } returns flowOf(listOf(target))
         coEvery { upload.delete(any(), any()) } returns true
 
-        val viewModel = MesImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload)
+        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload)
         viewModel.requestDelete(target)
         viewModel.confirmDelete()
         advanceUntilIdle()
-        assertEquals(MesImagesUiState.DeletionMessage.Confirmed, viewModel.state.value.deletionMessage)
+        assertEquals(MyImagesUiState.DeletionMessage.Confirmed, viewModel.state.value.deletionMessage)
 
         viewModel.consumeDeletionMessage()
         assertNull(viewModel.state.value.deletionMessage)
@@ -153,13 +153,13 @@ class MesImagesViewModelTest {
         val uploads = MutableStateFlow(listOf(record("a"), record("b")))
         coEvery { upload.observeUploads("xaat") } returns uploads
 
-        val viewModel = MesImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload)
+        val viewModel = MyImagesViewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), upload)
 
         viewModel.state.test {
-            assertEquals(2, (awaitItem().mode as MesImagesUiState.Mode.Content).images.size)
+            assertEquals(2, (awaitItem().mode as MyImagesUiState.Mode.Content).images.size)
             uploads.value = listOf(record("a"))
             advanceUntilIdle()
-            assertEquals(1, (awaitItem().mode as MesImagesUiState.Mode.Content).images.size)
+            assertEquals(1, (awaitItem().mode as MyImagesUiState.Mode.Content).images.size)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -173,7 +173,7 @@ class MesImagesViewModelTest {
             coEvery { upload.observeUploads("bob") } returns flowOf(emptyList())
             val auth = FakeAuthRepository(AuthState.Authenticated("alice"))
 
-            val viewModel = MesImagesViewModel(auth, upload)
+            val viewModel = MyImagesViewModel(auth, upload)
             viewModel.requestDelete(target)
             assertEquals(target, viewModel.state.value.pendingDeletion)
 
