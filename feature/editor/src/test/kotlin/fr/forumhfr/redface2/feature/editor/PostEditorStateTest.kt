@@ -12,7 +12,7 @@ import org.junit.Test
  */
 class PostEditorStateTest {
 
-    private fun replyState(subcat: Int?): PostEditorState =
+    private fun replyState(subcat: Int?, isUploading: Boolean = false): PostEditorState =
         PostEditorState(
             mode = PostEditorMode.Reply,
             cat = 32,
@@ -21,6 +21,7 @@ class PostEditorStateTest {
             page = 1,
             subcat = subcat,
             draft = TextFieldValue("Hello!"),
+            isUploading = isUploading,
         )
 
     @Test
@@ -41,5 +42,10 @@ class PostEditorStateTest {
     @Test
     fun `canSubmit is false when subcat is null`() {
         assertFalse(replyState(subcat = null).canSubmit)
+    }
+
+    @Test
+    fun `canSubmit is false while an image upload is in flight (#459)`() {
+        assertFalse(replyState(subcat = 0, isUploading = true).canSubmit)
     }
 }

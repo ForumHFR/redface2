@@ -124,9 +124,10 @@ data class PostEditorState(
     /**
      * Submission is allowed when : we know the routing context (page + subcat + topicId),
      * the user has typed something non-blank, the editor is not already submitting,
-     * and we are not still fetching the form. Phase 2D (#147) additionally requires
-     * `numreponse` for [PostEditorMode.Edit] — without it we cannot identify which
-     * post HFR should rewrite.
+     * we are not still fetching the form, and no image upload is in flight. Phase 2D (#147)
+     * additionally requires `numreponse` for [PostEditorMode.Edit] — without it we cannot
+     * identify which post HFR should rewrite. The [isUploading] guard (#459) stops a tap on
+     * « Envoyer » from racing an in-flight upload and posting before the image markup is inserted.
      */
     val canSubmit: Boolean
         get() = (mode == PostEditorMode.Reply || (mode == PostEditorMode.Edit && numreponse != null)) &&
@@ -138,7 +139,8 @@ data class PostEditorState(
             topicId != null &&
             draft.text.isNotBlank() &&
             !isSubmitting &&
-            !isLoadingForm
+            !isLoadingForm &&
+            !isUploading
 
     val isSubmitEnabled: Boolean get() = canSubmit
 }

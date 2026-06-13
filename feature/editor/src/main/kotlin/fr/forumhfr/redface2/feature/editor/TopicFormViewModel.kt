@@ -249,11 +249,12 @@ class TopicFormViewModel @AssistedInject constructor(
 
     /**
      * #405 — the topic reached HFR ; the cached draft is now obsolete. Cancel any pending autosave
-     * first so a debounced save can't resurrect the row after delete.
+     * first so a debounced save can't resurrect the row after delete. AWAITED (not launched) so the
+     * nav pop driven by the success effect can't cancel the delete before the row is gone (Codex).
      */
-    private fun deleteDraftOnSuccess() {
+    private suspend fun deleteDraftOnSuccess() {
         autosaveJob?.cancel()
-        draftKey?.let { key -> viewModelScope.launch { draftStore.delete(draftOwner, key) } }
+        draftKey?.let { key -> draftStore.delete(draftOwner, key) }
     }
 
     private fun onSmileyPickerOpened() {
@@ -639,7 +640,7 @@ class TopicFormViewModel @AssistedInject constructor(
         }
     }
 
-    private fun handleNewTopicOutcome(
+    private suspend fun handleNewTopicOutcome(
         context: NewTopicContext,
         selectedSubcat: Int,
         subject: String,
@@ -675,7 +676,7 @@ class TopicFormViewModel @AssistedInject constructor(
         }
     }
 
-    private fun handleSubmitOutcome(
+    private suspend fun handleSubmitOutcome(
         numreponse: Int?,
         result: ReplySubmitResult,
     ) {

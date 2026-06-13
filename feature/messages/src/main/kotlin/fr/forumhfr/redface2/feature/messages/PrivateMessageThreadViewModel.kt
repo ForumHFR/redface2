@@ -103,9 +103,9 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
      * the frozen opening page resumes where they actually were. A store failure falls back to
      * the route — opening the conversation must never break on a local read.
      */
-    private suspend fun openingPage(): Int {
+    private suspend fun openingPage(owner: String): Int {
         val saved = try {
-            readPositionStore.readPage(request.threadId)
+            readPositionStore.readPage(owner, request.threadId)
         } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
             null
         }
@@ -122,7 +122,8 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private fun loadInitial() {
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            fetchPage(openingPage())
+            val owner = authenticatedPseudo ?: return@launch
+            fetchPage(openingPage(owner))
         }
     }
 
@@ -214,7 +215,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         saveJob = viewModelScope.launch {
             if (owner != authenticatedPseudo) return@launch
             try {
-                readPositionStore.savePage(request.threadId, page)
+                readPositionStore.savePage(owner, request.threadId, page)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {

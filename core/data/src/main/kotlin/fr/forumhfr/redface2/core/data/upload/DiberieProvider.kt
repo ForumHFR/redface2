@@ -24,8 +24,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 /**
  * Uploads to the diberie rehost host (#459), the default provider (no auth, no Client-ID).
  *
- * Deletion is BEST-EFFORT: server-side authorisation is not confirmed (#459 NB), so [delete] tries
- * the call and never throws — it returns `false` when the host did not confirm.
+ * Deletion is BEST-EFFORT: the host never confirms removal (#459 NB — a 2xx can just swap the
+ * picture for a placeholder), so [delete] fires the call, never throws, and ALWAYS returns `false`.
  *
  * All network work runs on [ioDispatcher] (project rule: every repository / data source that calls
  * an OkHttp client wraps it in `withContext(ioDispatcher)`).
@@ -86,10 +86,16 @@ internal class DiberieProvider @Inject constructor(
     }
 
     override suspend fun delete(deleteHandle: String): Boolean = withContext(ioDispatcher) {
-        // Best-effort: authorisation NOT confirmed (#459 NB). Try, never throw, report false on doubt.
+        // Best-effort cleanup (#459 NB). The host answers 2xx/redirect even when it merely swaps the
+        // picture for a placeholder rather than removing it (live capture 2026-06-13), so a
+        // successful HTTP exchange does NOT prove host-side deletion. We fire the request as a
+        // courtesy, never throw, and ALWAYS report `false` (= not confirmed) — diberie declares
+        // `UploadProviderId.confirmsHostDeletion = false`, and the «Mes images» screen only offers a
+        // delete affordance for providers that DO confirm (imgur, which authenticates the delete).
         val form = FormBody.Builder().add("DeletePhoto_IdPhoto", deleteHandle).build()
         val request = Request.Builder().url("$baseUrl/Host/DeletePhoto").post(form).build()
-        runCatching { client.newCall(request).execute().use { it.isSuccessful } }.getOrDefault(false)
+        runCatching { client.newCall(request).execute().close() }
+        false
     }
 
     private fun uploadUrl(): String = "$baseUrl/Host/UploadFiles?SelectedAlbumId=0&PrivateMode=false" +
