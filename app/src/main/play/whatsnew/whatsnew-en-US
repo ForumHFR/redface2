@@ -1,11 +1,13 @@
-Redface 2 v0.10.0 — beta.
+Redface 2 v0.11.0 — beta.
 
 New:
-- Private messages: compose new PMs, smiley picker, unread badge, page swipe, pull-to-refresh.
-- Multi-quote, with visual marking of picked posts.
-- Search: author filter, collapsible form.
-- Reading: end-of-topic marker, display options.
+- Image upload in the editor: from the gallery, several at once, host choice (diberie/imgur), "My images" screen.
+- Editor drafts saved automatically.
+- Multi-quote, collapsible polls.
+- Flags: swipe between tabs, long-press to remove, filter by category.
+- PMs: open on the last page, resume reading.
+- Display: adjustable density/font, configurable start screen.
 
-Fixes: editor follows the cursor while typing, flags/favorites, keyboard, theme, rendering.
+Fix: diberie upload repaired.
 
 Report bugs via the beta or GitHub.
