@@ -238,6 +238,20 @@ class CategoryViewModel @AssistedInject constructor(
                 }
             }
             .launchIn(viewModelScope)
+
+        // #455 — on logout / session expiry the flag selector is hidden (anonymous has no
+        // flags); reset to ALL so the screen never stays stuck on a stale filtered list with
+        // no visible control to leave it (review Codex #455). The initial emission is `false`
+        // while the filter is already ALL, so it is a no-op until a real logout occurs.
+        isAuthenticated
+            .onEach { authenticated ->
+                if (!authenticated && flagFilter.value != CategoryFlagFilter.ALL) {
+                    flagFilterJob?.cancel()
+                    flagFilter.value = CategoryFlagFilter.ALL
+                    flagFilterTopics.value = TopicsUiState.Loading
+                }
+            }
+            .launchIn(viewModelScope)
     }
 
     private fun schedulePrefetch(trigger: ContentTrigger) {
@@ -307,7 +321,11 @@ class CategoryViewModel @AssistedInject constructor(
      * `Loading` so the list does not blank; `false` (filter change / subcat switch) shows it.
      */
     private suspend fun fetchFlagFilter(keepContent: Boolean) {
-        val bucket = flagFilter.value.toDomainBucket()
+        // Snapshot the (filter, subcat) this fetch is for so the tuple stays atomic across the
+        // suspension and a concurrent change can be detected before publishing (review #455).
+        val filter = flagFilter.value
+        val subcat = selectedSubcat.value
+        val bucket = filter.toDomainBucket()
         if (bucket == null) {
             flagFilterTopics.value = TopicsUiState.Loading
             return
@@ -315,9 +333,11 @@ class CategoryViewModel @AssistedInject constructor(
         if (!keepContent || flagFilterTopics.value !is TopicsUiState.Content) {
             flagFilterTopics.value = TopicsUiState.Loading
         }
-        flagFilterTopics.value = forumRepository
-            .getFlagFilteredTopics(cat = request.cat, subcat = selectedSubcat.value, bucket = bucket)
-            .toTopicsUiState()
+        val result = forumRepository.getFlagFilteredTopics(cat = request.cat, subcat = subcat, bucket = bucket)
+        // Stale-guard: only publish if the active (filter, subcat) is still the one we fetched.
+        if (flagFilter.value == filter && selectedSubcat.value == subcat) {
+            flagFilterTopics.value = result.toTopicsUiState()
+        }
     }
 
     private fun CategoryFlagFilter.toDomainBucket(): FlagFilterBucket? = when (this) {
@@ -346,11 +366,14 @@ class CategoryViewModel @AssistedInject constructor(
                         page = page.value,
                     )
                 } else {
-                    // #455 — re-fetch the active bucket inline (keep content) so [isRefreshing]
-                    // brackets the round-trip. Cancel any pending filter job to avoid a double
-                    // fetch racing this one.
+                    // #455 — re-fetch through [flagFilterJob] (NOT inline) so a concurrent
+                    // selectFlagFilter / subcat change can cancel it: an inline fetch had no
+                    // handle and could clobber flagFilterTopics out of order (review #455).
+                    // join() keeps [isRefreshing] bracketing the round-trip.
                     flagFilterJob?.cancel()
-                    fetchFlagFilter(keepContent = true)
+                    val job = viewModelScope.launch { fetchFlagFilter(keepContent = true) }
+                    flagFilterJob = job
+                    job.join()
                 }
             } finally {
                 isRefreshing.value = false

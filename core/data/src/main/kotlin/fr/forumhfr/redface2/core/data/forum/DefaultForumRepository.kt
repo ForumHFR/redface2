@@ -140,7 +140,7 @@ class DefaultForumRepository @Inject constructor(
         subcat: Int?,
         bucket: FlagFilterBucket,
     ): ForumResult<TopicListPage> = withContext(ioDispatcher) {
-        runCatching {
+        try {
             val body = apiClient.getCategoryFlagTopics(
                 cat = cat,
                 bucket = bucket.toRestBucket(),
@@ -149,14 +149,16 @@ class DefaultForumRepository @Inject constructor(
                 useAuth = true,
             )
             val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(body)
-            RestForumMappers.toTopicListPage(envelope, cat = cat, subcat = subcat)
-        }.fold(
-            onSuccess = { ForumResult.Success(it) },
-            onFailure = { throwable ->
-                Log.w(LOG_TAG, "Flag-filter fetch failed for cat=$cat subcat=$subcat bucket=$bucket", throwable)
-                ForumResult.Failure(throwable)
-            },
-        )
+            ForumResult.Success(RestForumMappers.toTopicListPage(envelope, cat = cat, subcat = subcat))
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            // The flag-filter fetch runs inside a ViewModel job cancelled on filter / subcat
+            // change; let cancellation propagate rather than mapping it to a Failure that would
+            // clobber flagFilterTopics with an Error (review #455). Same stance as prefetchTopicList.
+            throw cancellation
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            Log.w(LOG_TAG, "Flag-filter fetch failed for cat=$cat subcat=$subcat bucket=$bucket", error)
+            ForumResult.Failure(error)
+        }
     }
 
     private fun FlagFilterBucket.toRestBucket(): HfrRestFlagBucket = when (this) {

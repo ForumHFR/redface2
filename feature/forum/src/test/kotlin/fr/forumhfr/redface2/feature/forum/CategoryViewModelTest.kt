@@ -677,6 +677,86 @@ class CategoryViewModelTest {
         assertEquals(1, repo.getFlagFilteredTopicsCalls.size)
     }
 
+    @Test
+    fun `refresh in flag-filter mode re-fetches the same bucket and brackets isRefreshing`() = runTest {
+        val repo = FakeForumRepository()
+        repo.flagFilterResponder = { _, _, _ -> ForumResult.Success(pageOf(topicSummary(7, "Flagged"))) }
+        val vm = categoryVm(repo)
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE))
+            awaitContent { it.topics is TopicsUiState.Content }
+            vm.selectFlagFilter(CategoryFlagFilter.PARTICIPATED)
+            awaitContent { it.flagFilterTopics is TopicsUiState.Content }
+            vm.refresh()
+            awaitContent { !it.isRefreshing && it.flagFilterTopics is TopicsUiState.Content }
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(
+            listOf(
+                Triple(23, null, FlagFilterBucket.PARTICIPATED),
+                Triple(23, null, FlagFilterBucket.PARTICIPATED),
+            ),
+            repo.getFlagFilteredTopicsCalls,
+        )
+    }
+
+    @Test
+    fun `a filter change during a filtered refresh wins over the stale refresh result`() = runTest {
+        val repo = FakeForumRepository()
+        repo.flagFilterResponder = { _, _, bucket ->
+            ForumResult.Success(pageOf(topicSummary(bucket.ordinal, bucket.name)))
+        }
+        val vm = categoryVm(repo)
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE))
+            awaitContent { it.topics is TopicsUiState.Content }
+            vm.selectFlagFilter(CategoryFlagFilter.PARTICIPATED)
+            awaitContent {
+                it.flagFilter == CategoryFlagFilter.PARTICIPATED && it.flagFilterTopics is TopicsUiState.Content
+            }
+            // Gate the refresh fetch so it stays in-flight while we switch filters.
+            val gate = CompletableDeferred<Unit>()
+            repo.suspendNextFlagFetchUntil = gate
+            vm.refresh()
+            // Switching filter must cancel the in-flight (gated) refresh fetch.
+            vm.selectFlagFilter(CategoryFlagFilter.FAVORITES)
+            // Release the (cancelled) refresh fetch: if the fix were absent it would resume and
+            // clobber flagFilterTopics with the stale PARTICIPATED bucket.
+            gate.complete(Unit)
+            // Wait for the FAVORITES content specifically (id == FAVORITES.ordinal). A precise
+            // predicate skips the transient (FAVORITES filter + old PARTICIPATED content) state
+            // emitted right when the filter flips, before the new fetch posts Loading. If the
+            // stale refresh had won, this would never reach [2] and time out.
+            val favorites = awaitContent {
+                it.flagFilter == CategoryFlagFilter.FAVORITES &&
+                    it.filteredTopics.map { t -> t.topicId } == listOf(FlagFilterBucket.FAVORITES.ordinal)
+            }
+            assertEquals(
+                listOf(FlagFilterBucket.FAVORITES.ordinal),
+                favorites.filteredTopics.map { it.topicId },
+            )
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `losing auth resets the flag filter to ALL`() = runTest {
+        val repo = FakeForumRepository()
+        repo.flagFilterResponder = { _, _, _ -> ForumResult.Success(pageOf(topicSummary(9, "Flagged"))) }
+        val auth = FakeAuthRepository(initial = AuthState.Authenticated("xat"))
+        val vm = categoryVm(repo, auth)
+        vm.uiState.test {
+            repo.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE))
+            awaitContent { it.canCreateTopic && it.topics is TopicsUiState.Content }
+            vm.selectFlagFilter(CategoryFlagFilter.FAVORITES)
+            awaitContent { it.flagFilter == CategoryFlagFilter.FAVORITES }
+            auth.logout()
+            val reset = awaitContent { it.flagFilter == CategoryFlagFilter.ALL }
+            assertFalse("selector hidden once anonymous", reset.canCreateTopic)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun categoryVm(
         repo: FakeForumRepository,
         auth: AuthRepository = FakeAuthRepository(),
@@ -814,12 +894,25 @@ class CategoryViewModelTest {
             prefetchHook?.invoke(cat, subcat, page)
         }
 
+        /**
+         * When set, the NEXT [getFlagFilteredTopics] call awaits this gate before returning,
+         * letting a test pin an in-flight bucket fetch (e.g. a gated refresh) while another
+         * action runs. Consumed (reset to null) on first use. The await happens on the
+         * ViewModel's Main dispatcher (no separate scheduler), so cancellation/completion
+         * resolve eagerly under [UnconfinedTestDispatcher] — no risk of a hung test.
+         */
+        var suspendNextFlagFetchUntil: CompletableDeferred<Unit>? = null
+
         override suspend fun getFlagFilteredTopics(
             cat: Int,
             subcat: Int?,
             bucket: FlagFilterBucket,
         ): ForumResult<TopicListPage> {
             getFlagFilteredTopicsCalls = getFlagFilteredTopicsCalls + Triple(cat, subcat, bucket)
+            suspendNextFlagFetchUntil?.let { gate ->
+                suspendNextFlagFetchUntil = null
+                gate.await()
+            }
             return flagFilterResponder(cat, subcat, bucket)
         }
 
