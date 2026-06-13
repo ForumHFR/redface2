@@ -186,6 +186,17 @@
     <string name="settings_my_images_description">Consultez les images que vous avez envoyées et supprimez-les.</string>
     <string name="settings_my_images_open">Voir mes images</string>
 
+    <!-- #459 — Hébergeur d'images. Choisit l'hébergeur des uploads de l'éditeur ; le Client-ID
+         imgur n'apparaît que pour imgur. Persisté en DataStore, lu par l'éditeur à chaque upload. -->
+    <string name="settings_upload_provider_title">Hébergeur d\'images</string>
+    <string name="settings_upload_provider_intro">Choisissez où envoyer les images insérées dans vos messages. Diberie fonctionne sans compte ; imgur nécessite un Client-ID d\'application.</string>
+    <string name="settings_upload_provider_diberie">diberie (sans compte)</string>
+    <string name="settings_upload_provider_imgur">imgur (Client-ID requis)</string>
+    <string name="settings_upload_provider_persist_failed">Impossible de mémoriser l\'hébergeur. Réessayez.</string>
+    <string name="settings_upload_imgur_client_id_label">Client-ID imgur</string>
+    <string name="settings_upload_imgur_client_id_helper">Client-ID d\'application Imgur</string>
+    <string name="settings_upload_imgur_client_id_persist_failed">Impossible de mémoriser le Client-ID. Réessayez.</string>
+
     <!-- #459 PR3 — écran « Mes images uploadées » (liste + suppression). -->
     <string name="my_images_title">Mes images uploadées</string>
     <string name="my_images_back">Retour</string>

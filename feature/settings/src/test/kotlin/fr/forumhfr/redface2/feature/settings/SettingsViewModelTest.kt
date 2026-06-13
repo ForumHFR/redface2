@@ -1098,6 +1098,109 @@ class SettingsViewModelTest {
             assertEquals(FontScalePreference.L, repository.lastFontScaleSet)
         }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Hébergeur d'images — provider + imgur Client-ID (#459)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates upload provider and imgur client id from storage`() = runTest {
+        repository.emitUploadProvider(UploadProviderId.IMGUR)
+        repository.emitImgurClientId("abc123")
+
+        val viewModel = newViewModel()
+        val state = viewModel.state.value
+
+        assertEquals(UploadProviderId.IMGUR, state.uploadProvider)
+        assertEquals("abc123", state.imgurClientId)
+    }
+
+    @Test
+    fun `SetUploadProvider persists the new provider and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals("DIBERIE is the default", UploadProviderId.DIBERIE, viewModel.state.value.uploadProvider)
+
+        viewModel.submit(SettingsIntent.SetUploadProvider(UploadProviderId.IMGUR))
+
+        val state = viewModel.state.value
+        assertEquals(UploadProviderId.IMGUR, state.uploadProvider)
+        assertFalse(state.isUpdatingUploadProvider)
+        assertFalse(state.uploadProviderError)
+        assertEquals(1, repository.uploadProviderSetCalls)
+        assertEquals(UploadProviderId.IMGUR, repository.lastUploadProviderSet)
+    }
+
+    @Test
+    fun `SetUploadProvider reverts to the previous provider and raises the error flag on persist failure`() =
+        runTest {
+            repository.failOnUploadProviderSet = true
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.SetUploadProvider(UploadProviderId.IMGUR))
+
+            val state = viewModel.state.value
+            assertEquals(
+                "must revert to the previous provider on failure",
+                UploadProviderId.DIBERIE,
+                state.uploadProvider,
+            )
+            assertFalse(state.isUpdatingUploadProvider)
+            assertTrue(state.uploadProviderError)
+        }
+
+    @Test
+    fun `SetImgurClientId persists the text and exposes it`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals("client id is empty by default", "", viewModel.state.value.imgurClientId)
+
+        viewModel.submit(SettingsIntent.SetImgurClientId("CID-42"))
+
+        val state = viewModel.state.value
+        assertEquals("CID-42", state.imgurClientId)
+        assertFalse(state.imgurClientIdError)
+        assertEquals(1, repository.imgurClientIdSetCalls)
+        assertEquals("CID-42", repository.lastImgurClientIdSet)
+    }
+
+    @Test
+    fun `SetImgurClientId raises the error flag on persist failure but keeps the typed text`() = runTest {
+        repository.failOnImgurClientIdSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.SetImgurClientId("CID-42"))
+
+        val state = viewModel.state.value
+        // The optimistic value is kept — wiping what the user just typed would be hostile.
+        assertEquals("typed text is preserved on persist failure", "CID-42", state.imgurClientId)
+        assertTrue(state.imgurClientIdError)
+        assertEquals(1, repository.imgurClientIdSetCalls)
+    }
+
+    @Test
+    fun `upload provider hydration race - a stale initial emission must not overwrite a local change`() =
+        runTest {
+            // Same startup-race contract as ThemeMode (#459): the user picks IMGUR while init is still
+            // suspended on observeUploadProvider().first(); the late stale DIBERIE must be skipped by
+            // the touchedLocally guard.
+            val initialHydrationFlow = MutableSharedFlow<UploadProviderId>(replay = 0)
+            repository.uploadProviderObserveOverride = initialHydrationFlow
+            val viewModel = newViewModel()
+
+            viewModel.submit(SettingsIntent.SetUploadProvider(UploadProviderId.IMGUR))
+            assertEquals(UploadProviderId.IMGUR, viewModel.state.value.uploadProvider)
+            assertTrue(viewModel.state.value.uploadProviderTouchedLocally)
+
+            initialHydrationFlow.emit(UploadProviderId.DIBERIE)
+
+            val finalState = viewModel.state.value
+            assertEquals(
+                "stale hydration must NOT overwrite the local provider change",
+                UploadProviderId.IMGUR,
+                finalState.uploadProvider,
+            )
+            assertEquals(1, repository.uploadProviderSetCalls)
+            assertEquals(UploadProviderId.IMGUR, repository.lastUploadProviderSet)
+        }
+
     private fun newViewModel(): SettingsViewModel =
         SettingsViewModel(repository, topicCacheMaintenance, imageCacheMaintenance)
 
@@ -1356,15 +1459,51 @@ class SettingsViewModelTest {
 
         override suspend fun setStartScreen(preference: StartScreenPreference) = Unit
 
-        // #459 — upload provider / imgur Client-ID not exercised by these tests; default stubs.
+        // #459 — upload provider / imgur Client-ID. Same optimistic-flip seam as the theme controls
+        // so the Settings tests can assert hydration, the repo call, and the revert-on-failure path.
+        private val uploadProvider = MutableStateFlow(UploadProviderId.DIBERIE)
+        var uploadProviderSetCalls: Int = 0
+            private set
+        var lastUploadProviderSet: UploadProviderId? = null
+            private set
+        var failOnUploadProviderSet: Boolean = false
+
+        /** Startup-race seam, mirroring [themeModeObserveOverride] (#459). */
+        var uploadProviderObserveOverride: Flow<UploadProviderId>? = null
+
         override fun observeUploadProvider(): Flow<UploadProviderId> =
-            MutableStateFlow(UploadProviderId.DIBERIE)
+            uploadProviderObserveOverride ?: uploadProvider
 
-        override suspend fun setUploadProvider(provider: UploadProviderId) = Unit
+        override suspend fun setUploadProvider(provider: UploadProviderId) {
+            uploadProviderSetCalls += 1
+            check(!failOnUploadProviderSet) { "boom" }
+            lastUploadProviderSet = provider
+            uploadProvider.value = provider
+        }
 
-        override fun observeImgurClientId(): Flow<String> = MutableStateFlow("")
+        fun emitUploadProvider(value: UploadProviderId) {
+            uploadProvider.value = value
+        }
 
-        override suspend fun setImgurClientId(clientId: String) = Unit
+        private val imgurClientId = MutableStateFlow("")
+        var imgurClientIdSetCalls: Int = 0
+            private set
+        var lastImgurClientIdSet: String? = null
+            private set
+        var failOnImgurClientIdSet: Boolean = false
+
+        override fun observeImgurClientId(): Flow<String> = imgurClientId
+
+        override suspend fun setImgurClientId(clientId: String) {
+            imgurClientIdSetCalls += 1
+            check(!failOnImgurClientIdSet) { "boom" }
+            lastImgurClientIdSet = clientId
+            imgurClientId.value = clientId
+        }
+
+        fun emitImgurClientId(value: String) {
+            imgurClientId.value = value
+        }
 
         // #312 — confirm-before-posting. Same optimistic-flip seam as the topic top-bar toggle.
         private val confirmBeforePosting = MutableStateFlow(false)

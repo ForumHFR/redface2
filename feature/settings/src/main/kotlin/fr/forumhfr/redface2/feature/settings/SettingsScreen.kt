@@ -46,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 
 @Composable
 fun SettingsScreen(
@@ -284,6 +285,10 @@ internal fun SettingsContent(
             )
 
             SettingsSectionHeader(stringResource(R.string.settings_section_images))
+            UploadProviderPreferencesCard(
+                state = state,
+                onIntent = onIntent,
+            )
             MyImagesCard(onOpenMyImages = onOpenMyImages)
 
             SettingsSectionHeader(stringResource(R.string.settings_section_mp))
@@ -759,6 +764,72 @@ private fun MyImagesCard(onOpenMyImages: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.settings_my_images_open))
+            }
+        }
+    }
+}
+
+/**
+ * #459 — « Hébergeur d'images » : choisit l'hébergeur des uploads de l'éditeur (diberie sans
+ * compte, imgur avec un Client-ID que l'utilisateur colle). Le champ Client-ID n'apparaît que pour
+ * imgur. Persisté en DataStore et lu par l'éditeur à chaque upload. Boutons segmentés en texte seul
+ * (pas d'icônes Material — l'import `androidx.compose.material.*` est interdit dans le projet).
+ */
+@Composable
+private fun UploadProviderPreferencesCard(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    val options = listOf(
+        UploadProviderId.DIBERIE to stringResource(R.string.settings_upload_provider_diberie),
+        UploadProviderId.IMGUR to stringResource(R.string.settings_upload_provider_imgur),
+    )
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_upload_provider_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.settings_upload_provider_intro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                options.forEachIndexed { index, (provider, label) ->
+                    SegmentedButton(
+                        selected = state.uploadProvider == provider,
+                        enabled = state.canChangeUploadProvider,
+                        onClick = { onIntent(SettingsIntent.SetUploadProvider(provider)) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                    ) {
+                        Text(label)
+                    }
+                }
+            }
+            if (state.uploadProviderError) {
+                PreferencePersistError(R.string.settings_upload_provider_persist_failed)
+            }
+            // The Client-ID field is only meaningful for imgur (diberie needs no credentials).
+            if (state.uploadProvider == UploadProviderId.IMGUR) {
+                OutlinedTextField(
+                    value = state.imgurClientId,
+                    onValueChange = { onIntent(SettingsIntent.SetImgurClientId(it)) },
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.settings_upload_imgur_client_id_label)) },
+                    supportingText = {
+                        Text(stringResource(R.string.settings_upload_imgur_client_id_helper))
+                    },
+                    isError = state.imgurClientIdError,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (state.imgurClientIdError) {
+                    PreferencePersistError(R.string.settings_upload_imgur_client_id_persist_failed)
+                }
             }
         }
     }
