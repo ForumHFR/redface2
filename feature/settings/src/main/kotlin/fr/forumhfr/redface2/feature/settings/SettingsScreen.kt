@@ -69,6 +69,10 @@ fun SettingsScreen(
     )
 }
 
+// MVI screen content : state + intent + modifier + rappels de navigation/feature (#458 démarrage,
+// #459 « Mes images »). 6 paramètres = la surface complète de l'écran ; les regrouper derrière un
+// objet masquerait le site d'appel sans gain réel. Seuil detekt LongParameterList à 6.
+@Suppress("LongParameterList")
 @Composable
 internal fun SettingsContent(
     state: SettingsState,
