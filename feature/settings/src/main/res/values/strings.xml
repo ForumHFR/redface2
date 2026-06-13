@@ -13,6 +13,7 @@
     <string name="settings_start_screen_messages">Messages</string>
     <string name="settings_start_screen_category_label">Catégorie à l\'ouverture</string>
     <string name="settings_start_screen_category_root">Accueil du forum</string>
+    <string name="settings_start_screen_category_unresolved">Catégorie %1$d</string>
     <string name="settings_start_screen_categories_error">Liste des catégories indisponible pour le moment — « Accueil du forum » reste utilisable.</string>
     <string name="settings_start_screen_persist_failed">Impossible d\'enregistrer ce réglage pour le moment.</string>
     <string name="settings_section_display">Affichage</string>

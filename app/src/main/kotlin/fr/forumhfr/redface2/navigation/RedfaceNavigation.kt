@@ -440,13 +440,20 @@ fun RedfaceApp(intent: Intent?) {
         val flagsBackStack = rememberNavBackStack(FlagsListRoute)
         val forumStartCat = startScreen.forumCatId
             ?.takeIf { startScreen.screen == StartScreenChoice.FORUM }
-        val forumBackStack = if (forumStartCat != null) {
-            // Pre-stacked category listing: back from it lands on the forum root, like a manual
-            // navigation would.
-            rememberNavBackStack(ForumRoute, CategoryRoute(cat = forumStartCat))
+        // SINGLE rememberNavBackStack call site on purpose (review Codex PR #464): two
+        // conditional calls would occupy different saveable slots, so flipping the preference
+        // between launches could orphan the saved Forum stack and reset it to the seed instead
+        // of restoring. The pre-stacked category listing means back from it lands on the forum
+        // root, like a manual navigation would.
+        val forumInitialStack = if (forumStartCat != null) {
+            arrayOf<NavKey>(ForumRoute, CategoryRoute(cat = forumStartCat))
         } else {
-            rememberNavBackStack(ForumRoute)
+            arrayOf<NavKey>(ForumRoute)
         }
+        // The spread copies a 1-2 element array once per cold start — the price of keeping the
+        // single call site (rememberNavBackStack only has a vararg overload).
+        @Suppress("SpreadOperator")
+        val forumBackStack = rememberNavBackStack(*forumInitialStack)
         val searchBackStack = rememberNavBackStack(SearchRoute)
         val messagesBackStack = rememberNavBackStack(MessagesRoute)
 

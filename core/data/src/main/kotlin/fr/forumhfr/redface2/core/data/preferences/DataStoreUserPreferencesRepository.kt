@@ -297,10 +297,14 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .map(::readStartScreen)
             .distinctUntilChanged()
             // #458 backfill, same contract as the theme mirror (#386): converge the synchronous
-            // bootstrap copy from the observed truth (idempotent, write-on-diff).
+            // bootstrap copy from the observed truth (idempotent, write-on-diff). Hops to IO
+            // because the mirror write is a synchronous commit() (cf. its KDoc) and this flow
+            // is collected on Main by the Settings ViewModel.
             .onEach { preference ->
-                if (startScreenBootstrapStore.read() != preference) {
-                    startScreenBootstrapStore.write(preference)
+                withContext(ioDispatcher) {
+                    if (startScreenBootstrapStore.read() != preference) {
+                        startScreenBootstrapStore.write(preference)
+                    }
                 }
             }
             .catch { emit(StartScreenPreference()) }

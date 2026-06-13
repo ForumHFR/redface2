@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.data.preferences
 
+import android.annotation.SuppressLint
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
@@ -31,11 +32,17 @@ class SharedPreferencesStartScreenBootstrapStore @Inject constructor(
         return StartScreenPreference(screen = screen, forumCatId = catId)
     }
 
+    // commit() over apply() on purpose (review Codex PR #464): unlike the theme mirror, the
+    // start-screen mirror is only ever READ at cold start — nothing re-observes DataStore at
+    // runtime to repair a divergence, so a process death before apply()'s async flush would
+    // leave the stale mirror winning every subsequent launch. Writes are rare (a Settings tap)
+    // and both call sites run on the IO dispatcher, so the synchronous flush is free.
+    @SuppressLint("ApplySharedPref")
     override fun write(preference: StartScreenPreference) {
         prefs.edit()
             .putString(KEY_SCREEN, preference.screen.name)
             .putInt(KEY_FORUM_CAT, preference.forumCatId ?: NO_CATEGORY)
-            .apply()
+            .commit()
     }
 
     private companion object {

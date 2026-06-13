@@ -92,10 +92,15 @@ private fun StartForumCategoryPicker(
     onIntent: (StartScreenSettingsIntent) -> Unit,
 ) {
     val rootLabel = stringResource(R.string.settings_start_screen_category_root)
-    val selectedLabel = state.categories
-        .firstOrNull { it.id == state.preference.forumCatId }
-        ?.name
-        ?: rootLabel
+    val selectedCatId = state.preference.forumCatId
+    // A persisted category that the (not yet loaded / failed / stale) category list cannot
+    // resolve must NOT read as « Accueil du forum » — the next launch would still open it
+    // (review Codex PR #464). Show an explicit id-based fallback instead.
+    val selectedLabel = when (selectedCatId) {
+        null -> rootLabel
+        else -> state.categories.firstOrNull { it.id == selectedCatId }?.name
+            ?: stringResource(R.string.settings_start_screen_category_unresolved, selectedCatId)
+    }
     var expanded by remember { mutableStateOf(false) }
     val menuEnabled = state.canChange
 
