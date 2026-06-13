@@ -2,6 +2,9 @@ package fr.forumhfr.redface2.feature.editor
 
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -91,6 +94,15 @@ private fun PostEditorContent(
 ) {
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
     var optionsSheetOpen by remember { mutableStateOf(false) }
+    // #459 PR2 — modern Android photo picker (no runtime permission). The contract returns a
+    // nullable Uri ; on a non-null pick we hand the ViewModel the Uri's string so the platform-free
+    // VM reads the bytes via ImageUploadReader and uploads. API confirmed via Context7
+    // (androidx ActivityResultContracts.PickVisualMedia, input PickVisualMediaRequest, output Uri?).
+    val pickImageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) onIntent(PostEditorIntent.ImagePicked(uri.toString()))
+    }
     // Reply (#145), Quote (#146) and Edit (#147) submit through HFR's reply/edit form ; the other
     // (defensive) modes show a disabled note instead of a submit bar.
     val showSubmitBar = state.mode == PostEditorMode.Reply || state.mode == PostEditorMode.Edit
@@ -123,6 +135,12 @@ private fun PostEditorContent(
                 BbcodeToolbar(
                     onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
                     onImageUrlRequested = { imageUrlDialogOpen = true },
+                    onImageUploadRequested = {
+                        pickImageLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                        )
+                    },
+                    uploading = state.isUploading,
                 )
 
                 BbcodeTextField(
@@ -177,6 +195,17 @@ private fun PostEditorContent(
                         color = MaterialTheme.colorScheme.error,
                     )
                     TextButton(onClick = { onIntent(PostEditorIntent.ErrorDismissed) }) {
+                        Text(text = stringResource(R.string.editor_error_dismiss))
+                    }
+                }
+
+                state.uploadError?.let { error ->
+                    Text(
+                        text = stringResource(error.bannerResId),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TextButton(onClick = { onIntent(PostEditorIntent.UploadErrorDismissed) }) {
                         Text(text = stringResource(R.string.editor_error_dismiss))
                     }
                 }
@@ -466,6 +495,14 @@ private val PostEditorMode.titleResId: Int
     get() = when (this) {
         PostEditorMode.Reply -> R.string.editor_post_reply_title
         PostEditorMode.Edit -> R.string.editor_post_edit_title
+    }
+
+private val UploadError.bannerResId: Int
+    get() = when (this) {
+        UploadError.TooLarge -> R.string.editor_upload_error_too_large
+        UploadError.UnsupportedType -> R.string.editor_upload_error_unsupported_type
+        UploadError.Host -> R.string.editor_upload_error_host
+        UploadError.Network -> R.string.editor_upload_error_network
     }
 
 private val SubmitError.bannerResId: Int

@@ -102,6 +102,17 @@ data class PostEditorState(
      * quote prefill is not clobbered ; it is also never silently lost — discarding deletes the row.
      */
     val restorableDraft: String? = null,
+    /**
+     * #459 PR2 — `true` while an image picked from the photo picker is being read + uploaded to the
+     * selected host. The toolbar's image-upload affordance shows a progress indicator and is
+     * disabled so a second pick cannot race the in-flight upload.
+     */
+    val isUploading: Boolean = false,
+    /**
+     * #459 PR2 — typed upload failure surfaced after a failed pick→read→upload. Null means « no
+     * error to show ». Cleared on a fresh content mutation or via [PostEditorIntent.UploadErrorDismissed].
+     */
+    val uploadError: UploadError? = null,
 ) {
     /**
      * Submission is allowed when : we know the routing context (page + subcat + topicId),
@@ -147,6 +158,26 @@ sealed interface SubmitError {
     data object MissingSubcat : SubmitError
 }
 
+/**
+ * #459 PR2 — UI-facing image-upload failure. Maps the `:core:domain`
+ * [fr.forumhfr.redface2.core.domain.upload.UploadException] variants onto an actionable message
+ * (too large / unsupported type / host outage / network / unreadable) instead of a generic
+ * « échec ». Anonymous clients never get here — the ViewModel ignores a pick without a userId.
+ */
+sealed interface UploadError {
+    /** The picked image exceeds the host's accepted size. */
+    data object TooLarge : UploadError
+
+    /** The host rejected the MIME type. */
+    data object UnsupportedType : UploadError
+
+    /** The host answered a non-2xx status, or 2xx with an unreadable body. */
+    data object Host : UploadError
+
+    /** No network / DNS / timeout — also covers an unreadable picked Uri (mapped to Network). */
+    data object Network : UploadError
+}
+
 
 
 internal fun PostEditorState.withDraft(updated: TextFieldValue): PostEditorState =
@@ -157,4 +188,7 @@ internal fun PostEditorState.withDraft(updated: TextFieldValue): PostEditorState
         // accepted that we will try again. Keep it on toolbar-only mutations though
         // (caller resets `submitError` directly when needed).
         submitError = if (updated.text != draft.text) null else submitError,
+        // #459 PR2 — same rule for the image-upload error : a fresh text edit dismisses the stale
+        // banner. A successful upload INSERTS text via this path, which also clears any prior error.
+        uploadError = if (updated.text != draft.text) null else uploadError,
     )

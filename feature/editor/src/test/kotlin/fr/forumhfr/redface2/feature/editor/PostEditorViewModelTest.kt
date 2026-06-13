@@ -16,9 +16,17 @@ import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.upload.ImageUpload
+import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
+import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.domain.upload.UploadRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadedImage
+import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -61,6 +69,8 @@ class PostEditorViewModelTest {
     private val editPostRepository = FakeEditPostRepository()
     private val smileyRepository = FakeSmileyRepository()
     private val draftStore = FakeEditorDraftStore()
+    private val uploadRepository = FakeUploadRepository()
+    private val imageUploadReader = FakeImageUploadReader()
 
     @Before
     fun setUp() {
@@ -772,6 +782,7 @@ class PostEditorViewModelTest {
         extraQuoteNumreponses: List<Int> = emptyList(),
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
+        authRepository: AuthRepository = FakeAuthRepository(),
     ): PostEditorViewModel =
         PostEditorViewModel(
             request = PostEditorRequest(
@@ -792,6 +803,9 @@ class PostEditorViewModelTest {
             userPreferencesRepository = userPreferencesRepository,
             draftStore = draftStore,
             diagnostics = diagnostics,
+            uploadRepository = uploadRepository,
+            imageUploadReader = imageUploadReader,
+            authRepository = authRepository,
         )
 
     // ----- Phase 2F-B (#11) : smiley picker ----------------------------------
@@ -989,11 +1003,184 @@ class PostEditorViewModelTest {
         }
     }
 
+    // ----- #459 PR2 : image upload from the photo picker ---------------------
+
+    @Test
+    fun `ImagePicked reads the uri uploads with the lowercased userId and inserts img at caret`() = runTest {
+        // Authenticated with a MIXED-CASE pseudo to prove the userId is lowercased before reaching
+        // the repository (the upload foundation byte-matches on the lowercased pseudo).
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("XaTriX"))
+        imageUploadReader.result =
+            ImageUpload(bytes = byteArrayOf(1, 2, 3), mimeType = "image/png", displayName = "p.png")
+        uploadRepository.uploadResult = uploadedImage("https://rehost.diberie.com/Picture/Get/f/42")
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+
+        val pickedUri = "content://media/external/images/99"
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("photo: ", TextRange(7))))
+        viewModel.submit(PostEditorIntent.ImagePicked(pickedUri))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("the picked uri must be read once", pickedUri, imageUploadReader.lastUri)
+        assertEquals("upload called once", 1, uploadRepository.uploadCalls)
+        assertEquals("userId must be lowercased before the upload", "xatrix", uploadRepository.lastUserId)
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            val expected = "photo: [img]https://rehost.diberie.com/Picture/Get/f/42[/img]"
+            assertEquals("img token inserted at the caret on success", expected, state.draft.text)
+            assertEquals("caret lands after the inserted token", expected.length, state.draft.selection.start)
+            assertFalse("upload flag cleared on success", state.isUploading)
+            assertNull("no error on success", state.uploadError)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `ImagePicked surfaces a typed error and inserts nothing when the upload fails`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/jpeg", displayName = null)
+        uploadRepository.uploadException = UploadException.Server(code = 503, providerId = UploadProviderId.DIBERIE)
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("photo: ", TextRange(7))))
+        viewModel.submit(PostEditorIntent.ImagePicked("content://media/external/images/1"))
+        testScheduler.advanceUntilIdle()
+
+        viewModel.state.test {
+            val state = expectMostRecentItem()
+            assertEquals("draft is untouched on failure", "photo: ", state.draft.text)
+            assertEquals("Server failure maps to the Host error surface", UploadError.Host, state.uploadError)
+            assertFalse("upload flag cleared on failure", state.isUploading)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `ImagePicked maps TooLarge UnsupportedType and Network onto distinct UploadError variants`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/gif", displayName = null)
+
+        uploadRepository.uploadException = UploadException.TooLarge(maxBytes = 1024)
+        val tooLarge = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+        tooLarge.submit(PostEditorIntent.ImagePicked("content://x/1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(UploadError.TooLarge, tooLarge.state.value.uploadError)
+
+        uploadRepository.uploadException = UploadException.UnsupportedType(mimeType = "image/gif")
+        val unsupported = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+        unsupported.submit(PostEditorIntent.ImagePicked("content://x/2"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(UploadError.UnsupportedType, unsupported.state.value.uploadError)
+
+        uploadRepository.uploadException = UploadException.Network(java.io.IOException("offline"))
+        val network = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+        network.submit(PostEditorIntent.ImagePicked("content://x/3"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(UploadError.Network, network.state.value.uploadError)
+    }
+
+    @Test
+    fun `ImagePicked maps an unreadable picked uri onto the Network error and inserts nothing`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        // The reader fails (UploadException.Network) BEFORE the upload — the repository must never
+        // be reached, and the editor surfaces the same Network surface as a transport failure.
+        imageUploadReader.exception = UploadException.Network(java.io.IOException("stream gone"))
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("photo: ", TextRange(7))))
+        viewModel.submit(PostEditorIntent.ImagePicked("content://x/1"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("a failed read must not reach the upload", 0, uploadRepository.uploadCalls)
+        val state = viewModel.state.value
+        assertEquals("draft untouched when the read fails", "photo: ", state.draft.text)
+        assertEquals(UploadError.Network, state.uploadError)
+        assertFalse(state.isUploading)
+    }
+
+    @Test
+    fun `ImagePicked toggles isUploading while the upload is in flight`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        // Hold the upload pending so we can observe the intermediate isUploading = true.
+        val gate = CompletableDeferred<Unit>()
+        uploadRepository.uploadGate = gate
+        uploadRepository.uploadResult = uploadedImage("https://rehost.diberie.com/Picture/Get/f/7")
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ImagePicked("content://x/1"))
+        testScheduler.runCurrent()
+        assertTrue("isUploading must be true while the upload is in flight", viewModel.state.value.isUploading)
+
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+        assertFalse("isUploading must clear once the upload resolves", viewModel.state.value.isUploading)
+    }
+
+    @Test
+    fun `ImagePicked is ignored for an anonymous client (no upload, no error)`() = runTest {
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        val viewModel = newReplyViewModel(authRepository = FakeAuthRepository(AuthState.Anonymous))
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("hi", TextRange(2))))
+        viewModel.submit(PostEditorIntent.ImagePicked("content://x/1"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("anonymous pick must not read the uri", 0, imageUploadReader.readCalls)
+        assertEquals("anonymous pick must not upload", 0, uploadRepository.uploadCalls)
+        val state = viewModel.state.value
+        assertEquals("hi", state.draft.text)
+        assertFalse(state.isUploading)
+        assertNull(state.uploadError)
+    }
+
+    @Test
+    fun `a second ImagePicked is ignored while the first upload is still in flight`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        val gate = CompletableDeferred<Unit>()
+        uploadRepository.uploadGate = gate
+        uploadRepository.uploadResult = uploadedImage("https://rehost.diberie.com/Picture/Get/f/7")
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ImagePicked("content://x/1")) // launches, suspends on gate
+        viewModel.submit(PostEditorIntent.ImagePicked("content://x/2")) // must be a no-op
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("only the first pick uploads", 1, uploadRepository.uploadCalls)
+    }
+
+    @Test
+    fun `UploadErrorDismissed clears the upload error banner`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        uploadRepository.uploadException = UploadException.Network(java.io.IOException("offline"))
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ImagePicked("content://x/1"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(UploadError.Network, viewModel.state.value.uploadError)
+
+        viewModel.submit(PostEditorIntent.UploadErrorDismissed)
+
+        assertNull("dismissing clears the upload error", viewModel.state.value.uploadError)
+    }
+
     private fun newEditViewModel(
         subcat: Int? = SAMPLE_SUBCAT,
         numreponse: Int? = SAMPLE_EDITED_NUMREPONSE,
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
+        authRepository: AuthRepository = FakeAuthRepository(),
     ): PostEditorViewModel =
         PostEditorViewModel(
             request = PostEditorRequest(
@@ -1011,6 +1198,9 @@ class PostEditorViewModelTest {
             userPreferencesRepository = userPreferencesRepository,
             draftStore = draftStore,
             diagnostics = diagnostics,
+            uploadRepository = uploadRepository,
+            imageUploadReader = imageUploadReader,
+            authRepository = authRepository,
         )
 
     // ----- #312 : confirmation avant publication ------------------------------
@@ -1625,6 +1815,85 @@ class PostEditorViewModelTest {
             deletedKeys += key
             saved.remove(key)
         }
+    }
+
+    private fun uploadedImage(imageUrl: String): UploadedImage = UploadedImage(
+        provider = UploadProviderId.DIBERIE,
+        imageUrl = imageUrl,
+        thumbnailUrl = null,
+        deleteHandle = null,
+        expiresAt = null,
+    )
+
+    /**
+     * #459 PR2 — fake [ImageUploadReader]. Returns a canned [ImageUpload] (or throws a preset
+     * exception) and records the picked uri so the VM test can assert the read happened with the
+     * right argument. Defaults to a 1-byte PNG so a happy-path test that does not set [result]
+     * still gets a valid image.
+     */
+    private class FakeImageUploadReader : ImageUploadReader {
+        var result: ImageUpload = ImageUpload(bytes = byteArrayOf(0), mimeType = "image/png", displayName = null)
+
+        /** Set to make [read] throw — exercises the « unreadable picked Uri → Network » mapping. */
+        var exception: Throwable? = null
+        var lastUri: String? = null
+            private set
+        var readCalls: Int = 0
+            private set
+
+        override suspend fun read(uri: String): ImageUpload {
+            readCalls += 1
+            lastUri = uri
+            exception?.let { throw it }
+            return result
+        }
+    }
+
+    /**
+     * #459 PR2 — fake [UploadRepository]. Only [uploadWithCurrentProvider] matters to the editor ;
+     * the history / delete members are stubbed. [uploadGate] lets a test hold the upload pending to
+     * observe the intermediate `isUploading = true`.
+     */
+    private class FakeUploadRepository : UploadRepository {
+        var uploadResult: UploadedImage = UploadedImage(
+            provider = UploadProviderId.DIBERIE,
+            imageUrl = "https://rehost.diberie.com/Picture/Get/f/1",
+            thumbnailUrl = null,
+            deleteHandle = null,
+            expiresAt = null,
+        )
+        var uploadException: Throwable? = null
+        var uploadGate: CompletableDeferred<Unit>? = null
+        var uploadCalls: Int = 0
+            private set
+        var lastUserId: String? = null
+            private set
+
+        override suspend fun uploadWithCurrentProvider(image: ImageUpload, userId: String): UploadedImage {
+            uploadCalls += 1
+            lastUserId = userId
+            uploadGate?.await()
+            uploadException?.let { throw it }
+            return uploadResult
+        }
+
+        override fun observeUploads(userId: String): Flow<List<UploadedImageRecord>> =
+            MutableStateFlow(emptyList())
+
+        override suspend fun delete(record: UploadedImageRecord, userId: String): Boolean = false
+    }
+
+    /**
+     * #459 PR2 — fake [AuthRepository]. Emits a fixed [AuthState] so the VM resolves (or does not
+     * resolve) an upload `userId`. Login / logout are no-ops — the editor only observes.
+     */
+    private class FakeAuthRepository(
+        private val authState: AuthState = AuthState.Authenticated("alice"),
+    ) : AuthRepository {
+        override fun observeAuthState(): Flow<AuthState> = MutableStateFlow(authState)
+        override suspend fun login(pseudo: String, password: String): Result<AuthState.Authenticated> =
+            Result.success(AuthState.Authenticated(pseudo))
+        override suspend fun logout() = Unit
     }
 
     private companion object {
