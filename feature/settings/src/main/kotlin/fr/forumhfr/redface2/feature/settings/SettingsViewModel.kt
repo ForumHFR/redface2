@@ -12,6 +12,8 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -542,6 +544,12 @@ class SettingsViewModel @Inject constructor(
     // The optimistic value is shown immediately and the touched-locally guard blocks a late
     // hydration from clobbering in-progress typing; a persist failure raises the error flag without
     // reverting the typed text (it would be hostile to wipe what the user just typed).
+    // Persist-on-keystroke writes are serialised : each keystroke cancels the previous in-flight write
+    // so a slower/older write (or its failure) can never land after a newer one and strand a stale
+    // Client-ID or a spurious error flag (review #459). CancellationException is rethrown, not treated
+    // as a persistence failure.
+    private var imgurClientIdJob: Job? = null
+
     private fun updateImgurClientId(text: String) {
         _state.update {
             it.copy(
@@ -550,9 +558,13 @@ class SettingsViewModel @Inject constructor(
                 imgurClientIdTouchedLocally = true,
             )
         }
-        viewModelScope.launch {
+        imgurClientIdJob?.cancel()
+        imgurClientIdJob = viewModelScope.launch {
             runCatching { userPreferencesRepository.setImgurClientId(text) }
-                .onFailure { _state.update { it.copy(imgurClientIdError = true) } }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    _state.update { it.copy(imgurClientIdError = true) }
+                }
         }
     }
 

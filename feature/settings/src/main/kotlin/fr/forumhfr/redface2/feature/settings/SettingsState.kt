@@ -316,8 +316,8 @@ sealed interface SettingsIntent {
 
     // #459 — Hébergeur d'images. `provider` is the desired selection (applied optimistically with
     // revert-on-failure, like ThemeModeChanged); `text` is the desired imgur Client-ID (persisted on
-    // each change). The provider selector hides IMGUR until a Client-ID is set, so the user can never
-    // strand themselves on an unusable host.
+    // each change). Selecting IMGUR reveals the Client-ID field ; an empty Client-ID is NOT blocked at
+    // the UI layer — the upload then fails with a precise host error (cf. #474) instead of silently.
     data class SetUploadProvider(val provider: UploadProviderId) : SettingsIntent
     data class SetImgurClientId(val text: String) : SettingsIntent
 }
