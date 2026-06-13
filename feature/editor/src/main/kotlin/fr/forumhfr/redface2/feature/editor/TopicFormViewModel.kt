@@ -107,8 +107,11 @@ class TopicFormViewModel @AssistedInject constructor(
      */
     private val draftKey: String? = when (request.mode) {
         TopicFormMode.New -> request.cat?.let { EditorDraftKey.newTopic(it) }
-        TopicFormMode.EditFirstPost -> request.numreponse?.let {
-            EditorDraftKey.editFirstPost(request.cat ?: 0, it)
+        // Require BOTH cat and numreponse : the edit key carries `cat` for global uniqueness
+        // (numreponse is per-category), so falling back to cat=0 could collide. Null = no autosave,
+        // mirroring the New/Reply branches when routing args can't identify a unique target.
+        TopicFormMode.EditFirstPost -> request.cat?.let { cat ->
+            request.numreponse?.let { EditorDraftKey.editFirstPost(cat, it) }
         }
     }
 
@@ -210,10 +213,11 @@ class TopicFormViewModel @AssistedInject constructor(
      * banner. Marks both fields hydrated so a late EditFirstPost form fetch cannot overwrite them.
      */
     private fun onDraftRestoreRequested() {
-        val snapshot = _state.value
-        val body = snapshot.restorableDraft.orEmpty()
-        val subject = snapshot.restorableSubject.orEmpty()
         _state.update { current ->
+            val body = current.restorableDraft.orEmpty()
+            // Keep the live subject when the draft has none (it was autosaved before the server form
+            // populated the subject) : restoring must never blank a server-provided subject.
+            val subject = current.restorableSubject ?: current.subject.text
             current
                 .withDraft(TextFieldValue(text = body, selection = TextRange(body.length)))
                 .copy(
