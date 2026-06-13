@@ -25,13 +25,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
@@ -595,7 +592,11 @@ fun RedfaceApp(intent: Intent?) {
                 }
             },
         ) {
-            Surface(modifier = Modifier.padding(horizontal = 8.dp)) {
+            // #398 — no global side gutter here. Each screen owns its own lateral rhythm
+            // (listings keep their 16/24 dp content padding, readers compensate explicitly),
+            // so the nav host no longer steals 8 dp/side from every screen. The Surface is kept
+            // for the theme background/elevation; only its horizontal padding was removed.
+            Surface {
                 val activeBackStack = backStacks.getValue(currentDestination)
                 val accountMenu: @Composable () -> Unit = {
                     RedfaceAccountMenu(

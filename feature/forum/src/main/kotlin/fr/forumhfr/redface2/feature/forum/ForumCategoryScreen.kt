@@ -420,7 +420,8 @@ private fun TopicRow(
             },
         )
         .clickable(onClick = onClick)
-        .padding(horizontal = 24.dp, vertical = 12.dp)
+        // #287 — denser feed: tighter vertical rhythm on listing rows (12 → 10 dp).
+        .padding(horizontal = 24.dp, vertical = 10.dp)
     Row(
         modifier = rowModifier,
         verticalAlignment = Alignment.CenterVertically,

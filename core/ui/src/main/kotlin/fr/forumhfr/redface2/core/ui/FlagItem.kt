@@ -73,7 +73,8 @@ fun FlagItem(
         modifier = modifier
             .fillMaxWidth()
             .then(rowInteraction)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            // #287 — denser feed: tighter vertical rhythm on listing rows (12 → 10 dp).
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
