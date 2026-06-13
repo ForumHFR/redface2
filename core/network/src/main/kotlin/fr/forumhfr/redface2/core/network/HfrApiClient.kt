@@ -89,22 +89,34 @@ class HfrApiClient @Inject constructor(
     ): String = get(uri = "${CATEGORIES_URI}$cat/topics/$topicId/", useAuth = useAuth)
 
     /**
-     * Per-category drapeaux endpoint :
-     * `forums/hardwarefr/categories/{cat}/topics/{bucket}/`. Requires authentication —
-     * HFR redirects an anonymous request to login, surfaced as `SessionExpiredException`.
-     * The response is the same [RestListEnvelope]<RestTopic> shape used by the topic
-     * listing, contract proven by `rest_cat23_participated.json`.
+     * Per-(sub)category drapeaux endpoint :
+     * `forums/hardwarefr/categories/{cat}/topics/{bucket}/` (whole category) or
+     * `forums/hardwarefr/categories/{cat}/subcategories/{subcat}/topics/{bucket}/` when
+     * [subcat] is non-null. This is the REST equivalent of the web `owntopic=1|2|3` filter
+     * (#455): the server returns ONLY the user's flagged topics of that (sub)category, same
+     * `[RestListEnvelope]<RestTopic>` shape as the regular listing — contract proven live and
+     * by `rest_cat23_participated.json` / `rest_cat13_participated_favorites.json`. The flag
+     * buckets are not really paginated server-side (the whole bucket comes back in one page),
+     * but [page] / [resultsPerPage] are still sent for symmetry with [getTopicList].
      *
-     * `useAuth` defaults to `true` because a flags listing is by definition per-user.
-     * The bucket is taken from the [HfrRestFlagBucket] enum — no free-form string variant.
+     * Requires authentication — HFR redirects an anonymous request to login, surfaced as
+     * `SessionExpiredException`. `useAuth` defaults to `true` because a flags listing is by
+     * definition per-user. The bucket is taken from the [HfrRestFlagBucket] enum — no
+     * free-form string variant.
      *
      * The matching global endpoint (`forums/hardwarefr/topics/{bucket}/`) is intentionally
      * not exposed yet : its envelope is grouped-by-category and we have no captured
      * fixture for it. It can be added in a follow-up PR once a fixture exists.
      */
+    // 6 params: every one maps to a distinct REST URI segment / query param (cat, subcat,
+    // bucket, page, results_per_page) plus the auth toggle. They are not a cohesive object
+    // and bundling them would obscure the URL contract. Suppressing locally (#455) rather
+    // than relaxing the project-wide threshold.
+    @Suppress("LongParameterList")
     suspend fun getCategoryFlagTopics(
         cat: Int,
         bucket: HfrRestFlagBucket,
+        subcat: Int? = null,
         page: Int = 1,
         resultsPerPage: Int = DEFAULT_RESULTS_PER_PAGE,
         useAuth: Boolean = true,
@@ -113,8 +125,13 @@ class HfrApiClient @Inject constructor(
         require(resultsPerPage in 1..MAX_RESULTS_PER_PAGE) {
             "resultsPerPage must be in 1..$MAX_RESULTS_PER_PAGE, got $resultsPerPage"
         }
+        val uri = if (subcat == null) {
+            "${CATEGORIES_URI}$cat/topics/${bucket.uriSegment}/"
+        } else {
+            "${CATEGORIES_URI}$cat/subcategories/$subcat/topics/${bucket.uriSegment}/"
+        }
         return get(
-            uri = "${CATEGORIES_URI}$cat/topics/${bucket.uriSegment}/",
+            uri = uri,
             useAuth = useAuth,
             extraParams = mapOf(
                 PARAM_PAGE to page.toString(),

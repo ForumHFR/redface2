@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
@@ -1472,6 +1473,13 @@ class FlagsViewModelTest {
         override suspend fun refreshTopicList(cat: Int, subcat: Int?, page: Int) = Unit
 
         override suspend fun prefetchTopicList(cat: Int, subcat: Int?, page: Int) = Unit
+
+        // #455 — not exercised by FlagsViewModel (the Drapeaux tab uses FlagRepository).
+        override suspend fun getFlagFilteredTopics(
+            cat: Int,
+            subcat: Int?,
+            bucket: FlagFilterBucket,
+        ): ForumResult<TopicListPage> = ForumResult.Failure(UnsupportedOperationException())
     }
 
     /**

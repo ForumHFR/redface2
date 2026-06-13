@@ -108,6 +108,29 @@ class HfrApiClientTest {
     }
 
     @Test
+    fun `getCategoryFlagTopics with subcat scopes the URI to the subcategory bucket`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+
+        client.getCategoryFlagTopics(
+            cat = 13,
+            bucket = HfrRestFlagBucket.FAVORITES,
+            subcat = 422,
+            page = 1,
+            resultsPerPage = 100,
+            useAuth = true,
+        )
+
+        val recorded = server.takeRequest()
+        val url = requireNotNull(recorded.requestUrl)
+        assertEquals(
+            "forums/hardwarefr/categories/13/subcategories/422/topics/favorites/",
+            url.queryParameter("uri"),
+        )
+        assertEquals("1", url.queryParameter("page"))
+        assertEquals("100", url.queryParameter("results_per_page"))
+    }
+
+    @Test
     fun `getCategoryFlagTopics rejects page = 0 and out-of-range resultsPerPage`() = runTest {
         val zeroPage = runCatching {
             client.getCategoryFlagTopics(cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED, page = 0)

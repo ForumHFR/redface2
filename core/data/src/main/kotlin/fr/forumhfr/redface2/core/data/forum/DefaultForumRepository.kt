@@ -3,12 +3,14 @@ package fr.forumhfr.redface2.core.data.forum
 import android.util.Log
 import fr.forumhfr.redface2.core.data.cache.CachePolicy
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
 import fr.forumhfr.redface2.core.network.HfrApiClient
+import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
 import java.time.Clock
 import java.time.Instant
 import javax.inject.Inject
@@ -122,6 +124,47 @@ class DefaultForumRepository @Inject constructor(
         val flow = topicListFlow(cat, subcat, page)
         flow.emit(ForumResult.Loading)
         flow.emit(fetchTopicList(cat, subcat, page))
+    }
+
+    /**
+     * #455 — one-shot fetch of the flagged topics of a (sub)category for [bucket]. Not
+     * cached (same stance as topic lists) and not paginated server-side: we request the
+     * max page size so a busy category's whole bucket comes back in one call (the flag
+     * buckets ignore real pagination — see [HfrApiClient.getCategoryFlagTopics]). Reuses
+     * the forum mapper [RestForumMappers.toTopicListPage] so the rows are [TopicSummary],
+     * NOT [fr.forumhfr.redface2.core.model.Flag] — the category screen needs the listing
+     * row model (author / sticky / locked) and the same "resume at last read page" path.
+     */
+    override suspend fun getFlagFilteredTopics(
+        cat: Int,
+        subcat: Int?,
+        bucket: FlagFilterBucket,
+    ): ForumResult<TopicListPage> = withContext(ioDispatcher) {
+        try {
+            val body = apiClient.getCategoryFlagTopics(
+                cat = cat,
+                bucket = bucket.toRestBucket(),
+                subcat = subcat,
+                resultsPerPage = FLAG_FILTER_RESULTS_PER_PAGE,
+                useAuth = true,
+            )
+            val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(body)
+            ForumResult.Success(RestForumMappers.toTopicListPage(envelope, cat = cat, subcat = subcat))
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            // The flag-filter fetch runs inside a ViewModel job cancelled on filter / subcat
+            // change; let cancellation propagate rather than mapping it to a Failure that would
+            // clobber flagFilterTopics with an Error (review #455). Same stance as prefetchTopicList.
+            throw cancellation
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            Log.w(LOG_TAG, "Flag-filter fetch failed for cat=$cat subcat=$subcat bucket=$bucket", error)
+            ForumResult.Failure(error)
+        }
+    }
+
+    private fun FlagFilterBucket.toRestBucket(): HfrRestFlagBucket = when (this) {
+        FlagFilterBucket.PARTICIPATED -> HfrRestFlagBucket.PARTICIPATED
+        FlagFilterBucket.READ -> HfrRestFlagBucket.READ
+        FlagFilterBucket.FAVORITES -> HfrRestFlagBucket.FAVORITES
     }
 
     /**
@@ -268,5 +311,9 @@ class DefaultForumRepository @Inject constructor(
     private companion object {
         const val LOG_TAG = "ForumRepository"
         const val DEFAULT_RESULTS_PER_PAGE = 50
+
+        // #455 — flag buckets are not paginated server-side; request the max page size so a
+        // busy (sub)category's whole bucket comes back in one call (HfrApiClient caps at 100).
+        const val FLAG_FILTER_RESULTS_PER_PAGE = 100
     }
 }

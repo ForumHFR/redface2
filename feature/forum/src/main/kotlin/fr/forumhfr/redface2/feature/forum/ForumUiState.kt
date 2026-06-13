@@ -30,6 +30,15 @@ sealed interface ForumUiState {
 }
 
 /**
+ * « Mes drapeaux » filter local to the category screen (#455), replicating the web
+ * `owntopic` toolbar. [ALL] is the normal paginated listing; the three other modes show
+ * ONLY the user's flagged topics of that (sub)category for the matching REST bucket — not
+ * a decoration of the listing. Reset to [ALL] when the screen leaves composition (the
+ * state lives in the ViewModel, not persisted).
+ */
+enum class CategoryFlagFilter { ALL, PARTICIPATED, READ, FAVORITES }
+
+/**
  * UI state for a category detail screen. We keep subcategories and topic list as
  * independent sub-states so the screen can render the topic list under a loading
  * skeleton while the subcategories are already shown (or vice-versa).
@@ -79,9 +88,22 @@ data class CategoryUiState(
      * « Nouveau topic » FAB visibility (Phase 2E #149) — HFR refuses the wire
      * POST in anonymous mode and Redface 2 has decided not to surface the
      * legacy anonymous composer (cf. `docs/specs/protocol-hfr.md` § Note
-     * anonyme).
+     * anonyme). Also gates the « Mes drapeaux » filter (#455): an anonymous
+     * session has no flags, so the selector is hidden.
      */
     val canCreateTopic: Boolean = false,
+    /**
+     * Active « Mes drapeaux » filter (#455). [CategoryFlagFilter.ALL] → the normal
+     * paginated [topics] listing; any other value → [flagFilterTopics] holds the
+     * bucket-only listing and the pager is hidden (the buckets are not paginated).
+     */
+    val flagFilter: CategoryFlagFilter = CategoryFlagFilter.ALL,
+    /**
+     * State of the flag-filtered listing, consumed by the screen only when
+     * [flagFilter] != ALL. Independent of [topics] (the normal listing). Holds
+     * [TopicsUiState.Loading] and is ignored while [flagFilter] == ALL.
+     */
+    val flagFilterTopics: TopicsUiState = TopicsUiState.Loading,
 )
 
 /**
