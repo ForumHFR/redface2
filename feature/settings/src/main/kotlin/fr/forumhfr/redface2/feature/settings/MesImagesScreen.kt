@@ -214,10 +214,12 @@ private fun UploadedImageCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            // Always enabled : UploadRepository.delete() evicts the local trace REGARDLESS of the
+            // host outcome, so even a handle-less record (canDelete == false) must be removable from
+            // the list — the confirm dialog warns when the host cannot confirm (Codex review).
             val deleteLabel = stringResource(R.string.my_images_delete_action)
             TextButton(
                 onClick = { onRequestDelete(record) },
-                enabled = record.canDelete,
                 modifier = Modifier.semantics { contentDescription = deleteLabel },
             ) {
                 Text(stringResource(R.string.my_images_delete_action))

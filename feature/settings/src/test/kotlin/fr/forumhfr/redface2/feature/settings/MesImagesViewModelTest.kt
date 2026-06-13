@@ -164,6 +164,25 @@ class MesImagesViewModelTest {
         }
     }
 
+    @Test
+    fun `a session switch dismisses an open delete dialog (it belonged to the previous account)`() =
+        runTest {
+            val upload = mockk<UploadRepository>()
+            val target = record("a")
+            coEvery { upload.observeUploads("alice") } returns flowOf(listOf(target))
+            coEvery { upload.observeUploads("bob") } returns flowOf(emptyList())
+            val auth = FakeAuthRepository(AuthState.Authenticated("alice"))
+
+            val viewModel = MesImagesViewModel(auth, upload)
+            viewModel.requestDelete(target)
+            assertEquals(target, viewModel.state.value.pendingDeletion)
+
+            auth.switchTo(AuthState.Authenticated("bob"))
+            advanceUntilIdle()
+
+            assertNull(viewModel.state.value.pendingDeletion)
+        }
+
     private fun record(picId: String, deleteHandle: String? = "del-$picId") = UploadedImageRecord(
         provider = UploadProviderId.IMGUR,
         picId = picId,
@@ -186,6 +205,10 @@ class MesImagesViewModelTest {
 
         override suspend fun logout() {
             state.value = AuthState.Anonymous
+        }
+
+        fun switchTo(authState: AuthState) {
+            state.value = authState
         }
     }
 }

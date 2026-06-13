@@ -41,6 +41,10 @@ class MesImagesViewModel @Inject constructor(
     // auth stream so confirmDelete() can pass the right owner without re-reading the flow.
     private var activeUserId: String? = null
 
+    // Owner pseudo captured WHEN the delete dialog opens, so a session switch between request and
+    // confirm cannot retarget the deletion at a different account (Codex review, #459 PR3).
+    private var pendingDeletionUserId: String? = null
+
     private val _state = MutableStateFlow(MesImagesUiState())
     val state: StateFlow<MesImagesUiState> = _state.asStateFlow()
 
@@ -69,19 +73,28 @@ class MesImagesViewModel @Inject constructor(
     }
 
     private fun onAuthStateChanged(authState: AuthState) {
-        activeUserId = when (authState) {
+        val newUserId = when (authState) {
             AuthState.Anonymous -> null
             is AuthState.Authenticated -> authState.pseudo.lowercase()
         }
+        if (newUserId != activeUserId) {
+            // Identity changed → a delete dialog left open belonged to the previous account ; drop it.
+            pendingDeletionUserId = null
+            _state.update { if (it.pendingDeletion != null) it.copy(pendingDeletion = null) else it }
+        }
+        activeUserId = newUserId
     }
 
-    /** Deferred delete step 1 — open the confirmation dialog for [record]. */
+    /** Deferred delete step 1 — open the confirmation dialog for [record], capturing its owner. */
     fun requestDelete(record: UploadedImageRecord) {
+        val owner = activeUserId ?: return
+        pendingDeletionUserId = owner
         _state.update { it.copy(pendingDeletion = record) }
     }
 
     /** Deferred delete cancelled — close the dialog, delete nothing. */
     fun cancelDelete() {
+        pendingDeletionUserId = null
         _state.update { it.copy(pendingDeletion = null) }
     }
 
@@ -92,7 +105,8 @@ class MesImagesViewModel @Inject constructor(
      */
     fun confirmDelete() {
         val record = _state.value.pendingDeletion ?: return
-        val userId = activeUserId ?: return
+        val userId = pendingDeletionUserId ?: return
+        pendingDeletionUserId = null
         _state.update { it.copy(pendingDeletion = null) }
         viewModelScope.launch {
             val confirmed = runCatching { uploadRepository.delete(record, userId) }.getOrDefault(false)
