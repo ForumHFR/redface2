@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
@@ -50,23 +51,27 @@ internal class AndroidImageUploadReader @Inject constructor(
      * Open/read failures map to [UploadException.Network] (same surface as the upload itself).
      */
     private fun readBounded(resolver: ContentResolver, uri: Uri): ByteArray = try {
-        resolver.openInputStream(uri)?.use { stream ->
-            val buffer = ByteArrayOutputStream(DEFAULT_BUFFER_SIZE)
-            val chunk = ByteArray(DEFAULT_BUFFER_SIZE)
-            var total = 0L
-            while (true) {
-                val read = stream.read(chunk)
-                if (read < 0) break
-                total += read
-                if (total > MAX_READ_BYTES) throw UploadException.TooLarge(MAX_READ_BYTES)
-                buffer.write(chunk, 0, read)
-            }
-            buffer.toByteArray()
-        } ?: throw IOException("ContentResolver returned no stream for $uri")
+        resolver.openInputStream(uri)?.use { drainBounded(it) }
+            ?: throw IOException("ContentResolver returned no stream for $uri")
     } catch (e: UploadException) {
         throw e
     } catch (e: IOException) {
         throw UploadException.Network(e)
+    }
+
+    /** Copies [stream] into a byte array, throwing [UploadException.TooLarge] past [MAX_READ_BYTES]. */
+    private fun drainBounded(stream: InputStream): ByteArray {
+        val buffer = ByteArrayOutputStream(DEFAULT_BUFFER_SIZE)
+        val chunk = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0L
+        while (true) {
+            val read = stream.read(chunk)
+            if (read < 0) break
+            total += read
+            if (total > MAX_READ_BYTES) throw UploadException.TooLarge(MAX_READ_BYTES)
+            buffer.write(chunk, 0, read)
+        }
+        return buffer.toByteArray()
     }
 
     /**
