@@ -59,7 +59,10 @@ import kotlinx.coroutines.launch
  *    [TopicFormEffect.NewTopicCreated] for create-topic navigation.
  */
 @HiltViewModel(assistedFactory = TopicFormViewModel.Factory::class)
-@Suppress("LongParameterList") // Hilt constructor injection — one dependency per collaborator (#405 added draftStore).
+// LongParameterList : Hilt ctor — one dependency per collaborator (#405 added draftStore).
+// LargeClass : gère deux modes (newTopic + editFirstPost) ET le câblage des brouillons (#405) ;
+// l'extraction d'un contrôleur de brouillon partagé est prévue avec la migration éditeur #441.
+@Suppress("LongParameterList", "LargeClass")
 class TopicFormViewModel @AssistedInject constructor(
     @Assisted private val request: TopicFormRequest,
     private val previewParser: BbcodePreviewParser,
