@@ -8,7 +8,18 @@ import java.time.Instant
  * entry is a schema-affecting change and would need a migration plus a defensive read. `reho.st` /
  * `super-h` are reserved for a post-v1 iteration (see `docs/specs/extensions.md`).
  */
-enum class UploadProviderId { DIBERIE, IMGUR }
+enum class UploadProviderId(
+    /**
+     * Whether the host CONFIRMS a server-side deletion. imgur returns an authenticated delete
+     * confirmation; diberie's delete is best-effort (no server-side authorisation is confirmed),
+     * so the UI must not promise the image is gone from the host. Drives the « Mes images » delete
+     * confirmation wording (Codex beta review). Does not affect the serialised [name].
+     */
+    val confirmsHostDeletion: Boolean,
+) {
+    DIBERIE(confirmsHostDeletion = false),
+    IMGUR(confirmsHostDeletion = true),
+}
 
 /**
  * Raw bytes to upload, already resolved from the picked `Uri` by the Android layer (via

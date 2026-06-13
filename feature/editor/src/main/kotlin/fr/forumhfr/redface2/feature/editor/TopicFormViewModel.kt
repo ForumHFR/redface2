@@ -119,6 +119,13 @@ class TopicFormViewModel @AssistedInject constructor(
     private var autosaveJob: Job? = null
 
     /**
+     * #405 — account that owned this editor when it opened, snapshotted from [draftStore] so a
+     * mid-edit account switch can't write this session's draft under another account (Codex beta
+     * review). Captured in [restoreDraftIfAny]; null until then / for an anonymous session.
+     */
+    private var draftOwner: String? = null
+
+    /**
      * #312 — mirror of the persisted « Confirmation avant publication » preference. Collected on
      * init (same DataStore-consumption shape as `TopicViewModel.observeTopicTopBarAutoHide`) and
      * read synchronously at submit time, identical to `PostEditorViewModel`.
@@ -146,7 +153,8 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun restoreDraftIfAny() {
         val key = draftKey ?: return
         viewModelScope.launch {
-            val draft = draftStore.load(key) ?: return@launch
+            draftOwner = draftStore.currentOwner()
+            val draft = draftStore.load(draftOwner, key) ?: return@launch
             if (draft.body.isNotBlank() || !draft.subject.isNullOrBlank()) {
                 _state.update {
                     it.copy(restorableDraft = draft.body, restorableSubject = draft.subject)
@@ -168,9 +176,10 @@ class TopicFormViewModel @AssistedInject constructor(
         autosaveJob = viewModelScope.launch {
             delay(AUTOSAVE_DEBOUNCE_MS)
             if (body.isBlank() && subject.isBlank()) {
-                draftStore.delete(key)
+                draftStore.delete(draftOwner, key)
             } else {
                 draftStore.save(
+                    draftOwner,
                     key,
                     EditorDraftStore.Draft(body = body, subject = subject.ifBlank { null }),
                 )
@@ -235,7 +244,7 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun onDraftDiscardRequested() {
         _state.update { it.copy(restorableDraft = null, restorableSubject = null) }
         val key = draftKey ?: return
-        viewModelScope.launch { draftStore.delete(key) }
+        viewModelScope.launch { draftStore.delete(draftOwner, key) }
     }
 
     /**
@@ -244,7 +253,7 @@ class TopicFormViewModel @AssistedInject constructor(
      */
     private fun deleteDraftOnSuccess() {
         autosaveJob?.cancel()
-        draftKey?.let { key -> viewModelScope.launch { draftStore.delete(key) } }
+        draftKey?.let { key -> viewModelScope.launch { draftStore.delete(draftOwner, key) } }
     }
 
     private fun onSmileyPickerOpened() {

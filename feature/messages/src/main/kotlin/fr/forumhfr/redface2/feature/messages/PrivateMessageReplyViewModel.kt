@@ -82,6 +82,13 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private var autosaveJob: Job? = null
 
     /**
+     * #405 — account that owned this MP editor when it opened, snapshotted from [draftStore] so a
+     * mid-edit account switch can't write this session's PRIVATE draft under another account
+     * (Codex beta review). Captured in [restoreDraftIfAny]; null until then / when anonymous.
+     */
+    private var draftOwner: String? = null
+
+    /**
      * #312 — mirror of the persisted « Confirmation avant publication » preference. Collected on
      * init (same DataStore-consumption shape as `TopicViewModel.observeTopicTopBarAutoHide`) and
      * read synchronously at submit time, identical to the post editor.
@@ -103,7 +110,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     /** #405 — surface a cached draft on the banner (never auto-applied). Empty drafts are ignored. */
     private fun restoreDraftIfAny() {
         viewModelScope.launch {
-            val body = draftStore.load(draftKey)?.body
+            draftOwner = draftStore.currentOwner()
+            val body = draftStore.load(draftOwner, draftKey)?.body
             if (!body.isNullOrBlank()) {
                 _state.update { it.copy(restorableDraft = body) }
             }
@@ -120,9 +128,9 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         autosaveJob = viewModelScope.launch {
             delay(AUTOSAVE_DEBOUNCE_MS)
             if (body.isBlank()) {
-                draftStore.delete(draftKey)
+                draftStore.delete(draftOwner, draftKey)
             } else {
-                draftStore.save(draftKey, EditorDraftStore.Draft(body = body, isPrivate = true))
+                draftStore.save(draftOwner, draftKey, EditorDraftStore.Draft(body = body, isPrivate = true))
             }
         }
     }
@@ -140,7 +148,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     fun onDraftDiscardRequested() {
         _state.update { it.copy(restorableDraft = null) }
-        viewModelScope.launch { draftStore.delete(draftKey) }
+        viewModelScope.launch { draftStore.delete(draftOwner, draftKey) }
     }
 
     private fun loadForm() {
@@ -342,7 +350,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 // #405 — the reply reached HFR ; the cached draft is now obsolete. Cancel any
                 // pending autosave first so a debounced save can't resurrect the row after delete.
                 autosaveJob?.cancel()
-                viewModelScope.launch { draftStore.delete(draftKey) }
+                viewModelScope.launch { draftStore.delete(draftOwner, draftKey) }
                 _state.update { it.copy(isSubmitting = false, submitError = null) }
                 _effects.trySend(
                     PrivateMessageReplyEffect.SubmitSucceeded(

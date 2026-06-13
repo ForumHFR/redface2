@@ -1956,14 +1956,16 @@ class PostEditorViewModelTest {
             saved[key] = draft
         }
 
-        override suspend fun load(key: String): EditorDraftStore.Draft? = saved[key]
+        override suspend fun currentOwner(): String? = "tester"
 
-        override suspend fun save(key: String, draft: EditorDraftStore.Draft) {
+        override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? = saved[key]
+
+        override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
             saveCount += 1
             saved[key] = draft
         }
 
-        override suspend fun delete(key: String) {
+        override suspend fun delete(owner: String?, key: String) {
             deletedKeys += key
             saved.remove(key)
         }

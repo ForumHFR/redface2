@@ -36,12 +36,18 @@ class RoomEditorDraftStoreTest {
     )
 
     @Test
-    fun `anonymous session reads null and never touches the DAO`() = runTest {
+    fun `currentOwner is the lowercased active pseudo, null when anonymous`() = runTest {
+        assertEquals("xatrix", store(AuthState.Authenticated("XaTriX")).currentOwner())
+        assertNull(store(AuthState.Anonymous).currentOwner())
+    }
+
+    @Test
+    fun `anonymous owner reads null and never touches the DAO`() = runTest {
         val store = store(AuthState.Anonymous)
 
-        assertNull(store.load(key = "reply:29:123456"))
-        store.save(key = "reply:29:123456", draft = Draft(body = "wip"))
-        store.delete(key = "reply:29:123456")
+        assertNull(store.load(owner = null, key = "reply:29:123456"))
+        store.save(owner = null, key = "reply:29:123456", draft = Draft(body = "wip"))
+        store.delete(owner = null, key = "reply:29:123456")
 
         coVerify(exactly = 0) { dao.get(any()) }
         coVerify(exactly = 0) { dao.upsert(any()) }
@@ -49,10 +55,11 @@ class RoomEditorDraftStoreTest {
     }
 
     @Test
-    fun `save folds the lowercased owner into the row key and stamps the clock`() = runTest {
+    fun `save folds the owner into the row key and stamps the clock`() = runTest {
         val store = store(AuthState.Authenticated("XaTriX"))
 
         store.save(
+            owner = "xatrix",
             key = "reply:29:123456",
             draft = Draft(body = "wip body", isPrivate = false, updatedAt = 42L),
         )
@@ -73,7 +80,19 @@ class RoomEditorDraftStoreTest {
     }
 
     @Test
-    fun `load round-trips the stored draft for the active account`() = runTest {
+    fun `save is dropped when the owning account is no longer active (cross-account leak guard)`() = runTest {
+        // Editor opened as alice (owner = "alice"); the user has since switched to bob (active).
+        // A debounced autosave must NOT write alice's body — neither under bob (leak) nor under
+        // alice (the logout purge already swept alice). The DAO is never touched.
+        val store = store(AuthState.Authenticated("bob"))
+
+        store.save(owner = "alice", key = "mpnew", draft = Draft(body = "alice private body", isPrivate = true))
+
+        coVerify(exactly = 0) { dao.upsert(any()) }
+    }
+
+    @Test
+    fun `load round-trips the stored draft for the owner`() = runTest {
         coEvery { dao.get("xatrix|mpnew") } returns EditorDraftEntity(
             draftKey = "xatrix|mpnew",
             ownerId = "xatrix",
@@ -93,12 +112,12 @@ class RoomEditorDraftStoreTest {
                 isPrivate = true,
                 updatedAt = 1_700_000_000_000L,
             ),
-            store.load(key = "mpnew"),
+            store.load(owner = "xatrix", key = "mpnew"),
         )
     }
 
     @Test
-    fun `drafts are isolated per account`() = runTest {
+    fun `drafts are isolated per owner`() = runTest {
         // Account A wrote a row; account B must never read it.
         coEvery { dao.get("alice|reply:29:123456") } returns EditorDraftEntity(
             draftKey = "alice|reply:29:123456",
@@ -109,13 +128,10 @@ class RoomEditorDraftStoreTest {
             updatedAt = 1_700_000_000_000L,
             isPrivate = false,
         )
-        // Bob has no row under his own key — a real DAO returns null (the relaxed mock would
-        // otherwise hand back a dummy entity, masking the isolation we are asserting).
         coEvery { dao.get("bob|reply:29:123456") } returns null
         val storeForBob = store(AuthState.Authenticated("bob"))
 
-        // Bob's read targets "bob|..." — the DAO has no such row, so it returns null.
-        assertNull(storeForBob.load(key = "reply:29:123456"))
+        assertNull(storeForBob.load(owner = "bob", key = "reply:29:123456"))
         coVerify { dao.get("bob|reply:29:123456") }
     }
 
@@ -123,7 +139,7 @@ class RoomEditorDraftStoreTest {
     fun `delete targets the owner-scoped row key`() = runTest {
         val store = store(AuthState.Authenticated("xatrix"))
 
-        store.delete(key = "edit:23:35395")
+        store.delete(owner = "xatrix", key = "edit:23:35395")
 
         coVerify { dao.deleteByKey("xatrix|edit:23:35395") }
     }

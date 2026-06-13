@@ -78,6 +78,13 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     /** #405 — debounced autosave coroutine ; relaunched (cancelling the previous) on each edit. */
     private var autosaveJob: Job? = null
 
+    /**
+     * #405 — account that owned this MP composer when it opened, snapshotted from [draftStore] so a
+     * mid-edit account switch can't write this session's PRIVATE draft (recipients + body) under
+     * another account (Codex beta review). Captured in [restoreDraftIfAny]; null until then.
+     */
+    private var draftOwner: String? = null
+
     /** #312 — mirror of the persisted « Confirmation avant publication » preference. */
     private var confirmBeforePosting: Boolean = false
 
@@ -100,7 +107,8 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
      */
     private fun restoreDraftIfAny() {
         viewModelScope.launch {
-            val draft = draftStore.load(draftKey) ?: return@launch
+            draftOwner = draftStore.currentOwner()
+            val draft = draftStore.load(draftOwner, draftKey) ?: return@launch
             val hasContent = draft.body.isNotBlank() ||
                 !draft.subject.isNullOrBlank() ||
                 !draft.recipients.isNullOrBlank()
@@ -129,9 +137,10 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         autosaveJob = viewModelScope.launch {
             delay(AUTOSAVE_DEBOUNCE_MS)
             if (body.isBlank() && subject.isBlank() && recipients.isBlank()) {
-                draftStore.delete(draftKey)
+                draftStore.delete(draftOwner, draftKey)
             } else {
                 draftStore.save(
+                    draftOwner,
                     draftKey,
                     EditorDraftStore.Draft(
                         body = body,
@@ -166,7 +175,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         _state.update {
             it.copy(restorableDraft = null, restorableSubject = null, restorableRecipients = null)
         }
-        viewModelScope.launch { draftStore.delete(draftKey) }
+        viewModelScope.launch { draftStore.delete(draftOwner, draftKey) }
     }
 
     private fun loadForm() {
@@ -371,7 +380,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 // #405 — the conversation reached HFR ; the cached draft is now obsolete. Cancel any
                 // pending autosave first so a debounced save can't resurrect the row after delete.
                 autosaveJob?.cancel()
-                viewModelScope.launch { draftStore.delete(draftKey) }
+                viewModelScope.launch { draftStore.delete(draftOwner, draftKey) }
                 _state.update { it.copy(isSubmitting = false, submitError = null) }
                 // The success response of a NEW conversation is not topic-shaped, so the created
                 // threadId is unknown — the host pops back to the MP list and refreshes it.

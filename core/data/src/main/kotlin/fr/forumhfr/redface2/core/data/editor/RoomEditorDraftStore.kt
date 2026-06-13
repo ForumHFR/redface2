@@ -15,13 +15,15 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 /**
- * Room-backed [EditorDraftStore] (#405). The active account is snapshotted per call from
- * [AuthRepository]; with no session both reads and writes are no-ops — an anonymous client cannot
- * post (HFR's write forms require a session), so it has no draft, and a save racing a logout must
- * not write a row the purge pass has already swept (CacheInvalidator wipes by previous pseudo).
+ * Room-backed [EditorDraftStore] (#405). Drafts are keyed by the OWNING account the caller
+ * captured via [currentOwner] when the editor opened, never by whatever account is active when a
+ * late write lands. The row key folds that owner into the domain context key
+ * (`"<ownerId>|<contextKey>"`) so two accounts editing the same topic never collide.
  *
- * The row key folds the owning account into the domain context key (`"<ownerId>|<contextKey>"`)
- * so two accounts editing the same topic never collide. No draft content is ever logged.
+ * [save] additionally drops the write when the captured [owner] is no longer the active account
+ * (switch or logout): a debounced autosave racing an account change must not leak account A's
+ * content under account B, nor revive a row A's logout purge already swept (CacheInvalidator wipes
+ * by the previous pseudo). No draft content is ever logged.
  */
 @Singleton
 class RoomEditorDraftStore @Inject constructor(
@@ -31,8 +33,10 @@ class RoomEditorDraftStore @Inject constructor(
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : EditorDraftStore {
 
-    override suspend fun load(key: String): Draft? = withContext(ioDispatcher) {
-        val owner = activeOwnerId() ?: return@withContext null
+    override suspend fun currentOwner(): String? = withContext(ioDispatcher) { activeOwnerId() }
+
+    override suspend fun load(owner: String?, key: String): Draft? = withContext(ioDispatcher) {
+        if (owner == null) return@withContext null
         editorDraftDao.get(rowKey(owner, key))?.let { entity ->
             Draft(
                 body = entity.body,
@@ -44,9 +48,12 @@ class RoomEditorDraftStore @Inject constructor(
         }
     }
 
-    override suspend fun save(key: String, draft: Draft) {
+    override suspend fun save(owner: String?, key: String, draft: Draft) {
         withContext(ioDispatcher) {
-            val owner = activeOwnerId() ?: return@withContext
+            // No-op for an anonymous session, OR when the session's account is no longer active:
+            // the draft belongs to a session whose owner switched/logged out, so writing it would
+            // leak A's content under B or revive a row the logout purge already swept.
+            if (owner == null || owner != activeOwnerId()) return@withContext
             editorDraftDao.upsert(
                 EditorDraftEntity(
                     draftKey = rowKey(owner, key),
@@ -61,9 +68,9 @@ class RoomEditorDraftStore @Inject constructor(
         }
     }
 
-    override suspend fun delete(key: String) {
+    override suspend fun delete(owner: String?, key: String) {
         withContext(ioDispatcher) {
-            val owner = activeOwnerId() ?: return@withContext
+            if (owner == null) return@withContext
             editorDraftDao.deleteByKey(rowKey(owner, key))
         }
     }
