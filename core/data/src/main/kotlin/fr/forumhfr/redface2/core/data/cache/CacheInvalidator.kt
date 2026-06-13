@@ -4,6 +4,7 @@ import android.util.Log
 import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
+import fr.forumhfr.redface2.core.database.dao.UploadedImageDao
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
@@ -42,6 +43,10 @@ import kotlinx.coroutines.plus
  * drafts (`isPrivate = 0`) are NOT purged here — they survive logout and are bounded only by the
  * app-start retention sweep (cf. `DraftRetentionPurger`).
  *
+ * Uploaded-image traces (`uploaded_images`, #459) are wiped on the same transition: the rows hold
+ * per-account deletion handles and image URLs (private metadata, same contract as
+ * `mp_read_positions`), so none may survive the session that produced them.
+ *
  * On a `Authenticated(A) → Authenticated(B)` switch (login, then logout, then
  * login as someone else), we wipe rows owned by A explicitly. The session
  * cache held in [FlagRepository.clearSessionCache] is also flushed so that the
@@ -55,11 +60,13 @@ import kotlinx.coroutines.plus
  * anonymous prefetch from clobbering authenticated rows.
  */
 @Singleton
+@Suppress("LongParameterList") // All constructor args are injected per-user caches the invalidator aggregates.
 class CacheInvalidator @Inject constructor(
     private val authRepository: AuthRepository,
     private val flagDao: FlagDao,
     private val mpReadPositionDao: MpReadPositionDao,
     private val editorDraftDao: EditorDraftDao,
+    private val uploadedImageDao: UploadedImageDao,
     private val flagRepository: FlagRepository,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
@@ -89,6 +96,8 @@ class CacheInvalidator @Inject constructor(
                         .onFailure { Log.w(LOG_TAG, "Failed to purge MP positions for $previousPseudo", it) }
                     runCatching { editorDraftDao.deletePrivateForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge MP drafts for $previousPseudo", it) }
+                    runCatching { uploadedImageDao.deleteAllForUser(previousPseudo) }
+                        .onFailure { Log.w(LOG_TAG, "Failed to purge uploaded images for $previousPseudo", it) }
                     flagRepository.clearSessionCache()
                 }
             }

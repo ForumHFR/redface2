@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
@@ -1275,6 +1276,16 @@ class TopicFormViewModelTest {
             MutableStateFlow(StartScreenPreference())
 
         override suspend fun setStartScreen(preference: StartScreenPreference) = Unit
+
+        // #459 — upload provider / imgur Client-ID are irrelevant to this ViewModel; default stubs.
+        override fun observeUploadProvider(): Flow<UploadProviderId> =
+            MutableStateFlow(UploadProviderId.DIBERIE)
+
+        override suspend fun setUploadProvider(provider: UploadProviderId) = Unit
+
+        override fun observeImgurClientId(): Flow<String> = MutableStateFlow("")
+
+        override suspend fun setImgurClientId(clientId: String) = Unit
     }
 
     private companion object {

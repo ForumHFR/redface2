@@ -17,6 +17,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
@@ -1614,6 +1615,16 @@ class FlagsViewModelTest {
             MutableStateFlow(StartScreenPreference())
 
         override suspend fun setStartScreen(preference: StartScreenPreference) = Unit
+
+        // #459 — upload provider / imgur Client-ID are irrelevant to FlagsViewModel; default stubs.
+        override fun observeUploadProvider(): Flow<UploadProviderId> =
+            MutableStateFlow(UploadProviderId.DIBERIE)
+
+        override suspend fun setUploadProvider(provider: UploadProviderId) = Unit
+
+        override fun observeImgurClientId(): Flow<String> = MutableStateFlow("")
+
+        override suspend fun setImgurClientId(clientId: String) = Unit
 
         // #312 — confirm-before-posting is irrelevant to FlagsViewModel; stubbed at its default.
         override fun observeConfirmBeforePosting(): Flow<Boolean> = MutableStateFlow(false)
