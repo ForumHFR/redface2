@@ -56,6 +56,24 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 
+/** Upload multi-images — cap on how many images one pick can queue, passed to the photo picker. */
+private const val MAX_IMAGES_PER_UPLOAD = 10
+
+/**
+ * Multi-image upload — « n/N » counter shown under the toolbar while a batch is in flight. Extracted
+ * so [PostEditorContent] stays under the cyclomatic-complexity budget. Emits nothing for a single
+ * image (null progress), which only flips the toolbar spinner.
+ */
+@Composable
+private fun UploadProgressLabel(progress: UploadProgress?) {
+    if (progress == null) return
+    Text(
+        text = stringResource(R.string.editor_upload_progress, progress.completed, progress.total),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
 /**
  * Post-level editor screen. Phase 2C (#145) adds a Submit button that posts the
  * reply via [PostEditorViewModel.submit]. Successful submissions raise a one-shot
@@ -95,14 +113,15 @@ private fun PostEditorContent(
 ) {
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
     var optionsSheetOpen by remember { mutableStateOf(false) }
-    // #459 PR2 — modern Android photo picker (no runtime permission). The contract returns a
-    // nullable Uri ; on a non-null pick we hand the ViewModel the Uri's string so the platform-free
-    // VM reads the bytes via ImageUploadReader and uploads. API confirmed via Context7
-    // (androidx ActivityResultContracts.PickVisualMedia, input PickVisualMediaRequest, output Uri?).
-    val pickImageLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
-        if (uri != null) onIntent(PostEditorIntent.ImagePicked(uri.toString()))
+    // #459 PR2 — modern Android photo picker (no runtime permission). Multi-select variant: the
+    // contract returns a (possibly empty) List<Uri> ; we hand the platform-free VM each Uri's string
+    // and it reads + uploads them sequentially, inserting an [img] per success. API confirmed via
+    // Context7 (androidx ActivityResultContracts.PickMultipleVisualMedia(maxItems), input
+    // PickVisualMediaRequest, output List<Uri>). A single pick is just a one-element list.
+    val pickImagesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(MAX_IMAGES_PER_UPLOAD),
+    ) { uris ->
+        if (uris.isNotEmpty()) onIntent(PostEditorIntent.ImagesPicked(uris.map { it.toString() }))
     }
     // Reply (#145), Quote (#146) and Edit (#147) submit through HFR's reply/edit form ; the other
     // (defensive) modes show a disabled note instead of a submit bar.
@@ -137,12 +156,16 @@ private fun PostEditorContent(
                     onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
                     onImageUrlRequested = { imageUrlDialogOpen = true },
                     onImageUploadRequested = {
-                        pickImageLauncher.launch(
+                        pickImagesLauncher.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
                         )
                     },
                     uploading = state.isUploading,
                 )
+
+                // Multi-image upload — « n/N » progress under the toolbar while a batch (> 1 image)
+                // is in flight. A single upload keeps uploadProgress null (toolbar spinner only).
+                UploadProgressLabel(state.uploadProgress)
 
                 BbcodeTextField(
                     value = state.draft,

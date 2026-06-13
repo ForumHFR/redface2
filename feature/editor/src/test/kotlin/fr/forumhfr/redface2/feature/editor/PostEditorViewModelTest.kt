@@ -1205,6 +1205,95 @@ class PostEditorViewModelTest {
         assertNull("dismissing clears the upload error", viewModel.state.value.uploadError)
     }
 
+    @Test
+    fun `ImagesPicked uploads every image and inserts an img per success in pick order`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        uploadRepository.uploadResults = listOf(
+            Result.success(uploadedImage("https://h/Picture/Get/f/1")),
+            Result.success(uploadedImage("https://h/Picture/Get/f/2")),
+            Result.success(uploadedImage("https://h/Picture/Get/f/3")),
+        )
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(
+            PostEditorIntent.ImagesPicked(listOf("content://x/1", "content://x/2", "content://x/3")),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("every picked image is uploaded", 3, uploadRepository.uploadCalls)
+        val state = viewModel.state.value
+        val expected = "[img]https://h/Picture/Get/f/1[/img]" +
+            "[img]https://h/Picture/Get/f/2[/img]" +
+            "[img]https://h/Picture/Get/f/3[/img]"
+        assertEquals("one [img] per image, concatenated in pick order", expected, state.draft.text)
+        assertFalse("upload flag cleared at the end of the batch", state.isUploading)
+        assertNull("progress cleared at the end of the batch", state.uploadProgress)
+        assertNull("no error on a fully successful batch", state.uploadError)
+    }
+
+    @Test
+    fun `ImagesPicked exposes n of N progress and clears it when the batch ends`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        val gate = CompletableDeferred<Unit>()
+        uploadRepository.uploadGate = gate
+        uploadRepository.uploadResults = listOf(
+            Result.success(uploadedImage("https://h/1")),
+            Result.success(uploadedImage("https://h/2")),
+        )
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ImagesPicked(listOf("content://x/1", "content://x/2")))
+        testScheduler.runCurrent()
+        assertEquals(
+            "a multi-image batch starts at 0/N",
+            UploadProgress(completed = 0, total = 2),
+            viewModel.state.value.uploadProgress,
+        )
+        assertTrue("isUploading is true while the batch runs", viewModel.state.value.isUploading)
+
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+        assertNull("progress cleared once the batch resolves", viewModel.state.value.uploadProgress)
+        assertFalse("isUploading cleared once the batch resolves", viewModel.state.value.isUploading)
+    }
+
+    @Test
+    fun `ImagesPicked stops at the first failure and keeps the earlier images inserted`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        uploadRepository.uploadResults = listOf(
+            Result.success(uploadedImage("https://h/Picture/Get/f/1")),
+            Result.failure(UploadException.Server(code = 500, providerId = UploadProviderId.DIBERIE)),
+            Result.success(uploadedImage("https://h/Picture/Get/f/3")),
+        )
+        val viewModel = newReplyViewModel(authRepository = authRepository)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(
+            PostEditorIntent.ImagesPicked(listOf("content://x/1", "content://x/2", "content://x/3")),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("the batch stops after the failing upload — no 3rd attempt", 2, uploadRepository.uploadCalls)
+        val state = viewModel.state.value
+        assertEquals(
+            "only the image uploaded before the failure is inserted",
+            "[img]https://h/Picture/Get/f/1[/img]",
+            state.draft.text,
+        )
+        assertEquals(
+            "the typed error from the failing upload surfaces",
+            UploadError.Server(code = 500, providerId = UploadProviderId.DIBERIE),
+            state.uploadError,
+        )
+        assertFalse("upload flag cleared on failure", state.isUploading)
+        assertNull("progress cleared on failure", state.uploadProgress)
+    }
+
     private fun newEditViewModel(
         subcat: Int? = SAMPLE_SUBCAT,
         numreponse: Int? = SAMPLE_EDITED_NUMREPONSE,
@@ -1894,6 +1983,13 @@ class PostEditorViewModelTest {
         )
         var uploadException: Throwable? = null
         var uploadGate: CompletableDeferred<Unit>? = null
+
+        /**
+         * Multi-image upload — per-call outcomes, consumed in order (call N → `uploadResults[N-1]`).
+         * When set it takes precedence over [uploadResult] / [uploadException], so a test can make
+         * the 2nd of three uploads fail and assert the batch stops there.
+         */
+        var uploadResults: List<Result<UploadedImage>>? = null
         var uploadCalls: Int = 0
             private set
         var lastUserId: String? = null
@@ -1903,6 +1999,7 @@ class PostEditorViewModelTest {
             uploadCalls += 1
             lastUserId = userId
             uploadGate?.await()
+            uploadResults?.let { return it[uploadCalls - 1].getOrThrow() }
             uploadException?.let { throw it }
             return uploadResult
         }

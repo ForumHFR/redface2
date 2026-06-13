@@ -114,6 +114,12 @@ data class PostEditorState(
      * error to show ». Cleared on a fresh content mutation or via [PostEditorIntent.UploadErrorDismissed].
      */
     val uploadError: UploadError? = null,
+    /**
+     * Multi-image upload — progress of the in-flight batch, or null when no batch (or a single
+     * image) is uploading. [UploadProgress.total] > 1 is what the editor uses to show an « n/N »
+     * counter; a one-image upload keeps this null and only flips [isUploading].
+     */
+    val uploadProgress: UploadProgress? = null,
 ) {
     /**
      * Submission is allowed when : we know the routing context (page + subcat + topicId),
@@ -184,6 +190,12 @@ sealed interface UploadError {
     /** No network / DNS / timeout — also covers an unreadable picked Uri (mapped to Network). */
     data object Network : UploadError
 }
+
+/**
+ * Progress of a multi-image upload batch: [completed] images uploaded and inserted out of [total]
+ * picked. Surfaced as an « n/N » counter while [PostEditorState.isUploading] is true.
+ */
+data class UploadProgress(val completed: Int, val total: Int)
 
 
 

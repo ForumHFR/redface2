@@ -221,6 +221,7 @@ class PostEditorViewModel @AssistedInject constructor(
             is PostEditorIntent.SmileySelected -> onSmileySelected(intent.token)
             is PostEditorIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
             is PostEditorIntent.ImagePicked -> onImagePicked(intent.uri)
+            is PostEditorIntent.ImagesPicked -> onImagesPicked(intent.uris)
             PostEditorIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
             PostEditorIntent.DraftRestoreRequested -> onDraftRestoreRequested()
             PostEditorIntent.DraftDiscardRequested -> onDraftDiscardRequested()
@@ -409,29 +410,55 @@ class PostEditorViewModel @AssistedInject constructor(
      * the providers require an HFR session for the trace, and surfacing « connectez-vous » here
      * would duplicate the submit-time LoginRequired surface.
      */
-    private fun onImagePicked(uri: String) {
-        if (uploadJob?.isActive == true) return
-        val userId = activeUserId ?: return
-        _state.update { it.copy(isUploading = true, uploadError = null) }
-        uploadJob = viewModelScope.launch {
-            val outcome = runCatching {
-                val image = imageUploadReader.read(uri)
-                uploadRepository.uploadWithCurrentProvider(image, userId)
-            }
-            outcome.fold(
-                onSuccess = { uploaded ->
-                    insertImageUrlAtCaret(uploaded.imageUrl)
-                    _state.update { it.copy(isUploading = false, uploadError = null) }
-                    scheduleAutosave()
-                },
-                onFailure = ::handleUploadFailure,
+    private fun onImagePicked(uri: String) = onImagesPicked(listOf(uri))
+
+    /**
+     * Multi-image upload — uploads the picked [uris] sequentially (one in-flight at a time, same
+     * job/gate as the single path) and inserts `[img]url[/img]` at the caret for each success, in
+     * pick order (each insertion advances the caret so the next lands after it). The batch stops at
+     * the first failure: the already-inserted images stay and the typed [UploadError] is surfaced —
+     * the user fixes the cause and re-picks the rest. A blank list, an anonymous client (no userId),
+     * or an upload already in flight are ignored. [PostEditorState.uploadProgress] carries an « n/N »
+     * counter while more than one image is in the batch (null for a single image).
+     */
+    private fun onImagesPicked(uris: List<String>) {
+        val userId = activeUserId
+        val targets = uris.filter { it.isNotBlank() }
+        // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.
+        if (uploadJob?.isActive == true || userId == null || targets.isEmpty()) return
+        val multiple = targets.size > 1
+        _state.update {
+            it.copy(
+                isUploading = true,
+                uploadError = null,
+                uploadProgress = if (multiple) UploadProgress(completed = 0, total = targets.size) else null,
             )
+        }
+        uploadJob = viewModelScope.launch {
+            var completed = 0
+            for (uri in targets) {
+                val outcome = runCatching {
+                    val image = imageUploadReader.read(uri)
+                    uploadRepository.uploadWithCurrentProvider(image, userId)
+                }
+                val uploaded = outcome.getOrElse { error ->
+                    handleUploadFailure(error)
+                    return@launch
+                }
+                insertImageUrlAtCaret(uploaded.imageUrl)
+                completed += 1
+                if (multiple) {
+                    _state.update { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
+                }
+            }
+            _state.update { it.copy(isUploading = false, uploadError = null, uploadProgress = null) }
+            scheduleAutosave()
         }
     }
 
     private fun handleUploadFailure(error: Throwable) {
         if (error is CancellationException) {
-            _state.update { it.copy(isUploading = false) }
+            _state.update { it.copy(isUploading = false, uploadProgress = null) }
             throw error
         }
         val mapped = when (error) {
@@ -449,7 +476,7 @@ class PostEditorViewModel @AssistedInject constructor(
             LOG_TAG_VM,
             "image upload failed: ${error::class.simpleName} → ${mapped::class.simpleName}",
         )
-        _state.update { it.copy(isUploading = false, uploadError = mapped) }
+        _state.update { it.copy(isUploading = false, uploadError = mapped, uploadProgress = null) }
     }
 
     private fun onContentChanged(value: TextFieldValue) {
