@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
+import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -159,10 +160,13 @@ sealed interface SubmitError {
 }
 
 /**
- * #459 PR2 — UI-facing image-upload failure. Maps the `:core:domain`
+ * #459 PR2 / #474 — UI-facing image-upload failure. Maps the `:core:domain`
  * [fr.forumhfr.redface2.core.domain.upload.UploadException] variants onto an actionable message
- * (too large / unsupported type / host outage / network / unreadable) instead of a generic
- * « échec ». Anonymous clients never get here — the ViewModel ignores a pick without a userId.
+ * (too large / unsupported type / host HTTP error / unreadable host response / network) instead of
+ * a generic « erreur de l'hébergeur ». The HTTP [Server] case carries the status [code] and the
+ * [providerId] so the banner can name the host and the exact code (#474); [Malformed] stays distinct
+ * so an unreadable-but-2xx body reads differently from a flat HTTP refusal. Anonymous clients never
+ * get here — the ViewModel ignores a pick without a userId.
  */
 sealed interface UploadError {
     /** The picked image exceeds the host's accepted size. */
@@ -171,8 +175,11 @@ sealed interface UploadError {
     /** The host rejected the MIME type. */
     data object UnsupportedType : UploadError
 
-    /** The host answered a non-2xx status, or 2xx with an unreadable body. */
-    data object Host : UploadError
+    /** The host answered a non-2xx HTTP status. [code] is the status, [providerId] the host (#474). */
+    data class Server(val code: Int, val providerId: UploadProviderId) : UploadError
+
+    /** The host answered 2xx but the body could not be parsed into the expected shape (#474). */
+    data class Malformed(val providerId: UploadProviderId) : UploadError
 
     /** No network / DNS / timeout — also covers an unreadable picked Uri (mapped to Network). */
     data object Network : UploadError
