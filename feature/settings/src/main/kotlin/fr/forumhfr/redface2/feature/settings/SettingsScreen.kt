@@ -55,6 +55,9 @@ fun SettingsScreen(
     // #459 PR3 — navigates to the « Mes images uploadées » screen. Default no-op so previews and
     // the multi-pane illustrative call sites stay valid ; wired from RedfaceApp.
     onOpenMyImages: () -> Unit = {},
+    // #6 — navigates to the read-only MPStorage inspector (debug). Only surfaced when the DT section
+    // is enabled (gated below). Default no-op so previews / illustrative call sites stay valid.
+    onOpenMpStorageInspector: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
     // #458 — the « Démarrage » section has its own ViewModel (cf. its KDoc).
     startScreenViewModel: StartScreenSettingsViewModel = hiltViewModel(),
@@ -66,14 +69,15 @@ fun SettingsScreen(
         onIntent = viewModel::submit,
         modifier = modifier,
         onOpenMyImages = onOpenMyImages,
+        onOpenMpStorageInspector = onOpenMpStorageInspector,
         startScreenState = startScreenState,
         onStartScreenIntent = startScreenViewModel::submit,
     )
 }
 
 // MVI screen content : state + intent + modifier + rappels de navigation/feature (#458 démarrage,
-// #459 « Mes images »). 6 paramètres = la surface complète de l'écran ; les regrouper derrière un
-// objet masquerait le site d'appel sans gain réel. Seuil detekt LongParameterList à 6.
+// #459 « Mes images », #6 inspecteur MPStorage). 7 paramètres = la surface complète de l'écran ;
+// les regrouper derrière un objet masquerait le site d'appel sans gain réel.
 @Suppress("LongParameterList")
 @Composable
 internal fun SettingsContent(
@@ -81,6 +85,7 @@ internal fun SettingsContent(
     onIntent: (SettingsIntent) -> Unit,
     modifier: Modifier = Modifier,
     onOpenMyImages: () -> Unit = {},
+    onOpenMpStorageInspector: () -> Unit = {},
     startScreenState: StartScreenSettingsState = StartScreenSettingsState(),
     onStartScreenIntent: (StartScreenSettingsIntent) -> Unit = {},
 ) {
@@ -297,6 +302,11 @@ internal fun SettingsContent(
                 state = state,
                 onIntent = onIntent,
             )
+            // #6 — read-only MPStorage inspector (debug). Gated on the DT section toggle so it stays
+            // hidden from regular users and only power users who opted into DT features see it.
+            if (state.showDtSection) {
+                MpStorageInspectorCard(onOpen = onOpenMpStorageInspector)
+            }
             FutureSettingsCard(
                 items = listOf(
                     R.string.settings_future_mp_notifications to issueTag(313),
@@ -765,6 +775,37 @@ private fun MyImagesCard(onOpenMyImages: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.settings_my_images_open))
+            }
+        }
+    }
+}
+
+/**
+ * #6 — entry point to the read-only MPStorage inspector. Same shape as [MyImagesCard] (a routing
+ * card, not a preference toggle). Only rendered when the DT section is enabled (see call site).
+ */
+@Composable
+private fun MpStorageInspectorCard(onOpen: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_mpstorage_inspector_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.settings_mpstorage_inspector_description),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = onOpen,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.settings_mpstorage_inspector_open))
             }
         }
     }
