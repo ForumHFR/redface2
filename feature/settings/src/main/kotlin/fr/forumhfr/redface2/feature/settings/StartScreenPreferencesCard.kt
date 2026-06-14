@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -12,9 +11,6 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,12 +21,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
+import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
+import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
 
 /**
- * Settings card « Écran de démarrage » (#458): segmented choice of the cold-start tab, plus —
+ * Settings block « Écran de démarrage » (#458): segmented choice of the cold-start tab, plus —
  * for the Forum tab — an optional category picker (« Accueil du forum » = no pre-stacked
  * category). The selection applies on the NEXT launch (the intro line says so): the running
  * session is never teleported.
+ *
+ * #494 — the surrounding `Card` was dropped: the block now renders inline inside the settings
+ * `LazyColumn` (the « Démarrage » section stays at the root, it is not a sub-page). The 3-way
+ * selector uses the shared [RedfaceSettingsChoiceGroup]; the category picker keeps its bespoke
+ * `ExposedDropdownMenuBox` (not covered by the list primitives).
  */
 @Composable
 internal fun StartScreenPreferencesCard(
@@ -38,43 +41,32 @@ internal fun StartScreenPreferencesCard(
     onIntent: (StartScreenSettingsIntent) -> Unit,
 ) {
     val options = listOf(
-        StartScreenChoice.FLAGS to stringResource(R.string.settings_start_screen_flags),
-        StartScreenChoice.FORUM to stringResource(R.string.settings_start_screen_forum),
-        StartScreenChoice.MESSAGES to stringResource(R.string.settings_start_screen_messages),
+        RedfaceSettingsChoice(StartScreenChoice.FLAGS, stringResource(R.string.settings_start_screen_flags)),
+        RedfaceSettingsChoice(StartScreenChoice.FORUM, stringResource(R.string.settings_start_screen_forum)),
+        RedfaceSettingsChoice(StartScreenChoice.MESSAGES, stringResource(R.string.settings_start_screen_messages)),
     )
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.settings_start_screen_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = stringResource(R.string.settings_start_screen_intro),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                options.forEachIndexed { index, (choice, label) ->
-                    SegmentedButton(
-                        selected = state.preference.screen == choice,
-                        enabled = state.canChange,
-                        onClick = { onIntent(StartScreenSettingsIntent.ScreenChanged(choice)) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
-                    ) {
-                        Text(label)
-                    }
-                }
-            }
-            if (state.preference.screen == StartScreenChoice.FORUM) {
-                StartForumCategoryPicker(state = state, onIntent = onIntent)
-            }
-            if (state.persistError) {
-                PreferencePersistError(R.string.settings_start_screen_persist_failed)
-            }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.settings_start_screen_intro),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        RedfaceSettingsChoiceGroup(
+            options = options,
+            selected = state.preference.screen,
+            onSelected = { onIntent(StartScreenSettingsIntent.ScreenChanged(it)) },
+            enabled = state.canChange,
+        )
+        if (state.preference.screen == StartScreenChoice.FORUM) {
+            StartForumCategoryPicker(state = state, onIntent = onIntent)
+        }
+        if (state.persistError) {
+            PreferencePersistError(R.string.settings_start_screen_persist_failed)
         }
     }
 }

@@ -1,1183 +1,516 @@
 package fr.forumhfr.redface2.feature.settings
 
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Arrangement
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
-import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
-import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
-import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
-import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsListItem
+import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsSection
+import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsSearchTopBar
 
+/**
+ * #494 — root of the redesigned settings catalogue.
+ *
+ * A `Scaffold` + [RedfaceSettingsSearchTopBar] + `LazyColumn`, replacing the former
+ * `Surface` / `verticalScroll` + stack of `Card`s. The catalogue is structured in sections; rows are
+ * either toggles (a trailing `Switch`, wired straight to [SettingsViewModel.submit]) or navigation
+ * rows (a trailing chevron, routing to a sub-page). The « Démarrage » block is rendered inline at the
+ * root (it is a category picker, not a sub-page). Heavy areas — Proxy, Maintenance, Affichage, Images,
+ * Compte/À propos — are sub-pages reached from navigation rows.
+ *
+ * Search is a local `rememberSaveable` state (no DataStore persistence): the catalogue is mapped to a
+ * pure [SettingsSearchableSection] list and filtered via [filterSettingsSections]. Each kept item is
+ * rendered by id from a `renderers` map, so the pure (testable) filter and the Compose rendering stay
+ * decoupled. Future (disabled) rows stay searchable; gated rows (e.g. the DT inspector while the DT
+ * section is off) are `visible = false` and excluded.
+ *
+ * Two distinct ViewModels coexist in this nav entry: [viewModel] (preferences) and
+ * [startScreenViewModel] (#458 « Démarrage ») — both `hiltViewModel()` in the same `ViewModelStore`.
+ */
 @Composable
+@Suppress("LongParameterList") // state-hoisted Composable: 5 sub-page nav callbacks + back + 2 VMs, each distinct.
 fun SettingsScreen(
+    onBack: () -> Unit,
+    onOpenProxy: () -> Unit,
+    onOpenMaintenance: () -> Unit,
+    onOpenDisplay: () -> Unit,
+    onOpenImages: () -> Unit,
+    onOpenAccountAbout: () -> Unit,
     modifier: Modifier = Modifier,
-    // #459 PR3 — navigates to the « Mes images uploadées » screen. Default no-op so previews and
-    // the multi-pane illustrative call sites stay valid ; wired from RedfaceApp.
-    onOpenMyImages: () -> Unit = {},
-    // #6 — navigates to the read-only MPStorage inspector (debug). Only surfaced when the DT section
-    // is enabled (gated below). Default no-op so previews / illustrative call sites stay valid.
-    onOpenMpStorageInspector: () -> Unit = {},
+    topBarActions: @Composable (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
-    // #458 — the « Démarrage » section has its own ViewModel (cf. its KDoc).
     startScreenViewModel: StartScreenSettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val startScreenState by startScreenViewModel.state.collectAsStateWithLifecycle()
-    SettingsContent(
+    SettingsCatalogue(
         state = state,
         onIntent = viewModel::submit,
-        modifier = modifier,
-        onOpenMyImages = onOpenMyImages,
-        onOpenMpStorageInspector = onOpenMpStorageInspector,
         startScreenState = startScreenState,
         onStartScreenIntent = startScreenViewModel::submit,
+        onBack = onBack,
+        onOpenProxy = onOpenProxy,
+        onOpenMaintenance = onOpenMaintenance,
+        onOpenDisplay = onOpenDisplay,
+        onOpenImages = onOpenImages,
+        onOpenAccountAbout = onOpenAccountAbout,
+        modifier = modifier,
+        topBarActions = topBarActions,
     )
 }
 
-// MVI screen content : state + intent + modifier + rappels de navigation/feature (#458 démarrage,
-// #459 « Mes images », #6 inspecteur MPStorage). 7 paramètres = la surface complète de l'écran ;
-// les regrouper derrière un objet masquerait le site d'appel sans gain réel.
-@Suppress("LongParameterList")
+// 12 navigation/intent callbacks + state make the explicit surface; grouping them behind an object
+// would hide the call site. The two VMs are observed in [SettingsScreen]; this content is the
+// stateless catalogue body so it stays previewable/testable without Hilt.
+@Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod")
 @Composable
-internal fun SettingsContent(
+internal fun SettingsCatalogue(
     state: SettingsState,
     onIntent: (SettingsIntent) -> Unit,
+    startScreenState: StartScreenSettingsState,
+    onStartScreenIntent: (StartScreenSettingsIntent) -> Unit,
+    onBack: () -> Unit,
+    onOpenProxy: () -> Unit,
+    onOpenMaintenance: () -> Unit,
+    onOpenDisplay: () -> Unit,
+    onOpenImages: () -> Unit,
+    onOpenAccountAbout: () -> Unit,
     modifier: Modifier = Modifier,
-    onOpenMyImages: () -> Unit = {},
-    onOpenMpStorageInspector: () -> Unit = {},
-    startScreenState: StartScreenSettingsState = StartScreenSettingsState(),
-    onStartScreenIntent: (StartScreenSettingsIntent) -> Unit = {},
+    topBarActions: @Composable (() -> Unit)? = null,
 ) {
-    Surface(
+    var searchActive by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+
+    // System/gesture back closes the active search (without popping the Settings route, which is what
+    // nav3 would otherwise do). Disabled when search is closed so normal back navigation proceeds.
+    BackHandler(enabled = searchActive) {
+        searchActive = false
+        query = ""
+    }
+
+    // The renderable catalogue: each row carries its search metadata AND its Compose renderer. The
+    // pure model fed to [filterSettingsSections] is derived from it (so the filter stays Android-free).
+    val sections = buildSettingsCatalogue(
+        state = state,
+        onIntent = onIntent,
+        startScreenState = startScreenState,
+        onStartScreenIntent = onStartScreenIntent,
+        onOpenProxy = onOpenProxy,
+        onOpenMaintenance = onOpenMaintenance,
+        onOpenDisplay = onOpenDisplay,
+        onOpenImages = onOpenImages,
+        onOpenAccountAbout = onOpenAccountAbout,
+    )
+    val renderers: Map<String, @Composable () -> Unit> = sections
+        .flatMap { it.items }
+        .associate { it.searchable.id to it.render }
+    val filtered = filterSettingsSections(sections.map { it.toSearchable() }, query)
+
+    Scaffold(
         modifier = modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.surface,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                // Applied OUTSIDE verticalScroll so the keyboard inset shrinks the scroll viewport: a
-                // focused proxy field then stays above the IME (adjustNothing means the OEM no longer
-                // resizes the window for us, cf. #624). union() keeps navBar clearance when closed.
-                .windowInsetsPadding(
-                    WindowInsets.navigationBars
-                        .union(WindowInsets.ime)
-                        .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
+        topBar = {
+            RedfaceSettingsSearchTopBar(
+                labels = rememberSettingsSearchTopBarLabels(),
+                searchActive = searchActive,
+                query = query,
+                onQueryChange = { query = it },
+                onSearchActiveChange = { active ->
+                    searchActive = active
+                    if (!active) query = ""
+                },
+                onBack = onBack,
+                actions = { topBarActions?.invoke() },
+            )
+        },
+    ) { innerPadding ->
+        if (filtered.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_search_empty),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.settings_title),
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            // #288 — distinguish local (DataStore) preferences from HFR-account settings, and frame the
-            // screen as the full catalogue: shipped settings are interactive, planned ones are shown
-            // greyed with a phase/issue tag (a showcase of the roadmap, cf. the issue's design notes).
-            Text(
-                text = stringResource(R.string.settings_intro),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            SettingsSectionHeader(stringResource(R.string.settings_section_network))
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.settings_proxy_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = stringResource(R.string.settings_proxy_intro),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = stringResource(R.string.settings_proxy_enabled),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Switch(
-                            checked = state.proxyEnabled,
-                            onCheckedChange = { onIntent(SettingsIntent.ProxyEnabledChanged(it)) },
-                        )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+            ) {
+                filtered.forEachIndexed { sectionIndex, section ->
+                    item(key = "section:${section.id}") {
+                        if (sectionIndex > 0) HorizontalDivider()
+                        RedfaceSettingsSection(section.title)
                     }
-                    OutlinedTextField(
-                        value = state.proxyHost,
-                        onValueChange = { onIntent(SettingsIntent.ProxyHostChanged(it)) },
-                        enabled = state.proxyEnabled,
-                        singleLine = true,
-                        label = { Text(stringResource(R.string.settings_proxy_host)) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = state.proxyPort,
-                        onValueChange = { onIntent(SettingsIntent.ProxyPortChanged(it)) },
-                        enabled = state.proxyEnabled,
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        label = { Text(stringResource(R.string.settings_proxy_port)) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = state.proxyUsername,
-                        onValueChange = { onIntent(SettingsIntent.ProxyUsernameChanged(it)) },
-                        enabled = state.proxyEnabled,
-                        singleLine = true,
-                        label = { Text(stringResource(R.string.settings_proxy_username)) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = state.proxyPassword,
-                        onValueChange = { onIntent(SettingsIntent.ProxyPasswordChanged(it)) },
-                        enabled = state.proxyEnabled,
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        label = { Text(stringResource(R.string.settings_proxy_password)) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        text = stringResource(R.string.settings_proxy_scope),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (state.error == SettingsError.InvalidProxy) {
-                        Text(
-                            text = stringResource(R.string.settings_proxy_invalid),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                    if (state.error == SettingsError.PersistFailed) {
-                        Text(
-                            text = stringResource(R.string.settings_proxy_persist_failed),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                    if (state.saved) {
-                        Text(
-                            text = stringResource(R.string.settings_proxy_saved),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                    Button(
-                        enabled = state.canSave,
-                        onClick = { onIntent(SettingsIntent.SaveProxyClicked) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.settings_proxy_save))
+                    items(section.items, key = { "item:${it.id}" }) { item ->
+                        renderers[item.id]?.invoke()
                     }
                 }
             }
-
-            MaintenanceCard(
-                state = state,
-                onIntent = onIntent,
-            )
-            FutureSettingsCard(
-                items = listOf(
-                    R.string.settings_future_data_saver to issueTag(310),
-                ),
-            )
-
-            SettingsSectionHeader(stringResource(R.string.settings_section_start))
-            StartScreenPreferencesCard(
-                state = startScreenState,
-                onIntent = onStartScreenIntent,
-            )
-
-            SettingsSectionHeader(stringResource(R.string.settings_section_display))
-            ThemePreferencesCard(
-                state = state,
-                onIntent = onIntent,
-            )
-            DisplayPreferencesCard(
-                state = state,
-                onIntent = onIntent,
-            )
-            FutureSettingsCard(
-                items = listOf(
-                    R.string.settings_future_ui_colors to issueTag(296),
-                    R.string.settings_future_material_you to stringResource(R.string.settings_phase_future),
-                    R.string.settings_future_classic_theme to stringResource(R.string.settings_phase_future_far),
-                ),
-            )
-
-            SettingsSectionHeader(stringResource(R.string.settings_section_flags))
-            FlagsPreferencesCard(
-                state = state,
-                onIntent = onIntent,
-            )
-            FutureSettingsCard(
-                items = listOf(
-                    R.string.settings_future_flags_on_listing to issueTag(297),
-                ),
-            )
-
-            SettingsSectionHeader(stringResource(R.string.settings_section_topic))
-            TopicPreferencesCard(
-                state = state,
-                onIntent = onIntent,
-            )
-            FutureSettingsCard(
-                items = listOf(
-                    R.string.settings_future_prefetch to stringResource(R.string.settings_phase_future),
-                ),
-            )
-
-            SettingsSectionHeader(stringResource(R.string.settings_section_editing))
-            EditingPreferencesCard(
-                state = state,
-                onIntent = onIntent,
-            )
-            FutureSettingsCard(
-                items = listOf(
-                    R.string.settings_future_signature to stringResource(R.string.settings_phase_planned),
-                ),
-            )
-
-            SettingsSectionHeader(stringResource(R.string.settings_section_images))
-            UploadProviderPreferencesCard(
-                state = state,
-                onIntent = onIntent,
-            )
-            MyImagesCard(onOpenMyImages = onOpenMyImages)
-
-            SettingsSectionHeader(stringResource(R.string.settings_section_mp))
-            MessagesPreferencesCard(
-                state = state,
-                onIntent = onIntent,
-            )
-            // #6 — read-only MPStorage inspector (debug). Gated on the DT section toggle so it stays
-            // hidden from regular users and only power users who opted into DT features see it.
-            if (state.showDtSection) {
-                MpStorageInspectorCard(onOpen = onOpenMpStorageInspector)
-            }
-            FutureSettingsCard(
-                items = listOf(
-                    R.string.settings_future_mp_notifications to issueTag(313),
-                ),
-            )
-
-            SettingsSectionHeader(stringResource(R.string.settings_section_hfr_account))
-            Text(
-                text = stringResource(R.string.settings_hfr_account_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            FutureSettingsCard(
-                items = listOf(
-                    R.string.settings_future_hfr_profile to issueTag(311),
-                ),
-            )
-
-            SettingsSectionHeader(stringResource(R.string.settings_section_notifications))
-            FutureSettingsCard(
-                items = listOf(
-                    R.string.settings_future_notifications to stringResource(R.string.settings_phase_5),
-                ),
-            )
-
-            SettingsSectionHeader(stringResource(R.string.settings_section_accessibility))
-            FutureSettingsCard(
-                items = listOf(
-                    R.string.settings_future_timezone to stringResource(R.string.settings_phase_future),
-                    R.string.settings_future_multilang to stringResource(R.string.settings_phase_future),
-                ),
-            )
-
-            SettingsSectionHeader(stringResource(R.string.settings_section_extensions))
-            FutureSettingsCard(
-                items = listOf(
-                    R.string.settings_future_extensions to issueTag(7),
-                ),
-            )
-        }
-    }
-
-    if (state.showClearTopicCacheConfirm) {
-        ClearTopicCacheConfirmDialog(
-            onConfirm = { onIntent(SettingsIntent.ClearTopicCacheConfirmed) },
-            onDismiss = { onIntent(SettingsIntent.ClearTopicCacheDismissed) },
-        )
-    }
-    if (state.showClearImageCacheConfirm) {
-        ClearImageCacheConfirmDialog(
-            onConfirm = { onIntent(SettingsIntent.ClearImageCacheConfirmed) },
-            onDismiss = { onIntent(SettingsIntent.ClearImageCacheDismissed) },
-        )
-    }
-}
-
-/**
- * #288 — a section header that structures the catalogue by area (Affichage, Drapeaux, …).
- */
-@Composable
-private fun SettingsSectionHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 8.dp),
-    )
-}
-
-/**
- * #288 — formats the tag pill for a planned setting backed by a GitHub issue (e.g. `#310`). The
- * issue number is a technical identifier, but the `#` prefix still goes through a string resource to
- * keep all displayed text localizable. Phase words ("À venir", "Phase 5", …) are passed directly.
- */
-@Composable
-private fun issueTag(number: Int): String = stringResource(R.string.settings_future_issue_tag, number)
-
-/**
- * #288 — a card grouping planned (not-yet-shipped) settings as non-interactive, greyed rows so the
- * screen shows the full roadmap "for free". Each [items] entry pairs a title string-res with a tag
- * (an issue reference via [issueTag], or a localized phase word resolved at the call site). Renders
- * nothing for an empty list so callers never produce a stray empty card.
- */
-@Composable
-private fun FutureSettingsCard(items: List<Pair<Int, String>>) {
-    if (items.isEmpty()) return
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items.forEach { (titleRes, tag) ->
-                FutureSettingRow(title = stringResource(titleRes), tag = tag)
-            }
         }
     }
 }
 
-/**
- * One planned setting: title in the muted `onSurfaceVariant` colour (the M3 idiom for "not active",
- * preferred over a blanket `Modifier.alpha`) and a small tag pill. Non-interactive by design.
- */
-@Composable
-private fun FutureSettingRow(title: String, tag: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f, fill = false),
-        )
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-            shape = MaterialTheme.shapes.small,
-        ) {
-            Text(
-                text = tag,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-            )
-        }
-    }
+/** A catalogue row: its pure search metadata plus the Compose renderer that draws it. */
+internal data class SettingsCatalogueRow(
+    val searchable: SettingsSearchableItem,
+    val render: @Composable () -> Unit,
+)
+
+/** A catalogue section paired with its renderable rows. */
+internal data class SettingsCatalogueSection(
+    val id: String,
+    val title: String,
+    val items: List<SettingsCatalogueRow>,
+) {
+    fun toSearchable(): SettingsSearchableSection =
+        SettingsSearchableSection(id = id, title = title, items = items.map { it.searchable })
 }
 
 /**
- * Theme preferences (#286): a 3-way Clair / Système / Sombre selector (SYSTEM follows the OS),
- * plus an AMOLED true-black toggle that only applies when the effective theme is dark. Persisted via
- * DataStore; the selection is observed at the app root ([fr.forumhfr.redface2.navigation.RedfaceApp])
- * so a change here re-themes the whole app live.
+ * Builds the root catalogue from resolved strings + [state]. Keeps the search metadata and the
+ * renderer side by side so a row is described once. Toggle rows wire straight to [onIntent]; nav rows
+ * route to a sub-page.
  */
+@Suppress("LongMethod", "LongParameterList")
 @Composable
-private fun ThemePreferencesCard(
+private fun buildSettingsCatalogue(
     state: SettingsState,
     onIntent: (SettingsIntent) -> Unit,
-) {
-    // The AMOLED toggle is only meaningful when the app will actually render dark — forced DARK, or
-    // SYSTEM while the OS is in dark mode. Computed here so the switch is disabled otherwise.
-    val effectiveDark = when (state.themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    }
-    val options = listOf(
-        ThemeMode.LIGHT to stringResource(R.string.settings_theme_light),
-        ThemeMode.SYSTEM to stringResource(R.string.settings_theme_system),
-        ThemeMode.DARK to stringResource(R.string.settings_theme_dark),
-    )
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.settings_theme_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = stringResource(R.string.settings_theme_intro),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                options.forEachIndexed { index, (mode, label) ->
-                    SegmentedButton(
-                        selected = state.themeMode == mode,
-                        enabled = state.canChangeThemeMode,
-                        onClick = { onIntent(SettingsIntent.ThemeModeChanged(mode)) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
-                    ) {
-                        Text(label)
-                    }
-                }
-            }
-            if (state.themeModeError) {
-                PreferencePersistError(R.string.settings_theme_persist_failed)
-            }
-            PreferenceSwitchRow(
-                title = stringResource(R.string.settings_theme_amoled_title),
-                description = stringResource(R.string.settings_theme_amoled_description),
-                checked = state.amoledEnabled,
-                enabled = state.canToggleAmoled && effectiveDark,
-                onCheckedChange = { onIntent(SettingsIntent.AmoledEnabledChanged(it)) },
-            )
-            if (state.amoledError) {
-                PreferencePersistError(R.string.settings_theme_amoled_persist_failed)
-            }
-        }
-    }
-}
-
-/**
- * Reading display presets (#287): a density preset (Confort / Compact, structural spacing) and a
- * reading font-size preset (S / M / L). Both are persisted via DataStore and observed at the app
- * root, so a change here re-themes the whole app live. Text-only segmented buttons (no Material
- * icons — the `androidx.compose.material.*` import is forbidden project-wide).
- */
-@Composable
-private fun DisplayPreferencesCard(
-    state: SettingsState,
-    onIntent: (SettingsIntent) -> Unit,
-) {
-    val densityOptions = listOf(
-        DisplayDensity.COMFORT to stringResource(R.string.settings_display_density_comfort),
-        DisplayDensity.COMPACT to stringResource(R.string.settings_display_density_compact),
-    )
-    val fontScaleOptions = listOf(
-        FontScalePreference.S to stringResource(R.string.settings_display_font_scale_small),
-        FontScalePreference.M to stringResource(R.string.settings_display_font_scale_medium),
-        FontScalePreference.L to stringResource(R.string.settings_display_font_scale_large),
-    )
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.settings_display_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = stringResource(R.string.settings_display_density_intro),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                densityOptions.forEachIndexed { index, (density, label) ->
-                    SegmentedButton(
-                        selected = state.displayDensity == density,
-                        enabled = state.canChangeDisplayDensity,
-                        onClick = { onIntent(SettingsIntent.DisplayDensityChanged(density)) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = densityOptions.size),
-                    ) {
-                        Text(label)
-                    }
-                }
-            }
-            if (state.displayDensityError) {
-                PreferencePersistError(R.string.settings_display_density_persist_failed)
-            }
-            Text(
-                text = stringResource(R.string.settings_display_font_scale_intro),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                fontScaleOptions.forEachIndexed { index, (scale, label) ->
-                    SegmentedButton(
-                        selected = state.fontScale == scale,
-                        enabled = state.canChangeFontScale,
-                        onClick = { onIntent(SettingsIntent.FontScaleChanged(scale)) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = fontScaleOptions.size),
-                    ) {
-                        Text(label)
-                    }
-                }
-            }
-            if (state.fontScaleError) {
-                PreferencePersistError(R.string.settings_display_font_scale_persist_failed)
-            }
-        }
-    }
-}
-
-/**
- * Drapeaux display preferences (#179 follow-up): grouped-vs-flat layout and the « masquer les
- * catégories sans non-lu » filter. Persisted via DataStore and observed live by the Flags screen,
- * so a flip here re-renders the list without a refetch.
- */
-@Composable
-private fun FlagsPreferencesCard(
-    state: SettingsState,
-    onIntent: (SettingsIntent) -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.settings_flags_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            PreferenceSwitchRow(
+    startScreenState: StartScreenSettingsState,
+    onStartScreenIntent: (StartScreenSettingsIntent) -> Unit,
+    onOpenProxy: () -> Unit,
+    onOpenMaintenance: () -> Unit,
+    onOpenDisplay: () -> Unit,
+    onOpenImages: () -> Unit,
+    onOpenAccountAbout: () -> Unit,
+): List<SettingsCatalogueSection> = listOf(
+    // Réseau et cache.
+    SettingsCatalogueSection(
+        id = "network",
+        title = stringResource(R.string.settings_section_network),
+        items = listOf(
+            navRow(
+                id = "proxy",
+                title = stringResource(R.string.settings_nav_proxy),
+                description = stringResource(R.string.settings_nav_proxy_description),
+                keywords = listOf("proxy", "réseau", "host", "port"),
+                onClick = onOpenProxy,
+            ),
+            navRow(
+                id = "maintenance",
+                title = stringResource(R.string.settings_nav_maintenance),
+                description = stringResource(R.string.settings_nav_maintenance_description),
+                keywords = listOf("cache", "vider", "images", "topics", "diagnostic", "debug"),
+                onClick = onOpenMaintenance,
+            ),
+        ),
+    ),
+    // Démarrage (rendered inline — category picker, not a sub-page).
+    SettingsCatalogueSection(
+        id = "start",
+        title = stringResource(R.string.settings_section_start),
+        items = listOf(
+            SettingsCatalogueRow(
+                searchable = SettingsSearchableItem(
+                    id = "start_screen",
+                    title = stringResource(R.string.settings_start_screen_title),
+                    description = stringResource(R.string.settings_start_screen_intro),
+                    keywords = listOf("démarrage", "écran", "onglet", "lancement", "catégorie"),
+                ),
+                render = { StartScreenPreferencesCard(state = startScreenState, onIntent = onStartScreenIntent) },
+            ),
+        ),
+    ),
+    // Affichage (sub-page).
+    SettingsCatalogueSection(
+        id = "display",
+        title = stringResource(R.string.settings_section_display),
+        items = listOf(
+            navRow(
+                id = "display_nav",
+                title = stringResource(R.string.settings_nav_display),
+                description = stringResource(R.string.settings_nav_display_description),
+                keywords = listOf("thème", "amoled", "sombre", "clair", "densité", "police", "taille"),
+                onClick = onOpenDisplay,
+            ),
+        ),
+    ),
+    // Drapeaux (inline toggles).
+    SettingsCatalogueSection(
+        id = "flags",
+        title = stringResource(R.string.settings_section_flags),
+        items = listOf(
+            toggleRow(
+                id = "flags_group_by_category",
                 title = stringResource(R.string.settings_flags_group_by_category_title),
                 description = stringResource(R.string.settings_flags_group_by_category_description),
                 checked = state.flagsGroupByCategory,
                 enabled = state.canToggleFlagsGroupByCategory,
+                errorRes = R.string.settings_flags_group_by_category_persist_failed
+                    .takeIf { state.flagsGroupByCategoryError },
                 onCheckedChange = { onIntent(SettingsIntent.FlagsGroupByCategoryChanged(it)) },
-            )
-            if (state.flagsGroupByCategoryError) {
-                PreferencePersistError(R.string.settings_flags_group_by_category_persist_failed)
-            }
-            PreferenceSwitchRow(
+            ),
+            toggleRow(
+                id = "flags_hide_read",
                 title = stringResource(R.string.settings_flags_hide_read_categories_title),
                 description = stringResource(R.string.settings_flags_hide_read_categories_description),
                 checked = state.flagsHideReadCategories,
                 enabled = state.canToggleFlagsHideReadCategories,
+                errorRes = R.string.settings_flags_hide_read_categories_persist_failed
+                    .takeIf { state.flagsHideReadCategoriesError },
                 onCheckedChange = { onIntent(SettingsIntent.FlagsHideReadCategoriesChanged(it)) },
-            )
-            if (state.flagsHideReadCategoriesError) {
-                PreferencePersistError(R.string.settings_flags_hide_read_categories_persist_failed)
-            }
-            PreferenceSwitchRow(
+            ),
+            toggleRow(
+                id = "flags_per_tab_override",
                 title = stringResource(R.string.settings_flags_per_tab_override_title),
                 description = stringResource(R.string.settings_flags_per_tab_override_description),
                 checked = state.flagsPerTabOverride,
                 enabled = state.canToggleFlagsPerTabOverride,
+                errorRes = R.string.settings_flags_per_tab_override_persist_failed
+                    .takeIf { state.flagsPerTabOverrideError },
                 onCheckedChange = { onIntent(SettingsIntent.FlagsPerTabOverrideChanged(it)) },
-            )
-            if (state.flagsPerTabOverrideError) {
-                PreferencePersistError(R.string.settings_flags_per_tab_override_persist_failed)
-            }
-            PreferenceSwitchRow(
+            ),
+            toggleRow(
+                id = "flags_show_dt_section",
                 title = stringResource(R.string.settings_flags_show_dt_section_title),
                 description = stringResource(R.string.settings_flags_show_dt_section_description),
                 checked = state.showDtSection,
                 enabled = state.canToggleShowDtSection,
+                errorRes = R.string.settings_flags_show_dt_section_persist_failed
+                    .takeIf { state.showDtSectionError },
                 onCheckedChange = { onIntent(SettingsIntent.ShowDtSectionChanged(it)) },
-            )
-            if (state.showDtSectionError) {
-                PreferencePersistError(R.string.settings_flags_show_dt_section_persist_failed)
-            }
-            // #378 — auto-refresh on landing (app open / back from a topic). Opt-OUT: default on.
-            PreferenceSwitchRow(
+            ),
+            toggleRow(
+                id = "flags_auto_refresh",
                 title = stringResource(R.string.settings_flags_auto_refresh_title),
                 description = stringResource(R.string.settings_flags_auto_refresh_description),
                 checked = state.flagsAutoRefresh,
                 enabled = state.canToggleFlagsAutoRefresh,
+                errorRes = R.string.settings_flags_auto_refresh_persist_failed
+                    .takeIf { state.flagsAutoRefreshError },
                 onCheckedChange = { onIntent(SettingsIntent.FlagsAutoRefreshChanged(it)) },
-            )
-            if (state.flagsAutoRefreshError) {
-                PreferencePersistError(R.string.settings_flags_auto_refresh_persist_failed)
-            }
-        }
-    }
-}
-
-/**
- * Topic reading preferences:
- *
- * - « masquer la barre du haut en défilant » (build 89 follow-up) — when on, the topic top app
- *   bar (title + page counter) collapses on scroll-down and snaps back on the first scroll-up
- *   (Material3 `enterAlways`), freeing reading space;
- * - « boutons de changement de page » (#383) — when off, the floating ‹/› mini-FABs (#283) are
- *   hidden for swipe-only readers; « Répondre » keeps its own gates and stays.
- *
- * Both persisted via DataStore and observed live by the topic screen, so a flip here applies
- * without reopening a topic.
- */
-@Composable
-private fun TopicPreferencesCard(
-    state: SettingsState,
-    onIntent: (SettingsIntent) -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.settings_topic_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            PreferenceSwitchRow(
+            ),
+        ),
+    ),
+    // Sujet et lecture (inline toggles).
+    SettingsCatalogueSection(
+        id = "topic",
+        title = stringResource(R.string.settings_section_topic),
+        items = listOf(
+            toggleRow(
+                id = "topic_topbar_auto_hide",
                 title = stringResource(R.string.settings_topic_topbar_auto_hide_title),
                 description = stringResource(R.string.settings_topic_topbar_auto_hide_description),
                 checked = state.topicTopBarAutoHide,
                 enabled = state.canToggleTopicTopBarAutoHide,
+                errorRes = R.string.settings_topic_topbar_auto_hide_persist_failed
+                    .takeIf { state.topicTopBarAutoHideError },
                 onCheckedChange = { onIntent(SettingsIntent.TopicTopBarAutoHideChanged(it)) },
-            )
-            if (state.topicTopBarAutoHideError) {
-                PreferencePersistError(R.string.settings_topic_topbar_auto_hide_persist_failed)
-            }
-            PreferenceSwitchRow(
+            ),
+            toggleRow(
+                id = "topic_page_fabs",
                 title = stringResource(R.string.settings_topic_page_fabs_title),
                 description = stringResource(R.string.settings_topic_page_fabs_description),
                 checked = state.topicPageFabs,
                 enabled = state.canToggleTopicPageFabs,
+                errorRes = R.string.settings_topic_page_fabs_persist_failed.takeIf { state.topicPageFabsError },
                 onCheckedChange = { onIntent(SettingsIntent.TopicPageFabsChanged(it)) },
-            )
-            if (state.topicPageFabsError) {
-                PreferencePersistError(R.string.settings_topic_page_fabs_persist_failed)
-            }
-            PreferenceSwitchRow(
+            ),
+            toggleRow(
+                id = "topic_polls_expanded",
                 title = stringResource(R.string.settings_topic_polls_expanded_title),
                 description = stringResource(R.string.settings_topic_polls_expanded_description),
                 checked = state.topicPollsExpanded,
                 enabled = state.canToggleTopicPollsExpanded,
+                errorRes = R.string.settings_topic_polls_expanded_persist_failed
+                    .takeIf { state.topicPollsExpandedError },
                 onCheckedChange = { onIntent(SettingsIntent.TopicPollsExpandedChanged(it)) },
-            )
-            if (state.topicPollsExpandedError) {
-                PreferencePersistError(R.string.settings_topic_polls_expanded_persist_failed)
-            }
-        }
-    }
-}
-
-/**
- * Publishing preferences (#312): the « Confirmation avant publication » toggle. When on, every
- * publish action (topic reply / post edit, new topic / first-post edit, private-message reply)
- * first shows a confirmation dialog. Persisted via DataStore and observed live by the editor
- * ViewModels, so a flip here applies without reopening an editor.
- */
-@Composable
-private fun MessagesPreferencesCard(
-    state: SettingsState,
-    onIntent: (SettingsIntent) -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.settings_mp_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            PreferenceSwitchRow(
-                title = stringResource(R.string.settings_mp_unread_badge_title),
-                description = stringResource(R.string.settings_mp_unread_badge_description),
-                checked = state.mpUnreadBadge,
-                enabled = state.canToggleMpUnreadBadge,
-                onCheckedChange = { onIntent(SettingsIntent.MpUnreadBadgeChanged(it)) },
-            )
-            if (state.mpUnreadBadgeError) {
-                PreferencePersistError(R.string.settings_mp_unread_badge_persist_failed)
-            }
-        }
-    }
-}
-
-/**
- * #459 PR3 — entry point to the « Mes images uploadées » screen. A short description plus a button
- * that navigates out of Settings (the screen itself is a standalone route, not a sub-form), mirroring
- * how the maintenance actions read but routing instead of mutating a preference.
- */
-@Composable
-private fun MyImagesCard(onOpenMyImages: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.settings_my_images_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = stringResource(R.string.settings_my_images_description),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedButton(
-                onClick = onOpenMyImages,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.settings_my_images_open))
-            }
-        }
-    }
-}
-
-/**
- * #6 — entry point to the read-only MPStorage inspector. Same shape as [MyImagesCard] (a routing
- * card, not a preference toggle). Only rendered when the DT section is enabled (see call site).
- */
-@Composable
-private fun MpStorageInspectorCard(onOpen: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.settings_mpstorage_inspector_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = stringResource(R.string.settings_mpstorage_inspector_description),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedButton(
-                onClick = onOpen,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.settings_mpstorage_inspector_open))
-            }
-        }
-    }
-}
-
-/**
- * #459 — « Hébergeur d'images » : choisit l'hébergeur des uploads de l'éditeur (diberie sans
- * compte, imgur avec un Client-ID que l'utilisateur colle). Le champ Client-ID n'apparaît que pour
- * imgur. Persisté en DataStore et lu par l'éditeur à chaque upload. Boutons segmentés en texte seul
- * (pas d'icônes Material — l'import `androidx.compose.material.*` est interdit dans le projet).
- */
-@Composable
-private fun UploadProviderPreferencesCard(
-    state: SettingsState,
-    onIntent: (SettingsIntent) -> Unit,
-) {
-    val options = listOf(
-        UploadProviderId.DIBERIE to stringResource(R.string.settings_upload_provider_diberie),
-        UploadProviderId.IMGUR to stringResource(R.string.settings_upload_provider_imgur),
-    )
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.settings_upload_provider_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = stringResource(R.string.settings_upload_provider_intro),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                options.forEachIndexed { index, (provider, label) ->
-                    SegmentedButton(
-                        selected = state.uploadProvider == provider,
-                        enabled = state.canChangeUploadProvider,
-                        onClick = { onIntent(SettingsIntent.SetUploadProvider(provider)) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
-                    ) {
-                        Text(label)
-                    }
-                }
-            }
-            if (state.uploadProviderError) {
-                PreferencePersistError(R.string.settings_upload_provider_persist_failed)
-            }
-            // The Client-ID field is only meaningful for imgur (diberie needs no credentials).
-            if (state.uploadProvider == UploadProviderId.IMGUR) {
-                OutlinedTextField(
-                    value = state.imgurClientId,
-                    onValueChange = { onIntent(SettingsIntent.SetImgurClientId(it)) },
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.settings_upload_imgur_client_id_label)) },
-                    supportingText = {
-                        Text(stringResource(R.string.settings_upload_imgur_client_id_helper))
-                    },
-                    isError = state.imgurClientIdError,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (state.imgurClientIdError) {
-                    PreferencePersistError(R.string.settings_upload_imgur_client_id_persist_failed)
-                }
-            }
-            // #459 PR-images follow-up — how the editor wraps an inserted image (applies to uploads
-            // and pasted URLs). Reduced = the HFR "vignette cliquable" (default).
-            Text(
-                text = stringResource(R.string.settings_image_insert_title),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = stringResource(R.string.settings_image_insert_intro),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            val imageInsertOptions = listOf(
-                EditorImageInsert.FULL to stringResource(R.string.settings_image_insert_full),
-                EditorImageInsert.LINKED to stringResource(R.string.settings_image_insert_linked),
-                EditorImageInsert.REDUCED to stringResource(R.string.settings_image_insert_reduced),
-            )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                imageInsertOptions.forEachIndexed { index, (mode, label) ->
-                    SegmentedButton(
-                        selected = state.editorImageInsert == mode,
-                        enabled = !state.isUpdatingEditorImageInsert,
-                        onClick = { onIntent(SettingsIntent.SetEditorImageInsert(mode)) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = imageInsertOptions.size),
-                    ) {
-                        Text(label)
-                    }
-                }
-            }
-            if (state.editorImageInsertError) {
-                PreferencePersistError(R.string.settings_image_insert_persist_failed)
-            }
-        }
-    }
-}
-
-@Composable
-private fun EditingPreferencesCard(
-    state: SettingsState,
-    onIntent: (SettingsIntent) -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.settings_editing_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            PreferenceSwitchRow(
+            ),
+        ),
+    ),
+    // Édition et publication (inline toggle).
+    SettingsCatalogueSection(
+        id = "editing",
+        title = stringResource(R.string.settings_section_editing),
+        items = listOf(
+            toggleRow(
+                id = "confirm_before_posting",
                 title = stringResource(R.string.settings_confirm_before_posting_title),
                 description = stringResource(R.string.settings_confirm_before_posting_description),
                 checked = state.confirmBeforePosting,
                 enabled = state.canToggleConfirmBeforePosting,
+                errorRes = R.string.settings_confirm_before_posting_persist_failed
+                    .takeIf { state.confirmBeforePostingError },
                 onCheckedChange = { onIntent(SettingsIntent.ConfirmBeforePostingChanged(it)) },
-            )
-            if (state.confirmBeforePostingError) {
-                PreferencePersistError(R.string.settings_confirm_before_posting_persist_failed)
-            }
-        }
-    }
-}
+            ),
+        ),
+    ),
+    // Images (sub-page).
+    SettingsCatalogueSection(
+        id = "images",
+        title = stringResource(R.string.settings_section_images),
+        items = listOf(
+            navRow(
+                id = "images_nav",
+                title = stringResource(R.string.settings_nav_images),
+                description = stringResource(R.string.settings_nav_images_description),
+                keywords = listOf("images", "hébergeur", "imgur", "diberie", "upload", "insertion"),
+                onClick = onOpenImages,
+            ),
+        ),
+    ),
+    // Messages privés (inline toggle).
+    SettingsCatalogueSection(
+        id = "mp",
+        title = stringResource(R.string.settings_section_mp),
+        items = listOf(
+            toggleRow(
+                id = "mp_unread_badge",
+                title = stringResource(R.string.settings_mp_unread_badge_title),
+                description = stringResource(R.string.settings_mp_unread_badge_description),
+                checked = state.mpUnreadBadge,
+                enabled = state.canToggleMpUnreadBadge,
+                errorRes = R.string.settings_mp_unread_badge_persist_failed.takeIf { state.mpUnreadBadgeError },
+                onCheckedChange = { onIntent(SettingsIntent.MpUnreadBadgeChanged(it)) },
+            ),
+        ),
+    ),
+    // Compte HFR (sub-page).
+    SettingsCatalogueSection(
+        id = "hfr_account",
+        title = stringResource(R.string.settings_section_hfr_account),
+        items = listOf(
+            navRow(
+                id = "account_nav",
+                title = stringResource(R.string.settings_nav_account),
+                description = stringResource(R.string.settings_nav_account_description),
+                keywords = listOf("compte", "hfr", "profil", "version", "à propos", "diagnostic"),
+                onClick = onOpenAccountAbout,
+            ),
+        ),
+    ),
+    // Notifications (future, disabled — searchable).
+    SettingsCatalogueSection(
+        id = "notifications",
+        title = stringResource(R.string.settings_section_notifications),
+        items = listOf(
+            futureRow(
+                id = "future_notifications",
+                title = stringResource(R.string.settings_future_notifications),
+            ),
+        ),
+    ),
+    // Accessibilité (future, disabled — searchable).
+    SettingsCatalogueSection(
+        id = "accessibility",
+        title = stringResource(R.string.settings_section_accessibility),
+        items = listOf(
+            futureRow(
+                id = "future_timezone",
+                title = stringResource(R.string.settings_future_timezone),
+            ),
+            futureRow(
+                id = "future_multilang",
+                title = stringResource(R.string.settings_future_multilang),
+            ),
+        ),
+    ),
+    // Extensions et filtrage (future, disabled — searchable).
+    SettingsCatalogueSection(
+        id = "extensions",
+        title = stringResource(R.string.settings_section_extensions),
+        items = listOf(
+            futureRow(
+                id = "future_extensions",
+                title = stringResource(R.string.settings_future_extensions),
+            ),
+        ),
+    ),
+)
 
-/**
- * One label + description + Material 3 [Switch] row. Generic so the two Drapeaux preference rows
- * share the layout; the persist-failure message is rendered by the caller via
- * [PreferencePersistError] so this stays a layout-only composable.
- */
-@Composable
-private fun PreferenceSwitchRow(
+/** A navigation row (chevron trailing) — opaque to search via [keywords]. */
+private fun navRow(
+    id: String,
+    title: String,
+    description: String,
+    keywords: List<String>,
+    onClick: () -> Unit,
+): SettingsCatalogueRow = SettingsCatalogueRow(
+    searchable = SettingsSearchableItem(id = id, title = title, description = description, keywords = keywords),
+    render = {
+        RedfaceSettingsListItem(
+            title = title,
+            description = description,
+            onClick = onClick,
+            trailingContent = { ChevronTrailing() },
+        )
+    },
+)
+
+/** A toggle row (trailing `Switch`) with an optional inline persist-error message below it. */
+@Suppress("LongParameterList") // row descriptor: id + title/description + checked/enabled/error + callback.
+private fun toggleRow(
+    id: String,
     title: String,
     description: String,
     checked: Boolean,
     enabled: Boolean,
+    errorRes: Int?,
     onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+): SettingsCatalogueRow = SettingsCatalogueRow(
+    searchable = SettingsSearchableItem(id = id, title = title, description = description),
+    render = {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            RedfaceSettingsListItem(
+                title = title,
+                description = description,
+                trailingContent = {
+                    Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+                },
             )
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(
-            checked = checked,
-            enabled = enabled,
-            onCheckedChange = onCheckedChange,
-        )
-    }
-}
-
-/** Inline persist-failure message for a [PreferenceSwitchRow], shown below the row. */
-@Composable
-internal fun PreferencePersistError(messageRes: Int) {
-    Text(
-        text = stringResource(messageRes),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.error,
-    )
-}
-
-@Composable
-private fun MaintenanceCard(
-    state: SettingsState,
-    onIntent: (SettingsIntent) -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.settings_maintenance_title),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = stringResource(R.string.settings_clear_topic_cache_intro),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (state.isClearingTopicCache) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                    )
-                    Text(
-                        text = stringResource(R.string.settings_clear_topic_cache_in_progress),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            if (errorRes != null) {
+                Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    PreferencePersistError(errorRes)
                 }
             }
-            when (state.topicCacheClearResult) {
-                TopicCacheClearResult.Success -> Text(
-                    text = stringResource(R.string.settings_clear_topic_cache_success),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                TopicCacheClearResult.Failure -> Text(
-                    text = stringResource(R.string.settings_clear_topic_cache_failure),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                null -> Unit
-            }
-            OutlinedButton(
-                enabled = state.canClearTopicCache,
-                onClick = { onIntent(SettingsIntent.ClearTopicCacheClicked) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.settings_clear_topic_cache_button))
-            }
-
-            // #314 — « Vider le cache des images », same confirm → progress → inline-result
-            // flow as the topic clear above, on its own dedicated state fields.
-            Text(
-                text = stringResource(R.string.settings_clear_image_cache_intro),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (state.isClearingImageCache) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                    )
-                    Text(
-                        text = stringResource(R.string.settings_clear_image_cache_in_progress),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            when (state.imageCacheClearResult) {
-                ImageCacheClearResult.Success -> Text(
-                    text = stringResource(R.string.settings_clear_image_cache_success),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-                ImageCacheClearResult.Failure -> Text(
-                    text = stringResource(R.string.settings_clear_image_cache_failure),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                null -> Unit
-            }
-            OutlinedButton(
-                enabled = state.canClearImageCache,
-                onClick = { onIntent(SettingsIntent.ClearImageCacheClicked) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.settings_clear_image_cache_button))
-            }
-
-            IgnoreTopicCacheRow(
-                state = state,
-                onIntent = onIntent,
-            )
         }
-    }
-}
+    },
+)
 
-@Composable
-private fun IgnoreTopicCacheRow(
-    state: SettingsState,
-    onIntent: (SettingsIntent) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.settings_ignore_topic_cache_title),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = stringResource(R.string.settings_ignore_topic_cache_description),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(
-            checked = state.ignoreTopicCache,
-            enabled = state.canToggleIgnoreTopicCache,
-            onCheckedChange = { onIntent(SettingsIntent.IgnoreTopicCacheChanged(it)) },
-        )
-    }
-    if (state.ignoreTopicCacheError) {
-        Text(
-            text = stringResource(R.string.settings_ignore_topic_cache_persist_failed),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-        )
-    }
-}
-
-@Composable
-private fun ClearTopicCacheConfirmDialog(
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.settings_clear_topic_cache_confirm_title)) },
-        text = { Text(stringResource(R.string.settings_clear_topic_cache_confirm_body)) },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(stringResource(R.string.settings_clear_topic_cache_confirm_action))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.settings_clear_topic_cache_confirm_cancel))
-            }
-        },
-    )
-}
-
-@Composable
-private fun ClearImageCacheConfirmDialog(
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.settings_clear_image_cache_confirm_title)) },
-        text = { Text(stringResource(R.string.settings_clear_image_cache_confirm_body)) },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(stringResource(R.string.settings_clear_image_cache_confirm_action))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.settings_clear_image_cache_confirm_cancel))
-            }
-        },
-    )
-}
+/** A planned (not-yet-shipped) row: disabled but still searchable (`enabled = false`). */
+private fun futureRow(
+    id: String,
+    title: String,
+): SettingsCatalogueRow = SettingsCatalogueRow(
+    searchable = SettingsSearchableItem(id = id, title = title, enabled = false),
+    render = {
+        RedfaceSettingsListItem(title = title, enabled = false)
+    },
+)

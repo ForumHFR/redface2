@@ -11,6 +11,9 @@ dependencies {
     implementation(project(":core:domain"))
     implementation(project(":core:ui"))
 
+    // #494 — BackHandler intercepts system/gesture back to close the settings search instead of
+    // popping the whole route (nav3 otherwise pops it).
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
