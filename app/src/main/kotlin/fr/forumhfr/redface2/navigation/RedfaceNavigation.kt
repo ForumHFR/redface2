@@ -653,19 +653,7 @@ fun RedfaceApp(intent: Intent?) {
                         versionCode = BuildConfig.VERSION_CODE,
                         onLogin = { activeBackStack.add(LoginRoute) },
                         onLogout = accountViewModel::logout,
-                        onOpenSettings = {
-                            // Idempotent: the account menu is also shown ON the settings screen and its
-                            // sub-pages. Tapping « Paramètres » there must land back on the existing
-                            // Settings root rather than push a duplicate SettingsRoute (#494 Codex P3).
-                            val existing = activeBackStack.indexOfLast { it is SettingsRoute }
-                            if (existing >= 0) {
-                                while (activeBackStack.lastIndex > existing) {
-                                    activeBackStack.removeAt(activeBackStack.lastIndex)
-                                }
-                            } else {
-                                activeBackStack.add(SettingsRoute)
-                            }
-                        },
+                        onOpenSettings = { openSettingsIdempotently(activeBackStack) },
                         onOpenDiagnostics = { activeBackStack.add(DiagnosticsRoute) },
                         onReportContent = {
                             startReportEmail(context, reportEmailSubject, reportNoEmailClient)
@@ -933,6 +921,26 @@ internal fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: Str
         updated.entries.drop(updated.size - TOPIC_TITLE_CACHE_MAX).associate { it.toPair() }
     } else {
         updated
+    }
+}
+
+/**
+ * Opens the settings root idempotently. The account menu is shown ON the settings screen and its
+ * sub-pages too, so tapping « Paramètres » there must land back on the existing [SettingsRoute]
+ * (popping any sub-pages stacked above it) rather than push a duplicate that Back then has to unwind
+ * (#494 Codex P3). When no [SettingsRoute] is in [backStack] (we are elsewhere), a fresh one is pushed.
+ *
+ * Kept top-level (not inlined in the account-menu lambda) so its branches don't inflate RedfaceApp's
+ * cyclomatic complexity.
+ */
+private fun openSettingsIdempotently(backStack: NavBackStack<NavKey>) {
+    val existing = backStack.indexOfLast { it is SettingsRoute }
+    if (existing >= 0) {
+        while (backStack.lastIndex > existing) {
+            backStack.removeAt(backStack.lastIndex)
+        }
+    } else {
+        backStack.add(SettingsRoute)
     }
 }
 
