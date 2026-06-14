@@ -22,6 +22,7 @@ import fr.forumhfr.redface2.core.domain.upload.ImageUpload
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
@@ -1229,10 +1230,12 @@ class PostEditorViewModelTest {
             imageUploadReader.readUris,
         )
         val state = viewModel.state.value
-        val expected = "[img]https://h/Picture/Get/f/1[/img]" +
-            "[img]https://h/Picture/Get/f/2[/img]" +
+        // #459 PR-images follow-up — each image after the first lands on its OWN line (no more
+        // run-together uploads). FULL mode here (the fake's default) keeps the plain [img] shape.
+        val expected = "[img]https://h/Picture/Get/f/1[/img]\n" +
+            "[img]https://h/Picture/Get/f/2[/img]\n" +
             "[img]https://h/Picture/Get/f/3[/img]"
-        assertEquals("one [img] per image, concatenated in pick order", expected, state.draft.text)
+        assertEquals("one [img] per image, each on its own line, in pick order", expected, state.draft.text)
         assertFalse("upload flag cleared at the end of the batch", state.isUploading)
         assertNull("progress cleared at the end of the batch", state.uploadProgress)
         assertNull("no error on a fully successful batch", state.uploadError)
@@ -1324,6 +1327,74 @@ class PostEditorViewModelTest {
             "the image inserted before the failure must be persisted",
             "[img]https://h/Picture/Get/f/1[/img]",
             draftStore.saved[key]?.body,
+        )
+    }
+
+    @Test
+    fun `ImagePicked in REDUCED mode wraps the reduced image in a url to the original`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        uploadRepository.uploadResult = uploadedImage(
+            imageUrl = "https://rehost.diberie.com/Picture/Get/f/42",
+            resizedUrl = "https://rehost.diberie.com/Picture/Get/r/42",
+        )
+        val viewModel = newReplyViewModel(
+            authRepository = authRepository,
+            userPreferencesRepository = FakeUserPreferencesRepository(editorImageInsert = EditorImageInsert.REDUCED),
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ImagePicked("content://x/1"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(
+            "REDUCED shows the reduced URL, clickable to the original",
+            "[url=https://rehost.diberie.com/Picture/Get/f/42]" +
+                "[img]https://rehost.diberie.com/Picture/Get/r/42[/img][/url]",
+            viewModel.state.value.draft.text,
+        )
+    }
+
+    @Test
+    fun `ImagePicked in LINKED mode wraps the full image in a url to itself`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        uploadRepository.uploadResult = uploadedImage("https://h/Picture/Get/f/42")
+        val viewModel = newReplyViewModel(
+            authRepository = authRepository,
+            userPreferencesRepository = FakeUserPreferencesRepository(editorImageInsert = EditorImageInsert.LINKED),
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ImagePicked("content://x/1"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(
+            "LINKED wraps the full image so a click opens the original",
+            "[url=https://h/Picture/Get/f/42][img]https://h/Picture/Get/f/42[/img][/url]",
+            viewModel.state.value.draft.text,
+        )
+    }
+
+    @Test
+    fun `ImagePicked in REDUCED mode with no reduced url falls back to the full url`() = runTest {
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = null)
+        // imgur exposes no reduced variant (resizedUrl null) → REDUCED degrades to LINKED.
+        uploadRepository.uploadResult = uploadedImage("https://i.imgur.com/x.png")
+        val viewModel = newReplyViewModel(
+            authRepository = authRepository,
+            userPreferencesRepository = FakeUserPreferencesRepository(editorImageInsert = EditorImageInsert.REDUCED),
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ImagePicked("content://x/1"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(
+            "no reduced URL → REDUCED falls back to the full URL (same as LINKED)",
+            "[url=https://i.imgur.com/x.png][img]https://i.imgur.com/x.png[/img][/url]",
+            viewModel.state.value.draft.text,
         )
     }
 
@@ -1865,6 +1936,10 @@ class PostEditorViewModelTest {
      */
     private class FakeUserPreferencesRepository(
         confirmBeforePosting: Boolean = false,
+        // Default FULL so the existing single-image insert tests keep asserting `[img]url[/img]`;
+        // production defaults to REDUCED (cf. DataStoreUserPreferencesRepository), exercised by the
+        // dedicated mode tests below.
+        editorImageInsert: EditorImageInsert = EditorImageInsert.FULL,
     ) : UserPreferencesRepository {
         private val confirmBeforePosting = MutableStateFlow(confirmBeforePosting)
 
@@ -1930,6 +2005,15 @@ class PostEditorViewModelTest {
 
         override suspend fun setImgurClientId(clientId: String) = Unit
 
+        // #459 PR-images follow-up — editor image insert mode, configurable per test.
+        private val editorImageInsert = MutableStateFlow(editorImageInsert)
+
+        override fun observeEditorImageInsert(): Flow<EditorImageInsert> = editorImageInsert
+
+        override suspend fun setEditorImageInsert(mode: EditorImageInsert) {
+            editorImageInsert.value = mode
+        }
+
         // #287 — reading display presets are irrelevant to the editor; stubbed at defaults.
         override fun observeDisplayDensity(): Flow<DisplayDensity> = MutableStateFlow(DisplayDensity.COMFORT)
 
@@ -1971,10 +2055,11 @@ class PostEditorViewModelTest {
         }
     }
 
-    private fun uploadedImage(imageUrl: String): UploadedImage = UploadedImage(
+    private fun uploadedImage(imageUrl: String, resizedUrl: String? = null): UploadedImage = UploadedImage(
         provider = UploadProviderId.DIBERIE,
         imageUrl = imageUrl,
         thumbnailUrl = null,
+        resizedUrl = resizedUrl,
         deleteHandle = null,
         expiresAt = null,
     )
@@ -2017,6 +2102,7 @@ class PostEditorViewModelTest {
             provider = UploadProviderId.DIBERIE,
             imageUrl = "https://rehost.diberie.com/Picture/Get/f/1",
             thumbnailUrl = null,
+            resizedUrl = null,
             deleteHandle = null,
             expiresAt = null,
         )

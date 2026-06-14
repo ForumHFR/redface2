@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 
 data class SettingsState(
     val proxyEnabled: Boolean = false,
@@ -146,6 +147,12 @@ data class SettingsState(
     val imgurClientId: String = "",
     val imgurClientIdError: Boolean = false,
     val imgurClientIdTouchedLocally: Boolean = false,
+    // #459 PR-images follow-up — how the editor wraps an inserted image (full / linked / reduced).
+    // Same optimistic-flip shape as [uploadProvider]. Default REDUCED (the HFR "vignette cliquable").
+    val editorImageInsert: EditorImageInsert = EditorImageInsert.REDUCED,
+    val isUpdatingEditorImageInsert: Boolean = false,
+    val editorImageInsertError: Boolean = false,
+    val editorImageInsertTouchedLocally: Boolean = false,
 ) {
     val canSave: Boolean
         get() = !isSaving
@@ -320,4 +327,7 @@ sealed interface SettingsIntent {
     // the UI layer — the upload then fails with a precise host error (cf. #474) instead of silently.
     data class SetUploadProvider(val provider: UploadProviderId) : SettingsIntent
     data class SetImgurClientId(val text: String) : SettingsIntent
+
+    /** #459 PR-images follow-up — choose how the editor wraps an inserted image. */
+    data class SetEditorImageInsert(val mode: EditorImageInsert) : SettingsIntent
 }

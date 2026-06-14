@@ -64,6 +64,12 @@ data class UploadedImage(
     val imageUrl: String,
     /** Thumbnail URL when the host exposes one (diberie `.../Get/t/{id}`), otherwise `null`. */
     val thumbnailUrl: String?,
+    /**
+     * A REDUCED (but not thumbnail-tiny) URL when the host exposes one — diberie `.../Get/r/{id}`,
+     * ~300px. Used by the editor's "vignette cliquable" insert mode; `null` when the host has no
+     * such variant (imgur), so the editor falls back to [imageUrl].
+     */
+    val resizedUrl: String?,
     /** `deletehash` (imgur) | `picID` (diberie) | `null` when no deletion handle is available. */
     val deleteHandle: String?,
     /** Expiry instant when the host advertises one; `null` means no known expiration. */

@@ -6,16 +6,20 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -54,52 +59,62 @@ fun BbcodeToolbar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 4.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        ToolbarOrder.forEach { action ->
-            ActionChip(
-                action = action,
-                onAction = onAction,
-                onImageUrlRequested = onImageUrlRequested,
-            )
+        // #459 PR-images follow-up — the image-upload button is PINNED at the leading edge (outside
+        // the horizontal scroll) and styled as a filled-tonal button so it stands out from the
+        // outlined formatting chips and never scrolls out of sight. Rendered only when the host
+        // wires the picker (the post editor) ; MP / topic-form surfaces pass null.
+        onImageUploadRequested?.let { ImageUploadButton(onClick = it, uploading = uploading) }
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ToolbarOrder.forEach { action ->
+                ActionChip(
+                    action = action,
+                    onAction = onAction,
+                    onImageUrlRequested = onImageUrlRequested,
+                )
+            }
+            ColorChip(onAction = onAction)
         }
-        // #459 PR2 — image-upload affordance, rendered only when the host screen wires the picker
-        // (the post editor) ; MP / topic-form surfaces pass null and keep the toolbar unchanged.
-        onImageUploadRequested?.let { ImageUploadChip(onClick = it, uploading = uploading) }
-        ColorChip(onAction = onAction)
     }
 }
 
 /**
- * #459 PR2 — chip launching the system photo picker (the upload itself is the host ViewModel's job).
- * While an upload is in flight it shows a small [CircularProgressIndicator] and is disabled so a
- * second pick cannot race the first. M3-only icon (a `:core:ui` vector + [Icon]) — material-icons is
- * forbidden by detekt.
+ * #459 PR-images follow-up — the prominent, pinned image-upload affordance: a filled-tonal button
+ * launching the system photo picker (the upload itself is the host ViewModel's job). While an upload
+ * is in flight it shows a small [CircularProgressIndicator] and is disabled so a second pick cannot
+ * race the first. M3-only icon (a `:core:ui` vector + [Icon]) — material-icons is forbidden by detekt.
  */
 @Composable
-private fun ImageUploadChip(
+private fun ImageUploadButton(
     onClick: () -> Unit,
     uploading: Boolean,
 ) {
-    AssistChip(
+    FilledTonalButton(
         enabled = !uploading,
         onClick = onClick,
-        label = { Text(stringResource(R.string.bbcode_action_image_upload)) },
-        leadingIcon = {
-            if (uploading) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-            } else {
-                Icon(
-                    painter = painterResource(R.drawable.ic_image_upload),
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        },
-        border = AssistChipDefaults.assistChipBorder(enabled = !uploading),
-    )
+        contentPadding = ButtonDefaults.ContentPadding,
+    ) {
+        if (uploading) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(
+                painter = painterResource(R.drawable.ic_image_upload),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(stringResource(R.string.bbcode_action_image_upload))
+    }
 }
 
 /**

@@ -14,6 +14,7 @@ import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.HfrParser
@@ -586,6 +587,11 @@ class TopicRepositoryImplTest {
         override fun observeImgurClientId(): Flow<String> = MutableStateFlow("")
 
         override suspend fun setImgurClientId(clientId: String) = Unit
+
+        override fun observeEditorImageInsert(): Flow<EditorImageInsert> =
+            MutableStateFlow(EditorImageInsert.REDUCED)
+
+        override suspend fun setEditorImageInsert(mode: EditorImageInsert) = Unit
 
         // #287 — reading display presets are irrelevant to TopicRepository; stubbed at defaults.
         override fun observeDisplayDensity(): Flow<DisplayDensity> = MutableStateFlow(DisplayDensity.COMFORT)

@@ -19,6 +19,7 @@ import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
 import fr.forumhfr.redface2.core.model.write.NewTopicContext
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
@@ -28,7 +29,7 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.model.write.TopicForm
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
-import fr.forumhfr.redface2.core.ui.editor.imageBbcodeTokenOrNull
+import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
@@ -132,10 +133,23 @@ class TopicFormViewModel @AssistedInject constructor(
      */
     private var confirmBeforePosting: Boolean = false
 
+    /**
+     * #459 PR2 — mirror of the persisted [EditorImageInsert] preference, read synchronously at insert
+     * time so [onImageUrlInserted] mutates the draft in the same frame as the user action (cf.
+     * `PostEditorViewModel.imageInsertMode`). A pasted URL has no reduced variant, so REDUCED degrades
+     * to LINKED. Default mirrors the repository's REDUCED default until the first emission lands.
+     */
+    private var imageInsertMode: EditorImageInsert = EditorImageInsert.REDUCED
+
     init {
         viewModelScope.launch {
             userPreferencesRepository.observeConfirmBeforePosting().collect { enabled ->
                 confirmBeforePosting = enabled
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.observeEditorImageInsert().collect { mode ->
+                imageInsertMode = mode
             }
         }
         restoreDraftIfAny()
@@ -360,8 +374,14 @@ class TopicFormViewModel @AssistedInject constructor(
         scheduleAutosave()
     }
 
+    /**
+     * #189 / #459 — a user-pasted image URL, shaped by the cached [EditorImageInsert] preference
+     * ([imageInsertBbcodeOrNull] validates the http(s) scheme ; a pasted URL has no reduced variant,
+     * so REDUCED degrades to LINKED). Read synchronously so the draft mutates in the same frame as
+     * the intent (Codex PR2 review — the topic composer must honour the preference too).
+     */
     private fun onImageUrlInserted(url: String) {
-        val token = imageBbcodeTokenOrNull(url) ?: return
+        val token = imageInsertBbcodeOrNull(fullUrl = url, mode = imageInsertMode) ?: return
         _state.update { current ->
             val draft = current.draft
             val selection = draft.selection

@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -133,6 +134,12 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.imgurClientIdTouchedLocally },
             apply = { state, value -> state.copy(imgurClientId = value) },
         )
+        // #459 PR-images follow-up — editor image insert mode (enum), same hydration shape.
+        hydratePreference(
+            read = { userPreferencesRepository.observeEditorImageInsert().first() },
+            isLocked = { it.editorImageInsertTouchedLocally || it.isUpdatingEditorImageInsert },
+            apply = { state, value -> state.copy(editorImageInsert = value) },
+        )
     }
 
     /**
@@ -202,6 +209,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FontScaleChanged -> updateFontScale(intent.scale)
             is SettingsIntent.SetUploadProvider -> updateUploadProvider(intent.provider)
             is SettingsIntent.SetImgurClientId -> updateImgurClientId(intent.text)
+            is SettingsIntent.SetEditorImageInsert -> updateEditorImageInsert(intent.mode)
         }
     }
 
@@ -534,6 +542,34 @@ class SettingsViewModel @Inject constructor(
                             uploadProvider = previous,
                             isUpdatingUploadProvider = false,
                             uploadProviderError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // #459 PR-images follow-up — editor image insert mode is an enum, same optimistic-flip shape.
+    private fun updateEditorImageInsert(desired: EditorImageInsert) {
+        val previous = _state.value.editorImageInsert
+        _state.update {
+            it.copy(
+                editorImageInsert = desired,
+                isUpdatingEditorImageInsert = true,
+                editorImageInsertError = false,
+                editorImageInsertTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setEditorImageInsert(desired) }
+                .onSuccess {
+                    _state.update { it.copy(editorImageInsert = desired, isUpdatingEditorImageInsert = false) }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            editorImageInsert = previous,
+                            isUpdatingEditorImageInsert = false,
+                            editorImageInsertError = true,
                         )
                     }
                 }

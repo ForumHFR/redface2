@@ -60,6 +60,7 @@ class DiberieProviderTest {
         assertEquals(UploadProviderId.DIBERIE, result.provider)
         assertEquals("https://rehost.diberie.com/Picture/Get/f/521196", result.imageUrl)
         assertEquals("https://rehost.diberie.com/Picture/Get/t/521196", result.thumbnailUrl)
+        assertEquals("https://rehost.diberie.com/Picture/Get/r/521196", result.resizedUrl)
         // picID is the integer 521196 on the wire; the delete handle is its string form.
         assertEquals("521196", result.deleteHandle)
         assertEquals(null, result.expiresAt)
@@ -97,6 +98,7 @@ class DiberieProviderTest {
 
         assertTrue("imageUrl must be derived from picID", result.imageUrl.endsWith("/Picture/Get/f/777"))
         assertTrue("thumbnailUrl must be derived from picID", result.thumbnailUrl!!.endsWith("/Picture/Get/t/777"))
+        assertTrue("resizedUrl must be derived from picID", result.resizedUrl!!.endsWith("/Picture/Get/r/777"))
     }
 
     @Test

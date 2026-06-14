@@ -197,6 +197,14 @@
     <string name="settings_upload_imgur_client_id_helper">Client-ID d\'application Imgur</string>
     <string name="settings_upload_imgur_client_id_persist_failed">Impossible de mémoriser le Client-ID. Réessayez.</string>
 
+    <!-- #459 PR-images follow-up — mode d'insertion des images dans l'éditeur. -->
+    <string name="settings_image_insert_title">Insertion des images</string>
+    <string name="settings_image_insert_intro">Comment insérer une image (upload ou URL collée). « Réduite » insère une vignette cliquable qui ouvre l\'image originale en grand.</string>
+    <string name="settings_image_insert_full">Complète</string>
+    <string name="settings_image_insert_linked">Cliquable</string>
+    <string name="settings_image_insert_reduced">Réduite</string>
+    <string name="settings_image_insert_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+
     <!-- #459 PR3 — écran « Mes images uploadées » (liste + suppression). -->
     <string name="my_images_title">Mes images uploadées</string>
     <string name="my_images_back">Retour</string>

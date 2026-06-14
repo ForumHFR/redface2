@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
@@ -1395,6 +1396,11 @@ private class FakeUserPreferencesRepository(
     override fun observeImgurClientId(): Flow<String> = MutableStateFlow("")
 
     override suspend fun setImgurClientId(clientId: String) = Unit
+
+    override fun observeEditorImageInsert(): Flow<EditorImageInsert> =
+        MutableStateFlow(EditorImageInsert.REDUCED)
+
+    override suspend fun setEditorImageInsert(mode: EditorImageInsert) = Unit
 
     // #287 — reading display presets are irrelevant to TopicViewModel; stubbed at defaults.
     override fun observeDisplayDensity(): Flow<DisplayDensity> = MutableStateFlow(DisplayDensity.COMFORT)
