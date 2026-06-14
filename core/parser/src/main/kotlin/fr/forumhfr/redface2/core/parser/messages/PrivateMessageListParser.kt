@@ -120,8 +120,12 @@ class PrivateMessageListParser(
             ?.mapNotNull { it.text().trim().toIntOrNull() }
             ?.lastOrNull()
             ?: 1
+        // Page-number links are `a.cHeader` on page 1 but obfuscated `span.md_cryptlink…` on
+        // authenticated pages 2+. Read BOTH shapes, otherwise the max linked page collapses to the
+        // current page from page 2 on and `totalPages` is under-reported (a paged inbox scan would
+        // then stop after page 2 — MPStorage discovery #6).
         val linkedPages = pagerLeft
-            ?.select(HfrSelectors.TOP_PAGER_LINK)
+            ?.select("${HfrSelectors.TOP_PAGER_LINK}, ${HfrSelectors.MP_LIST_PAGER_CRYPTLINK}")
             ?.mapNotNull { it.text().trim().toIntOrNull() }
             .orEmpty()
         val total = maxOf(current, linkedPages.maxOrNull() ?: current)

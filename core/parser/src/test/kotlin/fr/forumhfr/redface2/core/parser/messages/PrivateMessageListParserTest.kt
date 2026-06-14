@@ -132,6 +132,44 @@ class PrivateMessageListParserTest {
     }
 
     @Test
+    fun `parseList reads totalPages from the obfuscated cryptlink pager on authenticated pages`() {
+        // Regression (#6): on an AUTHENTICATED inbox the pager uses `a.cHeader` page links on
+        // page 1 only; on page 2+ HFR obfuscates them as `<span class="md_cryptlink…">N</span>`.
+        // The old parser read `a.cHeader` exclusively, so from page 2 on `totalPages` collapsed to
+        // the current page — which made the MPStorage inbox scan terminate after page 2 and miss a
+        // storage MP sitting deeper (NotFound on a real 42-page inbox). Pager shape modeled on a
+        // real page-2 capture; the conversation row is synthetic (no real thread id / pseudo).
+        val html = """
+            <html><body><table>
+            <tr class="cBackHeader fondForum1PagesHaut"><td class="padding"><div class="left">
+              <b>&nbsp;Page&nbsp;: </b>
+              <span class="md_cryptlink1F444FC1C34E2A19">1</span>
+              <b>2</b>
+              <span class="md_cryptlink2A19C045C02F424F">3</span>
+              <span class="md_cryptlink424F4944464C2E45">10</span>
+              <span class="md_cryptlink44464C2E4544C119">20</span>
+              <span class="md_cryptlink4C2E4544C1194649">30</span>
+              <span class="md_cryptlink2E4544C119464942">40</span>
+            </div></td></tr>
+            <tr class="sujet ligne_booleen">
+              <td class="sujetCase1"><img src="/themes_static/images/silk/closedp.gif" /></td>
+              <td class="sujetCase3"><a href="/forum2.php?config=hfr.inc&cat=prive&post=9100200&page=1" class="cCatTopic">Sujet</a></td>
+              <td class="sujetCase6"><a href="/profilebdd.php?pseudo=Alice" class="Tableau">Alice</a></td>
+              <td class="sujetCase9"><a href="#bas">06-01-2020&nbsp;à&nbsp;22:08<br /><b>Alice</b></a></td>
+            </tr>
+            </table></body></html>
+        """.trimIndent()
+
+        val page = parser.parseList(html)
+
+        assertEquals(2, page.page)
+        // The forward links are cryptlink spans, not a.cHeader: the count must still resolve to 40,
+        // never collapse to the current page (2).
+        assertEquals(40, page.totalPages)
+        assertEquals(1, page.items.size)
+    }
+
+    @Test
     fun `parseList flags a multi-recipient conversation and leaves its correspondent empty`() {
         // MultiMP / "DT" row: the Interlocuteur cell is a "Interlocuteurs multiples" <span>
         // (truncated participant list in its title), NOT a profile link. Hand-written stub with
