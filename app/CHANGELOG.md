@@ -16,6 +16,23 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v136 — `0.12.0` — 2026-06-14
+
+**Statut** : `open` (track open testing — canal beta, Play Edit committed) + F-Droid `.beta`
+**Commit** : promotion dev→main (cf. PR de promotion)
+**Contenu depuis la 0.11.0/v132** : dogfoodé sur le canal dev (v133 → v135).
+
+> `0.11.0` ayant déjà été shippé en bêta (v132), le `versionName` est bumpé en `0.12.0` (la garde CI refuse deux bêtas au même `versionName`).
+
+### Added
+- **Éditeur — mode d'insertion d'image** (#500) : choix entre image réduite (défaut) et pleine taille dans les Réglages ; saut de ligne automatique entre les images d'un upload multiple ; bouton « Uploader » désormais toujours visible.
+- **(DT) Stockage MP cross-app** (#499, #502) : moteur de découverte/lecture du conteneur MPStorage partagé (compatible DTCloud/MultiMP) + écran d'inspection en lecture seule, accessible depuis Réglages → section DT (caché pour les utilisateurs normaux).
+
+### Fixed
+- **Pagination des listes MP au-delà de la page 2** (#503) : sur une boîte authentifiée, les numéros de page sont des liens obfusqués (`md_cryptlink`) dès la page 2 ; ils n'étaient pas lus, donc le total de pages retombait à la page courante. Affectait notamment la découverte du conteneur MPStorage (« aucun MP de stockage » à tort sur des comptes qui en possèdent un). Test de régression ajouté.
+
+---
+
 ## v132 — `0.11.0` — 2026-06-13
 
 **Statut** : `open` (track open testing — canal beta, Play Edit committed) + F-Droid `.beta`
