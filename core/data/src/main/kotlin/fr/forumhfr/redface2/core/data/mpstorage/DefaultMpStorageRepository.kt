@@ -173,7 +173,11 @@ class DefaultMpStorageRepository @Inject constructor(
         var outcome: Discovery? = null
         while (outcome == null && page <= totalPages && page <= MAX_DISCOVERY_PAGES) {
             val listPage = listParser.parseList(hfrClient.getPrivateMessageListPage(page))
-            totalPages = listPage.totalPages
+            // Never let the scan bound SHRINK across pages: HFR's pager only shows a window around
+            // the current page, so a later page can report a smaller `totalPages` than page 1 did.
+            // Taking the running max keeps a deep storage MP reachable even if one page under-reports
+            // the count (defence-in-depth alongside the cryptlink-aware pager parse, #6).
+            totalPages = maxOf(totalPages, listPage.totalPages)
             val hit = listPage.items.firstOrNull { it.subject == MpStorageRepository.STORAGE_SUBJECT_HASH }
             if (hit != null) {
                 // The subject is matched : the scan ends here whether or not the first post is

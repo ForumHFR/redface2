@@ -49,4 +49,9 @@ object HfrSelectors {
     const val MP_LIST_CORRESPONDENT_GROUP = "td.sujetCase6 span"
     const val MP_LIST_DATE = "td.sujetCase9 a"
     const val MP_LIST_TOP_PAGER = "tr.fondForum1PagesHaut"
+    // On an AUTHENTICATED inbox, the pager's forward page-number links are `a.cHeader` on page 1
+    // only; on page 2+ HFR obfuscates them as `<span class="md_cryptlink…">N</span>`. The page
+    // count must read these too, otherwise `totalPages` collapses to the current page from page 2
+    // on, and a paged scan (MPStorage discovery, #6) terminates after page 2.
+    const val MP_LIST_PAGER_CRYPTLINK = "span[class^=md_cryptlink]"
 }
