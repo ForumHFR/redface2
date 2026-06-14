@@ -220,14 +220,33 @@ private fun buildSettingsCatalogue(
                 id = "proxy",
                 title = stringResource(R.string.settings_nav_proxy),
                 description = stringResource(R.string.settings_nav_proxy_description),
-                keywords = listOf("proxy", "réseau", "host", "port"),
+                // A nav row is opaque to search: it must carry the labels actually shown inside the
+                // sub-page (e.g. « Hôte »), or searching them hits the empty state (#494 Codex P2).
+                keywords = listOf(
+                    "proxy",
+                    "réseau",
+                    "host",
+                    "port",
+                    stringResource(R.string.settings_proxy_host),
+                    stringResource(R.string.settings_proxy_port),
+                    stringResource(R.string.settings_proxy_username),
+                    stringResource(R.string.settings_proxy_password),
+                ),
                 onClick = onOpenProxy,
             ),
             navRow(
                 id = "maintenance",
                 title = stringResource(R.string.settings_nav_maintenance),
                 description = stringResource(R.string.settings_nav_maintenance_description),
-                keywords = listOf("cache", "vider", "images", "topics", "diagnostic", "debug"),
+                keywords = buildList {
+                    addAll(listOf("cache", "vider", "images", "topics", "diagnostic", "debug"))
+                    add(stringResource(R.string.settings_clear_topic_cache_button))
+                    add(stringResource(R.string.settings_clear_image_cache_button))
+                    add(stringResource(R.string.settings_ignore_topic_cache_title))
+                    // The MPStorage inspector only exists in this page when the DT section is on,
+                    // so only surface its label to search in that case (avoids a dead-end result).
+                    if (state.showDtSection) add(stringResource(R.string.settings_mpstorage_inspector_title))
+                },
                 onClick = onOpenMaintenance,
             ),
         ),
@@ -257,7 +276,18 @@ private fun buildSettingsCatalogue(
                 id = "display_nav",
                 title = stringResource(R.string.settings_nav_display),
                 description = stringResource(R.string.settings_nav_display_description),
-                keywords = listOf("thème", "amoled", "sombre", "clair", "densité", "police", "taille"),
+                keywords = listOf(
+                    "thème",
+                    "amoled",
+                    "sombre",
+                    "clair",
+                    "densité",
+                    "police",
+                    "taille",
+                    stringResource(R.string.settings_theme_title),
+                    stringResource(R.string.settings_theme_amoled_title),
+                    stringResource(R.string.settings_display_title),
+                ),
                 onClick = onOpenDisplay,
             ),
         ),
@@ -381,7 +411,18 @@ private fun buildSettingsCatalogue(
                 id = "images_nav",
                 title = stringResource(R.string.settings_nav_images),
                 description = stringResource(R.string.settings_nav_images_description),
-                keywords = listOf("images", "hébergeur", "imgur", "diberie", "upload", "insertion"),
+                keywords = listOf(
+                    "images",
+                    "hébergeur",
+                    "imgur",
+                    "diberie",
+                    "upload",
+                    "insertion",
+                    stringResource(R.string.settings_upload_provider_title),
+                    stringResource(R.string.settings_upload_imgur_client_id_label),
+                    stringResource(R.string.settings_image_insert_title),
+                    stringResource(R.string.settings_my_images_title),
+                ),
                 onClick = onOpenImages,
             ),
         ),
@@ -411,7 +452,16 @@ private fun buildSettingsCatalogue(
                 id = "account_nav",
                 title = stringResource(R.string.settings_nav_account),
                 description = stringResource(R.string.settings_nav_account_description),
-                keywords = listOf("compte", "hfr", "profil", "version", "à propos", "diagnostic"),
+                keywords = listOf(
+                    "compte",
+                    "hfr",
+                    "profil",
+                    "version",
+                    "à propos",
+                    "diagnostic",
+                    stringResource(R.string.settings_about_diagnostics),
+                    stringResource(R.string.settings_about_report),
+                ),
                 onClick = onOpenAccountAbout,
             ),
         ),

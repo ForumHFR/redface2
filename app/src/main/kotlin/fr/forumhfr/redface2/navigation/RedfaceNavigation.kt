@@ -653,7 +653,19 @@ fun RedfaceApp(intent: Intent?) {
                         versionCode = BuildConfig.VERSION_CODE,
                         onLogin = { activeBackStack.add(LoginRoute) },
                         onLogout = accountViewModel::logout,
-                        onOpenSettings = { activeBackStack.add(SettingsRoute) },
+                        onOpenSettings = {
+                            // Idempotent: the account menu is also shown ON the settings screen and its
+                            // sub-pages. Tapping « Paramètres » there must land back on the existing
+                            // Settings root rather than push a duplicate SettingsRoute (#494 Codex P3).
+                            val existing = activeBackStack.indexOfLast { it is SettingsRoute }
+                            if (existing >= 0) {
+                                while (activeBackStack.lastIndex > existing) {
+                                    activeBackStack.removeAt(activeBackStack.lastIndex)
+                                }
+                            } else {
+                                activeBackStack.add(SettingsRoute)
+                            }
+                        },
                         onOpenDiagnostics = { activeBackStack.add(DiagnosticsRoute) },
                         onReportContent = {
                             startReportEmail(context, reportEmailSubject, reportNoEmailClient)

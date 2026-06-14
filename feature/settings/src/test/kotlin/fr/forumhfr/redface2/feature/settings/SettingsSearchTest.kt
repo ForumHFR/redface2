@@ -50,6 +50,21 @@ class SettingsSearchTest {
                 ),
             ),
         ),
+        // A navigation row whose target sub-page hosts controls only reachable by their displayed
+        // label (e.g. « Hôte » in Proxy). The row carries those labels as keywords so search routes
+        // to the sub-page instead of the empty state (#494 Codex P2).
+        SettingsSearchableSection(
+            id = "network",
+            title = "Réseau et cache",
+            items = listOf(
+                SettingsSearchableItem(
+                    id = "proxy",
+                    title = "Proxy",
+                    description = "Configurer un proxy HTTP",
+                    keywords = listOf("proxy", "Hôte", "Port"),
+                ),
+            ),
+        ),
         SettingsSearchableSection(
             id = "mp",
             title = "Messages privés",
@@ -72,7 +87,7 @@ class SettingsSearchTest {
     fun `blank query returns all sections with visible items`() {
         val result = filterSettingsSections(sections(), "")
         // The MP section keeps only its visible item; every other section is present.
-        assertEquals(listOf("display", "editing", "notifications", "mp"), result.map { it.id })
+        assertEquals(listOf("display", "editing", "notifications", "network", "mp"), result.map { it.id })
         val mp = result.first { it.id == "mp" }
         assertEquals(listOf("mp_badge"), mp.items.map { it.id })
     }
@@ -123,6 +138,15 @@ class SettingsSearchTest {
         val items = result.flatMap { it.items }
         assertEquals(listOf("future_notifications"), items.map { it.id })
         assertTrue(items.all { !it.enabled })
+    }
+
+    @Test
+    fun `matches a sub-page label carried as a nav-row keyword`() {
+        // « Hôte » is only shown inside the Proxy sub-page; the nav row carries it as a keyword so
+        // searching it (accent-folded) routes to the network section instead of the empty state.
+        val result = filterSettingsSections(sections(), "hote")
+        assertEquals(listOf("network"), result.map { it.id })
+        assertEquals(listOf("proxy"), result.first().items.map { it.id })
     }
 
     @Test
