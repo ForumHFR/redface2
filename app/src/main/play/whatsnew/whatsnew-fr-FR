@@ -1,11 +1,10 @@
-Redface 2 v0.11.0 — bêta.
+Redface 2 v0.12.0 — bêta.
 
 Nouveautés :
-- Upload d'images dans l'éditeur : galerie, plusieurs d'un coup, choix de l'hébergeur (diberie/imgur), écran « Mes images ».
-- Brouillons d'éditeur sauvegardés automatiquement.
-- Multi-quote, sondages repliables.
-- Drapeaux : swipe entre onglets, suppr. appui long, filtre par catégorie.
-- MP : ouverture sur la dernière page lue.
-- Affichage : densité/police réglables, démarrage configurable.
+- Éditeur : insertion d'image en taille réduite ou pleine taille (au choix dans les Réglages), saut de ligne entre les images d'un envoi multiple, bouton « Uploader » toujours visible.
+- (DT) Inspecteur du stockage MP cross-app pour les utilisateurs DT (Réglages → section DT).
 
-Correctif : upload diberie réparé.
+Correctif :
+- Pagination des MP au-delà de la page 2.
+
+Signalez les bugs via la bêta ou GitHub.

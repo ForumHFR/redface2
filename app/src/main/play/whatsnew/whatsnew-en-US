@@ -1,13 +1,10 @@
-Redface 2 v0.11.0 — beta.
+Redface 2 v0.12.0 — beta.
 
 New:
-- Image upload in the editor: from the gallery, several at once, host choice (diberie/imgur), "My images" screen.
-- Editor drafts saved automatically.
-- Multi-quote, collapsible polls.
-- Flags: swipe between tabs, long-press to remove, filter by category.
-- PMs: open on the last page, resume reading.
-- Display: adjustable density/font, configurable start screen.
+- Editor: insert images at reduced or full size (your choice in Settings), line break between images of a multi-upload, "Upload" button always visible.
+- (DT) Cross-app MP storage inspector for DT users (Settings → DT section).
 
-Fix: diberie upload repaired.
+Fix:
+- MP list pagination beyond page 2.
 
 Report bugs via the beta or GitHub.
