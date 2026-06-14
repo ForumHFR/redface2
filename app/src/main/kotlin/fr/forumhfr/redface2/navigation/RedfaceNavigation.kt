@@ -273,6 +273,13 @@ data object SettingsRoute : RedfaceNavKey
 data object MyImagesRoute : RedfaceNavKey
 
 /**
+ * #6 — read-only MPStorage inspector (debug). Reached from the Settings screen, only when the DT
+ * section is enabled. Opaque route, no params (the screen owns its own fetch).
+ */
+@Serializable
+data object MpStorageInspectorRoute : RedfaceNavKey
+
+/**
  * Phase 2 finish (#208) — full profile page route.
  *
  * Navigation is always [userId]-first. [pseudo] and [avatarUrl] are display hints shown
@@ -1135,11 +1142,21 @@ private fun RedfaceNavHost(
             entry<SettingsRoute> {
                 SettingsScreen(
                     onOpenMyImages = { backStack.add(MyImagesRoute) },
+                    onOpenMpStorageInspector = { backStack.add(MpStorageInspectorRoute) },
                 )
             }
             entry<MyImagesRoute> {
                 MyImagesScreen(
                     onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                )
+            }
+            entry<MpStorageInspectorRoute> {
+                fr.forumhfr.redface2.feature.settings.MpStorageInspectorScreen(
+                    onClose = {
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
                         }

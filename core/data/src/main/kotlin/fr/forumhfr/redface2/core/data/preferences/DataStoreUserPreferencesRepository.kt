@@ -18,6 +18,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.FlagType
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -402,6 +403,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeEditorImageInsert(): Flow<EditorImageInsert> =
+        dataStore.data
+            // Default REDUCED (#459 PR-images follow-up): the classic HFR "vignette cliquable".
+            .map(::readEditorImageInsert)
+            .distinctUntilChanged()
+            .catch { emit(EditorImageInsert.REDUCED) }
+
+    override suspend fun setEditorImageInsert(mode: EditorImageInsert) {
+        withContext(ioDispatcher) {
+            dataStore.edit { prefs ->
+                prefs[KEY_EDITOR_IMAGE_INSERT] = mode.name
+            }
+        }
+    }
+
     override fun observeFontScale(): Flow<FontScalePreference> =
         dataStore.data
             // Default M (#287): the M3 reference sizes unless the user picks S / L.
@@ -426,6 +442,12 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_UPLOAD_PROVIDER]
             ?.let { stored -> runCatching { UploadProviderId.valueOf(stored) }.getOrNull() }
             ?: UploadProviderId.DIBERIE
+
+    /** Reads [KEY_EDITOR_IMAGE_INSERT] defensively; unknown / corrupt value → [EditorImageInsert.REDUCED]. */
+    private fun readEditorImageInsert(prefs: Preferences): EditorImageInsert =
+        prefs[KEY_EDITOR_IMAGE_INSERT]
+            ?.let { stored -> runCatching { EditorImageInsert.valueOf(stored) }.getOrNull() }
+            ?: EditorImageInsert.REDUCED
 
     /**
      * Reads [KEY_DISPLAY_DENSITY] defensively (#287): an unknown / corrupt stored value (older
@@ -558,6 +580,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // imgur Client-ID (empty = imgur unconfigured, option B: never committed).
         val KEY_UPLOAD_PROVIDER = stringPreferencesKey("upload_provider")
         val KEY_IMGUR_CLIENT_ID = stringPreferencesKey("imgur_client_id")
+        // #459 PR-images follow-up — editor image insert mode (EditorImageInsert.name, defensively parsed).
+        val KEY_EDITOR_IMAGE_INSERT = stringPreferencesKey("editor_image_insert")
 
         // #287 — reading display presets: density (DisplayDensity.name) + font scale
         // (FontScalePreference.name), both defensively parsed. No bootstrap mirror (cf. observers).

@@ -577,21 +577,26 @@ reply/quote MP, MultiMP et MPStorage restent dans la suite Phase 3.
 
 MPStorage est une bibliothèque cross-plateforme (HFRGMTools/Wiripse, en production depuis ~2019) qui utilise un **MP HFR dédié** comme backend de stockage : sujet = hash fixe `a2bcc09b796b8c6fab77058ff8446c34`, destinataire = compte tiers `MultiMP`. Le **premier post** de ce MP contient un document JSON **partagé par tous les userscripts** (DTCloud pour les drapeaux DT, HFR4K, …). Redface 2 adopte **l'enveloppe v0.1 de facto telle quelle** — décision actée dans [ADR-014]({{ site.baseurl }}/adr/014-mpstorage-v01-de-facto) (accepté 2026-06-12, cf. exploration [#6](https://github.com/ForumHFR/redface2/issues/6)) : toute extension Redface 2 passe par de **nouvelles clés additives** dans l'entrée v0.1, jamais par un nouveau format — la compatibilité avec les userscripts existants est non négociable.
 
-Enveloppe réelle (source : `MPStorage.user.js` + doc Wiripse, confrontées le 2026-06-10) :
+Enveloppe réelle (source : `MPStorage.user.js` + doc Wiripse, confrontées le 2026-06-10 ; **jeu de 16 clés observé sur un vrai document le 2026-06-14** — les valeurs ci-dessous sont **synthétiques/scrubées**, aucun id de MP privé réel n'est publié) :
 
 ```json
 {
   "data": [
     {
       "version": "0.1",
-      "mpFlags": { "list": [ { "uri": "…", "post": 12345, "page": 3, "href": "t1980000001", "p": 2 } ] },
-      "hfr4k": { "…": "clés d'un autre outil, à préserver verbatim" }
+      "mpFlags": { "list": [ { "uri": "https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=prive&post=900100&page=12&…#t900101", "post": 900100, "page": 12, "href": "t900101", "p": "1" } ], "active": true },
+      "blacklist": { "…": "" }, "hfrChat": {}, "superFavs": {}, "hfr4k": {}, "egoQuote": {},
+      "egoPost": {}, "lastRead": {}, "ezzziDrap": {}, "fastDelete": {}, "fastValid": {},
+      "catMP": {}, "oemMP": {},
+      "sourceName": "DTCloud_GM", "lastUpdate": 1764545018539
     }
   ],
-  "sourceName": "DTCloud",
-  "lastUpdate": 1718064000000
+  "sourceName": "DTCloud_GM",
+  "lastUpdate": 1764545018539
 }
 ```
+
+Notes de format vérifiées sur le document réel : `mpFlags.list[].post` est un **entier**, `page` un entier, `p` une **string** ; toutes les `uri` portent `cat=prive` → **`mpFlags` adresse des conversations MP de groupe (« DT »), pas des topics publics** (`post` = threadId MP). Chaque outil pose ses clés dans l'entrée v0.1 partagée (≥ 14 clés tierces ici) : `sourceName`/`lastUpdate` sont ceux du **dernier écrivain**, dupliqués à la racine ET dans l'entrée v0.1.
 
 Modèles Kotlin (lecture seule, Phase 3) :
 
@@ -624,9 +629,11 @@ Règles non négociables (exploration #6) :
 
 - **Préserver les clés inconnues** : l'écriture MPStorage est un remplacement intégral sans verrou (last-write-wins) — perdre `hfr4k` ou toute clé tierce casserait les userscripts de l'utilisateur.
 - **Jamais de reset destructif** sur contenu invalide (le piège de la bibliothèque d'origine) : un document illisible = lecture en échec explicite, pas un écrasement par le défaut.
-- **Découverte** = recherche authentifiée par sujet : `forum1.php?recherches=1&cat=prive&search=<hash>&titre=1` (vérifié live 2026-06-11, fixtures `mp_storage_search_*`). L'absence de MP storage (compte n'ayant jamais utilisé DTCloud) est le **cas nominal premier**.
-- **Lecture** = GET du formulaire d'édition du premier post (`message.php?cat=prive&post=<mpId>&numreponse=<repId>`), textarea `content_form` (contenu brut, pas le HTML rendu).
-- **Écriture** (différée, opt-in) = POST `bdd.php` `cat=prive` en read-modify-write juste avant le POST, jamais une édition par page vue.
+- **Découverte** = **scan client-side de la boîte de réception MP**, PAS une recherche serveur. C'est le mécanisme réel de `MPStorage.user.js` (`findStorageMPOnPage`), confirmé au niveau du source le 2026-06-14 : l'index de titres HFR ne renvoie **jamais** le hash 32-hex (la recherche par titre du #406 d'origine renvoyait `NotFound` sur tout compte réel). On pagine `forum1.php?cat=prive&page=N` et on matche une conversation dont le **sujet** == hash (parser `PrivateMessageListParser`), jusqu'à `MAX_DISCOVERY_PAGES`. L'absence de MP storage (compte n'ayant jamais utilisé DTCloud) reste le **cas nominal premier**.
+- **Cache par compte** (`mp_storage_locations`, Room, purgé au logout par `CacheInvalidator` — pas DataStore, pour aligner la purge sur `mp_read_positions`/`uploaded_images`) : `threadId` + `numreponse` du premier post sont mémorisés après la première découverte → les fetches suivants lisent directement le formulaire d'édition sans rescanner l'inbox. C'est exactement l'optimisation de l'userscript (cache de `mpId`/`mpRepId`). Un cache périmé (formulaire d'édition introuvable) → purge + rescan.
+- **Lecture** = GET du formulaire d'édition du premier post (`message.php?cat=prive&post=<mpId>&numreponse=<repId>`), textarea `content_form` (contenu brut, pas le HTML rendu). `numreponse` du premier post = `name.split('t')[1]` du premier `a[name]` de la page de conversation (`forum2.php`).
+- **Application des positions DT** (livré) : `mpFlags.list[]` → `PrivateMessageReadPositionStore` (table `mp_read_positions`, ADR-013 étage 1), **seed local-prioritaire** : on n'écrit la position que si la conversation n'a pas de position locale ou si la page stockée est **plus avancée** — MPStorage ne fait jamais reculer une page déjà dépassée localement. Déclenché une fois par session sur l'écran liste MP, gated par le réglage « section DT ».
+- **Écriture** (différée, opt-in) = POST `bdd.php?config=hfr.inc` `cat=prive` (édition) en read-modify-write juste avant le POST, jamais une édition par page vue. Champs observés dans le source : `content_form`, `post`, `numreponse`, `pseudo`, `cat=prive`, `verifrequet=1100`, `sujet=<hash>`, `hash_check`. Création (si jamais nécessaire) = POST `bddpost.php` avec en plus `dest=MultiMP`. Validité = `data && lastUpdate` (sinon la lib reset au défaut — à NE PAS reproduire).
 
 ---
 

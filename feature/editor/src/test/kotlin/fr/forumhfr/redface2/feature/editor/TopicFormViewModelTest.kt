@@ -18,6 +18,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
@@ -768,6 +769,27 @@ class TopicFormViewModelTest {
         assertEquals("image: ", viewModel.state.value.draft.text)
     }
 
+    @Test
+    fun `ImageUrlInserted honours the EditorImageInsert preference in topic-level forms`() = runTest {
+        // #459 PR2 (Codex P2#1) — the topic composer must respect the same preference as the post
+        // editor. A pasted URL has no reduced variant, so REDUCED wraps the full URL in [url].
+        val viewModel = newViewModel(
+            userPreferencesRepository =
+                FakeUserPreferencesRepository(editorImageInsert = EditorImageInsert.REDUCED),
+        )
+        viewModel.state.test {
+            awaitHydratedState()
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("image: ", TextRange(7))))
+        viewModel.submit(TopicFormIntent.ImageUrlInserted("https://example.com/pic.gif"))
+
+        val expected =
+            "image: [url=https://example.com/pic.gif][img]https://example.com/pic.gif[/img][/url]"
+        assertEquals(expected, viewModel.state.value.draft.text)
+    }
+
     // ----- #312 : confirmation avant publication ------------------------------
 
     @Test
@@ -1316,8 +1338,10 @@ class TopicFormViewModelTest {
      */
     private class FakeUserPreferencesRepository(
         confirmBeforePosting: Boolean = false,
+        editorImageInsert: EditorImageInsert = EditorImageInsert.FULL,
     ) : UserPreferencesRepository {
         private val confirmBeforePosting = MutableStateFlow(confirmBeforePosting)
+        private val editorImageInsert = MutableStateFlow(editorImageInsert)
 
         override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
         override suspend fun saveProxyConfig(config: ProxyConfig) = Unit
@@ -1380,6 +1404,12 @@ class TopicFormViewModelTest {
         override fun observeImgurClientId(): Flow<String> = MutableStateFlow("")
 
         override suspend fun setImgurClientId(clientId: String) = Unit
+
+        override fun observeEditorImageInsert(): Flow<EditorImageInsert> = editorImageInsert
+
+        override suspend fun setEditorImageInsert(mode: EditorImageInsert) {
+            editorImageInsert.value = mode
+        }
 
         // #287 — reading display presets are irrelevant to the topic form; stubbed at defaults.
         override fun observeDisplayDensity(): Flow<DisplayDensity> = MutableStateFlow(DisplayDensity.COMFORT)

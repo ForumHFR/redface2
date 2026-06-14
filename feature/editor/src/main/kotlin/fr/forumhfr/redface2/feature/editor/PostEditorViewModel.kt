@@ -25,6 +25,7 @@ import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -33,7 +34,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
-import fr.forumhfr.redface2.core.ui.editor.imageBbcodeTokenOrNull
+import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
@@ -133,6 +134,15 @@ class PostEditorViewModel @AssistedInject constructor(
     private var confirmBeforePosting: Boolean = false
 
     /**
+     * #459 PR2 — mirror of the persisted [EditorImageInsert] preference (full / linked / reduced).
+     * Collected on init like [confirmBeforePosting] and read SYNCHRONOUSLY at insert time so the
+     * image-URL / upload paths can mutate the draft in the same frame as the user action (no
+     * suspend between the action and the draft mutation — Codex PR2 review). Default mirrors the
+     * repository's REDUCED default until the first emission lands.
+     */
+    private var imageInsertMode: EditorImageInsert = EditorImageInsert.REDUCED
+
+    /**
      * #459 PR2 — active lowercased HFR pseudo (the upload `userId`), or null when anonymous.
      * Captured from the auth stream exactly like `MyImagesViewModel` / `FlagsViewModel` so an
      * [PostEditorIntent.ImagePicked] can scope the upload to the right owner without re-reading the
@@ -155,6 +165,11 @@ class PostEditorViewModel @AssistedInject constructor(
         viewModelScope.launch {
             userPreferencesRepository.observeConfirmBeforePosting().collect { enabled ->
                 confirmBeforePosting = enabled
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.observeEditorImageInsert().collect { mode ->
+                imageInsertMode = mode
             }
         }
         viewModelScope.launch {
@@ -380,23 +395,33 @@ class PostEditorViewModel @AssistedInject constructor(
         scheduleAutosave()
     }
 
+    /**
+     * #189 / #459 — a user-pasted image URL. The BBCode is shaped by the [EditorImageInsert]
+     * preference ([imageInsertBbcodeOrNull] validates the http(s) scheme and applies full / linked /
+     * reduced — a pasted URL has no reduced variant, so REDUCED degrades to LINKED). Reads the cached
+     * [imageInsertMode] synchronously so the draft mutates in the same frame as the user action
+     * (no suspend between the intent and the caret insertion — Codex PR2 review).
+     */
     private fun onImageUrlInserted(url: String) {
-        if (insertImageUrlAtCaret(url)) scheduleAutosave()
+        val bbcode = imageInsertBbcodeOrNull(fullUrl = url, mode = imageInsertMode) ?: return
+        insertImageBbcodeAtCaret(bbcode, leadingNewline = false)
+        scheduleAutosave()
     }
 
     /**
-     * #189 / #459 PR2 — shared `[img]url[/img]` insertion at the caret. Reuses the smiley path's
-     * pure helpers ([imageBbcodeTokenOrNull] validates the scheme, [insertBbcodeToken] inserts while
-     * preserving the selection) so the cursor-insertion contract is identical to `onSmileySelected`.
-     * The image token is inserted WITHOUT surrounding spaces (an `[img]` is a self-contained block,
-     * unlike a smiley which would fuse with an adjacent one). Returns `true` when the URL was valid
-     * and inserted (so callers can decide whether to schedule an autosave), `false` otherwise.
+     * #459 — inserts an already-built image BBCode fragment at the caret. Same cursor contract as the
+     * smiley path ([insertBbcodeToken] preserves the selection, the preview is refreshed), WITHOUT
+     * surrounding spaces (an image is self-contained). [leadingNewline] prefixes a newline when the
+     * caret is not already at a line start, so consecutive uploads land on their own lines instead of
+     * running together.
      */
-    private fun insertImageUrlAtCaret(url: String): Boolean {
-        val token = imageBbcodeTokenOrNull(url) ?: return false
+    private fun insertImageBbcodeAtCaret(bbcode: String, leadingNewline: Boolean) {
         _state.update { current ->
             val draft = current.draft
             val selection = draft.selection
+            val caret = selection.start.coerceIn(0, draft.text.length)
+            val needsNewline = leadingNewline && caret > 0 && draft.text[caret - 1] != '\n'
+            val token = if (needsNewline) "\n$bbcode" else bbcode
             val outcome = insertBbcodeToken(
                 token = token,
                 text = draft.text,
@@ -415,7 +440,6 @@ class PostEditorViewModel @AssistedInject constructor(
                 withDraft
             }
         }
-        return true
     }
 
     /**
@@ -452,6 +476,10 @@ class PostEditorViewModel @AssistedInject constructor(
             )
         }
         uploadJob = viewModelScope.launch {
+            // Snapshot the cached preference once at batch start so all N inserts use a consistent
+            // mode even if the user flips the setting mid-upload. Reading the cached field (not the
+            // flow) keeps the upload free of an extra suspend point.
+            val mode = imageInsertMode
             var completed = 0
             for (uri in targets) {
                 val outcome = runCatching {
@@ -462,10 +490,20 @@ class PostEditorViewModel @AssistedInject constructor(
                     handleUploadFailure(error)
                     return@launch
                 }
-                insertImageUrlAtCaret(uploaded.imageUrl)
-                // Persist after EACH insert, not once at the end: a later image failing must not
-                // lose the images already inserted into the draft (Codex review #490).
-                scheduleAutosave()
+                // BBCode shaped by the preference (full / linked / reduced) ; the reduced URL is the
+                // host's smaller variant when it exposes one, else the full URL.
+                val bbcode = imageInsertBbcodeOrNull(
+                    fullUrl = uploaded.imageUrl,
+                    displayUrl = uploaded.resizedUrl ?: uploaded.imageUrl,
+                    mode = mode,
+                )
+                if (bbcode != null) {
+                    // Each image after the first lands on its own line (no more run-together uploads).
+                    insertImageBbcodeAtCaret(bbcode, leadingNewline = completed > 0)
+                    // Persist after EACH insert, not once at the end: a later image failing must not
+                    // lose the images already inserted into the draft (Codex review #490).
+                    scheduleAutosave()
+                }
                 completed += 1
                 if (multiple) {
                     _state.update { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }

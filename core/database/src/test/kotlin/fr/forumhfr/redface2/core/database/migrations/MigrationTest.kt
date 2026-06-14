@@ -25,8 +25,9 @@ import org.robolectric.annotation.Config
  * (#213 added `Topic.canReply` in v7), `MIGRATION_7_8` (#362 added `Post.editedAt`
  * in v8), `MIGRATION_8_9` (#384 follow-up added `FlagTopic.isFavorite` in v9),
  * `MIGRATION_9_10` (#430 added the `mp_read_positions` table in v10),
- * `MIGRATION_10_11` (#405 added the `editor_drafts` table in v11) and
- * `MIGRATION_11_12` (#459 added the `uploaded_images` table in v12).
+ * `MIGRATION_10_11` (#405 added the `editor_drafts` table in v11),
+ * `MIGRATION_11_12` (#459 added the `uploaded_images` table in v12) and
+ * `MIGRATION_12_13` (#6/ADR-014 added the `mp_storage_locations` table in v13).
  * Without these tests a typo (missing column, wrong index name, wrong default)
  * would only crash on a real upgrade-in-place install, where the diagnostic loop is
  * days long. The tests take seconds.
@@ -123,6 +124,7 @@ class MigrationTest {
                 MIGRATION_9_10,
                 MIGRATION_10_11,
                 MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             .build()
 
@@ -265,6 +267,7 @@ class MigrationTest {
                 MIGRATION_9_10,
                 MIGRATION_10_11,
                 MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             .build()
 
@@ -367,6 +370,7 @@ class MigrationTest {
                 MIGRATION_9_10,
                 MIGRATION_10_11,
                 MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             .build()
 
@@ -441,6 +445,7 @@ class MigrationTest {
                 MIGRATION_9_10,
                 MIGRATION_10_11,
                 MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             .build()
 
@@ -511,6 +516,7 @@ class MigrationTest {
                 MIGRATION_9_10,
                 MIGRATION_10_11,
                 MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             .build()
 
@@ -572,6 +578,7 @@ class MigrationTest {
                 MIGRATION_9_10,
                 MIGRATION_10_11,
                 MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             .build()
 
@@ -647,6 +654,7 @@ class MigrationTest {
                 MIGRATION_9_10,
                 MIGRATION_10_11,
                 MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             .build()
 
@@ -709,6 +717,7 @@ class MigrationTest {
                 MIGRATION_9_10,
                 MIGRATION_10_11,
                 MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             .build()
 
@@ -761,6 +770,7 @@ class MigrationTest {
                 MIGRATION_9_10,
                 MIGRATION_10_11,
                 MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             .build()
 
@@ -817,6 +827,7 @@ class MigrationTest {
                 MIGRATION_9_10,
                 MIGRATION_10_11,
                 MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             .build()
 
@@ -878,6 +889,7 @@ class MigrationTest {
                 MIGRATION_9_10,
                 MIGRATION_10_11,
                 MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             .build()
 
@@ -897,6 +909,63 @@ class MigrationTest {
                 assertTrue("thumbnailUrl must round-trip NULL", cursor.isNull(1))
                 assertEquals("ABC123", cursor.getString(2))
                 assertTrue("expiresAt must round-trip NULL", cursor.isNull(3))
+            }
+        } finally {
+            migrated.close()
+        }
+    }
+
+    /**
+     * #6 / ADR-014 — v12 → v13 creates `mp_storage_locations` (per-account cached MPStorage location).
+     *
+     * Verifies:
+     * 1. The migration runs cleanly against the v12 fixture and matches the exported v13 schema.
+     * 2. The production Room database (full migration chain) can write and read a location row.
+     */
+    @Test
+    fun migrate_12_to_13_creates_mp_storage_locations() {
+        val dbName = "migration_12_13_test"
+
+        // 1. Create a v12 database (no location rows can pre-exist the table).
+        helper.createDatabase(dbName, 12).close()
+
+        // 2. Run MIGRATION_12_13 and validate against the exported v13 schema.
+        helper.runMigrationsAndValidate(dbName, 13, true, MIGRATION_12_13).close()
+
+        // 3. Open the production Room database (which chains every migration).
+        val migrated = Room.databaseBuilder(
+            ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java,
+            dbName,
+        )
+            .allowMainThreadQueries()
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+                MIGRATION_7_8,
+                MIGRATION_8_9,
+                MIGRATION_9_10,
+                MIGRATION_10_11,
+                MIGRATION_11_12,
+                MIGRATION_12_13,
+            )
+            .build()
+
+        try {
+            migrated.openHelper.writableDatabase.execSQL(
+                "INSERT INTO mp_storage_locations (userId, threadId, numreponse) " +
+                    "VALUES ('xatrix', 9100200, 1980664234)",
+            )
+            migrated.openHelper.readableDatabase.query(
+                "SELECT threadId, numreponse FROM mp_storage_locations WHERE userId = 'xatrix'",
+            ).use { cursor ->
+                assertTrue("the migrated table must accept and return a row", cursor.moveToFirst())
+                assertEquals(9100200, cursor.getInt(0))
+                assertEquals(1980664234, cursor.getInt(1))
             }
         } finally {
             migrated.close()

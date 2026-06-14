@@ -4,11 +4,15 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageReadPositionSeeder
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageSeedOutcome
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
 import java.time.Instant
@@ -17,6 +21,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -47,7 +52,7 @@ class MessagesViewModelTest {
         coEvery { repository.getPrivateMessageList(page = 1) } returns
             PrivateMessageListPage(page = 1, totalPages = 3, items = listOf(summary(10), summary(20)))
 
-        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
+        val viewModel = viewModel(repository, FakeAuthRepository())
 
         val state = viewModel.state.value
         val mode = state.mode
@@ -62,7 +67,7 @@ class MessagesViewModelTest {
     fun `anonymous state does not fetch the private inbox`() = runTest {
         val repository = mockk<MessagesRepository>()
 
-        val viewModel = MessagesViewModel(repository, FakeAuthRepository(AuthState.Anonymous))
+        val viewModel = viewModel(repository, FakeAuthRepository(AuthState.Anonymous))
 
         assertEquals(MessagesUiState.Mode.RequiresLogin, viewModel.state.value.mode)
         coVerify(exactly = 0) {
@@ -75,7 +80,7 @@ class MessagesViewModelTest {
         val repository = mockk<MessagesRepository>()
         coEvery { repository.getPrivateMessageList(page = 1) } throws IOException("offline")
 
-        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
+        val viewModel = viewModel(repository, FakeAuthRepository())
 
         // #316: the Error mode carries NO raw throwable message (privacy — it can embed the private
         // conversation URL). The only detail is the #324 type-derived kind (safe closed enum).
@@ -92,7 +97,7 @@ class MessagesViewModelTest {
         coEvery { repository.getPrivateMessageList(page = 1) } throws
             HfrServerException(code = 503, url = "https://forum.hardware.fr/forum1.php")
 
-        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
+        val viewModel = viewModel(repository, FakeAuthRepository())
 
         val mode = viewModel.state.value.mode
         assertTrue(mode is MessagesUiState.Mode.Error)
@@ -107,7 +112,7 @@ class MessagesViewModelTest {
             PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1), summary(2))),
         )
 
-        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
+        val viewModel = viewModel(repository, FakeAuthRepository())
         viewModel.refresh()
 
         val state = viewModel.state.value
@@ -122,7 +127,7 @@ class MessagesViewModelTest {
             PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1))) andThenThrows
             IOException("offline")
 
-        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
+        val viewModel = viewModel(repository, FakeAuthRepository())
         viewModel.refresh()
 
         val state = viewModel.state.value
@@ -141,7 +146,7 @@ class MessagesViewModelTest {
         coEvery { repository.getPrivateMessageList(page = 2) } returns
             PrivateMessageListPage(page = 2, totalPages = 2, items = listOf(summary(2), summary(3)))
 
-        val viewModel = MessagesViewModel(repository, FakeAuthRepository())
+        val viewModel = viewModel(repository, FakeAuthRepository())
         viewModel.selectPage(2)
 
         val state = viewModel.state.value
@@ -157,7 +162,7 @@ class MessagesViewModelTest {
         coEvery { repository.getPrivateMessageList(page = 1) } returns
             PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1)))
 
-        val viewModel = MessagesViewModel(repository, authRepository)
+        val viewModel = viewModel(repository, authRepository)
         assertTrue(viewModel.state.value.mode is MessagesUiState.Mode.Content)
 
         authRepository.emit(AuthState.Anonymous)
@@ -167,6 +172,52 @@ class MessagesViewModelTest {
         authRepository.emit(AuthState.Authenticated("other"))
         advanceUntilIdle()
         assertTrue(viewModel.state.value.mode is MessagesUiState.Mode.Content)
+    }
+
+    @Test
+    fun `seeds DT reading positions once when the section is enabled`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageList(page = 1) } returns
+            PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1)))
+        val seeder = fakeSeeder()
+
+        viewModel(repository, preferences = fakePreferences(showDt = true), seeder = seeder)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { seeder.seed() }
+    }
+
+    @Test
+    fun `does not seed DT reading positions when the section is disabled`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageList(page = 1) } returns
+            PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1)))
+        val seeder = fakeSeeder()
+
+        viewModel(repository, preferences = fakePreferences(showDt = false), seeder = seeder)
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { seeder.seed() }
+    }
+
+    private fun viewModel(
+        repository: MessagesRepository,
+        authRepository: AuthRepository = FakeAuthRepository(),
+        preferences: UserPreferencesRepository = fakePreferences(showDt = false),
+        seeder: MpStorageReadPositionSeeder = fakeSeeder(),
+    ) = MessagesViewModel(
+        repository = repository,
+        authRepository = authRepository,
+        userPreferencesRepository = preferences,
+        mpStorageReadPositionSeeder = seeder,
+    )
+
+    private fun fakePreferences(showDt: Boolean) = mockk<UserPreferencesRepository> {
+        every { observeShowDtSection() } returns flowOf(showDt)
+    }
+
+    private fun fakeSeeder() = mockk<MpStorageReadPositionSeeder> {
+        coEvery { seed() } returns MpStorageSeedOutcome.NoStorage
     }
 
     private fun summary(threadId: Int, hasUnread: Boolean = false) = PrivateMessageSummary(

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -326,5 +327,48 @@ class BbcodeFormatterTest {
         ).forEach { candidate ->
             assertEquals("expected <$candidate> to be rejected", null, imageBbcodeTokenOrNull(candidate))
         }
+    }
+
+    // ----- #459 PR-images follow-up : image insert modes ---------------------
+
+    @Test
+    fun `imageInsert FULL is a plain img token`() {
+        assertEquals(
+            "[img]https://h/f/1[/img]",
+            imageInsertBbcodeOrNull("https://h/f/1", "https://h/r/1", EditorImageInsert.FULL),
+        )
+    }
+
+    @Test
+    fun `imageInsert LINKED wraps the full url in a url to itself`() {
+        assertEquals(
+            "[url=https://h/f/1][img]https://h/f/1[/img][/url]",
+            imageInsertBbcodeOrNull("https://h/f/1", "https://h/r/1", EditorImageInsert.LINKED),
+        )
+    }
+
+    @Test
+    fun `imageInsert REDUCED shows the display url linked to the full url`() {
+        assertEquals(
+            "[url=https://h/f/1][img]https://h/r/1[/img][/url]",
+            imageInsertBbcodeOrNull("https://h/f/1", "https://h/r/1", EditorImageInsert.REDUCED),
+        )
+    }
+
+    @Test
+    fun `imageInsert REDUCED with a non-web display url falls back to the full url`() {
+        assertEquals(
+            "[url=https://h/f/1][img]https://h/f/1[/img][/url]",
+            imageInsertBbcodeOrNull("https://h/f/1", "content://nope", EditorImageInsert.REDUCED),
+        )
+    }
+
+    @Test
+    fun `imageInsert trims the full url and rejects a non-web full url`() {
+        assertEquals(
+            "[img]https://h/f/1[/img]",
+            imageInsertBbcodeOrNull(" https://h/f/1 ", mode = EditorImageInsert.FULL),
+        )
+        assertEquals(null, imageInsertBbcodeOrNull("file:///pic.jpg", mode = EditorImageInsert.REDUCED))
     }
 }

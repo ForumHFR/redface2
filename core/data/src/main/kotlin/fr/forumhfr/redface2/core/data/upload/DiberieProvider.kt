@@ -78,6 +78,8 @@ internal class DiberieProvider @Inject constructor(
                 provider = id,
                 imageUrl = dto.picUrl ?: "$baseUrl/Picture/Get/f/$picId",
                 thumbnailUrl = dto.thumbUrl ?: "$baseUrl/Picture/Get/t/$picId",
+                // `.../Get/r/{id}` is diberie's ~300px reduced variant (the "vignette cliquable").
+                resizedUrl = dto.resizedUrl ?: "$baseUrl/Picture/Get/r/$picId",
                 deleteHandle = picId.toString(),
                 // SelectedExpiryType=0 in the upload query → no advertised expiration.
                 expiresAt = null,

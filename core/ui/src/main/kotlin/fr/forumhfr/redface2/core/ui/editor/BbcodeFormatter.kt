@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+
 /**
  * BBCode actions the Phase 2B toolbar can apply to the editor selection.
  *
@@ -208,7 +210,34 @@ fun insertBbcodeToken(
  * only generates `[img]` for http(s) schemes so dangerous local/app schemes
  * (`file:`, `content:`, `data:`, `javascript:`) never leave the editor helper.
  */
-fun imageBbcodeTokenOrNull(rawUrl: String): String? {
+fun imageBbcodeTokenOrNull(rawUrl: String): String? =
+    webImageUrlOrNull(rawUrl)?.let { "[img]$it[/img]" }
+
+/**
+ * #459 PR-images follow-up — builds the BBCode for an inserted image according to the user's
+ * [EditorImageInsert] preference. [fullUrl] is the original (the click target); [displayUrl] is what
+ * is shown inline (the reduced URL for [EditorImageInsert.REDUCED], else the full URL).
+ *
+ * Returns `null` when [fullUrl] is not a safe http(s) image URL (same scheme guard as
+ * [imageBbcodeTokenOrNull]); a non-web [displayUrl] degrades to [fullUrl] rather than failing.
+ * [EditorImageInsert.REDUCED] with no distinct reduced URL is identical to [EditorImageInsert.LINKED].
+ */
+fun imageInsertBbcodeOrNull(
+    fullUrl: String,
+    displayUrl: String = fullUrl,
+    mode: EditorImageInsert,
+): String? {
+    val full = webImageUrlOrNull(fullUrl) ?: return null
+    val display = webImageUrlOrNull(displayUrl) ?: full
+    return when (mode) {
+        EditorImageInsert.FULL -> "[img]$full[/img]"
+        EditorImageInsert.LINKED -> "[url=$full][img]$full[/img][/url]"
+        EditorImageInsert.REDUCED -> "[url=$full][img]$display[/img][/url]"
+    }
+}
+
+/** Trims [rawUrl] and returns it only when it is a non-empty http(s) URL with a host, else `null`. */
+private fun webImageUrlOrNull(rawUrl: String): String? {
     val trimmed = rawUrl.trim()
     val parsed = runCatching { java.net.URI(trimmed) }.getOrNull()
     val scheme = parsed?.scheme?.lowercase()
@@ -217,6 +246,5 @@ fun imageBbcodeTokenOrNull(rawUrl: String): String? {
         trimmed.isNotEmpty() &&
             (scheme == "http" || scheme == "https") &&
             !host.isNullOrBlank()
-
-    return if (isWebImageUrl) "[img]$trimmed[/img]" else null
+    return if (isWebImageUrl) trimmed else null
 }
