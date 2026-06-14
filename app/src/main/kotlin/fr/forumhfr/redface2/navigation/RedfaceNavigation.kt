@@ -80,6 +80,11 @@ import fr.forumhfr.redface2.feature.profile.ProfileRoute
 import fr.forumhfr.redface2.feature.profile.ProfileViewModel
 import fr.forumhfr.redface2.feature.search.SearchScreen
 import fr.forumhfr.redface2.feature.settings.MyImagesScreen
+import fr.forumhfr.redface2.feature.settings.SettingsAccountAboutScreen
+import fr.forumhfr.redface2.feature.settings.SettingsDisplayScreen
+import fr.forumhfr.redface2.feature.settings.SettingsImagesScreen
+import fr.forumhfr.redface2.feature.settings.SettingsMaintenanceScreen
+import fr.forumhfr.redface2.feature.settings.SettingsProxyScreen
 import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
@@ -278,6 +283,26 @@ data object MyImagesRoute : RedfaceNavKey
  */
 @Serializable
 data object MpStorageInspectorRoute : RedfaceNavKey
+
+/**
+ * #494 — settings sub-pages reached from the redesigned catalogue. Each is a distinct nav entry (a
+ * distinct `ViewModelStore`), so each binds its own `SettingsViewModel`; DataStore is the single
+ * source of truth so the instances stay consistent. Opaque routes, no params.
+ */
+@Serializable
+data object SettingsProxyRoute : RedfaceNavKey
+
+@Serializable
+data object SettingsMaintenanceRoute : RedfaceNavKey
+
+@Serializable
+data object SettingsDisplayRoute : RedfaceNavKey
+
+@Serializable
+data object SettingsImagesRoute : RedfaceNavKey
+
+@Serializable
+data object SettingsAccountAboutRoute : RedfaceNavKey
 
 /**
  * Phase 2 finish (#208) — full profile page route.
@@ -628,7 +653,7 @@ fun RedfaceApp(intent: Intent?) {
                         versionCode = BuildConfig.VERSION_CODE,
                         onLogin = { activeBackStack.add(LoginRoute) },
                         onLogout = accountViewModel::logout,
-                        onOpenSettings = { activeBackStack.add(SettingsRoute) },
+                        onOpenSettings = { openSettingsIdempotently(activeBackStack) },
                         onOpenDiagnostics = { activeBackStack.add(DiagnosticsRoute) },
                         onReportContent = {
                             startReportEmail(context, reportEmailSubject, reportNoEmailClient)
@@ -638,6 +663,9 @@ fun RedfaceApp(intent: Intent?) {
                 RedfaceNavHost(
                     backStack = activeBackStack,
                     accountMenu = accountMenu,
+                    onReportContent = {
+                        startReportEmail(context, reportEmailSubject, reportNoEmailClient)
+                    },
                     privateMessageNavState = PrivateMessageNavState(
                         readThreadIds = readPrivateMessageThreadIds,
                         multiRecipientThreadIds = multiRecipientThreadIds,
@@ -896,6 +924,26 @@ internal fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: Str
     }
 }
 
+/**
+ * Opens the settings root idempotently. The account menu is shown ON the settings screen and its
+ * sub-pages too, so tapping « Paramètres » there must land back on the existing [SettingsRoute]
+ * (popping any sub-pages stacked above it) rather than push a duplicate that Back then has to unwind
+ * (#494 Codex P3). When no [SettingsRoute] is in [backStack] (we are elsewhere), a fresh one is pushed.
+ *
+ * Kept top-level (not inlined in the account-menu lambda) so its branches don't inflate RedfaceApp's
+ * cyclomatic complexity.
+ */
+private fun openSettingsIdempotently(backStack: NavBackStack<NavKey>) {
+    val existing = backStack.indexOfLast { it is SettingsRoute }
+    if (existing >= 0) {
+        while (backStack.lastIndex > existing) {
+            backStack.removeAt(backStack.lastIndex)
+        }
+    } else {
+        backStack.add(SettingsRoute)
+    }
+}
+
 @Composable
 @Suppress("CyclomaticComplexMethod", "LongParameterList") // One entry per top-level route + per-screen
 // navigation callbacks ; splitting the host would just push the same `when` shape one level deeper
@@ -903,6 +951,9 @@ internal fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: Str
 private fun RedfaceNavHost(
     backStack: NavBackStack<NavKey>,
     accountMenu: @Composable () -> Unit,
+    // #494 — the « Signaler un contenu » row of the settings Account/About sub-page reuses the same
+    // report-email flow as the account menu (which owns `context` + the report strings).
+    onReportContent: () -> Unit,
     privateMessageNavState: PrivateMessageNavState,
     // Bug fix (build 89) — per-topic title cache threaded down from RedfaceApp (where the `var` lives
     // so it survives entry recreation across page changes). Bundled to keep the param count in check.
@@ -1141,8 +1192,74 @@ private fun RedfaceNavHost(
             }
             entry<SettingsRoute> {
                 SettingsScreen(
-                    onOpenMyImages = { backStack.add(MyImagesRoute) },
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    onOpenProxy = { backStack.add(SettingsProxyRoute) },
+                    onOpenMaintenance = { backStack.add(SettingsMaintenanceRoute) },
+                    onOpenDisplay = { backStack.add(SettingsDisplayRoute) },
+                    onOpenImages = { backStack.add(SettingsImagesRoute) },
+                    onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsProxyRoute> {
+                SettingsProxyScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsMaintenanceRoute> {
+                SettingsMaintenanceScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
                     onOpenMpStorageInspector = { backStack.add(MpStorageInspectorRoute) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsDisplayRoute> {
+                SettingsDisplayScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsImagesRoute> {
+                SettingsImagesScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    onOpenMyImages = { backStack.add(MyImagesRoute) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsAccountAboutRoute> {
+                SettingsAccountAboutScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    versionName = BuildConfig.VERSION_NAME,
+                    versionCode = BuildConfig.VERSION_CODE,
+                    onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
+                    onReportContent = onReportContent,
+                    topBarActions = accountMenu,
                 )
             }
             entry<MyImagesRoute> {

@@ -31,6 +31,35 @@
     <string name="settings_section_accessibility">Accessibilité</string>
     <string name="settings_section_extensions">Extensions et filtrage</string>
     <string name="settings_hfr_account_note">Ces réglages proviennent de votre profil HFR (editprofil.php) et arriveront plus tard.</string>
+
+    <!-- #494 — refonte du menu : barre supérieure avec recherche activable, sous-pages, état vide. -->
+    <string name="settings_back">Retour</string>
+    <string name="settings_search_open">Rechercher dans les réglages</string>
+    <string name="settings_search_close">Fermer la recherche</string>
+    <string name="settings_search_clear">Effacer la recherche</string>
+    <string name="settings_search_placeholder">Rechercher un réglage…</string>
+    <string name="settings_search_empty">Aucun réglage ne correspond à votre recherche.</string>
+
+    <!-- #494 — lignes de navigation de la racine vers les sous-pages, et titres des sous-pages. -->
+    <string name="settings_nav_proxy">Proxy</string>
+    <string name="settings_nav_proxy_description">Router les requêtes HFR via votre proxy.</string>
+    <string name="settings_nav_maintenance">Maintenance</string>
+    <string name="settings_nav_maintenance_description">Vider les caches, options de debug.</string>
+    <string name="settings_nav_display">Affichage</string>
+    <string name="settings_nav_display_description">Thème, AMOLED, densité et taille de police.</string>
+    <string name="settings_nav_images">Images</string>
+    <string name="settings_nav_images_description">Hébergeur d\'images, insertion, mes images uploadées.</string>
+    <string name="settings_nav_account">Compte HFR et à propos</string>
+    <string name="settings_nav_account_description">Réglages du compte HFR, version de l\'app, diagnostic.</string>
+
+    <!-- #494 — sous-page « Compte HFR et à propos » : version de l'app et raccourcis. -->
+    <string name="settings_account_title">Compte HFR et à propos</string>
+    <string name="settings_about_version">Version</string>
+    <string name="settings_about_version_value">%1$s (build %2$d)</string>
+    <string name="settings_about_diagnostics">Diagnostic</string>
+    <string name="settings_about_diagnostics_description">Informations techniques pour le support.</string>
+    <string name="settings_about_report">Signaler un contenu ou un problème</string>
+    <string name="settings_diagnostics_open">Ouvrir le diagnostic</string>
     <string name="settings_phase_future">À venir</string>
     <string name="settings_phase_future_far">Plus tard</string>
     <string name="settings_phase_planned">Planifié</string>
