@@ -6,6 +6,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageReadPositionSeeder
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -14,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -28,6 +31,8 @@ import kotlinx.coroutines.launch
 class MessagesViewModel @Inject constructor(
     private val repository: MessagesRepository,
     private val authRepository: AuthRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
+    private val mpStorageReadPositionSeeder: MpStorageReadPositionSeeder,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(MessagesUiState())
@@ -39,19 +44,44 @@ class MessagesViewModel @Inject constructor(
     private var loadJob: Job? = null
     private var authenticatedPseudo: String? = null
 
+    // One-shot guard for the MPStorage DT seed (#6, ADR-014). Reset whenever the active pseudo
+    // changes so a re-login / account switch re-seeds for the new account, never carries the
+    // previous account's "already done" flag across the switch.
+    private var dtSeedAttempted = false
+
     init {
         viewModelScope.launch {
             authRepository.observeAuthState()
                 .distinctUntilChanged()
                 .collect { authState ->
                     when (authState) {
-                        AuthState.Anonymous -> clearPrivateState()
+                        AuthState.Anonymous -> {
+                            dtSeedAttempted = false
+                            clearPrivateState()
+                        }
                         is AuthState.Authenticated -> {
+                            if (authenticatedPseudo != authState.pseudo) dtSeedAttempted = false
                             authenticatedPseudo = authState.pseudo
                             load(page = 1)
+                            maybeSeedDtReadPositions()
                         }
                     }
                 }
+        }
+    }
+
+    /**
+     * #6 / ADR-014 — once per authenticated session, when the « section DT » setting is on, seed the
+     * local MP reading positions from the MPStorage document (DTCloud's `mpFlags`). Best-effort and
+     * fire-and-forget: it must never block or fail the inbox load (a missing storage MP is the
+     * nominal case). Gated behind the opt-in setting so non-DT users never pay the inbox scan.
+     */
+    private fun maybeSeedDtReadPositions() {
+        if (dtSeedAttempted) return
+        dtSeedAttempted = true
+        viewModelScope.launch {
+            if (!userPreferencesRepository.observeShowDtSection().first()) return@launch
+            runCatching { mpStorageReadPositionSeeder.seed() }
         }
     }
 

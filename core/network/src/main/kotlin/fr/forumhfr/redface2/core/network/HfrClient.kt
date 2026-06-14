@@ -150,41 +150,6 @@ class HfrClient @Inject constructor(
     }
 
     /**
-     * MPStorage discovery (#6, ADR-014) — authenticated subject search inside `cat=prive`.
-     * Same `recherches=1` wire as the public search, but scoped to the private inbox :
-     * verified live 2026-06-11 (fixtures `mp_storage_search_*`) — the GET variant is
-     * accepted while the REST API rejects `cat=prive`. `titre=1` (subjects only) because
-     * the storage MP is identified by its fixed hash SUBJECT.
-     *
-     * [date] mirrors [searchTopics] : HFR's form serialises today's date even though
-     * `daterange=2` makes it irrelevant — injectable for test determinism.
-     */
-    suspend fun searchPrivateMessagesBySubject(subject: String, date: java.time.LocalDate): String {
-        val url = baseUrl.newBuilder()
-            .addPathSegment("forum1.php")
-            .addQueryParameter("recherches", "1")
-            .addQueryParameter("cat", "prive")
-            .addQueryParameter("config", "hfr.inc")
-            .addQueryParameter("search", subject)
-            .addQueryParameter("titre", "1")
-            .addQueryParameter("orderSearch", "1")
-            .addQueryParameter("resSearch", "50")
-            .addQueryParameter("daterange", "2")
-            .addQueryParameter("searchtype", "1")
-            .addQueryParameter("jour", date.dayOfMonth.toString())
-            .addQueryParameter("mois", date.monthValue.toString())
-            .addQueryParameter("annee", date.year.toString())
-            .addQueryParameter("pseud", "")
-            .addQueryParameter("subcat", "0")
-            .addQueryParameter("trash", "0")
-            .addQueryParameter("trash_post", "0")
-            .addQueryParameter("moderation", "0")
-            .build()
-        val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
-    }
-
-    /**
      * MPStorage read (#6, ADR-014) — GET the edit form of a private-message post the user
      * owns. The textarea `content_form` carries the RAW storage document (not rendered
      * HTML), exactly how `MPStorage.user.js` reads it. Same `message.php` family as

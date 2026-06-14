@@ -47,10 +47,24 @@ Vérifications live 2026-06-11 (GET only, compte XaTriX) :
 ## Conséquences
 
 - `models.md` § MPStorage remplace les modèles inventés par `MpStorageDocument` / `MpStorageFlagEntry` et référence cette ADR.
-- Les ids découverts (mpId, numreponse du premier post) seront cachés en DataStore **par compte** et purgés au logout (même règle de vie privée que #316) — **pas encore implémenté** : le client livré (PR #406) redécouvre à chaque fetch.
+- Les ids découverts (mpId, numreponse du premier post) sont cachés **par compte** et purgés au logout (même règle de vie privée que #316) — **implémenté** (cf. Addendum 2026-06-14) : table Room `mp_storage_locations`, et non DataStore comme initialement envisagé, pour aligner la purge sur `mp_read_positions`/`uploaded_images` via `CacheInvalidator`.
 - Risques assumés et documentés : lost-update inter-outils (full overwrite sans condition), taille max du post MP inconnue (la `list` DTCloud n'est jamais prunée — la vérification de taille devra précéder toute écriture), dépendance au compte tiers `MultiMP`.
 - Trous de vérification restants avant l'étape écriture :
   - effet du GET du formulaire d'édition sur le dot du correspondant (non mesuré par #361) ;
   - contrat `bdd.php cat=prive` en écriture (non capturé) ;
   - round-trip JSON réel et découverte d'un **vrai** document storage, jamais observés (le compte de test n'a pas de MP storage — les fixtures `hit` proviennent d'un sujet ordinaire) ;
   - sensibilité de la recherche aux paramètres de date (`daterange=2` + `jour/mois/annee` du jour) : si HFR les honorait autrement qu'observé, un faux `NotFound` deviendrait, à l'étape écriture, une **création de doublon** du MP storage — à requalifier avant d'écrire.
+
+## Addendum — 2026-06-14 (découverte corrigée, cache, seed DT)
+
+Confrontation du **source réel** `MPStorage.user.js` (récupéré depuis le dépôt Wiripse) et vérification live sur un compte possédant un vrai document storage (XaTriX) :
+
+1. **La découverte de la décision 2 était cassée.** La recherche par titre (`forum1.php?recherches=1&…&search=<hash>&titre=1`) renvoie **toujours** « aucune réponse » sur un compte réel : l'index de titres HFR n'indexe pas le hash 32-hex. Le client #406 reportait donc `NotFound` même quand le storage existait. Le source userscript ne fait **aucune recherche serveur** : il **pagine la boîte de réception** (`findStorageMPOnPage` → `forum1.php?cat=prive&page=N`) et matche le **sujet** == hash côté client, puis **cache** `mpId`/`mpRepId` (GM storage) — il ne redécouvre pas à chaque chargement.
+
+   **Correction livrée** : `DefaultMpStorageRepository` découvre désormais par **scan de l'inbox** (réutilise `PrivateMessageListParser`, borné à `MAX_DISCOVERY_PAGES`), `MpStorageDiscoveryParser` et `HfrClient.searchPrivateMessagesBySubject` sont **supprimés**. Le choix « premier résultat » de la décision 2 devient « premier sujet == hash rencontré dans l'ordre inbox » (à re-trancher avant écriture, inchangé).
+
+2. **Cache des ids par compte** (table Room `mp_storage_locations`, purge `CacheInvalidator`) — résout la conséquence « redécouvre à chaque fetch ». Cache périmé (formulaire d'édition introuvable) → purge + rescan.
+
+3. **Décision 5 — application des `mpFlags` livrée en partie** : un seeder (`MpStorageReadPositionSeeder`) projette les positions DT de `mpFlags.list[]` dans le store local `PrivateMessageReadPositionStore` (table `mp_read_positions`), **seed local-prioritaire** (jamais de recul de page). Déclenché une fois par session sur l'écran liste MP, gated par le réglage « section DT ». L'onglet DT dédié reste à câbler ; l'écriture (décision 4) reste différée & opt-in.
+
+Confirmation de format (document réel, 16 clés dans l'entrée v0.1) : `mpFlags.list[].post` = threadId d'une conversation MP de groupe (`cat=prive` dans toutes les `uri`), `page` entier, `p` string. Le piège du **reset destructif** sur contenu invalide est confirmé dans le source (`getStorageData` réécrit le défaut) — non reproduit (ADR-014 décision 3).

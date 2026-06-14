@@ -343,3 +343,32 @@ val MIGRATION_11_12: Migration = object : Migration(11, 12) {
         )
     }
 }
+
+/**
+ * v12 → v13 — `mp_storage_locations` (#6, ADR-014): per-account cache of the discovered MPStorage
+ * conversation (the `post` id + the first post's `numreponse`), so the storage document is read
+ * directly instead of re-scanning the whole MP inbox on every fetch. Pure DDL, no backfill — a row
+ * only exists once the storage MP has been discovered with the new build. Like `mp_read_positions`
+ * / `uploaded_images` the row is private per account and wiped on logout / account switch (cf.
+ * `CacheInvalidator`).
+ *
+ * The DDL matches the exported `13.json` `createSql` (column order = entity field order, NOT NULL
+ * flags, single-column PK) so `runMigrationsAndValidate` is satisfied.
+ *
+ * NOTE orchestrateur: régénérer `13.json` via ksp (`./gradlew :core:database:kspDebugKotlin`) puis
+ * vérifier que ce DDL correspond exactement au `createSql` exporté avant merge.
+ */
+val MIGRATION_12_13: Migration = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `mp_storage_locations` (
+                `userId` TEXT NOT NULL,
+                `threadId` INTEGER NOT NULL,
+                `numreponse` INTEGER NOT NULL,
+                PRIMARY KEY(`userId`)
+            )
+            """.trimIndent(),
+        )
+    }
+}
