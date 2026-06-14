@@ -186,6 +186,11 @@
     <string name="settings_my_images_description">Consultez les images que vous avez envoyées et supprimez-les.</string>
     <string name="settings_my_images_open">Voir mes images</string>
 
+    <!-- #6 — inspecteur MP storage (debug, visible seulement quand la section DT est activée). -->
+    <string name="settings_mpstorage_inspector_title">Inspecteur MP storage</string>
+    <string name="settings_mpstorage_inspector_description">Outil de debug : inspecte le conteneur MPStorage découvert (source, positions DT, enveloppe brute), en lecture seule.</string>
+    <string name="settings_mpstorage_inspector_open">Ouvrir l\'inspecteur</string>
+
     <!-- #459 — Hébergeur d'images. Choisit l'hébergeur des uploads de l'éditeur ; le Client-ID
          imgur n'apparaît que pour imgur. Persisté en DataStore, lu par l'éditeur à chaque upload. -->
     <string name="settings_upload_provider_title">Hébergeur d\'images</string>
