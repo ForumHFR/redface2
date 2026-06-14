@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -561,6 +562,30 @@ class DataStoreUserPreferencesRepositoryTest {
         // #459 — DIBERIE is the default (no auth, no Client-ID), never the enum's first ordinal alone.
         repository.observeUploadProvider().test {
             assertEquals(UploadProviderId.DIBERIE, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeEditorImageInsert defaults to REDUCED on an empty store`() = runTest(dispatcher) {
+        // #459 PR-images follow-up — REDUCED is the default (the HFR "vignette cliquable").
+        repository.observeEditorImageInsert().test {
+            assertEquals(EditorImageInsert.REDUCED, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setEditorImageInsert persists and round-trips FULL then REDUCED`() = runTest(dispatcher) {
+        repository.setEditorImageInsert(EditorImageInsert.FULL)
+        repository.observeEditorImageInsert().test {
+            assertEquals(EditorImageInsert.FULL, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setEditorImageInsert(EditorImageInsert.REDUCED)
+        repository.observeEditorImageInsert().test {
+            assertEquals(EditorImageInsert.REDUCED, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

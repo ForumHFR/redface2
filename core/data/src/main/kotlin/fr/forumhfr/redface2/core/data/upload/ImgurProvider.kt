@@ -70,6 +70,9 @@ internal class ImgurProvider @Inject constructor(
                 provider = id,
                 imageUrl = data.link ?: throw UploadException.Malformed(id),
                 thumbnailUrl = null,
+                // imgur exposes size variants via URL suffixes, but the v1 contract does not derive
+                // them — the editor's reduced mode falls back to the full link for imgur.
+                resizedUrl = null,
                 deleteHandle = data.deleteHash,
                 expiresAt = null,
             )

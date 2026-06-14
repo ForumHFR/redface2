@@ -47,6 +47,7 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 
 @Composable
 fun SettingsScreen(
@@ -830,6 +831,38 @@ private fun UploadProviderPreferencesCard(
                 if (state.imgurClientIdError) {
                     PreferencePersistError(R.string.settings_upload_imgur_client_id_persist_failed)
                 }
+            }
+            // #459 PR-images follow-up — how the editor wraps an inserted image (applies to uploads
+            // and pasted URLs). Reduced = the HFR "vignette cliquable" (default).
+            Text(
+                text = stringResource(R.string.settings_image_insert_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.settings_image_insert_intro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val imageInsertOptions = listOf(
+                EditorImageInsert.FULL to stringResource(R.string.settings_image_insert_full),
+                EditorImageInsert.LINKED to stringResource(R.string.settings_image_insert_linked),
+                EditorImageInsert.REDUCED to stringResource(R.string.settings_image_insert_reduced),
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                imageInsertOptions.forEachIndexed { index, (mode, label) ->
+                    SegmentedButton(
+                        selected = state.editorImageInsert == mode,
+                        enabled = !state.isUpdatingEditorImageInsert,
+                        onClick = { onIntent(SettingsIntent.SetEditorImageInsert(mode)) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = imageInsertOptions.size),
+                    ) {
+                        Text(label)
+                    }
+                }
+            }
+            if (state.editorImageInsertError) {
+                PreferencePersistError(R.string.settings_image_insert_persist_failed)
             }
         }
     }

@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -1148,6 +1149,33 @@ class SettingsViewModelTest {
         }
 
     @Test
+    fun `SetEditorImageInsert persists the new mode and clears the updating flag`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals("REDUCED is the default", EditorImageInsert.REDUCED, viewModel.state.value.editorImageInsert)
+
+        viewModel.submit(SettingsIntent.SetEditorImageInsert(EditorImageInsert.FULL))
+
+        val state = viewModel.state.value
+        assertEquals(EditorImageInsert.FULL, state.editorImageInsert)
+        assertFalse(state.isUpdatingEditorImageInsert)
+        assertFalse(state.editorImageInsertError)
+        assertEquals(EditorImageInsert.FULL, repository.lastEditorImageInsertSet)
+    }
+
+    @Test
+    fun `SetEditorImageInsert reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnEditorImageInsertSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.SetEditorImageInsert(EditorImageInsert.FULL))
+
+        val state = viewModel.state.value
+        assertEquals("must revert on failure", EditorImageInsert.REDUCED, state.editorImageInsert)
+        assertFalse(state.isUpdatingEditorImageInsert)
+        assertTrue(state.editorImageInsertError)
+    }
+
+    @Test
     fun `SetImgurClientId persists the text and exposes it`() = runTest {
         val viewModel = newViewModel()
         assertEquals("client id is empty by default", "", viewModel.state.value.imgurClientId)
@@ -1503,6 +1531,20 @@ class SettingsViewModelTest {
 
         fun emitImgurClientId(value: String) {
             imgurClientId.value = value
+        }
+
+        // #459 PR-images follow-up — editor image insert mode. Same optimistic-flip seam.
+        private val editorImageInsert = MutableStateFlow(EditorImageInsert.REDUCED)
+        var lastEditorImageInsertSet: EditorImageInsert? = null
+            private set
+        var failOnEditorImageInsertSet: Boolean = false
+
+        override fun observeEditorImageInsert(): Flow<EditorImageInsert> = editorImageInsert
+
+        override suspend fun setEditorImageInsert(mode: EditorImageInsert) {
+            check(!failOnEditorImageInsertSet) { "boom" }
+            lastEditorImageInsertSet = mode
+            editorImageInsert.value = mode
         }
 
         // #312 — confirm-before-posting. Same optimistic-flip seam as the topic top-bar toggle.

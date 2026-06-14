@@ -71,6 +71,7 @@ class DefaultUploadRepositoryTest {
             provider = UploadProviderId.DIBERIE,
             imageUrl = "https://host/f/NOHANDLE",
             thumbnailUrl = null,
+            resizedUrl = null,
             deleteHandle = null,
             expiresAt = null,
         )
@@ -135,6 +136,7 @@ class DefaultUploadRepositoryTest {
         provider = UploadProviderId.IMGUR,
         imageUrl = "https://i.imgur.com/x.png",
         thumbnailUrl = null,
+        resizedUrl = null,
         deleteHandle = "DELHASH",
         expiresAt = null,
     )

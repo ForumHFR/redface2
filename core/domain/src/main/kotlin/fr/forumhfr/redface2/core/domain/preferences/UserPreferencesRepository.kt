@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.domain.preferences
 
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import kotlinx.coroutines.flow.Flow
 
 interface UserPreferencesRepository {
@@ -240,6 +241,17 @@ interface UserPreferencesRepository {
 
     /** Persists [observeImgurClientId]. Default empty string until the first call. */
     suspend fun setImgurClientId(clientId: String)
+
+    /**
+     * How the editor wraps an inserted image (#459 PR-images follow-up). Default
+     * [EditorImageInsert.REDUCED] — the classic HFR "vignette cliquable" (a reduced image linking to
+     * the original), matching Redface v1's default for diberie. A corrupt / unknown stored value
+     * degrades to the default.
+     */
+    fun observeEditorImageInsert(): Flow<EditorImageInsert>
+
+    /** Persists [observeEditorImageInsert]. Default [EditorImageInsert.REDUCED] until the first call. */
+    suspend fun setEditorImageInsert(mode: EditorImageInsert)
 
     /**
      * Reading-density preset (#287): [DisplayDensity.COMFORT] (default) keeps the historical
