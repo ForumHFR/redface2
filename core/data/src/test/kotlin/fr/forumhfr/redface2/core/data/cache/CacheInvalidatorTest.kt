@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.data.cache
 import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
+import fr.forumhfr.redface2.core.database.dao.MpStorageLocationDao
 import fr.forumhfr.redface2.core.database.dao.UploadedImageDao
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
@@ -33,25 +34,28 @@ class CacheInvalidatorTest {
         coVerify(exactly = 0) { fixture.mpReadPositionDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.editorDraftDao.deletePrivateForUser(any()) }
         coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser(any()) }
+        coVerify(exactly = 0) { fixture.mpStorageLocationDao.deleteAllForUser(any()) }
         verify(exactly = 0) { fixture.flagRepository.clearSessionCache() }
     }
 
     @Test
-    fun `logout purges the previous user's flag rows, MP positions, MP drafts, uploads and session`() = runTest {
-        val state = MutableStateFlow<AuthState>(AuthState.Authenticated("alice"))
-        val fixture = invalidator(state)
-        fixture.invalidator.start()
+    fun `logout purges the previous user's flag rows, MP positions, MP drafts, uploads, storage and session`() =
+        runTest {
+            val state = MutableStateFlow<AuthState>(AuthState.Authenticated("alice"))
+            val fixture = invalidator(state)
+            fixture.invalidator.start()
 
-        state.value = AuthState.Anonymous
+            state.value = AuthState.Anonymous
 
-        coVerifyOrder {
-            fixture.flagDao.deleteAllForUser("alice")
-            fixture.mpReadPositionDao.deleteAllForUser("alice")
-            fixture.editorDraftDao.deletePrivateForUser("alice")
-            fixture.uploadedImageDao.deleteAllForUser("alice")
+            coVerifyOrder {
+                fixture.flagDao.deleteAllForUser("alice")
+                fixture.mpReadPositionDao.deleteAllForUser("alice")
+                fixture.editorDraftDao.deletePrivateForUser("alice")
+                fixture.uploadedImageDao.deleteAllForUser("alice")
+                fixture.mpStorageLocationDao.deleteAllForUser("alice")
+            }
+            verify { fixture.flagRepository.clearSessionCache() }
         }
-        verify { fixture.flagRepository.clearSessionCache() }
-    }
 
     @Test
     fun `account switch purges the outgoing pseudo not the incoming one`() = runTest {
@@ -67,10 +71,12 @@ class CacheInvalidatorTest {
         coVerify { fixture.mpReadPositionDao.deleteAllForUser("alice") }
         coVerify { fixture.editorDraftDao.deletePrivateForUser("alice") }
         coVerify { fixture.uploadedImageDao.deleteAllForUser("alice") }
+        coVerify { fixture.mpStorageLocationDao.deleteAllForUser("alice") }
         coVerify(exactly = 0) { fixture.flagDao.deleteAllForUser("bob") }
         coVerify(exactly = 0) { fixture.mpReadPositionDao.deleteAllForUser("bob") }
         coVerify(exactly = 0) { fixture.editorDraftDao.deletePrivateForUser("bob") }
         coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser("bob") }
+        coVerify(exactly = 0) { fixture.mpStorageLocationDao.deleteAllForUser("bob") }
         verify { fixture.flagRepository.clearSessionCache() }
     }
 
@@ -88,6 +94,7 @@ class CacheInvalidatorTest {
         coVerify(exactly = 0) { fixture.mpReadPositionDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.editorDraftDao.deletePrivateForUser(any()) }
         coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser(any()) }
+        coVerify(exactly = 0) { fixture.mpStorageLocationDao.deleteAllForUser(any()) }
         verify(exactly = 0) { fixture.flagRepository.clearSessionCache() }
     }
 
@@ -97,6 +104,7 @@ class CacheInvalidatorTest {
         val mpReadPositionDao: MpReadPositionDao,
         val editorDraftDao: EditorDraftDao,
         val uploadedImageDao: UploadedImageDao,
+        val mpStorageLocationDao: MpStorageLocationDao,
         val flagRepository: FlagRepository,
     )
 
@@ -108,6 +116,7 @@ class CacheInvalidatorTest {
         val mpReadPositionDao = mockk<MpReadPositionDao>(relaxed = true)
         val editorDraftDao = mockk<EditorDraftDao>(relaxed = true)
         val uploadedImageDao = mockk<UploadedImageDao>(relaxed = true)
+        val mpStorageLocationDao = mockk<MpStorageLocationDao>(relaxed = true)
         val flagRepository = mockk<FlagRepository>(relaxed = true)
         val invalidator = CacheInvalidator(
             authRepository = authRepository,
@@ -115,6 +124,7 @@ class CacheInvalidatorTest {
             mpReadPositionDao = mpReadPositionDao,
             editorDraftDao = editorDraftDao,
             uploadedImageDao = uploadedImageDao,
+            mpStorageLocationDao = mpStorageLocationDao,
             flagRepository = flagRepository,
             ioDispatcher = UnconfinedTestDispatcher(),
         )
@@ -124,6 +134,7 @@ class CacheInvalidatorTest {
             mpReadPositionDao,
             editorDraftDao,
             uploadedImageDao,
+            mpStorageLocationDao,
             flagRepository,
         )
     }

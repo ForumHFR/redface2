@@ -4,6 +4,7 @@ import android.util.Log
 import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
+import fr.forumhfr.redface2.core.database.dao.MpStorageLocationDao
 import fr.forumhfr.redface2.core.database.dao.UploadedImageDao
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
@@ -47,6 +48,10 @@ import kotlinx.coroutines.plus
  * per-account deletion handles and image URLs (private metadata, same contract as
  * `mp_read_positions`), so none may survive the session that produced them.
  *
+ * The cached MPStorage location (`mp_storage_locations`, #6/ADR-014) is wiped on the same
+ * transition too: the row reveals the account owns a cross-userscript storage MP and at which
+ * conversation, so it must not survive the session that discovered it.
+ *
  * On a `Authenticated(A) → Authenticated(B)` switch (login, then logout, then
  * login as someone else), we wipe rows owned by A explicitly. The session
  * cache held in [FlagRepository.clearSessionCache] is also flushed so that the
@@ -67,6 +72,7 @@ class CacheInvalidator @Inject constructor(
     private val mpReadPositionDao: MpReadPositionDao,
     private val editorDraftDao: EditorDraftDao,
     private val uploadedImageDao: UploadedImageDao,
+    private val mpStorageLocationDao: MpStorageLocationDao,
     private val flagRepository: FlagRepository,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
@@ -98,6 +104,8 @@ class CacheInvalidator @Inject constructor(
                         .onFailure { Log.w(LOG_TAG, "Failed to purge MP drafts for $previousPseudo", it) }
                     runCatching { uploadedImageDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge uploaded images for $previousPseudo", it) }
+                    runCatching { mpStorageLocationDao.deleteAllForUser(previousPseudo) }
+                        .onFailure { Log.w(LOG_TAG, "Failed to purge MPStorage location for $previousPseudo", it) }
                     flagRepository.clearSessionCache()
                 }
             }
