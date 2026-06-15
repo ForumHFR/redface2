@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -25,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsListItem
-import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsSection
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsSearchTopBar
 import fr.forumhfr.redface2.core.ui.settings.shell.SettingsHomeScreen
 
@@ -182,17 +180,36 @@ internal fun SettingsRoot(
                     .fillMaxSize()
                     .padding(innerPadding),
             ) {
-                filtered.forEachIndexed { sectionIndex, section ->
-                    item(key = "section:${section.id}") {
-                        if (sectionIndex > 0) HorizontalDivider()
-                        RedfaceSettingsSection(section.title)
-                    }
-                    items(section.items, key = { "item:${it.id}" }) { item ->
-                        renderers[item.id]?.invoke()
-                    }
+                // #494 PR3 — résultats À PLAT : chaque résultat porte son origine (catégorie) en fil
+                // d'Ariane, et garde son contrôle éditable inline. Plus de regroupement par en-tête de
+                // section : l'origine vit sur chaque ligne (utile quand des résultats de catégories
+                // différentes se suivent).
+                val results = filtered.flatMap { section -> section.items.map { section.title to it } }
+                items(results, key = { "res:${it.second.id}" }) { (origin, item) ->
+                    SettingsSearchResult(origin = origin, render = renderers[item.id])
                 }
             }
         }
+    }
+}
+
+/**
+ * A flattened search result (#494 PR3) : the row's own editable control kept inline, preceded by a
+ * « fil d'Ariane » naming the [origin] category. Grouping by section header is dropped in search mode
+ * so each result self-describes — useful when results from different categories interleave. [render]
+ * is the catalogue renderer looked up by id; it is never expected to be null (every filtered item has
+ * a renderer), but it stays nullable so a stale id degrades to just the breadcrumb instead of crashing.
+ */
+@Composable
+private fun SettingsSearchResult(origin: String, render: (@Composable () -> Unit)?) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = origin,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+        )
+        render?.invoke()
     }
 }
 
