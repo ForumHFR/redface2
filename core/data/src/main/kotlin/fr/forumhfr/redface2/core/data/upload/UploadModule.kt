@@ -6,8 +6,6 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.IntoMap
-import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
-import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadProvider
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
@@ -15,9 +13,6 @@ import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import javax.inject.Named
 import javax.inject.Qualifier
 import javax.inject.Singleton
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 
 /**
@@ -27,14 +22,6 @@ import kotlinx.serialization.json.Json
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 internal annotation class UploadJson
-
-/**
- * The user's imgur Client-ID (#459, option B). Injected as a `javax.inject.Provider<String>` into
- * [ImgurProvider] so each upload re-reads the current preference value. Empty when not configured.
- */
-@Qualifier
-@Retention(AnnotationRetention.BINARY)
-internal annotation class ImgurClientId
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -85,19 +72,8 @@ internal object UploadModule {
     @Suppress("FunctionOnlyReturningConstant")
     fun provideImgurBaseUrl(): String = ImgurProvider.DEFAULT_BASE_URL
 
-    /**
-     * Reads the user's imgur Client-ID from the preference (option B). Synchronous — invoked via a
-     * `javax.inject.Provider` on each upload, off the main thread inside the provider's
-     * `withContext(ioDispatcher)`. Empty string when the user has not configured imgur (the
-     * selector then hides IMGUR). Same synchronous-bridge pattern as
-     * `UserPreferencesRepository.readProxyConfigForNetworkBootstrap`.
-     */
-    @Provides
-    @ImgurClientId
-    fun provideImgurClientId(
-        userPreferencesRepository: UserPreferencesRepository,
-        @IoDispatcher ioDispatcher: CoroutineDispatcher,
-    ): String = runBlocking(ioDispatcher) {
-        userPreferencesRepository.observeImgurClientId().first()
-    }
+    // #474 — the imgur Client-ID is no longer bridged through a runBlocking @Provides. ImgurProvider
+    // now reads `UserPreferencesRepository.observeImgurClientId().first()` directly inside its
+    // suspending `withContext(ioDispatcher)`, so the preference is collected without blocking a
+    // thread and the value is still re-read on every upload/delete.
 }

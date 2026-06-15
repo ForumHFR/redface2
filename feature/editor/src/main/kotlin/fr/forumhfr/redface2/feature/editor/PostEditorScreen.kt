@@ -537,6 +537,7 @@ private fun UploadError.bannerText(): String = when (this) {
         stringResource(R.string.editor_upload_error_server, providerId.displayName(), code)
     is UploadError.Malformed ->
         stringResource(R.string.editor_upload_error_malformed, providerId.displayName())
+    UploadError.Configuration -> stringResource(R.string.editor_upload_error_configuration)
     UploadError.Network -> stringResource(R.string.editor_upload_error_network)
 }
 

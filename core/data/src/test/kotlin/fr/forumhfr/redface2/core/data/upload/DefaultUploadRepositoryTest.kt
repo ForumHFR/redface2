@@ -84,7 +84,10 @@ class DefaultUploadRepositoryTest {
     }
 
     @Test
-    fun `observeUploads maps entities to records, defaulting an unknown provider to DIBERIE`() = runTest {
+    fun `observeUploads preserves an unknown-provider row but disables its deletion`() = runTest {
+        // #474 — a row whose stored provider matches no enum value (downgrade, manual edit, future
+        // provider) must be PRESERVED (still listable) and NON-DELETABLE (canDelete=false) without
+        // throwing: with no known provider a deletion cannot be routed to the right host.
         io.mockk.every { dao.observeForUser("alice") } returns MutableStateFlow(
             listOf(
                 entity(provider = "IMGUR", picId = "A"),
@@ -94,10 +97,14 @@ class DefaultUploadRepositoryTest {
 
         val records = repository().observeUploads("ALICE").first()
 
+        assertEquals("the unknown-provider row must not be dropped", 2, records.size)
         assertEquals(UploadProviderId.IMGUR, records[0].provider)
-        // Unknown stored provider degrades to DIBERIE instead of crashing valueOf.
+        assertTrue("a known-provider record with a handle can be deleted", records[0].canDelete)
+        // Unknown stored provider degrades to the safe DIBERIE default instead of crashing valueOf,
+        // but its delete handle is dropped so it can never be mis-routed to the wrong host.
         assertEquals(UploadProviderId.DIBERIE, records[1].provider)
-        assertTrue("a record with a handle can be deleted", records[0].canDelete)
+        assertFalse("an unknown-provider row must be non-deletable", records[1].canDelete)
+        assertEquals("the unknown row stays listable (URL preserved)", "https://host/B", records[1].imageUrl)
     }
 
     @Test
