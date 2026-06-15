@@ -630,6 +630,14 @@ fun RedfaceApp(intent: Intent?) {
         // time (selecting in another topic resets it — quoting is a single-topic act). Plain
         // remember: losing it on process death just means re-selecting, like the markers above.
         var multiQuoteBasket by remember { mutableStateOf<MultiQuoteBasket?>(null) }
+        // #465 — per-topic MANUAL poll-expansion choice, keyed by (cat, post) (one poll per topic),
+        // twin of topicTitleCache / topicScrollAnchorCache: a page change replaces the TopicRoute
+        // (new nav entry → new ViewModel), so a `rememberSaveable` toggle inside the poll card was
+        // re-seeded to the global default on every page. Hoisted above NavDisplay so collapsing /
+        // expanding a poll survives navigation between the topic's pages. Absence of a key = follow
+        // the `topicPollsExpanded` default; the toggle records the manual choice here. RAM/session
+        // only, never serialized into a route.
+        var topicPollExpansionCache by remember { mutableStateOf(emptyMap<TopicPollKey, Boolean>()) }
 
         LaunchedEffect(authState) {
             when (authState) {
@@ -742,6 +750,15 @@ fun RedfaceApp(intent: Intent?) {
                             multiQuoteBasket = multiQuoteBasket.toggled(cat, post, numreponse)
                         },
                         onClear = { multiQuoteBasket = null },
+                    ),
+                    topicPollNavState = TopicPollNavState(
+                        expansions = topicPollExpansionCache,
+                        onExpansionChanged = { cat, post, expanded ->
+                            topicPollExpansionCache = topicPollExpansionCache.withPollExpansion(
+                                TopicPollKey(cat, post),
+                                expanded,
+                            )
+                        },
                     ),
                     onOpenProfile = { userId, pseudo, avatarUrl ->
                         // Review feedback I3: capture the **origin** tab so that
@@ -901,6 +918,21 @@ private data class MultiQuoteNavState(
 )
 
 /**
+ * #465 — per-topic poll-expansion bundle threaded into [RedfaceNavHost], same shape and survival
+ * rationale as the other hoisted-state bundles ([TopicScrollNavState], [TopicTitleNavState]): a page
+ * change replaces the TopicRoute entry, so any expansion state owned by the topic screen would die
+ * with it. The `var` backing [expansions] lives in [RedfaceApp]. A `null` lookup (no entry for the
+ * topic) means « follow the global default »; [onExpansionChanged] records the user's manual toggle.
+ *
+ * @property expansions the manual collapse/expand choice per topic the user has toggled.
+ * @property onExpansionChanged records a topic's manual poll choice when the card is tapped.
+ */
+private data class TopicPollNavState(
+    val expansions: Map<TopicPollKey, Boolean>,
+    val onExpansionChanged: (cat: Int, post: Int, expanded: Boolean) -> Unit,
+)
+
+/**
  * #291 — multi-quote selection, hoisted to RedfaceApp (same survival rationale as
  * [TopicScrollNavState]: a page change replaces the TopicRoute entry, so any state owned by the
  * topic screen dies with it). [numreponses] keeps SELECTION ORDER — the quotes are concatenated
@@ -981,6 +1013,8 @@ private fun RedfaceNavHost(
     topicScrollNavState: TopicScrollNavState,
     // #291 — multi-quote basket, same hoisting rationale (survives the per-page entry swap).
     multiQuoteNavState: MultiQuoteNavState,
+    // #465 — per-topic poll-expansion cache, same hoisting rationale (survives the per-page swap).
+    topicPollNavState: TopicPollNavState,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     NavDisplay(
@@ -1458,6 +1492,15 @@ private fun RedfaceNavHost(
                         .orEmpty(),
                     onToggleMultiQuote = { numreponse ->
                         multiQuoteNavState.onToggle(route.cat, route.post, numreponse)
+                    },
+                    // #465 — the topic's saved manual poll choice (null = follow the global
+                    // default), and the callback recording a tap on the poll card. Hoisted to
+                    // :app so it survives the per-page TopicRoute swap, keyed by (cat, post).
+                    pollManualExpanded = topicPollNavState.expansions[
+                        TopicPollKey(route.cat, route.post),
+                    ],
+                    onPollExpansionChanged = { expanded ->
+                        topicPollNavState.onExpansionChanged(route.cat, route.post, expanded)
                     },
                     onMultiQuote = { subcat, page ->
                         // #291 — quote flavour of reply with the EXTRA numreponses riding the
