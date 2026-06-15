@@ -1,12 +1,15 @@
 package fr.forumhfr.redface2.core.ui.settings.shell
 
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,10 +30,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.R
 
@@ -136,6 +142,21 @@ fun SettingsHomeScreen(
                 )
             }
         }
+        // Scrim : juste sous la barre, un court dégradé surfaceContainer → transparent qui fond le
+        // contenu émergeant de dessous la barre (pas de coupure nette). N'apparaît qu'à l'élévation.
+        val scrimAlpha by animateFloatAsState(
+            targetValue = if (barElevated) 1f else 0f,
+            label = "searchBarScrim",
+        )
+        val scrimTop = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = scrimAlpha)
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .offset { IntOffset(0, barHeightPx) }
+                .height(24.dp)
+                .background(Brush.verticalGradient(listOf(scrimTop, Color.Transparent))),
+        )
     }
 }
 
