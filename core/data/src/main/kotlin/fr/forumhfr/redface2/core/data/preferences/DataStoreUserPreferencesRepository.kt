@@ -52,6 +52,10 @@ class DataStoreUserPreferencesRepository @Inject constructor(
      * (#507). `await()` re-throws a write failure to the caller, preserving the ViewModels' optimistic
      * rollback; if the caller is already gone, the failure is held in the (un-awaited) Deferred and the
      * `SupervisorJob` keeps the scope alive for the next write.
+     *
+     * Use for DISCRETE writes (toggles, pickers, Save buttons). Do NOT use for write-on-keystroke
+     * setters that rely on caller cancellation to serialise (last-write-wins) — see [setImgurClientId],
+     * which deliberately stays on the caller's cancellable scope.
      */
     private suspend fun persist(block: suspend () -> Unit) {
         externalScope.async { block() }.await()
@@ -412,8 +416,13 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .distinctUntilChanged()
             .catch { emit("") }
 
+    // NOT routed through persist(): unlike the discrete toggles/pickers, the Client-ID is written on
+    // EVERY keystroke and SettingsViewModel cancels the previous in-flight write so only the latest text
+    // commits (last-write-wins, #459). Detaching it onto the application scope would let a cancelled
+    // older write survive and land after a newer one, stranding a stale value (#508 Codex review). Here
+    // cancellation IS the intended behaviour, so this write stays on the caller's (cancellable) scope.
     override suspend fun setImgurClientId(clientId: String) {
-        persist {
+        withContext(ioDispatcher) {
             dataStore.edit { prefs ->
                 prefs[KEY_IMGUR_CLIENT_ID] = clientId.trim()
             }
