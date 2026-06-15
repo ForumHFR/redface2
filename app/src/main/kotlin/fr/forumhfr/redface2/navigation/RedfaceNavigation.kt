@@ -709,6 +709,13 @@ fun RedfaceApp(intent: Intent?) {
                         readThreadIds = readPrivateMessageThreadIds,
                         multiRecipientThreadIds = multiRecipientThreadIds,
                         onThreadLoaded = { threadId ->
+                            // #453 — only the FIRST time this thread is marked read decrements the
+                            // badge ; re-opening an already-read conversation must not subtract
+                            // again (the repository also guards against double-decrement, but
+                            // skipping the redundant signal keeps the intent local to the nav).
+                            if (threadId !in readPrivateMessageThreadIds) {
+                                mpBadgeViewModel.onThreadRead(threadId)
+                            }
                             readPrivateMessageThreadIds = readPrivateMessageThreadIds + threadId
                         },
                         onThreadOpenedAsMulti = { threadId ->

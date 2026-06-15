@@ -256,6 +256,91 @@ class DefaultMessagesRepositoryTest {
     }
 
     @Test
+    fun `markThreadRead decrements the observed count and clears it on the last unread (#453)`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageListPage(page = 1) } returns FAKE_HTML
+        val parser = mockk<PrivateMessageListParser>()
+        coEvery { parser.countUnread(FAKE_HTML) } returns 1
+
+        val (repo, authStates) = buildRepository(hfrClient = hfrClient, parser = parser)
+
+        repo.observeUnreadMpCount().test {
+            authStates.emit(AuthState.Authenticated("xaat"))
+            assertEquals(1, awaitItem())
+
+            // Reading the LAST unread conversation must clear the badge immediately (#453), with no
+            // second network fetch (the count came from page 1 only once).
+            repo.markThreadRead(threadId = 42)
+
+            assertEquals(0, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        coVerify(exactly = 1) { hfrClient.getPrivateMessageListPage(page = 1) }
+    }
+
+    @Test
+    fun `markThreadRead twice on the same thread decrements only once (#453)`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageListPage(page = 1) } returns FAKE_HTML
+        val parser = mockk<PrivateMessageListParser>()
+        coEvery { parser.countUnread(FAKE_HTML) } returns 2
+
+        val (repo, authStates) = buildRepository(hfrClient = hfrClient, parser = parser)
+
+        repo.observeUnreadMpCount().test {
+            authStates.emit(AuthState.Authenticated("xaat"))
+            assertEquals(2, awaitItem())
+
+            repo.markThreadRead(threadId = 7)
+            assertEquals(1, awaitItem())
+
+            // Re-opening the same conversation must NOT subtract again (idempotent per thread until
+            // the next authoritative network count).
+            repo.markThreadRead(threadId = 7)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a fresh network count resets the local read-decrements (#453)`() = runTest {
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageListPage(page = 1) } returns FAKE_HTML
+        val parser = mockk<PrivateMessageListParser>()
+        coEvery { parser.countUnread(FAKE_HTML) } returnsMany listOf(1, 3)
+
+        val (repo, authStates) = buildRepository(hfrClient = hfrClient, parser = parser)
+
+        repo.observeUnreadMpCount().test {
+            authStates.emit(AuthState.Authenticated("xaat"))
+            assertEquals(1, awaitItem())
+
+            repo.markThreadRead(threadId = 1)
+            assertEquals(0, awaitItem())
+
+            // A real refresh is authoritative : it supersedes the local decrement (the server count
+            // is the source of truth ; the optimistic subtraction was only a stop-gap).
+            repo.requestUnreadRefresh()
+            assertEquals(3, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `markThreadRead is inert while anonymous (#453)`() = runTest {
+        val (repo, authStates) = buildRepository()
+
+        repo.observeUnreadMpCount().test {
+            authStates.emit(AuthState.Anonymous)
+            assertNull(awaitItem())
+
+            repo.markThreadRead(threadId = 5)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `getPrivateMessageList fetches the requested page and returns the parsed inbox`() = runTest {
         val hfrClient = mockk<HfrClient>()
         coEvery { hfrClient.getPrivateMessageListPage(page = 2) } returns FAKE_HTML
