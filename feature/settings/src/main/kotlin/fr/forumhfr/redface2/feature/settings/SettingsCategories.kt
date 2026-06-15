@@ -7,7 +7,7 @@ import fr.forumhfr.redface2.core.ui.settings.shell.SettingsCategoryUi
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 
 /**
- * #494 v2 — modèle de la racine « catégories d'abord » : 10 catégories regroupées en 5 familles.
+ * #494 v2 — modèle de la racine « catégories d'abord » : 12 catégories regroupées en 5 familles.
  * Les titres de catégorie réutilisent les titres de section existants ; sous-titres et familles sont
  * propres à la racine v2. Le routage (catégorie → sous-page dédiée ou détail générique) et le mapping
  * catégorie → section(s) du catalogue vivent ici pour rester testables et hors du composant racine.
@@ -84,14 +84,26 @@ internal fun rememberSettingsCategoryGroups(): List<SettingsCategoryGroup> = lis
             ),
         ),
     ),
+    // #494 — « À venir » éclatée en 3 vraies catégories (décision produit XaTriX 2026-06-15) : chacune
+    // pointe sur sa propre section future du catalogue (cf. [sectionIdsForCategory]).
     SettingsCategoryGroup(
-        id = "other",
-        title = stringResource(R.string.settings_family_other),
+        id = "upcoming",
+        title = stringResource(R.string.settings_family_upcoming),
         categories = listOf(
             category(
-                "upcoming", R.string.settings_category_upcoming_title,
-                R.string.settings_category_subtitle_upcoming,
+                "notifications", R.string.settings_section_notifications,
+                R.string.settings_category_subtitle_notifications,
                 CoreUiR.drawable.ic_ms_upcoming,
+            ),
+            category(
+                "accessibility", R.string.settings_section_accessibility,
+                R.string.settings_category_subtitle_accessibility,
+                CoreUiR.drawable.ic_ms_settings,
+            ),
+            category(
+                "extensions", R.string.settings_section_extensions,
+                R.string.settings_category_subtitle_extensions,
+                CoreUiR.drawable.ic_ms_article,
             ),
         ),
     ),
@@ -125,11 +137,12 @@ internal fun routeSettingsCategory(
     }
 }
 
-/** Les sections du catalogue rendues par le détail générique d'une catégorie. */
-internal fun sectionIdsForCategory(categoryId: String): List<String> = when (categoryId) {
-    "upcoming" -> listOf("notifications", "accessibility", "extensions")
-    else -> listOf(categoryId)
-}
+/**
+ * Les sections du catalogue rendues par le détail générique d'une catégorie. Chaque catégorie (y compris
+ * les 3 catégories « à venir » Notifications/Accessibilité/Extensions, désormais distinctes) pointe sur
+ * la section homonyme du catalogue ; l'identité id-catégorie == id-section suffit.
+ */
+internal fun sectionIdsForCategory(categoryId: String): List<String> = listOf(categoryId)
 
 /** Titre du détail générique d'une catégorie (réutilise les titres de section quand ils existent). */
 internal fun categoryTitleRes(categoryId: String): Int = when (categoryId) {
@@ -139,6 +152,8 @@ internal fun categoryTitleRes(categoryId: String): Int = when (categoryId) {
     "topic" -> R.string.settings_section_topic
     "editing" -> R.string.settings_section_editing
     "mp" -> R.string.settings_section_mp
-    "upcoming" -> R.string.settings_category_upcoming_title
+    "notifications" -> R.string.settings_section_notifications
+    "accessibility" -> R.string.settings_section_accessibility
+    "extensions" -> R.string.settings_section_extensions
     else -> R.string.settings_title
 }
