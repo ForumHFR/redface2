@@ -52,7 +52,7 @@ class SettingsHomeShowcaseRoborazziTest {
                 searchPlaceholder = "Rechercher un réglage",
                 menuContentDescription = "Menu",
                 searchContentDescription = "Rechercher dans les réglages",
-                onMenuClick = {},
+                onMenuClick = null,
                 onSearchClick = {},
                 onCategoryClick = {},
                 modifier = Modifier.weight(1f),

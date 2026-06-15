@@ -38,7 +38,7 @@ fun RedfaceSearchAppBar(
     placeholder: String,
     menuContentDescription: String,
     searchContentDescription: String,
-    onMenuClick: () -> Unit,
+    onMenuClick: (() -> Unit)? = null,
     onSearchClick: () -> Unit,
     modifier: Modifier = Modifier,
     avatar: @Composable () -> Unit = { DefaultAvatarPlaceholder() },
@@ -52,8 +52,11 @@ fun RedfaceSearchAppBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            // Hamburger gardé par décision produit (#494 v2), rôle à définir : désactivé tant qu'aucune
+            // action n'est câblée → présent visuellement mais pas de bouton mort (a11y : annoncé désactivé).
             IconButton(
-                onClick = onMenuClick,
+                onClick = onMenuClick ?: {},
+                enabled = onMenuClick != null,
                 modifier = Modifier.semantics { contentDescription = menuContentDescription },
             ) {
                 Icon(painter = painterResource(R.drawable.ic_ms_menu), contentDescription = null)
