@@ -4,13 +4,14 @@ import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -19,8 +20,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -68,31 +76,26 @@ fun SettingsHomeScreen(
     modifier: Modifier = Modifier,
     accountSlot: (@Composable () -> Unit)? = null,
 ) {
-    Column(
+    val listState = rememberLazyListState()
+    // « Contenu sous la barre » (edge-to-edge) : la barre est SUPERPOSÉE à la liste (Box, pas Column),
+    // donc le contenu glisse derrière elle. Elle s'élève (teinte surfaceContainer) dès que la liste a
+    // défilé — canScrollBackward passe true au 1er pixel sous la barre.
+    val barElevated by remember { derivedStateOf { listState.canScrollBackward } }
+    // Hauteur réelle de la barre (status bar + pill + paddings), mesurée au runtime et reportée en
+    // contentPadding haut : le 1er item démarre VISIBLE juste sous la barre, puis passe DERRIÈRE elle.
+    var barHeightPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface),
     ) {
-        // Le slot compte (menu compte app-wide) remplace l'avatar placeholder quand le host le fournit.
-        if (accountSlot != null) {
-            RedfaceSearchAppBar(
-                placeholder = searchPlaceholder,
-                menuContentDescription = menuContentDescription,
-                searchContentDescription = searchContentDescription,
-                onMenuClick = onMenuClick,
-                onSearchClick = onSearchClick,
-                avatar = accountSlot,
-            )
-        } else {
-            RedfaceSearchAppBar(
-                placeholder = searchPlaceholder,
-                menuContentDescription = menuContentDescription,
-                searchContentDescription = searchContentDescription,
-                onMenuClick = onMenuClick,
-                onSearchClick = onSearchClick,
-            )
-        }
-        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = with(density) { barHeightPx.toDp() }),
+        ) {
             groups.forEachIndexed { index, group ->
                 item(key = "header_${group.id}") {
                     SettingsSectionHeader(title = group.title, first = index == 0)
@@ -103,6 +106,34 @@ fun SettingsHomeScreen(
                         onClick = { onCategoryClick(category.id) },
                     )
                 }
+            }
+        }
+        // Barre superposée en haut. Le slot compte (menu app-wide) remplace l'avatar placeholder quand
+        // le host le fournit. onSizeChanged alimente le contentPadding de la liste ci-dessus.
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .onSizeChanged { barHeightPx = it.height },
+        ) {
+            if (accountSlot != null) {
+                RedfaceSearchAppBar(
+                    placeholder = searchPlaceholder,
+                    menuContentDescription = menuContentDescription,
+                    searchContentDescription = searchContentDescription,
+                    onMenuClick = onMenuClick,
+                    onSearchClick = onSearchClick,
+                    elevated = barElevated,
+                    avatar = accountSlot,
+                )
+            } else {
+                RedfaceSearchAppBar(
+                    placeholder = searchPlaceholder,
+                    menuContentDescription = menuContentDescription,
+                    searchContentDescription = searchContentDescription,
+                    onMenuClick = onMenuClick,
+                    onSearchClick = onSearchClick,
+                    elevated = barElevated,
+                )
             }
         }
     }

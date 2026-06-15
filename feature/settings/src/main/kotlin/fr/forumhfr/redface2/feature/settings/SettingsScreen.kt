@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,6 +21,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -81,6 +84,7 @@ fun SettingsScreen(
 // 12 navigation/intent callbacks + state make the explicit surface; grouping them behind an object
 // would hide the call site. The two VMs are observed in [SettingsScreen]; this content is the
 // stateless catalogue body so it stays previewable/testable without Hilt.
+@OptIn(ExperimentalMaterial3Api::class)
 @Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod")
 @Composable
 internal fun SettingsRoot(
@@ -144,8 +148,14 @@ internal fun SettingsRoot(
         .associate { it.searchable.id to it.render }
     val filtered = filterSettingsSections(sections.map { it.toSearchable() }, query)
 
+    // #494 — effet « résultats sous la barre » (idiome M3) : pinnedScrollBehavior + nestedScroll sur le
+    // Scaffold → la barre prend sa teinte surfaceContainer quand la liste de résultats défile dessous.
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+
     Scaffold(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             RedfaceSettingsSearchTopBar(
                 labels = rememberSettingsSearchTopBarLabels(),
@@ -156,6 +166,7 @@ internal fun SettingsRoot(
                     searchActive = active
                     if (!active) query = ""
                 },
+                scrollBehavior = scrollBehavior,
                 actions = { topBarActions?.invoke() },
             )
         },
