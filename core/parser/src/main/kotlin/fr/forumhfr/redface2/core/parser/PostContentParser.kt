@@ -36,6 +36,7 @@ class PostContentParser {
         blocks = listOf(PostBlock.Paragraph(listOf(PostInline.Text(DELETED_PLACEHOLDER)))),
     )
 
+    @Suppress("CyclomaticComplexMethod")
     private fun parseBlocks(nodes: List<Node>): List<PostBlock> {
         val blocks = mutableListOf<PostBlock>()
         val paragraph = mutableListOf<PostInline>()
@@ -54,6 +55,14 @@ class PostContentParser {
             paragraph.clear()
         }
 
+        // #466 — count of orphan `&nbsp;` (U+00A0) carried by the last top-level whitespace-only
+        // text node, kept pending until we know what follows it. HFR always emits at LEAST one
+        // `&nbsp;` between two sibling <p> (the structural paragraph separator, ~all pages), and
+        // an EXTRA `&nbsp;` for each blank line the author typed in between. So a run of N drives
+        // (N - 1) rendered empty lines ; a lone separator (N == 1) keeps the current behaviour
+        // (two distinct Paragraph blocks). See `parseParagraphContainer`.
+        var pendingNbsp = 0
+
         nodes.forEach { node ->
             when (classifyNode(node)) {
                 NodeKind.IGNORE -> Unit
@@ -63,38 +72,51 @@ class PostContentParser {
                 // renderer's 8dp inter-block gap replaced the natural line height between every
                 // line (#280). A top-level break is now an inline LineBreak INSIDE the running
                 // paragraph — web parity: N consecutive breaks render N newlines.
-                NodeKind.LINE_BREAK -> paragraph += PostInline.LineBreak
+                NodeKind.LINE_BREAK -> {
+                    paragraph += PostInline.LineBreak
+                    pendingNbsp = 0
+                }
 
                 NodeKind.QUOTE -> {
                     flushParagraph()
+                    pendingNbsp = 0
                     parseQuote(node as Element)?.let(blocks::add)
                 }
 
                 NodeKind.SPOILER -> {
                     flushParagraph()
+                    pendingNbsp = 0
                     parseSpoiler(node as Element)?.let(blocks::add)
                 }
 
                 NodeKind.IMAGE_BLOCK -> {
                     flushParagraph()
+                    pendingNbsp = 0
                     parseImageBlock(node as Element)?.let(blocks::add)
                 }
 
                 NodeKind.FIXED_BLOCK -> {
                     flushParagraph()
+                    pendingNbsp = 0
                     parseFixedBlock(node as Element)?.let(blocks::add)
                 }
 
                 NodeKind.CODE_BLOCK -> {
                     flushParagraph()
+                    pendingNbsp = 0
                     parseCodeBlock(node as Element)?.let(blocks::add)
                 }
 
-                NodeKind.INLINE -> paragraph += parseInline(node)
+                NodeKind.BLANK_TEXT -> pendingNbsp = orphanNbspCount(node as TextNode)
+
+                NodeKind.INLINE -> {
+                    paragraph += parseInline(node)
+                    pendingNbsp = 0
+                }
 
                 NodeKind.PARAGRAPH_CONTAINER -> {
-                    flushParagraph()
-                    blocks += parseBlocks((node as Element).childNodes())
+                    parseParagraphContainer(node as Element, blocks, paragraph, pendingNbsp, ::flushParagraph)
+                    pendingNbsp = 0
                 }
             }
         }
@@ -103,8 +125,76 @@ class PostContentParser {
         return blocks
     }
 
+    /**
+     * #466 — folds the orphan `&nbsp;` run separating two `<p>` into rendered empty lines.
+     *
+     * HFR encodes a deliberate blank line BETWEEN two paragraphs as an EXTRA `&nbsp;` in the
+     * orphan text node separating the two `<p>` (the very first `&nbsp;` is the structural
+     * separator HFR always emits between any two sibling `<p>`). The parser used to swallow that
+     * whitespace and emit each `<p>` as its own Paragraph block, losing the empty lines (the
+     * "lignes sautées" bug, suite of #333/#280 — the earlier fix only covered the
+     * `<br />&nbsp;<br />` shape, not the `</p>&nbsp;…&nbsp;<p>` one).
+     *
+     * An inline-only `<p>` (HFR never nests a block table/container directly inside a `<p>`,
+     * verified across the fixtures) is accumulated into the running paragraph buffer rather than
+     * sub-parsed, so the NEXT `<p>` can decide to merge with it:
+     *  - when at least one EXTRA `&nbsp;` is pending (run ≥ 2) and the running paragraph already
+     *    holds real content, the boundary is kept inside ONE paragraph as [pendingNbsp] LineBreaks
+     *    — one for the paragraph boundary itself plus (pendingNbsp - 1) for the authored empty
+     *    lines. They sit strictly between two text runs, so the #333 edge-trim never touches them.
+     *  - otherwise (lone `&nbsp;` separator, or an empty running paragraph) the running paragraph
+     *    is flushed first, so two ordinary paragraphs stay two distinct Paragraph blocks as before.
+     *
+     * A `<p>` that does carry a nested block keeps the legacy path: flush, then sub-parse so the
+     * inner block surfaces.
+     */
+    private fun parseParagraphContainer(
+        element: Element,
+        blocks: MutableList<PostBlock>,
+        paragraph: MutableList<PostInline>,
+        pendingNbsp: Int,
+        flushParagraph: () -> Unit,
+    ) {
+        val children = element.childNodes()
+        if (children.any { isBlockNode(it) }) {
+            flushParagraph()
+            blocks += parseBlocks(children)
+            return
+        }
+        val mergeable = pendingNbsp >= 2 && paragraph.any { it.isNonBlank() }
+        if (mergeable) {
+            repeat(pendingNbsp) { paragraph += PostInline.LineBreak }
+        } else {
+            // Close the previous paragraph as its own block, then accumulate this <p>'s inline
+            // content into the now-empty buffer so a following <p> can still merge with it (#466).
+            flushParagraph()
+        }
+        // Accumulate the <p> body inline, honouring the same per-node classification as the block
+        // path: a nested <br> stays a LineBreak and an ignored node (e.g. a `clear: both` spacer
+        // div) is dropped, so the merged paragraph matches what the legacy sub-parse produced.
+        children.forEach { child ->
+            when (classifyNode(child)) {
+                NodeKind.IGNORE -> Unit
+                NodeKind.LINE_BREAK -> paragraph += PostInline.LineBreak
+                else -> paragraph += parseInline(child)
+            }
+        }
+    }
+
+    /** #466 — a top-level text node made solely of whitespace carries its U+00A0 (`&nbsp;`) count. */
+    private fun orphanNbspCount(node: TextNode): Int =
+        node.wholeText.count { it == NBSP }
+
+    /** #466 — true when [node] would be parsed as a block (so a `<p>` wrapping it can't be merged). */
+    private fun isBlockNode(node: Node): Boolean = when (classifyNode(node)) {
+        NodeKind.QUOTE, NodeKind.SPOILER, NodeKind.IMAGE_BLOCK,
+        NodeKind.FIXED_BLOCK, NodeKind.CODE_BLOCK, NodeKind.PARAGRAPH_CONTAINER -> true
+
+        else -> false
+    }
+
     private fun classifyNode(node: Node): NodeKind {
-        val element = (node as? Element) ?: return if (node is TextNode) NodeKind.INLINE else NodeKind.IGNORE
+        val element = (node as? Element) ?: return classifyNonElement(node)
         return when (element.tagName()) {
             "br" -> NodeKind.LINE_BREAK
             "div" -> classifyDiv(element)
@@ -117,6 +207,17 @@ class PostContentParser {
             "table" -> classifyTable(element)
             else -> NodeKind.INLINE
         }
+    }
+
+    private fun classifyNonElement(node: Node): NodeKind = when {
+        node !is TextNode -> NodeKind.IGNORE
+        // #466 — a whitespace-only text node carrying at least one `&nbsp;` (U+00A0) is HFR's
+        // inter-paragraph separator, possibly inflated with one extra `&nbsp;` per authored empty
+        // line. It is BLANK_TEXT so parseBlocks can fold the run into rendered line breaks instead
+        // of swallowing it. A whitespace text node WITHOUT `&nbsp;` stays INLINE: it is genuine
+        // word spacing inside a paragraph and must survive between two text runs.
+        node.wholeText.isBlank() && node.wholeText.any { it == NBSP } -> NodeKind.BLANK_TEXT
+        else -> NodeKind.INLINE
     }
 
     private fun classifyDiv(element: Element): NodeKind {
@@ -486,11 +587,18 @@ class PostContentParser {
         FIXED_BLOCK,
         CODE_BLOCK,
         INLINE,
+
+        /** #466 — a whitespace-only orphan text node carrying `&nbsp;` separators. */
+        BLANK_TEXT,
         PARAGRAPH_CONTAINER,
     }
 
     private companion object {
         const val DELETED_PLACEHOLDER = "[Message supprimé]"
+
+        // #466 — non-breaking space (U+00A0). HFR encodes inter-paragraph blank lines as runs of
+        // `&nbsp;` between sibling <p>; Jsoup keeps them as this literal char until normalizeText.
+        const val NBSP = '\u00A0'
 
         val WHITESPACE_REGEX = Regex("\\s+")
         val HEX_REGEX = Regex("[0-9a-fA-F]+")

@@ -403,6 +403,117 @@ class PostContentParserTest {
     }
 
     @Test
+    fun `orphan nbsp runs between paragraphs survive as empty lines (real fixture)`() {
+        // #466 — suite of #333/#280. HFR encodes a deliberate blank line BETWEEN two paragraphs
+        // not as `<br /><br />` (the shape #423 already handled) but as an EXTRA `&nbsp;` inside
+        // the orphan text node separating two sibling <p>. Real witness on the single-page topic
+        // (post #9762063, captured fixture): `…C'est normal.</p>&nbsp;&nbsp;&nbsp;<p><br />Pour
+        // trouver une solution…</p>` — 3 `&nbsp;` between the two paragraphs. The parser used to
+        // swallow that whitespace and emit two separate Paragraph blocks, losing the blank lines.
+        val topic = pageParser.parse(fixture("topic_page_single.html"))
+
+        // Anchor on the UNIQUE authored second line "Pour trouver une solution". There are two
+        // "C'est normal." occurrences in the fixture and only the second precedes the triple-nbsp
+        // run, so anchoring on "C'est normal." picks the wrong (single-separator) paragraph. After
+        // the fix, the second <p> folds INTO the preceding paragraph, so the paragraph holding
+        // "Pour trouver une solution" also holds "C'est normal.", with the blank lines as LineBreaks.
+        val paragraph = topic.posts
+            .flatMap { it.content.allBlocks() }
+            .filterIsInstance<PostBlock.Paragraph>()
+            .firstOrNull { block ->
+                block.inlines.filterIsInstance<PostInline.Text>()
+                    .any { it.value.contains("Pour trouver une solution") }
+            }
+
+        assertNotNull("fixture should contain the folded paragraph", paragraph)
+        assertTrue(
+            "the line before the orphan-nbsp run must merge into the same paragraph, " +
+                "got=${paragraph!!.inlines}",
+            paragraph.inlines.filterIsInstance<PostInline.Text>()
+                .any { it.value.contains("C'est normal.") },
+        )
+        // The triple `&nbsp;` run folds into blank lines (>= 2 LineBreaks) between the two authored
+        // lines; the exact count for a bare run is pinned by the synthetic test below. A lone
+        // `&nbsp;` separator never folds, so >= 2 here proves the multi-nbsp blank lines survived.
+        val breaksBetween = run {
+            val inlines = paragraph.inlines
+            val from = inlines.indexOfLast {
+                it is PostInline.Text && it.value.contains("C'est normal.")
+            }
+            val to = inlines.indexOfFirst {
+                it is PostInline.Text && it.value.contains("Pour trouver une solution")
+            }
+            inlines.subList(from + 1, to).count { it is PostInline.LineBreak }
+        }
+        assertTrue(
+            "the triple orphan &nbsp; run must yield at least 2 LineBreaks between the lines, " +
+                "got=$breaksBetween",
+            breaksBetween >= 2,
+        )
+    }
+
+    @Test
+    fun `single orphan nbsp between paragraphs stays two separate blocks`() {
+        // #466 guard — a LONE `&nbsp;` between two <p> is HFR's normal paragraph separator (it is
+        // present between ~every pair of sibling <p>), NOT an authored blank line. Folding it in
+        // would add a spurious empty line to virtually every multi-paragraph post, so the parser
+        // must keep two distinct Paragraph blocks in that case (legacy behaviour preserved).
+        //
+        // NOTE: this HTML input is DERIVED FROM THE ISSUE #466 encoding (`</p>&nbsp;<p>`), not a
+        // raw hfr-mcp capture — it isolates the single-separator boundary so the fix can be pinned
+        // without depending on a fixture that happens to contain exactly two adjacent <p>. The
+        // real `</p>&nbsp;&nbsp;&nbsp;<p>` multi-run case is covered by the fixture test above.
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            "<div id=\"para1\"><p>premier paragraphe</p>&nbsp;<p>second paragraphe</p></div>",
+        )
+
+        val result = parser.parse(element)
+
+        val paragraphs = result.ast.blocks.filterIsInstance<PostBlock.Paragraph>()
+        assertEquals(
+            "a lone &nbsp; separator must keep two distinct Paragraph blocks, got=${result.ast.blocks}",
+            2,
+            paragraphs.size,
+        )
+        assertEquals("premier paragraphe", (paragraphs[0].inlines.single() as PostInline.Text).value)
+        assertEquals("second paragraphe", (paragraphs[1].inlines.single() as PostInline.Text).value)
+    }
+
+    @Test
+    fun `multiple orphan nbsp between paragraphs fold into one paragraph with empty lines`() {
+        // #466 — focused boundary check on the EXACT encoding documented in the issue:
+        // `<p>A</p>&nbsp;&nbsp;&nbsp;<p>B</p>` (3 orphan `&nbsp;`). DERIVED FROM THE ISSUE #466
+        // encoding, not a raw hfr-mcp capture (the real multi-run shape is also pinned by the
+        // `topic_page_single.html` fixture test above). A run of 3 ⇒ one paragraph boundary +
+        // two authored empty lines, kept as 3 LineBreaks inside ONE paragraph.
+        val parser = PostContentParser()
+        val element = jsoupBody(
+            "<div id=\"para1\"><p>A</p>&nbsp;&nbsp;&nbsp;<p>B</p></div>",
+        )
+
+        val result = parser.parse(element)
+
+        val paragraphs = result.ast.blocks.filterIsInstance<PostBlock.Paragraph>()
+        assertEquals(
+            "the two paragraphs separated by a >=2 nbsp run must merge into ONE block, got=${result.ast.blocks}",
+            1,
+            paragraphs.size,
+        )
+        assertEquals(
+            "3 orphan &nbsp; fold into 3 LineBreaks between A and B (1 boundary + 2 empty lines)",
+            listOf(
+                PostInline.Text("A"),
+                PostInline.LineBreak,
+                PostInline.LineBreak,
+                PostInline.LineBreak,
+                PostInline.Text("B"),
+            ),
+            paragraphs.single().inlines,
+        )
+    }
+
+    @Test
     fun `breaks adjacent to block boundaries never leak to paragraph edges`() {
         // #333 — edge-trim invariant over real pages. The fixtures carry both directions:
         // `a écrit :</a></b><br /><br /><p>…` (leading, quote header, topic_page_single) and
