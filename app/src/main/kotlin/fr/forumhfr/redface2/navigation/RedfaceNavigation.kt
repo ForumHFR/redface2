@@ -10,9 +10,12 @@ import android.widget.Toast
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -972,15 +975,16 @@ private fun RedfaceNavHost(
                 backStack.removeAt(backStack.lastIndex)
             }
         },
-        // #282 — a topic page change (swipe) replaces the top TopicRoute with the same route at a new
-        // page; our gesture already slides the outgoing page off-screen, so the default 700 ms NavDisplay
-        // cross-fade is redundant AND keeps the incoming entry below RESUMED for its whole duration —
-        // exactly the window the swipe is gated off. Making the FORWARD topic→topic transition instant
-        // collapses that dead-zone to ~one frame. The pop direction ALWAYS cross-fades: a page change is
-        // always a forward in-place replace (never a pop), so a genuine back-pop never goes instant even
-        // if two TopicRoute entries ever coexist. Every other transition keeps nav3's default cross-fade.
-        transitionSpec = { navContentTransform(initialState, targetState) },
-        popTransitionSpec = { navCrossfade() },
+        // Transitions (Claude + Codex, remplace le crossfade 700 ms global) : shared-axis X léger pour le
+        // drill-down (forward/back), fade-through court pour un changement d'onglet, instantané pour le
+        // swipe topic→topic (#282 : le geste glisse déjà la page sortante ; un crossfade garderait l'entrée
+        // entrante sous RESUMED toute la durée — pile la fenêtre où le swipe est gaté). Le sens vient du
+        // spec appelé (transitionSpec = forward/replace, popTransitionSpec = pop). Changer d'onglet remplace
+        // le backStack → ça passe par transitionSpec : on le détecte par le changement de racine de pile
+        // (chaque onglet a une racine distincte) pour ne pas hériter du slide de drill-down.
+        transitionSpec = { navForwardTransform(initialState, targetState) },
+        popTransitionSpec = { navPopTransform(initialState, targetState) },
+        predictivePopTransitionSpec = { navPopTransform(initialState, targetState) },
         entryDecorators = listOf(
             rememberSaveableStateHolderNavEntryDecorator(),
             rememberViewModelStoreNavEntryDecorator(),
@@ -1762,12 +1766,36 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
-/** Default NavDisplay cross-fade duration, mirroring nav3 1.1.1 `defaultTransitionSpec` (700 ms). */
-private const val NAV_CROSSFADE_MILLIS = 700
+// #494 — paramètres de transition (Claude + Codex). MotionScheme M3 absent en stable 1.4.x (1.5.0-alpha)
+// → easings « emphasized » locaux. Slide LÉGER (1/4 de largeur) pour ne pas singer le swipe topic.
+private val EmphasizedDecelerate = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+private val EmphasizedAccelerate = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
+private const val DRILL_MS = 320
+private const val DRILL_FADE_IN_MS = 150
+private const val DRILL_FADE_OUT_MS = 90
+private const val TAB_FADE_IN_MS = 140
+private const val TAB_FADE_OUT_MS = 80
+private const val SLIDE_DIVISOR = 4
 
-/** nav3 1.1.1 default transition: a 700 ms cross-fade (mirrors androidx `defaultTransitionSpec`). */
-private fun navCrossfade(): ContentTransform =
-    fadeIn(tween(NAV_CROSSFADE_MILLIS)) togetherWith fadeOut(tween(NAV_CROSSFADE_MILLIS))
+private fun navInstant(): ContentTransform = EnterTransition.None togetherWith ExitTransition.None
+
+/** Shared-axis X, sens AVANT : l'entrant glisse depuis la droite, le sortant part vers la gauche. */
+private fun navSharedAxisXForward(): ContentTransform =
+    (slideInHorizontally(tween(DRILL_MS, easing = EmphasizedDecelerate)) { it / SLIDE_DIVISOR } +
+        fadeIn(tween(DRILL_FADE_IN_MS, delayMillis = 30))) togetherWith
+        (slideOutHorizontally(tween(DRILL_MS, easing = EmphasizedAccelerate)) { -it / SLIDE_DIVISOR } +
+            fadeOut(tween(DRILL_FADE_OUT_MS)))
+
+/** Shared-axis X, sens ARRIÈRE : l'entrant glisse depuis la gauche, le sortant part vers la droite. */
+private fun navSharedAxisXBack(): ContentTransform =
+    (slideInHorizontally(tween(DRILL_MS, easing = EmphasizedDecelerate)) { -it / SLIDE_DIVISOR } +
+        fadeIn(tween(DRILL_FADE_IN_MS, delayMillis = 30))) togetherWith
+        (slideOutHorizontally(tween(DRILL_MS, easing = EmphasizedAccelerate)) { it / SLIDE_DIVISOR } +
+            fadeOut(tween(DRILL_FADE_OUT_MS)))
+
+/** Fade-through court entre onglets (contenus sans relation spatiale → pas de slide). */
+private fun navTabFadeThrough(): ContentTransform =
+    fadeIn(tween(TAB_FADE_IN_MS, delayMillis = 30)) togetherWith fadeOut(tween(TAB_FADE_OUT_MS))
 
 /**
  * Marks a [TopicRoute] NavEntry so [isTopicScene] can recognise a topic scene without relying on the
@@ -1790,15 +1818,38 @@ private fun Scene<NavKey>.isTopicScene(): Boolean =
     isTopicSceneMetadata(entries.lastOrNull()?.metadata)
 
 /**
- * Forward ContentTransform for a NavDisplay transition: instant for a topic→topic FORWARD transition
- * (the swipe page change is an in-place backStack replace — always forward, never a pop — collapsing
- * the dead-zone, see #282), nav3's default 700 ms cross-fade otherwise. Only used for the forward
- * direction; the pop direction always uses [navCrossfade]. A deep-link reset that swaps one topic for
- * another while already in a topic would also be instant here, which is benign.
+ * Pure : une navigation AVANT est un drill-down (push) — par opposition à un changement d'onglet ou un
+ * remplacement de pile — ssi la pile cible est exactement la pile source AVEC une entrée empilée au
+ * sommet. On compare les piles ENTIÈRES (par `contentKey`), pas seulement le sommet : deux onglets
+ * peuvent partager une même valeur de route (ex. `CategoryRoute(cat=23)` présent dans Drapeaux ET dans
+ * Forums), et ne comparer que le dernier `contentKey` ferait passer un changement d'onglet pour un push
+ * (slide au lieu de fade-through). On ne peut PAS s'appuyer sur une « racine » via `entries.first` : dans
+ * le `SinglePaneScene` de nav3 `entries` ne contient que l'entrée visible (le sommet) ; la pile complète
+ * se reconstruit par `previousEntries + entries`. [sourceStack] = pile source complète (bas→haut),
+ * [targetParentStack] = pile cible privée de son sommet (ce vers quoi elle se dépilerait). Drill-down
+ * ssi les deux coïncident et sont non vides — exact à toute profondeur.
  */
-private fun navContentTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform =
-    if (from.isTopicScene() && to.isTopicScene()) {
-        EnterTransition.None togetherWith ExitTransition.None
-    } else {
-        navCrossfade()
-    }
+internal fun isForwardDrillDown(sourceStack: List<Any?>, targetParentStack: List<Any?>): Boolean =
+    targetParentStack.isNotEmpty() && targetParentStack == sourceStack
+
+/** True quand passer de [this] à [to] est un drill-down (cf. [isForwardDrillDown]). */
+private fun Scene<NavKey>.isForwardDrillDownTo(to: Scene<NavKey>): Boolean =
+    isForwardDrillDown(
+        sourceStack = (previousEntries + entries).map { it.contentKey },
+        targetParentStack = to.previousEntries.map { it.contentKey },
+    )
+
+/**
+ * Transition AVANT (push/replace non-pop) : instantané pour le swipe topic→topic (#282), shared-axis X
+ * avant pour un drill-down (push intra-onglet, toute profondeur), fade-through sinon (changement
+ * d'onglet ou remplacement de pile — contenus sans relation spatiale parent/enfant).
+ */
+private fun navForwardTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform = when {
+    from.isTopicScene() && to.isTopicScene() -> navInstant()
+    from.isForwardDrillDownTo(to) -> navSharedAxisXForward()
+    else -> navTabFadeThrough()
+}
+
+/** Transition ARRIÈRE (pop / retour prédictif) : instantané topic→topic, sinon shared-axis X arrière. */
+private fun navPopTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform =
+    if (from.isTopicScene() && to.isTopicScene()) navInstant() else navSharedAxisXBack()
