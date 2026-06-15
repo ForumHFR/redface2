@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
@@ -23,6 +24,8 @@ import fr.forumhfr.redface2.core.model.FlagType
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -38,7 +41,25 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     private val themeBootstrapStore: ThemeBootstrapStore,
     private val startScreenBootstrapStore: StartScreenBootstrapStore,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    @param:ApplicationScope private val externalScope: CoroutineScope,
 ) : UserPreferencesRepository {
+
+    /**
+     * Runs a preference write on [externalScope] (process-lifetime) instead of the caller's job, then
+     * awaits it. A settings sub-page popped mid-write cancels the caller's `viewModelScope` — and thus
+     * this `await()` — but the `async` is parented to [externalScope], so the DataStore commit (and any
+     * bootstrap-mirror write in the same block) still completes and the change is not silently lost
+     * (#507). `await()` re-throws a write failure to the caller, preserving the ViewModels' optimistic
+     * rollback; if the caller is already gone, the failure is held in the (un-awaited) Deferred and the
+     * `SupervisorJob` keeps the scope alive for the next write.
+     *
+     * Use for DISCRETE writes (toggles, pickers, Save buttons). Do NOT use for write-on-keystroke
+     * setters that rely on caller cancellation to serialise (last-write-wins) — see [setImgurClientId],
+     * which deliberately stays on the caller's cancellable scope.
+     */
+    private suspend fun persist(block: suspend () -> Unit) {
+        externalScope.async { block() }.await()
+    }
 
     override fun observeProxyConfig(): Flow<ProxyConfig> =
         dataStore.data
@@ -47,7 +68,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
     override suspend fun saveProxyConfig(config: ProxyConfig) {
         val normalized = config.normalized()
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_PROXY_ENABLED] = normalized.enabled
                 prefs[KEY_PROXY_HOST] = normalized.host
@@ -70,7 +91,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(false) }
 
     override suspend fun setIgnoreTopicCache(enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_IGNORE_TOPIC_CACHE] = enabled
             }
@@ -84,7 +105,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(true) }
 
     override suspend fun setFlagsGroupByCategory(enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_FLAGS_GROUP_BY_CATEGORY] = enabled
             }
@@ -98,7 +119,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(false) }
 
     override suspend fun setFlagsHideReadCategories(enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_FLAGS_HIDE_READ_CATEGORIES] = enabled
             }
@@ -112,7 +133,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(false) }
 
     override suspend fun setFlagsPerTabOverride(enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_FLAGS_PER_TAB_OVERRIDE] = enabled
             }
@@ -132,7 +153,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(FlagsViewSettings(unreadOnly = defaultUnreadOnly(type))) }
 
     override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[flagsGroupByCategoryKey(type)] = enabled
             }
@@ -140,7 +161,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     }
 
     override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[flagsHideReadCategoriesKey(type)] = enabled
             }
@@ -148,7 +169,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     }
 
     override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[flagsUnreadOnlyKey(type)] = enabled
             }
@@ -172,7 +193,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(ThemeMode.SYSTEM) }
 
     override suspend fun setThemeMode(mode: ThemeMode) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_THEME_MODE] = mode.name
             }
@@ -195,7 +216,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(false) }
 
     override suspend fun setAmoledEnabled(enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_AMOLED_ENABLED] = enabled
             }
@@ -211,7 +232,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(false) }
 
     override suspend fun setTopicTopBarAutoHide(enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_TOPIC_TOPBAR_AUTO_HIDE] = enabled
             }
@@ -226,7 +247,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(false) }
 
     override suspend fun setConfirmBeforePosting(enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_CONFIRM_BEFORE_POSTING] = enabled
             }
@@ -241,7 +262,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(false) }
 
     override suspend fun setShowDtSection(enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_FLAGS_SHOW_DT_SECTION] = enabled
             }
@@ -257,7 +278,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(true) }
 
     override suspend fun setFlagsAutoRefresh(enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_FLAGS_AUTO_REFRESH] = enabled
             }
@@ -273,7 +294,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(true) }
 
     override suspend fun setTopicPageFabs(enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_TOPIC_PAGE_FABS] = enabled
             }
@@ -289,7 +310,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(false) }
 
     override suspend fun setTopicPollsExpanded(enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_TOPIC_POLLS_EXPANDED] = enabled
             }
@@ -314,7 +335,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(StartScreenPreference()) }
 
     override suspend fun setStartScreen(preference: StartScreenPreference) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_START_SCREEN] = preference.screen.name
                 val catId = preference.forumCatId
@@ -349,7 +370,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(true) }
 
     override suspend fun setMpUnreadBadge(enabled: Boolean) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_MP_UNREAD_BADGE] = enabled
             }
@@ -364,7 +385,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(UploadProviderId.DIBERIE) }
 
     override suspend fun setUploadProvider(provider: UploadProviderId) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_UPLOAD_PROVIDER] = provider.name
             }
@@ -381,7 +402,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(DisplayDensity.COMFORT) }
 
     override suspend fun setDisplayDensity(density: DisplayDensity) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_DISPLAY_DENSITY] = density.name
             }
@@ -395,6 +416,11 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .distinctUntilChanged()
             .catch { emit("") }
 
+    // NOT routed through persist(): unlike the discrete toggles/pickers, the Client-ID is written on
+    // EVERY keystroke and SettingsViewModel cancels the previous in-flight write so only the latest text
+    // commits (last-write-wins, #459). Detaching it onto the application scope would let a cancelled
+    // older write survive and land after a newer one, stranding a stale value (#508 Codex review). Here
+    // cancellation IS the intended behaviour, so this write stays on the caller's (cancellable) scope.
     override suspend fun setImgurClientId(clientId: String) {
         withContext(ioDispatcher) {
             dataStore.edit { prefs ->
@@ -411,7 +437,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(EditorImageInsert.REDUCED) }
 
     override suspend fun setEditorImageInsert(mode: EditorImageInsert) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_EDITOR_IMAGE_INSERT] = mode.name
             }
@@ -426,7 +452,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             .catch { emit(FontScalePreference.M) }
 
     override suspend fun setFontScale(scale: FontScalePreference) {
-        withContext(ioDispatcher) {
+        persist {
             dataStore.edit { prefs ->
                 prefs[KEY_FONT_SCALE] = scale.name
             }
