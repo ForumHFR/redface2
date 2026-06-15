@@ -1818,20 +1818,34 @@ private fun Scene<NavKey>.isTopicScene(): Boolean =
     isTopicSceneMetadata(entries.lastOrNull()?.metadata)
 
 /**
- * Clé de la racine de pile d'une scène. Un changement d'onglet remplace tout le back stack (racine
- * comprise) ; une navigation intra-onglet garde la même racine. Chaque onglet ayant une racine distincte
- * (FlagsListRoute, ForumRoute, …), comparer cette clé distingue « changement d'onglet » de « drill-down ».
+ * Pure : une navigation AVANT est un drill-down (push) — par opposition à un changement d'onglet ou un
+ * remplacement de pile — ssi la cible se dépile exactement vers l'écran d'origine. Autrement dit le
+ * parent immédiat de la cible (l'entrée juste sous son sommet) est le sommet de la scène source. On ne
+ * compare PAS une « racine de pile » : dans le `SinglePaneScene` de nav3, `entries` ne contient que
+ * l'entrée visible (le sommet), pas la racine ; comparer `entries.first` classerait tout push profond
+ * (Forums → Catégorie → Topic) comme un changement d'onglet. Le parent vient de `previousEntries`
+ * (la pile qui resterait après dépilement), dont le dernier élément est le parent immédiat — exact à
+ * toute profondeur.
  */
-private fun Scene<NavKey>.rootContentKey(): Any? = entries.firstOrNull()?.contentKey
+internal fun isForwardDrillDown(fromTopContentKey: Any?, targetParentContentKey: Any?): Boolean =
+    targetParentContentKey != null && targetParentContentKey == fromTopContentKey
+
+/** True quand passer de [this] à [to] est un drill-down (cf. [isForwardDrillDown]). */
+private fun Scene<NavKey>.isForwardDrillDownTo(to: Scene<NavKey>): Boolean =
+    isForwardDrillDown(
+        fromTopContentKey = entries.lastOrNull()?.contentKey,
+        targetParentContentKey = to.previousEntries.lastOrNull()?.contentKey,
+    )
 
 /**
- * Transition AVANT (push/replace non-pop) : instantané pour le swipe topic→topic (#282), fade-through
- * pour un changement d'onglet (racine de pile différente), shared-axis X avant pour un drill-down.
+ * Transition AVANT (push/replace non-pop) : instantané pour le swipe topic→topic (#282), shared-axis X
+ * avant pour un drill-down (push intra-onglet, toute profondeur), fade-through sinon (changement
+ * d'onglet ou remplacement de pile — contenus sans relation spatiale parent/enfant).
  */
 private fun navForwardTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform = when {
     from.isTopicScene() && to.isTopicScene() -> navInstant()
-    from.rootContentKey() != to.rootContentKey() -> navTabFadeThrough()
-    else -> navSharedAxisXForward()
+    from.isForwardDrillDownTo(to) -> navSharedAxisXForward()
+    else -> navTabFadeThrough()
 }
 
 /** Transition ARRIÈRE (pop / retour prédictif) : instantané topic→topic, sinon shared-axis X arrière. */

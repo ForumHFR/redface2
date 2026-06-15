@@ -38,4 +38,32 @@ class NavTransitionTest {
     fun `unrelated metadata keys are not a topic scene`() {
         assertFalse(isTopicSceneMetadata(mapOf("some.other.key" to true)))
     }
+
+    // --- isForwardDrillDown (#494 transitions) ---------------------------------------------------
+    // A forward navigation is a drill-down (shared-axis X) iff the target's immediate parent — the
+    // entry just below its top, taken from previousEntries — is the source scene's top entry. Using
+    // entries.first() (a stack "root") instead would misclassify deep pushes (Forums → Catégorie →
+    // Topic) as tab switches and skip the slide; these pin the parent-matches-top contract.
+
+    @Test
+    fun `target parent equal to source top is a drill-down`() {
+        assertTrue(isForwardDrillDown(fromTopContentKey = "ForumCategory", targetParentContentKey = "ForumCategory"))
+    }
+
+    @Test
+    fun `null target parent (tab root) is not a drill-down`() {
+        // A scene whose top is the stack root has empty previousEntries -> null parent -> tab switch.
+        assertFalse(isForwardDrillDown(fromTopContentKey = "Flags", targetParentContentKey = null))
+    }
+
+    @Test
+    fun `target parent different from source top is not a drill-down`() {
+        // Switching to another tab whose top sits over a different parent: not a push from here.
+        assertFalse(isForwardDrillDown(fromTopContentKey = "Flags", targetParentContentKey = "Forum"))
+    }
+
+    @Test
+    fun `both null is not a drill-down`() {
+        assertFalse(isForwardDrillDown(fromTopContentKey = null, targetParentContentKey = null))
+    }
 }
