@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -296,6 +298,26 @@ internal fun buildSettingsCatalogue(
                 },
                 onClick = onOpenMaintenance,
             ),
+            futureRow(
+                id = "future_prefetch_wifi_only",
+                title = stringResource(R.string.settings_future_prefetch_wifi_only),
+            ),
+            futureRow(
+                id = "future_data_saver",
+                title = stringResource(R.string.settings_future_data_saver),
+            ),
+            futureRow(
+                id = "future_image_cache_size",
+                title = stringResource(R.string.settings_future_image_cache_size),
+            ),
+            futureRow(
+                id = "future_clear_cache_on_start",
+                title = stringResource(R.string.settings_future_clear_cache_on_start),
+            ),
+            futureRow(
+                id = "future_offline_mode",
+                title = stringResource(R.string.settings_future_offline_mode),
+            ),
         ),
     ),
     // Démarrage (rendered inline — category picker, not a sub-page).
@@ -311,6 +333,10 @@ internal fun buildSettingsCatalogue(
                     keywords = listOf("démarrage", "écran", "onglet", "lancement", "catégorie"),
                 ),
                 render = { StartScreenPreferencesCard(state = startScreenState, onIntent = onStartScreenIntent) },
+            ),
+            futureRow(
+                id = "future_resume_last_topic",
+                title = stringResource(R.string.settings_future_resume_last_topic),
             ),
         ),
     ),
@@ -346,6 +372,34 @@ internal fun buildSettingsCatalogue(
                     stringResource(R.string.settings_display_font_scale_large),
                 ),
                 onClick = onOpenDisplay,
+            ),
+            futureRow(
+                id = "future_material_you",
+                title = stringResource(R.string.settings_future_material_you),
+            ),
+            futureRow(
+                id = "future_ui_colors",
+                title = stringResource(R.string.settings_future_ui_colors),
+            ),
+            futureRow(
+                id = "future_classic_theme",
+                title = stringResource(R.string.settings_future_classic_theme),
+            ),
+            futureRow(
+                id = "future_amoled_auto_night",
+                title = stringResource(R.string.settings_future_amoled_auto_night),
+            ),
+            futureRow(
+                id = "future_smiley_size",
+                title = stringResource(R.string.settings_future_smiley_size),
+            ),
+            futureRow(
+                id = "future_show_avatars",
+                title = stringResource(R.string.settings_future_show_avatars),
+            ),
+            futureRow(
+                id = "future_show_signatures",
+                title = stringResource(R.string.settings_future_show_signatures),
             ),
         ),
     ),
@@ -404,6 +458,22 @@ internal fun buildSettingsCatalogue(
                     .takeIf { state.flagsAutoRefreshError },
                 onCheckedChange = { onIntent(SettingsIntent.FlagsAutoRefreshChanged(it)) },
             ),
+            futureRow(
+                id = "future_flags_sort",
+                title = stringResource(R.string.settings_future_flags_sort),
+            ),
+            futureRow(
+                id = "future_flags_on_listing",
+                title = stringResource(R.string.settings_future_flags_on_listing),
+            ),
+            futureRow(
+                id = "future_flags_mark_read_on_scroll",
+                title = stringResource(R.string.settings_future_flags_mark_read_on_scroll),
+            ),
+            futureRow(
+                id = "future_flags_by_subcategory",
+                title = stringResource(R.string.settings_future_flags_by_subcategory),
+            ),
         ),
     ),
     // Sujet et lecture (inline toggles).
@@ -440,6 +510,34 @@ internal fun buildSettingsCatalogue(
                     .takeIf { state.topicPollsExpandedError },
                 onCheckedChange = { onIntent(SettingsIntent.TopicPollsExpandedChanged(it)) },
             ),
+            futureRow(
+                id = "future_restore_read_position",
+                title = stringResource(R.string.settings_future_restore_read_position),
+            ),
+            futureRow(
+                id = "future_swipe_page",
+                title = stringResource(R.string.settings_future_swipe_page),
+            ),
+            futureRow(
+                id = "future_collapse_quotes",
+                title = stringResource(R.string.settings_future_collapse_quotes),
+            ),
+            futureRow(
+                id = "future_prefetch",
+                title = stringResource(R.string.settings_future_prefetch),
+            ),
+            futureRow(
+                id = "future_open_external_in_app",
+                title = stringResource(R.string.settings_future_open_external_in_app),
+            ),
+            futureRow(
+                id = "future_autoplay_animations",
+                title = stringResource(R.string.settings_future_autoplay_animations),
+            ),
+            futureRow(
+                id = "future_fullscreen_reading",
+                title = stringResource(R.string.settings_future_fullscreen_reading),
+            ),
         ),
     ),
     // Édition et publication (inline toggle).
@@ -456,6 +554,26 @@ internal fun buildSettingsCatalogue(
                 errorRes = R.string.settings_confirm_before_posting_persist_failed
                     .takeIf { state.confirmBeforePostingError },
                 onCheckedChange = { onIntent(SettingsIntent.ConfirmBeforePostingChanged(it)) },
+            ),
+            futureRow(
+                id = "future_auto_signature",
+                title = stringResource(R.string.settings_future_auto_signature),
+            ),
+            futureRow(
+                id = "future_auto_drafts",
+                title = stringResource(R.string.settings_future_auto_drafts),
+            ),
+            futureRow(
+                id = "future_recent_smileys",
+                title = stringResource(R.string.settings_future_recent_smileys),
+            ),
+            futureRow(
+                id = "future_spell_check",
+                title = stringResource(R.string.settings_future_spell_check),
+            ),
+            futureRow(
+                id = "future_custom_bbcode_toolbar",
+                title = stringResource(R.string.settings_future_custom_bbcode_toolbar),
             ),
         ),
     ),
@@ -488,6 +606,18 @@ internal fun buildSettingsCatalogue(
                 ),
                 onClick = onOpenImages,
             ),
+            futureRow(
+                id = "future_compress_upload",
+                title = stringResource(R.string.settings_future_compress_upload),
+            ),
+            futureRow(
+                id = "future_strip_exif",
+                title = stringResource(R.string.settings_future_strip_exif),
+            ),
+            futureRow(
+                id = "future_upload_wifi_only",
+                title = stringResource(R.string.settings_future_upload_wifi_only),
+            ),
         ),
     ),
     // Messages privés (inline toggle).
@@ -503,6 +633,18 @@ internal fun buildSettingsCatalogue(
                 enabled = state.canToggleMpUnreadBadge,
                 errorRes = R.string.settings_mp_unread_badge_persist_failed.takeIf { state.mpUnreadBadgeError },
                 onCheckedChange = { onIntent(SettingsIntent.MpUnreadBadgeChanged(it)) },
+            ),
+            futureRow(
+                id = "future_mp_push",
+                title = stringResource(R.string.settings_future_mp_push),
+            ),
+            futureRow(
+                id = "future_mp_preview",
+                title = stringResource(R.string.settings_future_mp_preview),
+            ),
+            futureRow(
+                id = "future_mp_read_receipt",
+                title = stringResource(R.string.settings_future_mp_read_receipt),
             ),
         ),
     ),
@@ -527,42 +669,110 @@ internal fun buildSettingsCatalogue(
                 ),
                 onClick = onOpenAccountAbout,
             ),
+            futureRow(
+                id = "future_hfr_profile_settings",
+                title = stringResource(R.string.settings_future_hfr_profile_settings),
+            ),
+            futureRow(
+                id = "future_multi_account",
+                title = stringResource(R.string.settings_future_multi_account),
+            ),
+            futureRow(
+                id = "future_auto_logout",
+                title = stringResource(R.string.settings_future_auto_logout),
+            ),
         ),
     ),
-    // Notifications (future, disabled — searchable).
+    // Notifications (future category, all rows disabled — searchable). Draft §10.
     SettingsCatalogueSection(
         id = "notifications",
         title = stringResource(R.string.settings_section_notifications),
         items = listOf(
             futureRow(
-                id = "future_notifications",
-                title = stringResource(R.string.settings_future_notifications),
+                id = "future_notif_push",
+                title = stringResource(R.string.settings_future_notif_push),
+            ),
+            futureRow(
+                id = "future_notif_mp",
+                title = stringResource(R.string.settings_future_notif_mp),
+            ),
+            futureRow(
+                id = "future_notif_mentions",
+                title = stringResource(R.string.settings_future_notif_mentions),
+            ),
+            futureRow(
+                id = "future_notif_polling",
+                title = stringResource(R.string.settings_future_notif_polling),
+            ),
+            futureRow(
+                id = "future_notif_dnd",
+                title = stringResource(R.string.settings_future_notif_dnd),
+            ),
+            futureRow(
+                id = "future_notif_sound_vibration",
+                title = stringResource(R.string.settings_future_notif_sound_vibration),
             ),
         ),
     ),
-    // Accessibilité (future, disabled — searchable).
+    // Accessibilité (future category, all rows disabled — searchable). Draft §11.
     SettingsCatalogueSection(
         id = "accessibility",
         title = stringResource(R.string.settings_section_accessibility),
         items = listOf(
             futureRow(
-                id = "future_timezone",
-                title = stringResource(R.string.settings_future_timezone),
+                id = "future_a11y_force_system_text",
+                title = stringResource(R.string.settings_future_a11y_force_system_text),
             ),
             futureRow(
-                id = "future_multilang",
-                title = stringResource(R.string.settings_future_multilang),
+                id = "future_a11y_high_contrast",
+                title = stringResource(R.string.settings_future_a11y_high_contrast),
+            ),
+            futureRow(
+                id = "future_a11y_reduce_motion",
+                title = stringResource(R.string.settings_future_a11y_reduce_motion),
+            ),
+            futureRow(
+                id = "future_a11y_timezone",
+                title = stringResource(R.string.settings_future_a11y_timezone),
+            ),
+            futureRow(
+                id = "future_a11y_language",
+                title = stringResource(R.string.settings_future_a11y_language),
             ),
         ),
     ),
-    // Extensions et filtrage (future, disabled — searchable).
+    // Extensions et filtrage (future category, all rows disabled — searchable). Draft §12.
     SettingsCatalogueSection(
         id = "extensions",
         title = stringResource(R.string.settings_section_extensions),
         items = listOf(
             futureRow(
-                id = "future_extensions",
-                title = stringResource(R.string.settings_future_extensions),
+                id = "future_ext_ignore_list",
+                title = stringResource(R.string.settings_future_ext_ignore_list),
+            ),
+            futureRow(
+                id = "future_ext_keyword_filters",
+                title = stringResource(R.string.settings_future_ext_keyword_filters),
+            ),
+            futureRow(
+                id = "future_ext_blacklist",
+                title = stringResource(R.string.settings_future_ext_blacklist),
+            ),
+            futureRow(
+                id = "future_ext_color_tag",
+                title = stringResource(R.string.settings_future_ext_color_tag),
+            ),
+            futureRow(
+                id = "future_ext_qualitay",
+                title = stringResource(R.string.settings_future_ext_qualitay),
+            ),
+            futureRow(
+                id = "future_ext_redflag",
+                title = stringResource(R.string.settings_future_ext_redflag),
+            ),
+            futureRow(
+                id = "future_ext_community",
+                title = stringResource(R.string.settings_future_ext_community),
             ),
         ),
     ),
@@ -617,13 +827,40 @@ private fun toggleRow(
     },
 )
 
-/** A planned (not-yet-shipped) row: disabled but still searchable (`enabled = false`). */
+/**
+ * A planned (not-yet-shipped) row: disabled but still searchable (`enabled = false`), carrying a small
+ * « À venir » badge in its trailing slot to make the planned status explicit (cf. [FutureBadge]).
+ */
 private fun futureRow(
     id: String,
     title: String,
 ): SettingsCatalogueRow = SettingsCatalogueRow(
     searchable = SettingsSearchableItem(id = id, title = title, enabled = false),
     render = {
-        RedfaceSettingsListItem(title = title, enabled = false)
+        RedfaceSettingsListItem(
+            title = title,
+            enabled = false,
+            trailingContent = { FutureBadge() },
+        )
     },
 )
+
+/**
+ * The « À venir » pill shown in the trailing slot of a [futureRow]: a sober tonal `Surface` (rounded,
+ * `secondaryContainer`) wrapping a `labelSmall` label. Signals the planned status without competing
+ * with the disabled (greyed) row text.
+ */
+@Composable
+private fun FutureBadge() {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    ) {
+        Text(
+            text = stringResource(R.string.settings_future_badge),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    }
+}

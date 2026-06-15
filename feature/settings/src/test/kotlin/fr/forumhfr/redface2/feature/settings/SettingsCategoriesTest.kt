@@ -8,7 +8,9 @@ import org.junit.Test
 /**
  * #494 v2 — contrat de routage de la racine « catégories d'abord » : les catégories adossées à une
  * sous-page dédiée y mènent directement, les autres ouvrent le détail générique ; le mapping
- * catégorie → section(s) du catalogue est figé (notamment « À venir » qui agrège 3 sections futures).
+ * catégorie → section du catalogue est l'identité (id-catégorie == id-section). Les 3 catégories « à
+ * venir » (Notifications/Accessibilité/Extensions) sont désormais distinctes, plus une « À venir »
+ * fourre-tout.
  */
 class SettingsCategoriesTest {
 
@@ -48,7 +50,11 @@ class SettingsCategoriesTest {
 
     @Test
     fun `other categories open the generic detail with their id`() {
-        for (id in listOf("flags", "topic", "mp", "editing", "start", "network", "upcoming")) {
+        val generic = listOf(
+            "flags", "topic", "mp", "editing", "start", "network",
+            "notifications", "accessibility", "extensions",
+        )
+        for (id in generic) {
             with(Spy()) {
                 route(id)
                 assertEquals(id, category)
@@ -58,8 +64,10 @@ class SettingsCategoriesTest {
     }
 
     @Test
-    fun `upcoming aggregates the three future sections`() {
-        assertEquals(listOf("notifications", "accessibility", "extensions"), sectionIdsForCategory("upcoming"))
+    fun `the three future categories map to their own homonymous section`() {
+        assertEquals(listOf("notifications"), sectionIdsForCategory("notifications"))
+        assertEquals(listOf("accessibility"), sectionIdsForCategory("accessibility"))
+        assertEquals(listOf("extensions"), sectionIdsForCategory("extensions"))
     }
 
     @Test
@@ -70,7 +78,11 @@ class SettingsCategoriesTest {
 
     @Test
     fun `every category title resolves to a non-zero resource`() {
-        for (id in listOf("network", "start", "flags", "topic", "editing", "mp", "upcoming")) {
+        val ids = listOf(
+            "network", "start", "flags", "topic", "editing", "mp",
+            "notifications", "accessibility", "extensions",
+        )
+        for (id in ids) {
             assertTrue("title res for $id", categoryTitleRes(id) != 0)
         }
     }
