@@ -40,6 +40,25 @@
     <string name="settings_search_placeholder">Rechercher un réglage…</string>
     <string name="settings_search_empty">Aucun réglage ne correspond à votre recherche.</string>
 
+    <!-- #494 v2 — racine « catégories d'abord » : familles, sous-titres de catégories, a11y, écran « À venir ». -->
+    <string name="settings_menu_content_description">Menu</string>
+    <string name="settings_category_upcoming_title">À venir</string>
+    <string name="settings_family_appearance">Apparence</string>
+    <string name="settings_family_communication">Communication</string>
+    <string name="settings_family_content">Contenu</string>
+    <string name="settings_family_system">Système</string>
+    <string name="settings_family_other">Autres</string>
+    <string name="settings_category_subtitle_display">Thème, AMOLED, densité, police</string>
+    <string name="settings_category_subtitle_flags">Regroupement, masquer lus, auto-refresh</string>
+    <string name="settings_category_subtitle_topic">Barre, sondages, navigation</string>
+    <string name="settings_category_subtitle_mp">Badge de non-lus</string>
+    <string name="settings_category_subtitle_editing">Confirmation avant envoi</string>
+    <string name="settings_category_subtitle_images">Hébergeur, Client-ID, insertion</string>
+    <string name="settings_category_subtitle_start">Écran ouvert au lancement</string>
+    <string name="settings_category_subtitle_network">Proxy, vider les caches</string>
+    <string name="settings_category_subtitle_account">Compte HFR, version, diagnostics</string>
+    <string name="settings_category_subtitle_upcoming">Fonctionnalités planifiées</string>
+
     <!-- #494 — lignes de navigation de la racine vers les sous-pages, et titres des sous-pages. -->
     <string name="settings_nav_proxy">Proxy</string>
     <string name="settings_nav_proxy_description">Router les requêtes HFR via votre proxy.</string>

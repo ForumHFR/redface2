@@ -84,6 +84,7 @@ import fr.forumhfr.redface2.feature.profile.ProfileViewModel
 import fr.forumhfr.redface2.feature.search.SearchScreen
 import fr.forumhfr.redface2.feature.settings.MyImagesScreen
 import fr.forumhfr.redface2.feature.settings.SettingsAccountAboutScreen
+import fr.forumhfr.redface2.feature.settings.SettingsCategoryDetailScreen
 import fr.forumhfr.redface2.feature.settings.SettingsDisplayScreen
 import fr.forumhfr.redface2.feature.settings.SettingsImagesScreen
 import fr.forumhfr.redface2.feature.settings.SettingsMaintenanceScreen
@@ -306,6 +307,10 @@ data object SettingsImagesRoute : RedfaceNavKey
 
 @Serializable
 data object SettingsAccountAboutRoute : RedfaceNavKey
+
+/** #494 v2 — détail générique d'une catégorie de réglages (cf. SettingsCategoryDetailScreen). */
+@Serializable
+data class SettingsCategoryRoute(val categoryId: String) : RedfaceNavKey
 
 /**
  * Phase 2 finish (#208) — full profile page route.
@@ -1188,8 +1193,24 @@ private fun RedfaceNavHost(
             }
             entry<SettingsRoute> {
                 SettingsScreen(
-                    // #494 v2 — racine de l'onglet Réglages (jamais empilée) : pas de flèche retour morte.
-                    onBack = null,
+                    onOpenProxy = { backStack.add(SettingsProxyRoute) },
+                    onOpenMaintenance = { backStack.add(SettingsMaintenanceRoute) },
+                    onOpenDisplay = { backStack.add(SettingsDisplayRoute) },
+                    onOpenImages = { backStack.add(SettingsImagesRoute) },
+                    onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
+                    // #494 v2 — catégories sans sous-page dédiée → détail générique.
+                    onOpenCategory = { categoryId -> backStack.add(SettingsCategoryRoute(categoryId)) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsCategoryRoute> { key ->
+                SettingsCategoryDetailScreen(
+                    categoryId = key.categoryId,
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
                     onOpenProxy = { backStack.add(SettingsProxyRoute) },
                     onOpenMaintenance = { backStack.add(SettingsMaintenanceRoute) },
                     onOpenDisplay = { backStack.add(SettingsDisplayRoute) },

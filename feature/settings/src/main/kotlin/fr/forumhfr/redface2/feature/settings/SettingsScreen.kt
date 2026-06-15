@@ -27,6 +27,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsListItem
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsSection
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsSearchTopBar
+import fr.forumhfr.redface2.core.ui.settings.shell.SettingsHomeScreen
 
 /**
  * #494 — root of the redesigned settings catalogue.
@@ -48,14 +49,14 @@ import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsSearchTopBar
  * [startScreenViewModel] (#458 « Démarrage ») — both `hiltViewModel()` in the same `ViewModelStore`.
  */
 @Composable
-@Suppress("LongParameterList") // state-hoisted Composable: 5 sub-page nav callbacks + back + 2 VMs, each distinct.
+@Suppress("LongParameterList") // racine v2 : 5 sous-pages + onOpenCategory + 2 VMs + slots, chacun distinct.
 fun SettingsScreen(
-    onBack: (() -> Unit)? = null,
     onOpenProxy: () -> Unit,
     onOpenMaintenance: () -> Unit,
     onOpenDisplay: () -> Unit,
     onOpenImages: () -> Unit,
     onOpenAccountAbout: () -> Unit,
+    onOpenCategory: (String) -> Unit,
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -63,17 +64,17 @@ fun SettingsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val startScreenState by startScreenViewModel.state.collectAsStateWithLifecycle()
-    SettingsCatalogue(
+    SettingsRoot(
         state = state,
         onIntent = viewModel::submit,
         startScreenState = startScreenState,
         onStartScreenIntent = startScreenViewModel::submit,
-        onBack = onBack,
         onOpenProxy = onOpenProxy,
         onOpenMaintenance = onOpenMaintenance,
         onOpenDisplay = onOpenDisplay,
         onOpenImages = onOpenImages,
         onOpenAccountAbout = onOpenAccountAbout,
+        onOpenCategory = onOpenCategory,
         modifier = modifier,
         topBarActions = topBarActions,
     )
@@ -84,17 +85,17 @@ fun SettingsScreen(
 // stateless catalogue body so it stays previewable/testable without Hilt.
 @Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod")
 @Composable
-internal fun SettingsCatalogue(
+internal fun SettingsRoot(
     state: SettingsState,
     onIntent: (SettingsIntent) -> Unit,
     startScreenState: StartScreenSettingsState,
     onStartScreenIntent: (StartScreenSettingsIntent) -> Unit,
-    onBack: (() -> Unit)? = null,
     onOpenProxy: () -> Unit,
     onOpenMaintenance: () -> Unit,
     onOpenDisplay: () -> Unit,
     onOpenImages: () -> Unit,
     onOpenAccountAbout: () -> Unit,
+    onOpenCategory: (String) -> Unit,
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
@@ -106,6 +107,25 @@ internal fun SettingsCatalogue(
     BackHandler(enabled = searchActive) {
         searchActive = false
         query = ""
+    }
+
+    // #494 v2 — idle : racine « catégories d'abord » (catégories regroupées en familles). Le pill de
+    // recherche bascule en mode recherche qui réutilise le filtre/renderers du catalogue (ci-dessous).
+    if (!searchActive) {
+        SettingsHomeScreen(
+            groups = rememberSettingsCategoryGroups(),
+            searchPlaceholder = stringResource(R.string.settings_search_placeholder),
+            menuContentDescription = stringResource(R.string.settings_menu_content_description),
+            searchContentDescription = stringResource(R.string.settings_search_open),
+            onMenuClick = null, // hamburger gardé mais désactivé : rôle à définir (#494 v2)
+            onSearchClick = { searchActive = true },
+            onCategoryClick = { id ->
+                routeSettingsCategory(id, onOpenDisplay, onOpenImages, onOpenAccountAbout, onOpenCategory)
+            },
+            modifier = modifier,
+            accountSlot = topBarActions,
+        )
+        return
     }
 
     // The renderable catalogue: each row carries its search metadata AND its Compose renderer. The
@@ -138,7 +158,6 @@ internal fun SettingsCatalogue(
                     searchActive = active
                     if (!active) query = ""
                 },
-                onBack = onBack,
                 actions = { topBarActions?.invoke() },
             )
         },
@@ -200,7 +219,7 @@ internal data class SettingsCatalogueSection(
  */
 @Suppress("LongMethod", "LongParameterList")
 @Composable
-private fun buildSettingsCatalogue(
+internal fun buildSettingsCatalogue(
     state: SettingsState,
     onIntent: (SettingsIntent) -> Unit,
     startScreenState: StartScreenSettingsState,

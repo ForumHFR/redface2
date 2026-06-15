@@ -62,23 +62,36 @@ fun SettingsHomeScreen(
     searchPlaceholder: String,
     menuContentDescription: String,
     searchContentDescription: String,
-    onMenuClick: () -> Unit,
+    onMenuClick: (() -> Unit)? = null,
     onSearchClick: () -> Unit,
     onCategoryClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    accountSlot: (@Composable () -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface),
     ) {
-        RedfaceSearchAppBar(
-            placeholder = searchPlaceholder,
-            menuContentDescription = menuContentDescription,
-            searchContentDescription = searchContentDescription,
-            onMenuClick = onMenuClick,
-            onSearchClick = onSearchClick,
-        )
+        // Le slot compte (menu compte app-wide) remplace l'avatar placeholder quand le host le fournit.
+        if (accountSlot != null) {
+            RedfaceSearchAppBar(
+                placeholder = searchPlaceholder,
+                menuContentDescription = menuContentDescription,
+                searchContentDescription = searchContentDescription,
+                onMenuClick = onMenuClick,
+                onSearchClick = onSearchClick,
+                avatar = accountSlot,
+            )
+        } else {
+            RedfaceSearchAppBar(
+                placeholder = searchPlaceholder,
+                menuContentDescription = menuContentDescription,
+                searchContentDescription = searchContentDescription,
+                onMenuClick = onMenuClick,
+                onSearchClick = onSearchClick,
+            )
+        }
         LazyColumn(modifier = Modifier.fillMaxWidth()) {
             groups.forEachIndexed { index, group ->
                 item(key = "header_${group.id}") {
