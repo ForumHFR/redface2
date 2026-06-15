@@ -50,7 +50,7 @@ fun RedfaceSettingsSearchTopBar(
     query: String,
     onQueryChange: (String) -> Unit,
     onSearchActiveChange: (Boolean) -> Unit,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
@@ -58,18 +58,18 @@ fun RedfaceSettingsSearchTopBar(
     TopAppBar(
         modifier = modifier,
         navigationIcon = {
-            val backLabel = if (searchActive) {
-                labels.closeSearchContentDescription
-            } else {
-                labels.backContentDescription
-            }
-            IconButton(
-                onClick = { if (searchActive) onSearchActiveChange(false) else onBack() },
-                modifier = Modifier.semantics { contentDescription = backLabel },
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_arrow_back),
-                    contentDescription = null,
+            // Search active → the icon CLOSES the search. Otherwise it's a back affordance, shown only
+            // when [onBack] is provided : a top-level/root use (Réglages onglet, #494 v2) passes null so
+            // no dead back button appears (Codex P2).
+            if (searchActive) {
+                NavigationIconButton(
+                    label = labels.closeSearchContentDescription,
+                    onClick = { onSearchActiveChange(false) },
+                )
+            } else if (onBack != null) {
+                NavigationIconButton(
+                    label = labels.backContentDescription,
+                    onClick = onBack,
                 )
             }
         },
@@ -128,6 +128,20 @@ fun RedfaceSettingsSearchTopBar(
             }
         },
     )
+}
+
+/** Bouton de navigation (flèche retour / fermer la recherche) partagé par le top bar de réglages. */
+@Composable
+private fun NavigationIconButton(label: String, onClick: () -> Unit) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.semantics { contentDescription = label },
+    ) {
+        Icon(
+            painter = painterResource(R.drawable.ic_arrow_back),
+            contentDescription = null,
+        )
+    }
 }
 
 /**

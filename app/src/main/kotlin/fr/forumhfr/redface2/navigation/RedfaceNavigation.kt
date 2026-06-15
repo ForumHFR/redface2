@@ -27,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
@@ -38,6 +39,7 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Icon
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -52,6 +54,7 @@ import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
+import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -337,12 +340,14 @@ data class ProfileFullRoute(
 
 internal enum class TopLevelDestination(
     val labelRes: Int,
+    val iconRes: Int,
     val rootRoute: RedfaceNavKey,
 ) {
-    Flags(R.string.nav_flags, FlagsListRoute),
-    Forum(R.string.nav_forum, ForumRoute),
-    Search(R.string.nav_search, SearchRoute),
-    Messages(R.string.nav_messages, MessagesRoute),
+    Flags(R.string.nav_flags, CoreUiR.drawable.ic_ms_flag, FlagsListRoute),
+    Forum(R.string.nav_forum, CoreUiR.drawable.ic_ms_forum, ForumRoute),
+    Search(R.string.nav_search, CoreUiR.drawable.ic_ms_search, SearchRoute),
+    Messages(R.string.nav_messages, CoreUiR.drawable.ic_ms_mail, MessagesRoute),
+    Settings(R.string.nav_settings, CoreUiR.drawable.ic_ms_settings, SettingsRoute),
 }
 
 /** #458 — maps the persisted cold-start choice onto the navigation's own destination enum. */
@@ -363,9 +368,11 @@ private const val MAX_BADGE_COUNT = 9
  */
 @Composable
 private fun TopLevelDestinationIcon(destination: TopLevelDestination, mpUnreadCount: Int?) {
-    val glyph = stringResource(destination.labelRes).first().toString()
+    val icon: @Composable () -> Unit = {
+        Icon(painter = painterResource(destination.iconRes), contentDescription = null)
+    }
     if (destination != TopLevelDestination.Messages || mpUnreadCount == null) {
-        Text(text = glyph)
+        icon()
         return
     }
     BadgedBox(
@@ -381,7 +388,7 @@ private fun TopLevelDestinationIcon(destination: TopLevelDestination, mpUnreadCo
             }
         },
     ) {
-        Text(text = glyph)
+        icon()
     }
 }
 
@@ -501,6 +508,9 @@ fun RedfaceApp(intent: Intent?) {
         val forumBackStack = rememberNavBackStack(*forumInitialStack)
         val searchBackStack = rememberNavBackStack(SearchRoute)
         val messagesBackStack = rememberNavBackStack(MessagesRoute)
+        // #494 v2 — Réglages est désormais une destination top-level à part entière (5e onglet),
+        // avec sa propre pile (sa racine = SettingsRoute), au lieu d'être poussé sur l'onglet actif.
+        val settingsBackStack = rememberNavBackStack(SettingsRoute)
 
         var currentDestination by rememberSaveable {
             mutableStateOf(startScreen.screen.toTopLevelDestination())
@@ -515,12 +525,19 @@ fun RedfaceApp(intent: Intent?) {
             mutableStateOf<ProfileSheetRequest?>(null)
         }
 
-        val backStacks = remember(flagsBackStack, forumBackStack, searchBackStack, messagesBackStack) {
+        val backStacks = remember(
+            flagsBackStack,
+            forumBackStack,
+            searchBackStack,
+            messagesBackStack,
+            settingsBackStack,
+        ) {
             mapOf(
                 TopLevelDestination.Flags to flagsBackStack,
                 TopLevelDestination.Forum to forumBackStack,
                 TopLevelDestination.Search to searchBackStack,
                 TopLevelDestination.Messages to messagesBackStack,
+                TopLevelDestination.Settings to settingsBackStack,
             )
         }
 
@@ -653,7 +670,6 @@ fun RedfaceApp(intent: Intent?) {
                         versionCode = BuildConfig.VERSION_CODE,
                         onLogin = { activeBackStack.add(LoginRoute) },
                         onLogout = accountViewModel::logout,
-                        onOpenSettings = { openSettingsIdempotently(activeBackStack) },
                         onOpenDiagnostics = { activeBackStack.add(DiagnosticsRoute) },
                         onReportContent = {
                             startReportEmail(context, reportEmailSubject, reportNoEmailClient)
@@ -924,26 +940,6 @@ internal fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: Str
     }
 }
 
-/**
- * Opens the settings root idempotently. The account menu is shown ON the settings screen and its
- * sub-pages too, so tapping « Paramètres » there must land back on the existing [SettingsRoute]
- * (popping any sub-pages stacked above it) rather than push a duplicate that Back then has to unwind
- * (#494 Codex P3). When no [SettingsRoute] is in [backStack] (we are elsewhere), a fresh one is pushed.
- *
- * Kept top-level (not inlined in the account-menu lambda) so its branches don't inflate RedfaceApp's
- * cyclomatic complexity.
- */
-private fun openSettingsIdempotently(backStack: NavBackStack<NavKey>) {
-    val existing = backStack.indexOfLast { it is SettingsRoute }
-    if (existing >= 0) {
-        while (backStack.lastIndex > existing) {
-            backStack.removeAt(backStack.lastIndex)
-        }
-    } else {
-        backStack.add(SettingsRoute)
-    }
-}
-
 @Composable
 @Suppress("CyclomaticComplexMethod", "LongParameterList") // One entry per top-level route + per-screen
 // navigation callbacks ; splitting the host would just push the same `when` shape one level deeper
@@ -1192,11 +1188,8 @@ private fun RedfaceNavHost(
             }
             entry<SettingsRoute> {
                 SettingsScreen(
-                    onBack = {
-                        if (backStack.size > 1) {
-                            backStack.removeAt(backStack.lastIndex)
-                        }
-                    },
+                    // #494 v2 — racine de l'onglet Réglages (jamais empilée) : pas de flèche retour morte.
+                    onBack = null,
                     onOpenProxy = { backStack.add(SettingsProxyRoute) },
                     onOpenMaintenance = { backStack.add(SettingsMaintenanceRoute) },
                     onOpenDisplay = { backStack.add(SettingsDisplayRoute) },
