@@ -18,8 +18,17 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.FlagType
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -37,6 +46,7 @@ class DataStoreUserPreferencesRepositoryTest {
     private lateinit var dataStore: DataStore<Preferences>
     private lateinit var repository: DataStoreUserPreferencesRepository
     private val dispatcher = UnconfinedTestDispatcher()
+    private val externalScope = CoroutineScope(dispatcher + SupervisorJob())
 
     /** In-memory [ThemeBootstrapStore] — the SharedPreferences impl has its own Robolectric test. */
     private val themeBootstrapStore = object : ThemeBootstrapStore {
@@ -69,7 +79,46 @@ class DataStoreUserPreferencesRepositoryTest {
             themeBootstrapStore = themeBootstrapStore,
             startScreenBootstrapStore = startScreenBootstrapStore,
             ioDispatcher = dispatcher,
+            externalScope = externalScope,
         )
+    }
+
+    /**
+     * #507 — observable contract: a preference write whose initiating coroutine is cancelled (a
+     * settings sub-page popped right after a toggle, cancelling its `viewModelScope`) must still land,
+     * because the commit runs on the injected application scope, not the caller's. Built on a paused
+     * [StandardTestDispatcher] so the write is provably only *started* (dispatched onto the app scope,
+     * caller suspended at `await`) — not yet committed — when the caller is cancelled. Deterministic
+     * (no real time / threads): the assertion is the persisted value after the scheduler drains.
+     */
+    @Test
+    fun `setter write lands even when the initiating coroutine is cancelled`() = runTest {
+        val ioDispatcher = StandardTestDispatcher(testScheduler)
+        val dataStoreScope = CoroutineScope(ioDispatcher + Job())
+        val appScope = CoroutineScope(ioDispatcher + SupervisorJob())
+        val survivalStore = PreferenceDataStoreFactory.create(
+            scope = dataStoreScope,
+            produceFile = { tempFolder.newFile("survival.preferences_pb") },
+        )
+        val survivalRepository = DataStoreUserPreferencesRepository(
+            dataStore = survivalStore,
+            themeBootstrapStore = themeBootstrapStore,
+            startScreenBootstrapStore = startScreenBootstrapStore,
+            ioDispatcher = ioDispatcher,
+            externalScope = appScope,
+        )
+
+        // setFlagsAutoRefresh defaults to true; flip it to false from a cancellable caller scope.
+        val callerScope = CoroutineScope(ioDispatcher + Job())
+        callerScope.launch { survivalRepository.setFlagsAutoRefresh(false) }
+        runCurrent() // caller dispatched the write onto appScope, then suspended on await — not committed
+        callerScope.cancel() // the sub-page is popped before the commit completes
+        advanceUntilIdle() // appScope (not the cancelled caller) drives the commit to completion
+
+        assertFalse(survivalRepository.observeFlagsAutoRefresh().first())
+
+        appScope.cancel()
+        dataStoreScope.cancel()
     }
 
     @Test

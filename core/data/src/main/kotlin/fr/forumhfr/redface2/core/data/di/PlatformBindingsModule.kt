@@ -4,6 +4,7 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.DefaultDispatcher
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.coroutines.MainDispatcher
@@ -14,7 +15,9 @@ import fr.forumhfr.redface2.core.parser.messages.PrivateMessageThreadParser
 import java.time.Clock
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -37,6 +40,18 @@ object PlatformBindingsModule {
     @Singleton
     @MainDispatcher
     fun provideMainDispatcher(): CoroutineDispatcher = Dispatchers.Main.immediate
+
+    /**
+     * Process-lifetime scope for writes that must complete regardless of the caller's lifecycle
+     * (#507). `SupervisorJob` so one failed write never tears down the scope; on [IoDispatcher] since
+     * its only client today is DataStore commits. Never cancelled (it lives for the whole process).
+     */
+    @Provides
+    @Singleton
+    @ApplicationScope
+    fun provideApplicationScope(
+        @IoDispatcher ioDispatcher: CoroutineDispatcher,
+    ): CoroutineScope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
     @Provides
     @Singleton
