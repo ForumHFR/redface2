@@ -7,7 +7,7 @@ import org.junit.Test
 /**
  * Pins the topic-scene marker contract used by the instant `TopicRoute → TopicRoute` NavDisplay
  * transition (#282). The transition reads this marker off a scene's top NavEntry metadata; if the
- * lookup silently returned the wrong answer the page-change would degrade to the 700 ms cross-fade
+ * lookup silently returned the wrong answer the page-change would degrade to the shared-axis X slide
  * (re-introducing the swipe dead-zone) without any crash. These cover the lookup + the edge cases
  * (empty `entries` surfaces as a null metadata map).
  */
