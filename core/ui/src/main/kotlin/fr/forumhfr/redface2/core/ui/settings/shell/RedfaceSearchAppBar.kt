@@ -25,6 +25,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.R
 
+/** Opacité du conteneur de la barre au scroll : translucide pour laisser deviner le contenu dessous. */
+private const val SEARCH_BAR_ELEVATED_ALPHA = 0.94f
+
 /**
  * #494 v2 — Search app bar (docked search bar M3) du shell de configuration : icône menu (hamburger,
  * rôle à définir) · champ de recherche cliquable · avatar de compte. Custom STABLE (Surface + Row +
@@ -52,9 +55,13 @@ fun RedfaceSearchAppBar(
     elevated: Boolean = false,
     avatar: @Composable () -> Unit = { DefaultAvatarPlaceholder() },
 ) {
+    // Au scroll, le conteneur passe à surfaceContainer LÉGÈREMENT translucide : on devine le contenu
+    // qui glisse derrière (l'effet « voir le texte passer dessous »), sans nuire à la lisibilité — le
+    // pill de recherche, lui, reste opaque (surfaceContainerHigh). Au repos : surface opaque (rien
+    // dessous). Pas de flou (non-standard M3, fragile en Compose) : translucidité + scrim (cf. shell).
     val containerColor by animateColorAsState(
         targetValue = if (elevated) {
-            MaterialTheme.colorScheme.surfaceContainer
+            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = SEARCH_BAR_ELEVATED_ALPHA)
         } else {
             MaterialTheme.colorScheme.surface
         },
