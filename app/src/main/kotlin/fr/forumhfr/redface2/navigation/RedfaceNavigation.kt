@@ -1819,22 +1819,24 @@ private fun Scene<NavKey>.isTopicScene(): Boolean =
 
 /**
  * Pure : une navigation AVANT est un drill-down (push) — par opposition à un changement d'onglet ou un
- * remplacement de pile — ssi la cible se dépile exactement vers l'écran d'origine. Autrement dit le
- * parent immédiat de la cible (l'entrée juste sous son sommet) est le sommet de la scène source. On ne
- * compare PAS une « racine de pile » : dans le `SinglePaneScene` de nav3, `entries` ne contient que
- * l'entrée visible (le sommet), pas la racine ; comparer `entries.first` classerait tout push profond
- * (Forums → Catégorie → Topic) comme un changement d'onglet. Le parent vient de `previousEntries`
- * (la pile qui resterait après dépilement), dont le dernier élément est le parent immédiat — exact à
- * toute profondeur.
+ * remplacement de pile — ssi la pile cible est exactement la pile source AVEC une entrée empilée au
+ * sommet. On compare les piles ENTIÈRES (par `contentKey`), pas seulement le sommet : deux onglets
+ * peuvent partager une même valeur de route (ex. `CategoryRoute(cat=23)` présent dans Drapeaux ET dans
+ * Forums), et ne comparer que le dernier `contentKey` ferait passer un changement d'onglet pour un push
+ * (slide au lieu de fade-through). On ne peut PAS s'appuyer sur une « racine » via `entries.first` : dans
+ * le `SinglePaneScene` de nav3 `entries` ne contient que l'entrée visible (le sommet) ; la pile complète
+ * se reconstruit par `previousEntries + entries`. [sourceStack] = pile source complète (bas→haut),
+ * [targetParentStack] = pile cible privée de son sommet (ce vers quoi elle se dépilerait). Drill-down
+ * ssi les deux coïncident et sont non vides — exact à toute profondeur.
  */
-internal fun isForwardDrillDown(fromTopContentKey: Any?, targetParentContentKey: Any?): Boolean =
-    targetParentContentKey != null && targetParentContentKey == fromTopContentKey
+internal fun isForwardDrillDown(sourceStack: List<Any?>, targetParentStack: List<Any?>): Boolean =
+    targetParentStack.isNotEmpty() && targetParentStack == sourceStack
 
 /** True quand passer de [this] à [to] est un drill-down (cf. [isForwardDrillDown]). */
 private fun Scene<NavKey>.isForwardDrillDownTo(to: Scene<NavKey>): Boolean =
     isForwardDrillDown(
-        fromTopContentKey = entries.lastOrNull()?.contentKey,
-        targetParentContentKey = to.previousEntries.lastOrNull()?.contentKey,
+        sourceStack = (previousEntries + entries).map { it.contentKey },
+        targetParentStack = to.previousEntries.map { it.contentKey },
     )
 
 /**
