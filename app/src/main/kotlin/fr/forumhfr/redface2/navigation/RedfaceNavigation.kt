@@ -164,6 +164,24 @@ private fun NavKey?.hidesNavigationSuite(): Boolean =
     this is PostEditorRoute || this is TopicFormRoute || this is PrivateMessageReplyRoute ||
         this is PrivateMessageComposeRoute
 
+/**
+ * #494 — type de barre de navigation à passer au [NavigationSuiteScaffold]. Sur téléphone l'adaptatif
+ * renvoie `NavigationBar` (80dp) ; on lui substitue `ShortNavigationBarCompact` (M3 Expressive, ~64dp,
+ * icône au-dessus du label, labels conservés, cible tactile ≥48dp). Les autres formes (rail/drawer sur
+ * largeur medium/expanded) restent telles quelles ; la navigation est masquée (`None`) sur les routes
+ * plein écran (éditeur, #624). Pure (l'`adaptiveType` composable est résolu côté appelant) + extraite
+ * pour garder la complexité cyclomatique de `RedfaceApp` sous le seuil.
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+private fun resolveNavLayoutType(
+    hidesNavigationSuite: Boolean,
+    adaptiveType: NavigationSuiteType,
+): NavigationSuiteType = when {
+    hidesNavigationSuite -> NavigationSuiteType.None
+    adaptiveType == NavigationSuiteType.NavigationBar -> NavigationSuiteType.ShortNavigationBarCompact
+    else -> adaptiveType
+}
+
 @Serializable
 data class CategoryRoute(
     val cat: Int,
@@ -641,11 +659,8 @@ fun RedfaceApp(intent: Intent?) {
         // routes makes the editor full-screen: its submit bar then sits at the window bottom and the IME
         // inset lands exactly on the keyboard. Bonus UX: no tab switching mid-compose (would drop the draft).
         val topRoute = backStacks.getValue(currentDestination).lastOrNull()
-        val navLayoutType = if (topRoute.hidesNavigationSuite()) {
-            NavigationSuiteType.None
-        } else {
-            NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
-        }
+        val adaptiveType = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
+        val navLayoutType = resolveNavLayoutType(topRoute.hidesNavigationSuite(), adaptiveType)
 
         NavigationSuiteScaffold(
             layoutType = navLayoutType,

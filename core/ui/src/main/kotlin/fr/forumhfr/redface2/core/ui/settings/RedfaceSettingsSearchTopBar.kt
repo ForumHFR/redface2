@@ -12,6 +12,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -40,10 +42,14 @@ import fr.forumhfr.redface2.core.ui.R
  *
  * Icons use local vector drawables from `:core:ui` rendered with the material3 [Icon] (material-icons
  * are forbidden project-wide); a11y labels live on the [IconButton]s, the glyphs are decorative.
+ *
+ * [scrollBehavior] branche l'effet « contenu sous la barre » (idiome M3) : avec un
+ * `pinnedScrollBehavior` câblé côté écran (Scaffold `nestedScroll`), la barre prend la teinte
+ * `scrolledContainerColor` (`surfaceContainer`) dès que la liste de résultats défile dessous.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-@Suppress("LongParameterList") // Top-bar API: search state + the two back/query callbacks + slots.
+@Suppress("LongParameterList") // Top-bar API: search state + the two back/query callbacks + scroll + slots.
 fun RedfaceSettingsSearchTopBar(
     labels: RedfaceSettingsSearchTopBarLabels,
     searchActive: Boolean,
@@ -52,11 +58,16 @@ fun RedfaceSettingsSearchTopBar(
     onSearchActiveChange: (Boolean) -> Unit,
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    scrollBehavior: TopAppBarScrollBehavior? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     val focusManager = LocalFocusManager.current
     TopAppBar(
         modifier = modifier,
+        scrollBehavior = scrollBehavior,
+        colors = TopAppBarDefaults.topAppBarColors(
+            scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ),
         navigationIcon = {
             // Search active → the icon CLOSES the search. Otherwise it's a back affordance, shown only
             // when [onBack] is provided : a top-level/root use (Réglages onglet, #494 v2) passes null so

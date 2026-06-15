@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.ui.settings.shell
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -31,9 +34,14 @@ import fr.forumhfr.redface2.core.ui.R
  *
  * Edge-to-edge : la barre applique `statusBarsPadding()` pour se loger sous la status bar transparente.
  * Le pill ouvre la recherche ([onSearchClick]) ; le filtrage/résultats vivent au niveau du shell.
+ *
+ * [elevated] pilote l'effet « contenu sous la barre » (idiome M3) : au repos la barre est `surface`
+ * (continue avec le contenu) ; quand du contenu scrolle DESSOUS, elle prend la teinte `surfaceContainer`
+ * + une ombre fine. Le shell la superpose à la liste (Box + `contentPadding` haut) et passe
+ * `elevated = listState.canScrollBackward`. Transition tonale animée (pas de flou : non-standard M3).
  */
 @Composable
-@Suppress("LongParameterList") // Top-bar API : placeholder + 2 a11y labels + 2 callbacks + slot avatar.
+@Suppress("LongParameterList") // Top-bar API : placeholder + 2 a11y labels + 2 callbacks + elevated + avatar.
 fun RedfaceSearchAppBar(
     placeholder: String,
     menuContentDescription: String,
@@ -41,9 +49,26 @@ fun RedfaceSearchAppBar(
     onMenuClick: (() -> Unit)? = null,
     onSearchClick: () -> Unit,
     modifier: Modifier = Modifier,
+    elevated: Boolean = false,
     avatar: @Composable () -> Unit = { DefaultAvatarPlaceholder() },
 ) {
-    Surface(modifier = modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
+    val containerColor by animateColorAsState(
+        targetValue = if (elevated) {
+            MaterialTheme.colorScheme.surfaceContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        label = "searchAppBarContainer",
+    )
+    val shadowElevation by animateDpAsState(
+        targetValue = if (elevated) 3.dp else 0.dp,
+        label = "searchAppBarShadow",
+    )
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = containerColor,
+        shadowElevation = shadowElevation,
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
