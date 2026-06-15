@@ -50,7 +50,7 @@ import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsSearchTopBar
 @Composable
 @Suppress("LongParameterList") // state-hoisted Composable: 5 sub-page nav callbacks + back + 2 VMs, each distinct.
 fun SettingsScreen(
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
     onOpenProxy: () -> Unit,
     onOpenMaintenance: () -> Unit,
     onOpenDisplay: () -> Unit,
@@ -89,7 +89,7 @@ internal fun SettingsCatalogue(
     onIntent: (SettingsIntent) -> Unit,
     startScreenState: StartScreenSettingsState,
     onStartScreenIntent: (StartScreenSettingsIntent) -> Unit,
-    onBack: () -> Unit,
+    onBack: (() -> Unit)? = null,
     onOpenProxy: () -> Unit,
     onOpenMaintenance: () -> Unit,
     onOpenDisplay: () -> Unit,
