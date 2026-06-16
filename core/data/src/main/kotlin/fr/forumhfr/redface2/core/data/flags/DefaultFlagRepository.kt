@@ -22,6 +22,9 @@ import java.util.EnumMap
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.BufferOverflow
@@ -81,6 +84,11 @@ class DefaultFlagRepository @Inject constructor(
 
     private val cachedSuccesses: MutableMap<FlagType, FlagsResult.Success> = EnumMap(FlagType::class.java)
 
+    // Bumped by [clearSessionCache] on logout / account switch, read+written under the cachedSuccesses
+    // lock. A fetch that began before a switch must not write its result into the (type-keyed)
+    // singleton cache afterwards (#501 Codex P1) — it compares this generation at write time.
+    private var sessionGeneration = 0
+
     /**
      * One refresh-trigger per [FlagType] so a refresh on one tab does not re-fetch the
      * other two. Replay = 0 because [observe] emits its own cached-or-initial result;
@@ -94,6 +102,26 @@ class DefaultFlagRepository @Inject constructor(
                 onBufferOverflow = BufferOverflow.DROP_OLDEST,
             )
         }
+
+    /**
+     * #501 (Codex review) — in-flight fetch coordinator, one [Deferred] per [FlagType]. observe()'s
+     * initial fetch (first subscription with no fresh cache) and an explicit refresh() can fire for
+     * the SAME tab at the same instant (the screen's auto-refresh lands as the list first subscribes),
+     * each otherwise running the full per-category REST fan-out. Sharing one in-flight Deferred
+     * collapses concurrent calls into a single fan-out; a completed fetch is cleared, so a LATER
+     * refresh still triggers a fresh one. Launched in an app-scoped CoroutineScope (this is a
+     * @Singleton, so the scope lives for the process) so cancelling one caller — e.g. observe() torn
+     * down by a flatMapLatest tab switch — never cancels the fetch a concurrent refresh still awaits.
+     */
+    private val fetchScope = CoroutineScope(SupervisorJob() + ioDispatcher)
+
+    /** Identifies an in-flight fetch by BOTH type and user — never share a fetch across accounts. */
+    private data class FetchKey(val type: FlagType, val userId: String)
+
+    // Keyed by (type, userId), NOT type alone: a fetch started for one account must never be awaited
+    // by another after a logout / account switch, and [clearSessionCache] cancels stragglers so they
+    // cannot repopulate the singleton success cache with the previous account's data (#501 Codex P1).
+    private val inFlightFetches: MutableMap<FetchKey, Deferred<FlagsResult>> = mutableMapOf()
 
     override fun observe(type: FlagType): Flow<FlagsResult> = flow {
         val cached = synchronized(cachedSuccesses) { cachedSuccesses[type] }
@@ -109,7 +137,7 @@ class DefaultFlagRepository @Inject constructor(
                     synchronized(cachedSuccesses) { cachedSuccesses[type] = diskCached.result }
                     emit(diskCached.result)
                     if (!diskCached.isFresh) {
-                        when (val refreshed = fetch(type = type, userId = userId)) {
+                        when (val refreshed = fetchDeduplicated(type = type, userId = userId)) {
                             is FlagsResult.Success -> emit(refreshed)
                             is FlagsResult.Failure -> Log.w(
                                 LOG_TAG,
@@ -121,7 +149,7 @@ class DefaultFlagRepository @Inject constructor(
                     }
                 } else {
                     emit(FlagsResult.Loading)
-                    emit(fetch(type = type, userId = userId))
+                    emit(fetchDeduplicated(type = type, userId = userId))
                 }
             }
         }
@@ -136,13 +164,24 @@ class DefaultFlagRepository @Inject constructor(
             if (userId == null) {
                 notAuthenticatedFailure()
             } else {
-                fetch(type = type, userId = userId)
+                fetchDeduplicated(type = type, userId = userId)
             },
         )
     }
 
     override fun clearSessionCache() {
-        synchronized(cachedSuccesses) { cachedSuccesses.clear() }
+        // Bump the generation under the same lock as the write guard: a fetch in flight across this
+        // point will see a changed generation and skip its cache write (#501 Codex P1).
+        synchronized(cachedSuccesses) {
+            cachedSuccesses.clear()
+            sessionGeneration++
+        }
+        // Cancel any fetch still in flight from the previous session so it stops early instead of
+        // running the full fan-out for an account that just logged out / switched.
+        synchronized(inFlightFetches) {
+            inFlightFetches.values.forEach { it.cancel() }
+            inFlightFetches.clear()
+        }
     }
 
     /**
@@ -225,8 +264,31 @@ class DefaultFlagRepository @Inject constructor(
         }
     }
 
+    /**
+     * Runs [fetch] for [type] unless an identical fetch is already in flight, in which case the
+     * concurrent caller awaits the same result instead of launching a second per-category fan-out
+     * (#501, Codex review). [fetch] folds every failure into [FlagsResult.Failure] and never throws,
+     * so the shared [Deferred] always completes with a result (no exception to propagate on await).
+     */
+    private suspend fun fetchDeduplicated(type: FlagType, userId: String): FlagsResult {
+        val key = FetchKey(type = type, userId = userId)
+        val deferred = synchronized(inFlightFetches) {
+            inFlightFetches[key]?.takeIf { it.isActive }
+                ?: fetchScope.async { fetch(type = type, userId = userId) }.also { started ->
+                    inFlightFetches[key] = started
+                    started.invokeOnCompletion {
+                        synchronized(inFlightFetches) {
+                            if (inFlightFetches[key] === started) inFlightFetches.remove(key)
+                        }
+                    }
+                }
+        }
+        return deferred.await()
+    }
+
     private suspend fun fetch(type: FlagType, userId: String): FlagsResult = withContext(ioDispatcher) {
-        runCatching {
+        val startGeneration = synchronized(cachedSuccesses) { sessionGeneration }
+        val result = runCatching {
             val cats = loadCategories()
             val bucket = type.toBucket()
             // `coroutineScope` (fail-all) is intentional over `supervisorScope` (best-effort).
@@ -249,15 +311,26 @@ class DefaultFlagRepository @Inject constructor(
         }.fold(
             onSuccess = { flags ->
                 persistFlags(userId = userId, type = type, flags = flags)
-                FlagsResult.Success(flags).also { result ->
-                    synchronized(cachedSuccesses) { cachedSuccesses[type] = result }
-                }
+                FlagsResult.Success(flags)
             },
             onFailure = { throwable ->
                 Log.w(LOG_TAG, "Flags REST fetch failed for $type", throwable)
                 FlagsResult.Failure(throwable)
             },
         )
+        // Cache the success ONLY if it still belongs to the active session (#501 Codex P1). observe()
+        // serves this type-keyed singleton cache BEFORE resolving the current user, so a stale write
+        // would hand the next account the previous account's flags. Two guards cover every ordering of
+        // a logout / account switch vs. this fetch: the user must still be the one we fetched for (a
+        // fetch launched for a now-stale account, racing the switch, is dropped), AND no
+        // clearSessionCache must have bumped the generation since this fetch began (a switch DURING the
+        // fetch). The disk cache (persistFlags) is already userId-scoped, so it keeps each account's data.
+        if (result is FlagsResult.Success && currentUserId() == userId) {
+            synchronized(cachedSuccesses) {
+                if (sessionGeneration == startGeneration) cachedSuccesses[type] = result
+            }
+        }
+        result
     }
 
     private suspend fun persistFlags(userId: String, type: FlagType, flags: List<Flag>) {
