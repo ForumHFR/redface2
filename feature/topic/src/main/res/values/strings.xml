@@ -40,6 +40,9 @@
     <string name="topic_post_menu_no_browser">Aucun navigateur disponible</string>
     <string name="topic_post_menu_report_soon">Alerter (à venir)</string>
     <string name="topic_post_menu_edited">Édité le %1$s</string>
+    <!-- #483 — compact inline marker next to the post date when the post was edited; the full
+         « Édité le … » timestamp stays in the post menu (R.string.topic_post_menu_edited). -->
+    <string name="topic_post_edited_inline">édité</string>
     <plurals name="topic_post_menu_cited_on_page">
         <item quantity="one">Cité %1$d fois sur cette page</item>
         <item quantity="other">Cité %1$d fois sur cette page</item>

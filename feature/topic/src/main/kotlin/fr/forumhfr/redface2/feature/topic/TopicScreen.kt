@@ -1548,11 +1548,33 @@ internal fun TopicPostCard(
                                     .then(pseudoModifier),
                             )
                         }
-                        Text(
-                            text = post.date.asTopicDate(),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        // #483 — the date line carries a compact « · édité » marker when the post was
+                        // edited (beta feedback Azgor). The exact edit time stays in the « … » menu
+                        // (PostMenuSheet « Édité le … »). On the date line, INSIDE the pseudo+date
+                        // Column but OUTSIDE the pseudo Row, so it never reflows the avatar nor breaks
+                        // the pseudo ellipsis — and it composes with #476's stable header (pills hoisted
+                        // below this Row) since the date block never grows the identity line sideways.
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = post.date.asTopicDate(),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (post.editedAt != null) {
+                                val editedLabel = stringResource(R.string.topic_post_edited_inline)
+                                Text(
+                                    // « · » is a decorative separator — TalkBack reads the
+                                    // contentDescription (« édité »), so the dot is never vocalised.
+                                    text = "· $editedLabel",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.semantics { contentDescription = editedLabel },
+                                )
+                            }
+                        }
                     }
                     // #362 — per-post contextual menu trigger, flush right of the header. The post
                     // number that used to trail the pseudo lives in the menu now. A text glyph, not
