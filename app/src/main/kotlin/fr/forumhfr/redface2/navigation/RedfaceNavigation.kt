@@ -28,11 +28,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
@@ -180,6 +184,28 @@ private fun resolveNavLayoutType(
     hidesNavigationSuite -> NavigationSuiteType.None
     adaptiveType == NavigationSuiteType.NavigationBar -> NavigationSuiteType.ShortNavigationBarCompact
     else -> adaptiveType
+}
+
+/**
+ * #529 — modifier appliqué au CONTENU du [NavigationSuiteScaffold]. Quand la suite est une barre du
+ * BAS (téléphone), cette barre possède déjà `WindowInsets.navigationBars` : on consomme l'inset pour
+ * le sous-arbre de contenu, de sorte que les `.navigationBarsPadding()` des écrans (toujours requis
+ * pour les dispositions rail/drawer, où la suite est sur le côté et laisse l'inset bas) se résolvent
+ * à 0 sous une barre du bas, au lieu de laisser une bande sombre de la couleur `Surface` au-dessus de
+ * la barre (le « vide noir »). Le type custom `ShortNavigationBarCompact` ne consomme pas cet inset
+ * pour le contenu côté scaffold, d'où la bande. Extrait (la branche reste hors de `RedfaceApp`).
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+private fun navSuiteContentInsetModifier(
+    navLayoutType: NavigationSuiteType,
+    navigationBarInsets: WindowInsets,
+): Modifier = if (
+    navLayoutType == NavigationSuiteType.ShortNavigationBarCompact ||
+    navLayoutType == NavigationSuiteType.NavigationBar
+) {
+    Modifier.consumeWindowInsets(navigationBarInsets)
+} else {
+    Modifier
 }
 
 @Serializable
@@ -661,6 +687,9 @@ fun RedfaceApp(intent: Intent?) {
         val topRoute = backStacks.getValue(currentDestination).lastOrNull()
         val adaptiveType = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
         val navLayoutType = resolveNavLayoutType(topRoute.hidesNavigationSuite(), adaptiveType)
+        // #529 — consume the bottom nav-bar inset for the content only under a bottom-bar layout
+        // (see navSuiteContentInsetModifier). Read in composable scope, branch lives in the helper.
+        val contentInsetModifier = navSuiteContentInsetModifier(navLayoutType, WindowInsets.navigationBars)
 
         NavigationSuiteScaffold(
             layoutType = navLayoutType,
@@ -684,7 +713,8 @@ fun RedfaceApp(intent: Intent?) {
             // (listings keep their 16/24 dp content padding, readers compensate explicitly),
             // so the nav host no longer steals 8 dp/side from every screen. The Surface is kept
             // for the theme background/elevation; only its horizontal padding was removed.
-            Surface {
+            // #529 — consumes the bottom nav-bar inset under a bottom-bar layout (no-op otherwise).
+            Surface(modifier = contentInsetModifier) {
                 val activeBackStack = backStacks.getValue(currentDestination)
                 val accountMenu: @Composable () -> Unit = {
                     RedfaceAccountMenu(
