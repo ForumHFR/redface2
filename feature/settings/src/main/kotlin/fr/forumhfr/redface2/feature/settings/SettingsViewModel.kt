@@ -53,6 +53,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(ignoreTopicCache = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeDebugBoundsOverlay().first() },
+            isLocked = { it.debugBoundsOverlayTouchedLocally || it.isUpdatingDebugBoundsOverlay },
+            apply = { state, value -> state.copy(debugBoundsOverlay = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeFlagsGroupByCategory().first() },
             isLocked = { it.flagsGroupByCategoryTouchedLocally || it.isUpdatingFlagsGroupByCategory },
             apply = { state, value -> state.copy(flagsGroupByCategory = value) },
@@ -198,6 +203,7 @@ class SettingsViewModel @Inject constructor(
                 _state.update { it.copy(showClearImageCacheConfirm = false) }
             SettingsIntent.ClearImageCacheConfirmed -> clearImageCache()
             is SettingsIntent.IgnoreTopicCacheChanged -> updateIgnoreTopicCache(intent.enabled)
+            is SettingsIntent.DebugBoundsOverlayChanged -> updateDebugBoundsOverlay(intent.enabled)
             is SettingsIntent.FlagsGroupByCategoryChanged -> updateFlagsGroupByCategory(intent.enabled)
             is SettingsIntent.FlagsHideReadCategoriesChanged -> updateFlagsHideReadCategories(intent.enabled)
             is SettingsIntent.FlagsPerTabOverrideChanged -> updateFlagsPerTabOverride(intent.enabled)
@@ -357,6 +363,35 @@ class SettingsViewModel @Inject constructor(
                     }
                 }
         }
+    }
+
+    // #445 — debug bounds overlay (dev only). Plain boolean, so it reuses the shared optimistic-flip
+    // helper rather than the bespoke shape, like the flags toggles.
+    private fun updateDebugBoundsOverlay(desired: Boolean) {
+        val previous = _state.value.debugBoundsOverlay
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    debugBoundsOverlay = desired,
+                    isUpdatingDebugBoundsOverlay = true,
+                    debugBoundsOverlayError = false,
+                    debugBoundsOverlayTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(debugBoundsOverlay = desired, isUpdatingDebugBoundsOverlay = false)
+                } else {
+                    state.copy(
+                        debugBoundsOverlay = previous,
+                        isUpdatingDebugBoundsOverlay = false,
+                        debugBoundsOverlayError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setDebugBoundsOverlay,
+        )
     }
 
     private fun updateFlagsGroupByCategory(desired: Boolean) {

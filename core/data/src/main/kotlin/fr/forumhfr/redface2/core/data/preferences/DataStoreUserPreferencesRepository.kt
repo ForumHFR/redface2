@@ -474,6 +474,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeDebugBoundsOverlay(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#445): the debug bounds overlay is opt-in and dev-channel only.
+            .map { prefs -> prefs[KEY_DEBUG_BOUNDS_OVERLAY] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setDebugBoundsOverlay(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_DEBUG_BOUNDS_OVERLAY] = enabled
+            }
+        }
+    }
+
     /**
      * Reads [KEY_UPLOAD_PROVIDER] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [UploadProviderId.DIBERIE] instead of crashing on
@@ -631,5 +646,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // (FontScalePreference.name), both defensively parsed. No bootstrap mirror (cf. observers).
         val KEY_DISPLAY_DENSITY = stringPreferencesKey("display_density")
         val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
+
+        // #445 — debug bounds overlay toggle (default false; exposed on the dev channel only).
+        val KEY_DEBUG_BOUNDS_OVERLAY = booleanPreferencesKey("debug_bounds_overlay")
     }
 }

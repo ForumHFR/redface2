@@ -44,6 +44,10 @@ fun SettingsMaintenanceScreen(
     onOpenDiagnostics: () -> Unit,
     onOpenMpStorageInspector: () -> Unit,
     modifier: Modifier = Modifier,
+    // #445 — debug bounds overlay row visibility. `:feature:settings` does not own the `:app`
+    // BuildConfig, so the dev-channel gate is computed in `:app` and passed in (same approach as the
+    // version surfaced on the About screen). Defaults to false so a non-dev caller never shows it.
+    debugOverlayAvailable: Boolean = false,
     topBarActions: @Composable (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
@@ -122,6 +126,12 @@ fun SettingsMaintenanceScreen(
             }
 
             IgnoreTopicCacheRow(state = state, onIntent = viewModel::submit)
+
+            // #445 — debug bounds overlay. Dev-channel only: the row is composed solely when the
+            // `:app` flavor gate ([debugOverlayAvailable]) is true, so prod/beta never see it.
+            if (debugOverlayAvailable) {
+                DebugBoundsOverlayRow(state = state, onIntent = viewModel::submit)
+            }
 
             HorizontalDivider()
             RedfaceSettingsListItem(
@@ -221,6 +231,48 @@ private fun IgnoreTopicCacheRow(
     }
     if (state.ignoreTopicCacheError) {
         PreferencePersistError(R.string.settings_ignore_topic_cache_persist_failed)
+    }
+}
+
+/**
+ * #445 — « Surligner les bounds des composants » switch (dev channel only). Mirrors [IgnoreTopicCacheRow]
+ * exactly (title + description + gated Switch + inline persist error). The dev-channel gate lives at the
+ * call site ([SettingsMaintenanceScreen]'s `debugOverlayAvailable`), so this row is simply not composed
+ * off dev.
+ */
+@Composable
+private fun DebugBoundsOverlayRow(
+    state: SettingsState,
+    onIntent: (SettingsIntent) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.settings_debug_bounds_overlay_title),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.settings_debug_bounds_overlay_description),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = state.debugBoundsOverlay,
+            enabled = state.canToggleDebugBoundsOverlay,
+            onCheckedChange = { onIntent(SettingsIntent.DebugBoundsOverlayChanged(it)) },
+        )
+    }
+    if (state.debugBoundsOverlayError) {
+        PreferencePersistError(R.string.settings_debug_bounds_overlay_persist_failed)
     }
 }
 

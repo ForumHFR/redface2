@@ -1012,6 +1012,45 @@ class SettingsViewModelTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────
+    // Debug bounds overlay (#445)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates debugBoundsOverlay from a persisted true`() = runTest {
+        // Default is false — only a persisted opt-in exercises the hydration path.
+        repository.emitDebugBoundsOverlay(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.debugBoundsOverlay)
+        assertFalse(viewModel.state.value.debugBoundsOverlayError)
+    }
+
+    @Test
+    fun `DebugBoundsOverlayChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("overlay is off by default", viewModel.state.value.debugBoundsOverlay)
+
+        viewModel.submit(SettingsIntent.DebugBoundsOverlayChanged(true))
+
+        assertTrue(viewModel.state.value.debugBoundsOverlay)
+        assertFalse(viewModel.state.value.isUpdatingDebugBoundsOverlay)
+        assertEquals(1, repository.debugBoundsOverlaySetCalls)
+    }
+
+    @Test
+    fun `DebugBoundsOverlayChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnDebugBoundsOverlaySet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.DebugBoundsOverlayChanged(true))
+
+        assertFalse("failed persist must revert to the previous value", viewModel.state.value.debugBoundsOverlay)
+        assertFalse(viewModel.state.value.isUpdatingDebugBoundsOverlay)
+        assertTrue(viewModel.state.value.debugBoundsOverlayError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Confirm before posting (#312)
     // ──────────────────────────────────────────────────────────────────────
 
@@ -1679,6 +1718,25 @@ class SettingsViewModelTest {
 
         fun emitFlagsPerTabOverride(value: Boolean) {
             flagsPerTabOverride.value = value
+        }
+
+        // #445 — debug bounds overlay. Same optimistic-flip seam as topicSignatures so the Settings
+        // tests can assert hydration, the repo call, and the revert-on-failure path.
+        private val debugBoundsOverlay = MutableStateFlow(false)
+        var debugBoundsOverlaySetCalls: Int = 0
+            private set
+        var failOnDebugBoundsOverlaySet: Boolean = false
+
+        override fun observeDebugBoundsOverlay(): Flow<Boolean> = debugBoundsOverlay
+
+        override suspend fun setDebugBoundsOverlay(enabled: Boolean) {
+            debugBoundsOverlaySetCalls += 1
+            check(!failOnDebugBoundsOverlaySet) { "boom" }
+            debugBoundsOverlay.value = enabled
+        }
+
+        fun emitDebugBoundsOverlay(value: Boolean) {
+            debugBoundsOverlay.value = value
         }
     }
 

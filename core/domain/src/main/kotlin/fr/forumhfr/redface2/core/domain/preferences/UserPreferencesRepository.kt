@@ -286,4 +286,17 @@ interface UserPreferencesRepository {
 
     /** Persists [observeFontScale]. Default [FontScalePreference.M] until the first call. */
     suspend fun setFontScale(scale: FontScalePreference)
+
+    /**
+     * Debug bounds overlay (#445): when `true`, the app draws a full-screen overlay outlining the
+     * bounds of every laid-out component (walked from the Compose semantics tree) so a developer can
+     * eyeball layout/spacing while dogfooding. Default `false`. The toggle is exposed in Settings on
+     * the DEV channel ONLY (gated by the `:app` build flavor), and the overlay itself early-returns
+     * when disabled so it costs nothing in production. Observed at the app root
+     * ([fr.forumhfr.redface2.navigation.RedfaceApp]).
+     */
+    fun observeDebugBoundsOverlay(): Flow<Boolean>
+
+    /** Persists [observeDebugBoundsOverlay]. Default `false` until the first call. */
+    suspend fun setDebugBoundsOverlay(enabled: Boolean)
 }

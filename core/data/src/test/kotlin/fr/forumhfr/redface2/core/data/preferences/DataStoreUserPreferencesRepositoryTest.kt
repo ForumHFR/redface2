@@ -585,6 +585,27 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeDebugBoundsOverlay defaults to false then persists true and false`() = runTest(dispatcher) {
+        // #445 — the debug bounds overlay is opt-in (dev channel only); an empty store reports false.
+        repository.observeDebugBoundsOverlay().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setDebugBoundsOverlay(true)
+        repository.observeDebugBoundsOverlay().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setDebugBoundsOverlay(false)
+        repository.observeDebugBoundsOverlay().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `saving disabled proxy removes optional fields from effective config`() = runTest(dispatcher) {
         repository.saveProxyConfig(
             ProxyConfig(
