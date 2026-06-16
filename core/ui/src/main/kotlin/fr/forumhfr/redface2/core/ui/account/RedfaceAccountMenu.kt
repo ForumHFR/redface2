@@ -52,7 +52,6 @@ fun RedfaceAccountMenu(
     versionCode: Int,
     onLogin: () -> Unit,
     onLogout: () -> Unit,
-    onOpenSettings: () -> Unit,
     onOpenDiagnostics: () -> Unit,
     onReportContent: () -> Unit,
     modifier: Modifier = Modifier,
@@ -91,13 +90,7 @@ fun RedfaceAccountMenu(
                 )
             }
 
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.account_menu_settings)) },
-                onClick = {
-                    expanded = false
-                    onOpenSettings()
-                },
-            )
+            // #494 v2 — « Réglages » a quitté ce menu : c'est désormais la 5e destination de la barre du bas.
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.account_menu_diagnostics)) },
                 onClick = {

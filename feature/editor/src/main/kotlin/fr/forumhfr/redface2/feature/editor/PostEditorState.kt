@@ -189,6 +189,10 @@ sealed interface UploadError {
     /** The host answered 2xx but the body could not be parsed into the expected shape (#474). */
     data class Malformed(val providerId: UploadProviderId) : UploadError
 
+    /** The upload provider is not configured (e.g. a blank Imgur Client-ID): the user must set it
+     * up in Settings, not retry — so the banner points at configuration, not connectivity (#474). */
+    data object Configuration : UploadError
+
     /** No network / DNS / timeout — also covers an unreadable picked Uri (mapped to Network). */
     data object Network : UploadError
 }

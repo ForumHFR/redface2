@@ -61,6 +61,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
@@ -158,12 +160,23 @@ fun FlagsRoute(
         onFallback = { viewModel.selectTab(FlagTab.Cyan) },
     )
 
-    // #378 — auto-refresh on landing. LaunchedEffect(Unit) re-fires every time this screen
-    // (re)enters the composition: app open, back from a topic, return from another bottom tab —
-    // exactly the two requested triggers plus the tab round-trip that motivated #384. The
-    // ViewModel gates it (preference opt-out, auth, real tab, in-flight refresh, 15 s throttle)
-    // and reuses the pull-to-refresh indicator as the visual cue.
-    LaunchedEffect(Unit) {
+    // #378 — auto-refresh on landing. Keyed on [selectedTab] (not Unit) so it re-fires both when
+    // this screen (re)enters the composition — app open, back from a topic, return from another
+    // bottom tab — AND when the user switches flag tab WITHOUT leaving the screen (#501: a tab
+    // change kept FlagsRoute composed, so a Unit key never re-fired and the new tab showed stale
+    // data). The ViewModel snapshots the tab at call time and gates the call (preference opt-out,
+    // auth, real tab, in-flight refresh, 15 s throttle), so a rapid tab burst is absorbed by the
+    // throttle and reuses the pull-to-refresh indicator as the visual cue.
+    LaunchedEffect(selectedTab) {
+        viewModel.maybeAutoRefresh()
+    }
+
+    // #501 — also refresh when the app returns to the foreground. A warm resume (home → reopen
+    // without process death) does NOT leave/re-enter the composition, so the LaunchedEffect above
+    // never re-fired on relaunch. ON_RESUME covers exactly that case; the ViewModel's throttle and
+    // in-flight guard make a resume that lands right after another trigger a no-op (no double
+    // fan-out — the post-suspension recheck in maybeAutoRefresh is concurrency-safe).
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.maybeAutoRefresh()
     }
 

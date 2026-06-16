@@ -1,0 +1,12 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <!-- #494 v2 — Material Symbols Outlined (add_photo_alternate), grille 960 (viewBox 0 -960 960 960) recadrée via group translateY=960. fillColor tinté à l'usage. -->
+    <group android:translateY="960">
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h360v80H200v560h560v-360h80v360q0 33-23.5 56.5T760-120H200Zm480-480v-80h-80v-80h80v-80h80v80h80v80h-80v80h-80ZM240-280h480L570-480 450-320l-90-120-120 160Zm-40-480v560-560Z" />
+    </group>
+</vector>

@@ -525,6 +525,8 @@ class PostEditorViewModel @AssistedInject constructor(
             // (Server) vs. an unreadable host response (Malformed), instead of one vague message.
             is UploadException.Server -> UploadError.Server(code = error.code, providerId = error.providerId)
             is UploadException.Malformed -> UploadError.Malformed(providerId = error.providerId)
+            // #474 — a config error (blank Imgur Client-ID) must point at Settings, not connectivity.
+            is UploadException.Configuration -> UploadError.Configuration
             is UploadException.Network -> UploadError.Network
             else -> UploadError.Network
         }

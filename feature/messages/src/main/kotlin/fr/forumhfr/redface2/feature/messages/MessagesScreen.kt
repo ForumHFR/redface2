@@ -62,7 +62,10 @@ fun MessagesScreen(
     // opaque — it never persists this private metadata in the back stack). openAtPage is the
     // conversation's last page read from the inbox (#430, web parity: the inbox "Pages" cell
     // links the last page) — a bare page number is not private metadata.
-    onOpenThread: (threadId: Int, isMultiRecipient: Boolean, openAtPage: Int) -> Unit,
+    // wasUnread is the row's unread state at open-time (#453) : the nav host decrements the unread
+    // badge only for a conversation that was actually unread. Not private metadata persisted in any
+    // route — a transient signal consumed by the ephemeral nav state.
+    onOpenThread: (threadId: Int, isMultiRecipient: Boolean, openAtPage: Int, wasUnread: Boolean) -> Unit,
     readThreadIds: Set<Int> = emptySet(),
     topBarActions: @Composable (() -> Unit)? = null,
     // #301 follow-up — opens the new-conversation composer. Null hides the button.
@@ -184,6 +187,9 @@ fun MessagesScreen(
                                 conversation.threadId,
                                 conversation.isMultiRecipient,
                                 conversation.lastPage,
+                                // effectiveConversation already folds the local read override, so a
+                                // re-opened (now read) row correctly reports wasUnread = false (#453).
+                                conversation.hasUnread,
                             )
                         },
                     )

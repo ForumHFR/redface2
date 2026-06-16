@@ -24,13 +24,65 @@
     <!-- #313 — carte « Messages privés » : badge MP non lus. -->
     <string name="settings_mp_title">Notifications</string>
     <string name="settings_mp_unread_badge_title">Badge de MP non lus</string>
-    <string name="settings_mp_unread_badge_description">Affiche le nombre de conversations non lues sur l\'onglet Messages. Actualisé à l\'ouverture de l\'app et à chaque visite de la liste.</string>
+    <string name="settings_mp_unread_badge_description">Nombre de conversations non lues sur l\'onglet Messages.</string>
     <string name="settings_mp_unread_badge_persist_failed">Impossible d\'enregistrer ce réglage pour le moment.</string>
     <string name="settings_section_hfr_account">Compte HFR</string>
     <string name="settings_section_notifications">Notifications</string>
     <string name="settings_section_accessibility">Accessibilité</string>
     <string name="settings_section_extensions">Extensions et filtrage</string>
     <string name="settings_hfr_account_note">Ces réglages proviennent de votre profil HFR (editprofil.php) et arriveront plus tard.</string>
+
+    <!-- #494 — refonte du menu : barre supérieure avec recherche activable, sous-pages, état vide. -->
+    <string name="settings_back">Retour</string>
+    <string name="settings_search_open">Rechercher dans les réglages</string>
+    <string name="settings_search_close">Fermer la recherche</string>
+    <string name="settings_search_clear">Effacer la recherche</string>
+    <string name="settings_search_placeholder">Rechercher un réglage…</string>
+    <string name="settings_search_empty">Aucun réglage ne correspond à votre recherche.</string>
+
+    <!-- #494 v2 — racine « catégories d'abord » : familles, sous-titres de catégories, a11y, écran « À venir ». -->
+    <string name="settings_menu_content_description">Menu</string>
+    <string name="settings_family_appearance">Apparence</string>
+    <string name="settings_family_communication">Communication</string>
+    <string name="settings_family_content">Contenu</string>
+    <string name="settings_family_system">Système</string>
+    <string name="settings_category_subtitle_display">Thème, AMOLED, densité, police</string>
+    <string name="settings_category_subtitle_flags">Regroupement, masquer lus, auto-refresh</string>
+    <string name="settings_category_subtitle_topic">Barre, sondages, navigation</string>
+    <string name="settings_category_subtitle_mp">Badge de non-lus</string>
+    <string name="settings_category_subtitle_editing">Confirmation avant envoi</string>
+    <string name="settings_category_subtitle_images">Hébergeur, Client-ID, insertion</string>
+    <string name="settings_category_subtitle_start">Écran ouvert au lancement</string>
+    <string name="settings_category_subtitle_network">Proxy, vider les caches</string>
+    <string name="settings_category_subtitle_account">Compte HFR, version, diagnostics</string>
+    <!-- #494 — famille « À venir » : 3 catégories distinctes (Notifications, Accessibilité, Extensions). -->
+    <string name="settings_family_upcoming">À venir</string>
+    <string name="settings_category_subtitle_notifications">Push, MP, relève, Ne pas déranger</string>
+    <string name="settings_category_subtitle_accessibility">Contraste, animations, langue</string>
+    <string name="settings_category_subtitle_extensions">Ignorés, filtres, Blacklist, Qualitay</string>
+    <!-- #494 — badge texte affiché en trailing des lignes « à venir » (désactivées mais cherchables). -->
+    <string name="settings_future_badge">À venir</string>
+
+    <!-- #494 — lignes de navigation de la racine vers les sous-pages, et titres des sous-pages. -->
+    <string name="settings_nav_proxy">Proxy</string>
+    <string name="settings_nav_proxy_description">Router les requêtes HFR via votre proxy.</string>
+    <string name="settings_nav_maintenance">Maintenance</string>
+    <string name="settings_nav_maintenance_description">Vider les caches, options de debug.</string>
+    <string name="settings_nav_display">Affichage</string>
+    <string name="settings_nav_display_description">Thème, AMOLED, densité et taille de police.</string>
+    <string name="settings_nav_images">Images</string>
+    <string name="settings_nav_images_description">Hébergeur d\'images, insertion, mes images uploadées.</string>
+    <string name="settings_nav_account">Compte HFR et à propos</string>
+    <string name="settings_nav_account_description">Réglages du compte HFR, version de l\'app, diagnostic.</string>
+
+    <!-- #494 — sous-page « Compte HFR et à propos » : version de l'app et raccourcis. -->
+    <string name="settings_account_title">Compte HFR et à propos</string>
+    <string name="settings_about_version">Version</string>
+    <string name="settings_about_version_value">%1$s (build %2$d)</string>
+    <string name="settings_about_diagnostics">Diagnostic</string>
+    <string name="settings_about_diagnostics_description">Informations techniques pour le support.</string>
+    <string name="settings_about_report">Signaler un contenu ou un problème</string>
+    <string name="settings_diagnostics_open">Ouvrir le diagnostic</string>
     <string name="settings_phase_future">À venir</string>
     <string name="settings_phase_future_far">Plus tard</string>
     <string name="settings_phase_planned">Planifié</string>
@@ -42,14 +94,75 @@
     <string name="settings_future_classic_theme">Thème HFR Classique</string>
     <string name="settings_future_flags_on_listing">Poser les drapeaux en listant une catégorie</string>
     <string name="settings_future_prefetch">Préchargement de la page suivante</string>
-    <string name="settings_future_signature">Signature automatique et notification e-mail</string>
-    <string name="settings_future_mp_notifications">Notifications et badge de MP non lus</string>
     <string name="settings_future_data_saver">Mode économie de données</string>
+    <!-- Toujours utilisée par SettingsAccountAboutScreen (sous-page Compte). -->
     <string name="settings_future_hfr_profile">Avatars, signatures, messages par page</string>
-    <string name="settings_future_notifications">Relève configurable, filtres, mode Ne pas déranger</string>
-    <string name="settings_future_timezone">Fuseau horaire d’affichage</string>
-    <string name="settings_future_multilang">Multilingue</string>
-    <string name="settings_future_extensions">Blacklist, Color Tag, ignore-list, Qualitay, Redflag</string>
+
+    <!-- #494 — catalogue exhaustif des options à venir (toggles désactivés mais cherchables).
+         Une string par option du draft drafts/claude-settings-catalogue-v2-options.md. -->
+    <!-- §1 Affichage -->
+    <string name="settings_future_amoled_auto_night">AMOLED automatique la nuit</string>
+    <string name="settings_future_smiley_size">Taille des smileys</string>
+    <string name="settings_future_show_avatars">Afficher les avatars dans les sujets</string>
+    <string name="settings_future_show_signatures">Afficher les signatures</string>
+    <!-- §2 Drapeaux -->
+    <string name="settings_future_flags_sort">Tri des drapeaux</string>
+    <string name="settings_future_flags_mark_read_on_scroll">Marquer lu au survol / défilement</string>
+    <string name="settings_future_flags_by_subcategory">Drapeaux par sous-catégorie</string>
+    <!-- §3 Sujet et lecture -->
+    <string name="settings_future_restore_read_position">Restaurer la position de lecture</string>
+    <string name="settings_future_swipe_page">Changer de page au glissement</string>
+    <string name="settings_future_collapse_quotes">Replier les longues citations</string>
+    <string name="settings_future_open_external_in_app">Ouvrir les liens externes dans l\'app</string>
+    <string name="settings_future_autoplay_animations">Lecture auto des images animées</string>
+    <string name="settings_future_fullscreen_reading">Plein écran en lecture</string>
+    <!-- §4 Messages privés -->
+    <string name="settings_future_mp_push">Notifications de MP</string>
+    <string name="settings_future_mp_preview">Aperçu du message dans la liste</string>
+    <string name="settings_future_mp_read_receipt">Accusé de lecture</string>
+    <!-- §5 Édition et publication -->
+    <string name="settings_future_auto_signature">Signature automatique</string>
+    <string name="settings_future_auto_drafts">Brouillons automatiques</string>
+    <string name="settings_future_recent_smileys">Smileys récents / favoris</string>
+    <string name="settings_future_spell_check">Correcteur orthographique</string>
+    <string name="settings_future_custom_bbcode_toolbar">Barre d\'outils BBCode personnalisable</string>
+    <!-- §6 Images et upload -->
+    <string name="settings_future_compress_upload">Compression avant upload</string>
+    <string name="settings_future_strip_exif">Supprimer les métadonnées (EXIF)</string>
+    <string name="settings_future_upload_wifi_only">Upload uniquement en Wi-Fi</string>
+    <!-- §7 Démarrage -->
+    <string name="settings_future_resume_last_topic">Reprendre le dernier sujet ouvert</string>
+    <!-- §8 Réseau et cache -->
+    <string name="settings_future_prefetch_wifi_only">Préchargement Wi-Fi uniquement</string>
+    <string name="settings_future_image_cache_size">Taille max du cache images</string>
+    <string name="settings_future_clear_cache_on_start">Vider le cache au démarrage</string>
+    <string name="settings_future_offline_mode">Mode hors-ligne</string>
+    <!-- §9 Compte et à propos -->
+    <string name="settings_future_hfr_profile_settings">Réglages du profil HFR</string>
+    <string name="settings_future_multi_account">Multi-comptes</string>
+    <string name="settings_future_auto_logout">Déconnexion automatique</string>
+    <!-- §10 Notifications -->
+    <string name="settings_future_notif_push">Notifications push</string>
+    <string name="settings_future_notif_mp">Notifications de MP</string>
+    <string name="settings_future_notif_mentions">Citations et mentions</string>
+    <string name="settings_future_notif_polling">Relève configurable</string>
+    <string name="settings_future_notif_dnd">Mode Ne pas déranger</string>
+    <string name="settings_future_notif_sound_vibration">Son et vibration</string>
+    <!-- §11 Accessibilité -->
+    <string name="settings_future_a11y_force_system_text">Forcer la taille du texte système</string>
+    <string name="settings_future_a11y_high_contrast">Contraste élevé</string>
+    <string name="settings_future_a11y_reduce_motion">Réduire les animations</string>
+    <string name="settings_future_a11y_timezone">Fuseau horaire d\'affichage</string>
+    <string name="settings_future_a11y_language">Langue de l\'interface</string>
+    <!-- §12 Extensions et filtrage -->
+    <string name="settings_future_ext_ignore_list">Liste d\'ignorés</string>
+    <string name="settings_future_ext_keyword_filters">Filtres par mots-clés</string>
+    <string name="settings_future_ext_blacklist">Blacklist</string>
+    <string name="settings_future_ext_color_tag">Color Tag</string>
+    <string name="settings_future_ext_qualitay">Qualitay</string>
+    <string name="settings_future_ext_redflag">Redflag</string>
+    <string name="settings_future_ext_community">Extensions communautaires</string>
+
     <string name="settings_proxy_title">Proxy utilisateur</string>
     <string name="settings_proxy_intro">Route les requêtes HFR via votre proxy. Le changement peut nécessiter un redémarrage de l’app.</string>
     <string name="settings_proxy_enabled">Activer le proxy</string>
@@ -104,28 +217,28 @@
          observées en direct par l'écran Drapeaux : un changement ici se reflète sans refetch. -->
     <string name="settings_flags_title">Drapeaux</string>
     <string name="settings_flags_group_by_category_title">Grouper par catégorie</string>
-    <string name="settings_flags_group_by_category_description">Affiche les drapeaux regroupés par catégorie de forum, avec un en-tête par catégorie. Désactivé : une liste à plat triée par dernière réponse (comme avant).</string>
+    <string name="settings_flags_group_by_category_description">En-tête par catégorie ; sinon liste à plat.</string>
     <string name="settings_flags_group_by_category_persist_failed">Impossible de mémoriser l\'affichage des drapeaux. Réessayez.</string>
     <string name="settings_flags_hide_read_categories_title">Masquer les catégories sans non-lu</string>
-    <string name="settings_flags_hide_read_categories_description">Cache les catégories qui n\'ont aucun message non lu. Les cyans déjà lus restent accessibles en activant « +lus » sur l\'onglet Mes sujets. Sans effet en vue à plat.</string>
+    <string name="settings_flags_hide_read_categories_description">Cache les catégories sans message non lu. Sans effet en vue à plat.</string>
     <string name="settings_flags_hide_read_categories_persist_failed">Impossible de mémoriser le filtre des catégories. Réessayez.</string>
 
     <!-- #309 — Réglages d'affichage différents par type de drapeau (onglet). Quand activé, les deux
          réglages ci-dessus servent de valeurs par défaut et chaque onglet (Mes sujets / Lu / Favoris)
          garde son propre affichage, ajustable depuis le menu d'affichage de l'écran Drapeaux. -->
     <string name="settings_flags_per_tab_override_title">Réglages différents par onglet</string>
-    <string name="settings_flags_per_tab_override_description">Chaque onglet (Mes sujets, Lu, Favoris) garde son propre affichage. Les réglages ci-dessus deviennent les valeurs par défaut ; ajustez chaque onglet depuis le menu d\'affichage de l\'écran Drapeaux.</string>
+    <string name="settings_flags_per_tab_override_description">Chaque onglet (Mes sujets, Lu, Favoris) garde son propre affichage ; les réglages ci-dessus servent de valeurs par défaut.</string>
     <string name="settings_flags_per_tab_override_persist_failed">Impossible de mémoriser le réglage par onglet. Réessayez.</string>
 
     <!-- Onglet « DT » opt-in dans l'écran Drapeaux (placeholder, synchro MPStorage à venir, #6). -->
     <string name="settings_flags_show_dt_section_title">Section DT</string>
-    <string name="settings_flags_show_dt_section_description">Affiche un onglet « DT » dans l\'écran Drapeaux. Le contenu (discussions suivies avec drapeaux synchronisés via MPStorage) arrivera dans une prochaine version.</string>
+    <string name="settings_flags_show_dt_section_description">Affiche un onglet « DT » dans l\'écran Drapeaux (contenu à venir).</string>
     <string name="settings_flags_show_dt_section_persist_failed">Impossible de mémoriser la section DT. Réessayez.</string>
 
     <!-- #378 — auto-refresh des listes de drapeaux à l'arrivée sur l'écran (ouverture de l'app,
          retour d'un sujet). Activé par défaut ; ce réglage est l'opt-out. -->
     <string name="settings_flags_auto_refresh_title">Actualisation automatique</string>
-    <string name="settings_flags_auto_refresh_description">Rafraîchit la liste des drapeaux à l\'ouverture de l\'app et au retour d\'un sujet. L\'indicateur de rafraîchissement signale l\'actualisation en cours.</string>
+    <string name="settings_flags_auto_refresh_description">Rafraîchit la liste à l\'ouverture de l\'app et au retour d\'un sujet.</string>
     <string name="settings_flags_auto_refresh_persist_failed">Impossible de mémoriser l\'actualisation automatique. Réessayez.</string>
 
     <!-- #286 — Thème. Sélecteur Clair/Système/Sombre (Système = suit l'OS) + thème AMOLED (vrai
@@ -158,17 +271,17 @@
          en défilant vers le bas pour libérer de la place ; persisté en DataStore et appliqué en direct. -->
     <string name="settings_topic_title">Lecture des sujets</string>
     <string name="settings_topic_topbar_auto_hide_title">Masquer la barre en défilant</string>
-    <string name="settings_topic_topbar_auto_hide_description">La barre du haut (titre du sujet et numéro de page) disparaît quand vous faites défiler vers le bas et réapparaît dès que vous remontez.</string>
+    <string name="settings_topic_topbar_auto_hide_description">La barre du haut disparaît en défilant vers le bas, réapparaît en remontant.</string>
     <string name="settings_topic_topbar_auto_hide_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- #383 — Boutons flottants ‹/› de changement de page (#283). Le swipe (#282) couvre déjà le
          changement de page ; ce réglage est l'opt-out demandé en bêta. « Répondre » reste affiché. -->
     <string name="settings_topic_page_fabs_title">Boutons de changement de page</string>
-    <string name="settings_topic_page_fabs_description">Affiche les boutons flottants ‹ et › en bas du sujet. Désactivez-les si vous changez de page au glissement ; le bouton Répondre reste affiché.</string>
+    <string name="settings_topic_page_fabs_description">Boutons flottants ‹ et › en bas du sujet ; le bouton Répondre reste affiché.</string>
     <string name="settings_topic_page_fabs_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
     <!-- #456 — sondages dépliés par défaut dans la lecture de sujet. -->
     <string name="settings_topic_polls_expanded_title">Déplier les sondages</string>
-    <string name="settings_topic_polls_expanded_description">Affiche les sondages dépliés en haut des sujets. Désactivé : une ligne « Sondage » repliée, à déplier d\'un appui.</string>
+    <string name="settings_topic_polls_expanded_description">Sondages dépliés en haut des sujets ; sinon une ligne repliée.</string>
     <string name="settings_topic_polls_expanded_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- #312 — Publication. Confirmation avant chaque envoi (réponse/édition de message, sujet,
@@ -177,7 +290,7 @@
          toggles actifs. -->
     <string name="settings_editing_title">Publication</string>
     <string name="settings_confirm_before_posting_title">Confirmation avant publication</string>
-    <string name="settings_confirm_before_posting_description">Demande une confirmation avant d\'envoyer une réponse, un sujet ou un message privé.</string>
+    <string name="settings_confirm_before_posting_description">Avant chaque réponse, sujet ou MP envoyé.</string>
     <string name="settings_confirm_before_posting_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- #459 PR3 — entrée vers l'écran « Mes images uploadées » depuis le catalogue de réglages. -->

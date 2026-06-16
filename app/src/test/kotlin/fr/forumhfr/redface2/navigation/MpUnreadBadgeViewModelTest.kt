@@ -113,4 +113,69 @@ class MpUnreadBadgeViewModelTest {
         vm.onAppForegrounded()
         verify(exactly = 2) { repository.requestUnreadRefresh() }
     }
+
+    /**
+     * #452 — the opt-out must cut the NETWORK, not just the display. While the badge preference is
+     * off, the ViewModel must NOT collect (nor even invoke) the count flow that drives the
+     * authenticated page-1 fetch ; the badge stays null.
+     */
+    @Test
+    fun `the count flow is not collected while the badge is disabled (#452)`() = runTest {
+        val repository = mockk<MessagesRepository>(relaxed = true)
+        val vm = viewModel(
+            counts = flowOf(7),
+            badgeEnabled = flowOf(false),
+            messagesRepository = repository,
+        )
+
+        vm.unreadCount.test {
+            assertNull(expectMostRecentItem())
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        // The network-backed count flow is never even asked for : no fetch chain is kept alive.
+        verify(exactly = 0) { repository.observeUnreadMpCount() }
+    }
+
+    /**
+     * #452 — flipping the badge ON must (re)subscribe to the count flow, flipping it OFF must drop
+     * the subscription. Asserted via the call count of `observeUnreadMpCount` across a live toggle.
+     */
+    @Test
+    fun `toggling the badge subscribes and unsubscribes the count flow (#452)`() = runTest {
+        val enabled = MutableStateFlow(false)
+        val repository = mockk<MessagesRepository>(relaxed = true) {
+            every { observeUnreadMpCount() } returns flowOf(4)
+        }
+        val vm = viewModel(counts = flowOf(4), badgeEnabled = enabled, messagesRepository = repository)
+
+        vm.unreadCount.test {
+            assertNull(expectMostRecentItem())
+            verify(exactly = 0) { repository.observeUnreadMpCount() }
+
+            enabled.value = true
+            assertEquals(4, awaitItem())
+            verify(exactly = 1) { repository.observeUnreadMpCount() }
+
+            enabled.value = false
+            assertNull(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    /**
+     * #453 — reading a conversation forwards an optimistic-decrement signal to the repository
+     * (which owns the count) so the badge clears the moment the last unread MP is opened.
+     */
+    @Test
+    fun `onThreadRead forwards the read signal to the repository (#453)`() = runTest {
+        val repository = mockk<MessagesRepository>(relaxed = true) {
+            every { observeUnreadMpCount() } returns flowOf(1)
+        }
+        val vm = viewModel(counts = flowOf(1), messagesRepository = repository)
+
+        vm.onThreadRead(threadId = 99)
+
+        verify(exactly = 1) { repository.markThreadRead(threadId = 99) }
+    }
 }

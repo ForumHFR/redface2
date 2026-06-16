@@ -16,12 +16,15 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.withContext
@@ -62,30 +65,68 @@ class DefaultMessagesRepository @Inject constructor(
     private val unreadRefreshTicks = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     private val inboxDerivedUnread = MutableSharedFlow<Pair<String, Int>>(extraBufferCapacity = 1)
 
+    // #453 — optimistic local decrement. Reading the LAST unread conversation left the badge
+    // stale until the next page-1 fetch (foreground / tab visit), because the count only ever
+    // came from the network. A thread-read signal decrements the displayed count locally — zero
+    // network, and consistent with the inbox row that already forces `hasUnread=false` for a read
+    // thread (MessagesScreen). HFR has no server-side read flag (#361), so the server count would
+    // not change just from reading anyway ; the next real page-1 fetch reconciles. Threads read
+    // since the last network count are tracked so re-opening one never double-decrements, and a
+    // fresh fetch clears the set (its count is authoritative). tryEmit + buffer: the signal may
+    // fire with no collector (badge disabled, #452) and must never suspend.
+    private val markThreadReadEvents = MutableSharedFlow<Int>(extraBufferCapacity = 8)
+
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun observeUnreadMpCount(): Flow<Int?> = authRepository.observeAuthState()
         .transformLatest { state ->
             when (state) {
                 AuthState.Anonymous -> emit(null)
-                is AuthState.Authenticated -> {
-                    emit(fetchUnreadCount())
-                    emitAll(
-                        merge(
-                            unreadRefreshTicks.map { fetchUnreadCount() },
-                            inboxDerivedUnread.mapNotNull { (pseudo, count) ->
-                                // Drop emissions sealed for another session (account switch
-                                // while the page-1 fetch was in flight).
-                                if (pseudo == state.pseudo) count else null
-                            },
-                        ),
-                    )
-                }
+                is AuthState.Authenticated -> emitAll(authenticatedUnreadCount(state))
             }
         }
+        .distinctUntilChanged()
         .flowOn(ioDispatcher)
+
+    /**
+     * Stream of unread counts for an authenticated [session] : the first fetch, then every network
+     * refresh (foreground tick / page-1 piggyback), with #453 local read-decrements applied on top.
+     * Each fresh network count is authoritative and resets the local decrements
+     * ([LocalUnread.applyEvent] on a [NetworkCount]).
+     */
+    private fun authenticatedUnreadCount(session: AuthState.Authenticated): Flow<Int?> {
+        val networkCounts = merge(
+            unreadRefreshTicks.map { NetworkCount(fetchUnreadCount()) },
+            inboxDerivedUnread.mapNotNull { (pseudo, count) ->
+                // Drop emissions sealed for another session (account switch while the page-1
+                // fetch was in flight).
+                if (pseudo == session.pseudo) NetworkCount(count) else null
+            },
+        )
+        // The initial fetch is its own first emission so reads marked before any refresh still
+        // decrement it (otherwise the cold-start count would be a non-resettable baseline). It is
+        // tagged `isInitial` so that, if a page-1 piggyback or a refresh tick wins the race to be the
+        // first count, the late-landing cold-start is dropped rather than resetting the local reads
+        // accumulated meanwhile (Codex review, #453).
+        return merge(
+            flow { emit(NetworkCount(fetchUnreadCount(), isInitial = true)) },
+            networkCounts,
+            markThreadReadEvents.map { ReadThread(it) },
+        )
+            .scan(LocalUnread()) { acc, event -> acc.applyEvent(event) }
+            // Drop the seed (no network count seen yet) ; emit every resolved state afterwards,
+            // including a `null` from a failed fetch (the contract surfaces failures as null).
+            .mapNotNull { folded ->
+                if (folded.hasNetworkCount) Displayed(folded.displayedCount) else null
+            }
+            .map { it.value }
+    }
 
     override fun requestUnreadRefresh() {
         unreadRefreshTicks.tryEmit(Unit)
+    }
+
+    override fun markThreadRead(threadId: Int) {
+        markThreadReadEvents.tryEmit(threadId)
     }
 
     private suspend fun fetchUnreadCount(): Int? = withContext(ioDispatcher) {
@@ -140,6 +181,52 @@ class DefaultMessagesRepository @Inject constructor(
             fallbackCorrespondent = fallbackCorrespondent,
         )
     }
+
+    /** #453 — events folded by the unread-count [scan]. */
+    private sealed interface UnreadEvent
+
+    /**
+     * A count from the network. [isInitial] marks the one-shot cold-start fetch (vs a refresh tick /
+     * page-1 piggyback) so a late-landing cold-start cannot reset reads another count already baselined.
+     */
+    private data class NetworkCount(val count: Int?, val isInitial: Boolean = false) : UnreadEvent
+
+    /** A conversation was read in-app (decrements the displayed count by one, once). */
+    private data class ReadThread(val threadId: Int) : UnreadEvent
+
+    /**
+     * #453 — fold state over [UnreadEvent]s. [baseCount] is the last network count ; [readThreadIds]
+     * are the threads read since that count arrived. [displayedCount] subtracts them (clamped at 0).
+     * [hasNetworkCount] tells the seed (no count yet) apart from a resolved `null` (failed fetch).
+     */
+    private data class LocalUnread(
+        val baseCount: Int? = null,
+        val readThreadIds: Set<Int> = emptySet(),
+        val hasNetworkCount: Boolean = false,
+    ) {
+        val displayedCount: Int?
+            get() = baseCount?.let { (it - readThreadIds.size).coerceAtLeast(0) }
+
+        fun applyEvent(event: UnreadEvent): LocalUnread = when (event) {
+            is NetworkCount -> when {
+                // The FIRST count to arrive (whichever source wins the cold-start race) adopts its
+                // value but KEEPS the local reads accumulated meanwhile : a read that raced the very
+                // first fetch must not be discarded — HFR has no server-side read flag (#361), so that
+                // count can't reflect it anyway (#453, Codex review).
+                !hasNetworkCount -> copy(baseCount = event.count, hasNetworkCount = true)
+                // A late-landing cold-start fetch (a piggyback / refresh tick already baselined first)
+                // is stale and must NOT reset the reads marked since : drop it (Codex review, #453).
+                event.isInitial -> this
+                // A genuine later refresh (foreground tick / page-1 piggyback) is authoritative : it
+                // resets the local decrements so the displayed count reconciles with the server truth.
+                else -> LocalUnread(baseCount = event.count, readThreadIds = emptySet(), hasNetworkCount = true)
+            }
+            is ReadThread -> copy(readThreadIds = readThreadIds + event.threadId)
+        }
+    }
+
+    /** Wraps a resolved (possibly `null`) displayed count so [mapNotNull] only drops the scan seed. */
+    private data class Displayed(val value: Int?)
 
     private companion object {
         const val LOG_TAG = "MessagesRepository"

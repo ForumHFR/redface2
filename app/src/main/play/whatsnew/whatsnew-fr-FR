@@ -1,10 +1,13 @@
-Redface 2 v0.12.0 — bêta.
+Redface 2 v0.13.0 — bêta.
 
 Nouveautés :
-- Éditeur : insertion d'image en taille réduite ou pleine taille (au choix dans les Réglages), saut de ligne entre les images d'un envoi multiple, bouton « Uploader » toujours visible.
-- (DT) Inspecteur du stockage MP cross-app pour les utilisateurs DT (Réglages → section DT).
+- Réglages repensés : onglet dédié, navigation par catégories, recherche, transitions fluides.
+- Bottom bar compacte, recherche translucide au défilement.
+- Marqueur « édité », en-tête stable au multiquote, sondages conservés entre pages.
 
-Correctif :
-- Pagination des MP au-delà de la page 2.
+Correctifs :
+- Drapeaux rafraîchis au changement d'onglet et à la reprise.
+- Badge MP non-lus qui coupe vraiment le réseau.
+- Lignes vides parasites, upload d'images durci.
 
 Signalez les bugs via la bêta ou GitHub.

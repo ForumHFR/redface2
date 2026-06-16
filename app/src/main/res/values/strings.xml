@@ -4,6 +4,8 @@
     <string name="nav_forum">Forum</string>
     <string name="nav_search">Recherche</string>
     <string name="nav_messages">Messages</string>
+    <!-- #494 v2 — Réglages devient la 5e destination de la barre du bas (retiré du menu compte). -->
+    <string name="nav_settings">Réglages</string>
     <!-- #313 — badge MP non lus sur l'item Messages ; au-delà de 9 le badge plafonne. -->
     <string name="nav_messages_badge_overflow">9+</string>
 </resources>

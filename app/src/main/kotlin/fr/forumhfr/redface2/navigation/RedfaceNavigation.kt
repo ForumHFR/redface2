@@ -10,9 +10,12 @@ import android.widget.Toast
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -25,10 +28,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
@@ -38,6 +48,7 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Icon
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -52,6 +63,7 @@ import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
+import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -80,6 +92,12 @@ import fr.forumhfr.redface2.feature.profile.ProfileRoute
 import fr.forumhfr.redface2.feature.profile.ProfileViewModel
 import fr.forumhfr.redface2.feature.search.SearchScreen
 import fr.forumhfr.redface2.feature.settings.MyImagesScreen
+import fr.forumhfr.redface2.feature.settings.SettingsAccountAboutScreen
+import fr.forumhfr.redface2.feature.settings.SettingsCategoryDetailScreen
+import fr.forumhfr.redface2.feature.settings.SettingsDisplayScreen
+import fr.forumhfr.redface2.feature.settings.SettingsImagesScreen
+import fr.forumhfr.redface2.feature.settings.SettingsMaintenanceScreen
+import fr.forumhfr.redface2.feature.settings.SettingsProxyScreen
 import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
@@ -151,6 +169,49 @@ data class PrivateMessageComposeRoute(
 private fun NavKey?.hidesNavigationSuite(): Boolean =
     this is PostEditorRoute || this is TopicFormRoute || this is PrivateMessageReplyRoute ||
         this is PrivateMessageComposeRoute
+
+/**
+ * #494 — type de barre de navigation à passer au [NavigationSuiteScaffold]. Sur téléphone l'adaptatif
+ * renvoie `NavigationBar` (80dp) ; on lui substitue `ShortNavigationBarCompact` (M3 Expressive, ~64dp,
+ * icône au-dessus du label, labels conservés, cible tactile ≥48dp). Les autres formes (rail/drawer sur
+ * largeur medium/expanded) restent telles quelles ; la navigation est masquée (`None`) sur les routes
+ * plein écran (éditeur, #624). Pure (l'`adaptiveType` composable est résolu côté appelant) + extraite
+ * pour garder la complexité cyclomatique de `RedfaceApp` sous le seuil.
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+private fun resolveNavLayoutType(
+    hidesNavigationSuite: Boolean,
+    adaptiveType: NavigationSuiteType,
+): NavigationSuiteType = when {
+    hidesNavigationSuite -> NavigationSuiteType.None
+    adaptiveType == NavigationSuiteType.NavigationBar -> NavigationSuiteType.ShortNavigationBarCompact
+    else -> adaptiveType
+}
+
+/**
+ * #529 — modifier appliqué au CONTENU du [NavigationSuiteScaffold]. Quand la suite est une barre du
+ * BAS (téléphone), cette barre possède déjà `WindowInsets.navigationBars` : on consomme l'inset pour
+ * le sous-arbre de contenu, de sorte que les `.navigationBarsPadding()` des écrans (toujours requis
+ * pour les dispositions rail/drawer, où la suite est sur le côté et laisse l'inset bas) se résolvent
+ * à 0 sous une barre du bas, au lieu de laisser une bande sombre de la couleur `Surface` au-dessus de
+ * la barre (le « vide noir »). Le type custom `ShortNavigationBarCompact` ne consomme pas cet inset
+ * pour le contenu côté scaffold, d'où la bande. Extrait (la branche reste hors de `RedfaceApp`).
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+private fun navSuiteContentInsetModifier(
+    navLayoutType: NavigationSuiteType,
+    navigationBarInsets: WindowInsets,
+): Modifier = if (
+    navLayoutType == NavigationSuiteType.ShortNavigationBarCompact ||
+    navLayoutType == NavigationSuiteType.NavigationBar
+) {
+    // BOTTOM edge only : a side navigation bar (landscape / compact multi-window with 3-button
+    // nav) reports a horizontal navigationBars inset too — consuming the whole thing would zero the
+    // screens' horizontal `.navigationBarsPadding()` and run content under the side bar (Codex review).
+    Modifier.consumeWindowInsets(navigationBarInsets.only(WindowInsetsSides.Bottom))
+} else {
+    Modifier
+}
 
 @Serializable
 data class CategoryRoute(
@@ -280,6 +341,30 @@ data object MyImagesRoute : RedfaceNavKey
 data object MpStorageInspectorRoute : RedfaceNavKey
 
 /**
+ * #494 — settings sub-pages reached from the redesigned catalogue. Each is a distinct nav entry (a
+ * distinct `ViewModelStore`), so each binds its own `SettingsViewModel`; DataStore is the single
+ * source of truth so the instances stay consistent. Opaque routes, no params.
+ */
+@Serializable
+data object SettingsProxyRoute : RedfaceNavKey
+
+@Serializable
+data object SettingsMaintenanceRoute : RedfaceNavKey
+
+@Serializable
+data object SettingsDisplayRoute : RedfaceNavKey
+
+@Serializable
+data object SettingsImagesRoute : RedfaceNavKey
+
+@Serializable
+data object SettingsAccountAboutRoute : RedfaceNavKey
+
+/** #494 v2 — détail générique d'une catégorie de réglages (cf. SettingsCategoryDetailScreen). */
+@Serializable
+data class SettingsCategoryRoute(val categoryId: String) : RedfaceNavKey
+
+/**
  * Phase 2 finish (#208) — full profile page route.
  *
  * Navigation is always [userId]-first. [pseudo] and [avatarUrl] are display hints shown
@@ -312,12 +397,14 @@ data class ProfileFullRoute(
 
 internal enum class TopLevelDestination(
     val labelRes: Int,
+    val iconRes: Int,
     val rootRoute: RedfaceNavKey,
 ) {
-    Flags(R.string.nav_flags, FlagsListRoute),
-    Forum(R.string.nav_forum, ForumRoute),
-    Search(R.string.nav_search, SearchRoute),
-    Messages(R.string.nav_messages, MessagesRoute),
+    Flags(R.string.nav_flags, CoreUiR.drawable.ic_ms_flag, FlagsListRoute),
+    Forum(R.string.nav_forum, CoreUiR.drawable.ic_ms_forum, ForumRoute),
+    Search(R.string.nav_search, CoreUiR.drawable.ic_ms_search, SearchRoute),
+    Messages(R.string.nav_messages, CoreUiR.drawable.ic_ms_mail, MessagesRoute),
+    Settings(R.string.nav_settings, CoreUiR.drawable.ic_ms_settings, SettingsRoute),
 }
 
 /** #458 — maps the persisted cold-start choice onto the navigation's own destination enum. */
@@ -338,9 +425,11 @@ private const val MAX_BADGE_COUNT = 9
  */
 @Composable
 private fun TopLevelDestinationIcon(destination: TopLevelDestination, mpUnreadCount: Int?) {
-    val glyph = stringResource(destination.labelRes).first().toString()
+    val icon: @Composable () -> Unit = {
+        Icon(painter = painterResource(destination.iconRes), contentDescription = null)
+    }
     if (destination != TopLevelDestination.Messages || mpUnreadCount == null) {
-        Text(text = glyph)
+        icon()
         return
     }
     BadgedBox(
@@ -356,7 +445,7 @@ private fun TopLevelDestinationIcon(destination: TopLevelDestination, mpUnreadCo
             }
         },
     ) {
-        Text(text = glyph)
+        icon()
     }
 }
 
@@ -476,6 +565,9 @@ fun RedfaceApp(intent: Intent?) {
         val forumBackStack = rememberNavBackStack(*forumInitialStack)
         val searchBackStack = rememberNavBackStack(SearchRoute)
         val messagesBackStack = rememberNavBackStack(MessagesRoute)
+        // #494 v2 — Réglages est désormais une destination top-level à part entière (5e onglet),
+        // avec sa propre pile (sa racine = SettingsRoute), au lieu d'être poussé sur l'onglet actif.
+        val settingsBackStack = rememberNavBackStack(SettingsRoute)
 
         var currentDestination by rememberSaveable {
             mutableStateOf(startScreen.screen.toTopLevelDestination())
@@ -490,12 +582,19 @@ fun RedfaceApp(intent: Intent?) {
             mutableStateOf<ProfileSheetRequest?>(null)
         }
 
-        val backStacks = remember(flagsBackStack, forumBackStack, searchBackStack, messagesBackStack) {
+        val backStacks = remember(
+            flagsBackStack,
+            forumBackStack,
+            searchBackStack,
+            messagesBackStack,
+            settingsBackStack,
+        ) {
             mapOf(
                 TopLevelDestination.Flags to flagsBackStack,
                 TopLevelDestination.Forum to forumBackStack,
                 TopLevelDestination.Search to searchBackStack,
                 TopLevelDestination.Messages to messagesBackStack,
+                TopLevelDestination.Settings to settingsBackStack,
             )
         }
 
@@ -533,6 +632,12 @@ fun RedfaceApp(intent: Intent?) {
         // Purged on every auth transition, exactly like readPrivateMessageThreadIds, so private
         // metadata never outlives the session / account.
         var multiRecipientThreadIds by remember { mutableStateOf(emptySet<Int>()) }
+        // #453 (Codex review) — threads that were UNREAD when opened from the inbox. The badge
+        // decrement on first read must fire ONLY for these: opening an already-read conversation has
+        // nothing to subtract. In-memory only and purged on auth transition, like the sets above —
+        // it is private metadata (it reveals a conversation carried an unread message) and must never
+        // outlive the session, hence it stays OUT of the opaque PrivateMessageThreadRoute.
+        var unreadOnOpenThreadIds by remember { mutableStateOf(emptySet<Int>()) }
         // #301 follow-up — bumped when the new-conversation composer pops back after a successful
         // send. The MP list collects the signal and refreshes itself so the created conversation
         // appears at the top (its thread id is unknown — the bddpost success response of a new MP
@@ -562,6 +667,14 @@ fun RedfaceApp(intent: Intent?) {
         // time (selecting in another topic resets it — quoting is a single-topic act). Plain
         // remember: losing it on process death just means re-selecting, like the markers above.
         var multiQuoteBasket by remember { mutableStateOf<MultiQuoteBasket?>(null) }
+        // #465 — per-topic MANUAL poll-expansion choice, keyed by (cat, post) (one poll per topic),
+        // twin of topicTitleCache / topicScrollAnchorCache: a page change replaces the TopicRoute
+        // (new nav entry → new ViewModel), so a `rememberSaveable` toggle inside the poll card was
+        // re-seeded to the global default on every page. Hoisted above NavDisplay so collapsing /
+        // expanding a poll survives navigation between the topic's pages. Absence of a key = follow
+        // the `topicPollsExpanded` default; the toggle records the manual choice here. RAM/session
+        // only, never serialized into a route.
+        var topicPollExpansionCache by remember { mutableStateOf(emptyMap<TopicPollKey, Boolean>()) }
 
         LaunchedEffect(authState) {
             when (authState) {
@@ -569,6 +682,7 @@ fun RedfaceApp(intent: Intent?) {
                 AuthState.Anonymous -> {
                     readPrivateMessageThreadIds = emptySet()
                     multiRecipientThreadIds = emptySet()
+                    unreadOnOpenThreadIds = emptySet()
                     privateMessageSentSignal = null
                     // #291 — a write intention armed under another session must not survive the
                     // transition (Codex review: stale « Citer N » after logout/login).
@@ -578,6 +692,7 @@ fun RedfaceApp(intent: Intent?) {
                 is AuthState.Authenticated -> {
                     readPrivateMessageThreadIds = emptySet()
                     multiRecipientThreadIds = emptySet()
+                    unreadOnOpenThreadIds = emptySet()
                     privateMessageSentSignal = null
                     multiQuoteBasket = null
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
@@ -591,11 +706,11 @@ fun RedfaceApp(intent: Intent?) {
         // routes makes the editor full-screen: its submit bar then sits at the window bottom and the IME
         // inset lands exactly on the keyboard. Bonus UX: no tab switching mid-compose (would drop the draft).
         val topRoute = backStacks.getValue(currentDestination).lastOrNull()
-        val navLayoutType = if (topRoute.hidesNavigationSuite()) {
-            NavigationSuiteType.None
-        } else {
-            NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
-        }
+        val adaptiveType = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
+        val navLayoutType = resolveNavLayoutType(topRoute.hidesNavigationSuite(), adaptiveType)
+        // #529 — consume the bottom nav-bar inset for the content only under a bottom-bar layout
+        // (see navSuiteContentInsetModifier). Read in composable scope, branch lives in the helper.
+        val contentInsetModifier = navSuiteContentInsetModifier(navLayoutType, WindowInsets.navigationBars)
 
         NavigationSuiteScaffold(
             layoutType = navLayoutType,
@@ -619,7 +734,8 @@ fun RedfaceApp(intent: Intent?) {
             // (listings keep their 16/24 dp content padding, readers compensate explicitly),
             // so the nav host no longer steals 8 dp/side from every screen. The Surface is kept
             // for the theme background/elevation; only its horizontal padding was removed.
-            Surface {
+            // #529 — consumes the bottom nav-bar inset under a bottom-bar layout (no-op otherwise).
+            Surface(modifier = contentInsetModifier) {
                 val activeBackStack = backStacks.getValue(currentDestination)
                 val accountMenu: @Composable () -> Unit = {
                     RedfaceAccountMenu(
@@ -628,7 +744,6 @@ fun RedfaceApp(intent: Intent?) {
                         versionCode = BuildConfig.VERSION_CODE,
                         onLogin = { activeBackStack.add(LoginRoute) },
                         onLogout = accountViewModel::logout,
-                        onOpenSettings = { activeBackStack.add(SettingsRoute) },
                         onOpenDiagnostics = { activeBackStack.add(DiagnosticsRoute) },
                         onReportContent = {
                             startReportEmail(context, reportEmailSubject, reportNoEmailClient)
@@ -638,14 +753,31 @@ fun RedfaceApp(intent: Intent?) {
                 RedfaceNavHost(
                     backStack = activeBackStack,
                     accountMenu = accountMenu,
+                    onReportContent = {
+                        startReportEmail(context, reportEmailSubject, reportNoEmailClient)
+                    },
                     privateMessageNavState = PrivateMessageNavState(
                         readThreadIds = readPrivateMessageThreadIds,
                         multiRecipientThreadIds = multiRecipientThreadIds,
                         onThreadLoaded = { threadId ->
+                            // #453 (Codex review) — decrement the badge ONLY when the conversation was
+                            // unread when opened AND this is its first read of the session (predicate
+                            // extracted to keep this composable under detekt's complexity threshold).
+                            val decrement = shouldDecrementUnreadBadge(
+                                threadId = threadId,
+                                unreadOnOpen = unreadOnOpenThreadIds,
+                                alreadyRead = readPrivateMessageThreadIds,
+                            )
+                            if (decrement) {
+                                mpBadgeViewModel.onThreadRead(threadId)
+                            }
                             readPrivateMessageThreadIds = readPrivateMessageThreadIds + threadId
                         },
                         onThreadOpenedAsMulti = { threadId ->
                             multiRecipientThreadIds = multiRecipientThreadIds + threadId
+                        },
+                        onThreadOpenedUnread = { threadId ->
+                            unreadOnOpenThreadIds = unreadOnOpenThreadIds + threadId
                         },
                         sentSignal = privateMessageSentSignal,
                         onConversationSent = {
@@ -675,6 +807,15 @@ fun RedfaceApp(intent: Intent?) {
                             multiQuoteBasket = multiQuoteBasket.toggled(cat, post, numreponse)
                         },
                         onClear = { multiQuoteBasket = null },
+                    ),
+                    topicPollNavState = TopicPollNavState(
+                        expansions = topicPollExpansionCache,
+                        onExpansionChanged = { cat, post, expanded ->
+                            topicPollExpansionCache = topicPollExpansionCache.withPollExpansion(
+                                TopicPollKey(cat, post),
+                                expanded,
+                            )
+                        },
                     ),
                     onOpenProfile = { userId, pseudo, avatarUrl ->
                         // Review feedback I3: capture the **origin** tab so that
@@ -766,17 +907,33 @@ private const val REPORT_EMAIL: String = "xat@azora.fr"
  *   page shows a single other author.
  * @property onThreadLoaded marks a thread read once its first page has successfully loaded.
  * @property onThreadOpenedAsMulti records that a thread was opened from a multi-recipient row.
+ * @property onThreadOpenedUnread records that a thread was UNREAD when opened, so [onThreadLoaded]
+ *   knows it may decrement the unread badge (an already-read conversation must not, #453).
  */
 private data class PrivateMessageNavState(
     val readThreadIds: Set<Int>,
     val multiRecipientThreadIds: Set<Int>,
     val onThreadLoaded: (Int) -> Unit,
     val onThreadOpenedAsMulti: (Int) -> Unit,
+    val onThreadOpenedUnread: (Int) -> Unit = {},
     /** #301 follow-up — last successful new-conversation send ; the MP list refreshes on change. */
     val sentSignal: Long? = null,
     /** #301 follow-up — bumps [sentSignal] when the composer reports a successful send. */
     val onConversationSent: () -> Unit = {},
 )
+
+/**
+ * #453 (Codex review) — the unread badge decrements on a thread's first read of the session ONLY
+ * when that thread was actually unread when opened ([unreadOnOpen]). Opening an already-read
+ * conversation subtracts nothing, and re-opening one ([alreadyRead]) must not subtract twice.
+ * Extracted from [onThreadLoaded] so the boolean connective stays out of RedfaceApp's cyclomatic
+ * complexity budget.
+ */
+private fun shouldDecrementUnreadBadge(
+    threadId: Int,
+    unreadOnOpen: Set<Int>,
+    alreadyRead: Set<Int>,
+): Boolean = threadId in unreadOnOpen && threadId !in alreadyRead
 
 /**
  * Bug fix (build 89) — per-topic title cache plumbed into [RedfaceNavHost]. A topic page change
@@ -831,6 +988,21 @@ private data class MultiQuoteNavState(
     val basket: MultiQuoteBasket?,
     val onToggle: (cat: Int, post: Int, numreponse: Int) -> Unit,
     val onClear: () -> Unit,
+)
+
+/**
+ * #465 — per-topic poll-expansion bundle threaded into [RedfaceNavHost], same shape and survival
+ * rationale as the other hoisted-state bundles ([TopicScrollNavState], [TopicTitleNavState]): a page
+ * change replaces the TopicRoute entry, so any expansion state owned by the topic screen would die
+ * with it. The `var` backing [expansions] lives in [RedfaceApp]. A `null` lookup (no entry for the
+ * topic) means « follow the global default »; [onExpansionChanged] records the user's manual toggle.
+ *
+ * @property expansions the manual collapse/expand choice per topic the user has toggled.
+ * @property onExpansionChanged records a topic's manual poll choice when the card is tapped.
+ */
+private data class TopicPollNavState(
+    val expansions: Map<TopicPollKey, Boolean>,
+    val onExpansionChanged: (cat: Int, post: Int, expanded: Boolean) -> Unit,
 )
 
 /**
@@ -903,6 +1075,9 @@ internal fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: Str
 private fun RedfaceNavHost(
     backStack: NavBackStack<NavKey>,
     accountMenu: @Composable () -> Unit,
+    // #494 — the « Signaler un contenu » row of the settings Account/About sub-page reuses the same
+    // report-email flow as the account menu (which owns `context` + the report strings).
+    onReportContent: () -> Unit,
     privateMessageNavState: PrivateMessageNavState,
     // Bug fix (build 89) — per-topic title cache threaded down from RedfaceApp (where the `var` lives
     // so it survives entry recreation across page changes). Bundled to keep the param count in check.
@@ -911,6 +1086,8 @@ private fun RedfaceNavHost(
     topicScrollNavState: TopicScrollNavState,
     // #291 — multi-quote basket, same hoisting rationale (survives the per-page entry swap).
     multiQuoteNavState: MultiQuoteNavState,
+    // #465 — per-topic poll-expansion cache, same hoisting rationale (survives the per-page swap).
+    topicPollNavState: TopicPollNavState,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     NavDisplay(
@@ -920,15 +1097,16 @@ private fun RedfaceNavHost(
                 backStack.removeAt(backStack.lastIndex)
             }
         },
-        // #282 — a topic page change (swipe) replaces the top TopicRoute with the same route at a new
-        // page; our gesture already slides the outgoing page off-screen, so the default 700 ms NavDisplay
-        // cross-fade is redundant AND keeps the incoming entry below RESUMED for its whole duration —
-        // exactly the window the swipe is gated off. Making the FORWARD topic→topic transition instant
-        // collapses that dead-zone to ~one frame. The pop direction ALWAYS cross-fades: a page change is
-        // always a forward in-place replace (never a pop), so a genuine back-pop never goes instant even
-        // if two TopicRoute entries ever coexist. Every other transition keeps nav3's default cross-fade.
-        transitionSpec = { navContentTransform(initialState, targetState) },
-        popTransitionSpec = { navCrossfade() },
+        // Transitions (Claude + Codex, remplace le crossfade 700 ms global) : shared-axis X léger pour le
+        // drill-down (forward/back), fade-through court pour un changement d'onglet, instantané pour le
+        // swipe topic→topic (#282 : le geste glisse déjà la page sortante ; un crossfade garderait l'entrée
+        // entrante sous RESUMED toute la durée — pile la fenêtre où le swipe est gaté). Le sens vient du
+        // spec appelé (transitionSpec = forward/replace, popTransitionSpec = pop). Changer d'onglet remplace
+        // le backStack → ça passe par transitionSpec : on le détecte par le changement de racine de pile
+        // (chaque onglet a une racine distincte) pour ne pas hériter du slide de drill-down.
+        transitionSpec = { navForwardTransform(initialState, targetState) },
+        popTransitionSpec = { navPopTransform(initialState, targetState) },
+        predictivePopTransitionSpec = { navPopTransform(initialState, targetState) },
         entryDecorators = listOf(
             rememberSaveableStateHolderNavEntryDecorator(),
             rememberViewModelStoreNavEntryDecorator(),
@@ -1048,10 +1226,15 @@ private fun RedfaceNavHost(
             entry<MessagesRoute> {
                 MessagesScreen(
                     readThreadIds = privateMessageNavState.readThreadIds,
-                    onOpenThread = { threadId, isMultiRecipient, openAtPage ->
+                    onOpenThread = { threadId, isMultiRecipient, openAtPage, wasUnread ->
                         // Record the multi-recipient hint in memory only; the route stays opaque.
                         if (isMultiRecipient) {
                             privateMessageNavState.onThreadOpenedAsMulti(threadId)
+                        }
+                        // #453 (Codex review) — remember the unread-on-open state so the badge only
+                        // decrements for a conversation that actually had something unread.
+                        if (wasUnread) {
+                            privateMessageNavState.onThreadOpenedUnread(threadId)
                         }
                         backStack.add(
                             PrivateMessageThreadRoute(
@@ -1141,8 +1324,87 @@ private fun RedfaceNavHost(
             }
             entry<SettingsRoute> {
                 SettingsScreen(
-                    onOpenMyImages = { backStack.add(MyImagesRoute) },
+                    onOpenProxy = { backStack.add(SettingsProxyRoute) },
+                    onOpenMaintenance = { backStack.add(SettingsMaintenanceRoute) },
+                    onOpenDisplay = { backStack.add(SettingsDisplayRoute) },
+                    onOpenImages = { backStack.add(SettingsImagesRoute) },
+                    onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
+                    // #494 v2 — catégories sans sous-page dédiée → détail générique.
+                    onOpenCategory = { categoryId -> backStack.add(SettingsCategoryRoute(categoryId)) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsCategoryRoute> { key ->
+                SettingsCategoryDetailScreen(
+                    categoryId = key.categoryId,
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    onOpenProxy = { backStack.add(SettingsProxyRoute) },
+                    onOpenMaintenance = { backStack.add(SettingsMaintenanceRoute) },
+                    onOpenDisplay = { backStack.add(SettingsDisplayRoute) },
+                    onOpenImages = { backStack.add(SettingsImagesRoute) },
+                    onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsProxyRoute> {
+                SettingsProxyScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsMaintenanceRoute> {
+                SettingsMaintenanceScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
                     onOpenMpStorageInspector = { backStack.add(MpStorageInspectorRoute) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsDisplayRoute> {
+                SettingsDisplayScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsImagesRoute> {
+                SettingsImagesScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    onOpenMyImages = { backStack.add(MyImagesRoute) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsAccountAboutRoute> {
+                SettingsAccountAboutScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    versionName = BuildConfig.VERSION_NAME,
+                    versionCode = BuildConfig.VERSION_CODE,
+                    onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
+                    onReportContent = onReportContent,
+                    topBarActions = accountMenu,
                 )
             }
             entry<MyImagesRoute> {
@@ -1308,6 +1570,15 @@ private fun RedfaceNavHost(
                         .orEmpty(),
                     onToggleMultiQuote = { numreponse ->
                         multiQuoteNavState.onToggle(route.cat, route.post, numreponse)
+                    },
+                    // #465 — the topic's saved manual poll choice (null = follow the global
+                    // default), and the callback recording a tap on the poll card. Hoisted to
+                    // :app so it survives the per-page TopicRoute swap, keyed by (cat, post).
+                    pollManualExpanded = topicPollNavState.expansions[
+                        TopicPollKey(route.cat, route.post),
+                    ],
+                    onPollExpansionChanged = { expanded ->
+                        topicPollNavState.onExpansionChanged(route.cat, route.post, expanded)
                     },
                     onMultiQuote = { subcat, page ->
                         // #291 — quote flavour of reply with the EXTRA numreponses riding the
@@ -1631,12 +1902,36 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
-/** Default NavDisplay cross-fade duration, mirroring nav3 1.1.1 `defaultTransitionSpec` (700 ms). */
-private const val NAV_CROSSFADE_MILLIS = 700
+// #494 — paramètres de transition (Claude + Codex). MotionScheme M3 absent en stable 1.4.x (1.5.0-alpha)
+// → easings « emphasized » locaux. Slide LÉGER (1/4 de largeur) pour ne pas singer le swipe topic.
+private val EmphasizedDecelerate = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+private val EmphasizedAccelerate = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
+private const val DRILL_MS = 320
+private const val DRILL_FADE_IN_MS = 150
+private const val DRILL_FADE_OUT_MS = 90
+private const val TAB_FADE_IN_MS = 140
+private const val TAB_FADE_OUT_MS = 80
+private const val SLIDE_DIVISOR = 4
 
-/** nav3 1.1.1 default transition: a 700 ms cross-fade (mirrors androidx `defaultTransitionSpec`). */
-private fun navCrossfade(): ContentTransform =
-    fadeIn(tween(NAV_CROSSFADE_MILLIS)) togetherWith fadeOut(tween(NAV_CROSSFADE_MILLIS))
+private fun navInstant(): ContentTransform = EnterTransition.None togetherWith ExitTransition.None
+
+/** Shared-axis X, sens AVANT : l'entrant glisse depuis la droite, le sortant part vers la gauche. */
+private fun navSharedAxisXForward(): ContentTransform =
+    (slideInHorizontally(tween(DRILL_MS, easing = EmphasizedDecelerate)) { it / SLIDE_DIVISOR } +
+        fadeIn(tween(DRILL_FADE_IN_MS, delayMillis = 30))) togetherWith
+        (slideOutHorizontally(tween(DRILL_MS, easing = EmphasizedAccelerate)) { -it / SLIDE_DIVISOR } +
+            fadeOut(tween(DRILL_FADE_OUT_MS)))
+
+/** Shared-axis X, sens ARRIÈRE : l'entrant glisse depuis la gauche, le sortant part vers la droite. */
+private fun navSharedAxisXBack(): ContentTransform =
+    (slideInHorizontally(tween(DRILL_MS, easing = EmphasizedDecelerate)) { -it / SLIDE_DIVISOR } +
+        fadeIn(tween(DRILL_FADE_IN_MS, delayMillis = 30))) togetherWith
+        (slideOutHorizontally(tween(DRILL_MS, easing = EmphasizedAccelerate)) { it / SLIDE_DIVISOR } +
+            fadeOut(tween(DRILL_FADE_OUT_MS)))
+
+/** Fade-through court entre onglets (contenus sans relation spatiale → pas de slide). */
+private fun navTabFadeThrough(): ContentTransform =
+    fadeIn(tween(TAB_FADE_IN_MS, delayMillis = 30)) togetherWith fadeOut(tween(TAB_FADE_OUT_MS))
 
 /**
  * Marks a [TopicRoute] NavEntry so [isTopicScene] can recognise a topic scene without relying on the
@@ -1659,15 +1954,38 @@ private fun Scene<NavKey>.isTopicScene(): Boolean =
     isTopicSceneMetadata(entries.lastOrNull()?.metadata)
 
 /**
- * Forward ContentTransform for a NavDisplay transition: instant for a topic→topic FORWARD transition
- * (the swipe page change is an in-place backStack replace — always forward, never a pop — collapsing
- * the dead-zone, see #282), nav3's default 700 ms cross-fade otherwise. Only used for the forward
- * direction; the pop direction always uses [navCrossfade]. A deep-link reset that swaps one topic for
- * another while already in a topic would also be instant here, which is benign.
+ * Pure : une navigation AVANT est un drill-down (push) — par opposition à un changement d'onglet ou un
+ * remplacement de pile — ssi la pile cible est exactement la pile source AVEC une entrée empilée au
+ * sommet. On compare les piles ENTIÈRES (par `contentKey`), pas seulement le sommet : deux onglets
+ * peuvent partager une même valeur de route (ex. `CategoryRoute(cat=23)` présent dans Drapeaux ET dans
+ * Forums), et ne comparer que le dernier `contentKey` ferait passer un changement d'onglet pour un push
+ * (slide au lieu de fade-through). On ne peut PAS s'appuyer sur une « racine » via `entries.first` : dans
+ * le `SinglePaneScene` de nav3 `entries` ne contient que l'entrée visible (le sommet) ; la pile complète
+ * se reconstruit par `previousEntries + entries`. [sourceStack] = pile source complète (bas→haut),
+ * [targetParentStack] = pile cible privée de son sommet (ce vers quoi elle se dépilerait). Drill-down
+ * ssi les deux coïncident et sont non vides — exact à toute profondeur.
  */
-private fun navContentTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform =
-    if (from.isTopicScene() && to.isTopicScene()) {
-        EnterTransition.None togetherWith ExitTransition.None
-    } else {
-        navCrossfade()
-    }
+internal fun isForwardDrillDown(sourceStack: List<Any?>, targetParentStack: List<Any?>): Boolean =
+    targetParentStack.isNotEmpty() && targetParentStack == sourceStack
+
+/** True quand passer de [this] à [to] est un drill-down (cf. [isForwardDrillDown]). */
+private fun Scene<NavKey>.isForwardDrillDownTo(to: Scene<NavKey>): Boolean =
+    isForwardDrillDown(
+        sourceStack = (previousEntries + entries).map { it.contentKey },
+        targetParentStack = to.previousEntries.map { it.contentKey },
+    )
+
+/**
+ * Transition AVANT (push/replace non-pop) : instantané pour le swipe topic→topic (#282), shared-axis X
+ * avant pour un drill-down (push intra-onglet, toute profondeur), fade-through sinon (changement
+ * d'onglet ou remplacement de pile — contenus sans relation spatiale parent/enfant).
+ */
+private fun navForwardTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform = when {
+    from.isTopicScene() && to.isTopicScene() -> navInstant()
+    from.isForwardDrillDownTo(to) -> navSharedAxisXForward()
+    else -> navTabFadeThrough()
+}
+
+/** Transition ARRIÈRE (pop / retour prédictif) : instantané topic→topic, sinon shared-axis X arrière. */
+private fun navPopTransform(from: Scene<NavKey>, to: Scene<NavKey>): ContentTransform =
+    if (from.isTopicScene() && to.isTopicScene()) navInstant() else navSharedAxisXBack()
