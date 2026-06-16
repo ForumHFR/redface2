@@ -35,8 +35,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
@@ -203,7 +205,10 @@ private fun navSuiteContentInsetModifier(
     navLayoutType == NavigationSuiteType.ShortNavigationBarCompact ||
     navLayoutType == NavigationSuiteType.NavigationBar
 ) {
-    Modifier.consumeWindowInsets(navigationBarInsets)
+    // BOTTOM edge only : a side navigation bar (landscape / compact multi-window with 3-button
+    // nav) reports a horizontal navigationBars inset too — consuming the whole thing would zero the
+    // screens' horizontal `.navigationBarsPadding()` and run content under the side bar (Codex review).
+    Modifier.consumeWindowInsets(navigationBarInsets.only(WindowInsetsSides.Bottom))
 } else {
     Modifier
 }
