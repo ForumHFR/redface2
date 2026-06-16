@@ -1,0 +1,15 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- #360 — tracé stroke unifié (ADR-015) : crayon « ✎ » en lignes, strokeWidth 2.5,
+         caps/joins ronds, même poids optique que ic_arrow_back/ic_chevron_*. Remplace le glyphe
+         texte ✎ des FAB « Répondre » (topic + thread MP). Tinté à l'usage. -->
+    <path
+        android:strokeColor="#FF000000"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4,20 L4,16 L15,5 L19,9 L8,20 Z M13,7 L17,11" />
+</vector>

@@ -4,7 +4,13 @@
     android:viewportWidth="24"
     android:viewportHeight="24"
     android:autoMirrored="true">
+    <!-- #360 — tracé stroke unifié (ADR-015) : hampe + chevron en lignes, strokeWidth 2.5,
+         caps/joins ronds. Plus épais que l'ancien tracé fillColor (retour nicko « plus épaisse »),
+         et optiquement aligné avec ic_chevron_*/ic_edit. Tinté à l'usage. -->
     <path
-        android:fillColor="#FF000000"
-        android:pathData="M20,11H7.83l5.59,-5.59L12,4l-8,8l8,8l1.41,-1.41L7.83,13H20v-2z" />
+        android:strokeColor="#FF000000"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M20,12 L4.5,12 M11.5,5 L4.5,12 L11.5,19" />
 </vector>

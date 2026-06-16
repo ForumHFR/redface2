@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -12,7 +13,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -28,7 +28,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -61,7 +60,6 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -82,6 +80,7 @@ import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
+import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
@@ -677,15 +676,12 @@ internal fun TopicContent(
                         onClick = onBack,
                         modifier = Modifier.semantics { contentDescription = backLabel },
                     ) {
-                        // A text glyph used as an icon was unstable: its size depended on the system
-                        // font's `←` rendering, the baseline and the font-scale, never matching the
-                        // title cleanly (cf. Codex review). Use a dp-sized vector instead — optically
-                        // centred by the IconButton, font-independent. The a11y label stays on the
-                        // IconButton, so the icon itself is decorative (contentDescription = null).
-                        Icon(
-                            painter = painterResource(fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back),
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp),
+                        // #360 / ADR-015 — vector stroke unifié, dimensionné en dp (indépendant de la
+                        // police et de la baseline, contrairement à l'ancien glyphe « ← »), via le
+                        // primitive partagé :core:ui. L'étiquette a11y reste sur l'IconButton, donc
+                        // l'icône est décorative (contentDescription = null par défaut).
+                        RedfaceVectorIcon(
+                            resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back,
                         )
                     }
                 },
@@ -1851,10 +1847,18 @@ private fun TopicBottomActions(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (showPrevious) {
-                PageFab(description = previousLabel, glyph = "‹", onClick = onPreviousPage)
+                PageFab(
+                    description = previousLabel,
+                    iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_left,
+                    onClick = onPreviousPage,
+                )
             }
             if (showNext) {
-                PageFab(description = nextLabel, glyph = "›", onClick = onNextPage)
+                PageFab(
+                    description = nextLabel,
+                    iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right,
+                    onClick = onNextPage,
+                )
             }
             if (showMultiQuote) {
                 MultiQuoteFab(count = multiQuoteCount, onClick = onMultiQuote)
@@ -1883,31 +1887,32 @@ private fun MultiQuoteFab(count: Int, onClick: () -> Unit) {
 @Composable
 private fun PageFab(
     description: String,
-    glyph: String,
+    @DrawableRes iconRes: Int,
     onClick: () -> Unit,
 ) {
-    // No Material icons (detekt ForbiddenImport blocks androidx.compose.material.*): the glyph is a
-    // decorative Text and the real label rides on the FAB's `contentDescription` for TalkBack — same
-    // pattern as the top-bar back button.
+    // #360 / ADR-015 — chevron en vector stroke unifié (poids optique aligné sur la flèche retour),
+    // dimensionné en dp via le primitive partagé :core:ui plutôt qu'un glyphe « ‹ »/« › » dépendant
+    // de la police. Pas de Material icons (detekt ForbiddenImport). L'étiquette a11y reste sur le FAB,
+    // donc l'icône est décorative.
     SmallFloatingActionButton(
         onClick = onClick,
         modifier = Modifier.semantics { contentDescription = description },
     ) {
-        Text(glyph)
+        RedfaceVectorIcon(resId = iconRes)
     }
 }
 
 @Composable
 private fun ReplyFab(onClick: () -> Unit) {
-    // Same SmallFloatingActionButton footprint as the page FABs (user request): the « Répondre » label
-    // rides on contentDescription for TalkBack and the glyph is decorative (no Material icons — detekt
-    // ForbiddenImport blocks androidx.compose.material.*), mirroring PageFab and the top-bar back button.
+    // #360 / ADR-015 — crayon en vector stroke unifié (même poids optique que la flèche retour / les
+    // chevrons), via le primitive partagé :core:ui, à la place du glyphe « ✎ » dépendant de la police.
+    // Pas de Material icons (detekt ForbiddenImport). L'étiquette a11y reste sur le FAB.
     val replyLabel = stringResource(R.string.topic_fab_reply)
     SmallFloatingActionButton(
         onClick = onClick,
         modifier = Modifier.semantics { contentDescription = replyLabel },
     ) {
-        Text("✎")
+        RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_edit)
     }
 }
 
