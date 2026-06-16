@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.model.FlagType
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -54,6 +55,31 @@ class RestFlagMappersTest {
         assertEquals("XaTriX", flag.firstPostAuthor)
         assertEquals("qwazer", flag.lastReplyAuthor)
         assertEquals("2026-05-01 17:07", flag.lastReplyAt)
+    }
+
+    @Test
+    fun `last poster is links last_author, never the topic author - regression 331`() {
+        // #331 (@tinc, HFR #2786280): « mes sujets » showed an incorrect last poster.
+        // The real cat23 participated fixture has DISTINCT people on the two author slots —
+        // creator XaTriX vs last poster qwazer — so a swap (mapping lastReplyAuthor to
+        // links.author by mistake) would flip this assertion. The flag list must surface the
+        // REST `links.last_author.title` (last poster), not `links.author.title` (creator).
+        val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(
+            fixture("rest_cat23_participated.json"),
+        )
+
+        val flag = RestFlagMappers.toFlags(
+            envelope = envelope,
+            type = FlagType.CYAN,
+            fallbackCat = 23,
+        ).single()
+
+        assertEquals("qwazer", flag.lastReplyAuthor)
+        assertNotEquals(
+            "last poster must not be the topic creator (the #331 confusion)",
+            flag.firstPostAuthor,
+            flag.lastReplyAuthor,
+        )
     }
 
     @Test
