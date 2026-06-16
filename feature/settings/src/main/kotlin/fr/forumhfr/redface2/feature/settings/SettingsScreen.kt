@@ -510,6 +510,16 @@ internal fun buildSettingsCatalogue(
                     .takeIf { state.topicPollsExpandedError },
                 onCheckedChange = { onIntent(SettingsIntent.TopicPollsExpandedChanged(it)) },
             ),
+            toggleRow(
+                id = "topic_signatures",
+                title = stringResource(R.string.settings_topic_signatures_title),
+                description = stringResource(R.string.settings_topic_signatures_description),
+                checked = state.topicSignatures,
+                enabled = state.canToggleTopicSignatures,
+                errorRes = R.string.settings_topic_signatures_persist_failed
+                    .takeIf { state.topicSignaturesError },
+                onCheckedChange = { onIntent(SettingsIntent.TopicSignaturesChanged(it)) },
+            ),
             futureRow(
                 id = "future_restore_read_position",
                 title = stringResource(R.string.settings_future_restore_read_position),

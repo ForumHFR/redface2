@@ -122,6 +122,13 @@ class TopicViewModel @AssistedInject constructor(
                 _state.update { it.copy(pollsExpandedDefault = expanded) }
             }
             .launchIn(viewModelScope)
+        // #330 — mirror the signatures preference so the post cards can show/hide the author
+        // signature without a refetch (it is always parsed and cached on the Post).
+        userPreferencesRepository.observeTopicSignatures()
+            .onEach { show ->
+                _state.update { it.copy(showSignatures = show) }
+            }
+            .launchIn(viewModelScope)
     }
 
     fun send(intent: TopicIntent) {

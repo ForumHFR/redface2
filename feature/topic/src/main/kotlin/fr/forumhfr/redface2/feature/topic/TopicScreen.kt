@@ -55,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -1006,6 +1007,9 @@ private fun TopicLoadedContent(
                 post = post,
                 highlighted = highlight == post.numreponse,
                 citedCount = citationCounts[post.numreponse] ?: 0,
+                // #330 — render the author signature beneath the body when the reading preference
+                // is on (the signature is always parsed/cached on the Post; this is render-only).
+                showSignature = state.showSignatures,
                 onQuote = quoteAction,
                 onEdit = editAction,
                 onOpenProfile = profileAction,
@@ -1381,6 +1385,12 @@ internal fun TopicPostCard(
      * #239 — number of posts on the current page that cite this one. 0 hides the badge.
      */
     citedCount: Int,
+    /**
+     * #330 — when `true` (the « Afficher les signatures » reading preference is on), the author's
+     * signature ([Post.signature]) is rendered beneath the body, separated by a divider, in a
+     * subdued style. No-op when the post has no signature. Default `false`.
+     */
+    showSignature: Boolean = false,
     onQuote: (() -> Unit)?,
     onEdit: (() -> Unit)?,
     /**
@@ -1675,6 +1685,19 @@ internal fun TopicPostCard(
         ) {
             // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
             PostRenderer(content = post.content, selectable = true)
+            // #330 — the author signature (web parity), gated by the reading preference. Rendered
+            // with the shared PostRenderer (the signature is BBCode/HTML like the body) but in a
+            // subdued style: a divider separates it from the body and a reduced alpha makes it
+            // subordinate to the post content. No-op when the post carries no signature.
+            post.signature?.let { signature ->
+                if (showSignature) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    PostRenderer(
+                        content = signature,
+                        modifier = Modifier.alpha(SIGNATURE_ALPHA),
+                    )
+                }
+            }
             if (onQuote != null || onEdit != null || onToggleMultiQuote != null) {
                 // Actions row at the bottom of the post card, sober TextButtons
                 // so they stay subordinate to the post content. « Modifier »
@@ -1747,6 +1770,11 @@ internal fun TopicPostCard(
         }
     }
 }
+
+// #330 — the author signature renders subordinate to the post body: a reduced opacity keeps it
+// visually secondary (it shares the body's typography, so colour-only dimming via alpha is the
+// least invasive subdued treatment without recolouring PostRenderer's internals).
+private const val SIGNATURE_ALPHA = 0.7f
 
 private val topicDateFormatter = DateTimeFormatter
     .ofPattern("dd/MM/yyyy HH:mm:ss", Locale.FRANCE)

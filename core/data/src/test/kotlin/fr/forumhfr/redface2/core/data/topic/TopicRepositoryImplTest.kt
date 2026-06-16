@@ -573,6 +573,10 @@ class TopicRepositoryImplTest {
 
         override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
 
+        override fun observeTopicSignatures(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicSignatures(enabled: Boolean) = Unit
+
         override fun observeStartScreen(): Flow<StartScreenPreference> =
             MutableStateFlow(StartScreenPreference())
 

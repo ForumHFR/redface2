@@ -284,6 +284,11 @@
     <string name="settings_topic_polls_expanded_description">Sondages dépliés en haut des sujets ; sinon une ligne repliée.</string>
     <string name="settings_topic_polls_expanded_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
+    <!-- #330 — Lecture. Afficher la signature de l'auteur sous chaque post (parité web). -->
+    <string name="settings_topic_signatures_title">Afficher les signatures</string>
+    <string name="settings_topic_signatures_description">Signature de l\'auteur sous chaque post, en plus discret.</string>
+    <string name="settings_topic_signatures_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+
     <!-- #312 — Publication. Confirmation avant chaque envoi (réponse/édition de message, sujet,
          message privé) ; persisté en DataStore et lu en direct par les éditeurs.
          `settings_future_submit_confirm` (catalogue vitrine #288) renommé selon la convention des

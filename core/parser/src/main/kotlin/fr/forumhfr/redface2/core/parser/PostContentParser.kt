@@ -15,6 +15,7 @@ class PostContentParser {
             return ParsedPostContent(
                 quotedAuthors = emptyList(),
                 ast = deletedFallbackAst(),
+                signature = null,
             )
         }
 
@@ -29,7 +30,23 @@ class PostContentParser {
         return ParsedPostContent(
             quotedAuthors = quotedAuthors,
             ast = ast,
+            signature = parseSignature(contentElement),
         )
+    }
+
+    /**
+     * #330 — extracts the author signature trailer (`<span class="signature">`, a descendant of
+     * the `div[id^=para]` content element, after the post body and any `div.edited` marker) into
+     * the same AST as the body so it renders with the shared `PostRenderer`. HFR opens every
+     * signature with a horizontal-rule-ish dashes line and a trailing `clear: both` spacer div
+     * (both stripped by [parseBlocks]'s edge-trim / IGNORE rules), so an EMPTY signature
+     * (`<span class="signature"></span>`, or one carrying only decoration) yields no real block
+     * and is reported as `null` — same "no noise" contract as a never-edited [editedAt].
+     */
+    private fun parseSignature(contentElement: Element): PostContent? {
+        val span = contentElement.selectFirst(HfrSelectors.POST_SIGNATURE) ?: return null
+        val blocks = parseBlocks(span.clone().childNodes())
+        return blocks.takeIf { it.isNotEmpty() }?.let { PostContent(blocks = it) }
     }
 
     private fun deletedFallbackAst(): PostContent = PostContent(
@@ -709,4 +726,9 @@ internal fun sanitizeImageHref(rawSrc: String): String? =
 data class ParsedPostContent(
     val quotedAuthors: List<String>,
     val ast: PostContent,
+    /**
+     * #330 — the author signature AST (`<span class="signature">`), or `null` when the post has
+     * no signature (the span is absent, or holds only decoration that edge-trims to nothing).
+     */
+    val signature: PostContent? = null,
 )
