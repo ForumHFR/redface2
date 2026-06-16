@@ -35,6 +35,20 @@ interface MessagesRepository {
     fun requestUnreadRefresh()
 
     /**
+     * #453 — signals that conversation [threadId] was read in-app. Optimistically decrements the
+     * observed unread count by one (clamped at zero), so reading the LAST unread conversation
+     * clears the badge immediately instead of waiting for the next page-1 fetch. Fire-and-forget,
+     * non-suspending (safe from a navigation callback) ; no-op while anonymous or while nobody
+     * collects [observeUnreadMpCount].
+     *
+     * Local-only by design (zero network) : HFR has no server-side read flag (#361), so a read does
+     * not change the server count — the decrement mirrors the inbox row that already marks the
+     * conversation read locally, and the next real page-1 fetch reconciles. Marking the same thread
+     * twice between two network refreshes decrements only once.
+     */
+    fun markThreadRead(threadId: Int)
+
+    /**
      * Fetches one page of the private-message inbox (`forum1.php?cat=prive`). Throws on
      * network / session errors (e.g. [fr.forumhfr.redface2.core.domain.auth.SessionExpiredException]);
      * the caller maps the failure to its UI state.
