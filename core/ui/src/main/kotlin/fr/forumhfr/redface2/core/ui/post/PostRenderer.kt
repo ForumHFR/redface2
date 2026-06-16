@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -74,6 +75,7 @@ import coil3.compose.LocalPlatformContext
 import coil3.compose.SubcomposeAsyncImage
 import coil3.compose.SubcomposeAsyncImageContent
 import coil3.request.ImageRequest
+import coil3.request.crossfade
 import coil3.size.Precision
 import coil3.size.Scale
 import fr.forumhfr.redface2.core.ui.R
@@ -516,48 +518,84 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
  *
  * Bounded so a 4000×3000 RAW screenshot can't blow up the post and destroy the scroll position.
  * SubcomposeAsyncImage exposes loading/error slots so the user gets visual feedback when an HFR image
- * host (rehost.diberie.com, super-h.fr, …) is offline rather than a silent empty Box. Phase 1 keeps the
- * loading + error layout minimal — no material-icons-extended dependency just for a placeholder glyph.
+ * host (rehost.diberie.com, super-h.fr, …) is offline rather than a silent empty Box.
+ *
+ * #249 — anti-CLS: instead of reserving the legacy `minHeight` slot (which then SNAPS to the bitmap's
+ * real height on arrival = a bump), reserve the EXACT final height from the measured intrinsic size
+ * (`width × h/w`, same #175/#224 cache) so the shimmer placeholder occupies the loaded image's slot and
+ * nothing below moves. The image then `crossfade`s in (Coil native) into the already-sized box. A
+ * not-yet-measured image (standalone `PostBlock.Image`, no paragraph measure effect) keeps the legacy
+ * min/max slot. Animations honour the system reduce-motion preference ([rememberAnimationsEnabled]).
  */
 @Composable
 private fun BlockImage(url: String, description: String?, linkUrl: String? = null) {
     val uriHandler = LocalUriHandler.current
     val openLabel = stringResource(R.string.post_image_open_link)
-    val containerModifier = Modifier
-        .fillMaxWidth()
-        .defaultMinSize(minHeight = PostMediaDisplayPolicy.blockImageMinHeight)
-        .heightIn(max = PostMediaDisplayPolicy.blockImageMaxHeight)
-        .clip(RoundedCornerShape(8.dp))
-        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-        .then(
-            if (linkUrl != null) {
-                // Role.Image (not Button): the element IS an image that opens its full version on tap;
-                // the localized onClickLabel carries the action for TalkBack ("Image, double-tap to …").
-                Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
-                    runCatching { uriHandler.openUri(linkUrl) }
-                }
-            } else {
-                Modifier
-            },
-        )
-    SubcomposeAsyncImage(
-        model = url,
-        contentDescription = description,
-        contentScale = ContentScale.Fit,
-        modifier = containerModifier,
-        loading = { ImageBlockLoading() },
-        error = { ImageBlockError(description) },
-        success = { SubcomposeAsyncImageContent() },
-    )
-}
+    val animationsEnabled = rememberAnimationsEnabled()
 
-@Composable
-private fun ImageBlockLoading() {
-    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Text(
-            text = stringResource(R.string.post_image_loading),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    // #249 — reserve the exact final box from the measured intrinsic size when known. The same cache the
+    // #175/#224 paragraph measure effect fills feeds promoted images; a standalone PostBlock.Image is
+    // unmeasured (null) and falls back to the legacy min/max slot below.
+    val sizeCache = LocalIntrinsicMediaSizeCache.current
+    val measured: IntSize? = sizeCache.get(url)
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val reservedHeight = PostMediaDisplayPolicy.reservedBlockImageHeight(
+            measured = measured?.let { PixelSize(it.width, it.height) },
+            availableWidthDp = maxWidth.value,
+        )
+        // Reserved box: an exact height when measured (anti-CLS), else the legacy min/max slot.
+        val sizeModifier = if (reservedHeight != null) {
+            Modifier.height(reservedHeight)
+        } else {
+            Modifier
+                .defaultMinSize(minHeight = PostMediaDisplayPolicy.blockImageMinHeight)
+                .heightIn(max = PostMediaDisplayPolicy.blockImageMaxHeight)
+        }
+        val containerModifier = Modifier
+            .fillMaxWidth()
+            .then(sizeModifier)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .then(
+                if (linkUrl != null) {
+                    // Role.Image (not Button): the element IS an image that opens its full version on
+                    // tap; the localized onClickLabel carries the action for TalkBack.
+                    Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
+                        runCatching { uriHandler.openUri(linkUrl) }
+                    }
+                } else {
+                    Modifier
+                },
+            )
+        val context = LocalPlatformContext.current
+        val request = remember(url, animationsEnabled, context) {
+            ImageRequest.Builder(context)
+                .data(url)
+                // #249 — fondu natif Coil dans la box déjà dimensionnée → zéro saut. Désactivé quand le
+                // système demande de réduire les animations (apparition directe, §4 de l'issue).
+                .crossfade(animationsEnabled)
+                .build()
+        }
+        SubcomposeAsyncImage(
+            model = request,
+            contentDescription = description,
+            contentScale = ContentScale.Fit,
+            modifier = containerModifier,
+            loading = {
+                // Measured: fill the exact reserved box. Unmeasured (max-only constraint): a STABLE
+                // min-height placeholder — NOT fillMaxSize, which would balloon to the max slot and then
+                // collapse to the loaded intrinsic height (a visible shift, Codex review). The legacy
+                // min→intrinsic grow on load remains for these rare standalone images.
+                val shimmerModifier = if (reservedHeight != null) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier.fillMaxWidth().height(PostMediaDisplayPolicy.blockImageMinHeight)
+                }
+                ImageShimmer(animated = animationsEnabled, modifier = shimmerModifier)
+            },
+            error = { ImageBlockError(description) },
+            success = { SubcomposeAsyncImageContent() },
         )
     }
 }

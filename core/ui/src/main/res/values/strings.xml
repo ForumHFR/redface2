@@ -10,7 +10,6 @@
     <string name="post_spoiler_show">(afficher)</string>
     <string name="post_spoiler_hide">(masquer)</string>
     <string name="post_inline_image_alt">[image]</string>
-    <string name="post_image_loading">Chargement…</string>
     <string name="post_image_error">Image indisponible</string>
     <string name="post_image_error_with_alt">Image indisponible — %1$s</string>
     <string name="post_image_open_link">Ouvrir l\'image</string>
