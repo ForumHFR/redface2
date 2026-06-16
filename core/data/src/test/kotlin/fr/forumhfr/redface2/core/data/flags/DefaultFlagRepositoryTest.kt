@@ -25,9 +25,13 @@ import java.io.IOException
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -89,6 +93,104 @@ class DefaultFlagRepositoryTest {
                 type = FlagType.CYAN,
                 rows = match { rows -> rows.size == 1 && rows.single().topicId == 35395 },
             )
+        }
+    }
+
+    @Test
+    fun `observe and refresh fired together share a single REST fan-out - 501`() = runTest {
+        // #501 (Codex review) — observe()'s initial fetch and a concurrent refresh() for the SAME tab
+        // must collapse into ONE per-category fan-out, not two. The gate keeps the first fetch in
+        // flight while the second caller arrives, so a missing in-flight dedup would call cat 23 twice.
+        val gate = CompletableDeferred<Unit>()
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 13,
+                bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(),
+                resultsPerPage = any(),
+                useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23,
+                bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(),
+                resultsPerPage = any(),
+                useAuth = true,
+            )
+        } coAnswers {
+            gate.await()
+            capturedParticipatedFixture
+        }
+        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories))
+
+        // Sequence the two callers so they genuinely overlap: observe() first reaches the gated fetch
+        // (registering the in-flight Deferred), THEN refresh() runs and must find + await that same
+        // Deferred rather than starting a second fan-out. Only then release the gate.
+        val observeJob = launch { repo.observe(FlagType.CYAN).first { it is FlagsResult.Success } }
+        runCurrent()
+        val refreshJob = launch { repo.refresh(FlagType.CYAN) }
+        runCurrent()
+        gate.complete(Unit)
+        observeJob.join()
+        refreshJob.join()
+
+        // A single fan-out: the gated category was hit exactly once despite the two concurrent callers.
+        coVerify(exactly = 1) {
+            apiClient.getCategoryFlagTopics(
+                cat = 23,
+                bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(),
+                resultsPerPage = any(),
+                useAuth = true,
+            )
+        }
+    }
+
+    @Test
+    fun `clearSessionCache keeps an in-flight fetch from caching across a session change - 501 P1`() = runTest {
+        // #501 (Codex review P1) — a fetch in flight when the account logs out / switches must not
+        // repopulate the type-keyed singleton cache, which observe() serves before resolving the
+        // current user (else the next account would receive the previous account's flags).
+        val gate = CompletableDeferred<Unit>()
+        val apiClient = mockk<HfrApiClient>()
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 13,
+                bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(),
+                resultsPerPage = any(),
+                useAuth = true,
+            )
+        } returns EMPTY_PAGE
+        coEvery {
+            apiClient.getCategoryFlagTopics(
+                cat = 23,
+                bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(),
+                resultsPerPage = any(),
+                useAuth = true,
+            )
+        } coAnswers {
+            gate.await()
+            capturedParticipatedFixture
+        }
+        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories))
+
+        val inFlight = launch { repo.observe(FlagType.CYAN).first { it is FlagsResult.Success } }
+        runCurrent() // the fetch is now in flight, awaiting the gate
+        repo.clearSessionCache() // logout / account switch while the fetch is running
+        gate.complete(Unit)
+        inFlight.join()
+
+        // A fresh observe must RE-FETCH (Loading first) rather than serve the interrupted fetch's
+        // success from the singleton cache.
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            assertTrue(awaitItem() is FlagsResult.Success)
+            cancelAndIgnoreRemainingEvents()
         }
     }
 
