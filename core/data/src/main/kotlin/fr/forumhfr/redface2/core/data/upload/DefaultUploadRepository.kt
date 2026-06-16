@@ -85,16 +85,21 @@ private fun UploadedImage.toEntity(userId: String, uploadedAt: Instant): Uploade
         expiresAt = expiresAt,
     )
 
-private fun UploadedImageEntity.toRecord(): UploadedImageRecord =
-    UploadedImageRecord(
-        // Defensive read: an unknown stored provider name (downgrade / manual edit) degrades to the
-        // DIBERIE default instead of crashing valueOf — the row stays listable.
-        provider = runCatching { UploadProviderId.valueOf(provider) }
-            .getOrDefault(UploadProviderId.DIBERIE),
+private fun UploadedImageEntity.toRecord(): UploadedImageRecord {
+    // Defensive read (#474): an unknown stored provider name (downgrade, manual DB edit, or a future
+    // provider written by a newer build) must NOT crash valueOf nor be dropped — the trace stays
+    // listable so the user still sees the image. The enum has no "unknown" member, so we degrade the
+    // provider to the safe DIBERIE default AND force `deleteHandle = null`: with no known provider we
+    // cannot route a deletion correctly, so deletion is disabled (canDelete=false) rather than
+    // mis-sent to the wrong host. A recognised provider keeps its real handle untouched.
+    val knownProvider = runCatching { UploadProviderId.valueOf(provider) }.getOrNull()
+    return UploadedImageRecord(
+        provider = knownProvider ?: UploadProviderId.DIBERIE,
         picId = picId,
         imageUrl = imageUrl,
         thumbnailUrl = thumbnailUrl,
-        deleteHandle = deleteHandle,
+        deleteHandle = if (knownProvider != null) deleteHandle else null,
         uploadedAt = uploadedAt,
         expiresAt = expiresAt,
     )
+}
