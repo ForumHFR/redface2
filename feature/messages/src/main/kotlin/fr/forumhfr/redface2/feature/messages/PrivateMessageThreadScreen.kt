@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -19,7 +18,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -39,7 +37,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -51,6 +48,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
+import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
@@ -148,12 +146,11 @@ fun PrivateMessageThreadScreen(
                         onClick = onBack,
                         modifier = Modifier.semantics { contentDescription = backLabel },
                     ) {
-                        // dp-sized vector instead of a text « ← » glyph (font/baseline-dependent, cf.
-                        // Codex review). a11y label on the IconButton; the icon is decorative.
-                        Icon(
-                            painter = painterResource(fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back),
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp),
+                        // #360 / ADR-015 — vector stroke unifié, dimensionné en dp (indépendant de la
+                        // police et de la baseline, contrairement au glyphe « ← »), via le primitive
+                        // partagé :core:ui. a11y label sur l'IconButton ; l'icône est décorative.
+                        RedfaceVectorIcon(
+                            resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back,
                         )
                     }
                 },
@@ -169,7 +166,12 @@ fun PrivateMessageThreadScreen(
                 val replyLabel = stringResource(R.string.messages_reply)
                 ExtendedFloatingActionButton(
                     text = { Text(replyLabel) },
-                    icon = { Text("✎") },
+                    // #360 / ADR-015 — crayon en vector stroke unifié via le primitive :core:ui,
+                    // à la place du glyphe « ✎ » (poids optique aligné sur la flèche retour / les
+                    // chevrons). Pas de Material icons (detekt ForbiddenImport).
+                    icon = {
+                        RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_edit)
+                    },
                     onClick = { onReply(request.threadId, state.page) },
                 )
             }
