@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -54,6 +55,8 @@ import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.search.SearchPivotCategory
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.search.SearchTopicResult
+import fr.forumhfr.redface2.core.ui.FlagMetadata
+import fr.forumhfr.redface2.core.ui.TopicMetadataLine
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 
@@ -542,21 +545,23 @@ private fun SearchResultCard(result: SearchTopicResult, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                text = stringResource(R.string.search_result_author, result.author),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = stringResource(R.string.search_result_replies, result.replyCount, result.viewCount),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = stringResource(
-                    R.string.search_result_last_reply,
-                    formatLastReplyTimestamp(result.lastReplyAt),
-                    result.lastReplyAuthor,
+            // #376 — common two-segment metadata line, shared with the drapeaux / catégorie
+            // lists: `par <auteur> · N rép. · N vues` (left, truncatable; search has no
+            // pagination so view count takes the page slot) + the last-reply timestamp pinned
+            // right and never truncated.
+            TopicMetadataLine(
+                metadata = FlagMetadata(
+                    start = stringResource(
+                        R.string.search_result_metadata,
+                        result.author,
+                        result.replyCount,
+                        pluralStringResource(
+                            R.plurals.search_result_views,
+                            result.viewCount,
+                            result.viewCount,
+                        ),
+                    ),
+                    end = formatLastReplyTimestamp(result.lastReplyAt),
                 ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

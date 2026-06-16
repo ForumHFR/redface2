@@ -54,6 +54,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicSummary
+import fr.forumhfr.redface2.core.ui.FlagMetadata
+import fr.forumhfr.redface2.core.ui.TopicMetadataLine
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
@@ -454,18 +456,21 @@ private fun TopicRow(
                 fontWeight = if (topic.hasUnread == true) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 2,
             )
-            Text(
-                text = stringResource(
-                    R.string.category_topic_metadata,
-                    topic.author,
-                    topic.lastReplyAuthor,
-                    formatLastReplyTimestamp(topic.lastReplyAt),
-                    topic.replyCount,
-                    topic.totalPages,
+            // #376 — common two-segment metadata line: `par <auteur> · N rép. · N p.` (left,
+            // truncatable) + the last-reply timestamp pinned right and never truncated. Matches
+            // the drapeaux template; the search list uses the same TopicMetadataLine.
+            TopicMetadataLine(
+                metadata = FlagMetadata(
+                    start = stringResource(
+                        R.string.category_topic_metadata,
+                        topic.author,
+                        topic.replyCount,
+                        topic.totalPages,
+                    ),
+                    end = formatLastReplyTimestamp(topic.lastReplyAt),
                 ),
                 style = MaterialTheme.typography.labelSmall,
                 color = metadataColor,
-                maxLines = 1,
             )
             if (topic.isSticky || topic.isLocked) {
                 Text(
