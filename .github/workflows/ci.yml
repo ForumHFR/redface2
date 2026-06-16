@@ -15,12 +15,36 @@ permissions:
   contents: read
 
 jobs:
+  # Fan-out by task type (was a single `verify` job running every task in one invocation). Each
+  # entry runs on its own runner, so the four task groups parallelise PAST the 4-vCPU cap of a
+  # single runner. `setup-gradle` gives each entry its own incremental build cache (seeded on push
+  # to main/dev, read-only on PRs) so unchanged modules are not recompiled per job; the only
+  # duplication is recompiling the PR's *changed* modules in each entry — the build cache cannot be
+  # shared across jobs running concurrently.
+  #
+  # `:app` is flavored (#233 channels) so its variant tasks are flavored: the unqualified
+  # `lintDebug` / `:app:assembleDebug` no longer resolve for `:app`. Use the default `prod` flavor
+  # for the `:app` lint + APK; `lintDebug` / `test` / `testDebugUnitTest` still cover the
+  # (flavour-less) core/feature/jvm modules, and the unqualified `test` covers `:app`'s unit tests
+  # across variants (incl. the Konsist architecture test).
   verify:
-    name: Build, lint and test
+    name: ${{ matrix.task.name }}
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/cirruslabs/android-sdk:36@sha256:f9b3ea9ed2b5fc9522adae82c7b4622ab7aa54207ef532c8e615a347dca08f31
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        task:
+          - name: assemble
+            gradle: ":app:assembleProdDebug"
+          - name: test
+            gradle: "test testDebugUnitTest"
+          - name: lint
+            gradle: "lintDebug :app:lintProdDebug"
+          - name: detekt
+            gradle: "detektAll"
 
     steps:
       - name: Checkout
@@ -29,10 +53,24 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
 
-      - name: Verify
-        # `:app` now has product flavors (#233 channels) so its variant tasks are flavored:
-        # the unqualified `lintDebug` / `:app:assembleDebug` no longer resolve for `:app`. Use the
-        # default `prod` flavor for the `:app` lint + APK; `lintDebug`/`test`/`testDebugUnitTest`
-        # still cover the (flavour-less) core/feature/jvm modules, and the unqualified `test`
-        # covers `:app`'s unit tests across variants (incl. the Konsist architecture test).
-        run: ./gradlew detektAll lintDebug test testDebugUnitTest :app:lintProdDebug :app:assembleProdDebug
+      - name: ${{ matrix.task.name }}
+        run: ./gradlew ${{ matrix.task.gradle }}
+
+  # Single aggregate check whose name is the one `main`'s branch protection requires
+  # ("Build, lint and test"). Green iff every `verify` matrix entry succeeded, so the fan-out stays
+  # compatible with the existing required-status-check on `main` (dev→main promotion) without having
+  # to re-point branch protection at four separate contexts.
+  build-lint-and-test:
+    name: Build, lint and test
+    if: always()
+    needs: [verify]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require all verify jobs to pass
+        run: |
+          result='${{ needs.verify.result }}'
+          echo "verify matrix result: $result"
+          if [ "$result" != "success" ]; then
+            echo "::error::One or more verify jobs did not succeed ($result)."
+            exit 1
+          fi
