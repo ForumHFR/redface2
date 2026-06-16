@@ -372,3 +372,24 @@ val MIGRATION_12_13: Migration = object : Migration(12, 13) {
         )
     }
 }
+
+/**
+ * v13 → v14 (#330):
+ *
+ * Adds `signature` to `posts`. Stores the author's signature block (the HFR
+ * `<span class="signature">` trailer) as JSON in the same `PostContent` AST shape as `content`,
+ * so the « Afficher les signatures » reading preference is a pure render-time switch — toggling
+ * it never triggers a refetch.
+ *
+ * Nullable `TEXT` on disk because:
+ * - pre-v14 rows backfill to `NULL` (the next live fetch sets the real value);
+ * - most posts legitimately carry no signature.
+ *
+ * Pure DDL, no row rewrite — posts are short-lived cache and the next fetch overwrites every row
+ * with a parsed (possibly null) signature.
+ */
+val MIGRATION_13_14: Migration = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE posts ADD COLUMN signature TEXT")
+    }
+}

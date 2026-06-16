@@ -99,6 +99,12 @@ data class SettingsState(
     val isUpdatingTopicPollsExpanded: Boolean = false,
     val topicPollsExpandedError: Boolean = false,
     val topicPollsExpandedTouchedLocally: Boolean = false,
+    // #330 — afficher les signatures sous les posts. Même machinerie optimistic-flip + garde de
+    // course au démarrage. Default FALSE (masquées) : les signatures sont bruyantes, donc opt-in.
+    val topicSignatures: Boolean = false,
+    val isUpdatingTopicSignatures: Boolean = false,
+    val topicSignaturesError: Boolean = false,
+    val topicSignaturesTouchedLocally: Boolean = false,
     // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
     // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
     // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
@@ -199,6 +205,10 @@ data class SettingsState(
     // #456 — the polls toggle is gated only by its own write.
     val canToggleTopicPollsExpanded: Boolean
         get() = !isUpdatingTopicPollsExpanded
+
+    // #330 — the signatures toggle is gated only by its own write.
+    val canToggleTopicSignatures: Boolean
+        get() = !isUpdatingTopicSignatures
 
     // #312 — the confirm-before-posting toggle is gated only by its own write.
     val canToggleConfirmBeforePosting: Boolean
@@ -303,6 +313,9 @@ sealed interface SettingsIntent {
 
     /** #456 — sondages dépliés par défaut dans la lecture de sujet. */
     data class TopicPollsExpandedChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #330 — afficher les signatures des auteurs sous les posts. */
+    data class TopicSignaturesChanged(val enabled: Boolean) : SettingsIntent
 
     // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
     // the boolean is the desired post-flip state.

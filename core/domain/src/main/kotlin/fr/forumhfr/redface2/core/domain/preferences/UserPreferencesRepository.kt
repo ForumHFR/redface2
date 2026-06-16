@@ -201,6 +201,18 @@ interface UserPreferencesRepository {
     suspend fun setTopicPollsExpanded(enabled: Boolean)
 
     /**
+     * #330 — whether each post's author signature (`<span class="signature">`, web parity) is
+     * rendered beneath the post body, in a subdued style separated by a divider. Default `false`:
+     * signatures are noisy and most readers scroll past them, so they are opt-in. Toggling is a
+     * pure render-time switch (the signature is always parsed and cached, no refetch). Observed by
+     * `:feature:topic`, toggled in Settings.
+     */
+    fun observeTopicSignatures(): Flow<Boolean>
+
+    /** Persists [observeTopicSignatures]. Default `false` until the first call. */
+    suspend fun setTopicSignatures(enabled: Boolean)
+
+    /**
      * #458 — which top-level tab (and optional Forum category) a cold start opens on. Default
      * [StartScreenChoice.FLAGS] (historical behaviour). The navigation reads the SYNCHRONOUS
      * [StartScreenBootstrapStore] mirror at cold start; this flow is the source of truth and

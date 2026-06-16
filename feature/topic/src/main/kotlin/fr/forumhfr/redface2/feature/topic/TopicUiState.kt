@@ -46,6 +46,13 @@ data class TopicUiState(
      */
     val pollsExpandedDefault: Boolean = false,
     /**
+     * #330 — mirrors `UserPreferencesRepository.observeTopicSignatures()`. When `true`, each post
+     * card renders the author's signature (`Post.signature`) beneath the body, in a subdued style
+     * separated by a divider. Default `false`: signatures are noisy and opt-in. Flips on the first
+     * preference emission; the field is always parsed/cached so toggling never refetches.
+     */
+    val showSignatures: Boolean = false,
+    /**
      * #335 — `true` while a manual pull-to-refresh of the current page is in flight. Drives the
      * Material3 `PullToRefreshBox` spinner. Set on the `Refresh` intent, cleared in the refresh
      * coroutine's `finally` (so a cancellation — e.g. a delete starting mid-refresh — never leaves

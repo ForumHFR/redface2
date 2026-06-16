@@ -317,6 +317,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeTopicSignatures(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#330): signatures are noisy; opt-in so the feed stays compact.
+            .map { prefs -> prefs[KEY_TOPIC_SIGNATURES] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setTopicSignatures(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_TOPIC_SIGNATURES] = enabled
+            }
+        }
+    }
+
     override fun observeStartScreen(): Flow<StartScreenPreference> =
         dataStore.data
             .map(::readStartScreen)
@@ -596,6 +611,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #456 — polls expanded by default in topic reading (default false = collapsed).
         val KEY_TOPIC_POLLS_EXPANDED = booleanPreferencesKey("topic_polls_expanded")
+
+        // #330 — render author signatures beneath posts (default false = hidden, signatures are noisy).
+        val KEY_TOPIC_SIGNATURES = booleanPreferencesKey("topic_signatures")
 
         // #458 — cold-start tab (StartScreenChoice.name, defensively parsed) + optional Forum
         // category id (absent unless screen == FORUM and a category was picked).

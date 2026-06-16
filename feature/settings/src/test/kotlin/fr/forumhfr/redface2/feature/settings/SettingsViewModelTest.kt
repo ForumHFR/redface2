@@ -973,6 +973,45 @@ class SettingsViewModelTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────
+    // Author signatures (#330)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates topicSignatures from a persisted true`() = runTest {
+        // Default is false — only a persisted opt-in exercises the hydration path.
+        repository.emitTopicSignatures(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.topicSignatures)
+        assertFalse(viewModel.state.value.topicSignaturesError)
+    }
+
+    @Test
+    fun `TopicSignaturesChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("signatures are hidden by default", viewModel.state.value.topicSignatures)
+
+        viewModel.submit(SettingsIntent.TopicSignaturesChanged(true))
+
+        assertTrue(viewModel.state.value.topicSignatures)
+        assertFalse(viewModel.state.value.isUpdatingTopicSignatures)
+        assertEquals(1, repository.topicSignaturesSetCalls)
+    }
+
+    @Test
+    fun `TopicSignaturesChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnTopicSignaturesSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.TopicSignaturesChanged(true))
+
+        assertFalse("failed persist must revert to the previous value", viewModel.state.value.topicSignatures)
+        assertFalse(viewModel.state.value.isUpdatingTopicSignatures)
+        assertTrue(viewModel.state.value.topicSignaturesError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Confirm before posting (#312)
     // ──────────────────────────────────────────────────────────────────────
 
@@ -1478,6 +1517,24 @@ class SettingsViewModelTest {
 
         fun emitTopicPollsExpanded(value: Boolean) {
             topicPollsExpanded.value = value
+        }
+
+        // #330 — afficher les signatures. Même seam optimistic-flip que topicPollsExpanded.
+        private val topicSignatures = MutableStateFlow(false)
+        var topicSignaturesSetCalls: Int = 0
+            private set
+        var failOnTopicSignaturesSet: Boolean = false
+
+        override fun observeTopicSignatures(): Flow<Boolean> = topicSignatures
+
+        override suspend fun setTopicSignatures(enabled: Boolean) {
+            topicSignaturesSetCalls += 1
+            check(!failOnTopicSignaturesSet) { "boom" }
+            topicSignatures.value = enabled
+        }
+
+        fun emitTopicSignatures(value: Boolean) {
+            topicSignatures.value = value
         }
 
         // #458 — start screen lives on its own StartScreenSettingsViewModel; this fake only

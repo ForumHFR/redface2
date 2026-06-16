@@ -98,6 +98,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(topicPollsExpanded = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeTopicSignatures().first() },
+            isLocked = { it.topicSignaturesTouchedLocally || it.isUpdatingTopicSignatures },
+            apply = { state, value -> state.copy(topicSignatures = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeConfirmBeforePosting().first() },
             isLocked = { it.confirmBeforePostingTouchedLocally || it.isUpdatingConfirmBeforePosting },
             apply = { state, value -> state.copy(confirmBeforePosting = value) },
@@ -202,6 +207,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.TopicPageFabsChanged -> updateTopicPageFabs(intent.enabled)
             is SettingsIntent.MpUnreadBadgeChanged -> updateMpUnreadBadge(intent.enabled)
             is SettingsIntent.TopicPollsExpandedChanged -> updateTopicPollsExpanded(intent.enabled)
+            is SettingsIntent.TopicSignaturesChanged -> updateTopicSignatures(intent.enabled)
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
@@ -705,6 +711,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setTopicPollsExpanded,
+        )
+    }
+
+    private fun updateTopicSignatures(desired: Boolean) {
+        val previous = _state.value.topicSignatures
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    topicSignatures = desired,
+                    isUpdatingTopicSignatures = true,
+                    topicSignaturesError = false,
+                    topicSignaturesTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(topicSignatures = desired, isUpdatingTopicSignatures = false)
+                } else {
+                    state.copy(
+                        topicSignatures = previous,
+                        isUpdatingTopicSignatures = false,
+                        topicSignaturesError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setTopicSignatures,
         )
     }
 

@@ -82,6 +82,9 @@ class PostsParser(
             quoteRef = parseQuoteRef(postTable),
             profileId = parseProfileId(postTable),
             editedAt = parseEditedAt(postTable),
+            // #330 — parsed from the same content element as `content` (the signature span is a
+            // descendant of `div[id^=para]`, stripped from the body but surfaced here).
+            signature = content.signature,
         )
     }
 

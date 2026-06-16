@@ -77,4 +77,14 @@ data class PostEntity(
      *   whose `div.edited` only holds the « Message cité N fois » citation link.
      */
     val editedAt: Instant? = null,
+    /**
+     * #330 — the author signature AST (`<span class="signature">`), persisted as JSON via the
+     * nullable [Converters.nullablePostContentToJson] converter so the « Afficher les signatures »
+     * reading preference is a pure render-time switch (no refetch when toggled). Persisted in
+     * Room v14 (`MIGRATION_13_14`). Nullable on disk:
+     *
+     * - pre-v14 rows backfill to `NULL` (recovered on the next live fetch);
+     * - most posts legitimately carry no signature.
+     */
+    val signature: PostContent? = null,
 )
