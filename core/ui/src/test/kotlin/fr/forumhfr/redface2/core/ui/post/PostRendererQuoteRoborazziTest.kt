@@ -142,6 +142,33 @@ class PostRendererQuoteRoborazziTest {
         )
     }
 
+    /**
+     * Issue #332 — a "long" top-level citation folds to a single header line by default ("longues
+     * citations repliées sur une ligne, dépliables au clic puis repliables"). This captures the
+     * default *folded* state: the framed quote shows only its "Citation de X" header + the
+     * "(afficher)" affordance, and the wall-of-text body is hidden until tapped.
+     */
+    @Test
+    fun postRendererLongQuoteFoldedLight() {
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                Surface(color = MaterialTheme.colorScheme.surface) {
+                    Box(
+                        modifier = Modifier
+                            .width(360.dp)
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(16.dp),
+                    ) {
+                        PostRenderer(content = longQuoteContent())
+                    }
+                }
+            }
+        }
+        composeTestRule.onRoot().captureRoboImage(
+            filePath = "build/outputs/roborazzi/post_renderer_long_quote_folded_light.png",
+        )
+    }
+
     @androidx.compose.runtime.Composable
     private fun AmoledHost(content: @androidx.compose.runtime.Composable () -> Unit) {
         RedfaceTheme(
@@ -227,6 +254,33 @@ class PostRendererQuoteRoborazziTest {
                     blocks = listOf(paragraph("Granfondo : épreuve cyclosportive de longue distance.")),
                 ),
             ),
+        ),
+    )
+
+    private fun longQuoteContent(): PostContent = PostContent(
+        blocks = listOf(
+            paragraph("Je réponds à un très long pavé :"),
+            PostBlock.Quote(
+                author = "XaTriX",
+                numreponse = 74749781,
+                page = 8270,
+                content = PostContent(
+                    blocks = listOf(
+                        paragraph(
+                            "Voilà un mur de texte volontairement très long pour dépasser le " +
+                                "seuil de repli automatique des citations (issue #332). " +
+                                "On répète quelques phrases afin de simuler une citation " +
+                                "interminable qu'un lecteur préfère replier par défaut puis " +
+                                "déplier au clic si le contexte l'intéresse vraiment.",
+                        ),
+                        paragraph(
+                            "Deuxième paragraphe tout aussi bavard, histoire de bien franchir " +
+                                "le budget de caractères et de rendre le repli pertinent.",
+                        ),
+                    ),
+                ),
+            ),
+            paragraph("Bref, replié par défaut c'est plus lisible."),
         ),
     )
 
