@@ -1676,5 +1676,9 @@ class FlagsViewModelTest {
         override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
 
         override suspend fun setFontScale(scale: FontScalePreference) = Unit
+
+        override fun observeDebugBoundsOverlay(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setDebugBoundsOverlay(enabled: Boolean) = Unit
     }
 }

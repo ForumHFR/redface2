@@ -49,4 +49,11 @@ class AppThemeViewModel @Inject constructor(
     val fontScale: StateFlow<FontScalePreference> =
         userPreferencesRepository.observeFontScale()
             .stateIn(viewModelScope, SharingStarted.Eagerly, FontScalePreference.M)
+
+    // #445 — debug bounds overlay toggle (dev channel only; the channel gate lives in RedfaceApp).
+    // No bootstrap mirror: it does not paint the pre-first-frame window, so the seed is the `false`
+    // default and DataStore resolves on the first Eagerly read.
+    val debugBoundsOverlay: StateFlow<Boolean> =
+        userPreferencesRepository.observeDebugBoundsOverlay()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 }

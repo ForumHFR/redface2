@@ -213,6 +213,12 @@
     <string name="settings_ignore_topic_cache_description">Force le retéléchargement et le reparse des pages de topic. Utile après un changement de parser/rendu. Désactive le prefetch topic pour éviter de remplir Room inutilement.</string>
     <string name="settings_ignore_topic_cache_persist_failed">Impossible de mémoriser le réglage « Ignorer le cache topic ». Réessayez.</string>
 
+    <!-- #445 — Overlay de debug qui surligne les bounds des composants. Réglage dev uniquement
+         (la ligne n'est affichée que sur le canal dev), désactivé par défaut. -->
+    <string name="settings_debug_bounds_overlay_title">Surligner les bounds des composants</string>
+    <string name="settings_debug_bounds_overlay_description">Dessine par-dessus l\'app un calque qui entoure les composants affichés (issus de l\'arbre sémantique Compose). Outil de debug du layout, canal dev uniquement.</string>
+    <string name="settings_debug_bounds_overlay_persist_failed">Impossible de mémoriser le réglage « Surligner les bounds des composants ». Réessayez.</string>
+
     <!-- #179 follow-up — Préférences d'affichage de l'écran Drapeaux. Persistées (DataStore) et
          observées en direct par l'écran Drapeaux : un changement ici se reflète sans refetch. -->
     <string name="settings_flags_title">Drapeaux</string>

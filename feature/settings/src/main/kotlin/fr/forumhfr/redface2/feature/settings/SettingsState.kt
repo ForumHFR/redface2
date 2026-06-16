@@ -41,6 +41,13 @@ data class SettingsState(
      * later and overwrite the optimistic flip with a stale snapshot. Never surfaced in the UI.
      */
     val ignoreTopicCacheTouchedLocally: Boolean = false,
+    // #445 — debug bounds overlay toggle (dev-channel only; the channel gate is in the screen, which
+    // hides the row off dev). Same optimistic-flip + startup-race-guard machinery as ignoreTopicCache.
+    // Default false (the overlay is opt-in even on dev).
+    val debugBoundsOverlay: Boolean = false,
+    val isUpdatingDebugBoundsOverlay: Boolean = false,
+    val debugBoundsOverlayError: Boolean = false,
+    val debugBoundsOverlayTouchedLocally: Boolean = false,
     // Drapeaux view preferences (#179 follow-up). Same optimistic-flip + startup-race-guard
     // machinery as ignoreTopicCache: the field is the displayed value, `isUpdating*` gates the
     // switch while DataStore writes, `*Error` surfaces a persist failure, and `*TouchedLocally`
@@ -172,6 +179,10 @@ data class SettingsState(
     val canToggleIgnoreTopicCache: Boolean
         get() = !isUpdatingIgnoreTopicCache
 
+    // #445 — the debug bounds overlay toggle is gated only by its own in-flight write.
+    val canToggleDebugBoundsOverlay: Boolean
+        get() = !isUpdatingDebugBoundsOverlay
+
     val canToggleFlagsGroupByCategory: Boolean
         get() = !isUpdatingFlagsGroupByCategory
 
@@ -286,6 +297,10 @@ sealed interface SettingsIntent {
     // ViewModel applies it optimistically, then reverts on DataStore failure so the UI never
     // shows a value that doesn't match what's persisted.
     data class IgnoreTopicCacheChanged(val enabled: Boolean) : SettingsIntent
+
+    // #445 — debug bounds overlay toggle (dev only). Same optimistic-flip contract: the boolean is
+    // the desired post-flip state.
+    data class DebugBoundsOverlayChanged(val enabled: Boolean) : SettingsIntent
 
     // Drapeaux view preferences (#179 follow-up). Same optimistic-flip contract as
     // IgnoreTopicCacheChanged: the boolean is the desired post-flip state.

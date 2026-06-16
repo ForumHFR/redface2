@@ -69,6 +69,7 @@ import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.account.RedfaceAccountMenu
+import fr.forumhfr.redface2.core.ui.debug.DebugBoundsOverlay
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import fr.forumhfr.redface2.feature.auth.LoginScreen
 import fr.forumhfr.redface2.feature.editor.PostEditorMode
@@ -512,6 +513,9 @@ fun RedfaceApp(intent: Intent?) {
     // #287 — reading presets (density + font scale) resolved at the root and bundled for RedfaceTheme.
     val displayDensity by themeViewModel.displayDensity.collectAsStateWithLifecycle()
     val fontScale by themeViewModel.fontScale.collectAsStateWithLifecycle()
+    // #445 — debug bounds overlay preference (the dev-channel gate + render live in
+    // [DevDebugBoundsOverlay], emitted last so it paints over everything; off by default).
+    val debugBoundsOverlay by themeViewModel.debugBoundsOverlay.collectAsStateWithLifecycle()
     val darkTheme = when (themeMode) {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
@@ -871,6 +875,24 @@ fun RedfaceApp(intent: Intent?) {
                 )
             }
         }
+
+        // #445 — debug bounds overlay, emitted LAST so it paints on top of every sibling (the nav
+        // scaffold + the profile sheet). The root content is Box-stacked by z-order = emission order,
+        // so no explicit wrapper is needed.
+        DevDebugBoundsOverlay(enabled = debugBoundsOverlay)
+    }
+}
+
+/**
+ * #445 — renders the [DebugBoundsOverlay] only when [enabled] AND the build is the DEV channel
+ * ([BuildConfig.FLAVOR]). Both gates live here (not in [RedfaceApp]) so the channel check can NEVER be
+ * bypassed and so [RedfaceApp] stays a single call site. Off the dev channel, or when the preference is
+ * off, the overlay composable is never composed — zero cost.
+ */
+@Composable
+private fun DevDebugBoundsOverlay(enabled: Boolean) {
+    if (enabled && BuildConfig.FLAVOR == DEV_CHANNEL) {
+        DebugBoundsOverlay()
     }
 }
 
@@ -897,6 +919,10 @@ private fun startReportEmail(
 }
 
 private const val REPORT_EMAIL: String = "xat@azora.fr"
+
+// #445 — the `channel` product flavor whose BuildConfig.FLAVOR gates the debug bounds overlay. Matches
+// the `dev` flavor name in app/build.gradle.kts; prod/beta never expose the overlay.
+private const val DEV_CHANNEL: String = "dev"
 
 /**
  * Ephemeral private-message navigation state, held in memory by the nav host and purged on every
@@ -1372,6 +1398,8 @@ private fun RedfaceNavHost(
                     },
                     onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
                     onOpenMpStorageInspector = { backStack.add(MpStorageInspectorRoute) },
+                    // #445 — expose the debug bounds overlay toggle on the dev channel only.
+                    debugOverlayAvailable = BuildConfig.FLAVOR == DEV_CHANNEL,
                     topBarActions = accountMenu,
                 )
             }
