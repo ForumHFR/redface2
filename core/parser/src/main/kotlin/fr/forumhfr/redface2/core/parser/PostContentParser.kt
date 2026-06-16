@@ -41,6 +41,14 @@ class PostContentParser {
         val blocks = mutableListOf<PostBlock>()
         val paragraph = mutableListOf<PostInline>()
 
+        // #466 (Codex review) — true ONLY while [paragraph]'s tail is the inline body of a CLOSED
+        // inline-only <p> with nothing appended after it, kept buffered so a FOLLOWING <p> can still
+        // merge with it. Any other sibling closes the merge window: an inline-classified <ul> or a
+        // block flushes the buffered <p> as its own paragraph (the sibling is not appended to it),
+        // and a top-level <br> appends its LineBreak but clears this flag (the extended buffer is no
+        // longer a pristine <p> body, so the next <p> must not merge with it).
+        var pendingParagraph = false
+
         fun flushParagraph() {
             // #333 — trim breaks and blank fragments at the paragraph EDGES only: breaks adjacent
             // to a block boundary (quote, image, end of post) duplicate the renderer's inter-block
@@ -53,6 +61,7 @@ class PostContentParser {
                 blocks += PostBlock.Paragraph(cleaned)
             }
             paragraph.clear()
+            pendingParagraph = false
         }
 
         // #466 — count of orphan `&nbsp;` (U+00A0) carried by the last top-level whitespace-only
@@ -75,6 +84,12 @@ class PostContentParser {
                 NodeKind.LINE_BREAK -> {
                     paragraph += PostInline.LineBreak
                     pendingNbsp = 0
+                    // A top-level <br> appended after a buffered closed <p> EXTENDS the running
+                    // paragraph, so the buffer is no longer a pristine inline-only <p> body: a
+                    // FOLLOWING <p> must NOT merge with it (`<p>A</p><br>&nbsp;&nbsp;<p>B</p>` stays
+                    // two blocks, matching legacy — the break is a non-<p> sibling that closes the
+                    // merge window, #466 Codex review). The break itself stays for web parity (#280).
+                    pendingParagraph = false
                 }
 
                 NodeKind.QUOTE -> {
@@ -110,12 +125,31 @@ class PostContentParser {
                 NodeKind.BLANK_TEXT -> pendingNbsp = orphanNbspCount(node as TextNode)
 
                 NodeKind.INLINE -> {
+                    if (pendingParagraph) {
+                        // A buffered closed <p> followed by a non-<p> inline sibling (HFR emits
+                        // `</p>&nbsp;<ul>…`): close the <p> as its own paragraph and drop the lone
+                        // separator — do NOT run the list/inline content into it (#466 Codex review).
+                        flushParagraph()
+                        pendingNbsp = 0
+                    } else if (pendingNbsp > 0) {
+                        // A pending `&nbsp;` between two plain inline siblings is genuine word spacing,
+                        // not a paragraph separator: keep it so `<a>one</a>&nbsp;<a>two</a>` reads
+                        // "one two", not "onetwo" (#466 Codex review).
+                        paragraph += PostInline.Text(" ")
+                        pendingNbsp = 0
+                    }
                     paragraph += parseInline(node)
-                    pendingNbsp = 0
                 }
 
                 NodeKind.PARAGRAPH_CONTAINER -> {
-                    parseParagraphContainer(node as Element, blocks, paragraph, pendingNbsp, ::flushParagraph)
+                    pendingParagraph = parseParagraphContainer(
+                        element = node as Element,
+                        blocks = blocks,
+                        paragraph = paragraph,
+                        pendingNbsp = pendingNbsp,
+                        pendingParagraph = pendingParagraph,
+                        flushParagraph = ::flushParagraph,
+                    )
                     pendingNbsp = 0
                 }
             }
@@ -148,21 +182,35 @@ class PostContentParser {
      * A `<p>` that does carry a nested block keeps the legacy path: flush, then sub-parse so the
      * inner block surfaces.
      */
+    @Suppress("LongParameterList") // shares parseBlocks' mutable state (blocks/paragraph) + the merge
+    // inputs (pendingNbsp/pendingParagraph) and its flush closure; a wrapper object would only hide it.
     private fun parseParagraphContainer(
         element: Element,
         blocks: MutableList<PostBlock>,
         paragraph: MutableList<PostInline>,
         pendingNbsp: Int,
+        pendingParagraph: Boolean,
         flushParagraph: () -> Unit,
-    ) {
+    ): Boolean {
         val children = element.childNodes()
         if (children.any { isBlockNode(it) }) {
+            // Legacy path: a <p> carrying a nested block is flushed + sub-parsed, leaving nothing
+            // buffered to merge with — return false so the caller does not treat it as a pending <p>.
             flushParagraph()
             blocks += parseBlocks(children)
-            return
+            return false
         }
-        val mergeable = pendingNbsp >= 2 && paragraph.any { it.isNonBlank() }
+        // Only fold the `&nbsp;` separator into empty lines when the buffer is genuinely the body of
+        // a PREVIOUS inline-only <p> ([pendingParagraph]) — NOT arbitrary buffered inline content.
+        // `<strong>A</strong>&nbsp;&nbsp;<p>B</p>` must stay two blocks, not merge (#466 Codex review).
+        val mergeable = pendingNbsp >= 2 && pendingParagraph && paragraph.any { it.isNonBlank() }
         if (mergeable) {
+            // #466 (Codex review) — drop a trailing border <br> on the first paragraph so its edge
+            // break does not pile onto the separator breaks below (the legacy sub-parse edge-trimmed
+            // it via flushParagraph). Only the separator + the paragraphs' INTERIOR breaks remain.
+            while (paragraph.isNotEmpty() && paragraph.last().isBlankOrBreak()) {
+                paragraph.removeAt(paragraph.lastIndex)
+            }
             repeat(pendingNbsp) { paragraph += PostInline.LineBreak }
         } else {
             // Close the previous paragraph as its own block, then accumulate this <p>'s inline
@@ -171,14 +219,22 @@ class PostContentParser {
         }
         // Accumulate the <p> body inline, honouring the same per-node classification as the block
         // path: a nested <br> stays a LineBreak and an ignored node (e.g. a `clear: both` spacer
-        // div) is dropped, so the merged paragraph matches what the legacy sub-parse produced.
-        children.forEach { child ->
-            when (classifyNode(child)) {
-                NodeKind.IGNORE -> Unit
-                NodeKind.LINE_BREAK -> paragraph += PostInline.LineBreak
-                else -> paragraph += parseInline(child)
+        // div) is dropped. EDGE-trim leading/trailing breaks (#466 Codex review): the real fixture
+        // has `<p><br />Pour…`, whose leading border <br> would otherwise render an extra empty line
+        // — only INTERIOR breaks (the author's line structure) survive, matching flushParagraph #333.
+        val merged = buildList {
+            children.forEach { child ->
+                when (classifyNode(child)) {
+                    NodeKind.IGNORE -> Unit
+                    NodeKind.LINE_BREAK -> add(PostInline.LineBreak)
+                    else -> addAll(parseInline(child))
+                }
             }
-        }
+        }.dropWhile { it.isBlankOrBreak() }.dropLastWhile { it.isBlankOrBreak() }
+        paragraph += merged
+        // The buffer now holds this inline-only <p>'s body: a following <p> may still merge with it,
+        // so report it as pending (the caller closes it if the next sibling is not a <p>).
+        return true
     }
 
     /** #466 — a top-level text node made solely of whitespace carries its U+00A0 (`&nbsp;`) count. */
