@@ -16,6 +16,7 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import java.io.IOException
 import java.time.Instant
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -322,6 +323,40 @@ class DefaultMessagesRepositoryTest {
             // is the source of truth ; the optimistic subtraction was only a stop-gap).
             repo.requestUnreadRefresh()
             assertEquals(3, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a read racing the cold-start fetch is preserved by the initial count (#453 codex)`() = runTest {
+        // Codex review — at cold start the user may open an unread MP before the very first
+        // `fetchUnreadCount()` resolves. The initial network count must NOT discard that read (HFR
+        // has no server-side read flag, so the count can't reflect it anyway), otherwise the badge
+        // would snap back to the pre-read total. Here the cold-start fetch is held on a gate, the
+        // read lands first, then the fetch resolves : 3 - 1 must be displayed, not a reset to 3.
+        val hfrClient = mockk<HfrClient>()
+        val gate = CompletableDeferred<Unit>()
+        coEvery { hfrClient.getPrivateMessageListPage(page = 1) } coAnswers {
+            gate.await()
+            FAKE_HTML
+        }
+        val parser = mockk<PrivateMessageListParser>()
+        coEvery { parser.countUnread(FAKE_HTML) } returns 3
+
+        val (repo, authStates) = buildRepository(hfrClient = hfrClient, parser = parser)
+
+        repo.observeUnreadMpCount().test {
+            authStates.emit(AuthState.Authenticated("xaat"))
+            // The cold-start fetch is suspended on the gate ; the read races ahead of it.
+            repo.markThreadRead(threadId = 11)
+            // Now the initial fetch resolves : it adopts the count but keeps the racing read.
+            gate.complete(Unit)
+
+            assertEquals(
+                "the initial count must subtract the read that raced it, not reset to the raw total",
+                2,
+                awaitItem(),
+            )
             cancelAndIgnoreRemainingEvents()
         }
     }

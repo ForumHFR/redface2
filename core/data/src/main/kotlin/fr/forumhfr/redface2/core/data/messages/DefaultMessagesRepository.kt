@@ -202,8 +202,19 @@ class DefaultMessagesRepository @Inject constructor(
             get() = baseCount?.let { (it - readThreadIds.size).coerceAtLeast(0) }
 
         fun applyEvent(event: UnreadEvent): LocalUnread = when (event) {
-            // A fresh network count is authoritative : reset the local read-decrement set.
-            is NetworkCount -> LocalUnread(baseCount = event.count, readThreadIds = emptySet(), hasNetworkCount = true)
+            // The FIRST network count is the cold-start fetch, kicked off at collection time before
+            // any in-session read can commit. A read that races it (the user opens an unread MP while
+            // the initial fetch is still in flight) must NOT be discarded — HFR has no server-side
+            // read flag (#361), so the initial count cannot reflect that read anyway. Keep the local
+            // decrement set and only adopt the count (#453, Codex review). EVERY LATER network count
+            // is a deliberate refresh (foreground tick / page-1 piggyback) and stays authoritative:
+            // it resets the set so the displayed count reconciles with the server truth.
+            is NetworkCount ->
+                if (hasNetworkCount) {
+                    LocalUnread(baseCount = event.count, readThreadIds = emptySet(), hasNetworkCount = true)
+                } else {
+                    copy(baseCount = event.count, hasNetworkCount = true)
+                }
             is ReadThread -> copy(readThreadIds = readThreadIds + event.threadId)
         }
     }

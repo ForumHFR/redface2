@@ -601,6 +601,12 @@ fun RedfaceApp(intent: Intent?) {
         // Purged on every auth transition, exactly like readPrivateMessageThreadIds, so private
         // metadata never outlives the session / account.
         var multiRecipientThreadIds by remember { mutableStateOf(emptySet<Int>()) }
+        // #453 (Codex review) — threads that were UNREAD when opened from the inbox. The badge
+        // decrement on first read must fire ONLY for these: opening an already-read conversation has
+        // nothing to subtract. In-memory only and purged on auth transition, like the sets above —
+        // it is private metadata (it reveals a conversation carried an unread message) and must never
+        // outlive the session, hence it stays OUT of the opaque PrivateMessageThreadRoute.
+        var unreadOnOpenThreadIds by remember { mutableStateOf(emptySet<Int>()) }
         // #301 follow-up — bumped when the new-conversation composer pops back after a successful
         // send. The MP list collects the signal and refreshes itself so the created conversation
         // appears at the top (its thread id is unknown — the bddpost success response of a new MP
@@ -637,6 +643,7 @@ fun RedfaceApp(intent: Intent?) {
                 AuthState.Anonymous -> {
                     readPrivateMessageThreadIds = emptySet()
                     multiRecipientThreadIds = emptySet()
+                    unreadOnOpenThreadIds = emptySet()
                     privateMessageSentSignal = null
                     // #291 — a write intention armed under another session must not survive the
                     // transition (Codex review: stale « Citer N » after logout/login).
@@ -646,6 +653,7 @@ fun RedfaceApp(intent: Intent?) {
                 is AuthState.Authenticated -> {
                     readPrivateMessageThreadIds = emptySet()
                     multiRecipientThreadIds = emptySet()
+                    unreadOnOpenThreadIds = emptySet()
                     privateMessageSentSignal = null
                     multiQuoteBasket = null
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
@@ -709,17 +717,24 @@ fun RedfaceApp(intent: Intent?) {
                         readThreadIds = readPrivateMessageThreadIds,
                         multiRecipientThreadIds = multiRecipientThreadIds,
                         onThreadLoaded = { threadId ->
-                            // #453 — only the FIRST time this thread is marked read decrements the
-                            // badge ; re-opening an already-read conversation must not subtract
-                            // again (the repository also guards against double-decrement, but
-                            // skipping the redundant signal keeps the intent local to the nav).
-                            if (threadId !in readPrivateMessageThreadIds) {
+                            // #453 (Codex review) — decrement the badge ONLY when the conversation was
+                            // unread when opened AND this is its first read of the session (predicate
+                            // extracted to keep this composable under detekt's complexity threshold).
+                            val decrement = shouldDecrementUnreadBadge(
+                                threadId = threadId,
+                                unreadOnOpen = unreadOnOpenThreadIds,
+                                alreadyRead = readPrivateMessageThreadIds,
+                            )
+                            if (decrement) {
                                 mpBadgeViewModel.onThreadRead(threadId)
                             }
                             readPrivateMessageThreadIds = readPrivateMessageThreadIds + threadId
                         },
                         onThreadOpenedAsMulti = { threadId ->
                             multiRecipientThreadIds = multiRecipientThreadIds + threadId
+                        },
+                        onThreadOpenedUnread = { threadId ->
+                            unreadOnOpenThreadIds = unreadOnOpenThreadIds + threadId
                         },
                         sentSignal = privateMessageSentSignal,
                         onConversationSent = {
@@ -840,17 +855,33 @@ private const val REPORT_EMAIL: String = "xat@azora.fr"
  *   page shows a single other author.
  * @property onThreadLoaded marks a thread read once its first page has successfully loaded.
  * @property onThreadOpenedAsMulti records that a thread was opened from a multi-recipient row.
+ * @property onThreadOpenedUnread records that a thread was UNREAD when opened, so [onThreadLoaded]
+ *   knows it may decrement the unread badge (an already-read conversation must not, #453).
  */
 private data class PrivateMessageNavState(
     val readThreadIds: Set<Int>,
     val multiRecipientThreadIds: Set<Int>,
     val onThreadLoaded: (Int) -> Unit,
     val onThreadOpenedAsMulti: (Int) -> Unit,
+    val onThreadOpenedUnread: (Int) -> Unit = {},
     /** #301 follow-up — last successful new-conversation send ; the MP list refreshes on change. */
     val sentSignal: Long? = null,
     /** #301 follow-up — bumps [sentSignal] when the composer reports a successful send. */
     val onConversationSent: () -> Unit = {},
 )
+
+/**
+ * #453 (Codex review) — the unread badge decrements on a thread's first read of the session ONLY
+ * when that thread was actually unread when opened ([unreadOnOpen]). Opening an already-read
+ * conversation subtracts nothing, and re-opening one ([alreadyRead]) must not subtract twice.
+ * Extracted from [onThreadLoaded] so the boolean connective stays out of RedfaceApp's cyclomatic
+ * complexity budget.
+ */
+private fun shouldDecrementUnreadBadge(
+    threadId: Int,
+    unreadOnOpen: Set<Int>,
+    alreadyRead: Set<Int>,
+): Boolean = threadId in unreadOnOpen && threadId !in alreadyRead
 
 /**
  * Bug fix (build 89) — per-topic title cache plumbed into [RedfaceNavHost]. A topic page change
@@ -1126,10 +1157,15 @@ private fun RedfaceNavHost(
             entry<MessagesRoute> {
                 MessagesScreen(
                     readThreadIds = privateMessageNavState.readThreadIds,
-                    onOpenThread = { threadId, isMultiRecipient, openAtPage ->
+                    onOpenThread = { threadId, isMultiRecipient, openAtPage, wasUnread ->
                         // Record the multi-recipient hint in memory only; the route stays opaque.
                         if (isMultiRecipient) {
                             privateMessageNavState.onThreadOpenedAsMulti(threadId)
+                        }
+                        // #453 (Codex review) — remember the unread-on-open state so the badge only
+                        // decrements for a conversation that actually had something unread.
+                        if (wasUnread) {
+                            privateMessageNavState.onThreadOpenedUnread(threadId)
                         }
                         backStack.add(
                             PrivateMessageThreadRoute(
