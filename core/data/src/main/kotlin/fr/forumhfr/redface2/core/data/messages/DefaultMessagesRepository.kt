@@ -103,9 +103,12 @@ class DefaultMessagesRepository @Inject constructor(
             },
         )
         // The initial fetch is its own first emission so reads marked before any refresh still
-        // decrement it (otherwise the cold-start count would be a non-resettable baseline).
+        // decrement it (otherwise the cold-start count would be a non-resettable baseline). It is
+        // tagged `isInitial` so that, if a page-1 piggyback or a refresh tick wins the race to be the
+        // first count, the late-landing cold-start is dropped rather than resetting the local reads
+        // accumulated meanwhile (Codex review, #453).
         return merge(
-            flow { emit(NetworkCount(fetchUnreadCount())) },
+            flow { emit(NetworkCount(fetchUnreadCount(), isInitial = true)) },
             networkCounts,
             markThreadReadEvents.map { ReadThread(it) },
         )
@@ -182,8 +185,11 @@ class DefaultMessagesRepository @Inject constructor(
     /** #453 — events folded by the unread-count [scan]. */
     private sealed interface UnreadEvent
 
-    /** A fresh, authoritative count from the network (resets local read-decrements). */
-    private data class NetworkCount(val count: Int?) : UnreadEvent
+    /**
+     * A count from the network. [isInitial] marks the one-shot cold-start fetch (vs a refresh tick /
+     * page-1 piggyback) so a late-landing cold-start cannot reset reads another count already baselined.
+     */
+    private data class NetworkCount(val count: Int?, val isInitial: Boolean = false) : UnreadEvent
 
     /** A conversation was read in-app (decrements the displayed count by one, once). */
     private data class ReadThread(val threadId: Int) : UnreadEvent
@@ -202,19 +208,19 @@ class DefaultMessagesRepository @Inject constructor(
             get() = baseCount?.let { (it - readThreadIds.size).coerceAtLeast(0) }
 
         fun applyEvent(event: UnreadEvent): LocalUnread = when (event) {
-            // The FIRST network count is the cold-start fetch, kicked off at collection time before
-            // any in-session read can commit. A read that races it (the user opens an unread MP while
-            // the initial fetch is still in flight) must NOT be discarded — HFR has no server-side
-            // read flag (#361), so the initial count cannot reflect that read anyway. Keep the local
-            // decrement set and only adopt the count (#453, Codex review). EVERY LATER network count
-            // is a deliberate refresh (foreground tick / page-1 piggyback) and stays authoritative:
-            // it resets the set so the displayed count reconciles with the server truth.
-            is NetworkCount ->
-                if (hasNetworkCount) {
-                    LocalUnread(baseCount = event.count, readThreadIds = emptySet(), hasNetworkCount = true)
-                } else {
-                    copy(baseCount = event.count, hasNetworkCount = true)
-                }
+            is NetworkCount -> when {
+                // The FIRST count to arrive (whichever source wins the cold-start race) adopts its
+                // value but KEEPS the local reads accumulated meanwhile : a read that raced the very
+                // first fetch must not be discarded — HFR has no server-side read flag (#361), so that
+                // count can't reflect it anyway (#453, Codex review).
+                !hasNetworkCount -> copy(baseCount = event.count, hasNetworkCount = true)
+                // A late-landing cold-start fetch (a piggyback / refresh tick already baselined first)
+                // is stale and must NOT reset the reads marked since : drop it (Codex review, #453).
+                event.isInitial -> this
+                // A genuine later refresh (foreground tick / page-1 piggyback) is authoritative : it
+                // resets the local decrements so the displayed count reconciles with the server truth.
+                else -> LocalUnread(baseCount = event.count, readThreadIds = emptySet(), hasNetworkCount = true)
+            }
             is ReadThread -> copy(readThreadIds = readThreadIds + event.threadId)
         }
     }
