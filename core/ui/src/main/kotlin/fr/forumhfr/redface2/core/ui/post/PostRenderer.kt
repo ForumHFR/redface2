@@ -104,6 +104,68 @@ internal const val MAX_VISIBLE_QUOTE_DEPTH = 3
 internal fun isCollapsedQuoteDepth(depth: Int): Boolean = depth >= MAX_VISIBLE_QUOTE_DEPTH
 
 /**
+ * Issue #332 — character budget above which a TOP-LEVEL `[quote]`/`[quotemsg]` block renders
+ * folded to a one-line header by default ("longues citations… repliées sur une ligne, dépliables
+ * au clic puis repliables"), mirroring the long-quote behaviour of the existing HFR userscript.
+ *
+ * 280 ≈ a few lines of body text: a one- or two-sentence citation (the common "je cite la phrase à
+ * laquelle je réponds" case) stays expanded so the reader never has to tap for a short quote, while
+ * a wall-of-text citation folds away by default and can be opened on demand.
+ *
+ * This is ORTHOGONAL to [MAX_VISIBLE_QUOTE_DEPTH] / [isCollapsedQuoteDepth] (issue #3/#82 — collapse
+ * by NESTING depth, not length): the length fold only applies at depth 0 (see [isLongQuote]) so the
+ * two never compete on the same block.
+ */
+internal const val LONG_QUOTE_CHAR_THRESHOLD = 280
+
+/**
+ * Total length of the visible text carried by a [PostContent] (paragraph text + nested quote text,
+ * line breaks counted as one char, plus one separator per block boundary since consecutive blocks
+ * render on their own lines). Pure so the long-quote rule is pinned in a JVM test without entering
+ * Compose; smiley tokens and image alt-text are deliberately ignored — they are not "reading length"
+ * and a smiley-heavy line should not force a fold. A nested spoiler contributes nothing: its body is
+ * hidden behind its own toggle by default, so it adds no visible reading length to the fold decision
+ * (else a short quote wrapping a long spoiler would fold before the spoiler toggle even shows).
+ */
+internal fun quoteVisibleTextLength(content: PostContent): Int {
+    if (content.blocks.isEmpty()) return 0
+    // +1 per block boundary: consecutive paragraphs/blocks render on separate lines, so a quote made
+    // of many short blocks accumulates the visible breaks between them (Codex review).
+    return content.blocks.sumOf(::blockVisibleTextLength) + (content.blocks.size - 1)
+}
+
+private fun blockVisibleTextLength(block: PostBlock): Int = when (block) {
+    is PostBlock.Paragraph -> block.inlines.sumOf(::inlineVisibleTextLength)
+    is PostBlock.Quote -> quoteVisibleTextLength(block.content)
+    is PostBlock.Spoiler -> 0
+    is PostBlock.Fixed -> block.text.length
+    is PostBlock.CodeBlock -> block.text.length
+    is PostBlock.Image -> 0
+}
+
+private fun inlineVisibleTextLength(inline: PostInline): Int = when (inline) {
+    is PostInline.Text -> inline.value.length
+    PostInline.LineBreak -> 1
+    is PostInline.Strong -> inline.children.sumOf(::inlineVisibleTextLength)
+    is PostInline.Emphasis -> inline.children.sumOf(::inlineVisibleTextLength)
+    is PostInline.Underline -> inline.children.sumOf(::inlineVisibleTextLength)
+    is PostInline.Strike -> inline.children.sumOf(::inlineVisibleTextLength)
+    is PostInline.Color -> inline.children.sumOf(::inlineVisibleTextLength)
+    is PostInline.Link -> inline.children.sumOf(::inlineVisibleTextLength)
+    is PostInline.InlineImage -> 0
+    is PostInline.Smiley -> 0
+}
+
+/**
+ * Issue #332 — true when a quote must fold to a one-line header by default because it is "long".
+ * Restricted to [quoteDepth] == 0: a nested quote is already governed by the depth rule
+ * ([isCollapsedQuoteDepth]) and the parent fold, so folding it again by length would stack two
+ * different toggles on the same sub-tree. Pure decision, pinned in [PostRendererQuoteDepthTest].
+ */
+internal fun isLongQuote(block: PostBlock.Quote, quoteDepth: Int): Boolean =
+    quoteDepth == 0 && quoteVisibleTextLength(block.content) > LONG_QUOTE_CHAR_THRESHOLD
+
+/**
  * Which themed accent the [QuoteFrame] left bar uses. Issue #252 — a **bare** `[quote]` (typed by
  * hand, no author) is the user formatting their own text, not citing a sourced post, so it must read
  * differently from a real HFR citation (`[quotemsg=]`, author set) and from a nested citation:
@@ -320,21 +382,73 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
         CollapsedQuoteBlock(block, quoteDepth)
         return
     }
+    if (isLongQuote(block, quoteDepth)) {
+        FoldableQuoteBlock(block, quoteDepth)
+        return
+    }
     QuoteFrame(quoteDepth = quoteDepth, isBareQuote = isBareQuote(block)) {
-        Text(
-            // #252 — a bare quote still gets a "Citation" header (no author), mirroring the
-            // "Citation de X" header of a sourced citation, so the framed block always reads
-            // as a quotation and not as a stray indented paragraph.
-            text = block.author
-                ?.let { stringResource(R.string.post_quote_author, it) }
-                ?: stringResource(R.string.post_quote_bare),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        QuoteHeader(block)
         PostBlocksRenderer(
             blocks = block.content.blocks,
             quoteDepth = quoteDepth + 1,
         )
+    }
+}
+
+/**
+ * #252 — the "Citation de X" / "Citation" header shown above every framed quote so the block always
+ * reads as a quotation, not a stray indented paragraph. A bare quote (no author) falls back to the
+ * generic "Citation" label. Extracted so the expanded, depth-collapsed and long-fold variants share
+ * one source of truth for the header text.
+ */
+@Composable
+private fun QuoteHeader(block: PostBlock.Quote) {
+    Text(
+        text = block.author
+            ?.let { stringResource(R.string.post_quote_author, it) }
+            ?: stringResource(R.string.post_quote_bare),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * Issue #332 — a "long" top-level citation (`isLongQuote`) folds to a single header line by default,
+ * dépliable au clic puis repliable. Mirrors the [SpoilerBlock] interaction (a `rememberSaveable`
+ * boolean + a clickable header carrying an "Afficher"/"Masquer" affordance) and reuses [QuoteFrame]
+ * so the accent bar, surface and bare-quote palette stay identical to a normal quote. Unlike
+ * [CollapsedQuoteBlock] (issue #3 depth fold, which resets depth to 0 on reveal) this fold keeps the
+ * real [quoteDepth] when expanded so a long quote that also nests deeply still hits the depth rule.
+ */
+@Composable
+private fun FoldableQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
+    var expanded by rememberSaveable(block) { mutableStateOf(false) }
+    QuoteFrame(
+        quoteDepth = quoteDepth,
+        isBareQuote = isBareQuote(block),
+        modifier = Modifier.clickable { expanded = !expanded },
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            QuoteHeader(block)
+            Text(
+                text = if (expanded) {
+                    stringResource(R.string.post_quote_hide)
+                } else {
+                    stringResource(R.string.post_quote_show)
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (expanded) {
+            PostBlocksRenderer(
+                blocks = block.content.blocks,
+                quoteDepth = quoteDepth + 1,
+            )
+        }
     }
 }
 
@@ -444,14 +558,8 @@ private fun CollapsedQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
             )
         }
         if (revealed) {
-            Text(
-                // #252 — same "Citation"/"Citation de X" header rule as the expanded QuoteBlock.
-                text = block.author
-                    ?.let { stringResource(R.string.post_quote_author, it) }
-                    ?: stringResource(R.string.post_quote_bare),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // #252 — same "Citation"/"Citation de X" header rule as the expanded QuoteBlock.
+            QuoteHeader(block)
             PostBlocksRenderer(
                 blocks = block.content.blocks,
                 quoteDepth = 0,
