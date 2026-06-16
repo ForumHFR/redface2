@@ -1,10 +1,13 @@
-Redface 2 v0.12.0 — beta.
+Redface 2 v0.13.0 — beta.
 
 New:
-- Editor: insert images at reduced or full size (your choice in Settings), line break between images of a multi-upload, "Upload" button always visible.
-- (DT) Cross-app MP storage inspector for DT users (Settings → DT section).
+- Settings redesigned: dedicated tab, category-first navigation, search, smooth transitions.
+- Compact bottom bar, translucent search bar on scroll.
+- "edited" marker, steady post header on multi-quote, poll state kept across pages.
 
-Fix:
-- MP list pagination beyond page 2.
+Fixes:
+- Flags refresh on tab switch and on resume.
+- Unread MP badge that truly cuts the network when off.
+- Stray empty lines in posts, hardened image upload.
 
 Report bugs via the beta or GitHub.
