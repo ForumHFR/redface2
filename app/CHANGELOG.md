@@ -16,6 +16,35 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v145 — `0.13.0` — 2026-06-16
+
+**Statut** : `open` (track open testing — canal beta, Play Edit committed) + F-Droid `.beta`
+**Commit** : promotion dev→main (cf. PR de promotion)
+**Contenu depuis la 0.12.0/v136** : dogfoodé sur le canal dev (v137 → v144).
+
+> `0.12.0` ayant déjà été shippé en bêta (v136), le `versionName` est bumpé en `0.13.0` (la garde CI refuse deux bêtas au même `versionName`).
+
+### Added
+- **Refonte complète des Réglages** (#494) : Réglages devient un 5ᵉ onglet dédié de la barre du bas (icônes Material Symbols, #511), racine « catégories d'abord » avec sous-vues par catégorie (#512), recherche dans les réglages avec résultats à plat + fil d'Ariane (#514), catalogue « À venir » et microcopie épurée (#517).
+- **Transitions de navigation** (#513) : shared-axis X + fade-through entre onglets, geste de retour prédictif.
+- **Search app bar translucide** (#519, #515) : barre de recherche qui se fond au scroll, bottom bar plus compacte (~64 dp), contenu qui passe sous la barre.
+- **Marqueur « · édité »** (#483) inline sur la ligne de date d'un post édité.
+- **Persistance de l'état des sondages** (#465) : déplié/replié conservé en changeant de page dans un sujet.
+
+### Fixed
+- **Drapeaux — rafraîchissement auto** (#501) au changement d'onglet et à la reprise de l'app.
+- **Badge MP non-lus** (#452, #453) : l'option de désactivation coupe réellement le réseau ; rafraîchissement à la lecture.
+- **Lignes vides parasites** (#466) : paragraphes séparés par des `&nbsp;` orphelins correctement rendus.
+- **En-tête de post stable** (#476) quand on coche/décoche pour le multiquote.
+- **Upload d'images durci** (#474) : provider Imgur + repository, erreurs réseau mieux typées.
+- **Bande noire sous le contenu** au-dessus de la bottom bar (#529) supprimée (inset bottom-only).
+- **Écritures de préférences** (#507) déplacées sur un scope applicatif.
+
+### Infra
+- CI éclatée par type de tâche (#491), garde-fou de test drapeaux « dernier posteur = last_author » (#331), doc vivante des limitations connues (#419).
+
+---
+
 ## v136 — `0.12.0` — 2026-06-14
 
 **Statut** : `open` (track open testing — canal beta, Play Edit committed) + F-Droid `.beta`
