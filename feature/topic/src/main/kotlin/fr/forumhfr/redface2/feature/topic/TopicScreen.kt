@@ -218,6 +218,19 @@ fun TopicScreen(
      * topic's `(subcat, page)` like [onReply].
      */
     onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
+    /**
+     * #465 — the user's MANUAL poll-expansion choice for THIS topic, owned by `:app` so it survives
+     * the per-page TopicRoute swap (like the multi-quote basket / scroll anchors). `null` means « no
+     * manual choice yet — follow the [TopicUiState.pollsExpandedDefault] setting »; `true` / `false`
+     * mean the user explicitly expanded / collapsed the poll. The screen only renders it.
+     */
+    pollManualExpanded: Boolean? = null,
+    /**
+     * #465 — records a tap on the poll card (the resulting revealed state), so `:app` caches the
+     * manual choice per `(cat, post)`. The next page of the same topic reads it back through
+     * [pollManualExpanded], keeping the poll collapsed / expanded across page navigation.
+     */
+    onPollExpansionChanged: (Boolean) -> Unit = {},
 ) {
     val viewModel = hiltViewModel<TopicViewModel, TopicViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -372,6 +385,8 @@ fun TopicScreen(
         multiQuoteSelection = multiQuoteSelection,
         onToggleMultiQuote = onToggleMultiQuote,
         onMultiQuote = onMultiQuote,
+        pollManualExpanded = pollManualExpanded,
+        onPollExpansionChanged = onPollExpansionChanged,
     )
 
     // #292 — confirmation before the (irreversible, no-undo) deletion. Only « Supprimer » sends the
@@ -601,6 +616,10 @@ internal fun TopicContent(
     multiQuoteSelection: List<Int> = emptyList(),
     onToggleMultiQuote: (numreponse: Int) -> Unit = {},
     onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
+    // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) +
+    // the callback recording a tap on the poll card. Threaded to the header card's poll.
+    pollManualExpanded: Boolean? = null,
+    onPollExpansionChanged: (Boolean) -> Unit = {},
 ) {
     // #285 — the topic title and #284 — the page counter live in a persistent top app bar so they
     // stay visible while the user scrolls (the in-card title/caption scrolls away). When the page
@@ -777,6 +796,8 @@ internal fun TopicContent(
                                 listState = listState,
                                 multiQuoteSelection = multiQuoteSelection,
                                 onToggleMultiQuote = onToggleMultiQuote,
+                                pollManualExpanded = pollManualExpanded,
+                                onPollExpansionChanged = onPollExpansionChanged,
                             )
                             LazyListScrollbar(
                                 listState = listState,
@@ -808,6 +829,10 @@ private fun TopicLoadedContent(
     // #291 — selection state + toggle for the post menu's multi-quote entry.
     multiQuoteSelection: List<Int> = emptyList(),
     onToggleMultiQuote: (numreponse: Int) -> Unit = {},
+    // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) + the
+    // callback recording a tap on the poll card. Threaded down to the header card's poll.
+    pollManualExpanded: Boolean? = null,
+    onPollExpansionChanged: (Boolean) -> Unit = {},
 ) {
     val highlight = state.request.scrollTo
     // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
@@ -934,6 +959,8 @@ private fun TopicLoadedContent(
                 onReply = onReply,
                 onEditFirstPost = editFirstPostAction,
                 onOpenPage = onOpenPage,
+                pollManualExpanded = pollManualExpanded,
+                onPollExpansionChanged = onPollExpansionChanged,
             )
         }
         items(
@@ -1082,12 +1109,17 @@ private fun EndOfTopicFooter() {
 }
 
 @Composable
+@Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
 private fun TopicHeaderCard(
     topic: Topic,
     state: TopicUiState,
     onReply: (subcat: Int, page: Int) -> Unit,
     onEditFirstPost: (() -> Unit)?,
     onOpenPage: (Int) -> Unit,
+    // #465 — manual poll choice (null = follow the global default) + its toggle callback, both
+    // owned by :app so the expand/collapse choice survives the per-page TopicRoute swap.
+    pollManualExpanded: Boolean? = null,
+    onPollExpansionChanged: (Boolean) -> Unit = {},
 ) {
     Card {
         Column(
@@ -1126,7 +1158,12 @@ private fun TopicHeaderCard(
                 onOpenPage = onOpenPage,
             )
             topic.poll?.let { poll ->
-                TopicPollCard(poll, expandedDefault = state.pollsExpandedDefault)
+                TopicPollCard(
+                    poll = poll,
+                    expandedDefault = state.pollsExpandedDefault,
+                    manualExpanded = pollManualExpanded,
+                    onExpansionChanged = onPollExpansionChanged,
+                )
             }
             Button(
                 onClick = { onReply(topic.subcat, topic.page) },
@@ -1253,16 +1290,23 @@ private fun TopicPageJumpField(
 }
 
 @Composable
-private fun TopicPollCard(poll: Poll, expandedDefault: Boolean) {
-    // #456 — the preference seeds the initial state only; the tap toggle stays per-topic and
-    // survives rotation (rememberSaveable). Keyed on the poll AND the seed so the card follows
-    // a Settings change without restart (the saved value wins otherwise).
-    var revealed by rememberSaveable(poll, expandedDefault) { mutableStateOf(expandedDefault) }
+private fun TopicPollCard(
+    poll: Poll,
+    expandedDefault: Boolean,
+    // #465 — the user's manual choice for this topic's poll, hoisted to :app so it survives the
+    // per-page TopicRoute swap. `null` = no manual choice yet → follow [expandedDefault] (#456).
+    manualExpanded: Boolean?,
+    onExpansionChanged: (Boolean) -> Unit,
+) {
+    // #456 — the preference seeds the initial state; #465 — once the user taps, the manual choice
+    // (owned by :app, keyed by topic) wins and survives navigation between the topic's pages. The
+    // card is fully controlled: it never holds the revealed state itself, it only reports a toggle.
+    val revealed = manualExpanded ?: expandedDefault
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
-        modifier = Modifier.clickable { revealed = !revealed },
+        modifier = Modifier.clickable { onExpansionChanged(!revealed) },
     ) {
         Column(
             modifier = Modifier
