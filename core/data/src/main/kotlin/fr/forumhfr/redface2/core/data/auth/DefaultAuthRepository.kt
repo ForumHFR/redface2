@@ -39,7 +39,17 @@ class DefaultAuthRepository @Inject constructor(
         .filterNotNull()
         .map { cookies ->
             val mdUser = cookies.firstOrNull { it.name == COOKIE_MD_USER && it.value.isNotBlank() }
-            if (mdUser != null) AuthState.Authenticated(decodePseudo(mdUser.value)) else AuthState.Anonymous
+            if (mdUser != null) {
+                // #479 — the numeric id (`md_id`) is captured here, at the same single point where the
+                // session pseudo is decoded, so every consumer (account badge avatar, …) can fetch the
+                // public profile by id without re-reading the cookie jar. Null-safe: a session without
+                // `md_id` (older cookie set) still authenticates — the avatar just falls back to the
+                // pseudo initial. The auth verdict depends ONLY on `md_user` (cf. AuthRemoteDataSource).
+                val userId = cookies.firstOrNull { it.name == COOKIE_MD_ID }?.value?.toIntOrNull()
+                AuthState.Authenticated(decodePseudo(mdUser.value), userId)
+            } else {
+                AuthState.Anonymous
+            }
         }
         .distinctUntilChanged()
 
@@ -69,6 +79,9 @@ class DefaultAuthRepository @Inject constructor(
 
     private companion object {
         const val COOKIE_MD_USER = "md_user"
+
+        /** HFR's numeric user-id cookie, set alongside `md_user`/`md_pass` on login (#479). */
+        const val COOKIE_MD_ID = "md_id"
 
         /**
          * #260 — HFR stores the pseudo in the `md_user` cookie form-urlencoded, so a pseudo with a
