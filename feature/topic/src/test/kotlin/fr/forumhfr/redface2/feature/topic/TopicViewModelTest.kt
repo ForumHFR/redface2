@@ -282,8 +282,59 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `scrollTo does not emit an effect when the target post is missing from the page`() = runTest {
-        val topic = fakeTopic(page = 1, totalPages = 1, posts = listOf(fakePost(numreponse = 555)))
+    fun `scrollTo on a deleted anchor falls back to the nearest surviving post (#394)`() = runTest {
+        // #394 — the « dernier lu » anchor (999) was deleted on HFR, so it is absent from the page.
+        // Instead of silently landing at the top with no cue (the old bug), the ViewModel resolves
+        // the nearest surviving post — the first one chronologically AFTER the deleted anchor (1001)
+        // — and emits ScrollToFallbackPost so the screen can land + cue there.
+        val topic = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(numreponse = 990), fakePost(numreponse = 1001)),
+        )
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
+
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1, scrollTo = 999),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToFallbackPost(1001), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `scrollTo on a deleted anchor past the page tail falls back to the last post (#394)`() = runTest {
+        // #394 — the deleted anchor (999) is newer than every surviving post on the page, so there is
+        // no post chronologically after it; the fallback is the page's last post (the closest
+        // surviving neighbour), never a top-of-page drop.
+        val topic = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(numreponse = 100), fakePost(numreponse = 200)),
+        )
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
+
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1, scrollTo = 999),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            assertEquals(TopicEffect.ScrollToFallbackPost(200), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `scrollTo on a deleted anchor with an empty page emits no effect (#394)`() = runTest {
+        // #394 — an empty page (e.g. an error fallback) has nothing to land on, so the screen keeps
+        // its default top landing; the ViewModel must not emit a fallback effect.
+        val topic = fakeTopic(page = 1, totalPages = 1, posts = emptyList())
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
         val viewModel = topicViewModel(
@@ -297,6 +348,30 @@ class TopicViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
     }
+
+    @Test
+    fun `a post-submit scrollTo missing from the page does NOT trigger the deleted-anchor fallback (#394)`() =
+        runTest {
+            // #394 scoping — the deleted-anchor fallback is for flag/deep-link anchors only. A
+            // post-submit reload (submitSignal != null) carries its own #200 contract: if its scrollTo
+            // is absent it must NOT be relocated as a « deleted anchor », so no ScrollToFallbackPost.
+            val freshTopic = fakeTopic(page = 1, totalPages = 1, posts = listOf(fakePost(555)))
+            val repository = FakeTopicRepository(
+                flowsToReturn = emptyList(),
+                refreshTopicsToReturn = listOf(freshTopic),
+            )
+
+            val viewModel = topicViewModel(
+                request = topicRequest(page = 1, scrollTo = 999, submitSignal = 7L),
+                topicRepository = repository,
+                authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            )
+
+            viewModel.effects.test {
+                expectNoEvents()
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
 
     @Test
     fun `scrollTo emits at most once even when the page reloads`() = runTest {

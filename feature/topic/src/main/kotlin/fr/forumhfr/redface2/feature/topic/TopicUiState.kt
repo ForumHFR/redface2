@@ -144,6 +144,17 @@ sealed interface TopicEffect {
     data class ScrollToPost(val numreponse: Int) : TopicEffect
 
     /**
+     * #394 — emitted when the route carried a `scrollTo` anchor (the « dernier lu » `numreponse` of
+     * a drapeau / deep link / search hit) but that post is ABSENT from the fetched page because it
+     * was DELETED on HFR since the anchor was recorded. The ViewModel resolves the nearest surviving
+     * post via [resolveDeletedAnchorFallback] and asks the screen to land there instead of silently
+     * dropping to the top with no cue. [numreponse] is guaranteed present in the loaded page (the
+     * screen resolves the index the same way as [ScrollToPost]); the screen also surfaces a subtle
+     * « dernier lu introuvable » Toast so the relocation never reads as a random jump.
+     */
+    data class ScrollToFallbackPost(val numreponse: Int) : TopicEffect
+
+    /**
      * Issue #200 — emitted after a plain reply submit when HFR's success URL anchors
      * `#bas` instead of `#t{numreponse}`. The screen scrolls to the last post on the
      * (force-refreshed) page so the user can see their freshly-published reply at the

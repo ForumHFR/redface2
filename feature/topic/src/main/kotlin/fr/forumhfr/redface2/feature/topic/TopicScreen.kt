@@ -253,6 +253,13 @@ fun TopicScreen(
     // #292 — `numreponse` awaiting delete confirmation (null = no dialog). Local UI state: the
     // confirmation is a pure view concern, only the confirmed deletion reaches the ViewModel.
     var deleteCandidate by rememberSaveable { mutableStateOf<Int?>(null) }
+    // #394 — when the route's `scrollTo` (« dernier lu ») points at a now-deleted post, the ViewModel
+    // resolves the nearest surviving post and emits ScrollToFallbackPost. We highlight THAT post
+    // (the route's scrollTo no longer matches any post, so the default highlight is empty). Survives
+    // recomposition; a page change recreates the screen, resetting it.
+    var fallbackHighlight by rememberSaveable { mutableStateOf<Int?>(null) }
+    // #394 — discreet cue resolved upfront (same rationale as the other Toast messages above).
+    val lastReadMissingMsg = stringResource(R.string.topic_last_read_post_missing)
 
     // Bug fix (build 89) — report the loaded title up so `:app` caches it per topic. The next page
     // (recreated screen) reads it back through `request.titleHint`, keeping the top bar title stable
@@ -302,6 +309,28 @@ fun TopicScreen(
                         // leaving the target off-screen on a cold image cache. Keep it pinned while
                         // the layout settles (bails on user scroll, bounded by a frame budget).
                         lazyListState.reanchorWhileMediaSettles(target)
+                    }
+                }
+                is TopicEffect.ScrollToFallbackPost -> {
+                    // #394 — the route's « dernier lu » anchor pointed at a post deleted on HFR. The
+                    // ViewModel resolved the nearest surviving post; land on it (same index + reanchor
+                    // path as ScrollToPost), highlight it so the user has a « dernier lu » cue, and
+                    // surface a discreet Toast so the relocation never reads as a random top-of-page
+                    // jump. The resolved numreponse is guaranteed present in the loaded page.
+                    val loadedMode = viewModel.state.first { it.mode is TopicUiState.Mode.Loaded }.mode
+                            as TopicUiState.Mode.Loaded
+                    val index = loadedMode.topic.posts.indexOfFirst { it.numreponse == effect.numreponse }
+                    if (index >= 0) {
+                        fallbackHighlight = effect.numreponse
+                        // +1 because the LazyColumn header card occupies item 0 (cf. ScrollToPost).
+                        val target = index + 1
+                        lazyListState.scrollToItem(target)
+                        lazyListState.reanchorWhileMediaSettles(target)
+                        android.widget.Toast.makeText(
+                            context,
+                            lastReadMissingMsg,
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
                     }
                 }
                 TopicEffect.ScrollToEndOfPage -> {
@@ -373,6 +402,7 @@ fun TopicScreen(
     TopicContent(
         state = state,
         listState = lazyListState,
+        fallbackHighlight = fallbackHighlight,
         onIntent = viewModel::send,
         onBack = onBack,
         onReply = onReply,
@@ -600,6 +630,10 @@ private const val REANCHOR_STABLE_FRAMES = 3
 internal fun TopicContent(
     state: TopicUiState,
     listState: LazyListState,
+    // #394 — `numreponse` of the surviving post to highlight when the route's « dernier lu » anchor
+    // was deleted (resolved by the ViewModel, owned by TopicScreen as one-shot UI state). `null` on
+    // every normal landing, where the highlight follows `state.request.scrollTo` as before.
+    fallbackHighlight: Int? = null,
     onIntent: (TopicIntent) -> Unit,
     onBack: () -> Unit,
     onReply: (subcat: Int, page: Int) -> Unit,
@@ -785,6 +819,7 @@ internal fun TopicContent(
                             TopicLoadedContent(
                                 state = state,
                                 topic = mode.topic,
+                                fallbackHighlight = fallbackHighlight,
                                 onReply = onReply,
                                 onQuote = onQuote,
                                 onEdit = onEdit,
@@ -816,6 +851,9 @@ internal fun TopicContent(
 private fun TopicLoadedContent(
     state: TopicUiState,
     topic: Topic,
+    // #394 — surviving post to highlight when the route's « dernier lu » anchor was deleted; falls
+    // back to the route `scrollTo` highlight when null (the normal case).
+    fallbackHighlight: Int? = null,
     onReply: (subcat: Int, page: Int) -> Unit,
     onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
@@ -834,7 +872,10 @@ private fun TopicLoadedContent(
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
 ) {
-    val highlight = state.request.scrollTo
+    // #394 — the deleted-anchor fallback (a surviving post resolved by the ViewModel) takes
+    // precedence: when set, the route's `scrollTo` no longer matches any post on the page, so
+    // highlighting it would tint nothing. Otherwise the highlight follows the route anchor as before.
+    val highlight = fallbackHighlight ?: state.request.scrollTo
     // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
     // the « cité N fois » badge below. Pure + page-scoped (cf. citationCountsByNumreponse KDoc).
     val citationCounts = remember(topic.posts) { citationCountsByNumreponse(topic.posts) }

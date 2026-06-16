@@ -259,6 +259,21 @@ class TopicViewModel @AssistedInject constructor(
                 _effects.send(TopicEffect.ScrollToPost(target))
                 scrollEffectEmitted = true
             }
+            // #394 — the route carried a `scrollTo` anchor (drapeau / deep link / search) but the
+            // post is gone from the page: it was deleted on HFR since the anchor was recorded. Rather
+            // than silently land at the top with no « dernier lu » cue, land on the nearest surviving
+            // post (the one chronologically just after the deleted anchor, else the page's last post)
+            // and let the screen surface a discreet « dernier lu introuvable » Toast. Gated on a
+            // post-less page (no anchor to resolve) so an empty error page keeps the top landing.
+            // Excludes the post-submit path (`submitSignal != null`): a quote/edit reload also carries
+            // a `scrollTo` and must keep its existing #200 ScrollToPost / fallback-to-top contract, not
+            // get relocated as a « deleted anchor ».
+            target != null && request.submitSignal == null -> {
+                resolveDeletedAnchorFallback(visiblePosts, target)?.let { fallback ->
+                    _effects.send(TopicEffect.ScrollToFallbackPost(fallback))
+                    scrollEffectEmitted = true
+                }
+            }
             // Issue #200 — plain reply path: HFR anchors `#bas` and the parser leaves
             // `scrollTo` null. We still got told this is a post-submit reload via
             // `submitSignal`, so we scroll to the end of the (force-refreshed) page where
