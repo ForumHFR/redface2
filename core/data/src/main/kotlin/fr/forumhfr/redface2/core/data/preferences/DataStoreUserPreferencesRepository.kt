@@ -332,6 +332,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeFoldLongQuotes(): Flow<Boolean> =
+        dataStore.data
+            // Default `true` (#332): the long-quote fold is the historical behaviour; turning it
+            // off is the opt-out for readers who found the auto-fold « trop strict ».
+            .map { prefs -> prefs[KEY_FOLD_LONG_QUOTES] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setFoldLongQuotes(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FOLD_LONG_QUOTES] = enabled
+            }
+        }
+    }
+
     override fun observeStartScreen(): Flow<StartScreenPreference> =
         dataStore.data
             .map(::readStartScreen)
@@ -629,6 +645,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #330 — render author signatures beneath posts (default false = hidden, signatures are noisy).
         val KEY_TOPIC_SIGNATURES = booleanPreferencesKey("topic_signatures")
+
+        // #332 — fold long top-level citations by default (default true = historical fold; opt-out).
+        val KEY_FOLD_LONG_QUOTES = booleanPreferencesKey("fold_long_quotes")
 
         // #458 — cold-start tab (StartScreenChoice.name, defensively parsed) + optional Forum
         // category id (absent unless screen == FORUM and a category was picked).

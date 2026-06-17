@@ -108,6 +108,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(topicSignatures = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeFoldLongQuotes().first() },
+            isLocked = { it.foldLongQuotesTouchedLocally || it.isUpdatingFoldLongQuotes },
+            apply = { state, value -> state.copy(foldLongQuotes = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeConfirmBeforePosting().first() },
             isLocked = { it.confirmBeforePostingTouchedLocally || it.isUpdatingConfirmBeforePosting },
             apply = { state, value -> state.copy(confirmBeforePosting = value) },
@@ -214,6 +219,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.MpUnreadBadgeChanged -> updateMpUnreadBadge(intent.enabled)
             is SettingsIntent.TopicPollsExpandedChanged -> updateTopicPollsExpanded(intent.enabled)
             is SettingsIntent.TopicSignaturesChanged -> updateTopicSignatures(intent.enabled)
+            is SettingsIntent.FoldLongQuotesChanged -> updateFoldLongQuotes(intent.enabled)
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
@@ -773,6 +779,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setTopicSignatures,
+        )
+    }
+
+    private fun updateFoldLongQuotes(desired: Boolean) {
+        val previous = _state.value.foldLongQuotes
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    foldLongQuotes = desired,
+                    isUpdatingFoldLongQuotes = true,
+                    foldLongQuotesError = false,
+                    foldLongQuotesTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(foldLongQuotes = desired, isUpdatingFoldLongQuotes = false)
+                } else {
+                    state.copy(
+                        foldLongQuotes = previous,
+                        isUpdatingFoldLongQuotes = false,
+                        foldLongQuotesError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setFoldLongQuotes,
         )
     }
 

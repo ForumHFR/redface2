@@ -1394,6 +1394,10 @@ class TopicFormViewModelTest {
 
         override suspend fun setTopicSignatures(enabled: Boolean) = Unit
 
+        override fun observeFoldLongQuotes(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setFoldLongQuotes(enabled: Boolean) = Unit
+
         override fun observeStartScreen(): Flow<StartScreenPreference> =
             MutableStateFlow(StartScreenPreference())
 

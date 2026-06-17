@@ -213,6 +213,19 @@ interface UserPreferencesRepository {
     suspend fun setTopicSignatures(enabled: Boolean)
 
     /**
+     * #332 — whether a "long" top-level citation folds to a one-line header by default (the
+     * `isLongQuote` behaviour: a wall-of-text quote is collapsed and revealed on tap). Default
+     * `true` = the historical fold; `false` disables it entirely so a long quote always renders
+     * expanded inline like a short one (the beta feedback that the auto-fold is « trop strict »).
+     * Pure render-time switch (no refetch), provided to the post renderer through a CompositionLocal
+     * at the app root ([fr.forumhfr.redface2.navigation.RedfaceApp]) and mirrored in Settings.
+     */
+    fun observeFoldLongQuotes(): Flow<Boolean>
+
+    /** Persists [observeFoldLongQuotes]. Default `true` until the first call. */
+    suspend fun setFoldLongQuotes(enabled: Boolean)
+
+    /**
      * #458 — which top-level tab (and optional Forum category) a cold start opens on. Default
      * [StartScreenChoice.FLAGS] (historical behaviour). The navigation reads the SYNCHRONOUS
      * [StartScreenBootstrapStore] mirror at cold start; this flow is the source of truth and
