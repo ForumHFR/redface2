@@ -1,13 +1,16 @@
-Redface 2 v0.13.0 — beta.
+Redface 2 v0.14.0 — beta.
 
 New:
-- Settings redesigned: dedicated tab, category-first navigation, search, smooth transitions.
-- Compact bottom bar, translucent search bar on scroll.
-- "edited" marker, steady post header on multi-quote, poll state kept across pages.
+- Post signatures shown beneath the message (dedicated setting).
+- Account avatar in the top bar.
+- Long quotes are collapsible.
+- Flags action bar hides on scroll.
+
+Improvements:
+- Unified topic info line, harmonized icon buttons, images without layout shift.
 
 Fixes:
-- Flags refresh on tab switch and on resume.
-- Unread MP badge that truly cuts the network when off.
-- Stray empty lines in posts, hardened image upload.
+- Flags scrolled back to top after refresh.
+- Signature separator "---" removed from rendering.
 
 Report bugs via the beta or GitHub.

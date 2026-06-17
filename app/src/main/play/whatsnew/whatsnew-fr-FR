@@ -1,13 +1,16 @@
-Redface 2 v0.13.0 — bêta.
+Redface 2 v0.14.0 — bêta.
 
 Nouveautés :
-- Réglages repensés : onglet dédié, navigation par catégories, recherche, transitions fluides.
-- Bottom bar compacte, recherche translucide au défilement.
-- Marqueur « édité », en-tête stable au multiquote, sondages conservés entre pages.
+- Signatures des posts affichées sous le message (réglage dédié).
+- Avatar du compte dans la barre du haut.
+- Longues citations repliables.
+- Barre d'actions des drapeaux masquée au défilement.
+
+Améliorations :
+- Infos des sujets unifiées, boutons-icônes harmonisés, images sans saut de page.
 
 Correctifs :
-- Drapeaux rafraîchis au changement d'onglet et à la reprise.
-- Badge MP non-lus qui coupe vraiment le réseau.
-- Lignes vides parasites, upload d'images durci.
+- Drapeaux recalés en haut après le rafraîchissement.
+- Séparateur de signature « --- » retiré du rendu.
 
 Signalez les bugs via la bêta ou GitHub.
