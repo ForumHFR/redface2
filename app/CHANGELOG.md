@@ -16,13 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
-## v155 — `0.14.0` — 2026-06-17
+## v156 — `0.14.0` — 2026-06-17
 
-**Statut** : candidat bêta (à dispatcher) — destiné au track open testing + F-Droid `.beta`.
-**Commit** : promotion dev→main (cf. PR de promotion).
-**Contenu depuis la 0.13.0/v145** : dogfoodé sur le canal dev (v146 → v154).
+**Statut** : `open` (track open testing — canal beta, Play Edit committed) + F-Droid `.beta`
+**Commit** : promotion dev→main #558 (`182c4fb`), tag `app-v156`.
+**Contenu depuis la 0.13.0/v145** : dogfoodé sur le canal dev (v146 → v155).
 
-> `0.13.0` ayant déjà été shippé en bêta (v145), le `versionName` est bumpé en `0.14.0` (la garde CI refuse deux bêtas au même `versionName`). Le `versionCode` final est alloué au dispatch (registre de tags) ; le `v155` indiqué ici est le candidat et sera corrigé si d'autres builds dev s'intercalent avant la promotion.
+> `0.13.0` ayant déjà été shippé en bêta (v145), le `versionName` est bumpé en `0.14.0` (la garde CI refuse deux bêtas au même `versionName`). Le `versionCode` final a été alloué au dispatch par le registre de tags : **`app-v156`** (le candidat noté ici était `v155`, décalé d'un cran par les builds dev intercalés).
 
 ### Added
 - **Signatures des posts** (#330) : la signature de l'auteur s'affiche sous le message, derrière un réglage dédié.
