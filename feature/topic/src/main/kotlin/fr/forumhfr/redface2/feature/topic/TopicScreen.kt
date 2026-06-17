@@ -1832,8 +1832,9 @@ private fun DeletePostConfirmDialog(
  * #411 — drives the bottom-action cluster's show-on-scroll-up visibility, derived READ-ONLY from
  * [listState] (it never drives scrolling, so the anchor/restore #307 and the swipe #282 stay
  * untouched). Hides while the list scrolls DOWN, reveals on the first UPWARD scroll — the M3 idiom,
- * matching the collapsible top bar. A list that cannot scroll (a short, one-screen topic) stays
- * visible, so a page with nothing below never hides its actions.
+ * matching the collapsible top bar. It also stays visible at the END of the list (and on a short,
+ * one-screen topic): reaching the last post is exactly when the reader wants to reply, so the cluster
+ * must be there without scrolling back up (#411 beta feedback).
  */
 @Composable
 private fun rememberBottomActionsVisible(listState: LazyListState): Boolean {
@@ -1847,7 +1848,10 @@ private fun rememberBottomActionsVisible(listState: LazyListState): Boolean {
         snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
             .collect { (index, offset) ->
                 visible = when {
-                    !listState.canScrollForward && !listState.canScrollBackward -> true
+                    // At the end of the list (or a short, non-scrollable page) always show: the user is
+                    // on the last post and most likely wants to reply, so they should not have to scroll
+                    // up to reveal the cluster (#411 beta feedback, tinc t2788220).
+                    !listState.canScrollForward -> true
                     index != prevIndex -> index < prevIndex
                     offset != prevOffset -> offset < prevOffset
                     // No real movement (incl. snapshotFlow's initial emission): hold the last decision
