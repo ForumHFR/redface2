@@ -47,6 +47,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -91,6 +92,7 @@ import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
+import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -1705,10 +1707,16 @@ internal fun TopicPostCard(
             post.signature?.let { signature ->
                 if (showSignature) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    PostRenderer(
-                        content = signature,
-                        modifier = Modifier.alpha(SIGNATURE_ALPHA),
-                    )
+                    // #553 — drop the author's web-tuned `[color]` in the signature: on the app theme
+                    // (especially dark) those colours read as garish/illegible. The signature then
+                    // renders in the neutral subdued body colour (the reduced alpha keeps it
+                    // subordinate). Post bodies are unaffected (they don't provide this local).
+                    CompositionLocalProvider(LocalIgnoreInlineColors provides true) {
+                        PostRenderer(
+                            content = signature,
+                            modifier = Modifier.alpha(SIGNATURE_ALPHA),
+                        )
+                    }
                 }
             }
             if (onQuote != null || onEdit != null || onToggleMultiQuote != null) {

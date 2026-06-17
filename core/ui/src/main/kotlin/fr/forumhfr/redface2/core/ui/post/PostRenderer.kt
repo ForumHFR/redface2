@@ -80,6 +80,7 @@ import coil3.size.Precision
 import coil3.size.Scale
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
+import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
@@ -256,10 +257,12 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
         )
     }
     val imageAlt = stringResource(R.string.post_inline_image_alt)
+    // #553 — signatures provide LocalIgnoreInlineColors = true so author `[color]` is dropped.
+    val ignoreColors = LocalIgnoreInlineColors.current
     // The AnnotatedString is INVARIANT — it carries only the U+FFFC markers + IDs (via MediaCounter),
     // never a size — so it is never rebuilt when a measurement lands (#175 stability pivot).
-    val annotated = remember(inlines, linkStyles, imageAlt) {
-        buildInlineText(inlines, linkStyles, imageAlt)
+    val annotated = remember(inlines, linkStyles, imageAlt, ignoreColors) {
+        buildInlineText(inlines, linkStyles, imageAlt, ignoreColors)
     }
     val hasMedia = remember(inlines) { hasInlineMedia(inlines) }
 
@@ -894,9 +897,13 @@ internal fun buildInlineText(
     inlines: List<PostInline>,
     linkStyles: TextLinkStyles,
     imageAlt: String,
+    // #553 — when true, the author's inline `[color]` styling is dropped (used for signatures, whose
+    // web-tuned colours read as garish/illegible on the app theme). Text falls back to the caller's
+    // colour. Default false: post bodies keep author colours.
+    ignoreColors: Boolean = false,
 ): AnnotatedString = buildAnnotatedString {
     val media = MediaCounter()
-    appendInlines(inlines, linkStyles, media, imageAlt)
+    appendInlines(inlines, linkStyles, media, imageAlt, ignoreColors)
 }
 
 private fun AnnotatedString.Builder.appendInlines(
@@ -904,8 +911,9 @@ private fun AnnotatedString.Builder.appendInlines(
     linkStyles: TextLinkStyles,
     media: MediaCounter,
     imageAlt: String,
+    ignoreColors: Boolean,
 ) {
-    inlines.forEach { inline -> appendInline(inline, linkStyles, media, imageAlt) }
+    inlines.forEach { inline -> appendInline(inline, linkStyles, media, imageAlt, ignoreColors) }
 }
 
 @Suppress("CyclomaticComplexMethod")
@@ -914,32 +922,39 @@ private fun AnnotatedString.Builder.appendInline(
     linkStyles: TextLinkStyles,
     media: MediaCounter,
     imageAlt: String,
+    ignoreColors: Boolean,
 ) {
     when (inline) {
         is PostInline.Text -> append(inline.value)
         PostInline.LineBreak -> append('\n')
         is PostInline.Strong -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
         }
 
         is PostInline.Emphasis -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
         }
 
         is PostInline.Underline -> withStyle(SpanStyle(textDecoration = TextDecoration.Underline)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
         }
 
         is PostInline.Strike -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
         }
 
-        is PostInline.Color -> withStyle(SpanStyle(color = parseColor(inline.colorHex))) {
-            appendInlines(inline.children, linkStyles, media, imageAlt)
+        // #553 — drop the author colour when asked (signatures): render the children plain so they
+        // inherit the caller's neutral colour instead of the web-tuned, often-illegible author hue.
+        is PostInline.Color -> if (ignoreColors) {
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+        } else {
+            withStyle(SpanStyle(color = parseColor(inline.colorHex))) {
+                appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            }
         }
 
         is PostInline.Link -> withLink(LinkAnnotation.Url(inline.url, linkStyles)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
         }
 
         is PostInline.InlineImage -> appendInlineContent(media.nextImage(), inline.description ?: imageAlt)

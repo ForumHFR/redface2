@@ -70,3 +70,12 @@ val LocalDisplayMetrics = staticCompositionLocalOf { DisplayMetrics.Comfort }
  * resolved value from [ReadingDisplaySettings.foldLongQuotes].
  */
 val LocalFoldLongQuotes = staticCompositionLocalOf { true }
+
+/**
+ * Project CompositionLocal asking the post renderer to IGNORE the author's inline `[color]` styling
+ * for the subtree it wraps (#553). HFR signatures embed colours chosen for the white web background;
+ * rendered as-is on the app theme (especially dark) they read as unreadable/garish, so the signature
+ * render site provides `true` and the text falls back to the theme's neutral colour. Defaults to
+ * `false` (post bodies keep author colours). `staticCompositionLocalOf`: flips rarely, scoped reads.
+ */
+val LocalIgnoreInlineColors = staticCompositionLocalOf { false }
