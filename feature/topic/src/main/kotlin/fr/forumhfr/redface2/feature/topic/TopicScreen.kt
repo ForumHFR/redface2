@@ -1,6 +1,11 @@
 package fr.forumhfr.redface2.feature.topic
 
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -51,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -625,6 +631,8 @@ internal fun TopicContent(
     // stay visible while the user scrolls (the in-card title/caption scrolls away). When the page
     // is still loading / errored, fall back to a generic title and the requested page.
     val loaded = state.mode as? TopicUiState.Mode.Loaded
+    // #411 — bottom action cluster hides on scroll-down, re-appears on scroll-up (RF1 parity).
+    val bottomActionsVisible = rememberBottomActionsVisible(listState)
     val fallbackTitle = stringResource(R.string.topic_topbar_fallback_title)
     // Honour TopicRequest.titleHint's contract: the cached hint is a LOADING-only stand-in. Once the
     // page is Loaded, the live Topic.title wins (or the generic fallback if it is somehow blank) — we
@@ -695,26 +703,35 @@ internal fun TopicContent(
             // scrollbar (right edge, auto-hiding) — a slight bottom-right overlap is acceptable.
             val current = loaded
             if (current != null) {
-                TopicBottomActions(
-                    showReply = shouldEnableReply(current.topic, state.isAuthenticated),
-                    showPageFabs = state.showPageFabs,
-                    canGoPrevious = state.canGoPrevious,
-                    canGoNext = state.canGoNext,
-                    // #291 — the « Citer N » FAB shares the reply gate: quoting IS replying.
-                    multiQuoteCount = effectiveMultiQuoteCount(
-                        current.topic,
-                        state.isAuthenticated,
-                        multiQuoteSelection,
-                    ),
-                    // Clamp to [1, totalPages]: `canGoPrevious/Next` are derived from `request.page`
-                    // while the target is computed from the parsed `topic.page`; if those ever desync
-                    // (HFR clamps an out-of-range page to the last one), the clamp keeps navigation in
-                    // bounds — same robustness as the header guard and the swipe (#282).
-                    onPreviousPage = { onOpenPage((current.topic.page - 1).coerceAtLeast(1)) },
-                    onNextPage = { onOpenPage((current.topic.page + 1).coerceAtMost(current.topic.totalPages)) },
-                    onReply = { onReply(current.topic.subcat, current.topic.page) },
-                    onMultiQuote = { onMultiQuote(current.topic.subcat, current.topic.page) },
-                )
+                // #411 — tuck the cluster away while reading down, reveal it on the first upward
+                // scroll. AnimatedVisibility in the Scaffold's FAB slot simply collapses to nothing
+                // when hidden; the slide/fade mirrors the collapsible top bar (#286/#338).
+                AnimatedVisibility(
+                    visible = bottomActionsVisible,
+                    enter = fadeIn() + slideInVertically { it },
+                    exit = fadeOut() + slideOutVertically { it },
+                ) {
+                    TopicBottomActions(
+                        showReply = shouldEnableReply(current.topic, state.isAuthenticated),
+                        showPageFabs = state.showPageFabs,
+                        canGoPrevious = state.canGoPrevious,
+                        canGoNext = state.canGoNext,
+                        // #291 — the « Citer N » FAB shares the reply gate: quoting IS replying.
+                        multiQuoteCount = effectiveMultiQuoteCount(
+                            current.topic,
+                            state.isAuthenticated,
+                            multiQuoteSelection,
+                        ),
+                        // Clamp to [1, totalPages]: `canGoPrevious/Next` are derived from `request.page`
+                        // while the target is computed from the parsed `topic.page`; if those ever desync
+                        // (HFR clamps an out-of-range page to the last one), the clamp keeps navigation in
+                        // bounds — same robustness as the header guard and the swipe (#282).
+                        onPreviousPage = { onOpenPage((current.topic.page - 1).coerceAtLeast(1)) },
+                        onNextPage = { onOpenPage((current.topic.page + 1).coerceAtMost(current.topic.totalPages)) },
+                        onReply = { onReply(current.topic.subcat, current.topic.page) },
+                        onMultiQuote = { onMultiQuote(current.topic.subcat, current.topic.page) },
+                    )
+                }
             }
         },
     ) { innerPadding ->
@@ -1809,6 +1826,39 @@ private fun DeletePostConfirmDialog(
             }
         },
     )
+}
+
+/**
+ * #411 — drives the bottom-action cluster's show-on-scroll-up visibility, derived READ-ONLY from
+ * [listState] (it never drives scrolling, so the anchor/restore #307 and the swipe #282 stay
+ * untouched). Hides while the list scrolls DOWN, reveals on the first UPWARD scroll — the M3 idiom,
+ * matching the collapsible top bar. A list that cannot scroll (a short, one-screen topic) stays
+ * visible, so a page with nothing below never hides its actions.
+ */
+@Composable
+private fun rememberBottomActionsVisible(listState: LazyListState): Boolean {
+    var visible by remember(listState) { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        var prevIndex = listState.firstVisibleItemIndex
+        var prevOffset = listState.firstVisibleItemScrollOffset
+        // snapshotFlow only emits on a REAL position change, so a recomposition / async layout shift
+        // with an identical first-visible item+offset never re-reveals the cluster (Codex review): the
+        // last decision is simply held. A list that cannot scroll stays visible.
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                visible = when {
+                    !listState.canScrollForward && !listState.canScrollBackward -> true
+                    index != prevIndex -> index < prevIndex
+                    offset != prevOffset -> offset < prevOffset
+                    // No real movement (incl. snapshotFlow's initial emission): hold the last decision
+                    // so the cluster stays visible on load and never flips without a scroll.
+                    else -> visible
+                }
+                prevIndex = index
+                prevOffset = offset
+            }
+    }
+    return visible
 }
 
 /**
