@@ -513,6 +513,8 @@ fun RedfaceApp(intent: Intent?) {
     // #287 — reading presets (density + font scale) resolved at the root and bundled for RedfaceTheme.
     val displayDensity by themeViewModel.displayDensity.collectAsStateWithLifecycle()
     val fontScale by themeViewModel.fontScale.collectAsStateWithLifecycle()
+    // #332 — « fold long quotes » reading preference, provided to the post renderer via RedfaceTheme.
+    val foldLongQuotes by themeViewModel.foldLongQuotes.collectAsStateWithLifecycle()
     // #445 — debug bounds overlay preference (the dev-channel gate + render live in
     // [DevDebugBoundsOverlay], emitted last so it paints over everything; off by default).
     val debugBoundsOverlay by themeViewModel.debugBoundsOverlay.collectAsStateWithLifecycle()
@@ -541,7 +543,11 @@ fun RedfaceApp(intent: Intent?) {
     RedfaceTheme(
         darkTheme = darkTheme,
         amoledTheme = amoledEnabled,
-        reading = ReadingDisplaySettings(density = displayDensity, fontScale = fontScale),
+        reading = ReadingDisplaySettings(
+            density = displayDensity,
+            fontScale = fontScale,
+            foldLongQuotes = foldLongQuotes,
+        ),
     ) {
         // #458 — cold-start screen, read synchronously from the bootstrap mirror and frozen for
         // the session. Only the INITIAL values below consume it: rememberSaveable and

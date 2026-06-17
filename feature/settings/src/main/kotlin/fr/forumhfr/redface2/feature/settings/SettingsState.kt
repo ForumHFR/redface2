@@ -112,6 +112,13 @@ data class SettingsState(
     val isUpdatingTopicSignatures: Boolean = false,
     val topicSignaturesError: Boolean = false,
     val topicSignaturesTouchedLocally: Boolean = false,
+    // #332 — replier les longues citations. Même machinerie optimistic-flip + garde de course au
+    // démarrage. Default TRUE (repli historique) : le toggle est l'opt-out demandé par le retour
+    // bêta « trop strict ».
+    val foldLongQuotes: Boolean = true,
+    val isUpdatingFoldLongQuotes: Boolean = false,
+    val foldLongQuotesError: Boolean = false,
+    val foldLongQuotesTouchedLocally: Boolean = false,
     // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
     // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
     // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
@@ -220,6 +227,10 @@ data class SettingsState(
     // #330 — the signatures toggle is gated only by its own write.
     val canToggleTopicSignatures: Boolean
         get() = !isUpdatingTopicSignatures
+
+    // #332 — the fold-long-quotes toggle is gated only by its own write.
+    val canToggleFoldLongQuotes: Boolean
+        get() = !isUpdatingFoldLongQuotes
 
     // #312 — the confirm-before-posting toggle is gated only by its own write.
     val canToggleConfirmBeforePosting: Boolean
@@ -331,6 +342,9 @@ sealed interface SettingsIntent {
 
     /** #330 — afficher les signatures des auteurs sous les posts. */
     data class TopicSignaturesChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #332 — replier les longues citations sur une ligne. */
+    data class FoldLongQuotesChanged(val enabled: Boolean) : SettingsIntent
 
     // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
     // the boolean is the desired post-flip state.

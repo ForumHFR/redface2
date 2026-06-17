@@ -112,7 +112,6 @@
     <!-- §3 Sujet et lecture -->
     <string name="settings_future_restore_read_position">Restaurer la position de lecture</string>
     <string name="settings_future_swipe_page">Changer de page au glissement</string>
-    <string name="settings_future_collapse_quotes">Replier les longues citations</string>
     <string name="settings_future_open_external_in_app">Ouvrir les liens externes dans l\'app</string>
     <string name="settings_future_autoplay_animations">Lecture auto des images animées</string>
     <string name="settings_future_fullscreen_reading">Plein écran en lecture</string>
@@ -294,6 +293,11 @@
     <string name="settings_topic_signatures_title">Afficher les signatures</string>
     <string name="settings_topic_signatures_description">Signature de l\'auteur sous chaque post, en plus discret.</string>
     <string name="settings_topic_signatures_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+
+    <!-- #332 — Lecture. Replier les longues citations sur une ligne (dépliables au clic). -->
+    <string name="settings_fold_long_quotes_title">Replier les longues citations</string>
+    <string name="settings_fold_long_quotes_description">Les longues citations sont repliées sur une ligne, dépliables au clic ; sinon elles restent affichées en entier.</string>
+    <string name="settings_fold_long_quotes_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- #312 — Publication. Confirmation avant chaque envoi (réponse/édition de message, sujet,
          message privé) ; persisté en DataStore et lu en direct par les éditeurs.

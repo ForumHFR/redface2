@@ -10,6 +10,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
 import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
+import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import fr.forumhfr.redface2.core.ui.theme.RedfaceAmoledColorScheme
 import fr.forumhfr.redface2.core.ui.theme.RedfaceDarkColorScheme
@@ -39,6 +40,9 @@ fun RedfaceTheme(
 
     CompositionLocalProvider(
         LocalDisplayMetrics provides DisplayMetrics.of(reading.density),
+        // #332 — expose the « fold long quotes » preference to the post renderer (read via
+        // LocalFoldLongQuotes.current in QuoteBlock) so flipping the toggle re-renders posts.
+        LocalFoldLongQuotes provides reading.foldLongQuotes,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

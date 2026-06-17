@@ -79,6 +79,7 @@ import coil3.request.crossfade
 import coil3.size.Precision
 import coil3.size.Scale
 import fr.forumhfr.redface2.core.ui.R
+import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
@@ -382,7 +383,10 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
         CollapsedQuoteBlock(block, quoteDepth)
         return
     }
-    if (isLongQuote(block, quoteDepth)) {
+    // #332 — the long-quote fold is gated on the user preference (default ON = historical fold).
+    // When OFF we skip FoldableQuoteBlock entirely and fall through to the normal expanded render,
+    // exactly as if the quote were not "long". The depth fold above is unaffected.
+    if (LocalFoldLongQuotes.current && isLongQuote(block, quoteDepth)) {
         FoldableQuoteBlock(block, quoteDepth)
         return
     }

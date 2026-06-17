@@ -1012,6 +1012,45 @@ class SettingsViewModelTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────
+    // Fold long quotes (#332)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates foldLongQuotes from a persisted false`() = runTest {
+        // Default is true — only a persisted opt-OUT exercises the hydration path.
+        repository.emitFoldLongQuotes(false)
+
+        val viewModel = newViewModel()
+
+        assertFalse(viewModel.state.value.foldLongQuotes)
+        assertFalse(viewModel.state.value.foldLongQuotesError)
+    }
+
+    @Test
+    fun `FoldLongQuotesChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertTrue("long quotes fold by default", viewModel.state.value.foldLongQuotes)
+
+        viewModel.submit(SettingsIntent.FoldLongQuotesChanged(false))
+
+        assertFalse(viewModel.state.value.foldLongQuotes)
+        assertFalse(viewModel.state.value.isUpdatingFoldLongQuotes)
+        assertEquals(1, repository.foldLongQuotesSetCalls)
+    }
+
+    @Test
+    fun `FoldLongQuotesChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnFoldLongQuotesSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.FoldLongQuotesChanged(false))
+
+        assertTrue("failed persist must revert to the previous value", viewModel.state.value.foldLongQuotes)
+        assertFalse(viewModel.state.value.isUpdatingFoldLongQuotes)
+        assertTrue(viewModel.state.value.foldLongQuotesError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Debug bounds overlay (#445)
     // ──────────────────────────────────────────────────────────────────────
 
@@ -1574,6 +1613,24 @@ class SettingsViewModelTest {
 
         fun emitTopicSignatures(value: Boolean) {
             topicSignatures.value = value
+        }
+
+        // #332 — replier les longues citations. Même seam optimistic-flip ; default TRUE (repli).
+        private val foldLongQuotes = MutableStateFlow(true)
+        var foldLongQuotesSetCalls: Int = 0
+            private set
+        var failOnFoldLongQuotesSet: Boolean = false
+
+        override fun observeFoldLongQuotes(): Flow<Boolean> = foldLongQuotes
+
+        override suspend fun setFoldLongQuotes(enabled: Boolean) {
+            foldLongQuotesSetCalls += 1
+            check(!failOnFoldLongQuotesSet) { "boom" }
+            foldLongQuotes.value = enabled
+        }
+
+        fun emitFoldLongQuotes(value: Boolean) {
+            foldLongQuotes.value = value
         }
 
         // #458 — start screen lives on its own StartScreenSettingsViewModel; this fake only

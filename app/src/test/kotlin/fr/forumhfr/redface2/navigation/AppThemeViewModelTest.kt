@@ -54,6 +54,8 @@ class AppThemeViewModelTest {
             every { observeFontScale() } returns MutableStateFlow(FontScalePreference.M)
             // #445 — eagerly collected by the VM constructor; default off is enough here.
             every { observeDebugBoundsOverlay() } returns MutableStateFlow(false)
+            // #332 — eagerly collected by the VM constructor; default on is enough here.
+            every { observeFoldLongQuotes() } returns MutableStateFlow(true)
         }
 
         val vm = AppThemeViewModel(
@@ -75,6 +77,8 @@ class AppThemeViewModelTest {
             every { observeFontScale() } returns MutableStateFlow(FontScalePreference.M)
             // #445 — eagerly collected by the VM constructor; default off is enough here.
             every { observeDebugBoundsOverlay() } returns MutableStateFlow(false)
+            // #332 — eagerly collected by the VM constructor; default on is enough here.
+            every { observeFoldLongQuotes() } returns MutableStateFlow(true)
         }
 
         val vm = AppThemeViewModel(

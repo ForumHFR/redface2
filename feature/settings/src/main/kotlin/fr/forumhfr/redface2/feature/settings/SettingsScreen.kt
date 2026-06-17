@@ -520,6 +520,17 @@ internal fun buildSettingsCatalogue(
                     .takeIf { state.topicSignaturesError },
                 onCheckedChange = { onIntent(SettingsIntent.TopicSignaturesChanged(it)) },
             ),
+            // #332 — replaces the former `future_collapse_quotes` placeholder, now shipped.
+            toggleRow(
+                id = "fold_long_quotes",
+                title = stringResource(R.string.settings_fold_long_quotes_title),
+                description = stringResource(R.string.settings_fold_long_quotes_description),
+                checked = state.foldLongQuotes,
+                enabled = state.canToggleFoldLongQuotes,
+                errorRes = R.string.settings_fold_long_quotes_persist_failed
+                    .takeIf { state.foldLongQuotesError },
+                onCheckedChange = { onIntent(SettingsIntent.FoldLongQuotesChanged(it)) },
+            ),
             futureRow(
                 id = "future_restore_read_position",
                 title = stringResource(R.string.settings_future_restore_read_position),
@@ -527,10 +538,6 @@ internal fun buildSettingsCatalogue(
             futureRow(
                 id = "future_swipe_page",
                 title = stringResource(R.string.settings_future_swipe_page),
-            ),
-            futureRow(
-                id = "future_collapse_quotes",
-                title = stringResource(R.string.settings_future_collapse_quotes),
             ),
             futureRow(
                 id = "future_prefetch",

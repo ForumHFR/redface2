@@ -61,3 +61,12 @@ data class DisplayMetrics(
  * Defaults to [DisplayMetrics.Comfort] for previews / hosts that do not provide it.
  */
 val LocalDisplayMetrics = staticCompositionLocalOf { DisplayMetrics.Comfort }
+
+/**
+ * Project CompositionLocal carrying the #332 « fold long quotes » reading preference. Same
+ * `staticCompositionLocalOf` rationale as [LocalDisplayMetrics]: the value changes only when the
+ * user flips the toggle, so the subtree recomposes once on change. Defaults to `true` (the
+ * historical fold) for previews / hosts that do not provide it; `RedfaceTheme` provides the
+ * resolved value from [ReadingDisplaySettings.foldLongQuotes].
+ */
+val LocalFoldLongQuotes = staticCompositionLocalOf { true }

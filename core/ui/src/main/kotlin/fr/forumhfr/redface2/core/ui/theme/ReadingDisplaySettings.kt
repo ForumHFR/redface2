@@ -15,4 +15,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 data class ReadingDisplaySettings(
     val density: DisplayDensity = DisplayDensity.COMFORT,
     val fontScale: FontScalePreference = FontScalePreference.M,
+    // #332 — whether a long top-level citation folds to a one-line header by default. `true`
+    // (default) keeps the historical fold; `false` disables it so a long quote renders expanded.
+    val foldLongQuotes: Boolean = true,
 )
