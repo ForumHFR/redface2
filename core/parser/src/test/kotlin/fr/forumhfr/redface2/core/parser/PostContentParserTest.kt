@@ -217,6 +217,12 @@ class PostContentParserTest {
             "signature content must be parsed, got=$signatureText",
             signatureText.contains("Ma signature avec un"),
         )
+        // The HFR « --------------- » separator that opens every signature span is server chrome,
+        // not content — it must be stripped, never rendered as the first signature line (XaaT).
+        assertFalse(
+            "the HFR signature separator must not leak into the signature, got=$signatureText",
+            signatureText.contains("---"),
+        )
         // Inline formatting inside the signature survives (shared parseBlocks pipeline).
         assertTrue(
             "signature inline formatting must survive",
@@ -246,18 +252,20 @@ class PostContentParserTest {
     }
 
     @Test
-    fun `signature span with only decoration edge-trims to null`() {
-        // The dashes line + the trailing `clear: both` spacer are HFR boilerplate; a signature
-        // carrying nothing else must report null (no empty subdued block under the post).
+    fun `signature span with only the separator and decoration edge-trims to null`() {
+        // The « --------------- » separator line + the trailing `clear: both` spacer are HFR
+        // boilerplate; a signature carrying nothing else must report null (no empty subdued block
+        // under the post). Real-shape fixture: the separator dashes text node, a <br>, the spacer.
         val html = """
             <div id="para1980664236"><p>Corps.<div style="clear: both;"> </div></p>
-            <br /><span class="signature"><br /><div style="clear: both;"> </div></span></div>
+            <br /><span class="signature"> ---------------
+            <br /><div style="clear: both;"> </div></span></div>
         """.trimIndent()
         val contentElement = Jsoup.parse(html).selectFirst("div[id^=para]")
 
         val parsed = PostContentParser().parse(contentElement)
 
-        assertEquals("a decoration-only signature must report null", null, parsed.signature)
+        assertEquals("a separator-only signature must report null", null, parsed.signature)
     }
 
     @Test
