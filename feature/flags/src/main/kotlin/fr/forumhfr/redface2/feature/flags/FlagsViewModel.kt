@@ -382,6 +382,24 @@ class FlagsViewModel @Inject constructor(
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
 
     /**
+     * #546 — one-shot signal raised when a LANDING auto-refresh commits (app open, tab switch,
+     * resume) so the screen can recall the list to the top. An auto-refresh prepends freshly-surfaced
+     * flags; a held [androidx.compose.foundation.lazy.LazyListState] would otherwise leave those new
+     * top rows scrolled off-screen, the « faut scroller vers le haut » beta report (tinc, Lt Ripley).
+     * A return-from-topic refresh is deliberately EXCLUDED so the reader keeps their place in the list
+     * they were browsing.
+     *
+     * Modelled as a **consumable** boolean (set on the landing refresh, reset by
+     * [consumeRecallListToTop] once the screen has scrolled), exactly like [removeFlagEvent] — NOT a
+     * replayable counter. A counter's latest value re-arms a brand-new collector, so a rotation or a
+     * route recreation would replay the last scroll-to-top with no fresh refresh behind it (Codex
+     * review #546); a consumed `false` is inert on re-subscription, and an un-consumed `true` survives
+     * the recreation as a genuine still-pending scroll.
+     */
+    private val _recallListToTop = MutableStateFlow(false)
+    val recallListToTop: StateFlow<Boolean> = _recallListToTop.asStateFlow()
+
+    /**
      * Tab selection. Re-tapping [FlagTab.Cyan] while it is **already** selected toggles its
      * « non-lus uniquement » filter (show / hide the already-read participated topics) — the « +lus »
      * shortcut, inline replacement for the former « Cyans lus » FilterChip. Selecting Cyan from
@@ -442,6 +460,11 @@ class FlagsViewModel @Inject constructor(
     /** Consume the one-shot removal event after the snackbar has been shown. */
     fun consumeRemoveFlagEvent() {
         _removeFlagEvent.value = null
+    }
+
+    /** Consume the one-shot « recall to top » signal once the screen has scrolled (#546). */
+    fun consumeRecallListToTop() {
+        _recallListToTop.value = false
     }
 
     /**
@@ -588,6 +611,11 @@ class FlagsViewModel @Inject constructor(
             _isRefreshing.value = true
             try {
                 flagRepository.refresh(type)
+                // #546 — a genuine landing / tab-switch / resume refresh: recall the list to the top
+                // so the freshly prepended flags are visible. A return-from-topic refresh keeps the
+                // reader's current position (it is not a fresh landing). One-shot signal, consumed by
+                // the screen — see [recallListToTop].
+                if (!returningFromTopic) _recallListToTop.value = true
             } finally {
                 _isRefreshing.value = false
             }

@@ -1156,6 +1156,37 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `maybeAutoRefresh recalls the list to the top on a landing refresh (#546)`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        vm.maybeAutoRefresh()
+        assertTrue(vm.recallListToTop.value)
+
+        // One-shot: consuming it disarms the signal so a recomposition / rotation cannot replay the
+        // scroll with no fresh refresh behind it (Codex review #546).
+        vm.consumeRecallListToTop()
+        assertFalse(vm.recallListToTop.value)
+    }
+
+    @Test
+    fun `a return-from-topic auto-refresh does not recall the list to the top (#546)`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
+        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+        val vm = FlagsViewModel(auth, flags, FakeForumRepository(), FakeUserPreferencesRepository(), clock)
+
+        vm.maybeAutoRefresh() // landing refresh → raises the signal
+        vm.consumeRecallListToTop() // screen scrolled and consumed it
+        vm.onFlagOpened() // user opens a topic…
+        vm.maybeAutoRefresh() // …and returns (throttle bypassed): refreshes but must NOT re-raise
+
+        assertEquals(2, flags.refreshCalls.size)
+        assertFalse(vm.recallListToTop.value)
+    }
+
+    @Test
     fun `maybeAutoRefresh honours the Settings opt-out`() = runTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)

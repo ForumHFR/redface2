@@ -50,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -140,6 +141,31 @@ fun FlagsRoute(
         tabUnreadFilter = tabUnreadFilter,
         listState = flagsListState,
     )
+
+    // #546 — recall the list to the top after a LANDING auto-refresh (app open / tab switch /
+    // resume): the refresh prepends freshly-surfaced flags and a held scroll position would leave
+    // them off-screen (« faut scroller vers le haut », tinc/Lt Ripley). Driven by a one-shot
+    // ViewModel signal (consumed once handled) rather than a replayable counter, so a rotation /
+    // route recreation does not replay a stale scroll. Return-from-topic refreshes never raise it.
+    val recallListToTop by viewModel.recallListToTop.collectAsStateWithLifecycle()
+    LaunchedEffect(recallListToTop) {
+        if (recallListToTop) {
+            // requestScrollToItem (not scrollToItem) pins index 0 on the next remeasure ignoring the
+            // key-based position restoration — without that, when the refresh prepends freshly-
+            // surfaced flags the old top row stays anchored and the new rows sit above the viewport
+            // (the original #546 bug). But the request is honoured per-remeasure and is NOT durable:
+            // the refreshed list can land a frame later (repository SharedFlow → combine/flatMapLatest
+            // defers the final emission), and a remeasure that ran first on the old list would consume
+            // the request before the prepend. So re-assert it across a few frames — the top then wins
+            // whichever frame the new list lands on. Bounded so a no-change landing still disarms the
+            // signal (no replay on rotation/recreation). Codex review #546.
+            repeat(RECALL_TO_TOP_FRAMES) {
+                flagsListState.requestScrollToItem(0)
+                withFrameNanos { }
+            }
+            viewModel.consumeRecallListToTop()
+        }
+    }
 
     // #309 — display-settings bottom sheet. Opened from the header « Affichage » action; the trigger
     // is only offered when there is a real list to configure (authenticated AND a real FlagType tab,
@@ -773,6 +799,13 @@ private fun FilterFlipScrollResetEffect(
         }
     }
 }
+
+// #546 — number of consecutive frames over which the « recall to top » scroll is re-asserted after a
+// landing auto-refresh. requestScrollToItem is per-remeasure and not durable, while the refreshed list
+// can land a frame or two after the signal (repository SharedFlow → combine/flatMapLatest), so a small
+// window covers the prepend whichever frame it arrives on. Three is generous for an in-memory emission
+// and the loop always terminates, so the one-shot signal is always consumed (no rotation replay).
+private const val RECALL_TO_TOP_FRAMES = 3
 
 // LazyColumn contentType tags (#179 compose-perf): one reuse pool per structurally distinct slot
 // kind so Compose recycles like-for-like across the header→row→header alternation of the grouped
