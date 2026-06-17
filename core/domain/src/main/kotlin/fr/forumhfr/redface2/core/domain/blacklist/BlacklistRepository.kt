@@ -22,6 +22,11 @@ interface BlacklistRepository {
     /**
      * Canonical keys of currently blocked users, for cheap membership checks while rendering a topic:
      * `canonicalizePseudo(post.author) in canonicals`.
+     *
+     * Contract: emits the current set **immediately** on subscription (the empty set when nothing is
+     * blocked), then on every change. This lets a consumer `combine` it with another flow to gate the
+     * first emission on a known blacklist without ever stalling. The DataStore-backed implementation
+     * satisfies this by construction (a Preferences `DataStore` always emits its current value first).
      */
     fun observeBlockedCanonicals(): Flow<Set<String>>
 

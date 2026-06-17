@@ -78,6 +78,14 @@ data class TopicUiState(
 
         data class Loaded(
             val topic: Topic,
+            /**
+             * #509 — `numreponse` of the posts whose author is blacklisted, computed from the
+             * blacklist combined with `topic.posts` so it is always coherent with [topic]. The screen
+             * renders these as a collapsed "post masqué" placeholder (never removed from the list, so
+             * pagination/anchors/`numreponse` keys stay intact). Empty = nothing hidden. Gated into the
+             * first emission (combine with the blacklist) so a blocked post never flashes before hiding.
+             */
+            val hiddenNumreponses: Set<Int> = emptySet(),
         ) : Mode
 
         data class Error(
