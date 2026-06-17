@@ -195,6 +195,80 @@ class PostContentParserTest {
     }
 
     @Test
+    fun `signature span surfaces as a separate signature AST and is stripped from the body`() {
+        // #330 — HFR appends the author signature as a <span class="signature"> trailer inside
+        // the post content div, after the body and any div.edited marker. It is parsed into its
+        // own AST (rendered subdued, web parity) and removed from the body content.
+        val html = """
+            <div id="para1980664234"><p>Le corps du message.<div style="clear: both;"> </div></p>
+            <div class="edited"><br />Message édité par alice le 16-03-2016&nbsp;à&nbsp;14:35:19</div>
+            <br /><span class="signature"> ---------------
+            <br />Ma signature avec un <b>mot</b> en gras.<br /><div style="clear: both;"> </div></span></div>
+        """.trimIndent()
+        val contentElement = Jsoup.parse(html).selectFirst("div[id^=para]")
+
+        val parsed = PostContentParser().parse(contentElement)
+
+        val signature = requireNotNull(parsed.signature) { "the signature span must surface" }
+        val signatureText = signature.allInlines()
+            .filterIsInstance<PostInline.Text>()
+            .joinToString(" ") { it.value }
+        assertTrue(
+            "signature content must be parsed, got=$signatureText",
+            signatureText.contains("Ma signature avec un"),
+        )
+        // The HFR « --------------- » separator that opens every signature span is server chrome,
+        // not content — it must be stripped, never rendered as the first signature line (XaaT).
+        assertFalse(
+            "the HFR signature separator must not leak into the signature, got=$signatureText",
+            signatureText.contains("---"),
+        )
+        // Inline formatting inside the signature survives (shared parseBlocks pipeline).
+        assertTrue(
+            "signature inline formatting must survive",
+            signature.allInlines().any { it is PostInline.Strong },
+        )
+        // The signature text must NOT leak into the body AST.
+        val bodyText = parsed.ast.allInlines()
+            .filterIsInstance<PostInline.Text>()
+            .joinToString(" ") { it.value }
+        assertTrue("body must keep its own text, got=$bodyText", bodyText.contains("Le corps du message"))
+        assertFalse(
+            "signature must not leak into the body, got=$bodyText",
+            bodyText.contains("Ma signature avec un"),
+        )
+    }
+
+    @Test
+    fun `post without a signature span yields a null signature`() {
+        val html = """
+            <div id="para1980664235"><p>Un message sans signature.<div style="clear: both;"> </div></p></div>
+        """.trimIndent()
+        val contentElement = Jsoup.parse(html).selectFirst("div[id^=para]")
+
+        val parsed = PostContentParser().parse(contentElement)
+
+        assertEquals("a post without a signature span must report null", null, parsed.signature)
+    }
+
+    @Test
+    fun `signature span with only the separator and decoration edge-trims to null`() {
+        // The « --------------- » separator line + the trailing `clear: both` spacer are HFR
+        // boilerplate; a signature carrying nothing else must report null (no empty subdued block
+        // under the post). Real-shape fixture: the separator dashes text node, a <br>, the spacer.
+        val html = """
+            <div id="para1980664236"><p>Corps.<div style="clear: both;"> </div></p>
+            <br /><span class="signature"> ---------------
+            <br /><div style="clear: both;"> </div></span></div>
+        """.trimIndent()
+        val contentElement = Jsoup.parse(html).selectFirst("div[id^=para]")
+
+        val parsed = PostContentParser().parse(contentElement)
+
+        assertEquals("a separator-only signature must report null", null, parsed.signature)
+    }
+
+    @Test
     fun `a quote whose quoted content embeds a spoiler stays a Quote`() {
         // #393 — post t2787065 (topic RF2-DEV page 6, the live repro) : XaTriX cites a post
         // shaped "Test / [spoiler]caca rose[/spoiler] / Suite". The container div used to be

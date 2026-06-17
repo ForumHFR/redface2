@@ -56,4 +56,20 @@ data class Post(
      * marker; pre-v8 rows backfill to `NULL` and recover on the next live fetch.
      */
     val editedAt: Instant? = null,
+    /**
+     * #330 — the author's signature block (the HFR `<span class="signature">`
+     * trailer rendered under the post body on the web), parsed into the same
+     * [PostContent] AST as [content] so it can be rendered with the shared
+     * `PostRenderer`. `null` when the post has no signature (most posts) — the
+     * span is absent or empty.
+     *
+     * Gated for DISPLAY behind the `topic_signatures` reading preference (default
+     * OFF, signatures are noisy); the field is always parsed and persisted so the
+     * toggle is a pure render-time switch with no refetch.
+     *
+     * Persisted in Room v14 (cf. `MIGRATION_13_14`) so a cache hit keeps the
+     * signature without a network round-trip. Pre-v14 rows backfill to `NULL`
+     * and recover the real value on the next live fetch.
+     */
+    val signature: PostContent? = null,
 )

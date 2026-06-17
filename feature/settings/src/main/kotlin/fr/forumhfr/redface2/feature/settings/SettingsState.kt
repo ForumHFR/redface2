@@ -41,6 +41,13 @@ data class SettingsState(
      * later and overwrite the optimistic flip with a stale snapshot. Never surfaced in the UI.
      */
     val ignoreTopicCacheTouchedLocally: Boolean = false,
+    // #445 — debug bounds overlay toggle (dev-channel only; the channel gate is in the screen, which
+    // hides the row off dev). Same optimistic-flip + startup-race-guard machinery as ignoreTopicCache.
+    // Default false (the overlay is opt-in even on dev).
+    val debugBoundsOverlay: Boolean = false,
+    val isUpdatingDebugBoundsOverlay: Boolean = false,
+    val debugBoundsOverlayError: Boolean = false,
+    val debugBoundsOverlayTouchedLocally: Boolean = false,
     // Drapeaux view preferences (#179 follow-up). Same optimistic-flip + startup-race-guard
     // machinery as ignoreTopicCache: the field is the displayed value, `isUpdating*` gates the
     // switch while DataStore writes, `*Error` surfaces a persist failure, and `*TouchedLocally`
@@ -99,6 +106,19 @@ data class SettingsState(
     val isUpdatingTopicPollsExpanded: Boolean = false,
     val topicPollsExpandedError: Boolean = false,
     val topicPollsExpandedTouchedLocally: Boolean = false,
+    // #330 — afficher les signatures sous les posts. Même machinerie optimistic-flip + garde de
+    // course au démarrage. Default FALSE (masquées) : les signatures sont bruyantes, donc opt-in.
+    val topicSignatures: Boolean = false,
+    val isUpdatingTopicSignatures: Boolean = false,
+    val topicSignaturesError: Boolean = false,
+    val topicSignaturesTouchedLocally: Boolean = false,
+    // #332 — replier les longues citations. Même machinerie optimistic-flip + garde de course au
+    // démarrage. Default TRUE (repli historique) : le toggle est l'opt-out demandé par le retour
+    // bêta « trop strict ».
+    val foldLongQuotes: Boolean = true,
+    val isUpdatingFoldLongQuotes: Boolean = false,
+    val foldLongQuotesError: Boolean = false,
+    val foldLongQuotesTouchedLocally: Boolean = false,
     // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
     // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
     // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
@@ -166,6 +186,10 @@ data class SettingsState(
     val canToggleIgnoreTopicCache: Boolean
         get() = !isUpdatingIgnoreTopicCache
 
+    // #445 — the debug bounds overlay toggle is gated only by its own in-flight write.
+    val canToggleDebugBoundsOverlay: Boolean
+        get() = !isUpdatingDebugBoundsOverlay
+
     val canToggleFlagsGroupByCategory: Boolean
         get() = !isUpdatingFlagsGroupByCategory
 
@@ -199,6 +223,14 @@ data class SettingsState(
     // #456 — the polls toggle is gated only by its own write.
     val canToggleTopicPollsExpanded: Boolean
         get() = !isUpdatingTopicPollsExpanded
+
+    // #330 — the signatures toggle is gated only by its own write.
+    val canToggleTopicSignatures: Boolean
+        get() = !isUpdatingTopicSignatures
+
+    // #332 — the fold-long-quotes toggle is gated only by its own write.
+    val canToggleFoldLongQuotes: Boolean
+        get() = !isUpdatingFoldLongQuotes
 
     // #312 — the confirm-before-posting toggle is gated only by its own write.
     val canToggleConfirmBeforePosting: Boolean
@@ -277,6 +309,10 @@ sealed interface SettingsIntent {
     // shows a value that doesn't match what's persisted.
     data class IgnoreTopicCacheChanged(val enabled: Boolean) : SettingsIntent
 
+    // #445 — debug bounds overlay toggle (dev only). Same optimistic-flip contract: the boolean is
+    // the desired post-flip state.
+    data class DebugBoundsOverlayChanged(val enabled: Boolean) : SettingsIntent
+
     // Drapeaux view preferences (#179 follow-up). Same optimistic-flip contract as
     // IgnoreTopicCacheChanged: the boolean is the desired post-flip state.
     data class FlagsGroupByCategoryChanged(val enabled: Boolean) : SettingsIntent
@@ -303,6 +339,12 @@ sealed interface SettingsIntent {
 
     /** #456 — sondages dépliés par défaut dans la lecture de sujet. */
     data class TopicPollsExpandedChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #330 — afficher les signatures des auteurs sous les posts. */
+    data class TopicSignaturesChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #332 — replier les longues citations sur une ligne. */
+    data class FoldLongQuotesChanged(val enabled: Boolean) : SettingsIntent
 
     // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
     // the boolean is the desired post-flip state.

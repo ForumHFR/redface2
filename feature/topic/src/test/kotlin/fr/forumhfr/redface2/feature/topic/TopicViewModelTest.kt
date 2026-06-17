@@ -471,6 +471,25 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `state showSignatures reflects the user preference (#330)`() = runTest {
+        val hidden = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicSignatures = false),
+        )
+        assertEquals(false, hidden.state.value.showSignatures)
+
+        val shown = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            userPreferencesRepository = FakeUserPreferencesRepository(topicSignatures = true),
+        )
+        assertEquals(true, shown.state.value.showSignatures)
+    }
+
+    @Test
     fun `DeletePost success emits PostDeleted and force-refreshes the current page (#292)`() = runTest {
         // Page 2 so the editable post 777 is NOT the first post (the FP lives on page 1 and is
         // excluded from deletion). Editable + authenticated + canReply → the VM gate lets it through.
@@ -1304,15 +1323,16 @@ private class FakeStreamingTopicRepository(
 
 /**
  * No-op preferences fake for the topic ViewModel tests. Only [observeTopicTopBarAutoHide]
- * (build 89 follow-up), [observeTopicPageFabs] (#383) and [observeTopicPollsExpanded] (#456)
- * are read by [TopicViewModel] — everything else returns the DataStore default so the fake
- * stays a thin stand-in. The three relevant values are constructor-injectable so tests can
- * assert they reach state.
+ * (build 89 follow-up), [observeTopicPageFabs] (#383), [observeTopicPollsExpanded] (#456) and
+ * [observeTopicSignatures] (#330) are read by [TopicViewModel] — everything else returns the
+ * DataStore default so the fake stays a thin stand-in. The relevant values are
+ * constructor-injectable so tests can assert they reach state.
  */
 private class FakeUserPreferencesRepository(
     private val topicTopBarAutoHide: Boolean = false,
     private val topicPageFabs: Boolean = true,
     private val topicPollsExpanded: Boolean = false,
+    private val topicSignatures: Boolean = false,
 ) : UserPreferencesRepository {
     override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
 
@@ -1382,6 +1402,14 @@ private class FakeUserPreferencesRepository(
 
     override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
 
+    override fun observeTopicSignatures(): Flow<Boolean> = MutableStateFlow(topicSignatures)
+
+    override suspend fun setTopicSignatures(enabled: Boolean) = Unit
+
+    override fun observeFoldLongQuotes(): Flow<Boolean> = MutableStateFlow(true)
+
+    override suspend fun setFoldLongQuotes(enabled: Boolean) = Unit
+
     override fun observeStartScreen(): Flow<StartScreenPreference> =
         MutableStateFlow(StartScreenPreference())
 
@@ -1410,4 +1438,8 @@ private class FakeUserPreferencesRepository(
     override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
 
     override suspend fun setFontScale(scale: FontScalePreference) = Unit
+
+    override fun observeDebugBoundsOverlay(): Flow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun setDebugBoundsOverlay(enabled: Boolean) = Unit
 }

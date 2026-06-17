@@ -973,6 +973,123 @@ class SettingsViewModelTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────
+    // Author signatures (#330)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates topicSignatures from a persisted true`() = runTest {
+        // Default is false — only a persisted opt-in exercises the hydration path.
+        repository.emitTopicSignatures(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.topicSignatures)
+        assertFalse(viewModel.state.value.topicSignaturesError)
+    }
+
+    @Test
+    fun `TopicSignaturesChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("signatures are hidden by default", viewModel.state.value.topicSignatures)
+
+        viewModel.submit(SettingsIntent.TopicSignaturesChanged(true))
+
+        assertTrue(viewModel.state.value.topicSignatures)
+        assertFalse(viewModel.state.value.isUpdatingTopicSignatures)
+        assertEquals(1, repository.topicSignaturesSetCalls)
+    }
+
+    @Test
+    fun `TopicSignaturesChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnTopicSignaturesSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.TopicSignaturesChanged(true))
+
+        assertFalse("failed persist must revert to the previous value", viewModel.state.value.topicSignatures)
+        assertFalse(viewModel.state.value.isUpdatingTopicSignatures)
+        assertTrue(viewModel.state.value.topicSignaturesError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Fold long quotes (#332)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates foldLongQuotes from a persisted false`() = runTest {
+        // Default is true — only a persisted opt-OUT exercises the hydration path.
+        repository.emitFoldLongQuotes(false)
+
+        val viewModel = newViewModel()
+
+        assertFalse(viewModel.state.value.foldLongQuotes)
+        assertFalse(viewModel.state.value.foldLongQuotesError)
+    }
+
+    @Test
+    fun `FoldLongQuotesChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertTrue("long quotes fold by default", viewModel.state.value.foldLongQuotes)
+
+        viewModel.submit(SettingsIntent.FoldLongQuotesChanged(false))
+
+        assertFalse(viewModel.state.value.foldLongQuotes)
+        assertFalse(viewModel.state.value.isUpdatingFoldLongQuotes)
+        assertEquals(1, repository.foldLongQuotesSetCalls)
+    }
+
+    @Test
+    fun `FoldLongQuotesChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnFoldLongQuotesSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.FoldLongQuotesChanged(false))
+
+        assertTrue("failed persist must revert to the previous value", viewModel.state.value.foldLongQuotes)
+        assertFalse(viewModel.state.value.isUpdatingFoldLongQuotes)
+        assertTrue(viewModel.state.value.foldLongQuotesError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Debug bounds overlay (#445)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates debugBoundsOverlay from a persisted true`() = runTest {
+        // Default is false — only a persisted opt-in exercises the hydration path.
+        repository.emitDebugBoundsOverlay(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.debugBoundsOverlay)
+        assertFalse(viewModel.state.value.debugBoundsOverlayError)
+    }
+
+    @Test
+    fun `DebugBoundsOverlayChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("overlay is off by default", viewModel.state.value.debugBoundsOverlay)
+
+        viewModel.submit(SettingsIntent.DebugBoundsOverlayChanged(true))
+
+        assertTrue(viewModel.state.value.debugBoundsOverlay)
+        assertFalse(viewModel.state.value.isUpdatingDebugBoundsOverlay)
+        assertEquals(1, repository.debugBoundsOverlaySetCalls)
+    }
+
+    @Test
+    fun `DebugBoundsOverlayChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnDebugBoundsOverlaySet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.DebugBoundsOverlayChanged(true))
+
+        assertFalse("failed persist must revert to the previous value", viewModel.state.value.debugBoundsOverlay)
+        assertFalse(viewModel.state.value.isUpdatingDebugBoundsOverlay)
+        assertTrue(viewModel.state.value.debugBoundsOverlayError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Confirm before posting (#312)
     // ──────────────────────────────────────────────────────────────────────
 
@@ -1480,6 +1597,42 @@ class SettingsViewModelTest {
             topicPollsExpanded.value = value
         }
 
+        // #330 — afficher les signatures. Même seam optimistic-flip que topicPollsExpanded.
+        private val topicSignatures = MutableStateFlow(false)
+        var topicSignaturesSetCalls: Int = 0
+            private set
+        var failOnTopicSignaturesSet: Boolean = false
+
+        override fun observeTopicSignatures(): Flow<Boolean> = topicSignatures
+
+        override suspend fun setTopicSignatures(enabled: Boolean) {
+            topicSignaturesSetCalls += 1
+            check(!failOnTopicSignaturesSet) { "boom" }
+            topicSignatures.value = enabled
+        }
+
+        fun emitTopicSignatures(value: Boolean) {
+            topicSignatures.value = value
+        }
+
+        // #332 — replier les longues citations. Même seam optimistic-flip ; default TRUE (repli).
+        private val foldLongQuotes = MutableStateFlow(true)
+        var foldLongQuotesSetCalls: Int = 0
+            private set
+        var failOnFoldLongQuotesSet: Boolean = false
+
+        override fun observeFoldLongQuotes(): Flow<Boolean> = foldLongQuotes
+
+        override suspend fun setFoldLongQuotes(enabled: Boolean) {
+            foldLongQuotesSetCalls += 1
+            check(!failOnFoldLongQuotesSet) { "boom" }
+            foldLongQuotes.value = enabled
+        }
+
+        fun emitFoldLongQuotes(value: Boolean) {
+            foldLongQuotes.value = value
+        }
+
         // #458 — start screen lives on its own StartScreenSettingsViewModel; this fake only
         // satisfies the interface for the main Settings ViewModel under test.
         override fun observeStartScreen(): Flow<StartScreenPreference> =
@@ -1622,6 +1775,25 @@ class SettingsViewModelTest {
 
         fun emitFlagsPerTabOverride(value: Boolean) {
             flagsPerTabOverride.value = value
+        }
+
+        // #445 — debug bounds overlay. Same optimistic-flip seam as topicSignatures so the Settings
+        // tests can assert hydration, the repo call, and the revert-on-failure path.
+        private val debugBoundsOverlay = MutableStateFlow(false)
+        var debugBoundsOverlaySetCalls: Int = 0
+            private set
+        var failOnDebugBoundsOverlaySet: Boolean = false
+
+        override fun observeDebugBoundsOverlay(): Flow<Boolean> = debugBoundsOverlay
+
+        override suspend fun setDebugBoundsOverlay(enabled: Boolean) {
+            debugBoundsOverlaySetCalls += 1
+            check(!failOnDebugBoundsOverlaySet) { "boom" }
+            debugBoundsOverlay.value = enabled
+        }
+
+        fun emitDebugBoundsOverlay(value: Boolean) {
+            debugBoundsOverlay.value = value
         }
     }
 

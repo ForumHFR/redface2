@@ -317,6 +317,37 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeTopicSignatures(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#330): signatures are noisy; opt-in so the feed stays compact.
+            .map { prefs -> prefs[KEY_TOPIC_SIGNATURES] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setTopicSignatures(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_TOPIC_SIGNATURES] = enabled
+            }
+        }
+    }
+
+    override fun observeFoldLongQuotes(): Flow<Boolean> =
+        dataStore.data
+            // Default `true` (#332): the long-quote fold is the historical behaviour; turning it
+            // off is the opt-out for readers who found the auto-fold « trop strict ».
+            .map { prefs -> prefs[KEY_FOLD_LONG_QUOTES] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setFoldLongQuotes(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FOLD_LONG_QUOTES] = enabled
+            }
+        }
+    }
+
     override fun observeStartScreen(): Flow<StartScreenPreference> =
         dataStore.data
             .map(::readStartScreen)
@@ -459,6 +490,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeDebugBoundsOverlay(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#445): the debug bounds overlay is opt-in and dev-channel only.
+            .map { prefs -> prefs[KEY_DEBUG_BOUNDS_OVERLAY] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setDebugBoundsOverlay(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_DEBUG_BOUNDS_OVERLAY] = enabled
+            }
+        }
+    }
+
     /**
      * Reads [KEY_UPLOAD_PROVIDER] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [UploadProviderId.DIBERIE] instead of crashing on
@@ -597,6 +643,12 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // #456 — polls expanded by default in topic reading (default false = collapsed).
         val KEY_TOPIC_POLLS_EXPANDED = booleanPreferencesKey("topic_polls_expanded")
 
+        // #330 — render author signatures beneath posts (default false = hidden, signatures are noisy).
+        val KEY_TOPIC_SIGNATURES = booleanPreferencesKey("topic_signatures")
+
+        // #332 — fold long top-level citations by default (default true = historical fold; opt-out).
+        val KEY_FOLD_LONG_QUOTES = booleanPreferencesKey("fold_long_quotes")
+
         // #458 — cold-start tab (StartScreenChoice.name, defensively parsed) + optional Forum
         // category id (absent unless screen == FORUM and a category was picked).
         val KEY_START_SCREEN = stringPreferencesKey("start_screen")
@@ -613,5 +665,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // (FontScalePreference.name), both defensively parsed. No bootstrap mirror (cf. observers).
         val KEY_DISPLAY_DENSITY = stringPreferencesKey("display_density")
         val KEY_FONT_SCALE = stringPreferencesKey("font_scale")
+
+        // #445 — debug bounds overlay toggle (default false; exposed on the dev channel only).
+        val KEY_DEBUG_BOUNDS_OVERLAY = booleanPreferencesKey("debug_bounds_overlay")
     }
 }

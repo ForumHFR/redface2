@@ -4,13 +4,12 @@
     android:viewportWidth="24"
     android:viewportHeight="24"
     android:autoMirrored="true">
-    <!-- #360 — tracé stroke unifié (ADR-015) : chevron « › » en lignes, strokeWidth 2.5,
-         caps/joins ronds, même poids optique que ic_arrow_back/ic_chevron_left/ic_edit.
-         Tinté à l'usage. -->
+    <!-- #360 — tracé stroke unifié (ADR-015) : chevron « ‹ » en lignes, strokeWidth 2.5,
+         caps/joins ronds, miroir de ic_chevron_right, même poids optique que la famille. -->
     <path
         android:strokeColor="#FF000000"
         android:strokeWidth="2.5"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M9,5 L16,12 L9,19" />
+        android:pathData="M15,5 L8,12 L15,19" />
 </vector>

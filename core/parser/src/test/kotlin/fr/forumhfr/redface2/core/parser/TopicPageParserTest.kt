@@ -803,6 +803,23 @@ class TopicPageParserTest {
         )
     }
 
+    @Test
+    fun `parses author signatures into Post signature when present`() {
+        // #330 — the single-page fixture carries posts with a <span class="signature"> trailer.
+        // The parser surfaces each one as Post.signature (its own AST) without leaking it into the
+        // body content. Posts with no signature span keep Post.signature == null.
+        val topic = parser.parse(fixture("topic_page_single.html"))
+
+        val withSignature = topic.posts.filter { it.signature != null }
+        assertTrue("the single-page fixture should expose at least one author signature", withSignature.isNotEmpty())
+        withSignature.forEach { post ->
+            assertTrue(
+                "parsed signature #${post.numreponse} should hold at least one block",
+                post.signature!!.blocks.isNotEmpty(),
+            )
+        }
+    }
+
     private fun fixture(name: String): String {
         return requireNotNull(javaClass.getResource("/fixtures/$name")) {
             "Fixture not found: $name"

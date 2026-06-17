@@ -16,6 +16,38 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v155 — `0.14.0` — 2026-06-17
+
+**Statut** : candidat bêta (à dispatcher) — destiné au track open testing + F-Droid `.beta`.
+**Commit** : promotion dev→main (cf. PR de promotion).
+**Contenu depuis la 0.13.0/v145** : dogfoodé sur le canal dev (v146 → v154).
+
+> `0.13.0` ayant déjà été shippé en bêta (v145), le `versionName` est bumpé en `0.14.0` (la garde CI refuse deux bêtas au même `versionName`). Le `versionCode` final est alloué au dispatch (registre de tags) ; le `v155` indiqué ici est le candidat et sera corrigé si d'autres builds dev s'intercalent avant la promotion.
+
+### Added
+- **Signatures des posts** (#330) : la signature de l'auteur s'affiche sous le message, derrière un réglage dédié.
+- **Avatar du compte connecté** (#479) dans la barre du haut des listes.
+- **Repli des longues citations** (#332) : les citations de premier niveau trop longues sont repliées avec un bouton afficher/masquer, désactivable dans les réglages.
+- **Barre d'actions des drapeaux** (#411) : masquée au défilement vers le bas, révélée vers le haut, et toujours visible en bas de page.
+
+### Changed
+- **Ligne de métadonnées des sujets unifiée** (#376) entre Drapeaux, Catégorie et Recherche.
+- **Boutons-icônes harmonisés** (#360) sur des vecteurs en trait, flèche retour plus épaisse.
+- **FAB « nouveau sujet »** (#482) réduit en icône seule au défilement.
+
+### Fixed
+- **Drapeaux — recalage en haut** (#546) après le rafraîchissement auto à l'atterrissage : les sujets fraîchement remontés sont visibles sans scroller, le retour depuis un topic garde la position.
+- **Séparateur de signature** (#550) : la ligne web « --------------- » n'est plus rendue dans les signatures sous les posts.
+- **Couleurs de signature** (#553) : les signatures sont rendues dans la couleur neutre du thème ; les couleurs `[color]` de l'auteur (pensées pour le fond blanc web, illisibles sur le thème de l'app) sont ignorées.
+
+### Perf
+- **Images de bloc** (#249) : encart réservé + shimmer + crossfade, anti-saut de mise en page (CLS).
+
+### Infra
+- **Overlay de debug** (#445, canal dev) : contours des composants Compose pour le diagnostic de layout.
+
+---
+
 ## v145 — `0.13.0` — 2026-06-16
 
 **Statut** : `open` (track open testing — canal beta, Play Edit committed) + F-Droid `.beta`

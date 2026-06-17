@@ -100,6 +100,7 @@ internal object TopicMappers {
         quoteRef = quoteRef,
         profileId = profileId,
         editedAt = editedAt,
+        signature = signature,
     )
 
     private fun PostEntity.toDomain(): Post = Post(
@@ -115,6 +116,7 @@ internal object TopicMappers {
         quoteRef = quoteRef,
         profileId = profileId,
         editedAt = editedAt,
+        signature = signature,
     )
 
     /**

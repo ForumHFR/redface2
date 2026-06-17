@@ -15,6 +15,7 @@ class PostContentParser {
             return ParsedPostContent(
                 quotedAuthors = emptyList(),
                 ast = deletedFallbackAst(),
+                signature = null,
             )
         }
 
@@ -29,8 +30,44 @@ class PostContentParser {
         return ParsedPostContent(
             quotedAuthors = quotedAuthors,
             ast = ast,
+            signature = parseSignature(contentElement),
         )
     }
+
+    /**
+     * #330 — extracts the author signature trailer (`<span class="signature">`, a descendant of
+     * the `div[id^=para]` content element, after the post body and any `div.edited` marker) into
+     * the same AST as the body so it renders with the shared `PostRenderer`.
+     *
+     * HFR opens every signature span with a literal separator « --------------- » (a dashes-only
+     * text node, then a `<br>`) before the author's real signature, and closes it with a trailing
+     * `clear: both` spacer div. The spacer edge-trims away, but the dashes are a NON-blank text node
+     * so [parseBlocks]' edge-trim never drops them (they leaked as the first signature line, web
+     * separator chrome the app must not show — XaaT). The leading separator node is therefore removed
+     * explicitly before parsing; its following `<br>` then becomes a leading break and edge-trims
+     * away too. A signature that is ONLY the separator + decoration yields no real block and is
+     * reported as `null` — same "no noise" contract as a never-edited [editedAt].
+     */
+    private fun parseSignature(contentElement: Element): PostContent? {
+        val span = contentElement.selectFirst(HfrSelectors.POST_SIGNATURE)?.clone() ?: return null
+        // Match HFR's exact separator shape — a leading dashes-only text node IMMEDIATELY followed by
+        // the `<br>` it always emits — before removing it. Requiring the `<br>` sibling keeps the
+        // strip precise to the server chrome and guards a (hypothetical) real signature that merely
+        // opens with dashes (Codex review): on raw HFR the user's content always sits AFTER this pair.
+        (span.childNodes().firstOrNull() as? TextNode)
+            ?.takeIf { it.wholeText.isHfrSignatureSeparator() && it.nextSibling().isLineBreakElement() }
+            ?.remove()
+        val blocks = parseBlocks(span.childNodes())
+        return blocks.takeIf { it.isNotEmpty() }?.let { PostContent(blocks = it) }
+    }
+
+    /** HFR's server-inserted signature separator: a run of dashes only (after trimming whitespace). */
+    private fun String.isHfrSignatureSeparator(): Boolean {
+        val trimmed = trim { it.isWhitespace() || it == NBSP }
+        return trimmed.length >= MIN_SIGNATURE_SEPARATOR_DASHES && trimmed.all { it == '-' }
+    }
+
+    private fun Node?.isLineBreakElement(): Boolean = (this as? Element)?.tagName() == "br"
 
     private fun deletedFallbackAst(): PostContent = PostContent(
         blocks = listOf(PostBlock.Paragraph(listOf(PostInline.Text(DELETED_PLACEHOLDER)))),
@@ -656,6 +693,11 @@ class PostContentParser {
         // `&nbsp;` between sibling <p>; Jsoup keeps them as this literal char until normalizeText.
         const val NBSP = '\u00A0'
 
+        // #330 follow-up \u2014 minimum dashes for a text node to count as HFR's signature separator
+        // \u00AB --------------- \u00BB (server-inserted before every signature). 3+ avoids treating a stray
+        // \u00AB -- \u00BB in real signature content as the separator.
+        const val MIN_SIGNATURE_SEPARATOR_DASHES = 3
+
         val WHITESPACE_REGEX = Regex("\\s+")
         val HEX_REGEX = Regex("[0-9a-fA-F]+")
         val STYLE_COLOR_REGEX = Regex("""color\s*:\s*(#?[0-9a-fA-F]{3,8})""")
@@ -709,4 +751,9 @@ internal fun sanitizeImageHref(rawSrc: String): String? =
 data class ParsedPostContent(
     val quotedAuthors: List<String>,
     val ast: PostContent,
+    /**
+     * #330 — the author signature AST (`<span class="signature">`), or `null` when the post has
+     * no signature (the span is absent, or holds only decoration that edge-trims to nothing).
+     */
+    val signature: PostContent? = null,
 )

@@ -122,6 +122,30 @@ internal object PostMediaDisplayPolicy {
     }
 
     /**
+     * #249 — exact RESERVED height (dp) for a block `[img]`, computed BEFORE the bitmap arrives so the
+     * loading placeholder occupies the same vertical slot the loaded image will, hence zero layout
+     * shift (anti-CLS) when it crossfades in.
+     *
+     * Reuses the same measured intrinsic size the #175/#224 path already caches: at the block width
+     * [availableWidthDp] the image will render `availableWidthDp × (h/w)` tall (`ContentScale.Fit`,
+     * full width), so we reserve exactly that, clamped to the existing [blockImageMinHeight] /
+     * [blockImageMaxHeight] slot. A landscape shot narrower-than-tall and a portrait shot both land on
+     * their real height; only the rare clamp cases differ — exactly the bounds the loaded image already
+     * obeys, so no over-reserve vs the #175 sizing.
+     *
+     * [measured] is `null` for a not-yet-measured image (a standalone `PostBlock.Image` is not fed by
+     * the paragraph measure effect): callers then fall back to the legacy [blockImageMinHeight] slot.
+     */
+    fun reservedBlockImageHeight(measured: PixelSize?, availableWidthDp: Float): Dp? {
+        val size = measured?.takeIf { it.width > 0 && it.height > 0 }
+        if (size == null || availableWidthDp <= 0f) return null
+        val rawHeight = availableWidthDp * (size.height.toFloat() / size.width.toFloat())
+        return rawHeight
+            .coerceIn(blockImageMinHeight.value, blockImageMaxHeight.value)
+            .dp
+    }
+
+    /**
      * #416 — box for a DEAD smiley sprite (recorded as a fresh measurement failure). HFR's BBCode
      * engine turns ANY `:word:` into an `<img>` without checking existence, so an unknown code is
      * served as a 404 gif : web/RF1 then show the typed token at text size. The token replaces the

@@ -19,7 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
@@ -92,33 +91,13 @@ fun FlagItem(
                 fontWeight = if (flag.hasUnread) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 2,
             )
-            if (metadata.start.isNotEmpty() || metadata.end.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = metadata.start,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        // #325 — only the START segment may truncate; the end-aligned
-                        // timestamp keeps its intrinsic width (weight measures this text
-                        // in the remaining space).
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (metadata.end.isNotEmpty()) {
-                        Text(
-                            text = metadata.end,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            modifier = Modifier.padding(start = 8.dp),
-                        )
-                    }
-                }
-            }
+            // #376 — shared two-segment metadata line (start truncatable + date pinned right),
+            // common to the drapeaux / catégorie / recherche lists.
+            TopicMetadataLine(
+                metadata = metadata,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

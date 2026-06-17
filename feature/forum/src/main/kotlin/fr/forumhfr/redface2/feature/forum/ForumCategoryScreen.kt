@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,7 +37,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +54,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicSummary
+import fr.forumhfr.redface2.core.ui.FlagMetadata
+import fr.forumhfr.redface2.core.ui.TopicMetadataLine
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
@@ -79,6 +85,16 @@ fun ForumCategoryScreen(
     )
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // #482 — hoisted so the FAB can collapse to icon-only once the listing is scrolled
+    // (Azgor: the extended FAB is "presque envahissant"). Shared with the LazyColumn below.
+    val listState = rememberLazyListState()
+    // Expanded only while resting at the very top; any scroll shrinks it out of the way.
+    val fabExpanded by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+        }
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.surface,
@@ -86,6 +102,7 @@ fun ForumCategoryScreen(
             if (state.canCreateTopic) {
                 ExtendedFloatingActionButton(
                     onClick = { onCreateTopic(state.cat, state.selectedSubcat) },
+                    expanded = fabExpanded,
                     text = { Text(text = stringResource(R.string.category_create_topic)) },
                     icon = { Text(text = "+") },
                 )
@@ -142,6 +159,7 @@ fun ForumCategoryScreen(
             ) {
                 TopicsBody(
                     state = activeTopics,
+                    listState = listState,
                     filteredTopics = state.filteredTopics,
                     searchQuery = state.searchQuery,
                     onOpenTopic = onOpenTopic,
@@ -282,6 +300,7 @@ private fun SubcategoryChips(
 @Composable
 private fun TopicsBody(
     state: TopicsUiState,
+    listState: LazyListState,
     filteredTopics: List<TopicSummary>,
     searchQuery: String,
     onOpenTopic: (TopicSummary) -> Unit,
@@ -333,7 +352,7 @@ private fun TopicsBody(
             // The PagerRow always shows the underlying `state.page` total — a search
             // filter only narrows the visible rows in the current page; switching
             // page or subcat is what actually re-fetches.
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
+            LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
                 if (filteredTopics.isEmpty()) {
                     item { TopicsEmpty(searchQuery = searchQuery) }
                 } else {
@@ -437,18 +456,21 @@ private fun TopicRow(
                 fontWeight = if (topic.hasUnread == true) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 2,
             )
-            Text(
-                text = stringResource(
-                    R.string.category_topic_metadata,
-                    topic.author,
-                    topic.lastReplyAuthor,
-                    formatLastReplyTimestamp(topic.lastReplyAt),
-                    topic.replyCount,
-                    topic.totalPages,
+            // #376 — common two-segment metadata line: `par <auteur> · N rép. · N p.` (left,
+            // truncatable) + the last-reply timestamp pinned right and never truncated. Matches
+            // the drapeaux template; the search list uses the same TopicMetadataLine.
+            TopicMetadataLine(
+                metadata = FlagMetadata(
+                    start = stringResource(
+                        R.string.category_topic_metadata,
+                        topic.author,
+                        topic.replyCount,
+                        topic.totalPages,
+                    ),
+                    end = formatLastReplyTimestamp(topic.lastReplyAt),
                 ),
                 style = MaterialTheme.typography.labelSmall,
                 color = metadataColor,
-                maxLines = 1,
             )
             if (topic.isSticky || topic.isLocked) {
                 Text(

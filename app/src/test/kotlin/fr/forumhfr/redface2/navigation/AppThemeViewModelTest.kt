@@ -52,6 +52,10 @@ class AppThemeViewModelTest {
             // #287 — eagerly collected by the VM; defaults are enough for this theme-focused test.
             every { observeDisplayDensity() } returns MutableStateFlow(DisplayDensity.COMFORT)
             every { observeFontScale() } returns MutableStateFlow(FontScalePreference.M)
+            // #445 — eagerly collected by the VM constructor; default off is enough here.
+            every { observeDebugBoundsOverlay() } returns MutableStateFlow(false)
+            // #332 — eagerly collected by the VM constructor; default on is enough here.
+            every { observeFoldLongQuotes() } returns MutableStateFlow(true)
         }
 
         val vm = AppThemeViewModel(
@@ -71,6 +75,10 @@ class AppThemeViewModelTest {
             every { observeAmoledEnabled() } returns MutableStateFlow(false)
             every { observeDisplayDensity() } returns MutableStateFlow(DisplayDensity.COMFORT)
             every { observeFontScale() } returns MutableStateFlow(FontScalePreference.M)
+            // #445 — eagerly collected by the VM constructor; default off is enough here.
+            every { observeDebugBoundsOverlay() } returns MutableStateFlow(false)
+            // #332 — eagerly collected by the VM constructor; default on is enough here.
+            every { observeFoldLongQuotes() } returns MutableStateFlow(true)
         }
 
         val vm = AppThemeViewModel(

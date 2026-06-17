@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -74,9 +75,12 @@ import coil3.compose.LocalPlatformContext
 import coil3.compose.SubcomposeAsyncImage
 import coil3.compose.SubcomposeAsyncImageContent
 import coil3.request.ImageRequest
+import coil3.request.crossfade
 import coil3.size.Precision
 import coil3.size.Scale
 import fr.forumhfr.redface2.core.ui.R
+import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
+import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
@@ -100,6 +104,68 @@ internal const val MAX_VISIBLE_QUOTE_DEPTH = 3
  * without entering Compose; `QuoteBlock` is the only call site.
  */
 internal fun isCollapsedQuoteDepth(depth: Int): Boolean = depth >= MAX_VISIBLE_QUOTE_DEPTH
+
+/**
+ * Issue #332 — character budget above which a TOP-LEVEL `[quote]`/`[quotemsg]` block renders
+ * folded to a one-line header by default ("longues citations… repliées sur une ligne, dépliables
+ * au clic puis repliables"), mirroring the long-quote behaviour of the existing HFR userscript.
+ *
+ * 280 ≈ a few lines of body text: a one- or two-sentence citation (the common "je cite la phrase à
+ * laquelle je réponds" case) stays expanded so the reader never has to tap for a short quote, while
+ * a wall-of-text citation folds away by default and can be opened on demand.
+ *
+ * This is ORTHOGONAL to [MAX_VISIBLE_QUOTE_DEPTH] / [isCollapsedQuoteDepth] (issue #3/#82 — collapse
+ * by NESTING depth, not length): the length fold only applies at depth 0 (see [isLongQuote]) so the
+ * two never compete on the same block.
+ */
+internal const val LONG_QUOTE_CHAR_THRESHOLD = 280
+
+/**
+ * Total length of the visible text carried by a [PostContent] (paragraph text + nested quote text,
+ * line breaks counted as one char, plus one separator per block boundary since consecutive blocks
+ * render on their own lines). Pure so the long-quote rule is pinned in a JVM test without entering
+ * Compose; smiley tokens and image alt-text are deliberately ignored — they are not "reading length"
+ * and a smiley-heavy line should not force a fold. A nested spoiler contributes nothing: its body is
+ * hidden behind its own toggle by default, so it adds no visible reading length to the fold decision
+ * (else a short quote wrapping a long spoiler would fold before the spoiler toggle even shows).
+ */
+internal fun quoteVisibleTextLength(content: PostContent): Int {
+    if (content.blocks.isEmpty()) return 0
+    // +1 per block boundary: consecutive paragraphs/blocks render on separate lines, so a quote made
+    // of many short blocks accumulates the visible breaks between them (Codex review).
+    return content.blocks.sumOf(::blockVisibleTextLength) + (content.blocks.size - 1)
+}
+
+private fun blockVisibleTextLength(block: PostBlock): Int = when (block) {
+    is PostBlock.Paragraph -> block.inlines.sumOf(::inlineVisibleTextLength)
+    is PostBlock.Quote -> quoteVisibleTextLength(block.content)
+    is PostBlock.Spoiler -> 0
+    is PostBlock.Fixed -> block.text.length
+    is PostBlock.CodeBlock -> block.text.length
+    is PostBlock.Image -> 0
+}
+
+private fun inlineVisibleTextLength(inline: PostInline): Int = when (inline) {
+    is PostInline.Text -> inline.value.length
+    PostInline.LineBreak -> 1
+    is PostInline.Strong -> inline.children.sumOf(::inlineVisibleTextLength)
+    is PostInline.Emphasis -> inline.children.sumOf(::inlineVisibleTextLength)
+    is PostInline.Underline -> inline.children.sumOf(::inlineVisibleTextLength)
+    is PostInline.Strike -> inline.children.sumOf(::inlineVisibleTextLength)
+    is PostInline.Color -> inline.children.sumOf(::inlineVisibleTextLength)
+    is PostInline.Link -> inline.children.sumOf(::inlineVisibleTextLength)
+    is PostInline.InlineImage -> 0
+    is PostInline.Smiley -> 0
+}
+
+/**
+ * Issue #332 — true when a quote must fold to a one-line header by default because it is "long".
+ * Restricted to [quoteDepth] == 0: a nested quote is already governed by the depth rule
+ * ([isCollapsedQuoteDepth]) and the parent fold, so folding it again by length would stack two
+ * different toggles on the same sub-tree. Pure decision, pinned in [PostRendererQuoteDepthTest].
+ */
+internal fun isLongQuote(block: PostBlock.Quote, quoteDepth: Int): Boolean =
+    quoteDepth == 0 && quoteVisibleTextLength(block.content) > LONG_QUOTE_CHAR_THRESHOLD
 
 /**
  * Which themed accent the [QuoteFrame] left bar uses. Issue #252 — a **bare** `[quote]` (typed by
@@ -191,10 +257,12 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
         )
     }
     val imageAlt = stringResource(R.string.post_inline_image_alt)
+    // #553 — signatures provide LocalIgnoreInlineColors = true so author `[color]` is dropped.
+    val ignoreColors = LocalIgnoreInlineColors.current
     // The AnnotatedString is INVARIANT — it carries only the U+FFFC markers + IDs (via MediaCounter),
     // never a size — so it is never rebuilt when a measurement lands (#175 stability pivot).
-    val annotated = remember(inlines, linkStyles, imageAlt) {
-        buildInlineText(inlines, linkStyles, imageAlt)
+    val annotated = remember(inlines, linkStyles, imageAlt, ignoreColors) {
+        buildInlineText(inlines, linkStyles, imageAlt, ignoreColors)
     }
     val hasMedia = remember(inlines) { hasInlineMedia(inlines) }
 
@@ -318,21 +386,76 @@ private fun QuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
         CollapsedQuoteBlock(block, quoteDepth)
         return
     }
+    // #332 — the long-quote fold is gated on the user preference (default ON = historical fold).
+    // When OFF we skip FoldableQuoteBlock entirely and fall through to the normal expanded render,
+    // exactly as if the quote were not "long". The depth fold above is unaffected.
+    if (LocalFoldLongQuotes.current && isLongQuote(block, quoteDepth)) {
+        FoldableQuoteBlock(block, quoteDepth)
+        return
+    }
     QuoteFrame(quoteDepth = quoteDepth, isBareQuote = isBareQuote(block)) {
-        Text(
-            // #252 — a bare quote still gets a "Citation" header (no author), mirroring the
-            // "Citation de X" header of a sourced citation, so the framed block always reads
-            // as a quotation and not as a stray indented paragraph.
-            text = block.author
-                ?.let { stringResource(R.string.post_quote_author, it) }
-                ?: stringResource(R.string.post_quote_bare),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        QuoteHeader(block)
         PostBlocksRenderer(
             blocks = block.content.blocks,
             quoteDepth = quoteDepth + 1,
         )
+    }
+}
+
+/**
+ * #252 — the "Citation de X" / "Citation" header shown above every framed quote so the block always
+ * reads as a quotation, not a stray indented paragraph. A bare quote (no author) falls back to the
+ * generic "Citation" label. Extracted so the expanded, depth-collapsed and long-fold variants share
+ * one source of truth for the header text.
+ */
+@Composable
+private fun QuoteHeader(block: PostBlock.Quote) {
+    Text(
+        text = block.author
+            ?.let { stringResource(R.string.post_quote_author, it) }
+            ?: stringResource(R.string.post_quote_bare),
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * Issue #332 — a "long" top-level citation (`isLongQuote`) folds to a single header line by default,
+ * dépliable au clic puis repliable. Mirrors the [SpoilerBlock] interaction (a `rememberSaveable`
+ * boolean + a clickable header carrying an "Afficher"/"Masquer" affordance) and reuses [QuoteFrame]
+ * so the accent bar, surface and bare-quote palette stay identical to a normal quote. Unlike
+ * [CollapsedQuoteBlock] (issue #3 depth fold, which resets depth to 0 on reveal) this fold keeps the
+ * real [quoteDepth] when expanded so a long quote that also nests deeply still hits the depth rule.
+ */
+@Composable
+private fun FoldableQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
+    var expanded by rememberSaveable(block) { mutableStateOf(false) }
+    QuoteFrame(
+        quoteDepth = quoteDepth,
+        isBareQuote = isBareQuote(block),
+        modifier = Modifier.clickable { expanded = !expanded },
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            QuoteHeader(block)
+            Text(
+                text = if (expanded) {
+                    stringResource(R.string.post_quote_hide)
+                } else {
+                    stringResource(R.string.post_quote_show)
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (expanded) {
+            PostBlocksRenderer(
+                blocks = block.content.blocks,
+                quoteDepth = quoteDepth + 1,
+            )
+        }
     }
 }
 
@@ -442,14 +565,8 @@ private fun CollapsedQuoteBlock(block: PostBlock.Quote, quoteDepth: Int) {
             )
         }
         if (revealed) {
-            Text(
-                // #252 — same "Citation"/"Citation de X" header rule as the expanded QuoteBlock.
-                text = block.author
-                    ?.let { stringResource(R.string.post_quote_author, it) }
-                    ?: stringResource(R.string.post_quote_bare),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // #252 — same "Citation"/"Citation de X" header rule as the expanded QuoteBlock.
+            QuoteHeader(block)
             PostBlocksRenderer(
                 blocks = block.content.blocks,
                 quoteDepth = 0,
@@ -516,48 +633,84 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
  *
  * Bounded so a 4000×3000 RAW screenshot can't blow up the post and destroy the scroll position.
  * SubcomposeAsyncImage exposes loading/error slots so the user gets visual feedback when an HFR image
- * host (rehost.diberie.com, super-h.fr, …) is offline rather than a silent empty Box. Phase 1 keeps the
- * loading + error layout minimal — no material-icons-extended dependency just for a placeholder glyph.
+ * host (rehost.diberie.com, super-h.fr, …) is offline rather than a silent empty Box.
+ *
+ * #249 — anti-CLS: instead of reserving the legacy `minHeight` slot (which then SNAPS to the bitmap's
+ * real height on arrival = a bump), reserve the EXACT final height from the measured intrinsic size
+ * (`width × h/w`, same #175/#224 cache) so the shimmer placeholder occupies the loaded image's slot and
+ * nothing below moves. The image then `crossfade`s in (Coil native) into the already-sized box. A
+ * not-yet-measured image (standalone `PostBlock.Image`, no paragraph measure effect) keeps the legacy
+ * min/max slot. Animations honour the system reduce-motion preference ([rememberAnimationsEnabled]).
  */
 @Composable
 private fun BlockImage(url: String, description: String?, linkUrl: String? = null) {
     val uriHandler = LocalUriHandler.current
     val openLabel = stringResource(R.string.post_image_open_link)
-    val containerModifier = Modifier
-        .fillMaxWidth()
-        .defaultMinSize(minHeight = PostMediaDisplayPolicy.blockImageMinHeight)
-        .heightIn(max = PostMediaDisplayPolicy.blockImageMaxHeight)
-        .clip(RoundedCornerShape(8.dp))
-        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-        .then(
-            if (linkUrl != null) {
-                // Role.Image (not Button): the element IS an image that opens its full version on tap;
-                // the localized onClickLabel carries the action for TalkBack ("Image, double-tap to …").
-                Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
-                    runCatching { uriHandler.openUri(linkUrl) }
-                }
-            } else {
-                Modifier
-            },
-        )
-    SubcomposeAsyncImage(
-        model = url,
-        contentDescription = description,
-        contentScale = ContentScale.Fit,
-        modifier = containerModifier,
-        loading = { ImageBlockLoading() },
-        error = { ImageBlockError(description) },
-        success = { SubcomposeAsyncImageContent() },
-    )
-}
+    val animationsEnabled = rememberAnimationsEnabled()
 
-@Composable
-private fun ImageBlockLoading() {
-    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Text(
-            text = stringResource(R.string.post_image_loading),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    // #249 — reserve the exact final box from the measured intrinsic size when known. The same cache the
+    // #175/#224 paragraph measure effect fills feeds promoted images; a standalone PostBlock.Image is
+    // unmeasured (null) and falls back to the legacy min/max slot below.
+    val sizeCache = LocalIntrinsicMediaSizeCache.current
+    val measured: IntSize? = sizeCache.get(url)
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val reservedHeight = PostMediaDisplayPolicy.reservedBlockImageHeight(
+            measured = measured?.let { PixelSize(it.width, it.height) },
+            availableWidthDp = maxWidth.value,
+        )
+        // Reserved box: an exact height when measured (anti-CLS), else the legacy min/max slot.
+        val sizeModifier = if (reservedHeight != null) {
+            Modifier.height(reservedHeight)
+        } else {
+            Modifier
+                .defaultMinSize(minHeight = PostMediaDisplayPolicy.blockImageMinHeight)
+                .heightIn(max = PostMediaDisplayPolicy.blockImageMaxHeight)
+        }
+        val containerModifier = Modifier
+            .fillMaxWidth()
+            .then(sizeModifier)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            .then(
+                if (linkUrl != null) {
+                    // Role.Image (not Button): the element IS an image that opens its full version on
+                    // tap; the localized onClickLabel carries the action for TalkBack.
+                    Modifier.clickable(role = Role.Image, onClickLabel = openLabel) {
+                        runCatching { uriHandler.openUri(linkUrl) }
+                    }
+                } else {
+                    Modifier
+                },
+            )
+        val context = LocalPlatformContext.current
+        val request = remember(url, animationsEnabled, context) {
+            ImageRequest.Builder(context)
+                .data(url)
+                // #249 — fondu natif Coil dans la box déjà dimensionnée → zéro saut. Désactivé quand le
+                // système demande de réduire les animations (apparition directe, §4 de l'issue).
+                .crossfade(animationsEnabled)
+                .build()
+        }
+        SubcomposeAsyncImage(
+            model = request,
+            contentDescription = description,
+            contentScale = ContentScale.Fit,
+            modifier = containerModifier,
+            loading = {
+                // Measured: fill the exact reserved box. Unmeasured (max-only constraint): a STABLE
+                // min-height placeholder — NOT fillMaxSize, which would balloon to the max slot and then
+                // collapse to the loaded intrinsic height (a visible shift, Codex review). The legacy
+                // min→intrinsic grow on load remains for these rare standalone images.
+                val shimmerModifier = if (reservedHeight != null) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier.fillMaxWidth().height(PostMediaDisplayPolicy.blockImageMinHeight)
+                }
+                ImageShimmer(animated = animationsEnabled, modifier = shimmerModifier)
+            },
+            error = { ImageBlockError(description) },
+            success = { SubcomposeAsyncImageContent() },
         )
     }
 }
@@ -744,9 +897,13 @@ internal fun buildInlineText(
     inlines: List<PostInline>,
     linkStyles: TextLinkStyles,
     imageAlt: String,
+    // #553 — when true, the author's inline `[color]` styling is dropped (used for signatures, whose
+    // web-tuned colours read as garish/illegible on the app theme). Text falls back to the caller's
+    // colour. Default false: post bodies keep author colours.
+    ignoreColors: Boolean = false,
 ): AnnotatedString = buildAnnotatedString {
     val media = MediaCounter()
-    appendInlines(inlines, linkStyles, media, imageAlt)
+    appendInlines(inlines, linkStyles, media, imageAlt, ignoreColors)
 }
 
 private fun AnnotatedString.Builder.appendInlines(
@@ -754,8 +911,9 @@ private fun AnnotatedString.Builder.appendInlines(
     linkStyles: TextLinkStyles,
     media: MediaCounter,
     imageAlt: String,
+    ignoreColors: Boolean,
 ) {
-    inlines.forEach { inline -> appendInline(inline, linkStyles, media, imageAlt) }
+    inlines.forEach { inline -> appendInline(inline, linkStyles, media, imageAlt, ignoreColors) }
 }
 
 @Suppress("CyclomaticComplexMethod")
@@ -764,32 +922,39 @@ private fun AnnotatedString.Builder.appendInline(
     linkStyles: TextLinkStyles,
     media: MediaCounter,
     imageAlt: String,
+    ignoreColors: Boolean,
 ) {
     when (inline) {
         is PostInline.Text -> append(inline.value)
         PostInline.LineBreak -> append('\n')
         is PostInline.Strong -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
         }
 
         is PostInline.Emphasis -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
         }
 
         is PostInline.Underline -> withStyle(SpanStyle(textDecoration = TextDecoration.Underline)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
         }
 
         is PostInline.Strike -> withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
         }
 
-        is PostInline.Color -> withStyle(SpanStyle(color = parseColor(inline.colorHex))) {
-            appendInlines(inline.children, linkStyles, media, imageAlt)
+        // #553 — drop the author colour when asked (signatures): render the children plain so they
+        // inherit the caller's neutral colour instead of the web-tuned, often-illegible author hue.
+        is PostInline.Color -> if (ignoreColors) {
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+        } else {
+            withStyle(SpanStyle(color = parseColor(inline.colorHex))) {
+                appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
+            }
         }
 
         is PostInline.Link -> withLink(LinkAnnotation.Url(inline.url, linkStyles)) {
-            appendInlines(inline.children, linkStyles, media, imageAlt)
+            appendInlines(inline.children, linkStyles, media, imageAlt, ignoreColors)
         }
 
         is PostInline.InlineImage -> appendInlineContent(media.nextImage(), inline.description ?: imageAlt)

@@ -201,6 +201,31 @@ interface UserPreferencesRepository {
     suspend fun setTopicPollsExpanded(enabled: Boolean)
 
     /**
+     * #330 — whether each post's author signature (`<span class="signature">`, web parity) is
+     * rendered beneath the post body, in a subdued style separated by a divider. Default `false`:
+     * signatures are noisy and most readers scroll past them, so they are opt-in. Toggling is a
+     * pure render-time switch (the signature is always parsed and cached, no refetch). Observed by
+     * `:feature:topic`, toggled in Settings.
+     */
+    fun observeTopicSignatures(): Flow<Boolean>
+
+    /** Persists [observeTopicSignatures]. Default `false` until the first call. */
+    suspend fun setTopicSignatures(enabled: Boolean)
+
+    /**
+     * #332 — whether a "long" top-level citation folds to a one-line header by default (the
+     * `isLongQuote` behaviour: a wall-of-text quote is collapsed and revealed on tap). Default
+     * `true` = the historical fold; `false` disables it entirely so a long quote always renders
+     * expanded inline like a short one (the beta feedback that the auto-fold is « trop strict »).
+     * Pure render-time switch (no refetch), provided to the post renderer through a CompositionLocal
+     * at the app root ([fr.forumhfr.redface2.navigation.RedfaceApp]) and mirrored in Settings.
+     */
+    fun observeFoldLongQuotes(): Flow<Boolean>
+
+    /** Persists [observeFoldLongQuotes]. Default `true` until the first call. */
+    suspend fun setFoldLongQuotes(enabled: Boolean)
+
+    /**
      * #458 — which top-level tab (and optional Forum category) a cold start opens on. Default
      * [StartScreenChoice.FLAGS] (historical behaviour). The navigation reads the SYNCHRONOUS
      * [StartScreenBootstrapStore] mirror at cold start; this flow is the source of truth and
@@ -274,4 +299,17 @@ interface UserPreferencesRepository {
 
     /** Persists [observeFontScale]. Default [FontScalePreference.M] until the first call. */
     suspend fun setFontScale(scale: FontScalePreference)
+
+    /**
+     * Debug bounds overlay (#445): when `true`, the app draws a full-screen overlay outlining the
+     * bounds of every laid-out component (walked from the Compose semantics tree) so a developer can
+     * eyeball layout/spacing while dogfooding. Default `false`. The toggle is exposed in Settings on
+     * the DEV channel ONLY (gated by the `:app` build flavor), and the overlay itself early-returns
+     * when disabled so it costs nothing in production. Observed at the app root
+     * ([fr.forumhfr.redface2.navigation.RedfaceApp]).
+     */
+    fun observeDebugBoundsOverlay(): Flow<Boolean>
+
+    /** Persists [observeDebugBoundsOverlay]. Default `false` until the first call. */
+    suspend fun setDebugBoundsOverlay(enabled: Boolean)
 }

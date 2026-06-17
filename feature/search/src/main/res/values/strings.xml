@@ -26,8 +26,14 @@
     <string name="search_pivot_hint">HFR affiche les topics d’une catégorie à la fois. Choisir une catégorie relance la même recherche dans ce périmètre.</string>
     <string name="search_result_location">dans %1$s</string>
     <string name="search_result_excerpt">Extrait : %1$s</string>
-    <string name="search_result_replies">%1$d réponses · %2$d vues</string>
-    <string name="search_result_author">par %1$s</string>
-    <string name="search_result_last_reply">Dernier message %1$s par %2$s</string>
+    <!-- #376 — segment gauche tronquable de la ligne de métadonnées commune aux trois listes
+         (la recherche n'expose pas de pagination, donc N pages est remplacé par N vues). La date
+         du dernier message est alignée à droite, jamais tronquée. -->
+    <string name="search_result_metadata">par %1$s · %2$d rép. · %3$s</string>
+    <!-- « vues » (vue complète, pas une abréviation) doit s'accorder : 1 vue / N vues. -->
+    <plurals name="search_result_views">
+        <item quantity="one">%d vue</item>
+        <item quantity="other">%d vues</item>
+    </plurals>
     <string name="search_result_locked">Verrouillé</string>
 </resources>

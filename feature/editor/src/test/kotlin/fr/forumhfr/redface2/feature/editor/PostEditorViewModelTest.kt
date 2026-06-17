@@ -1990,6 +1990,14 @@ class PostEditorViewModelTest {
 
         override suspend fun setTopicPollsExpanded(enabled: Boolean) = Unit
 
+        override fun observeTopicSignatures(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setTopicSignatures(enabled: Boolean) = Unit
+
+        override fun observeFoldLongQuotes(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setFoldLongQuotes(enabled: Boolean) = Unit
+
         override fun observeStartScreen(): Flow<StartScreenPreference> =
             MutableStateFlow(StartScreenPreference())
 
@@ -2022,6 +2030,10 @@ class PostEditorViewModelTest {
         override fun observeFontScale(): Flow<FontScalePreference> = MutableStateFlow(FontScalePreference.M)
 
         override suspend fun setFontScale(scale: FontScalePreference) = Unit
+
+        override fun observeDebugBoundsOverlay(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setDebugBoundsOverlay(enabled: Boolean) = Unit
     }
 
     /**

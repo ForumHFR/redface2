@@ -1,5 +1,11 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -12,7 +18,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -28,7 +33,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -43,6 +47,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -52,15 +57,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -81,10 +87,12 @@ import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
+import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
+import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -625,6 +633,8 @@ internal fun TopicContent(
     // stay visible while the user scrolls (the in-card title/caption scrolls away). When the page
     // is still loading / errored, fall back to a generic title and the requested page.
     val loaded = state.mode as? TopicUiState.Mode.Loaded
+    // #411 — bottom action cluster hides on scroll-down, re-appears on scroll-up (RF1 parity).
+    val bottomActionsVisible = rememberBottomActionsVisible(listState)
     val fallbackTitle = stringResource(R.string.topic_topbar_fallback_title)
     // Honour TopicRequest.titleHint's contract: the cached hint is a LOADING-only stand-in. Once the
     // page is Loaded, the live Topic.title wins (or the generic fallback if it is somehow blank) — we
@@ -676,15 +686,12 @@ internal fun TopicContent(
                         onClick = onBack,
                         modifier = Modifier.semantics { contentDescription = backLabel },
                     ) {
-                        // A text glyph used as an icon was unstable: its size depended on the system
-                        // font's `←` rendering, the baseline and the font-scale, never matching the
-                        // title cleanly (cf. Codex review). Use a dp-sized vector instead — optically
-                        // centred by the IconButton, font-independent. The a11y label stays on the
-                        // IconButton, so the icon itself is decorative (contentDescription = null).
-                        Icon(
-                            painter = painterResource(fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back),
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp),
+                        // #360 / ADR-015 — vector stroke unifié, dimensionné en dp (indépendant de la
+                        // police et de la baseline, contrairement à l'ancien glyphe « ← »), via le
+                        // primitive partagé :core:ui. L'étiquette a11y reste sur l'IconButton, donc
+                        // l'icône est décorative (contentDescription = null par défaut).
+                        RedfaceVectorIcon(
+                            resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back,
                         )
                     }
                 },
@@ -698,26 +705,35 @@ internal fun TopicContent(
             // scrollbar (right edge, auto-hiding) — a slight bottom-right overlap is acceptable.
             val current = loaded
             if (current != null) {
-                TopicBottomActions(
-                    showReply = shouldEnableReply(current.topic, state.isAuthenticated),
-                    showPageFabs = state.showPageFabs,
-                    canGoPrevious = state.canGoPrevious,
-                    canGoNext = state.canGoNext,
-                    // #291 — the « Citer N » FAB shares the reply gate: quoting IS replying.
-                    multiQuoteCount = effectiveMultiQuoteCount(
-                        current.topic,
-                        state.isAuthenticated,
-                        multiQuoteSelection,
-                    ),
-                    // Clamp to [1, totalPages]: `canGoPrevious/Next` are derived from `request.page`
-                    // while the target is computed from the parsed `topic.page`; if those ever desync
-                    // (HFR clamps an out-of-range page to the last one), the clamp keeps navigation in
-                    // bounds — same robustness as the header guard and the swipe (#282).
-                    onPreviousPage = { onOpenPage((current.topic.page - 1).coerceAtLeast(1)) },
-                    onNextPage = { onOpenPage((current.topic.page + 1).coerceAtMost(current.topic.totalPages)) },
-                    onReply = { onReply(current.topic.subcat, current.topic.page) },
-                    onMultiQuote = { onMultiQuote(current.topic.subcat, current.topic.page) },
-                )
+                // #411 — tuck the cluster away while reading down, reveal it on the first upward
+                // scroll. AnimatedVisibility in the Scaffold's FAB slot simply collapses to nothing
+                // when hidden; the slide/fade mirrors the collapsible top bar (#286/#338).
+                AnimatedVisibility(
+                    visible = bottomActionsVisible,
+                    enter = fadeIn() + slideInVertically { it },
+                    exit = fadeOut() + slideOutVertically { it },
+                ) {
+                    TopicBottomActions(
+                        showReply = shouldEnableReply(current.topic, state.isAuthenticated),
+                        showPageFabs = state.showPageFabs,
+                        canGoPrevious = state.canGoPrevious,
+                        canGoNext = state.canGoNext,
+                        // #291 — the « Citer N » FAB shares the reply gate: quoting IS replying.
+                        multiQuoteCount = effectiveMultiQuoteCount(
+                            current.topic,
+                            state.isAuthenticated,
+                            multiQuoteSelection,
+                        ),
+                        // Clamp to [1, totalPages]: `canGoPrevious/Next` are derived from `request.page`
+                        // while the target is computed from the parsed `topic.page`; if those ever desync
+                        // (HFR clamps an out-of-range page to the last one), the clamp keeps navigation in
+                        // bounds — same robustness as the header guard and the swipe (#282).
+                        onPreviousPage = { onOpenPage((current.topic.page - 1).coerceAtLeast(1)) },
+                        onNextPage = { onOpenPage((current.topic.page + 1).coerceAtMost(current.topic.totalPages)) },
+                        onReply = { onReply(current.topic.subcat, current.topic.page) },
+                        onMultiQuote = { onMultiQuote(current.topic.subcat, current.topic.page) },
+                    )
+                }
             }
         },
     ) { innerPadding ->
@@ -1006,6 +1022,9 @@ private fun TopicLoadedContent(
                 post = post,
                 highlighted = highlight == post.numreponse,
                 citedCount = citationCounts[post.numreponse] ?: 0,
+                // #330 — render the author signature beneath the body when the reading preference
+                // is on (the signature is always parsed/cached on the Post; this is render-only).
+                showSignature = state.showSignatures,
                 onQuote = quoteAction,
                 onEdit = editAction,
                 onOpenProfile = profileAction,
@@ -1381,6 +1400,12 @@ internal fun TopicPostCard(
      * #239 — number of posts on the current page that cite this one. 0 hides the badge.
      */
     citedCount: Int,
+    /**
+     * #330 — when `true` (the « Afficher les signatures » reading preference is on), the author's
+     * signature ([Post.signature]) is rendered beneath the body, separated by a divider, in a
+     * subdued style. No-op when the post has no signature. Default `false`.
+     */
+    showSignature: Boolean = false,
     onQuote: (() -> Unit)?,
     onEdit: (() -> Unit)?,
     /**
@@ -1675,6 +1700,25 @@ internal fun TopicPostCard(
         ) {
             // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
             PostRenderer(content = post.content, selectable = true)
+            // #330 — the author signature (web parity), gated by the reading preference. Rendered
+            // with the shared PostRenderer (the signature is BBCode/HTML like the body) but in a
+            // subdued style: a divider separates it from the body and a reduced alpha makes it
+            // subordinate to the post content. No-op when the post carries no signature.
+            post.signature?.let { signature ->
+                if (showSignature) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    // #553 — drop the author's web-tuned `[color]` in the signature: on the app theme
+                    // (especially dark) those colours read as garish/illegible. The signature then
+                    // renders in the neutral subdued body colour (the reduced alpha keeps it
+                    // subordinate). Post bodies are unaffected (they don't provide this local).
+                    CompositionLocalProvider(LocalIgnoreInlineColors provides true) {
+                        PostRenderer(
+                            content = signature,
+                            modifier = Modifier.alpha(SIGNATURE_ALPHA),
+                        )
+                    }
+                }
+            }
             if (onQuote != null || onEdit != null || onToggleMultiQuote != null) {
                 // Actions row at the bottom of the post card, sober TextButtons
                 // so they stay subordinate to the post content. « Modifier »
@@ -1748,6 +1792,11 @@ internal fun TopicPostCard(
     }
 }
 
+// #330 — the author signature renders subordinate to the post body: a reduced opacity keeps it
+// visually secondary (it shares the body's typography, so colour-only dimming via alpha is the
+// least invasive subdued treatment without recolouring PostRenderer's internals).
+private const val SIGNATURE_ALPHA = 0.7f
+
 private val topicDateFormatter = DateTimeFormatter
     .ofPattern("dd/MM/yyyy HH:mm:ss", Locale.FRANCE)
     .withZone(ZoneId.of("Europe/Paris"))
@@ -1788,6 +1837,53 @@ private fun DeletePostConfirmDialog(
 }
 
 /**
+ * #411 — drives the bottom-action cluster's show-on-scroll-up visibility, derived READ-ONLY from
+ * [listState] (it never drives scrolling, so the anchor/restore #307 and the swipe #282 stay
+ * untouched). Hides while the list scrolls DOWN, reveals on the first UPWARD scroll — the M3 idiom,
+ * matching the collapsible top bar. It also stays visible at the END of the list (and on a short,
+ * one-screen topic): reaching the last post is exactly when the reader wants to reply, so the cluster
+ * must be there without scrolling back up (#411 beta feedback).
+ */
+@Composable
+private fun rememberBottomActionsVisible(listState: LazyListState): Boolean {
+    var visible by remember(listState) { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        var prevIndex = listState.firstVisibleItemIndex
+        var prevOffset = listState.firstVisibleItemScrollOffset
+        // snapshotFlow keys on the first-visible item+offset AND canScrollForward, so a recomposition /
+        // async layout shift with an identical position never re-reveals the cluster (the last decision
+        // is held) — BUT a change in SCROLLABILITY with an unchanged position (e.g. the list shrinks so
+        // the current position becomes the end without a scroll) still re-fires the collect and re-
+        // evaluates the « visible at the end » rule. Keying on position alone left that case stale until
+        // the next real scroll (multi-agent review finding, scored >65). A list that cannot scroll stays
+        // visible.
+        snapshotFlow {
+            Triple(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+                listState.canScrollForward,
+            )
+        }
+            .collect { (index, offset, canScrollForward) ->
+                visible = when {
+                    // At the end of the list (or a short, non-scrollable page) always show: the user is
+                    // on the last post and most likely wants to reply, so they should not have to scroll
+                    // up to reveal the cluster (#411 beta feedback, tinc t2788220).
+                    !canScrollForward -> true
+                    index != prevIndex -> index < prevIndex
+                    offset != prevOffset -> offset < prevOffset
+                    // No real movement (incl. snapshotFlow's initial emission): hold the last decision
+                    // so the cluster stays visible on load and never flips without a scroll.
+                    else -> visible
+                }
+                prevIndex = index
+                prevOffset = offset
+            }
+    }
+    return visible
+}
+
+/**
  * #283 + bonus — the floating bottom-action cluster: previous/next page mini-FABs and a « Répondre »
  * extended FAB, so posting and page-change are reachable without scrolling back up to the header. Pure
  * presentation: each affordance is gated on the same flags the header already uses, and reuses the
@@ -1823,10 +1919,18 @@ private fun TopicBottomActions(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (showPrevious) {
-                PageFab(description = previousLabel, glyph = "‹", onClick = onPreviousPage)
+                PageFab(
+                    description = previousLabel,
+                    iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_left,
+                    onClick = onPreviousPage,
+                )
             }
             if (showNext) {
-                PageFab(description = nextLabel, glyph = "›", onClick = onNextPage)
+                PageFab(
+                    description = nextLabel,
+                    iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right,
+                    onClick = onNextPage,
+                )
             }
             if (showMultiQuote) {
                 MultiQuoteFab(count = multiQuoteCount, onClick = onMultiQuote)
@@ -1855,31 +1959,32 @@ private fun MultiQuoteFab(count: Int, onClick: () -> Unit) {
 @Composable
 private fun PageFab(
     description: String,
-    glyph: String,
+    @DrawableRes iconRes: Int,
     onClick: () -> Unit,
 ) {
-    // No Material icons (detekt ForbiddenImport blocks androidx.compose.material.*): the glyph is a
-    // decorative Text and the real label rides on the FAB's `contentDescription` for TalkBack — same
-    // pattern as the top-bar back button.
+    // #360 / ADR-015 — chevron en vector stroke unifié (poids optique aligné sur la flèche retour),
+    // dimensionné en dp via le primitive partagé :core:ui plutôt qu'un glyphe « ‹ »/« › » dépendant
+    // de la police. Pas de Material icons (detekt ForbiddenImport). L'étiquette a11y reste sur le FAB,
+    // donc l'icône est décorative.
     SmallFloatingActionButton(
         onClick = onClick,
         modifier = Modifier.semantics { contentDescription = description },
     ) {
-        Text(glyph)
+        RedfaceVectorIcon(resId = iconRes)
     }
 }
 
 @Composable
 private fun ReplyFab(onClick: () -> Unit) {
-    // Same SmallFloatingActionButton footprint as the page FABs (user request): the « Répondre » label
-    // rides on contentDescription for TalkBack and the glyph is decorative (no Material icons — detekt
-    // ForbiddenImport blocks androidx.compose.material.*), mirroring PageFab and the top-bar back button.
+    // #360 / ADR-015 — crayon en vector stroke unifié (même poids optique que la flèche retour / les
+    // chevrons), via le primitive partagé :core:ui, à la place du glyphe « ✎ » dépendant de la police.
+    // Pas de Material icons (detekt ForbiddenImport). L'étiquette a11y reste sur le FAB.
     val replyLabel = stringResource(R.string.topic_fab_reply)
     SmallFloatingActionButton(
         onClick = onClick,
         modifier = Modifier.semantics { contentDescription = replyLabel },
     ) {
-        Text("✎")
+        RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_edit)
     }
 }
 

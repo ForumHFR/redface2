@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.ui.R
+import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 
 /**
  * Account / alpha-tools menu shown in the top-right of every main screen (#198).
@@ -55,12 +56,17 @@ fun RedfaceAccountMenu(
     onOpenDiagnostics: () -> Unit,
     onReportContent: () -> Unit,
     modifier: Modifier = Modifier,
+    // #479 — real HFR avatar of the connected user. Null (anonymous, loading, or no avatar set)
+    // falls back to the pseudo-initial badge. The host (RedfaceNavHost) resolves it from the
+    // connected user's profile via AppAccountViewModel.
+    avatarUrl: String? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
 
     Box(modifier = modifier) {
         AccountBadge(
             authState = authState,
+            avatarUrl = avatarUrl,
             onClick = { expanded = true },
         )
         DropdownMenu(
@@ -122,8 +128,22 @@ fun RedfaceAccountMenu(
 @Composable
 private fun AccountBadge(
     authState: AuthState?,
+    avatarUrl: String?,
     onClick: () -> Unit,
 ) {
+    // #479 — when the connected user has a resolved avatar, show it instead of the initial. The
+    // text-badge branch below is kept verbatim for anonymous / loading / no-avatar so the
+    // anti-flicker contract ("…" never "?") and the existing colour scheme are unchanged.
+    val authenticated = authState as? AuthState.Authenticated
+    if (authenticated != null && !avatarUrl.isNullOrBlank()) {
+        AvatarBadge(
+            avatarUrl = avatarUrl,
+            pseudo = authenticated.pseudo,
+            onClick = onClick,
+        )
+        return
+    }
+
     val label = when (authState) {
         null -> "…"
         AuthState.Anonymous -> "?"
@@ -169,6 +189,35 @@ private fun AccountBadge(
                 fontWeight = FontWeight.SemiBold,
             )
         }
+    }
+}
+
+@Composable
+private fun AvatarBadge(
+    avatarUrl: String,
+    pseudo: String,
+    onClick: () -> Unit,
+) {
+    // #479 — same interaction contract as the text [AccountBadge]: a clickable M3 `Surface`
+    // (ripple clipped to the rounded shape, `Role.Button` for TalkBack) with the 40dp visual and
+    // the explicit `minimumInteractiveComponentSize()` (BEFORE `.size`) expanding the touch
+    // target to 48dp. The Surface owns the "Ouvrir le menu compte" semantics
+    // (`mergeDescendants = true`) so the avatar's own "Avatar de <pseudo>" description does not
+    // leak as a second TalkBack node — the badge announces as the menu button, not the avatar.
+    val accessibilityLabel = stringResource(R.string.account_menu_open_description)
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(BADGE_CORNER_RADIUS),
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .size(BADGE_SIZE)
+            .semantics(mergeDescendants = true) { contentDescription = accessibilityLabel },
+    ) {
+        RedfaceUserAvatar(
+            avatarUrl = avatarUrl,
+            author = pseudo,
+            size = BADGE_SIZE,
+        )
     }
 }
 

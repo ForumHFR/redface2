@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.post
 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.unit.sp
@@ -104,6 +105,54 @@ class PostRendererInlineTest {
                 annotated.inlineContentIds(),
             )
         }
+    }
+
+    @Test
+    fun `buildInlineText drops the author color span when ignoreColors is set (#553)`() {
+        val inlines = listOf(
+            PostInline.Color(
+                colorHex = "#FF0000",
+                children = listOf(PostInline.Text("rouge")),
+            ),
+        )
+
+        // Default (post bodies): the author colour is applied as a span.
+        val colored = buildInlineText(inlines, emptyLinkStyles, imageAlt = "img")
+        assertTrue(
+            "by default the author color is applied",
+            colored.spanStyles.any { it.item.color != Color.Unspecified },
+        )
+
+        // Signatures (#553): ignoreColors drops the author colour; the text survives and falls back
+        // to the caller's neutral colour (no specified-colour span left).
+        val neutral = buildInlineText(inlines, emptyLinkStyles, imageAlt = "img", ignoreColors = true)
+        assertEquals("the text content is preserved", "rouge", neutral.text)
+        assertFalse(
+            "with ignoreColors the author color span is dropped (#553 signatures)",
+            neutral.spanStyles.any { it.item.color != Color.Unspecified },
+        )
+
+        // Media nested inside an ignored colour still emits its placeholder: ignoreColors only drops
+        // the colour span, never the recursion, so the MediaCounter symmetry (AnnotatedString IDs ==
+        // inline-content map keys) holds (Codex review #553).
+        val withMedia = listOf(
+            PostInline.Color(
+                colorHex = "#00FF00",
+                children = listOf(
+                    PostInline.Text("vert "),
+                    PostInline.Smiley(
+                        kind = SmileyKind.Perso("rofl"),
+                        imageUrl = "https://forum-images.hardware.fr/images/perso/rofl.gif",
+                    ),
+                ),
+            ),
+        )
+        val neutralMedia = buildInlineText(withMedia, emptyLinkStyles, imageAlt = "img", ignoreColors = true)
+        assertEquals(
+            "media inside an ignored colour keeps its placeholder (MediaCounter symmetry)",
+            collectInlineMedia(withMedia).keys,
+            neutralMedia.inlineContentIds(),
+        )
     }
 
     @Test

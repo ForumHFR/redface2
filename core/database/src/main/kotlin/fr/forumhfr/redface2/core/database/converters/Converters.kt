@@ -54,6 +54,21 @@ internal object Converters {
     fun postContentFromJson(value: String): PostContent =
         PostContentSerializer.decode(value)
 
+    /**
+     * #330 — nullable variant for `posts.signature`. A `null` AST (the common case: most posts
+     * carry no signature) maps to a SQL `NULL` rather than an encoded empty document, so the
+     * column stays sparse and `cursor.isNull(...)` reads true for signature-less rows.
+     */
+    @TypeConverter
+    @JvmStatic
+    fun nullablePostContentToJson(value: PostContent?): String? =
+        value?.let(PostContentSerializer::encode)
+
+    @TypeConverter
+    @JvmStatic
+    fun nullablePostContentFromJson(value: String?): PostContent? =
+        value?.let(PostContentSerializer::decode)
+
     @TypeConverter
     @JvmStatic
     fun fetchModeToString(value: FetchMode): String = value.name

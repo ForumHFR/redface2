@@ -53,6 +53,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(ignoreTopicCache = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeDebugBoundsOverlay().first() },
+            isLocked = { it.debugBoundsOverlayTouchedLocally || it.isUpdatingDebugBoundsOverlay },
+            apply = { state, value -> state.copy(debugBoundsOverlay = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeFlagsGroupByCategory().first() },
             isLocked = { it.flagsGroupByCategoryTouchedLocally || it.isUpdatingFlagsGroupByCategory },
             apply = { state, value -> state.copy(flagsGroupByCategory = value) },
@@ -96,6 +101,16 @@ class SettingsViewModel @Inject constructor(
             read = { userPreferencesRepository.observeTopicPollsExpanded().first() },
             isLocked = { it.topicPollsExpandedTouchedLocally || it.isUpdatingTopicPollsExpanded },
             apply = { state, value -> state.copy(topicPollsExpanded = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeTopicSignatures().first() },
+            isLocked = { it.topicSignaturesTouchedLocally || it.isUpdatingTopicSignatures },
+            apply = { state, value -> state.copy(topicSignatures = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeFoldLongQuotes().first() },
+            isLocked = { it.foldLongQuotesTouchedLocally || it.isUpdatingFoldLongQuotes },
+            apply = { state, value -> state.copy(foldLongQuotes = value) },
         )
         hydratePreference(
             read = { userPreferencesRepository.observeConfirmBeforePosting().first() },
@@ -193,6 +208,7 @@ class SettingsViewModel @Inject constructor(
                 _state.update { it.copy(showClearImageCacheConfirm = false) }
             SettingsIntent.ClearImageCacheConfirmed -> clearImageCache()
             is SettingsIntent.IgnoreTopicCacheChanged -> updateIgnoreTopicCache(intent.enabled)
+            is SettingsIntent.DebugBoundsOverlayChanged -> updateDebugBoundsOverlay(intent.enabled)
             is SettingsIntent.FlagsGroupByCategoryChanged -> updateFlagsGroupByCategory(intent.enabled)
             is SettingsIntent.FlagsHideReadCategoriesChanged -> updateFlagsHideReadCategories(intent.enabled)
             is SettingsIntent.FlagsPerTabOverrideChanged -> updateFlagsPerTabOverride(intent.enabled)
@@ -202,6 +218,8 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.TopicPageFabsChanged -> updateTopicPageFabs(intent.enabled)
             is SettingsIntent.MpUnreadBadgeChanged -> updateMpUnreadBadge(intent.enabled)
             is SettingsIntent.TopicPollsExpandedChanged -> updateTopicPollsExpanded(intent.enabled)
+            is SettingsIntent.TopicSignaturesChanged -> updateTopicSignatures(intent.enabled)
+            is SettingsIntent.FoldLongQuotesChanged -> updateFoldLongQuotes(intent.enabled)
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
@@ -351,6 +369,35 @@ class SettingsViewModel @Inject constructor(
                     }
                 }
         }
+    }
+
+    // #445 — debug bounds overlay (dev only). Plain boolean, so it reuses the shared optimistic-flip
+    // helper rather than the bespoke shape, like the flags toggles.
+    private fun updateDebugBoundsOverlay(desired: Boolean) {
+        val previous = _state.value.debugBoundsOverlay
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    debugBoundsOverlay = desired,
+                    isUpdatingDebugBoundsOverlay = true,
+                    debugBoundsOverlayError = false,
+                    debugBoundsOverlayTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(debugBoundsOverlay = desired, isUpdatingDebugBoundsOverlay = false)
+                } else {
+                    state.copy(
+                        debugBoundsOverlay = previous,
+                        isUpdatingDebugBoundsOverlay = false,
+                        debugBoundsOverlayError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setDebugBoundsOverlay,
+        )
     }
 
     private fun updateFlagsGroupByCategory(desired: Boolean) {
@@ -705,6 +752,60 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setTopicPollsExpanded,
+        )
+    }
+
+    private fun updateTopicSignatures(desired: Boolean) {
+        val previous = _state.value.topicSignatures
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    topicSignatures = desired,
+                    isUpdatingTopicSignatures = true,
+                    topicSignaturesError = false,
+                    topicSignaturesTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(topicSignatures = desired, isUpdatingTopicSignatures = false)
+                } else {
+                    state.copy(
+                        topicSignatures = previous,
+                        isUpdatingTopicSignatures = false,
+                        topicSignaturesError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setTopicSignatures,
+        )
+    }
+
+    private fun updateFoldLongQuotes(desired: Boolean) {
+        val previous = _state.value.foldLongQuotes
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    foldLongQuotes = desired,
+                    isUpdatingFoldLongQuotes = true,
+                    foldLongQuotesError = false,
+                    foldLongQuotesTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(foldLongQuotes = desired, isUpdatingFoldLongQuotes = false)
+                } else {
+                    state.copy(
+                        foldLongQuotes = previous,
+                        isUpdatingFoldLongQuotes = false,
+                        foldLongQuotesError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setFoldLongQuotes,
         )
     }
 
