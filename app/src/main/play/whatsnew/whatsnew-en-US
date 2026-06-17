@@ -11,6 +11,6 @@ Improvements:
 
 Fixes:
 - Flags scrolled back to top after refresh.
-- Signature separator "---" removed from rendering.
+- More readable signatures: author colours neutralised, "---" separator removed.
 
 Report bugs via the beta or GitHub.

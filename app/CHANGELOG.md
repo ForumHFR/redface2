@@ -38,6 +38,7 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 ### Fixed
 - **Drapeaux — recalage en haut** (#546) après le rafraîchissement auto à l'atterrissage : les sujets fraîchement remontés sont visibles sans scroller, le retour depuis un topic garde la position.
 - **Séparateur de signature** (#550) : la ligne web « --------------- » n'est plus rendue dans les signatures sous les posts.
+- **Couleurs de signature** (#553) : les signatures sont rendues dans la couleur neutre du thème ; les couleurs `[color]` de l'auteur (pensées pour le fond blanc web, illisibles sur le thème de l'app) sont ignorées.
 
 ### Perf
 - **Images de bloc** (#249) : encart réservé + shimmer + crossfade, anti-saut de mise en page (CLS).

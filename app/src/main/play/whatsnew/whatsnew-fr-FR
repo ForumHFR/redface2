@@ -1,16 +1,16 @@
 Redface 2 v0.14.0 — bêta.
 
 Nouveautés :
-- Signatures des posts affichées sous le message (réglage dédié).
+- Signatures affichées sous le message (réglage dédié).
 - Avatar du compte dans la barre du haut.
 - Longues citations repliables.
-- Barre d'actions des drapeaux masquée au défilement.
+- Barre d'actions drapeaux masquée au scroll.
 
 Améliorations :
-- Infos des sujets unifiées, boutons-icônes harmonisés, images sans saut de page.
+- Infos des sujets unifiées, icônes harmonisées, images sans à-coup.
 
 Correctifs :
 - Drapeaux recalés en haut après le rafraîchissement.
-- Séparateur de signature « --- » retiré du rendu.
+- Signatures plus lisibles : couleurs auteur neutralisées, séparateur « --- » retiré.
 
 Signalez les bugs via la bêta ou GitHub.
