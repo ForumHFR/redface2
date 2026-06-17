@@ -1850,16 +1850,26 @@ private fun rememberBottomActionsVisible(listState: LazyListState): Boolean {
     LaunchedEffect(listState) {
         var prevIndex = listState.firstVisibleItemIndex
         var prevOffset = listState.firstVisibleItemScrollOffset
-        // snapshotFlow only emits on a REAL position change, so a recomposition / async layout shift
-        // with an identical first-visible item+offset never re-reveals the cluster (Codex review): the
-        // last decision is simply held. A list that cannot scroll stays visible.
-        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-            .collect { (index, offset) ->
+        // snapshotFlow keys on the first-visible item+offset AND canScrollForward, so a recomposition /
+        // async layout shift with an identical position never re-reveals the cluster (the last decision
+        // is held) — BUT a change in SCROLLABILITY with an unchanged position (e.g. the list shrinks so
+        // the current position becomes the end without a scroll) still re-fires the collect and re-
+        // evaluates the « visible at the end » rule. Keying on position alone left that case stale until
+        // the next real scroll (multi-agent review finding, scored >65). A list that cannot scroll stays
+        // visible.
+        snapshotFlow {
+            Triple(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+                listState.canScrollForward,
+            )
+        }
+            .collect { (index, offset, canScrollForward) ->
                 visible = when {
                     // At the end of the list (or a short, non-scrollable page) always show: the user is
                     // on the last post and most likely wants to reply, so they should not have to scroll
                     // up to reveal the cluster (#411 beta feedback, tinc t2788220).
-                    !listState.canScrollForward -> true
+                    !canScrollForward -> true
                     index != prevIndex -> index < prevIndex
                     offset != prevOffset -> offset < prevOffset
                     // No real movement (incl. snapshotFlow's initial emission): hold the last decision
