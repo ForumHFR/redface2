@@ -62,9 +62,6 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -888,8 +885,8 @@ private fun TopicLoadedContent(
     onPollExpansionChanged: (Boolean) -> Unit = {},
 ) {
     // Scroll-anchor (#104 follow-up): the post the reader was sent to (quote link, deep link, last-read).
-    // Re-introduced as a DISCREET left rail on the card — the noisy yellow « mis en avant » band was
-    // removed; this marks the anchored post without a filled tint (XaTriX request, Codex-framed).
+    // Marked by tinting ONLY its identity band with tertiaryContainer (XaTriX: the left-rail attempt was
+    // ugly; the old card+band double tint stays removed) — one subtle band, no layout shift.
     val highlight = state.request.scrollTo
     // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
     // the « cité N fois » badge below. Pure + page-scoped (cf. citationCountsByNumreponse KDoc).
@@ -1522,8 +1519,8 @@ internal fun TopicPostCard(
     post: Post,
     /**
      * #104 follow-up — true for the scroll-anchor post (quote link / deep link / last-read landing).
-     * Draws a discreet left rail (tertiary) on the card instead of the removed yellow band, so the
-     * anchored post is findable without a filled highlight. Default false.
+     * Tints this post's identity band with tertiaryContainer so the anchored post is findable, without
+     * the old card+band double highlight (removed in #104) nor a left rail (dropped as ugly). Default false.
      */
     highlighted: Boolean = false,
     /**
@@ -1565,29 +1562,7 @@ internal fun TopicPostCard(
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
-    // #104 follow-up — discreet scroll-anchor rail: a 4dp tertiary stripe down the card's left edge,
-    // drawn OVER the content (drawWithContent) so it adds zero layout — no pop/reflow when it appears.
-    // tertiary (not primary) keeps it distinct from the multi-quote primary border; the two geometries
-    // (full border vs left rail) can coexist without reading as one mark (Codex framing).
-    val railColor = MaterialTheme.colorScheme.tertiary
     Card(
-        modifier = if (highlighted) {
-            Modifier.drawWithContent {
-                drawContent()
-                // Inset the rail by the card corner radius (CardDefaults medium = 12dp) so it never
-                // paints square corners over the card's rounded top/bottom-left (Codex review). The
-                // rare anchor+multi-quote combo lets the 4dp rail overlap the 2dp primary border on
-                // the left edge — accepted minor (two states still both legible).
-                val inset = 12.dp.toPx()
-                drawRect(
-                    color = railColor,
-                    topLeft = Offset(x = 0f, y = inset),
-                    size = Size(width = 4.dp.toPx(), height = (size.height - inset * 2).coerceAtLeast(0f)),
-                )
-            }
-        } else {
-            Modifier
-        },
         border = if (multiQuoteSelected) {
             BorderStroke(width = 2.dp, color = MaterialTheme.colorScheme.primary)
         } else {
@@ -1597,15 +1572,18 @@ internal fun TopicPostCard(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
     ) {
-        // Identity band — the avatar/pseudo/date header gets its own tinted strip across the
-        // full card width (forum idiom, dogfooding v109): secondaryContainer over the neutral card.
-        // TU 2788511 — the scroll-anchor « mis en avant » highlight (a secondaryContainer card +
-        // a tertiaryContainer/yellow band) was removed at XaTriX's request: the per-post header band
-        // already delineates each post, so the extra tint was redundant noise. The Surface sets
-        // LocalContentColor to onSecondaryContainer for the pseudo. The Card clips the strip to its
-        // rounded corners.
+        // Identity band — the avatar/pseudo/date header gets its own tinted strip across the full card
+        // width (forum idiom, dogfooding v109): secondaryContainer over the neutral card. #104 follow-up
+        // (XaTriX): the scroll-anchor post tints ONLY this band with tertiaryContainer (the left rail was
+        // dropped as ugly) — a single tertiary band, not the old card+band double tint. The Surface sets
+        // LocalContentColor to the matching on-container colour for the pseudo; the Card clips the strip
+        // to its rounded corners.
         Surface(
-            color = MaterialTheme.colorScheme.secondaryContainer,
+            color = if (highlighted) {
+                MaterialTheme.colorScheme.tertiaryContainer
+            } else {
+                MaterialTheme.colorScheme.secondaryContainer
+            },
             modifier = Modifier.fillMaxWidth(),
         ) {
             // #201 — avatar + author header in a Row so the visual identity of the poster
