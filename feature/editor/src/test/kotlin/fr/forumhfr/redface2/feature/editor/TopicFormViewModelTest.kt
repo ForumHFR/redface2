@@ -1431,6 +1431,10 @@ class TopicFormViewModelTest {
         override fun observeDebugBoundsOverlay(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setDebugBoundsOverlay(enabled: Boolean) = Unit
+
+        override fun observeHideSystemNavBar(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setHideSystemNavBar(enabled: Boolean) = Unit
     }
 
     /** #405 — in-memory fake [EditorDraftStore], same shape as the one in `PostEditorViewModelTest`. */

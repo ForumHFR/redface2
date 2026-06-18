@@ -119,6 +119,12 @@ data class SettingsState(
     val isUpdatingFoldLongQuotes: Boolean = false,
     val foldLongQuotesError: Boolean = false,
     val foldLongQuotesTouchedLocally: Boolean = false,
+    // #518 — masquer la barre de navigation système Android (plein écran immersif). Même machinerie
+    // optimistic-flip + garde de course. Default FALSE (opt-in).
+    val hideSystemNavBar: Boolean = false,
+    val isUpdatingHideSystemNavBar: Boolean = false,
+    val hideSystemNavBarError: Boolean = false,
+    val hideSystemNavBarTouchedLocally: Boolean = false,
     // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
     // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
     // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
@@ -231,6 +237,10 @@ data class SettingsState(
     // #332 — the fold-long-quotes toggle is gated only by its own write.
     val canToggleFoldLongQuotes: Boolean
         get() = !isUpdatingFoldLongQuotes
+
+    // #518 — the hide-system-nav-bar toggle is gated only by its own write.
+    val canToggleHideSystemNavBar: Boolean
+        get() = !isUpdatingHideSystemNavBar
 
     // #312 — the confirm-before-posting toggle is gated only by its own write.
     val canToggleConfirmBeforePosting: Boolean
@@ -345,6 +355,9 @@ sealed interface SettingsIntent {
 
     /** #332 — replier les longues citations sur une ligne. */
     data class FoldLongQuotesChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #518 — masquer la barre de navigation système Android (plein écran immersif). */
+    data class HideSystemNavBarChanged(val enabled: Boolean) : SettingsIntent
 
     // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
     // the boolean is the desired post-flip state.

@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
+import android.view.View
+import android.view.Window
 import android.widget.Toast
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
@@ -46,6 +48,8 @@ import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -523,6 +527,9 @@ fun RedfaceApp(intent: Intent?) {
     // #445 — debug bounds overlay preference (the dev-channel gate + render live in
     // [DevDebugBoundsOverlay], emitted last so it paints over everything; off by default).
     val debugBoundsOverlay by themeViewModel.debugBoundsOverlay.collectAsStateWithLifecycle()
+    // #518 — immersive mode: hide the bottom Android system navigation bar (3 buttons or gesture pill,
+    // device-dependent). Off by default; applied on the host window below.
+    val hideSystemNavBar by themeViewModel.hideSystemNavBar.collectAsStateWithLifecycle()
     val darkTheme = when (themeMode) {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
@@ -543,6 +550,17 @@ fun RedfaceApp(intent: Intent?) {
             val controller = WindowCompat.getInsetsController(window, view)
             controller.isAppearanceLightStatusBars = !darkTheme
             controller.isAppearanceLightNavigationBars = !darkTheme
+        }
+        // #518 — apply immersive mode whenever the preference changes, and re-assert it on ON_RESUME
+        // (returning from another app / the recents screen restores the bar without a recomposition).
+        // The transient-bars-by-swipe behaviour handles user swipes; hiding sets the bottom inset to 0
+        // so navigationBarsPadding() collapses cleanly, while a transient swipe-reveal does NOT change
+        // insets (no layout jump). Status bar and the in-app tab bar are untouched.
+        LaunchedEffect(hideSystemNavBar) {
+            applyImmersiveNavBar(window, view, hideSystemNavBar)
+        }
+        LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+            applyImmersiveNavBar(window, view, hideSystemNavBar)
         }
     }
     RedfaceTheme(
@@ -1954,6 +1972,23 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
+}
+
+/**
+ * #518 — hide or show ONLY the bottom Android system navigation bar on [window]. Never touches
+ * `Type.statusBars()` (the top bar stays) nor the in-app tab bar. When hiding, the behaviour is set to
+ * [WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE] so a swipe from the bottom edge
+ * re-reveals the bar transiently (documented Android behaviour) without changing layout insets.
+ */
+private fun applyImmersiveNavBar(window: Window, view: View, hide: Boolean) {
+    val controller = WindowCompat.getInsetsController(window, view)
+    if (hide) {
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(WindowInsetsCompat.Type.navigationBars())
+    } else {
+        controller.show(WindowInsetsCompat.Type.navigationBars())
+    }
 }
 
 // #494 — paramètres de transition (Claude + Codex). MotionScheme M3 absent en stable 1.4.x (1.5.0-alpha)

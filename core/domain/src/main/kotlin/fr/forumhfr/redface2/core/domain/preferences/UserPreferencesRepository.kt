@@ -312,4 +312,17 @@ interface UserPreferencesRepository {
 
     /** Persists [observeDebugBoundsOverlay]. Default `false` until the first call. */
     suspend fun setDebugBoundsOverlay(enabled: Boolean)
+
+    /**
+     * Immersive full-screen (#518): when `true`, the app hides the bottom Android system navigation
+     * bar (the 3 buttons, or the gesture pill depending on the device) — the top status bar and the
+     * in-app tab bar stay visible. A swipe from the
+     * bottom edge re-reveals the bar transiently (Android `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`,
+     * documented behaviour, not a bug), then it re-hides. Default `false`. Applied at the app root
+     * ([fr.forumhfr.redface2.navigation.RedfaceApp]) on the host window, toggled in Settings > Affichage.
+     */
+    fun observeHideSystemNavBar(): Flow<Boolean>
+
+    /** Persists [observeHideSystemNavBar]. Default `false` until the first call. */
+    suspend fun setHideSystemNavBar(enabled: Boolean)
 }

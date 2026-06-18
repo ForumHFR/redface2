@@ -505,6 +505,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeHideSystemNavBar(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#518): immersive mode is opt-in — most users expect the 3 buttons.
+            .map { prefs -> prefs[KEY_HIDE_SYSTEM_NAV_BAR] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setHideSystemNavBar(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_HIDE_SYSTEM_NAV_BAR] = enabled
+            }
+        }
+    }
+
     /**
      * Reads [KEY_UPLOAD_PROVIDER] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [UploadProviderId.DIBERIE] instead of crashing on
@@ -668,5 +683,6 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #445 — debug bounds overlay toggle (default false; exposed on the dev channel only).
         val KEY_DEBUG_BOUNDS_OVERLAY = booleanPreferencesKey("debug_bounds_overlay")
+        val KEY_HIDE_SYSTEM_NAV_BAR = booleanPreferencesKey("hide_system_nav_bar")
     }
 }

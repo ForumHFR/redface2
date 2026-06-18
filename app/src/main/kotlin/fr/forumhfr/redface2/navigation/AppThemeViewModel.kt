@@ -63,4 +63,11 @@ class AppThemeViewModel @Inject constructor(
     val debugBoundsOverlay: StateFlow<Boolean> =
         userPreferencesRepository.observeDebugBoundsOverlay()
             .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    // #518 — immersive mode: hide the bottom Android system navigation bar. Applied on the host window
+    // by RedfaceApp. Eagerly collected like the presets above; off by default, no bootstrap mirror
+    // (it does not paint the pre-first-frame window).
+    val hideSystemNavBar: StateFlow<Boolean> =
+        userPreferencesRepository.observeHideSystemNavBar()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 }

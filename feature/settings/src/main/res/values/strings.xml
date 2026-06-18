@@ -279,6 +279,11 @@
     <string name="settings_display_font_scale_medium">Moyenne</string>
     <string name="settings_display_font_scale_large">Grande</string>
     <string name="settings_display_font_scale_persist_failed">Impossible de mémoriser la taille de police. Réessayez.</string>
+    <!-- #518 — plein écran immersif : masquer la barre de navigation système Android (boutons ou barre gestuelle). -->
+    <string name="settings_display_fullscreen_title">Plein écran</string>
+    <string name="settings_display_hide_nav_bar_title">Masquer la barre de navigation Android</string>
+    <string name="settings_display_hide_nav_bar_description">Masque la barre de navigation système du bas (les 3 boutons, ou la barre gestuelle selon votre appareil). La barre du haut et les onglets de l\'app restent affichés. Elle peut réapparaître temporairement avec un geste depuis le bas de l\'écran.</string>
+    <string name="settings_display_hide_nav_bar_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- Build 89 follow-up — Lecture des sujets. Masquer la barre du haut (titre + numéro de page)
          en défilant vers le bas pour libérer de la place ; persisté en DataStore et appliqué en direct. -->

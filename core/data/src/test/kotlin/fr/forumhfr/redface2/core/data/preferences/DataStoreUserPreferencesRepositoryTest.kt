@@ -627,6 +627,27 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeHideSystemNavBar defaults to false then persists true and false`() = runTest(dispatcher) {
+        // #518 — immersive mode is opt-in; an empty store keeps the system nav bar visible.
+        repository.observeHideSystemNavBar().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setHideSystemNavBar(true)
+        repository.observeHideSystemNavBar().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setHideSystemNavBar(false)
+        repository.observeHideSystemNavBar().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `saving disabled proxy removes optional fields from effective config`() = runTest(dispatcher) {
         repository.saveProxyConfig(
             ProxyConfig(
