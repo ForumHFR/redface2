@@ -126,6 +126,13 @@ sealed interface TopicIntent {
      * identifies the post to delete (unique per category).
      */
     data class DeletePost(val numreponse: Int) : TopicIntent
+
+    /**
+     * #509 — blacklist (or un-blacklist) [author] from the post menu. [blocked] = true blocks (their
+     * posts collapse to the « masqué » placeholder), false unblocks. The ViewModel delegates to
+     * `BlacklistRepository`; the topic re-filters live through the page combine.
+     */
+    data class SetAuthorBlocked(val author: String, val blocked: Boolean) : TopicIntent
 }
 
 /**

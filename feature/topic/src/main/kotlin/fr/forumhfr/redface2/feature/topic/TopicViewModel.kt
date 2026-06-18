@@ -151,6 +151,20 @@ class TopicViewModel @AssistedInject constructor(
             TopicIntent.Retry -> loadCurrentPage()
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
             TopicIntent.Refresh -> refresh()
+            is TopicIntent.SetAuthorBlocked -> setAuthorBlocked(intent.author, intent.blocked)
+        }
+    }
+
+    /**
+     * #509 — block / unblock [author] from the post menu. This launch is on [viewModelScope], but the
+     * DataStore commit still survives the sheet/ViewModel going away mid-write: the repository's
+     * `persist {}` offloads the actual write to the application scope (the #507 pattern), so only the
+     * `await` is cancelled, not the commit. The page re-filters live via the [loadCurrentPage] combine,
+     * so no manual state poke is needed here.
+     */
+    private fun setAuthorBlocked(author: String, blocked: Boolean) {
+        viewModelScope.launch {
+            if (blocked) blacklistRepository.block(author) else blacklistRepository.unblock(author)
         }
     }
 
