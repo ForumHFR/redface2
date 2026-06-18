@@ -12,6 +12,8 @@ import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
@@ -29,6 +31,12 @@ import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageDocument
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageResult
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
@@ -267,7 +275,7 @@ class FlagsViewModelTest {
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository() // CYAN default unreadOnly = true
         prefs.blockUnreadOnlySetUntil = kotlinx.coroutines.CompletableDeferred()
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         vm.selectTab(FlagTab.Cyan) // re-tap: true → write(false) gated, pending = false
         vm.selectTab(FlagTab.Cyan) // re-tap: reads optimistic false → write(true) gated, pending = true
@@ -292,7 +300,7 @@ class FlagsViewModelTest {
         val prefs = FakeUserPreferencesRepository() // CYAN default unreadOnly = true
         prefs.blockUnreadOnlySetForType = FlagType.RED
         prefs.blockUnreadOnlySetUntil = kotlinx.coroutines.CompletableDeferred()
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         vm.selectTab(FlagTab.Red)
         vm.setFlagsUnreadOnly(false) // RED write goes in flight (gated), must not touch the CYAN shim
@@ -776,7 +784,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1, 13))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = false)
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -801,7 +809,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -823,7 +831,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -851,7 +859,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -883,7 +891,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -912,7 +920,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1, 10))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(hideReadCategories = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -943,7 +951,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = true, perTabOverride = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
         prefs.setFlagsGroupByCategoryForType(FlagType.CYAN, false)
 
         vm.flagsState.test {
@@ -972,7 +980,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -1003,7 +1011,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = true, perTabOverride = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -1034,7 +1042,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = true, perTabOverride = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
         prefs.setFlagsGroupByCategoryForType(FlagType.RED, false)
 
         vm.flagsViewSettings.test {
@@ -1055,7 +1063,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository()
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         assertFalse(vm.flagsViewSettings.value.hideReadCategories)
         vm.setFlagsHideReadCategories(true)
@@ -1073,7 +1081,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(perTabOverride = true)
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         vm.setFlagsHideReadCategories(true) // CYAN selected
         assertTrue("CYAN per-type hide-read on", vm.flagsViewSettings.value.hideReadCategories)
@@ -1095,7 +1103,7 @@ class FlagsViewModelTest {
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository() // persisted override OFF
         prefs.blockPerTabOverrideSetUntil = kotlinx.coroutines.CompletableDeferred()
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         vm.setFlagsPerTabOverride(true) // optimistic ON; persisted write GATED (never commits here)
         vm.setFlagsGroupByCategory(false)
@@ -1115,7 +1123,7 @@ class FlagsViewModelTest {
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val prefs = FakeUserPreferencesRepository(groupByCategory = true) // override OFF initially
-        val vm = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        val vm = viewModel(auth, flags, forum, prefs)
 
         vm.flagsState.test {
             awaitItem() // initial null
@@ -1177,7 +1185,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
         val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
-        val vm = FlagsViewModel(auth, flags, FakeForumRepository(), FakeUserPreferencesRepository(), clock)
+        val vm = viewModelWithClock(auth, flags, clock)
 
         vm.maybeAutoRefresh() // landing refresh → raises the signal
         vm.consumeRecallListToTop() // screen scrolled and consumed it
@@ -1217,7 +1225,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
         val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
-        val vm = FlagsViewModel(auth, flags, FakeForumRepository(), FakeUserPreferencesRepository(), clock)
+        val vm = viewModelWithClock(auth, flags, clock)
 
         vm.maybeAutoRefresh()
         vm.maybeAutoRefresh() // immediate re-landing (back-and-forth) — throttled
@@ -1253,7 +1261,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
         val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
-        val vm = FlagsViewModel(auth, flags, FakeForumRepository(), FakeUserPreferencesRepository(), clock)
+        val vm = viewModelWithClock(auth, flags, clock)
 
         vm.maybeAutoRefresh() // landing refresh, arms the throttle
         vm.onFlagOpened() // user opens a topic from the list…
@@ -1267,7 +1275,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
         val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
-        val vm = FlagsViewModel(auth, flags, FakeForumRepository(), FakeUserPreferencesRepository(), clock)
+        val vm = viewModelWithClock(auth, flags, clock)
 
         vm.maybeAutoRefresh()
         vm.onFlagOpened()
@@ -1287,7 +1295,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
         val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
-        val vm = FlagsViewModel(auth, flags, FakeForumRepository(), FakeUserPreferencesRepository(), clock)
+        val vm = viewModelWithClock(auth, flags, clock)
         advanceUntilIdle() // settle the init collectors
 
         vm.maybeAutoRefresh() // landing — generation snapshot taken now, body not yet run
@@ -1307,7 +1315,7 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
         val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
-        val vm = FlagsViewModel(auth, flags, FakeForumRepository(), FakeUserPreferencesRepository(), clock)
+        val vm = viewModelWithClock(auth, flags, clock)
 
         vm.maybeAutoRefresh() // arms the throttle
         vm.onFlagOpened()
@@ -1329,6 +1337,307 @@ class FlagsViewModelTest {
         assertEquals(2, flags.refreshCalls.size)
     }
 
+    // #6 — DT tab: MultiMP list + best-effort MPStorage enrichment.
+
+    @Test
+    fun `onDtTabOpened lists the MultiMP conversations joined with their MPStorage resume page`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(
+                inboxPage(
+                    stubSummary(threadId = 10, isMultiRecipient = true, lastPage = 3),
+                    stubSummary(threadId = 20, isMultiRecipient = false), // 1:1 MP → filtered out
+                    stubSummary(threadId = 30, isMultiRecipient = true),
+                ),
+            ),
+        )
+        val mpStorage = FakeMpStorageRepository(
+            result = MpStorageResult.Found(
+                mpDoc(MpStorageFlagEntry(threadId = 10, page = 7, numreponse = null, uri = null)),
+            ),
+        )
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages, mpStorage = mpStorage)
+
+        vm.dtListState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            val content = awaitItem() as DtListUiState.Content
+            // The 1:1 MP (20) is dropped; only the two MultiMP rows remain, in inbox order.
+            assertEquals(listOf(10, 30), content.items.map { it.conversation.threadId })
+            // Thread 10 has an mpFlags entry → its resume page joins; 30 has none → null badge.
+            assertEquals(7, content.items.first { it.conversation.threadId == 10 }.resumePage)
+            assertNull(content.items.first { it.conversation.threadId == 30 }.resumePage)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `onDtTabOpened renders the list without badges when MPStorage is NotFound`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(inboxPage(stubSummary(threadId = 10, isMultiRecipient = true))),
+        )
+        val mpStorage = FakeMpStorageRepository(result = MpStorageResult.NotFound)
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages, mpStorage = mpStorage)
+
+        vm.dtListState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            val content = awaitItem() as DtListUiState.Content
+            assertEquals(listOf(10), content.items.map { it.conversation.threadId })
+            assertNull("NotFound storage → no resume badge", content.items.single().resumePage)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `onDtTabOpened keeps the list when MPStorage read throws (best-effort)`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(inboxPage(stubSummary(threadId = 10, isMultiRecipient = true))),
+        )
+        // The MPStorage scan FAILS — it must never fail the conversation list.
+        val mpStorage = FakeMpStorageRepository(thrown = IllegalStateException("storage scan down"))
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages, mpStorage = mpStorage)
+
+        vm.dtListState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            val content = awaitItem() as DtListUiState.Content
+            assertEquals(listOf(10), content.items.map { it.conversation.threadId })
+            assertNull("a failed storage read degrades to no badge", content.items.single().resumePage)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `onDtTabOpened surfaces Empty when the inbox holds no MultiMP`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(
+                inboxPage(stubSummary(threadId = 20, isMultiRecipient = false)),
+            ),
+        )
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+        vm.dtListState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            assertEquals(DtListUiState.Empty, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `onDtTabOpened surfaces Error when the inbox load fails`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val expired = SessionExpiredException("https://forum.hardware.fr/login.php")
+        val messages = FakeMessagesRepository(inboxResult = Result.failure(expired))
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+        vm.dtListState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            val error = awaitItem() as DtListUiState.Error
+            assertTrue(error.cause is SessionExpiredException)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `onDtTabOpened fetches once per session then reuses the loaded list`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(inboxPage(stubSummary(threadId = 10, isMultiRecipient = true))),
+        )
+        val mpStorage = FakeMpStorageRepository(result = MpStorageResult.NotFound)
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages, mpStorage = mpStorage)
+
+        vm.onDtTabOpened()
+        vm.onDtTabOpened() // re-selecting DT must NOT re-scan (the MPStorage scan is expensive)
+
+        assertEquals("only one inbox scan per session", 1, messages.getListCalls)
+        assertEquals("only one MPStorage scan per session", 1, mpStorage.fetchCalls)
+    }
+
+    @Test
+    fun `refreshDt re-runs the scan even after a successful load`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(inboxPage(stubSummary(threadId = 10, isMultiRecipient = true))),
+        )
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+        vm.onDtTabOpened()
+        vm.refreshDt()
+
+        assertEquals("explicit refresh bypasses the once-per-session guard", 2, messages.getListCalls)
+    }
+
+    @Test
+    fun `a failed inbox load can be retried via onDtTabOpened`() = runTest {
+        // The inbox is the list's only hard source: an Error resets the guard so a retry re-runs.
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(inboxResult = Result.failure(IllegalStateException("net")))
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+        vm.dtListState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            assertTrue(awaitItem() is DtListUiState.Error)
+
+            messages.inboxResult =
+                Result.success(inboxPage(stubSummary(threadId = 10, isMultiRecipient = true)))
+            vm.onDtTabOpened() // guard was reset by the failure → retry re-runs
+            val content = awaitItem() as DtListUiState.Content
+            assertEquals(listOf(10), content.items.map { it.conversation.threadId })
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(2, messages.getListCalls)
+    }
+
+    @Test
+    fun `switching authenticated pseudo resets the DT list back to Loading`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(inboxPage(stubSummary(threadId = 10, isMultiRecipient = true))),
+        )
+        // flagsState is an Eagerly stateIn, so clearFlagsCacheIfSessionChanged already observes the
+        // auth emissions without an explicit collector here.
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+        vm.dtListState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            assertTrue(awaitItem() is DtListUiState.Content)
+
+            auth.emit(AuthState.Authenticated("other")) // account switch must drop the list
+            assertEquals(DtListUiState.Loading, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a DT fetch in flight when the account switches never publishes the previous account's list`() = runTest {
+        // #6 Codex review (BLOCKING — stale write): a loadDt mid-flight when resetDtState fires (logout
+        // / account switch) must NOT republish the previous account's MultiMP into the new session.
+        // resetDtState cancels the fetch and bumps the generation, so the in-flight load is dropped and
+        // the state stays at the post-switch Loading.
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(inboxPage(stubSummary(threadId = 10, isMultiRecipient = true))),
+        )
+        messages.blockInboxUntil = kotlinx.coroutines.CompletableDeferred()
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+        vm.dtListState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened() // fetch starts but suspends on the gated inbox load (in flight)
+
+            auth.emit(AuthState.Authenticated("other")) // account switch → resetDtState cancels it
+            // resetDtState republishes Loading; the value is identical to the seed so the StateFlow
+            // dedupes it — no new emission, the state is still Loading.
+
+            messages.blockInboxUntil!!.complete(Unit) // release the now-cancelled previous-account load
+            advanceUntilIdle()
+
+            // The stale (xaat) list must never surface: the only state remains Loading.
+            assertEquals(DtListUiState.Loading, vm.dtListState.value)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `two rapid refreshDt are latest-wins so the stale earlier result never overwrites the recent one`() =
+        runTest {
+            // #6 Codex review (concurrent refreshDt): a second refreshDt cancels the first's job and
+            // out-generations it, so an earlier in-flight scan can never overwrite the newer result.
+            val flags = FakeFlagRepository()
+            val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+            val messages = FakeMessagesRepository(
+                inboxResult = Result.success(inboxPage(stubSummary(threadId = 10, isMultiRecipient = true))),
+            )
+            messages.blockInboxUntil = kotlinx.coroutines.CompletableDeferred()
+            val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+            vm.refreshDt() // first scan, suspended on the gated inbox load (would yield thread 10)
+            messages.inboxResult =
+                Result.success(inboxPage(stubSummary(threadId = 99, isMultiRecipient = true)))
+            vm.refreshDt() // second scan cancels the first and out-generations it
+
+            messages.blockInboxUntil!!.complete(Unit) // release both; the cancelled first must not win
+            advanceUntilIdle()
+
+            val content = vm.dtListState.value as DtListUiState.Content
+            assertEquals(
+                "the latest refreshDt wins; the cancelled earlier scan's result is dropped",
+                listOf(99),
+                content.items.map { it.conversation.threadId },
+            )
+        }
+
+    @Test
+    fun `the DT list only scans inbox page 1 even when the inbox spans multiple pages`() = runTest {
+        // #6 MVP scope: a multi-page sweep is deliberately DEFERRED (it would multiply the cost of the
+        // expensive MPStorage scan). Even with totalPages > 1, only page 1 (the most recent
+        // conversations) is read, and the list reflects only that page — documented behaviour, the
+        // empty-state copy assumes « recent page » semantics.
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(
+                PrivateMessageListPage(
+                    page = 1,
+                    totalPages = 4, // the inbox spans several pages…
+                    items = listOf(stubSummary(threadId = 10, isMultiRecipient = true)),
+                ),
+            ),
+        )
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+        vm.dtListState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            val content = awaitItem() as DtListUiState.Content
+            // …yet only page 1 is reflected; no further page is scanned (multi-page deferred).
+            assertEquals(listOf(10), content.items.map { it.conversation.threadId })
+            assertEquals("only inbox page 1 is ever requested", listOf(1), messages.requestedPages)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    private fun stubSummary(
+        threadId: Int,
+        isMultiRecipient: Boolean,
+        hasUnread: Boolean = false,
+        lastPage: Int = 1,
+    ): PrivateMessageSummary = PrivateMessageSummary(
+        threadId = threadId,
+        correspondent = if (isMultiRecipient) "" else "someone",
+        subject = "Conversation $threadId",
+        date = Instant.parse("2026-06-18T12:00:00Z"),
+        hasUnread = hasUnread,
+        isMultiRecipient = isMultiRecipient,
+        lastPage = lastPage,
+    )
+
+    private fun inboxPage(vararg items: PrivateMessageSummary): PrivateMessageListPage =
+        PrivateMessageListPage(page = 1, totalPages = 1, items = items.toList())
+
+    private fun mpDoc(vararg entries: MpStorageFlagEntry): MpStorageDocument =
+        MpStorageDocument(sourceName = "DTCloud", mpFlags = entries.toList(), rawEnvelope = "{}")
+
     /** Mutable [Clock] for the #378 throttle tests — `now` is advanced by hand. */
     private class SteppingClock(start: Instant) : Clock() {
         var now: Instant = start
@@ -1337,12 +1646,31 @@ class FlagsViewModelTest {
         override fun instant(): Instant = now
     }
 
+    @Suppress("LongParameterList") // test fake-builder: each repo fake is an independent collaborator
     private fun viewModel(
         auth: FakeAuthRepository,
         flags: FakeFlagRepository,
         forum: FakeForumRepository,
         prefs: FakeUserPreferencesRepository = FakeUserPreferencesRepository(),
-    ): FlagsViewModel = FlagsViewModel(auth, flags, forum, prefs, fixedClock)
+        messages: FakeMessagesRepository = FakeMessagesRepository(),
+        mpStorage: FakeMpStorageRepository = FakeMpStorageRepository(),
+    ): FlagsViewModel = FlagsViewModel(auth, flags, forum, prefs, messages, mpStorage, fixedClock)
+
+    /** Builds a ViewModel with a custom [clock] for the #378 throttle tests; everything else is a
+     * fresh default fake. */
+    private fun viewModelWithClock(
+        auth: FakeAuthRepository,
+        flags: FakeFlagRepository,
+        clock: Clock,
+    ): FlagsViewModel = FlagsViewModel(
+        auth,
+        flags,
+        FakeForumRepository(),
+        FakeUserPreferencesRepository(),
+        FakeMessagesRepository(),
+        FakeMpStorageRepository(),
+        clock,
+    )
 
     /** Flattens whatever content shape into the topics order for assertions on flag content. */
     private fun flatTopics(state: FlagsListUiState.Success): List<Flag> =
@@ -1732,5 +2060,69 @@ class FlagsViewModelTest {
         override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) = Unit
         override fun observeAccentColor(): Flow<AccentColor> = MutableStateFlow(AccentColor.ROSE)
         override suspend fun setAccentColor(color: AccentColor) = Unit
+    }
+
+    /**
+     * Fake [MessagesRepository] for the #6 DT tab tests. Only [getPrivateMessageList] is exercised
+     * by FlagsViewModel (the DT list source) ; [inboxResult] lets a test seed the inbox page or
+     * make the load throw. The unread-count / thread members are stubbed at no-op defaults.
+     */
+    private class FakeMessagesRepository(
+        var inboxResult: Result<PrivateMessageListPage> =
+            Result.success(PrivateMessageListPage(page = 1, totalPages = 1, items = emptyList())),
+    ) : MessagesRepository {
+        var getListCalls: Int = 0
+            private set
+
+        /** Records the `page` argument of each [getPrivateMessageList] call (DT must only read page 1). */
+        var requestedPages: List<Int> = emptyList()
+            private set
+
+        /** When set, gates [getPrivateMessageList] so a test can hold the inbox load in flight (e.g.
+         * to fire an account switch and prove the stale result never publishes). */
+        var blockInboxUntil: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
+        override fun observeUnreadMpCount(): Flow<Int?> = MutableStateFlow(null)
+        override fun requestUnreadRefresh() = Unit
+        override fun markThreadRead(threadId: Int) = Unit
+
+        override suspend fun getPrivateMessageList(page: Int): PrivateMessageListPage {
+            getListCalls += 1
+            requestedPages = requestedPages + page
+            blockInboxUntil?.await()
+            return inboxResult.getOrThrow()
+        }
+
+        override suspend fun getPrivateMessageThread(
+            threadId: Int,
+            page: Int,
+            fallbackCorrespondent: String?,
+        ): PrivateMessageThread = PrivateMessageThread(
+            threadId = threadId,
+            subject = "",
+            correspondent = "",
+            messages = emptyList(),
+            page = page,
+            totalPages = 1,
+        )
+    }
+
+    /**
+     * Fake [MpStorageRepository] for the #6 DT tests. [result] seeds the lookup outcome (or a thrown
+     * error via [thrown]) so a test can prove the best-effort join tolerates NotFound / Unreadable /
+     * a transport failure — the list must still render in every case.
+     */
+    private class FakeMpStorageRepository(
+        var result: MpStorageResult = MpStorageResult.NotFound,
+        var thrown: Throwable? = null,
+    ) : MpStorageRepository {
+        var fetchCalls: Int = 0
+            private set
+
+        override suspend fun fetchStorage(): MpStorageResult {
+            fetchCalls += 1
+            thrown?.let { throw it }
+            return result
+        }
     }
 }

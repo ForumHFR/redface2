@@ -1372,6 +1372,13 @@ private fun RedfaceNavHost(
                     onOpenCategory = { catId ->
                         backStack.add(CategoryRoute(cat = catId, subcat = null, page = 1))
                     },
+                    // #6 — DT (MultiMP) row tap: open the existing PrivateMessageThread route inside
+                    // the Flags tab. DT rows are always multi-recipient, so record the hint (the
+                    // route itself stays opaque, like the Messages tab does, cf. onOpenThread).
+                    onOpenMultiMp = { threadId, page ->
+                        privateMessageNavState.onThreadOpenedAsMulti(threadId)
+                        backStack.add(PrivateMessageThreadRoute(threadId = threadId, page = page))
+                    },
                     topBarActions = accountMenu,
                 )
             }

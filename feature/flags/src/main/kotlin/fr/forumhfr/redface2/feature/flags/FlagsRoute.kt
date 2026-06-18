@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.flags
 import android.annotation.SuppressLint
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -21,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -36,6 +39,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Card
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -71,6 +75,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 import fr.forumhfr.redface2.core.ui.FlagItem
 import fr.forumhfr.redface2.core.ui.FlagItemDivider
 import fr.forumhfr.redface2.core.ui.FlagItemLongPress
@@ -110,6 +115,9 @@ fun FlagsRoute(
     onOpenFlag: (Flag) -> Unit,
     onLoginRequested: () -> Unit,
     onOpenCategory: (Int) -> Unit = {},
+    // #6 — open a DT (MultiMP) conversation : the host pushes the existing PrivateMessageThread
+    // route. `page` is the conversation's last inbox page (web parity, #430).
+    onOpenMultiMp: (threadId: Int, page: Int) -> Unit = { _, _ -> },
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel: FlagsViewModel = hiltViewModel()
@@ -128,8 +136,24 @@ fun FlagsRoute(
     // a cold start or a tab switch before DataStore re-resolves the selected tab (#317).
     val cyanShowsRead by viewModel.cyanShowsReadShortcut.collectAsStateWithLifecycle()
 
-    // Opt-in « DT » placeholder tab (Settings toggle ; MPStorage sync #6 lands later).
+    // Opt-in « DT » tab (Settings toggle). Its MultiMP list is fetched on tab open (#6).
     val showDtTab by viewModel.showDtTab.collectAsStateWithLifecycle()
+    val dtListState by viewModel.dtListState.collectAsStateWithLifecycle()
+
+    // #6 — trigger the DT scan only when the DT tab is OPENED (a stable LaunchedEffect, not the raw
+    // composition): fetchStorage scans the inbox and must stay off the per-category auto-refresh.
+    // The ViewModel guards it to once per session, so re-selecting DT reuses the loaded list.
+    // Gated on showDtTab (a stale `selectedTab == Dt` while the toggle is off must NOT scan) and
+    // keyed on the auth session pseudo so an account switch — which resets the DT state to Loading
+    // without changing selectedTab — re-runs the effect and re-scans for the new session (Codex
+    // review). Extracted so its branch stays out of FlagsRoute's cyclomatic-complexity budget.
+    val authSessionKey = (authState as? AuthState.Authenticated)?.pseudo
+    DtTabOpenEffect(
+        selectedTab = selectedTab,
+        showDtTab = showDtTab,
+        authSessionKey = authSessionKey,
+        onDtTabOpened = viewModel::onDtTabOpened,
+    )
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -265,6 +289,7 @@ fun FlagsRoute(
                                 isRefreshing = isRefreshing,
                                 removeFlagState = removeFlagState,
                                 showDtTab = showDtTab,
+                                dtListState = dtListState,
                             ),
                             actions = AuthenticatedActions(
                                 onSelectTab = viewModel::selectTab,
@@ -279,6 +304,8 @@ fun FlagsRoute(
                                 onLoginRequested = onLoginRequested,
                                 onRequestRemoveFlag = viewModel::requestRemoveFlag,
                                 onOpenCategory = onOpenCategory,
+                                onOpenMultiMp = onOpenMultiMp,
+                                onRefreshDt = viewModel::refreshDt,
                             ),
                             listState = flagsListState,
                         )
@@ -672,9 +699,11 @@ private fun ColumnScope.AuthenticatedBody(
             ),
     ) {
         when (selectedTab) {
-            // Placeholders — no backend, no fetch, no pull-to-refresh (cf. their KDoc).
+            // Super has no backend, no fetch, no pull-to-refresh (cf. its KDoc).
             FlagTab.Super -> SuperPlaceholderBody()
-            FlagTab.Dt -> DtPlaceholderBody()
+            // #6 — DT is a real list now: the user's MultiMP conversations, enriched best-effort
+            // with the MPStorage reading positions.
+            FlagTab.Dt -> DtListBody(state = state.dtListState, actions = actions)
             else -> FlagListBody(state = state, actions = actions, listState = listState)
         }
     }
@@ -1101,26 +1130,213 @@ private fun DtTabFallbackEffect(
 }
 
 /**
- * Sober M3 placeholder for the opt-in « DT » [FlagTab.Dt] tab. The content (followed
- * discussions whose flags sync through the MPStorage document, #6) lands later.
+ * #6 — fires the DT (MultiMP) scan once the DT tab becomes the selected one. The fetch only starts
+ * when DT is selected AND the Settings toggle still shows it ([showDtTab]) — a stale
+ * `selectedTab == Dt` left behind while the toggle is off (before [DtTabFallbackEffect] swaps back
+ * to Cyan) must never scan the inbox.
+ *
+ * Keyed on the tab, [showDtTab], AND [authSessionKey] (the authenticated pseudo). The session key is
+ * load-bearing: an account switch resets the DT state back to Loading without changing
+ * `selectedTab`, so a Unit/tab-only key would never re-fire and the screen would stay stuck on the
+ * spinner while sitting on the DT tab (Codex review). The ViewModel guards the actual fetch to once
+ * per session, so a benign re-key (returning to DT) reuses the loaded list.
+ *
+ * Extracted so its branch stays out of [FlagsRoute]'s cyclomatic-complexity budget.
  */
 @Composable
-private fun DtPlaceholderBody() {
+private fun DtTabOpenEffect(
+    selectedTab: FlagTab,
+    showDtTab: Boolean,
+    authSessionKey: String?,
+    onDtTabOpened: () -> Unit,
+) {
+    LaunchedEffect(selectedTab, showDtTab, authSessionKey) {
+        if (selectedTab == FlagTab.Dt && showDtTab) onDtTabOpened()
+    }
+}
+
+/**
+ * #6 — body of the opt-in « DT » tab: the user's MultiMP conversations (inbox `cat=prive`,
+ * filtered on [PrivateMessageSummary.isMultiRecipient]) enriched best-effort with the MPStorage
+ * reading positions (a discreet « reprise p.N » badge). Tapping a row opens the existing
+ * `PrivateMessageThread` route via [AuthenticatedActions.onOpenMultiMp].
+ *
+ * The MPStorage enrichment is best-effort: a missing / unreadable / failed storage read leaves the
+ * list intact, just without badges (cf. [FlagsViewModel.loadDt]). Only an inbox load failure
+ * reaches [DtListUiState.Error], which offers a reconnect/retry CTA like the flag list.
+ */
+@Composable
+private fun DtListBody(state: DtListUiState, actions: AuthenticatedActions) {
+    when (state) {
+        DtListUiState.Loading -> Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = 32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator()
+        }
+
+        DtListUiState.Empty -> DtMessageBody(text = stringResource(R.string.flags_dt_empty))
+
+        is DtListUiState.Error -> DtErrorBody(cause = state.cause, actions = actions)
+
+        is DtListUiState.Content -> LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(state.items, key = { it.conversation.threadId }) { item ->
+                DtConversationRow(
+                    item = item,
+                    // Open on the page the badge ADVERTISES: the MPStorage resume page when present,
+                    // else the conversation's last inbox page (#430). Tapping must land where the
+                    // « reprise p.N » badge says it will — opening lastPage while showing « reprise
+                    // p.N » was a badge/action contradiction (Codex review). Clamp ≥ 1 so a bogus
+                    // stored 0/negative page never produces an invalid route argument.
+                    onClick = {
+                        val target = (item.resumePage ?: item.conversation.lastPage).coerceAtLeast(1)
+                        actions.onOpenMultiMp(item.conversation.threadId, target)
+                    },
+                )
+            }
+        }
+    }
+}
+
+/** Centered single-line message body (DT empty state), sharing the surface background. */
+@Composable
+private fun DtMessageBody(text: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Error body for the DT list, mirroring the flag-list failure branch: a session-expired cause
+ * offers a reconnect CTA, every other cause a retry. The MPStorage read never lands here (it is
+ * best-effort) — only the inbox primary load.
+ */
+@Composable
+private fun DtErrorBody(cause: Throwable, actions: AuthenticatedActions) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 32.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        val sessionExpired = cause is SessionExpiredException
         Text(
-            text = stringResource(R.string.flags_dt_placeholder_title),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            text = stringResource(R.string.flags_dt_placeholder_body),
+            text = stringResource(
+                if (sessionExpired) {
+                    R.string.flags_session_expired
+                } else {
+                    classifyHfrError(cause).sharedLabelResOrNull() ?: R.string.flags_dt_error
+                },
+            ),
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.error,
+        )
+        if (sessionExpired) {
+            TextButton(onClick = actions.onLoginRequested) {
+                Text(stringResource(R.string.flags_login_cta))
+            }
+        } else {
+            TextButton(onClick = actions.onRefreshDt) {
+                Text(stringResource(R.string.flags_retry))
+            }
+        }
+    }
+}
+
+/**
+ * One DT conversation row: the « Interlocuteurs multiples » label, the conversation subject, an
+ * unread dot ([PrivateMessageSummary.hasUnread]), and — when present — the discreet « reprise p.N »
+ * MPStorage badge. The badge is a reading POSITION, never a read/unread state (#361/ADR-013).
+ */
+@Composable
+private fun DtConversationRow(item: DtListItem, onClick: () -> Unit) {
+    val conversation = item.conversation
+    // a11y — the read/unread dot is purely decorative (no semantics of its own), so the row carries
+    // the read state for TalkBack: « Non lu : <sujet> » / « Lu : <sujet> » (Codex review). The
+    // « Interlocuteurs multiples » caption and the resume badge stay separately announced beneath it.
+    val rowStateDescription = stringResource(
+        if (conversation.hasUnread) R.string.flags_dt_row_unread else R.string.flags_dt_row_read,
+        conversation.subject,
+    )
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = rowStateDescription },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DtUnreadDot(unread = conversation.hasUnread)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.flags_dt_multi_recipient),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = conversation.subject,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            item.resumePage?.let { page ->
+                Text(
+                    text = stringResource(R.string.flags_dt_resume_badge, page),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Inbox unread marker for a DT row: a filled primary dot when unread, a hollow outline ring when
+ * read. Mirrors the Messages tab's `ReadStateDot` without depending on `feature/messages`; the a11y
+ * state is carried by the row text, so this stays decorative.
+ */
+@Composable
+private fun DtUnreadDot(unread: Boolean) {
+    if (unread) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .background(MaterialTheme.colorScheme.primary, CircleShape),
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
         )
     }
 }
@@ -1136,8 +1352,10 @@ private data class FlagsBodyState(
     val cyanShowsRead: Boolean,
     val isRefreshing: Boolean,
     val removeFlagState: RemoveFlagState,
-    /** Whether the opt-in « DT » placeholder tab is shown (Settings toggle). */
+    /** Whether the opt-in « DT » tab is shown (Settings toggle). */
     val showDtTab: Boolean,
+    /** #6 — the DT (MultiMP) tab list state, fetched on tab open. */
+    val dtListState: DtListUiState,
 )
 
 private data class AuthenticatedActions(
@@ -1148,6 +1366,10 @@ private data class AuthenticatedActions(
     val onRequestRemoveFlag: (Flag) -> Unit,
     /** #414 — tap on a category band opens that category's topic listing. */
     val onOpenCategory: (Int) -> Unit,
+    /** #6 — open a DT conversation (threadId, last inbox page). */
+    val onOpenMultiMp: (threadId: Int, page: Int) -> Unit = { _, _ -> },
+    /** #6 — explicit user reload of the DT list (retry). */
+    val onRefreshDt: () -> Unit = {},
 )
 
 /**
