@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
@@ -536,6 +537,21 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeImmersiveNavBarReveal(): Flow<ImmersiveNavBarReveal> =
+        dataStore.data
+            // Default MANUAL (#518 follow-up): swipe-from-bottom only, the historical immersive behaviour.
+            .map(::readImmersiveNavBarReveal)
+            .distinctUntilChanged()
+            .catch { emit(ImmersiveNavBarReveal.MANUAL) }
+
+    override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_IMMERSIVE_NAV_BAR_REVEAL] = mode.name
+            }
+        }
+    }
+
     /**
      * Reads [KEY_UPLOAD_PROVIDER] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [UploadProviderId.DIBERIE] instead of crashing on
@@ -561,6 +577,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_DISPLAY_DENSITY]
             ?.let { stored -> runCatching { DisplayDensity.valueOf(stored) }.getOrNull() }
             ?: DisplayDensity.COMFORT
+
+    /**
+     * Reads [KEY_IMMERSIVE_NAV_BAR_REVEAL] defensively (#518 follow-up): an unknown / corrupt stored
+     * value falls back to [ImmersiveNavBarReveal.MANUAL] instead of crashing on
+     * `ImmersiveNavBarReveal.valueOf`, same stance as [readDisplayDensity].
+     */
+    private fun readImmersiveNavBarReveal(prefs: Preferences): ImmersiveNavBarReveal =
+        prefs[KEY_IMMERSIVE_NAV_BAR_REVEAL]
+            ?.let { stored -> runCatching { ImmersiveNavBarReveal.valueOf(stored) }.getOrNull() }
+            ?: ImmersiveNavBarReveal.MANUAL
 
     /**
      * Reads [KEY_FONT_SCALE] defensively (#287): an unknown / corrupt stored value falls back to
@@ -701,5 +727,6 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_DEBUG_BOUNDS_OVERLAY = booleanPreferencesKey("debug_bounds_overlay")
         val KEY_HIDE_SYSTEM_NAV_BAR = booleanPreferencesKey("hide_system_nav_bar")
         val KEY_IMMERSIVE_BACK_BUTTON = booleanPreferencesKey("immersive_back_button")
+        val KEY_IMMERSIVE_NAV_BAR_REVEAL = stringPreferencesKey("immersive_nav_bar_reveal")
     }
 }

@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -1124,6 +1125,44 @@ class SettingsViewModelTest {
         assertTrue(viewModel.state.value.immersiveBackButtonError)
     }
 
+    @Test
+    fun `init hydrates immersiveNavBarReveal from a persisted mode`() = runTest {
+        repository.emitImmersiveNavBarReveal(ImmersiveNavBarReveal.AT_BOTTOM)
+
+        val viewModel = newViewModel()
+
+        assertEquals(ImmersiveNavBarReveal.AT_BOTTOM, viewModel.state.value.immersiveNavBarReveal)
+        assertFalse(viewModel.state.value.immersiveNavBarRevealError)
+    }
+
+    @Test
+    fun `ImmersiveNavBarRevealChanged persists the chosen mode`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals(ImmersiveNavBarReveal.MANUAL, viewModel.state.value.immersiveNavBarReveal)
+
+        viewModel.submit(SettingsIntent.ImmersiveNavBarRevealChanged(ImmersiveNavBarReveal.ON_SCROLL_UP))
+
+        assertEquals(ImmersiveNavBarReveal.ON_SCROLL_UP, viewModel.state.value.immersiveNavBarReveal)
+        assertFalse(viewModel.state.value.isUpdatingImmersiveNavBarReveal)
+        assertEquals(1, repository.immersiveNavBarRevealSetCalls)
+    }
+
+    @Test
+    fun `ImmersiveNavBarRevealChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnImmersiveNavBarRevealSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ImmersiveNavBarRevealChanged(ImmersiveNavBarReveal.AT_BOTTOM))
+
+        assertEquals(
+            "failed persist must revert to the previous mode",
+            ImmersiveNavBarReveal.MANUAL,
+            viewModel.state.value.immersiveNavBarReveal,
+        )
+        assertFalse(viewModel.state.value.isUpdatingImmersiveNavBarReveal)
+        assertTrue(viewModel.state.value.immersiveNavBarRevealError)
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // Debug bounds overlay (#445)
     // ──────────────────────────────────────────────────────────────────────
@@ -1904,6 +1943,24 @@ class SettingsViewModelTest {
 
         fun emitImmersiveBackButton(value: Boolean) {
             immersiveBackButton.value = value
+        }
+
+        // #518 follow-up — immersive nav-bar reveal mode. Default MANUAL, enum optimistic-flip seam.
+        private val immersiveNavBarReveal = MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
+        var immersiveNavBarRevealSetCalls: Int = 0
+            private set
+        var failOnImmersiveNavBarRevealSet: Boolean = false
+
+        override fun observeImmersiveNavBarReveal(): Flow<ImmersiveNavBarReveal> = immersiveNavBarReveal
+
+        override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) {
+            immersiveNavBarRevealSetCalls += 1
+            check(!failOnImmersiveNavBarRevealSet) { "boom" }
+            immersiveNavBarReveal.value = mode
+        }
+
+        fun emitImmersiveNavBarReveal(value: ImmersiveNavBarReveal) {
+            immersiveNavBarReveal.value = value
         }
     }
 

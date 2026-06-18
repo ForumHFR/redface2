@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -76,4 +77,10 @@ class AppThemeViewModel @Inject constructor(
     val immersiveBackButton: StateFlow<Boolean> =
         userPreferencesRepository.observeImmersiveBackButton()
             .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    // #518 follow-up — when the hidden system nav bar auto-reveals from inside the app (scroll-driven).
+    // Default MANUAL (swipe-only, historical #518). Only acts while hideSystemNavBar is on. Eager seed.
+    val immersiveNavBarReveal: StateFlow<ImmersiveNavBarReveal> =
+        userPreferencesRepository.observeImmersiveNavBarReveal()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, ImmersiveNavBarReveal.MANUAL)
 }

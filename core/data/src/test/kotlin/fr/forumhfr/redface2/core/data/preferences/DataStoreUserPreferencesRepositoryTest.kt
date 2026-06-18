@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
@@ -664,6 +665,27 @@ class DataStoreUserPreferencesRepositoryTest {
         repository.setImmersiveBackButton(true)
         repository.observeImmersiveBackButton().test {
             assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeImmersiveNavBarReveal defaults to MANUAL then persists chosen modes`() = runTest(dispatcher) {
+        // #518 follow-up — default MANUAL (swipe-only) on an empty store.
+        repository.observeImmersiveNavBarReveal().test {
+            assertEquals(ImmersiveNavBarReveal.MANUAL, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImmersiveNavBarReveal(ImmersiveNavBarReveal.AT_BOTTOM)
+        repository.observeImmersiveNavBarReveal().test {
+            assertEquals(ImmersiveNavBarReveal.AT_BOTTOM, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImmersiveNavBarReveal(ImmersiveNavBarReveal.ON_SCROLL_UP)
+        repository.observeImmersiveNavBarReveal().test {
+            assertEquals(ImmersiveNavBarReveal.ON_SCROLL_UP, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

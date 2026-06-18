@@ -241,12 +241,32 @@ fun TopicScreen(
      * [pollManualExpanded], keeping the poll collapsed / expanded across page navigation.
      */
     onPollExpansionChanged: (Boolean) -> Unit = {},
+    /**
+     * #518 follow-up — `true` when `:app` wants this screen to report its scroll facts for the
+     * immersive nav-bar reveal (immersive on AND a scroll-driven mode selected). When `false` the
+     * reporter is a no-op and clears any stale facts. `:feature:topic` stays free of the reveal-mode
+     * enum: it only reports raw `(atBottom, scrollingUp)` facts; `:app` applies the policy.
+     */
+    immersiveNavBarRevealActive: Boolean = false,
+    /**
+     * #518 follow-up — reports the topic's raw scroll facts UP so `:app` (single owner of the window
+     * nav bar) can reveal the hidden bar per the chosen mode. Only fires while
+     * [immersiveNavBarRevealActive] and only on a change.
+     */
+    onImmersiveNavBarScroll: (atBottom: Boolean, scrollingUp: Boolean) -> Unit = { _, _ -> },
 ) {
     val viewModel = hiltViewModel<TopicViewModel, TopicViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     val lazyListState = rememberLazyListState()
+    // #518 follow-up — report scroll facts up so `:app` can reveal the hidden system nav bar per the
+    // chosen mode. No-op (and clears stale facts) when the feature is inactive.
+    ImmersiveNavBarScrollReporter(
+        listState = lazyListState,
+        active = immersiveNavBarRevealActive,
+        onScrollFacts = onImmersiveNavBarScroll,
+    )
     val context = androidx.compose.ui.platform.LocalContext.current
     // Resolve the string at composition time, not inside the LaunchedEffect collect block.
     // Lint flags `context.getString(R.string.…)` inside a Compose call site (the call is in a
@@ -1990,6 +2010,83 @@ private fun rememberBottomActionsVisible(listState: LazyListState): Boolean {
             }
     }
     return visible
+}
+
+/** #518 follow-up — one snapshot the reveal reporter reacts to (see [ImmersiveNavBarScrollReporter]). */
+private data class NavBarScrollSample(
+    val index: Int,
+    val offset: Int,
+    val canScrollForward: Boolean,
+    val scrolling: Boolean,
+)
+
+/**
+ * #518 follow-up — reports the topic's raw scroll facts (at-bottom + scrolling-up) UP to `:app` so it
+ * can reveal the hidden system navigation bar per the user's chosen mode. READ-ONLY on [listState]
+ * (never drives scrolling, like [rememberBottomActionsVisible]). When [active] is false (immersive off /
+ * MANUAL mode) it only clears any stale facts once. `:feature:topic` stays free of the reveal-mode enum
+ * — it ships facts, `:app` decides.
+ *
+ * CRITICAL anti-feedback-loop: revealing the bar consumes the bottom system-bar inset, which shrinks the
+ * list viewport and can flip `canScrollForward` / `firstVisibleItemScrollOffset` ON ITS OWN — with no
+ * user gesture. If those rest-time, inset-induced changes fed the decision, « at bottom » reveal would
+ * grow the inset → flip canScrollForward → un-reveal → shrink the inset → … (a visible jitter), and a
+ * pure layout shift would read as a fake scroll direction. So facts are only trusted DURING an active
+ * user scroll ([LazyListState.isScrollInProgress]); the first sample is emitted once to seed the static
+ * case (a short topic already at the bottom), and afterwards the last facts are LATCHED at rest.
+ */
+@Composable
+private fun ImmersiveNavBarScrollReporter(
+    listState: LazyListState,
+    active: Boolean,
+    onScrollFacts: (atBottom: Boolean, scrollingUp: Boolean) -> Unit,
+) {
+    val report by rememberUpdatedState(onScrollFacts)
+    if (!active) {
+        LaunchedEffect(Unit) { report(false, false) }
+        return
+    }
+    LaunchedEffect(listState) {
+        var prevIndex = listState.firstVisibleItemIndex
+        var prevOffset = listState.firstVisibleItemScrollOffset
+        var scrollingUp = false
+        var emitted = false
+        var lastAtBottom: Boolean? = null
+        var lastScrollingUp: Boolean? = null
+        snapshotFlow {
+            NavBarScrollSample(
+                index = listState.firstVisibleItemIndex,
+                offset = listState.firstVisibleItemScrollOffset,
+                canScrollForward = listState.canScrollForward,
+                scrolling = listState.isScrollInProgress,
+            )
+        }
+            .collect { sample ->
+                val positionChanged = sample.index != prevIndex || sample.offset != prevOffset
+                // Trust a direction change ONLY during an active user scroll; a rest-time shift (the nav
+                // bar's own inset toggling) must never be read as a scroll direction.
+                if (sample.scrolling && positionChanged) {
+                    scrollingUp = if (sample.index != prevIndex) {
+                        sample.index < prevIndex
+                    } else {
+                        sample.offset < prevOffset
+                    }
+                }
+                prevIndex = sample.index
+                prevOffset = sample.offset
+                val atBottom = !sample.canScrollForward
+                // Emit the first sample once (seed the static case: a short topic already at the bottom),
+                // then only while actively scrolling — never on a rest-time inset-induced change (loop).
+                val mayEmit = !emitted || sample.scrolling
+                val factsChanged = atBottom != lastAtBottom || scrollingUp != lastScrollingUp
+                if (mayEmit && factsChanged) {
+                    lastAtBottom = atBottom
+                    lastScrollingUp = scrollingUp
+                    emitted = true
+                    report(atBottom, scrollingUp)
+                }
+            }
+    }
 }
 
 /**

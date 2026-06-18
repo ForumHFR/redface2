@@ -338,4 +338,16 @@ interface UserPreferencesRepository {
 
     /** Persists [observeImmersiveBackButton]. Default `true` until the first call. */
     suspend fun setImmersiveBackButton(enabled: Boolean)
+
+    /**
+     * Immersive full-screen companion (#518 follow-up): WHEN the hidden Android navigation bar should be
+     * revealed again from inside the app, based on the reading scroll position (cf. [ImmersiveNavBarReveal]).
+     * Only meaningful while [observeHideSystemNavBar] is active. Default [ImmersiveNavBarReveal.MANUAL]
+     * (the historical #518 behaviour: swipe-from-bottom only). Observed at the app root, set in
+     * Settings > Affichage.
+     */
+    fun observeImmersiveNavBarReveal(): Flow<ImmersiveNavBarReveal>
+
+    /** Persists [observeImmersiveNavBarReveal]. Default [ImmersiveNavBarReveal.MANUAL] until the first call. */
+    suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal)
 }
