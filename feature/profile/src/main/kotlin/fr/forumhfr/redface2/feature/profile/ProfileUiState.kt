@@ -29,7 +29,17 @@ data class ProfileUiState(
      * reflects the live state (including a toggle made from the post menu while the sheet is open).
      */
     val isBlocked: Boolean = false,
+    /** #509 — a blacklist write is in flight; the toggle button is disabled to prevent a double-tap. */
+    val isUpdatingBlocked: Boolean = false,
+    /**
+     * #509 — `true` when the previewed user is the logged-in user. The blacklist toggle is hidden then,
+     * for parity with the post menu (which hides « Masquer » on one's own posts — blacklisting oneself
+     * is pointless).
+     */
+    val isOwnProfile: Boolean = false,
 ) {
+    /** #509 — the blacklist toggle is shown only on someone else's profile, and gated by its own write. */
+    val canToggleBlocked: Boolean get() = !isOwnProfile && !isUpdatingBlocked
     sealed interface Mode {
         data object Loading : Mode
 

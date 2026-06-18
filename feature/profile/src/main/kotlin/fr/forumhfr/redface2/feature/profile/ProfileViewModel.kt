@@ -6,10 +6,12 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.profile.ProfileRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,6 +40,7 @@ import kotlinx.coroutines.launch
 class ProfileViewModel @AssistedInject constructor(
     private val profileRepository: ProfileRepository,
     private val blacklistRepository: BlacklistRepository,
+    private val authRepository: AuthRepository,
     @Assisted("userId") private val userId: Int,
     @Assisted("pseudoHint") private val pseudoHint: String,
     @Assisted("avatarUrlHint") private val avatarUrlHint: String?,
@@ -65,6 +68,7 @@ class ProfileViewModel @AssistedInject constructor(
     init {
         loadProfile()
         observeBlacklist()
+        observeOwnProfile()
     }
 
     fun onIntent(intent: ProfileIntent) {
@@ -87,15 +91,45 @@ class ProfileViewModel @AssistedInject constructor(
         }
     }
 
-    private fun toggleBlocked() {
+    /**
+     * #509 — flags the previewed user as the logged-in user, so the blacklist toggle is hidden on one's
+     * OWN profile (parity with the post menu, which sets `onToggleBlockAuthor = null` for `isOwnPost` —
+     * « blacklisting oneself is pointless »). Matched on the numeric id when HFR provided it, else on the
+     * canonical pseudo. `observeAuthState` emits immediately and on every login/logout (cold flow).
+     */
+    private fun observeOwnProfile() {
         viewModelScope.launch {
-            if (_state.value.isBlocked) {
-                blacklistRepository.unblock(pseudoHint)
-            } else {
-                blacklistRepository.block(pseudoHint)
+            authRepository.observeAuthState().collect { auth ->
+                val own = auth is AuthState.Authenticated &&
+                    (
+                        (auth.userId != null && auth.userId == userId) ||
+                            canonicalizePseudo(auth.pseudo) == pseudoCanonical
+                        )
+                _state.update { it.copy(isOwnProfile = own) }
             }
-            // `isBlocked` is not flipped here: the `observeBlacklist` collector is the single source of
-            // truth and updates it once the store write lands.
+        }
+    }
+
+    private fun toggleBlocked() {
+        // Guard re-entrancy: `isBlocked` only flips once the store write lands and `observeBlacklist`
+        // re-emits, so without this a rapid double-tap reads the same stale value twice and fires the
+        // same direction twice (block+block) instead of toggling. The button is also disabled while
+        // `isUpdatingBlocked` (see ProfilePreviewSheet) — this is the model-side backstop.
+        if (_state.value.isUpdatingBlocked) return
+        val wasBlocked = _state.value.isBlocked
+        _state.update { it.copy(isUpdatingBlocked = true) }
+        viewModelScope.launch {
+            try {
+                if (wasBlocked) {
+                    blacklistRepository.unblock(pseudoHint)
+                } else {
+                    blacklistRepository.block(pseudoHint)
+                }
+                // `isBlocked` is not flipped here: the `observeBlacklist` collector is the single source
+                // of truth and updates it once the store write lands.
+            } finally {
+                _state.update { it.copy(isUpdatingBlocked = false) }
+            }
         }
     }
 

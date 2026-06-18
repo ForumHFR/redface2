@@ -6,10 +6,12 @@ import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.profile.ProfileRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.UserProfile
 import fr.forumhfr.redface2.core.model.blacklist.BlacklistEntry
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
@@ -73,9 +75,11 @@ class ProfileViewModelTest {
         userId: Int = 54596,
         pseudo: String = "XaTriX",
         avatarUrl: String? = null,
+        authState: AuthState = AuthState.Anonymous,
     ): ProfileViewModel = ProfileViewModel(
         profileRepository = repository,
         blacklistRepository = blacklist,
+        authRepository = mockk { every { observeAuthState() } returns MutableStateFlow(authState) },
         userId = userId,
         pseudoHint = pseudo,
         avatarUrlHint = avatarUrl,
@@ -231,22 +235,20 @@ class ProfileViewModelTest {
     fun `ToggleBlocked blocks then unblocks the previewed user and isBlocked tracks the store`() = runTest {
         coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
 
+        // UnconfinedTestDispatcher runs the toggle's launch{} to completion before onIntent returns,
+        // so the settled state is readable directly (the intermediate isUpdatingBlocked=true emission
+        // would otherwise trip a strict awaitItem sequence).
         val vm = createViewModel(pseudo = "XaTriX")
+        assertFalse("Not blocked initially", vm.state.value.isBlocked)
 
-        vm.state.test {
-            // From the first frame the button reflects the (empty) blacklist.
-            assertFalse("Not blocked initially", awaitItem().isBlocked)
+        vm.onIntent(ProfileIntent.ToggleBlocked)
+        assertTrue("Blocked after first toggle", vm.state.value.isBlocked)
+        assertTrue("Store holds the canonical pseudo", blacklist.isBlocked("XaTriX"))
+        assertFalse("Write settled", vm.state.value.isUpdatingBlocked)
 
-            vm.onIntent(ProfileIntent.ToggleBlocked)
-            assertTrue("Blocked after first toggle", awaitItem().isBlocked)
-            assertTrue("Store holds the canonical pseudo", blacklist.isBlocked("XaTriX"))
-
-            vm.onIntent(ProfileIntent.ToggleBlocked)
-            assertFalse("Unblocked after second toggle", awaitItem().isBlocked)
-            assertFalse("Store cleared", blacklist.isBlocked("XaTriX"))
-
-            cancelAndIgnoreRemainingEvents()
-        }
+        vm.onIntent(ProfileIntent.ToggleBlocked)
+        assertFalse("Unblocked after second toggle", vm.state.value.isBlocked)
+        assertFalse("Store cleared", blacklist.isBlocked("XaTriX"))
     }
 
     @Test
@@ -260,6 +262,46 @@ class ProfileViewModelTest {
             assertTrue("Already-blocked user renders the unblock label from frame one", awaitItem().isBlocked)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `the blacklist toggle is hidden on one's own profile`() = runTest {
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+
+        // Same numeric id AND pseudo as the logged-in user → own profile.
+        val vm = createViewModel(
+            pseudo = "XaTriX",
+            authState = AuthState.Authenticated(pseudo = "XaTriX", userId = 54596),
+        )
+
+        assertTrue("own profile detected", vm.state.value.isOwnProfile)
+        assertFalse("toggle hidden / not actionable on own profile", vm.state.value.canToggleBlocked)
+    }
+
+    @Test
+    fun `own profile is matched on the canonical pseudo when the auth userId is missing`() = runTest {
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+
+        // Older session without md_id → userId null, but the pseudo still matches (case-insensitive).
+        val vm = createViewModel(
+            pseudo = "XaTriX",
+            authState = AuthState.Authenticated(pseudo = "xatrix", userId = null),
+        )
+
+        assertTrue(vm.state.value.isOwnProfile)
+    }
+
+    @Test
+    fun `another user's profile is not flagged as own`() = runTest {
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+
+        val vm = createViewModel(
+            pseudo = "XaTriX",
+            authState = AuthState.Authenticated(pseudo = "SomeoneElse", userId = 999),
+        )
+
+        assertFalse(vm.state.value.isOwnProfile)
+        assertTrue("toggle available on another user's profile", vm.state.value.canToggleBlocked)
     }
 
     @Test
