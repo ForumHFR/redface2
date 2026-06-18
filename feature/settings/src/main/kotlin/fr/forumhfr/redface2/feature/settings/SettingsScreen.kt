@@ -52,13 +52,14 @@ import fr.forumhfr.redface2.core.ui.settings.shell.SettingsHomeScreen
  * [startScreenViewModel] (#458 « Démarrage ») — both `hiltViewModel()` in the same `ViewModelStore`.
  */
 @Composable
-@Suppress("LongParameterList") // racine v2 : 5 sous-pages + onOpenCategory + 2 VMs + slots, chacun distinct.
+@Suppress("LongParameterList") // racine v2 : 6 sous-pages + onOpenCategory + 2 VMs + slots, chacun distinct.
 fun SettingsScreen(
     onOpenProxy: () -> Unit,
     onOpenMaintenance: () -> Unit,
     onOpenDisplay: () -> Unit,
     onOpenImages: () -> Unit,
     onOpenAccountAbout: () -> Unit,
+    onOpenBlacklist: () -> Unit,
     onOpenCategory: (String) -> Unit,
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
@@ -77,6 +78,7 @@ fun SettingsScreen(
         onOpenDisplay = onOpenDisplay,
         onOpenImages = onOpenImages,
         onOpenAccountAbout = onOpenAccountAbout,
+        onOpenBlacklist = onOpenBlacklist,
         onOpenCategory = onOpenCategory,
         modifier = modifier,
         topBarActions = topBarActions,
@@ -99,6 +101,7 @@ internal fun SettingsRoot(
     onOpenDisplay: () -> Unit,
     onOpenImages: () -> Unit,
     onOpenAccountAbout: () -> Unit,
+    onOpenBlacklist: () -> Unit,
     onOpenCategory: (String) -> Unit,
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
@@ -144,6 +147,7 @@ internal fun SettingsRoot(
         onOpenDisplay = onOpenDisplay,
         onOpenImages = onOpenImages,
         onOpenAccountAbout = onOpenAccountAbout,
+        onOpenBlacklist = onOpenBlacklist,
     )
     val renderers: Map<String, @Composable () -> Unit> = sections
         .flatMap { it.items }
@@ -259,6 +263,7 @@ internal fun buildSettingsCatalogue(
     onOpenDisplay: () -> Unit,
     onOpenImages: () -> Unit,
     onOpenAccountAbout: () -> Unit,
+    onOpenBlacklist: () -> Unit,
 ): List<SettingsCatalogueSection> = listOf(
     // Réseau et cache.
     SettingsCatalogueSection(
@@ -771,9 +776,16 @@ internal fun buildSettingsCatalogue(
                 id = "future_ext_keyword_filters",
                 title = stringResource(R.string.settings_future_ext_keyword_filters),
             ),
-            futureRow(
-                id = "future_ext_blacklist",
+            // #509 — the blacklist is the first real extension: a nav row to the « Utilisateurs
+            // masqués » sub-page (the other extension entries stay futureRow placeholders for now).
+            navRow(
+                id = "ext_blacklist",
                 title = stringResource(R.string.settings_future_ext_blacklist),
+                description = stringResource(R.string.settings_blacklist_description),
+                keywords = listOf(
+                    "blacklist", "ignoré", "ignorer", "masquer", "masqués", "utilisateurs", "liste noire",
+                ),
+                onClick = onOpenBlacklist,
             ),
             futureRow(
                 id = "future_ext_color_tag",

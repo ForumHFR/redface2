@@ -156,7 +156,15 @@
     <!-- §12 Extensions et filtrage -->
     <string name="settings_future_ext_ignore_list">Liste d\'ignorés</string>
     <string name="settings_future_ext_keyword_filters">Filtres par mots-clés</string>
-    <string name="settings_future_ext_blacklist">Blacklist</string>
+    <string name="settings_future_ext_blacklist">Utilisateurs masqués</string>
+    <!-- #509 — sous-page de gestion de la blacklist (liste + ajout/retrait). -->
+    <string name="settings_blacklist_title">Utilisateurs masqués</string>
+    <string name="settings_blacklist_description">Masquer les posts de certains utilisateurs.</string>
+    <string name="settings_blacklist_intro">Les posts des utilisateurs ajoutés ici sont repliés dans les sujets (« post masqué »). Vous pouvez toujours les afficher au cas par cas.</string>
+    <string name="settings_blacklist_add_label">Pseudo à masquer</string>
+    <string name="settings_blacklist_add_button">Ajouter</string>
+    <string name="settings_blacklist_remove_button">Retirer</string>
+    <string name="settings_blacklist_empty">Aucun utilisateur masqué pour le moment.</string>
     <string name="settings_future_ext_color_tag">Color Tag</string>
     <string name="settings_future_ext_qualitay">Qualitay</string>
     <string name="settings_future_ext_redflag">Redflag</string>
