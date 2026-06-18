@@ -277,6 +277,33 @@ class HfrClientTest {
     }
 
     @Test
+    fun `submitPrivateMessageEdit POSTs bdd_php on the authenticated client and forwards the form body`() = runTest {
+        // MPStorage write (#6, ADR-014 §4) — GUARDED, NOT OBSERVED LIVE: the bdd.php cat=prive write
+        // contract was never captured. Here we only assert the REQUEST shape (endpoint + that the
+        // repository-built body, carrying cat=prive as a String, is forwarded verbatim).
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>ok</body></html>"))
+
+        val body = okhttp3.FormBody.Builder(Charsets.UTF_8)
+            .add("hash_check", "deadbeef")
+            .add("cat", "prive")
+            .add("content_form", """{"data":[]}""")
+            .build()
+
+        val html = client.submitPrivateMessageEdit(body)
+
+        assertEquals("<html><body>ok</body></html>", html)
+        val request = server.takeRequest()
+        assertEquals("authenticated", request.headers["X-RF2-Client"])
+        assertEquals("POST", request.method)
+        assertEquals("/bdd.php", requireNotNull(request.requestUrl).encodedPath)
+        assertEquals("hfr.inc", request.requestUrl!!.queryParameter("config"))
+        val fields = formFields(request.body.readUtf8())
+        assertEquals("deadbeef", fields["hash_check"])
+        assertEquals("prive", fields["cat"])
+        assertEquals("""{"data":[]}""", fields["content_form"])
+    }
+
+    @Test
     fun `removeFlag builds the delflag URL on the authenticated client mapping each type to owntopic`() = runTest {
         // owntopic discriminator: CYAN→1, RED→2, FAVORITE→3 (cf. Flag.kt / protocol-hfr.md).
         listOf(

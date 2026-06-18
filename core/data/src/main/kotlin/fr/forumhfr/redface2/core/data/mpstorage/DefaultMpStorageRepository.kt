@@ -8,8 +8,13 @@ import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocation
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageDocument
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageResult
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageWriteResult
+import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.network.HfrClient
+import fr.forumhfr.redface2.core.network.HfrConstants
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageListParser
 import fr.forumhfr.redface2.core.parser.mpstorage.MpStorageParser
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageThreadParser
@@ -20,6 +25,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import okhttp3.FormBody
 
 /**
  * Default [MpStorageRepository] (#6, ADR-014) — read-only, zero writes.
@@ -51,6 +57,7 @@ class DefaultMpStorageRepository @Inject constructor(
     private val threadParser: PrivateMessageThreadParser,
     private val replyFormParser: ReplyFormParser,
     private val storageParser: MpStorageParser,
+    private val envelopeWriter: MpStorageEnvelopeWriter,
     private val locationStore: MpStorageLocationStore,
     private val authRepository: AuthRepository,
     private val diagnostics: DiagnosticsLog,
@@ -115,6 +122,177 @@ class DefaultMpStorageRepository @Inject constructor(
                 "fetchStorage FAILED: ${error::class.simpleName}",
             )
             throw error
+        }
+    }
+
+    /**
+     * WRITE path (#6, ADR-014 §4) — GUARDED, NOT OBSERVED LIVE.
+     *
+     * Locates the storage document (same deterministic discovery as [fetchStorage] : cached location,
+     * else inbox scan for the conversation whose subject is EXACTLY [MpStorageRepository.STORAGE_SUBJECT_HASH]),
+     * reads its first-post edit form, runs the read-modify-write on the RAW JSON tree
+     * ([MpStorageEnvelopeWriter] — third-party namespaces preserved), enforces the
+     * [MpStorageRepository.MAX_CONTENT_FORM_BYTES] cap, and builds the `bdd.php cat=prive` POST body.
+     *
+     * GUARD : [dryRun] defaults to `true` → the POST is NEVER sent (the body is built & validated only).
+     * Nothing in the app calls this with `dryRun = false`, and there is no UI trigger — the
+     * `bdd.php cat=prive` write contract is unconfirmed (device down). A located-but-unreadable document
+     * or a [MpStorageWriteResult.TargetNotFound] is surfaced, NEVER repaired / created (ADR-014 §3 :
+     * creating a fresh document would fork the cross-userscript storage).
+     */
+    @Suppress("ReturnCount") // Guard clauses (auth / not-found / unreadable / oversize) + the prepared return.
+    override suspend fun writeBackFlag(entry: MpStorageFlagEntry, dryRun: Boolean): MpStorageWriteResult {
+        return withContext(ioDispatcher) {
+            val owner = activePseudo()
+                ?: return@withContext MpStorageWriteResult.TargetNotFound
+
+            val location = locateForWrite(owner)
+                ?: return@withContext MpStorageWriteResult.TargetNotFound
+            val read = readFormAndDocument(location)
+                ?: return@withContext MpStorageWriteResult.TargetNotFound
+            val document = read.document
+                ?: return@withContext MpStorageWriteResult.TargetUnreadable
+
+            when (val outcome = envelopeWriter.upsertFlag(document.rawEnvelope, entry)) {
+                MpStorageEnvelopeWriter.Outcome.NotJsonEnvelope ->
+                    // Defensive : the parser already accepted it, so this should not happen — but if the
+                    // raw text is somehow not a JSON object we surface it, never overwrite (ADR-014 §3).
+                    MpStorageWriteResult.TargetUnreadable
+
+                is MpStorageEnvelopeWriter.Outcome.TooLarge -> {
+                    val cap = MpStorageRepository.MAX_CONTENT_FORM_BYTES
+                    diagnostics.record(
+                        DiagnosticsLog.Level.WARN,
+                        LOG_TAG,
+                        "writeBackFlag oversize: ${outcome.sizeBytes} bytes > $cap",
+                    )
+                    MpStorageWriteResult.TooLarge(outcome.sizeBytes)
+                }
+
+                is MpStorageEnvelopeWriter.Outcome.Mutated ->
+                    prepareAndMaybePost(location, read.form, outcome.body, dryRun)
+            }
+        }
+    }
+
+    /**
+     * Builds the `bdd.php cat=prive` [FormBody] from the mutated [body] and the parsed [form], then —
+     * ONLY when [dryRun] is `false` — POSTs it. By default ([dryRun] = `true`) NO request is sent : the
+     * body is built and validated, and [MpStorageWriteResult.Prepared] carries `posted = false`.
+     * The live POST branch is unconfirmed (NOT OBSERVED LIVE).
+     */
+    private suspend fun prepareAndMaybePost(
+        location: MpStorageLocation,
+        form: ReplyForm,
+        body: String,
+        dryRun: Boolean,
+    ): MpStorageWriteResult {
+        val formBody = buildPrivateMessageEditBody(location, form, body)
+        if (dryRun) {
+            diagnostics.record(
+                DiagnosticsLog.Level.INFO,
+                LOG_TAG,
+                "writeBackFlag dryRun: body built (${body.length} chars), POST skipped — not observed live",
+            )
+            return MpStorageWriteResult.Prepared(body = body, posted = false)
+        }
+        // GUARDED branch — reached only with dryRun=false, which nothing in the app sets. The
+        // bdd.php cat=prive write contract is unconfirmed; the response is intentionally NOT parsed
+        // here (no live success/error capture). Surfaced as Prepared(posted = true).
+        hfrClient.submitPrivateMessageEdit(formBody)
+        diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, "writeBackFlag POSTED (live, unconfirmed contract)")
+        return MpStorageWriteResult.Prepared(body = body, posted = true)
+    }
+
+    /**
+     * The `bdd.php cat=prive` POST body. Mirrors [fr.forumhfr.redface2.core.data.write.DefaultEditPostRepository]'s
+     * edit body, with TWO deliberate differences :
+     *  - `cat` is the String `"prive"` (the storage post lives under the private-message category ;
+     *    the public edit flow passes an Int) — this is the whole reason for the dedicated wire method ;
+     *  - `content_form` is the mutated JSON document, not user BBCode.
+     * `numreponse` targets the storage first post, `numrep` stays empty, `sujet` / `hash_check` /
+     * `verifrequet` / the preserved hidden fields come from the parsed edit form. `password` and
+     * `delete` are hard-denied (never resend the deletion checkbox).
+     */
+    private fun buildPrivateMessageEditBody(
+        location: MpStorageLocation,
+        form: ReplyForm,
+        contentForm: String,
+    ): FormBody {
+        val builder = FormBody.Builder(Charsets.UTF_8)
+        val emitted = mutableSetOf<String>()
+        val overrides = buildMap {
+            put("hash_check", form.hashCheck)
+            put("verifrequet", HfrConstants.VERIF_REQUET)
+            put("content_form", contentForm)
+            put("numreponse", location.numreponse.toString())
+            put("numrep", "")
+            // The private-message discriminator — String, unlike the public edit flow's Int cat.
+            put("cat", "prive")
+            put("post", location.threadId.toString())
+            put("page", "1")
+            put("sujet", form.sujet)
+            form.msgIcon?.let { put("MsgIcon", it) }
+        }
+        overrides.forEach { (key, value) ->
+            builder.add(key, value)
+            emitted += key
+        }
+        form.hiddenFields.forEach { (key, value) ->
+            if (key in emitted) return@forEach
+            // Hard deny: never resend `password` (defence-in-depth; the parser already filters it)
+            // nor the `delete=1` checkbox the edit form ships (deletion is destructive, out of scope).
+            if (key == "password" || key == "delete") return@forEach
+            builder.add(key, value)
+            emitted += key
+        }
+        return builder.build()
+    }
+
+    /** Reading the storage edit form for the write path : the form + the parsed document (null = unreadable). */
+    private data class WriteRead(val form: ReplyForm, val document: MpStorageDocument?)
+
+    /**
+     * GETs and parses the storage first-post edit form at [location] for the WRITE path, returning the
+     * [ReplyForm] (for hash_check / sujet / hidden fields) plus the parsed [MpStorageDocument] (null when
+     * the body is not a readable v0.1 envelope — surfaced as unreadable, never repaired). Returns `null`
+     * when the edit form itself cannot be obtained (stale location). Throws [SessionExpiredException] on
+     * an anonymous composer.
+     */
+    private suspend fun readFormAndDocument(location: MpStorageLocation): WriteRead? {
+        val form = replyFormParser
+            .parse(hfrClient.getPrivateMessageEditForm(location.threadId, location.numreponse))
+            .getOrElse { error ->
+                diagnostics.record(
+                    DiagnosticsLog.Level.WARN,
+                    LOG_TAG,
+                    "write edit form parse FAILED: ${error::class.simpleName}",
+                )
+                return null
+            }
+        if (form.isAnonymous) {
+            throw SessionExpiredException("MPStorage write edit form served anonymous composer")
+        }
+        val document = storageParser.parse(form.initialContent).getOrNull()
+        return WriteRead(form = form, document = document)
+    }
+
+    /**
+     * Resolves the storage location for the write path : the cached id if present, else a fresh inbox
+     * scan (caching the discovery). Returns `null` when the account has no storage MP at all
+     * (deterministic exact-hash miss → the caller maps it to [MpStorageWriteResult.TargetNotFound],
+     * NEVER a creation — ADR-014 §3).
+     */
+    private suspend fun locateForWrite(owner: String): MpStorageLocation? {
+        locationStore.read(owner)?.let { return it }
+        return when (val discovery = discoverByInboxScan()) {
+            is Discovery.Located -> discovery.location.also {
+                locationStore.save(owner, it.threadId, it.numreponse)
+            }
+            // HitUnreadable = the conversation exists but its first post is unreachable. There is no
+            // numreponse to address an edit, so the write has no valid target — treat as not-found
+            // for the write path (still never creates a document).
+            Discovery.HitUnreadable, Discovery.Absent -> null
         }
     }
 

@@ -58,3 +58,42 @@ data class MpStorageFlagEntry(
     /** Desktop-format URI, relayed verbatim (DTCloud rebuilds its links from it). */
     val uri: String?,
 )
+
+/**
+ * Outcome of an MPStorage WRITE attempt (#6, ADR-014 §4 — deferred / opt-in).
+ *
+ * NOTE — NOT OBSERVED LIVE : the `bdd.php cat=prive` write contract has never been captured
+ * (device down, no real round-trip). The write mechanism is implemented and unit-tested but
+ * stays GUARDED — by default [fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository.writeBackFlag]
+ * runs `dryRun = true` (read-modify-build only, no POST) and nothing in the app calls it with
+ * `dryRun = false`. There is no UI entry point. These variants describe what the path WOULD
+ * return once the contract is confirmed.
+ */
+sealed interface MpStorageWriteResult {
+
+    /**
+     * The read-modify-write completed. [body] is the verbatim mutated JSON that WOULD be (or was)
+     * sent as `content_form`. [posted] is `false` for the guarded dry-run (the nominal case today:
+     * the body was built and validated but no request hit the wire), `true` once a real POST is
+     * confirmed accepted by HFR.
+     */
+    data class Prepared(val body: String, val posted: Boolean) : MpStorageWriteResult
+
+    /**
+     * The target storage document could not be located (ADR-014 §3 : NEVER create or overwrite a
+     * fresh document — that would fork the cross-userscript storage / spawn a duplicate). The
+     * caller must surface this, not "repair" it.
+     */
+    data object TargetNotFound : MpStorageWriteResult
+
+    /** The located document is not a readable v0.1 envelope — surfaced, never repaired (ADR-014 §3). */
+    data object TargetUnreadable : MpStorageWriteResult
+
+    /**
+     * The mutated `content_form` exceeds the hard size cap
+     * ([fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository.MAX_CONTENT_FORM_BYTES]).
+     * The real HFR MP body limit is unknown (never observed) ; this cap fails CLOSED rather than
+     * risk an uncontrolled / truncated POST. [sizeBytes] is the offending UTF-8 size.
+     */
+    data class TooLarge(val sizeBytes: Int) : MpStorageWriteResult
+}
