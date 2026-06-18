@@ -265,6 +265,11 @@
     <string name="settings_theme_amoled_title">Thème AMOLED (vrai noir)</string>
     <string name="settings_theme_amoled_description">Fond noir pur pour les écrans OLED. S\'applique uniquement en thème sombre.</string>
     <string name="settings_theme_amoled_persist_failed">Impossible de mémoriser le réglage AMOLED. Réessayez.</string>
+    <!-- TU 2788511 — couleur d\'accent (rose ↔ rouge REDFACE1). -->
+    <string name="settings_theme_accent_intro">Couleur d\'accent de l\'app (boutons, sélection, en-têtes de message).</string>
+    <string name="settings_theme_accent_rose">Rose (défaut)</string>
+    <string name="settings_theme_accent_rouge_redface1">Rouge REDFACE1</string>
+    <string name="settings_theme_accent_persist_failed">Impossible de mémoriser la couleur d\'accent. Réessayez.</string>
 
     <!-- #287 — Préréglages de lecture. Densité (Confort/Compact = espacement des listes et des
          messages) + taille de la police de lecture (S/M/L, appliquée en plus du zoom du système),

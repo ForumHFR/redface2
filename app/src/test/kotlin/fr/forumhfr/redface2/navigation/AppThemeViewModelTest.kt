@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.navigation
 
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
@@ -62,6 +63,7 @@ class AppThemeViewModelTest {
             // #518 follow-up — eagerly collected by the VM constructor; default on is enough here.
             every { observeImmersiveBackButton() } returns MutableStateFlow(true)
             every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
+            every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
         }
 
         val vm = AppThemeViewModel(
@@ -90,6 +92,7 @@ class AppThemeViewModelTest {
             // #518 follow-up — eagerly collected by the VM constructor; default on is enough here.
             every { observeImmersiveBackButton() } returns MutableStateFlow(true)
             every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
+            every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
         }
 
         val vm = AppThemeViewModel(
