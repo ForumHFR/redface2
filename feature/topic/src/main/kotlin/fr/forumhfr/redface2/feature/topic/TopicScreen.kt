@@ -1665,7 +1665,11 @@ internal fun TopicPostCard(
                                 .weight(weight = 1f, fill = false)
                                 .then(pseudoModifier)
                             // #221 — the RF2 creator's pseudo gets the gold sheen easter egg.
-                            if (isRf2Creator(post.author)) {
+                            // remember() keyed on the author so canonicalizePseudo (NFC + char walk)
+                            // runs once per author, not on every recomposition of this hot list row —
+                            // same off-the-render-path stance #509 took with hiddenNumreponses.
+                            val isCreator = remember(post.author) { isRf2Creator(post.author) }
+                            if (isCreator) {
                                 CreatorPseudoText(author = post.author, modifier = pseudoLayout)
                             } else {
                                 Text(

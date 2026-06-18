@@ -15,21 +15,22 @@ import org.junit.Test
 class CreatorHighlightTest {
 
     private val base = Color(0xFF7A5C00)
-    private val highlight = Color(0xFFC8901A)
+    private val highlight = Color(0xFF946E00)
 
     @Test
     fun `stops are strictly increasing across the whole sweep`() {
-        // Sample densely, hitting both extremities (0f, 1f) and the interior crossings.
-        var travel = 0f
-        while (travel <= 1f) {
+        // 101 evenly-spaced samples so the loop lands EXACTLY on both extremities (travel=0f at i=0,
+        // travel=1f at i=100) — those are the degenerate cases (band edge on 0f / 1f) the strict
+        // (0, 1) guards must keep from duplicating an endpoint.
+        (0..SAMPLES).forEach { i ->
+            val travel = i.toFloat() / SAMPLES
             val stops = creatorSheenStops(travel, base, highlight)
-            for (i in 1 until stops.size) {
+            for (j in 1 until stops.size) {
                 assertTrue(
                     "stops not strictly increasing at travel=$travel: ${stops.map { it.first }}",
-                    stops[i].first > stops[i - 1].first,
+                    stops[j].first > stops[j - 1].first,
                 )
             }
-            travel += STEP
         }
     }
 
@@ -52,6 +53,6 @@ class CreatorHighlightTest {
     }
 
     private companion object {
-        const val STEP = 0.013f
+        const val SAMPLES = 100
     }
 }

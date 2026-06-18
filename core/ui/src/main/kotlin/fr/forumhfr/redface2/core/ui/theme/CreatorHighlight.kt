@@ -93,12 +93,14 @@ private const val CREATOR_SHEEN_PERIOD_MS = 2600
 /** Surfaces darker than this read as a dark/AMOLED theme → brighter gold palette. */
 private const val DARK_SURFACE_LUMINANCE = 0.5f
 
-// Deeper gold on light surfaces so the SemiBold pseudo keeps enough contrast on white. The highlight
-// stays a saturated mid-gold (not a pale wash) so even the sweep's brightest pass remains legible — a
-// pale gold like #FFD700 is inherently low-contrast on white, so on light we trade some sparkle for
-// readability (#221 §5); the full brilliance lives on the dark palette below.
+// Deeper gold on light surfaces so the SemiBold pseudo keeps enough contrast on white. BOTH the base
+// and the highlight stay dark golds that clear WCAG: the base ≈6.2:1, and the highlight is kept dark
+// enough to stay ≥3:1 (large-bold threshold) on a light surface even at the sweep's brightest pass —
+// it also sits at the centre of the STATIC reduce-motion gradient, so it must be legible there too.
+// A pale gold (#FFD700 / the earlier #C8901A ≈2.7:1) is inherently low-contrast on white, so on light
+// we trade sparkle for readability (#221 §5); the full brilliance lives on the dark palette below.
 private val CreatorGoldBaseLight = Color(0xFF7A5C00)
-private val CreatorGoldHighlightLight = Color(0xFFC8901A)
+private val CreatorGoldHighlightLight = Color(0xFF946E00)
 
 // Brighter gold on dark / AMOLED where a deep gold would be muddy.
 private val CreatorGoldBaseDark = Color(0xFFD4AF37)
