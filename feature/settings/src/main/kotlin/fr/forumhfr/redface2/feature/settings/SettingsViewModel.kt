@@ -113,6 +113,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(foldLongQuotes = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeHideSystemNavBar().first() },
+            isLocked = { it.hideSystemNavBarTouchedLocally || it.isUpdatingHideSystemNavBar },
+            apply = { state, value -> state.copy(hideSystemNavBar = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeConfirmBeforePosting().first() },
             isLocked = { it.confirmBeforePostingTouchedLocally || it.isUpdatingConfirmBeforePosting },
             apply = { state, value -> state.copy(confirmBeforePosting = value) },
@@ -220,6 +225,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.TopicPollsExpandedChanged -> updateTopicPollsExpanded(intent.enabled)
             is SettingsIntent.TopicSignaturesChanged -> updateTopicSignatures(intent.enabled)
             is SettingsIntent.FoldLongQuotesChanged -> updateFoldLongQuotes(intent.enabled)
+            is SettingsIntent.HideSystemNavBarChanged -> updateHideSystemNavBar(intent.enabled)
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
@@ -806,6 +812,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setFoldLongQuotes,
+        )
+    }
+
+    private fun updateHideSystemNavBar(desired: Boolean) {
+        val previous = _state.value.hideSystemNavBar
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    hideSystemNavBar = desired,
+                    isUpdatingHideSystemNavBar = true,
+                    hideSystemNavBarError = false,
+                    hideSystemNavBarTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(hideSystemNavBar = desired, isUpdatingHideSystemNavBar = false)
+                } else {
+                    state.copy(
+                        hideSystemNavBar = previous,
+                        isUpdatingHideSystemNavBar = false,
+                        hideSystemNavBarError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setHideSystemNavBar,
         )
     }
 

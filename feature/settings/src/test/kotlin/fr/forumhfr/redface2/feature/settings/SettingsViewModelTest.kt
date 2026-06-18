@@ -1051,6 +1051,45 @@ class SettingsViewModelTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────
+    // Hide system navigation bar (#518)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates hideSystemNavBar from a persisted true`() = runTest {
+        // Default is false — only a persisted opt-in exercises the hydration path.
+        repository.emitHideSystemNavBar(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.hideSystemNavBar)
+        assertFalse(viewModel.state.value.hideSystemNavBarError)
+    }
+
+    @Test
+    fun `HideSystemNavBarChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("nav bar shown by default", viewModel.state.value.hideSystemNavBar)
+
+        viewModel.submit(SettingsIntent.HideSystemNavBarChanged(true))
+
+        assertTrue(viewModel.state.value.hideSystemNavBar)
+        assertFalse(viewModel.state.value.isUpdatingHideSystemNavBar)
+        assertEquals(1, repository.hideSystemNavBarSetCalls)
+    }
+
+    @Test
+    fun `HideSystemNavBarChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnHideSystemNavBarSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.HideSystemNavBarChanged(true))
+
+        assertFalse("failed persist must revert to the previous value", viewModel.state.value.hideSystemNavBar)
+        assertFalse(viewModel.state.value.isUpdatingHideSystemNavBar)
+        assertTrue(viewModel.state.value.hideSystemNavBarError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Debug bounds overlay (#445)
     // ──────────────────────────────────────────────────────────────────────
 
@@ -1794,6 +1833,24 @@ class SettingsViewModelTest {
 
         fun emitDebugBoundsOverlay(value: Boolean) {
             debugBoundsOverlay.value = value
+        }
+
+        // #518 — hide system nav bar. Same optimistic-flip seam as above.
+        private val hideSystemNavBar = MutableStateFlow(false)
+        var hideSystemNavBarSetCalls: Int = 0
+            private set
+        var failOnHideSystemNavBarSet: Boolean = false
+
+        override fun observeHideSystemNavBar(): Flow<Boolean> = hideSystemNavBar
+
+        override suspend fun setHideSystemNavBar(enabled: Boolean) {
+            hideSystemNavBarSetCalls += 1
+            check(!failOnHideSystemNavBarSet) { "boom" }
+            hideSystemNavBar.value = enabled
+        }
+
+        fun emitHideSystemNavBar(value: Boolean) {
+            hideSystemNavBar.value = value
         }
     }
 

@@ -145,6 +145,23 @@ fun SettingsDisplayScreen(
             if (state.fontScaleError) {
                 PreferencePersistError(R.string.settings_display_font_scale_persist_failed)
             }
+
+            // Immersive full-screen (#518).
+            Text(
+                text = stringResource(R.string.settings_display_fullscreen_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            DisplayToggleRow(
+                title = stringResource(R.string.settings_display_hide_nav_bar_title),
+                description = stringResource(R.string.settings_display_hide_nav_bar_description),
+                checked = state.hideSystemNavBar,
+                enabled = state.canToggleHideSystemNavBar,
+                onCheckedChange = { viewModel.submit(SettingsIntent.HideSystemNavBarChanged(it)) },
+            )
+            if (state.hideSystemNavBarError) {
+                PreferencePersistError(R.string.settings_display_hide_nav_bar_persist_failed)
+            }
         }
     }
 }
