@@ -581,10 +581,19 @@ class TopicViewModel @AssistedInject constructor(
      * that is still on the wire is dropped on arrival. Called at the head of every normal-load path
      * (load / refresh / force-refresh / post-delete) so a stale search result can never overwrite a
      * more recent normal page (latest-wins strict).
+     *
+     * Also clears a `status == Loading` left dangling by the cancelled search: bumping the generation
+     * drops the reply, but [submitSearch]'s own `status = Done/Error` write is then guarded out, so
+     * without this reset the search bar would spin forever after a normal load took over. We reset to
+     * [TopicSearchStatus.Idle] only the Loading state — the bar stays open (`isActive` kept) with the
+     * typed criteria preserved so the user can retry; we never close the bar from here.
      */
     private fun takeOverFromSearch() {
         searchJob?.cancel()
         searchGeneration++
+        if (_state.value.search.status == TopicSearchStatus.Loading) {
+            _state.update { it.copy(search = it.search.copy(status = TopicSearchStatus.Idle)) }
+        }
     }
 
     /**

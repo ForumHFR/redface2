@@ -36,6 +36,7 @@ import java.net.UnknownHostException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,6 +46,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -894,6 +896,11 @@ class TopicViewModelTest {
         val searchRepo = FakeTopicSearchRepository(result = staleSearch)
         val gate = CompletableDeferred<Unit>()
         searchRepo.gate = { gate.await() }
+        // Non-cooperative wait: cancelling searchJob (the refresh taking over) must NOT cut the await,
+        // so the fake truly DELIVERS staleSearch after the refresh. This is what forces the result
+        // through the `generation` guard — with a cancellable await the reply would never be produced
+        // and the test would stay green even if the guard were deleted.
+        searchRepo.ignoreCancellation = true
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(flow { emit(loaded) }),
             refreshTopicsToReturn = listOf(refreshed),
@@ -918,11 +925,27 @@ class TopicViewModelTest {
             "refreshed",
             (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title,
         )
+        // Fix 1 — the takeover clears the dangling Loading spinner instead of leaving it stuck (the
+        // search reply will be guarded out, so submitSearch never writes its own Done/Error status).
+        assertEquals(
+            "the dangling search spinner is cleared by the takeover, not left spinning",
+            TopicSearchStatus.Idle,
+            viewModel.state.value.search.status,
+        )
 
-        // Release the slow search reply: the generation moved on, so its page is discarded.
+        // Release the slow search reply: it IS produced (non-cancellable await) but the generation
+        // moved on, so the guard discards it. Without `generation != searchGeneration` the line below
+        // would clobber the refreshed page with "stale-search" and flip the status back to Done.
         gate.complete(Unit)
         val finalMode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
         assertEquals("the stale search reply must not clobber the refreshed page", "refreshed", finalMode.topic.title)
+        // The stale reply must not rewrite the search status either (it stays at the takeover's Idle,
+        // never re-flipped to Done by the dropped reply).
+        assertEquals(
+            "the dropped stale reply must not rewrite the search status",
+            TopicSearchStatus.Idle,
+            viewModel.state.value.search.status,
+        )
     }
 
     @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
@@ -1601,9 +1624,18 @@ private class FakeTopicSearchRepository(
      */
     var gate: (suspend () -> Unit)? = null
 
+    /**
+     * When `true`, the [gate] wait is run under [NonCancellable] so that cancelling [searchJob] (a
+     * normal-load path taking over) does NOT short-circuit the await. The fake then truly returns its
+     * (now stale) [result] AFTER the competing refresh — the only setup that actually exercises the
+     * `generation != searchGeneration` guard in `submitSearch`. Without this the await is cancellable,
+     * the reply is never produced, and the test would pass even with the guard removed.
+     */
+    var ignoreCancellation: Boolean = false
+
     override suspend fun searchInTopic(request: TopicSearchRequest): Topic {
         requests += request
-        gate?.invoke()
+        gate?.let { g -> if (ignoreCancellation) withContext(NonCancellable) { g() } else g() }
         error?.let { throw it }
         return result ?: error("FakeTopicSearchRepository has no result configured")
     }
