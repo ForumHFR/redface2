@@ -8,12 +8,16 @@ import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageResult
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -46,11 +50,17 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
+// Hilt-injected dependency cluster : flags + forum + messages + MPStorage + prefs + auth + clock,
+// each provided independently by the graph — there is no cohesive bundle to extract (a wrapper
+// would only relay them). Same pragmatic exception as the hoisted-composable suppressions elsewhere.
+@Suppress("LongParameterList")
 class FlagsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val flagRepository: FlagRepository,
     private val forumRepository: ForumRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val messagesRepository: MessagesRepository,
+    private val mpStorageRepository: MpStorageRepository,
     private val clock: Clock,
 ) : ViewModel() {
 
@@ -90,6 +100,24 @@ class FlagsViewModel @Inject constructor(
             started = SharingStarted.Eagerly,
             initialValue = false,
         )
+
+    /**
+     * #6 — UI state for the « DT » tab: the user's MultiMP conversations (inbox `cat=prive`,
+     * [PrivateMessageSummary.isMultiRecipient]) enriched best-effort with the MPStorage reading
+     * positions (DTCloud's `mpFlags`). A dedicated state (NOT a [FlagsListUiState] / [Flag] reuse,
+     * arbitrage Codex): the DT channel is a private-message list, not a flag list, so it never
+     * shares the flag model's contract (`flagType == null` stays a pure « no backend » marker for
+     * Super/DT placeholders elsewhere in this ViewModel).
+     *
+     * The fetch is triggered on tab OPENING ([onDtTabOpened]) — never from the per-category
+     * auto-refresh — because [MpStorageRepository.fetchStorage] is expensive (it scans the inbox to
+     * discover the storage MP). Idle until first opened.
+     */
+    private val _dtListState = MutableStateFlow<DtListUiState>(DtListUiState.Loading)
+    val dtListState: StateFlow<DtListUiState> = _dtListState.asStateFlow()
+
+    /** One-shot guard so re-entering the composition (recomposition, ON_RESUME) does not re-scan. */
+    private var dtFetchStarted = false
 
     val authState: StateFlow<AuthState?> = authRepository.observeAuthState()
         .stateIn(
@@ -622,6 +650,88 @@ class FlagsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * #6 — the screen calls this when the « DT » tab is OPENED (a stable [LaunchedEffect], not the
+     * raw composition). Loads the MultiMP conversations once per session: re-entering the
+     * composition reuses the already-loaded state ([dtFetchStarted] guard). The fan-out (inbox page
+     * + MPStorage scan) is deliberately kept off the per-category auto-refresh path. Use
+     * [refreshDt] for an explicit user re-pull.
+     */
+    fun onDtTabOpened() {
+        if (dtFetchStarted) return
+        loadDt()
+    }
+
+    /** Explicit user-driven reload of the DT list (pull-to-refresh / retry), bypassing the guard. */
+    fun refreshDt() {
+        loadDt()
+    }
+
+    /**
+     * Loads the DT list: the inbox MultiMP rows, each joined best-effort with its MPStorage reading
+     * position. The join tolerates every degraded MPStorage outcome ([MpStorageResult.NotFound] /
+     * [MpStorageResult.Unreadable] / an exception): the list still renders, just without the
+     * « reprise p.N » badge — the storage scan must never fail the conversation list.
+     *
+     * Only the inbox load itself is fatal: it is the list's primary source, so a network/session
+     * error there surfaces [DtListUiState.Error] (the screen offers a retry / reconnect CTA).
+     */
+    private fun loadDt() {
+        dtFetchStarted = true
+        viewModelScope.launch {
+            _dtListState.value = DtListUiState.Loading
+            val conversations = try {
+                messagesRepository.getPrivateMessageList(page = DT_INBOX_PAGE)
+                    .items
+                    .filter { it.isMultiRecipient }
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                // Reset the guard so a retry can re-run; the inbox is the list's only hard source.
+                dtFetchStarted = false
+                _dtListState.value = DtListUiState.Error(error)
+                return@launch
+            }
+
+            if (conversations.isEmpty()) {
+                _dtListState.value = DtListUiState.Empty
+                return@launch
+            }
+
+            // Best-effort enrichment: a missing / unreadable / failed storage read leaves an empty
+            // map, so every row simply renders without a resume badge (the list is never blocked).
+            val resumeByThread = fetchResumePositions()
+            _dtListState.value = DtListUiState.Content(
+                conversations.map { summary ->
+                    DtListItem(
+                        conversation = summary,
+                        resumePage = resumeByThread[summary.threadId],
+                    )
+                },
+            )
+        }
+    }
+
+    /**
+     * Best-effort MPStorage read for the « reprise p.N » badges. Returns a `threadId → page` map of
+     * the DTCloud `mpFlags` entries, EMPTY for every degraded outcome ([MpStorageResult.NotFound] /
+     * [MpStorageResult.Unreadable]) or transport failure — the caller renders the list regardless.
+     * `mpFlags` is a reading-RESUME position, NOT a read/unread state (#361/ADR-013): the unread dot
+     * is the inbox [PrivateMessageSummary.hasUnread], never this page number.
+     */
+    @Suppress("SwallowedException") // best-effort: a storage read failure deliberately degrades to
+    // « no resume badge » so the conversation list still renders (cf. KDoc); the cause is irrelevant.
+    private suspend fun fetchResumePositions(): Map<Int, Int> = try {
+        when (val storage = mpStorageRepository.fetchStorage()) {
+            is MpStorageResult.Found -> storage.document.mpFlags.associate { it.threadId to it.page }
+            MpStorageResult.NotFound, MpStorageResult.Unreadable -> emptyMap()
+        }
+    } catch (cancellation: kotlinx.coroutines.CancellationException) {
+        throw cancellation
+    } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+        emptyMap()
+    }
+
     // Round-2 review (PR #207): `logout()` was removed from this ViewModel — the global account
     // menu (#198) now drives the logout from `AppAccountViewModel.logout()`, which owns the
     // canonical `clearSessionCache → authRepository.logout` ordering. Keeping a second copy
@@ -722,6 +832,7 @@ class FlagsViewModel @Inject constructor(
             null -> Unit
             AuthState.Anonymous -> {
                 observedPseudo = null
+                resetDtState()
                 flagRepository.clearSessionCache()
             }
             is AuthState.Authenticated -> {
@@ -729,11 +840,19 @@ class FlagsViewModel @Inject constructor(
                 // singleton and may outlive this ViewModel, so a recreated Flags screen
                 // must not trust whatever per-user cache was left in memory.
                 if (observedPseudo != state.pseudo) {
+                    resetDtState()
                     flagRepository.clearSessionCache()
                 }
                 observedPseudo = state.pseudo
             }
         }
+    }
+
+    /** Drop the DT list (and its one-shot guard) so a logout / account switch never shows the
+     * previous user's MultiMP conversations; the next [onDtTabOpened] re-scans for the new session. */
+    private fun resetDtState() {
+        dtFetchStarted = false
+        _dtListState.value = DtListUiState.Loading
     }
 }
 
@@ -847,3 +966,43 @@ sealed interface RemoveFlagEvent {
     data class Success(val title: String) : RemoveFlagEvent
     data class Failure(val title: String) : RemoveFlagEvent
 }
+
+/**
+ * #6 — inbox page scanned for the DT (MultiMP) list. Page 1 holds the most recent conversations;
+ * the inbox is paged at 50 newest-first, so this covers the active DT in practice. A full
+ * multi-page sweep is deliberately deferred (it would multiply the cost of an already-expensive
+ * MPStorage scan) — see the rapport / follow-up note.
+ */
+private const val DT_INBOX_PAGE = 1
+
+/**
+ * #6 — UI state for the « DT » tab (the user's MultiMP conversations). A dedicated channel, NOT a
+ * reuse of [FlagsListUiState] / [Flag] : a DT row is a private-message conversation enriched with
+ * an MPStorage reading position, never a forum flag (arbitrage Codex).
+ */
+sealed interface DtListUiState {
+    /** First scan in flight (or reset after a logout / account switch). */
+    data object Loading : DtListUiState
+
+    /** The inbox loaded but holds no MultiMP conversation. */
+    data object Empty : DtListUiState
+
+    /** Loaded MultiMP conversations, each best-effort joined with its MPStorage resume position. */
+    data class Content(val items: List<DtListItem>) : DtListUiState
+
+    /** The inbox load failed (network / session). The MPStorage read NEVER reaches this state —
+     * it is best-effort and degrades to « no badge ». [cause] drives the reconnect/retry CTA. */
+    data class Error(val cause: Throwable) : DtListUiState
+}
+
+/**
+ * One DT row: a MultiMP [conversation] plus its optional MPStorage reading-resume page
+ * ([resumePage], DTCloud `mpFlags`). [resumePage] is the « reprise p.N » badge — a reading
+ * POSITION, never a read/unread state (#361/ADR-013): the unread dot is
+ * [PrivateMessageSummary.hasUnread]. `null` when the conversation has no MPStorage entry (or the
+ * storage was absent / unreadable / failed to load).
+ */
+data class DtListItem(
+    val conversation: PrivateMessageSummary,
+    val resumePage: Int?,
+)

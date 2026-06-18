@@ -21,10 +21,18 @@
     <string name="flags_super_placeholder_title">Super favoris — à venir</string>
     <string name="flags_super_placeholder_body">Les « super favoris » permettront d\'épingler les sujets les plus importants. Cette vue arrivera dans une prochaine version.</string>
 
-    <!-- Onglet « DT » opt-in (toggle Réglages) : placeholder en attendant la synchro MPStorage (#6). -->
+    <!-- Onglet « DT » opt-in (toggle Réglages) : liste des conversations MultiMP enrichie via MPStorage (#6). -->
     <string name="flags_tab_dt">DT</string>
-    <string name="flags_dt_placeholder_title">Discussions suivies — à venir</string>
-    <string name="flags_dt_placeholder_body">Cette section listera vos DT avec des drapeaux synchronisés entre appareils via MPStorage. Le contenu arrivera dans une prochaine version.</string>
+    <!-- Libellé de l'interlocuteur d'une conversation MultiMP (HFR affiche « Interlocuteurs multiples »). -->
+    <string name="flags_dt_multi_recipient">Interlocuteurs multiples</string>
+    <!-- Badge discret de reprise de lecture, alimenté par MPStorage (mpFlags). %1$d = page de reprise.
+         C'est une POSITION de lecture, PAS un état lu/non-lu (le point non-lu vient de l'inbox). -->
+    <string name="flags_dt_resume_badge">reprise p.%1$d</string>
+    <!-- Aucune conversation MultiMP dans la boîte de réception. -->
+    <string name="flags_dt_empty">Aucune conversation à interlocuteurs multiples.</string>
+    <!-- Échec du chargement de la liste DT (boîte de réception). La lecture MPStorage, best-effort,
+         n'atteint jamais cet état (elle se dégrade en « pas de badge »). -->
+    <string name="flags_dt_error">Impossible de charger les conversations. Vérifie ta connexion ou réessaie.</string>
 
     <!-- #179 — Vue drapeaux groupée par catégorie (parité vue web par défaut). -->
     <!-- Cyan (« Mes sujets ») : section de catégorie sans nouveau message non lu. Wording parité web. -->
