@@ -98,6 +98,7 @@ import fr.forumhfr.redface2.feature.settings.SettingsCategoryDetailScreen
 import fr.forumhfr.redface2.feature.settings.SettingsDisplayScreen
 import fr.forumhfr.redface2.feature.settings.SettingsImagesScreen
 import fr.forumhfr.redface2.feature.settings.SettingsMaintenanceScreen
+import fr.forumhfr.redface2.feature.settings.SettingsBlacklistScreen
 import fr.forumhfr.redface2.feature.settings.SettingsProxyScreen
 import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
@@ -360,6 +361,10 @@ data object SettingsImagesRoute : RedfaceNavKey
 
 @Serializable
 data object SettingsAccountAboutRoute : RedfaceNavKey
+
+/** #509 — sous-page « Utilisateurs masqués » (blacklist). */
+@Serializable
+data object SettingsBlacklistRoute : RedfaceNavKey
 
 /** #494 v2 — détail générique d'une catégorie de réglages (cf. SettingsCategoryDetailScreen). */
 @Serializable
@@ -1364,6 +1369,7 @@ private fun RedfaceNavHost(
                     onOpenDisplay = { backStack.add(SettingsDisplayRoute) },
                     onOpenImages = { backStack.add(SettingsImagesRoute) },
                     onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
+                    onOpenBlacklist = { backStack.add(SettingsBlacklistRoute) },
                     // #494 v2 — catégories sans sous-page dédiée → détail générique.
                     onOpenCategory = { categoryId -> backStack.add(SettingsCategoryRoute(categoryId)) },
                     topBarActions = accountMenu,
@@ -1382,6 +1388,17 @@ private fun RedfaceNavHost(
                     onOpenDisplay = { backStack.add(SettingsDisplayRoute) },
                     onOpenImages = { backStack.add(SettingsImagesRoute) },
                     onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
+                    onOpenBlacklist = { backStack.add(SettingsBlacklistRoute) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsBlacklistRoute> {
+                SettingsBlacklistScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
                     topBarActions = accountMenu,
                 )
             }

@@ -22,7 +22,7 @@ import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsSection
  * passent PAS par ici — elles ouvrent directement leur écran (cf. [routeSettingsCategory]).
  */
 @Composable
-@Suppress("LongParameterList") // détail : id + back + 5 nav-rows de sous-pages + 2 VMs + slots.
+@Suppress("LongParameterList") // détail : id + back + 6 nav-rows de sous-pages + 2 VMs + slots.
 fun SettingsCategoryDetailScreen(
     categoryId: String,
     onBack: () -> Unit,
@@ -31,6 +31,7 @@ fun SettingsCategoryDetailScreen(
     onOpenDisplay: () -> Unit,
     onOpenImages: () -> Unit,
     onOpenAccountAbout: () -> Unit,
+    onOpenBlacklist: () -> Unit,
     modifier: Modifier = Modifier,
     topBarActions: @Composable (() -> Unit)? = null,
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -48,6 +49,7 @@ fun SettingsCategoryDetailScreen(
         onOpenDisplay = onOpenDisplay,
         onOpenImages = onOpenImages,
         onOpenAccountAbout = onOpenAccountAbout,
+        onOpenBlacklist = onOpenBlacklist,
     )
     val wanted = sectionIdsForCategory(categoryId)
     val shown = sections.filter { it.id in wanted }
