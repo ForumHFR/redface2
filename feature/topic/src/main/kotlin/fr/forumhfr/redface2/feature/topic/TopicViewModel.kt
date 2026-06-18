@@ -8,12 +8,15 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import kotlinx.coroutines.CancellationException
@@ -24,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -48,10 +52,18 @@ class TopicViewModel @AssistedInject constructor(
     private val authRepository: AuthRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val deletePostRepository: DeletePostRepository,
+    private val blacklistRepository: BlacklistRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
     val state: StateFlow<TopicUiState> = _state.asStateFlow()
+
+    /**
+     * #509 — latest set of blacklisted canonical pseudos. Kept fresh by the [loadCurrentPage] combine
+     * so the refresh / post-submit / post-delete paths (which bypass `observeTopicPage`) can recompute
+     * the hidden set without re-subscribing to the blacklist.
+     */
+    private var blockedCanonicals: Set<String> = emptySet()
 
     private val _effects: Channel<TopicEffect> = Channel(capacity = Channel.BUFFERED)
     val effects: Flow<TopicEffect> = _effects.receiveAsFlow()
@@ -165,7 +177,7 @@ class TopicViewModel @AssistedInject constructor(
                 val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
                 _state.update {
                     it.copy(
-                        mode = TopicUiState.Mode.Loaded(topic),
+                        mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
                         availablePages = (1..topic.totalPages).toList(),
                     )
                 }
@@ -215,8 +227,15 @@ class TopicViewModel @AssistedInject constructor(
         beginFirstContentSection()
         _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
         loadJob = viewModelScope.launch {
-            topicRepository
-                .observeTopicPage(request.cat, request.post, request.page, forceRefresh = request.forceRefresh)
+            combine(
+                topicRepository
+                    .observeTopicPage(request.cat, request.post, request.page, forceRefresh = request.forceRefresh),
+                // #509 — gate the first Loaded on the blacklist being known so a blocked post never
+                // flashes before it is hidden, and re-filter live when the blacklist changes.
+                // observeBlockedCanonicals emits its current set immediately (its documented contract),
+                // so combine never stalls waiting on the blacklist.
+                blacklistRepository.observeBlockedCanonicals(),
+            ) { topic, blocked -> topic to blocked }
                 .catch { error ->
                     if (error is CancellationException) throw error
                     // Cache-first UX: if we already showed a cached page, keep it on screen
@@ -241,10 +260,11 @@ class TopicViewModel @AssistedInject constructor(
                     // still draws a bounded sliver from intent to terminal state.
                     endFirstContentSectionIfNeeded()
                 }
-                .collect { topic ->
+                .collect { (topic, blocked) ->
+                    blockedCanonicals = blocked
                     _state.update {
                         it.copy(
-                            mode = TopicUiState.Mode.Loaded(topic),
+                            mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
                             availablePages = (1..topic.totalPages).toList(),
                         )
                     }
@@ -256,6 +276,19 @@ class TopicViewModel @AssistedInject constructor(
                     maybeSchedulePrefetch(totalPages = topic.totalPages)
                 }
         }
+    }
+
+    /**
+     * #509 — `numreponse` of the posts in [topic] whose author is blacklisted (canonical match). The
+     * full [Topic.posts] list is kept intact; the screen renders a collapsed placeholder for these so
+     * pagination, anchors and `numreponse` keys are unaffected. Fast-paths the common empty blacklist.
+     */
+    private fun computeHiddenNumreponses(topic: Topic, blocked: Set<String>): Set<Int> {
+        if (blocked.isEmpty()) return emptySet()
+        return topic.posts.asSequence()
+            .filter { canonicalizePseudo(it.author) in blocked }
+            .map { it.numreponse }
+            .toSet()
     }
 
     private suspend fun maybeEmitScroll(visiblePosts: List<Int>) {
@@ -304,7 +337,7 @@ class TopicViewModel @AssistedInject constructor(
                 val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
                 _state.update {
                     it.copy(
-                        mode = TopicUiState.Mode.Loaded(topic),
+                        mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
                         availablePages = (1..topic.totalPages).toList(),
                     )
                 }
@@ -459,7 +492,7 @@ class TopicViewModel @AssistedInject constructor(
                 val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
                 _state.update {
                     it.copy(
-                        mode = TopicUiState.Mode.Loaded(topic),
+                        mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
                         availablePages = (1..topic.totalPages).toList(),
                     )
                 }

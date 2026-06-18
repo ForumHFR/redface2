@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.topic
 
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
@@ -17,6 +18,7 @@ import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.blacklist.BlacklistEntry
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -678,18 +680,90 @@ class TopicViewModelTest {
     // Construction seam: the ViewModel now also takes a UserPreferencesRepository (for the build 89
     // top-bar auto-hide preference) which none of these tests exercise, so it defaults to a no-op
     // fake. Keeps every existing call site unchanged bar the constructor → helper rename.
+    @Test
+    fun `blacklisted authors posts are reported hidden by numreponse, others are not`() = runTest {
+        val topic = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(
+                fakePost(100, author = "Alice"),
+                fakePost(101, author = "Bob"),
+                // canonical match is case/whitespace-insensitive: "alice" matches the "Alice" rule.
+                fakePost(102, author = "  alice  "),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = FakeBlacklistRepository(blockedCanonicals = setOf("alice")),
+        )
+
+        viewModel.state.test {
+            val mode = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            assertEquals(setOf(100, 102), mode.hiddenNumreponses)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `empty blacklist hides nothing`() = runTest {
+        val topic = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.state.test {
+            val mode = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            assertEquals(emptySet<Int>(), mode.hiddenNumreponses)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `blocking an author after load hides their posts live`() = runTest {
+        val topic = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val blacklist = FakeBlacklistRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = blacklist,
+        )
+
+        viewModel.state.test {
+            assertEquals(emptySet<Int>(), assertMode<TopicUiState.Mode.Loaded>(awaitItem()).hiddenNumreponses)
+            blacklist.block("alice")
+            assertEquals(setOf(100), assertMode<TopicUiState.Mode.Loaded>(awaitItem()).hiddenNumreponses)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun topicViewModel(
         request: TopicRequest,
         topicRepository: TopicRepository,
         authRepository: AuthRepository,
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
         deletePostRepository: DeletePostRepository = FakeDeletePostRepository(),
+        blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
     ): TopicViewModel = TopicViewModel(
         request = request,
         topicRepository = topicRepository,
         authRepository = authRepository,
         userPreferencesRepository = userPreferencesRepository,
         deletePostRepository = deletePostRepository,
+        blacklistRepository = blacklistRepository,
     )
 
     private fun topicRequest(
@@ -1205,9 +1279,9 @@ class TopicViewModelTest {
         poll = null,
     )
 
-    private fun fakePost(numreponse: Int, isEditable: Boolean = false): Post = Post(
+    private fun fakePost(numreponse: Int, isEditable: Boolean = false, author: String = "tester"): Post = Post(
         numreponse = numreponse,
-        author = "tester",
+        author = author,
         date = java.time.Instant.parse("2026-05-04T12:00:00Z"),
         content = PostContent(blocks = emptyList()),
         avatarUrl = null,
@@ -1304,6 +1378,27 @@ private class FakeDeletePostRepository(
     override suspend fun deletePost(context: EditPostContext): DeletePostResult {
         calls += context
         return result
+    }
+}
+
+private class FakeBlacklistRepository(
+    blockedCanonicals: Set<String> = emptySet(),
+) : BlacklistRepository {
+    private val canonicals = MutableStateFlow(blockedCanonicals)
+
+    override fun observeEntries(): Flow<List<BlacklistEntry>> =
+        MutableStateFlow(canonicals.value.map { BlacklistEntry(it, it, 0L) })
+
+    override fun observeBlockedCanonicals(): Flow<Set<String>> = canonicals
+
+    override suspend fun isBlocked(pseudo: String): Boolean = pseudo in canonicals.value
+
+    override suspend fun block(pseudo: String) {
+        canonicals.value = canonicals.value + pseudo
+    }
+
+    override suspend fun unblock(pseudo: String) {
+        canonicals.value = canonicals.value - pseudo
     }
 }
 

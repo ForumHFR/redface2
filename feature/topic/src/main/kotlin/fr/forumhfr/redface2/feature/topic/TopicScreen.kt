@@ -801,6 +801,7 @@ internal fun TopicContent(
                             TopicLoadedContent(
                                 state = state,
                                 topic = mode.topic,
+                                hiddenNumreponses = mode.hiddenNumreponses,
                                 onReply = onReply,
                                 onQuote = onQuote,
                                 onEdit = onEdit,
@@ -828,10 +829,16 @@ internal fun TopicContent(
 }
 
 @Composable
-@Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
+// LongParameterList : state-hoisted Composable, each param has a distinct call-site.
+// CyclomaticComplexMethod : dense list builder (header + per-post action gates + #509 hidden branch);
+// splitting it would scatter one visual unit across helpers (same stance as TopicPostCard).
+@Suppress("LongParameterList", "CyclomaticComplexMethod")
 private fun TopicLoadedContent(
     state: TopicUiState,
     topic: Topic,
+    // #509 — `numreponse` of posts whose author is blacklisted; rendered as a collapsed
+    // "post masqué" placeholder instead of the full card (the post stays in the list).
+    hiddenNumreponses: Set<Int> = emptySet(),
     onReply: (subcat: Int, page: Int) -> Unit,
     onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
@@ -860,6 +867,17 @@ private fun TopicLoadedContent(
     // it needs a Hilt ViewModel). Deliberately NOT rememberSaveable: Post is not Parcelable
     // and losing an open overflow menu across process death is acceptable.
     var menuPost by remember { mutableStateOf<Post?>(null) }
+    // #509 — posts the reader chose to reveal despite the author being blacklisted. Temporary and
+    // re-keyed on `topic.page`, not persisted: re-hiding on a page change is the intended "masqué by
+    // default" behaviour (decision #6). This composable instance is bound to one (cat, post), so the
+    // page is the only key dimension that matters here.
+    var revealedHiddenPosts by remember(topic.page) { mutableStateOf(emptySet<Int>()) }
+    // #509 — a post hidden (author blacklisted) while it sat in the multi-quote basket is dropped from
+    // the selection: the placeholder exposes no deselect affordance (decision #1), so leaving it
+    // selected would silently quote a masqué post. The basket is hoisted in :app; reuse its toggle.
+    LaunchedEffect(hiddenNumreponses, multiQuoteSelection) {
+        multiQuoteSelection.filter { it in hiddenNumreponses }.forEach(onToggleMultiQuote)
+    }
     // #282 — shared offset between the gesture (drives translationX) and the edge glow. A plain
     // MutableFloatState: the gesture writes it synchronously per frame (no coroutine/alloc), the draw
     // phase reads it; an Animatable inside the gesture handles only release transitions. Lives in the
@@ -1018,24 +1036,34 @@ private fun TopicLoadedContent(
             val profileAction: (() -> Unit)? = post.profileId?.let { profileId ->
                 { onOpenProfile(profileId, post.author, post.avatarUrl) }
             }
-            TopicPostCard(
-                post = post,
-                highlighted = highlight == post.numreponse,
-                citedCount = citationCounts[post.numreponse] ?: 0,
-                // #330 — render the author signature beneath the body when the reading preference
-                // is on (the signature is always parsed/cached on the Post; this is render-only).
-                showSignature = state.showSignatures,
-                onQuote = quoteAction,
-                onEdit = editAction,
-                onOpenProfile = profileAction,
-                onOpenMenu = { menuPost = post },
-                // #436 — same membership source as the menu entry (PostMenuSheet).
-                multiQuoteSelected = post.numreponse in multiQuoteSelection,
-                // #436 — per-post add/remove affordance (RF1 quote+/quote- parity), reachable
-                // without opening the « … » menu. Null/non-null under the SAME gate as « Citer »
-                // (derived together above), so the « + » and « Citer » always appear as a pair.
-                onToggleMultiQuote = multiQuoteToggle,
-            )
+            // #509 — a blacklisted author's post is replaced by a collapsed placeholder (the post is
+            // kept in the list to preserve index/anchor/numreponse invariants), until the reader taps
+            // « Afficher ». The placeholder exposes no quote/edit/menu action by design (decision #1).
+            if (post.numreponse in hiddenNumreponses && post.numreponse !in revealedHiddenPosts) {
+                HiddenPostCard(
+                    author = post.author,
+                    onReveal = { revealedHiddenPosts = revealedHiddenPosts + post.numreponse },
+                )
+            } else {
+                TopicPostCard(
+                    post = post,
+                    highlighted = highlight == post.numreponse,
+                    citedCount = citationCounts[post.numreponse] ?: 0,
+                    // #330 — render the author signature beneath the body when the reading preference
+                    // is on (the signature is always parsed/cached on the Post; this is render-only).
+                    showSignature = state.showSignatures,
+                    onQuote = quoteAction,
+                    onEdit = editAction,
+                    onOpenProfile = profileAction,
+                    onOpenMenu = { menuPost = post },
+                    // #436 — same membership source as the menu entry (PostMenuSheet).
+                    multiQuoteSelected = post.numreponse in multiQuoteSelection,
+                    // #436 — per-post add/remove affordance (RF1 quote+/quote- parity), reachable
+                    // without opening the « … » menu. Null/non-null under the SAME gate as « Citer »
+                    // (derived together above), so the « + » and « Citer » always appear as a pair.
+                    onToggleMultiQuote = multiQuoteToggle,
+                )
+            }
         }
         // #379 — explicit end-of-topic marker after the last post of the LAST page. The
         // « page X/Y » counter (#284) lets the reader deduce it; this says it. Reflects the
@@ -1379,6 +1407,44 @@ private fun TopicPollCard(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * #509 — collapsed placeholder shown in place of a blacklisted author's post. The post is NOT removed
+ * from the list (index/anchor/`numreponse` invariants stay intact); only its body is replaced by this
+ * one-line card. « Afficher » reveals the real card for the current page only. By design it exposes no
+ * quote/edit/menu action (decision #1): the reader reveals first, then acts on the full card.
+ */
+@Composable
+private fun HiddenPostCard(
+    author: String,
+    onReveal: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = stringResource(R.string.topic_post_hidden_by_author, author),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            TextButton(onClick = onReveal) {
+                Text(text = stringResource(R.string.topic_post_hidden_reveal))
             }
         }
     }
