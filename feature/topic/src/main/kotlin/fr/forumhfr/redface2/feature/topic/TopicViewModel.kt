@@ -80,6 +80,16 @@ class TopicViewModel @AssistedInject constructor(
     private var searchJob: Job? = null
 
     /**
+     * Chantier C (#546) — monotonic token guarding against a stale `transsearch` write.
+     * Incremented whenever ANY flow that owns the page (a normal load, refresh, force-refresh,
+     * post-delete refetch or a new search) takes over. [submitSearch] snapshots it before the POST
+     * and only applies the returned page + final `search.status` while the token is still current —
+     * so a slow `transsearch` reply can never clobber a more recent normal page (latest-wins strict).
+     * Symmetric with cancelling [searchJob] at the head of every normal-load path.
+     */
+    private var searchGeneration: Int = 0
+
+    /**
      * Tracks whether the current value of [TopicRequest.scrollTo] has already been
      * dispatched to the screen as a [TopicEffect.ScrollToPost]. Once true, a subsequent
      * refresh of the same page will not re-scroll — the user may have scrolled away
@@ -198,6 +208,7 @@ class TopicViewModel @AssistedInject constructor(
      */
     private fun refresh() {
         if (_state.value.mode !is TopicUiState.Mode.Loaded || _state.value.isRefreshing) return
+        takeOverFromSearch()
         loadJob?.cancel()
         prefetchJob?.cancel()
         prefetchedPage = null
@@ -251,6 +262,7 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     private fun loadCurrentPage() {
+        takeOverFromSearch()
         loadJob?.cancel()
         prefetchJob?.cancel()
         prefetchedPage = null
@@ -357,6 +369,7 @@ class TopicViewModel @AssistedInject constructor(
      * not an anonymous warmup escalating to authenticated.
      */
     private fun forceRefreshCurrentPage() {
+        takeOverFromSearch()
         loadJob?.cancel()
         prefetchJob?.cancel()
         prefetchedPage = null
@@ -513,6 +526,7 @@ class TopicViewModel @AssistedInject constructor(
      * user-confirmed deletion, not an anonymous warmup escalating to authenticated.
      */
     private fun refreshAfterDelete() {
+        takeOverFromSearch()
         loadJob?.cancel()
         prefetchJob?.cancel()
         prefetchedPage = null
@@ -553,17 +567,39 @@ class TopicViewModel @AssistedInject constructor(
      * actually applied (`status == Done`) to avoid a needless refetch on a cancel-before-submit.
      */
     private fun closeSearch() {
-        searchJob?.cancel()
         val hadResults = _state.value.search.status == TopicSearchStatus.Done
         _state.update {
             it.copy(search = it.search.copy(isActive = false, status = TopicSearchStatus.Idle))
         }
-        if (hadResults) loadCurrentPage()
+        // loadCurrentPage already cancels searchJob + bumps the generation (takeOverFromSearch). When
+        // there is nothing to reload, drop the in-flight search ourselves so a late reply can't write.
+        if (hadResults) loadCurrentPage() else takeOverFromSearch()
+    }
+
+    /**
+     * Cancel any in-flight intra-topic search and bump [searchGeneration] so a `transsearch` reply
+     * that is still on the wire is dropped on arrival. Called at the head of every normal-load path
+     * (load / refresh / force-refresh / post-delete) so a stale search result can never overwrite a
+     * more recent normal page (latest-wins strict).
+     */
+    private fun takeOverFromSearch() {
+        searchJob?.cancel()
+        searchGeneration++
     }
 
     /**
      * Submit the intra-topic search : `POST transsearch.php` (authenticated) with the parsed form +
      * the typed criteria, then render the returned topic page in [TopicUiState.Mode.Loaded].
+     *
+     * The current page STAYS visible while the POST is in flight — only `search.status` flips to
+     * [TopicSearchStatus.Loading] (the search bar shows the progress), per the documented contract
+     * ([TopicEffect.SearchFailed]'s KDoc : « the current page stays on screen »). We never switch the
+     * whole screen to [TopicUiState.Mode.Loading], which would blank the posts the user is reading.
+     *
+     * Latest-wins : a generation token is snapshotted before the POST (incremented by every normal-load
+     * path AND by a fresh submit through [searchJob]'s cancellation). The result page + final status
+     * are applied ONLY while that token is still current, so a slow `transsearch` reply that lost the
+     * race to a more recent normal page (refresh / page change / new search) is dropped, never written.
      *
      * Best-effort by contract : the `transsearch` response was never observed live, so we trust it
      * is a topic page and parse it as one — no result counter is promised. Server-side result
@@ -583,18 +619,22 @@ class TopicViewModel @AssistedInject constructor(
             onlyMatches = current.search.onlyMatches,
         )
         if (!request.isMeaningful) return
+        // Take over from any previous search and snapshot the generation this POST belongs to.
         searchJob?.cancel()
+        // Cancel the in-flight normal load / prefetch so a late `observeTopicPage` refresh emission
+        // cannot land on top of the filtered page this search is about to render. The screen keeps
+        // the page currently on display until the search reply (or its failure) settles.
         loadJob?.cancel()
         prefetchJob?.cancel()
-        _state.update {
-            it.copy(
-                mode = TopicUiState.Mode.Loading,
-                search = it.search.copy(status = TopicSearchStatus.Loading),
-            )
-        }
+        val generation = ++searchGeneration
+        // Stay on the loaded page — only drive the search status, never blank the posts.
+        _state.update { it.copy(search = it.search.copy(status = TopicSearchStatus.Loading)) }
         searchJob = viewModelScope.launch {
             try {
                 val topic = topicSearchRepository.searchInTopic(request)
+                // Drop a stale reply: a newer normal load / refresh / search bumped the generation
+                // while this POST was on the wire, so its page must not clobber the current one.
+                if (generation != searchGeneration) return@launch
                 _state.update {
                     it.copy(
                         mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
@@ -608,10 +648,12 @@ class TopicViewModel @AssistedInject constructor(
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") searchError: Exception) {
                 android.util.Log.w(LOG_TAG, "Intra-topic search failed", searchError)
+                // A stale failure must not stomp a fresher page's status either.
+                if (generation != searchGeneration) return@launch
                 _effects.send(TopicEffect.SearchFailed)
-                // Restore the normal page so the user is not stranded on a Loading screen.
+                // The current page is still on screen (we never left Mode.Loaded) — just mark the
+                // search as failed in the bar so the user can retry or close it.
                 _state.update { it.copy(search = it.search.copy(status = TopicSearchStatus.Error)) }
-                loadCurrentPage()
             }
         }
     }

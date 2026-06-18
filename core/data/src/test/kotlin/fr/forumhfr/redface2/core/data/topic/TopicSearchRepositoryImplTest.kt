@@ -101,6 +101,38 @@ class TopicSearchRepositoryImplTest {
     }
 
     @Test
+    fun `never logs the search term, the author filter or the hash_check (privacy)`() = runTest {
+        // #546 finding #3 — the diagnostics trail records only presence flags + the filter mode, never
+        // the free-text criteria nor the session secret. Lock that with sentinels: if any of them ever
+        // leaked into a log message, this fails. (cf. the privacy KDoc on TopicSearchRepositoryImpl.)
+        val hfrClient = mockk<HfrClient>()
+        coEvery {
+            hfrClient.searchInTopic(
+                cat = any(), topicId = any(), word = any(), spseudo = any(), onlyMatches = any(),
+                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(),
+            )
+        } returns fixture("topic_page_single.html")
+        val diagnostics = DiagnosticsLog()
+
+        buildRepository(hfrClient, diagnostics).searchInTopic(
+            TopicSearchRequest(
+                form = TopicSearchForm(hashCheck = "hash-secret", topicId = 35395, cat = 23, firstnum = 1),
+                word = "word-secret",
+                spseudo = "pseudo-secret",
+                onlyMatches = true,
+            ),
+        )
+
+        val sentinels = listOf("word-secret", "pseudo-secret", "hash-secret")
+        val leaked = diagnostics.entries.value
+            .map { it.message }
+            .filter { message -> sentinels.any { message.contains(it) } }
+        assertEquals("no diagnostics entry may leak the criteria or hash_check", emptyList<String>(), leaked)
+        // Sanity: the search DID leave a trail (so the assertion above is not vacuously true).
+        assertEquals(true, diagnostics.entries.value.any { it.message.contains("POST transsearch") })
+    }
+
+    @Test
     fun `propagates a SessionExpiredException from the network layer`() {
         val hfrClient = mockk<HfrClient>()
         coEvery {
@@ -124,10 +156,13 @@ class TopicSearchRepositoryImplTest {
         }
     }
 
-    private fun buildRepository(hfrClient: HfrClient) = TopicSearchRepositoryImpl(
+    private fun buildRepository(
+        hfrClient: HfrClient,
+        diagnostics: DiagnosticsLog = DiagnosticsLog(),
+    ) = TopicSearchRepositoryImpl(
         client = hfrClient,
         parser = HfrParser(),
-        diagnostics = DiagnosticsLog(),
+        diagnostics = diagnostics,
         ioDispatcher = UnconfinedTestDispatcher(),
     )
 

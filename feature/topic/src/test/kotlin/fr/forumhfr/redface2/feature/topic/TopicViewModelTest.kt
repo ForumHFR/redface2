@@ -847,17 +847,15 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `SubmitSearch failure restores the normal page and emits SearchFailed`() = runTest {
+    fun `SubmitSearch failure keeps the current page and emits SearchFailed`() = runTest {
         val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
         val searchRepo = FakeTopicSearchRepository(error = IllegalStateException("boom"))
         val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = FakeTopicRepository(
-                flowsToReturn = listOf(
-                    flow { emit(fakeTopic(1, 3, searchForm = form)) },
-                    // The failure path falls back to loadCurrentPage() which re-collects the page.
-                    flow { emit(fakeTopic(1, 3, searchForm = form)) },
-                ),
+                // A single flow: the failure path never switches to Mode.Loading and never reloads the
+                // page — the page on screen is kept as-is, so observeTopicPage is collected only once.
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 3, title = "loaded", searchForm = form)) }),
             ),
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
             topicSearchRepository = searchRepo,
@@ -871,8 +869,60 @@ class TopicViewModelTest {
             assertEquals(TopicEffect.SearchFailed, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
-        // The fallback restored a Loaded page (not stranded on Loading).
-        assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        // The page the user was reading stays on screen (never stranded on Loading, never reloaded).
+        val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("loaded", loaded.topic.title)
+        // #546 finding #4 — the search bar reflects the failure and stays open so the user can retry
+        // or close it; the status settles on Error rather than back to Idle / Loading.
+        assertEquals(TopicSearchStatus.Error, viewModel.state.value.search.status)
+        assertTrue(
+            "the search bar stays open after a failure so the user can retry",
+            viewModel.state.value.search.isActive,
+        )
+    }
+
+    @Test
+    fun `a stale SubmitSearch reply never clobbers a more recent normal page (#546)`() = runTest {
+        // #546 finding #1 (latest-wins) — a search POST is on the wire when the user pulls to refresh.
+        // The refresh (a normal-load path) bumps the search generation, so when the slow transsearch
+        // reply finally lands it must be DROPPED, never overwrite the freshly-refreshed page.
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val loaded = fakeTopic(page = 1, totalPages = 3, title = "loaded", searchForm = form)
+        val refreshed = fakeTopic(page = 1, totalPages = 3, title = "refreshed", searchForm = form)
+        // The (now stale) search result, would-be title if the guard were missing.
+        val staleSearch = fakeTopic(page = 1, totalPages = 1, title = "stale-search", searchForm = form)
+        val searchRepo = FakeTopicSearchRepository(result = staleSearch)
+        val gate = CompletableDeferred<Unit>()
+        searchRepo.gate = { gate.await() }
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SubmitSearch) // suspends in the gate → search in flight
+        assertEquals(TopicSearchStatus.Loading, viewModel.state.value.search.status)
+
+        // A normal-load path takes over while the search is still on the wire.
+        viewModel.send(TopicIntent.Refresh)
+        assertEquals(
+            "the refresh wins, not the stale search",
+            "refreshed",
+            (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title,
+        )
+
+        // Release the slow search reply: the generation moved on, so its page is discarded.
+        gate.complete(Unit)
+        val finalMode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("the stale search reply must not clobber the refreshed page", "refreshed", finalMode.topic.title)
     }
 
     @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
@@ -1545,8 +1595,15 @@ private class FakeTopicSearchRepository(
 ) : TopicSearchRepository {
     val requests = mutableListOf<TopicSearchRequest>()
 
+    /**
+     * Optional gate to suspend inside `searchInTopic` so a test can hold the `transsearch` reply
+     * in flight, drive a competing normal-load path, then release it to prove the stale-write guard.
+     */
+    var gate: (suspend () -> Unit)? = null
+
     override suspend fun searchInTopic(request: TopicSearchRequest): Topic {
         requests += request
+        gate?.invoke()
         error?.let { throw it }
         return result ?: error("FakeTopicSearchRepository has no result configured")
     }
