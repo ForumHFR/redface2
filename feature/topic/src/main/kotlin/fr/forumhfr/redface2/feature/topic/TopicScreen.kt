@@ -30,6 +30,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -102,9 +103,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 
 @Composable
-@Suppress("LongParameterList") // state-hoisted Composable : each callback has a distinct call-site
+// LongParameterList : state-hoisted Composable : each callback has a distinct call-site
 // (reply / quote / edit-post / edit-FP / openPage) and bundling them in a callbacks holder would
 // hide the navigation surface rather than simplify it.
+// CyclomaticComplexMethod : the one-shot effects `when` (scroll / refresh / delete / search) is a
+// flat dispatch table — every branch is a distinct, independent side effect ; splitting it would
+// scatter one logical sink (same stance as TopicContent / TopicLoadedContent).
+@Suppress("LongParameterList", "CyclomaticComplexMethod")
 fun TopicScreen(
     request: TopicRequest,
     /**
@@ -275,6 +280,8 @@ fun TopicScreen(
     val refreshFailedMsg = stringResource(R.string.topic_post_submit_refresh_failed)
     // #335 — manual pull-to-refresh failure message (resolved upfront, same rationale).
     val refreshManualFailedMsg = stringResource(R.string.topic_refresh_failed)
+    // Chantier C (#546) — intra-topic search failure message (resolved upfront, same rationale).
+    val searchFailedMsg = stringResource(R.string.topic_search_failed)
     // #292 — delete feedback messages, resolved upfront (same rationale as refreshFailedMsg).
     val deleteSuccessMsg = stringResource(R.string.topic_post_delete_success)
     val deleteFailedLoginMsg = stringResource(R.string.topic_post_delete_failed_login)
@@ -393,6 +400,15 @@ fun TopicScreen(
                     android.widget.Toast.makeText(
                         context,
                         message,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+                TopicEffect.SearchFailed -> {
+                    // Chantier C (#546) — the transsearch POST failed; the normal page is restored by
+                    // the ViewModel and the Toast invites a retry.
+                    android.widget.Toast.makeText(
+                        context,
+                        searchFailedMsg,
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
@@ -687,37 +703,15 @@ internal fun TopicContent(
             Modifier
         },
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = barTitle,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = stringResource(R.string.topic_page_indicator, barCurrentPage, barTotalPages),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.semantics { contentDescription = backLabel },
-                    ) {
-                        // #360 / ADR-015 — vector stroke unifié, dimensionné en dp (indépendant de la
-                        // police et de la baseline, contrairement à l'ancien glyphe « ← »), via le
-                        // primitive partagé :core:ui. L'étiquette a11y reste sur l'IconButton, donc
-                        // l'icône est décorative (contentDescription = null par défaut).
-                        RedfaceVectorIcon(
-                            resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back,
-                        )
-                    }
-                },
+            TopicTopBar(
+                state = state,
+                barTitle = barTitle,
+                barCurrentPage = barCurrentPage,
+                barTotalPages = barTotalPages,
+                backLabel = backLabel,
                 scrollBehavior = scrollBehavior,
+                onBack = onBack,
+                onIntent = onIntent,
             )
         },
         floatingActionButton = {
@@ -847,6 +841,156 @@ internal fun TopicContent(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * #285/#284 + Chantier C (#546) — the topic top app bar (title + page counter + back) plus the
+ * intra-topic search affordance : a search icon in `actions` (only when the loaded page exposes a
+ * usable, authenticated transsearch form) that opens the [TopicSearchBar] directly beneath the bar.
+ * Extracted from `TopicContent` to keep that builder under detekt's cyclomatic-complexity cap.
+ */
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+@Suppress("LongParameterList") // hoisted bar : title/page/back inputs + the search intent sink.
+private fun TopicTopBar(
+    state: TopicUiState,
+    barTitle: String,
+    barCurrentPage: Int,
+    barTotalPages: Int,
+    backLabel: String,
+    scrollBehavior: androidx.compose.material3.TopAppBarScrollBehavior?,
+    onBack: () -> Unit,
+    onIntent: (TopicIntent) -> Unit,
+) {
+    val searchLabel = stringResource(R.string.topic_search_open)
+    Column {
+        TopAppBar(
+            title = {
+                Column {
+                    Text(
+                        text = barTitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = stringResource(R.string.topic_page_indicator, barCurrentPage, barTotalPages),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            navigationIcon = {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.semantics { contentDescription = backLabel },
+                ) {
+                    // #360 / ADR-015 — vector stroke unifié, dimensionné en dp (indépendant de la
+                    // police et de la baseline, contrairement à l'ancien glyphe « ← »), via le
+                    // primitive partagé :core:ui. L'étiquette a11y reste sur l'IconButton, donc
+                    // l'icône est décorative (contentDescription = null par défaut).
+                    RedfaceVectorIcon(
+                        resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back,
+                    )
+                }
+            },
+            actions = {
+                if (state.canSearchInTopic && !state.search.isActive) {
+                    IconButton(
+                        onClick = { onIntent(TopicIntent.OpenSearch) },
+                        modifier = Modifier.semantics { contentDescription = searchLabel },
+                    ) {
+                        RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_search)
+                    }
+                }
+            },
+            scrollBehavior = scrollBehavior,
+        )
+        if (state.search.isActive) {
+            TopicSearchBar(search = state.search, onIntent = onIntent)
+        }
+    }
+}
+
+/**
+ * Chantier C (#546) — the intra-topic search bar, shown under the top app bar when search is active.
+ *
+ * Two fields (term / author) + a « Filtrer » toggle (HFR's `filter`, i.e. show only matching posts)
+ * + submit + close. Submitting POSTs `transsearch.php` ; the response (a topic page) replaces the
+ * loaded page. There is intentionally no next/previous control : the server-side `currentnum`
+ * cursor was never observed live, so result navigation is left out of the MVP rather than guessed
+ * (see the ViewModel / model KDoc — best-effort, not yet wired).
+ */
+@Composable
+private fun TopicSearchBar(
+    search: TopicSearchUiState,
+    onIntent: (TopicIntent) -> Unit,
+) {
+    val closeLabel = stringResource(R.string.topic_search_close)
+    Surface(
+        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = search.word,
+                    onValueChange = { onIntent(TopicIntent.SearchWordChanged(it)) },
+                    label = { Text(stringResource(R.string.topic_search_word_hint)) },
+                    singleLine = true,
+                    enabled = search.status != TopicSearchStatus.Loading,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    value = search.spseudo,
+                    onValueChange = { onIntent(TopicIntent.SearchPseudoChanged(it)) },
+                    label = { Text(stringResource(R.string.topic_search_pseudo_hint)) },
+                    singleLine = true,
+                    enabled = search.status != TopicSearchStatus.Loading,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = search.onlyMatches,
+                    onCheckedChange = { onIntent(TopicIntent.SearchOnlyMatchesChanged(it)) },
+                    enabled = search.status != TopicSearchStatus.Loading,
+                )
+                Text(
+                    text = stringResource(R.string.topic_search_only_matches),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(enabled = search.status != TopicSearchStatus.Loading) {
+                            onIntent(TopicIntent.SearchOnlyMatchesChanged(!search.onlyMatches))
+                        },
+                )
+                IconButton(
+                    onClick = { onIntent(TopicIntent.CloseSearch) },
+                    modifier = Modifier.semantics { contentDescription = closeLabel },
+                ) {
+                    RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_close)
+                }
+                Button(
+                    onClick = { onIntent(TopicIntent.SubmitSearch) },
+                    enabled = search.canSubmit && search.status != TopicSearchStatus.Loading,
+                ) {
+                    Text(stringResource(R.string.topic_search_submit))
                 }
             }
         }

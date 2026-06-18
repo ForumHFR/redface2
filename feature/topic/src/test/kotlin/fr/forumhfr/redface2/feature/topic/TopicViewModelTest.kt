@@ -16,6 +16,9 @@ import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
+import fr.forumhfr.redface2.core.model.TopicSearchForm
+import fr.forumhfr.redface2.core.model.TopicSearchRequest
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
@@ -776,6 +779,102 @@ class TopicViewModelTest {
         }
     }
 
+    // ─── intra-topic search (#546) ───────────────────────────────────────────────
+
+    @Test
+    fun `OpenSearch is a no-op when the loaded page exposes no usable search form`() = runTest {
+        // No searchForm ⇒ canSearchInTopic=false ⇒ the bar must not open.
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+
+        assertEquals(false, viewModel.state.value.search.isActive)
+    }
+
+    @Test
+    fun `SubmitSearch posts the parsed form plus criteria and renders the returned page`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val resultTopic = fakeTopic(page = 1, totalPages = 1, title = "filtered", searchForm = form)
+        val searchRepo = FakeTopicSearchRepository(result = resultTopic)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        assertEquals(true, viewModel.state.value.search.isActive)
+        viewModel.send(TopicIntent.SearchWordChanged("betatest"))
+        viewModel.send(TopicIntent.SearchPseudoChanged("XaTriX"))
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        assertEquals(1, searchRepo.requests.size)
+        val request = searchRepo.requests.single()
+        assertEquals("betatest", request.word)
+        assertEquals("XaTriX", request.spseudo)
+        assertEquals(true, request.onlyMatches)
+        assertEquals(form, request.form)
+        assertEquals(null, request.currentNum)
+        val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("filtered", loaded.topic.title)
+        assertEquals(TopicSearchStatus.Done, viewModel.state.value.search.status)
+    }
+
+    @Test
+    fun `SubmitSearch does not POST when neither term nor author is set`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val searchRepo = FakeTopicSearchRepository(result = fakeTopic(1, 1))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 1, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        assertEquals(0, searchRepo.requests.size)
+    }
+
+    @Test
+    fun `SubmitSearch failure restores the normal page and emits SearchFailed`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val searchRepo = FakeTopicSearchRepository(error = IllegalStateException("boom"))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(1, 3, searchForm = form)) },
+                    // The failure path falls back to loadCurrentPage() which re-collects the page.
+                    flow { emit(fakeTopic(1, 3, searchForm = form)) },
+                ),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.OpenSearch)
+            viewModel.send(TopicIntent.SearchWordChanged("x"))
+            viewModel.send(TopicIntent.SubmitSearch)
+
+            assertEquals(TopicEffect.SearchFailed, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        // The fallback restored a Loaded page (not stranded on Loading).
+        assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+    }
+
     @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun topicViewModel(
         request: TopicRequest,
@@ -784,6 +883,7 @@ class TopicViewModelTest {
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
         deletePostRepository: DeletePostRepository = FakeDeletePostRepository(),
         blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
+        topicSearchRepository: TopicSearchRepository = FakeTopicSearchRepository(),
     ): TopicViewModel = TopicViewModel(
         request = request,
         topicRepository = topicRepository,
@@ -791,6 +891,7 @@ class TopicViewModelTest {
         userPreferencesRepository = userPreferencesRepository,
         deletePostRepository = deletePostRepository,
         blacklistRepository = blacklistRepository,
+        topicSearchRepository = topicSearchRepository,
     )
 
     private fun topicRequest(
@@ -1285,12 +1386,14 @@ class TopicViewModelTest {
         )
     }
 
+    @Suppress("LongParameterList") // test builder mirroring the Topic model's fields, all defaulted.
     private fun fakeTopic(
         page: Int,
         totalPages: Int,
         title: String = "fake",
         posts: List<Post> = emptyList(),
         subcat: Int = SAMPLE_SUBCAT,
+        searchForm: TopicSearchForm? = null,
     ): Topic = Topic(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
@@ -1304,6 +1407,7 @@ class TopicViewModelTest {
         // read-only topic (the previous default was the Topic model's `false`, never asserted here).
         canReply = true,
         poll = null,
+        searchForm = searchForm,
     )
 
     private fun fakePost(numreponse: Int, isEditable: Boolean = false, author: String = "tester"): Post = Post(
@@ -1428,6 +1532,23 @@ private class FakeBlacklistRepository(
 
     override suspend fun unblock(pseudo: String) {
         canonicals.value = canonicals.value - canonicalizePseudo(pseudo)
+    }
+}
+
+/**
+ * Chantier C (#546) — intra-topic search fake. Returns [result] on `searchInTopic`, or throws
+ * [error] when set, and records the request for assertions.
+ */
+private class FakeTopicSearchRepository(
+    private val result: Topic? = null,
+    private val error: Throwable? = null,
+) : TopicSearchRepository {
+    val requests = mutableListOf<TopicSearchRequest>()
+
+    override suspend fun searchInTopic(request: TopicSearchRequest): Topic {
+        requests += request
+        error?.let { throw it }
+        return result ?: error("FakeTopicSearchRepository has no result configured")
     }
 }
 

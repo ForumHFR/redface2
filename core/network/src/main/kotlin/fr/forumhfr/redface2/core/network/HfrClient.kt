@@ -444,6 +444,76 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * Chantier C (#546) — POST the intra-topic search to `/transsearch.php`.
+     *
+     * **AUTHENTICATED by design.** `transsearch.php` rejects an empty `hash_check`, so the search is
+     * only meaningful with the token parsed from an authenticated topic page. Routing through the
+     * authenticated client also means a freshly-expired session surfaces [SessionExpiredException]
+     * (via [executeAuthenticatedHtml]) instead of silently returning anonymous HTML.
+     *
+     * Wire shape (cf. the `transsearch` form in fixtures `topic_*.html` / `write_*topic*.html`,
+     * captured 2026-05/06) :
+     *
+     * `POST /transsearch.php` with `hash_check`, `post`(=topic id), `cat`, `config=hfr.inc`, `p=1`,
+     * `sondage=0`, `owntopic`, `word`, `spseudo`, `filter` (=`1` only when [onlyMatches]), `dep=0`,
+     * `firstnum`, `currentnum`.
+     *
+     * - [onlyMatches] maps to the form's `filter` checkbox : included as `filter=1` only when `true`
+     *   (an unchecked HTML checkbox sends no field at all), so HFR re-renders the page showing ONLY
+     *   the matching messages. When `false` we omit `filter`, matching the unchecked form.
+     * - [currentnum] is HFR's JS-managed navigation cursor. The static form has NO `currentnum`
+     *   input — HFR's own script creates it and the submit button clears it. We therefore send it
+     *   empty for a fresh search and only carry a value for the **EXPERIMENTAL / best-effort**
+     *   next/previous navigation. **The `transsearch` response has NEVER been observed live** (no
+     *   fixture), so the cursor semantics are unverified ; callers must treat navigation as
+     *   best-effort and re-parse whatever topic page comes back.
+     *
+     * The response IS a topic page → the data layer re-parses it with the existing topic-page parser.
+     *
+     * `hashCheck`, `word` and `spseudo` are **never** logged here (cf. the submit-reply precedent ;
+     * the repository performs the redacted diagnostics).
+     */
+    @Suppress("LongParameterList") // HFR transsearch form : one parameter per wire field.
+    suspend fun searchInTopic(
+        cat: Int,
+        topicId: Int,
+        word: String,
+        spseudo: String,
+        onlyMatches: Boolean,
+        hashCheck: String,
+        firstnum: Int,
+        owntopic: Int = 0,
+        currentnum: String? = null,
+    ): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("transsearch.php")
+            .build()
+        val formBody = FormBody.Builder()
+            .add("hash_check", hashCheck)
+            .add("post", topicId.toString())
+            .add("cat", cat.toString())
+            .add("config", "hfr.inc")
+            .add("p", "1")
+            .add("sondage", "0")
+            .add("owntopic", owntopic.toString())
+            .add("word", word)
+            .add("spseudo", spseudo)
+            .apply {
+                // An unchecked HTML checkbox sends no field at all ; mirror that so HFR's
+                // server-side branch behaves exactly like the web form.
+                if (onlyMatches) add("filter", "1")
+            }
+            .add("dep", "0")
+            .add("firstnum", firstnum.toString())
+            // HFR's JS clears `currentnum` on a fresh submit (empty string) and only sets it for
+            // in-result navigation. Best-effort : the value is unverified (no live response capture).
+            .add("currentnum", currentnum.orEmpty())
+            .build()
+        val request = Request.Builder().url(url).post(formBody).build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Phase 2 finish (#99) — GET `/user/delflag.php` to remove a single drapeau the user
      * owns. Per ADR-003 the drapeau mutations stay HTML (the REST `PUT topics/{id}/`
      * semantics for downgrade/no-op are opaque), so this is a GET on the legacy endpoint.

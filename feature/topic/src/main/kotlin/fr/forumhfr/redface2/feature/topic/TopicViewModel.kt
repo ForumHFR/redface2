@@ -13,10 +13,12 @@ import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.TopicSearchRequest
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import kotlinx.coroutines.CancellationException
@@ -46,6 +48,7 @@ import kotlinx.coroutines.launch
  * synthetic chain of pages.
  */
 @HiltViewModel(assistedFactory = TopicViewModel.Factory::class)
+@Suppress("LongParameterList") // ViewModel aggregates its injected repositories; one per concern.
 class TopicViewModel @AssistedInject constructor(
     @Assisted private val request: TopicRequest,
     private val topicRepository: TopicRepository,
@@ -53,6 +56,7 @@ class TopicViewModel @AssistedInject constructor(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val deletePostRepository: DeletePostRepository,
     private val blacklistRepository: BlacklistRepository,
+    private val topicSearchRepository: TopicSearchRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
@@ -71,6 +75,9 @@ class TopicViewModel @AssistedInject constructor(
     private var loadJob: Job? = null
     private var prefetchJob: Job? = null
     private var prefetchedPage: Int? = null
+
+    /** Chantier C (#546) — at most one intra-topic search POST in flight at a time. */
+    private var searchJob: Job? = null
 
     /**
      * Tracks whether the current value of [TopicRequest.scrollTo] has already been
@@ -152,6 +159,15 @@ class TopicViewModel @AssistedInject constructor(
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
             TopicIntent.Refresh -> refresh()
             is TopicIntent.SetAuthorBlocked -> setAuthorBlocked(intent.author, intent.blocked)
+            TopicIntent.OpenSearch -> openSearch()
+            TopicIntent.CloseSearch -> closeSearch()
+            is TopicIntent.SearchWordChanged ->
+                _state.update { it.copy(search = it.search.copy(word = intent.word)) }
+            is TopicIntent.SearchPseudoChanged ->
+                _state.update { it.copy(search = it.search.copy(spseudo = intent.pseudo)) }
+            is TopicIntent.SearchOnlyMatchesChanged ->
+                _state.update { it.copy(search = it.search.copy(onlyMatches = intent.onlyMatches)) }
+            TopicIntent.SubmitSearch -> submitSearch()
         }
     }
 
@@ -514,6 +530,87 @@ class TopicViewModel @AssistedInject constructor(
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
                 android.util.Log.w(LOG_TAG, "Post-delete refresh failed", refreshError)
+                loadCurrentPage()
+            }
+        }
+    }
+
+    // ─── intra-topic search (#546) ───────────────────────────────────────────────
+
+    /**
+     * Open the search bar. No-op unless the loaded page exposes a usable search form
+     * ([TopicUiState.canSearchInTopic]) — the screen only shows the affordance in that case, but we
+     * re-check here so a stale tap can never open an inert bar.
+     */
+    private fun openSearch() {
+        if (!_state.value.canSearchInTopic) return
+        _state.update { it.copy(search = it.search.copy(isActive = true)) }
+    }
+
+    /**
+     * Close the search bar and drop any active filtered view by reloading the normal current page.
+     * The typed criteria are kept so re-opening restores them. We only reload when a search was
+     * actually applied (`status == Done`) to avoid a needless refetch on a cancel-before-submit.
+     */
+    private fun closeSearch() {
+        searchJob?.cancel()
+        val hadResults = _state.value.search.status == TopicSearchStatus.Done
+        _state.update {
+            it.copy(search = it.search.copy(isActive = false, status = TopicSearchStatus.Idle))
+        }
+        if (hadResults) loadCurrentPage()
+    }
+
+    /**
+     * Submit the intra-topic search : `POST transsearch.php` (authenticated) with the parsed form +
+     * the typed criteria, then render the returned topic page in [TopicUiState.Mode.Loaded].
+     *
+     * Best-effort by contract : the `transsearch` response was never observed live, so we trust it
+     * is a topic page and parse it as one — no result counter is promised. Server-side result
+     * navigation (HFR `currentnum`) is intentionally NOT wired yet : the cursor value is only known
+     * from a live response we have never captured, so navigating would guess. We surface the
+     * filtered page HFR returns and stop there (documented in the brief / model KDoc).
+     */
+    private fun submitSearch() {
+        val current = _state.value
+        val form = (current.mode as? TopicUiState.Mode.Loaded)?.topic?.searchForm
+        // Re-validate the gate server-side: never POST without a usable (authenticated) form.
+        if (form == null || !form.canSearch || !current.search.canSubmit) return
+        val request = TopicSearchRequest(
+            form = form,
+            word = current.search.word.trim(),
+            spseudo = current.search.spseudo.trim(),
+            onlyMatches = current.search.onlyMatches,
+        )
+        if (!request.isMeaningful) return
+        searchJob?.cancel()
+        loadJob?.cancel()
+        prefetchJob?.cancel()
+        _state.update {
+            it.copy(
+                mode = TopicUiState.Mode.Loading,
+                search = it.search.copy(status = TopicSearchStatus.Loading),
+            )
+        }
+        searchJob = viewModelScope.launch {
+            try {
+                val topic = topicSearchRepository.searchInTopic(request)
+                _state.update {
+                    it.copy(
+                        mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
+                        // The transsearch response is a filtered/anchored view of the topic — its
+                        // pager is not the canonical topic pager, so we do NOT touch availablePages
+                        // (leaving the previously-known set) and never schedule a prefetch off it.
+                        search = it.search.copy(status = TopicSearchStatus.Done),
+                    )
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (@Suppress("TooGenericExceptionCaught") searchError: Exception) {
+                android.util.Log.w(LOG_TAG, "Intra-topic search failed", searchError)
+                _effects.send(TopicEffect.SearchFailed)
+                // Restore the normal page so the user is not stranded on a Loading screen.
+                _state.update { it.copy(search = it.search.copy(status = TopicSearchStatus.Error)) }
                 loadCurrentPage()
             }
         }

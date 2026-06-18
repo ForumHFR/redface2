@@ -59,6 +59,13 @@ data class TopicUiState(
      * the indicator stuck).
      */
     val isRefreshing: Boolean = false,
+    /**
+     * Chantier C (#546) — intra-topic search (HFR `transsearch.php`), a MODE of this screen. Holds
+     * the search bar visibility, the typed criteria and the search lifecycle. The matching topic
+     * page returned by HFR is surfaced through [Mode.Loaded] like any other page (`transsearch`
+     * answers a topic page), so there is no separate "results list" model here.
+     */
+    val search: TopicSearchUiState = TopicSearchUiState(),
 ) {
     /**
      * Helper used by the screen / ViewModel : `true` when the user has navigated to a
@@ -100,6 +107,15 @@ data class TopicUiState(
         ) : Mode
     }
 
+    /**
+     * Helper used by the screen : `true` when the loaded topic page exposes a usable intra-topic
+     * search form (authenticated, non-empty `hash_check`). Drives the search icon affordance,
+     * symmetric with the reply gate. The form is transient (never cached), so a cold cache row
+     * keeps search disabled until a live authenticated load.
+     */
+    val canSearchInTopic: Boolean
+        get() = (mode as? Mode.Loaded)?.topic?.searchForm?.canSearch == true
+
     companion object {
         fun initial(request: TopicRequest): TopicUiState =
             TopicUiState(
@@ -108,6 +124,36 @@ data class TopicUiState(
                 availablePages = emptyList(),
             )
     }
+}
+
+/**
+ * Chantier C (#546) — UI state for the intra-topic search mode.
+ *
+ * @property isActive whether the search bar is open. When `false`, [word] / [spseudo] are kept so
+ *   re-opening restores the last criteria, but no search is in effect.
+ * @property word the term field (HFR `word`).
+ * @property spseudo the author field (HFR `spseudo`).
+ * @property onlyMatches the « Filtrer » toggle — HFR's `filter` checkbox (only show matching posts).
+ * @property status the search lifecycle. Idle before the first submit ; Loading while the POST is in
+ *   flight ; Done once a `transsearch` page has been loaded into [TopicUiState.Mode.Loaded] (the
+ *   page itself carries the matches) ; Error on failure.
+ */
+data class TopicSearchUiState(
+    val isActive: Boolean = false,
+    val word: String = "",
+    val spseudo: String = "",
+    val onlyMatches: Boolean = true,
+    val status: TopicSearchStatus = TopicSearchStatus.Idle,
+) {
+    /** HFR needs at least a term or an author ; the submit button is disabled otherwise. */
+    val canSubmit: Boolean get() = word.isNotBlank() || spseudo.isNotBlank()
+}
+
+enum class TopicSearchStatus {
+    Idle,
+    Loading,
+    Done,
+    Error,
 }
 
 sealed interface TopicIntent {
@@ -133,6 +179,26 @@ sealed interface TopicIntent {
      * `BlacklistRepository`; the topic re-filters live through the page combine.
      */
     data class SetAuthorBlocked(val author: String, val blocked: Boolean) : TopicIntent
+
+    // ─── intra-topic search (#546) ───────────────────────────────────────────────
+
+    /** Open the search bar. No-op if the loaded page has no usable search form. */
+    data object OpenSearch : TopicIntent
+
+    /**
+     * Close the search bar AND clear any active search by reloading the normal current page. Keeps
+     * the typed criteria so re-opening restores them.
+     */
+    data object CloseSearch : TopicIntent
+
+    data class SearchWordChanged(val word: String) : TopicIntent
+
+    data class SearchPseudoChanged(val pseudo: String) : TopicIntent
+
+    data class SearchOnlyMatchesChanged(val onlyMatches: Boolean) : TopicIntent
+
+    /** Submit the intra-topic search (`POST transsearch.php`). */
+    data object SubmitSearch : TopicIntent
 }
 
 /**
@@ -220,4 +286,11 @@ sealed interface TopicEffect {
      * and leaves the post in place.
      */
     data class PostDeleteFailed(val reason: DeleteFailureReason) : TopicEffect
+
+    /**
+     * Chantier C (#546) — emitted when the intra-topic search (`transsearch.php`) failed to reach
+     * HFR or returned an unparsable page. The current page stays on screen ; the screen surfaces a
+     * Toast inviting a retry.
+     */
+    data object SearchFailed : TopicEffect
 }

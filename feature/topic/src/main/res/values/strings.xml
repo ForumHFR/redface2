@@ -23,6 +23,14 @@
          the topic page has not loaded yet (or errored), so the bar never reads blank. -->
     <string name="topic_back">Retour</string>
     <string name="topic_topbar_fallback_title">Sujet</string>
+    <!-- Chantier C (#546) — recherche intra-sujet (transsearch.php). -->
+    <string name="topic_search_open">Rechercher dans le sujet</string>
+    <string name="topic_search_close">Fermer la recherche</string>
+    <string name="topic_search_word_hint">Mot</string>
+    <string name="topic_search_pseudo_hint">Pseudo</string>
+    <string name="topic_search_only_matches">Filtrer (résultats uniquement)</string>
+    <string name="topic_search_submit">Rechercher</string>
+    <string name="topic_search_failed">La recherche dans le sujet a échoué.</string>
     <string name="topic_error_title">Erreur de chargement</string>
     <string name="topic_error_body">Impossible d’ouvrir la page %1$d.\n\n%2$s</string>
     <string name="topic_caption">post %1$d • page %2$d / %3$d</string>
