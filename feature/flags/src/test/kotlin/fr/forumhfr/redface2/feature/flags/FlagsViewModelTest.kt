@@ -1526,6 +1526,97 @@ class FlagsViewModelTest {
         }
     }
 
+    @Test
+    fun `a DT fetch in flight when the account switches never publishes the previous account's list`() = runTest {
+        // #6 Codex review (BLOCKING — stale write): a loadDt mid-flight when resetDtState fires (logout
+        // / account switch) must NOT republish the previous account's MultiMP into the new session.
+        // resetDtState cancels the fetch and bumps the generation, so the in-flight load is dropped and
+        // the state stays at the post-switch Loading.
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(inboxPage(stubSummary(threadId = 10, isMultiRecipient = true))),
+        )
+        messages.blockInboxUntil = kotlinx.coroutines.CompletableDeferred()
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+        vm.dtListState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened() // fetch starts but suspends on the gated inbox load (in flight)
+
+            auth.emit(AuthState.Authenticated("other")) // account switch → resetDtState cancels it
+            // resetDtState republishes Loading; the value is identical to the seed so the StateFlow
+            // dedupes it — no new emission, the state is still Loading.
+
+            messages.blockInboxUntil!!.complete(Unit) // release the now-cancelled previous-account load
+            advanceUntilIdle()
+
+            // The stale (xaat) list must never surface: the only state remains Loading.
+            assertEquals(DtListUiState.Loading, vm.dtListState.value)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `two rapid refreshDt are latest-wins so the stale earlier result never overwrites the recent one`() =
+        runTest {
+            // #6 Codex review (concurrent refreshDt): a second refreshDt cancels the first's job and
+            // out-generations it, so an earlier in-flight scan can never overwrite the newer result.
+            val flags = FakeFlagRepository()
+            val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+            val messages = FakeMessagesRepository(
+                inboxResult = Result.success(inboxPage(stubSummary(threadId = 10, isMultiRecipient = true))),
+            )
+            messages.blockInboxUntil = kotlinx.coroutines.CompletableDeferred()
+            val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+            vm.refreshDt() // first scan, suspended on the gated inbox load (would yield thread 10)
+            messages.inboxResult =
+                Result.success(inboxPage(stubSummary(threadId = 99, isMultiRecipient = true)))
+            vm.refreshDt() // second scan cancels the first and out-generations it
+
+            messages.blockInboxUntil!!.complete(Unit) // release both; the cancelled first must not win
+            advanceUntilIdle()
+
+            val content = vm.dtListState.value as DtListUiState.Content
+            assertEquals(
+                "the latest refreshDt wins; the cancelled earlier scan's result is dropped",
+                listOf(99),
+                content.items.map { it.conversation.threadId },
+            )
+        }
+
+    @Test
+    fun `the DT list only scans inbox page 1 even when the inbox spans multiple pages`() = runTest {
+        // #6 MVP scope: a multi-page sweep is deliberately DEFERRED (it would multiply the cost of the
+        // expensive MPStorage scan). Even with totalPages > 1, only page 1 (the most recent
+        // conversations) is read, and the list reflects only that page — documented behaviour, the
+        // empty-state copy assumes « recent page » semantics.
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(
+                PrivateMessageListPage(
+                    page = 1,
+                    totalPages = 4, // the inbox spans several pages…
+                    items = listOf(stubSummary(threadId = 10, isMultiRecipient = true)),
+                ),
+            ),
+        )
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+        vm.dtListState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            val content = awaitItem() as DtListUiState.Content
+            // …yet only page 1 is reflected; no further page is scanned (multi-page deferred).
+            assertEquals(listOf(10), content.items.map { it.conversation.threadId })
+            assertEquals("only inbox page 1 is ever requested", listOf(1), messages.requestedPages)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     private fun stubSummary(
         threadId: Int,
         isMultiRecipient: Boolean,
@@ -1983,12 +2074,22 @@ class FlagsViewModelTest {
         var getListCalls: Int = 0
             private set
 
+        /** Records the `page` argument of each [getPrivateMessageList] call (DT must only read page 1). */
+        var requestedPages: List<Int> = emptyList()
+            private set
+
+        /** When set, gates [getPrivateMessageList] so a test can hold the inbox load in flight (e.g.
+         * to fire an account switch and prove the stale result never publishes). */
+        var blockInboxUntil: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
         override fun observeUnreadMpCount(): Flow<Int?> = MutableStateFlow(null)
         override fun requestUnreadRefresh() = Unit
         override fun markThreadRead(threadId: Int) = Unit
 
         override suspend fun getPrivateMessageList(page: Int): PrivateMessageListPage {
             getListCalls += 1
+            requestedPages = requestedPages + page
+            blockInboxUntil?.await()
             return inboxResult.getOrThrow()
         }
 

@@ -28,8 +28,14 @@
     <!-- Badge discret de reprise de lecture, alimenté par MPStorage (mpFlags). %1$d = page de reprise.
          C'est une POSITION de lecture, PAS un état lu/non-lu (le point non-lu vient de l'inbox). -->
     <string name="flags_dt_resume_badge">reprise p.%1$d</string>
-    <!-- Aucune conversation MultiMP dans la boîte de réception. -->
-    <string name="flags_dt_empty">Aucune conversation à interlocuteurs multiples.</string>
+    <!-- État vide DT. La liste ne lit que la PAGE 1 de la boîte de réception (les conversations
+         les plus récentes) — un balayage multi-pages est différé (cf. DT_INBOX_PAGE). Le wording
+         assume donc « récente » pour ne pas affirmer qu'AUCUNE MultiMP n'existe ailleurs. -->
+    <string name="flags_dt_empty">Aucune conversation multi-destinataires récente.</string>
+    <!-- Description a11y d'une ligne DT : état lu/non-lu, annoncé par TalkBack (le point coloré
+         est purement décoratif). %1$s = sujet de la conversation. -->
+    <string name="flags_dt_row_unread">Non lu : %1$s</string>
+    <string name="flags_dt_row_read">Lu : %1$s</string>
     <!-- Échec du chargement de la liste DT (boîte de réception). La lecture MPStorage, best-effort,
          n'atteint jamais cet état (elle se dégrade en « pas de badge »). -->
     <string name="flags_dt_error">Impossible de charger les conversations. Vérifie ta connexion ou réessaie.</string>

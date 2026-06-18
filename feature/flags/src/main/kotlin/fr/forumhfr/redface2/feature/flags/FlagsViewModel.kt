@@ -119,6 +119,17 @@ class FlagsViewModel @Inject constructor(
     /** One-shot guard so re-entering the composition (recomposition, ON_RESUME) does not re-scan. */
     private var dtFetchStarted = false
 
+    /**
+     * #6 Codex review — the in-flight DT fetch and a monotonic generation counter, together guarding
+     * against STALE WRITES. A logout / account switch ([resetDtState]) cancels [dtFetchJob] AND bumps
+     * [dtGeneration]; each [loadDt] captures its generation at launch and only publishes [_dtListState]
+     * while that capture still equals [dtGeneration]. So a fetch that was mid-flight when the account
+     * switched can never republish the previous account's MultiMP into the new session. Two rapid
+     * [refreshDt] calls are also latest-wins: the second cancels the first's job and out-generations it.
+     */
+    private var dtFetchJob: kotlinx.coroutines.Job? = null
+    private var dtGeneration = 0
+
     val authState: StateFlow<AuthState?> = authRepository.observeAuthState()
         .stateIn(
             scope = viewModelScope,
@@ -675,10 +686,19 @@ class FlagsViewModel @Inject constructor(
      *
      * Only the inbox load itself is fatal: it is the list's primary source, so a network/session
      * error there surfaces [DtListUiState.Error] (the screen offers a retry / reconnect CTA).
+     *
+     * MVP scope (#6): only inbox PAGE 1 ([DT_INBOX_PAGE]) is scanned — the most recent conversations.
+     * A full multi-page sweep is deliberately DEFERRED (it would multiply the cost of the already
+     * expensive MPStorage scan), so [DtListUiState.Empty] means « none on the recent page », not
+     * « none at all » — the empty-state copy assumes that semantics (`flags_dt_empty`).
      */
     private fun loadDt() {
         dtFetchStarted = true
-        viewModelScope.launch {
+        // Latest-wins: cancel any in-flight DT fetch and out-generation it so a previous load's
+        // late completion is ignored (two rapid refreshDt, or a refresh racing a still-running open).
+        dtFetchJob?.cancel()
+        val generation = ++dtGeneration
+        dtFetchJob = viewModelScope.launch {
             _dtListState.value = DtListUiState.Loading
             val conversations = try {
                 messagesRepository.getPrivateMessageList(page = DT_INBOX_PAGE)
@@ -688,19 +708,26 @@ class FlagsViewModel @Inject constructor(
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
                 // Reset the guard so a retry can re-run; the inbox is the list's only hard source.
-                dtFetchStarted = false
-                _dtListState.value = DtListUiState.Error(error)
+                // Only the live generation may publish — a fetch invalidated by an account switch
+                // (resetDtState bumped the generation) must not overwrite the new session's Loading.
+                if (generation == dtGeneration) {
+                    dtFetchStarted = false
+                    _dtListState.value = DtListUiState.Error(error)
+                }
                 return@launch
             }
 
             if (conversations.isEmpty()) {
-                _dtListState.value = DtListUiState.Empty
+                if (generation == dtGeneration) _dtListState.value = DtListUiState.Empty
                 return@launch
             }
 
             // Best-effort enrichment: a missing / unreadable / failed storage read leaves an empty
             // map, so every row simply renders without a resume badge (the list is never blocked).
             val resumeByThread = fetchResumePositions()
+            // Re-check the generation AFTER the (suspending) storage scan too: the account may have
+            // switched while the scan was in flight, so the stale result must not republish.
+            if (generation != dtGeneration) return@launch
             _dtListState.value = DtListUiState.Content(
                 conversations.map { summary ->
                     DtListItem(
@@ -849,8 +876,13 @@ class FlagsViewModel @Inject constructor(
     }
 
     /** Drop the DT list (and its one-shot guard) so a logout / account switch never shows the
-     * previous user's MultiMP conversations; the next [onDtTabOpened] re-scans for the new session. */
+     * previous user's MultiMP conversations; the next [onDtTabOpened] re-scans for the new session.
+     * Cancels any in-flight fetch and bumps [dtGeneration] so a load that was mid-flight when the
+     * account switched can no longer publish the previous account's conversations (stale write). */
     private fun resetDtState() {
+        dtFetchJob?.cancel()
+        dtFetchJob = null
+        dtGeneration++
         dtFetchStarted = false
         _dtListState.value = DtListUiState.Loading
     }

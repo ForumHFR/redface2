@@ -143,8 +143,17 @@ fun FlagsRoute(
     // #6 — trigger the DT scan only when the DT tab is OPENED (a stable LaunchedEffect, not the raw
     // composition): fetchStorage scans the inbox and must stay off the per-category auto-refresh.
     // The ViewModel guards it to once per session, so re-selecting DT reuses the loaded list.
-    // Extracted so its branch stays out of FlagsRoute's cyclomatic-complexity budget.
-    DtTabOpenEffect(selectedTab = selectedTab, onDtTabOpened = viewModel::onDtTabOpened)
+    // Gated on showDtTab (a stale `selectedTab == Dt` while the toggle is off must NOT scan) and
+    // keyed on the auth session pseudo so an account switch — which resets the DT state to Loading
+    // without changing selectedTab — re-runs the effect and re-scans for the new session (Codex
+    // review). Extracted so its branch stays out of FlagsRoute's cyclomatic-complexity budget.
+    val authSessionKey = (authState as? AuthState.Authenticated)?.pseudo
+    DtTabOpenEffect(
+        selectedTab = selectedTab,
+        showDtTab = showDtTab,
+        authSessionKey = authSessionKey,
+        onDtTabOpened = viewModel::onDtTabOpened,
+    )
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -1121,14 +1130,28 @@ private fun DtTabFallbackEffect(
 }
 
 /**
- * #6 — fires the DT (MultiMP) scan once the DT tab becomes the selected one. Keyed on the tab so it
- * only re-runs on a real tab change (the ViewModel guards the actual fetch to once per session).
+ * #6 — fires the DT (MultiMP) scan once the DT tab becomes the selected one. The fetch only starts
+ * when DT is selected AND the Settings toggle still shows it ([showDtTab]) — a stale
+ * `selectedTab == Dt` left behind while the toggle is off (before [DtTabFallbackEffect] swaps back
+ * to Cyan) must never scan the inbox.
+ *
+ * Keyed on the tab, [showDtTab], AND [authSessionKey] (the authenticated pseudo). The session key is
+ * load-bearing: an account switch resets the DT state back to Loading without changing
+ * `selectedTab`, so a Unit/tab-only key would never re-fire and the screen would stay stuck on the
+ * spinner while sitting on the DT tab (Codex review). The ViewModel guards the actual fetch to once
+ * per session, so a benign re-key (returning to DT) reuses the loaded list.
+ *
  * Extracted so its branch stays out of [FlagsRoute]'s cyclomatic-complexity budget.
  */
 @Composable
-private fun DtTabOpenEffect(selectedTab: FlagTab, onDtTabOpened: () -> Unit) {
-    LaunchedEffect(selectedTab) {
-        if (selectedTab == FlagTab.Dt) onDtTabOpened()
+private fun DtTabOpenEffect(
+    selectedTab: FlagTab,
+    showDtTab: Boolean,
+    authSessionKey: String?,
+    onDtTabOpened: () -> Unit,
+) {
+    LaunchedEffect(selectedTab, showDtTab, authSessionKey) {
+        if (selectedTab == FlagTab.Dt && showDtTab) onDtTabOpened()
     }
 }
 
@@ -1168,8 +1191,14 @@ private fun DtListBody(state: DtListUiState, actions: AuthenticatedActions) {
             items(state.items, key = { it.conversation.threadId }) { item ->
                 DtConversationRow(
                     item = item,
+                    // Open on the page the badge ADVERTISES: the MPStorage resume page when present,
+                    // else the conversation's last inbox page (#430). Tapping must land where the
+                    // « reprise p.N » badge says it will — opening lastPage while showing « reprise
+                    // p.N » was a badge/action contradiction (Codex review). Clamp ≥ 1 so a bogus
+                    // stored 0/negative page never produces an invalid route argument.
                     onClick = {
-                        actions.onOpenMultiMp(item.conversation.threadId, item.conversation.lastPage)
+                        val target = (item.resumePage ?: item.conversation.lastPage).coerceAtLeast(1)
+                        actions.onOpenMultiMp(item.conversation.threadId, target)
                     },
                 )
             }
@@ -1241,10 +1270,18 @@ private fun DtErrorBody(cause: Throwable, actions: AuthenticatedActions) {
 @Composable
 private fun DtConversationRow(item: DtListItem, onClick: () -> Unit) {
     val conversation = item.conversation
+    // a11y — the read/unread dot is purely decorative (no semantics of its own), so the row carries
+    // the read state for TalkBack: « Non lu : <sujet> » / « Lu : <sujet> » (Codex review). The
+    // « Interlocuteurs multiples » caption and the resume badge stay separately announced beneath it.
+    val rowStateDescription = stringResource(
+        if (conversation.hasUnread) R.string.flags_dt_row_unread else R.string.flags_dt_row_read,
+        conversation.subject,
+    )
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = rowStateDescription },
     ) {
         Row(
             modifier = Modifier
