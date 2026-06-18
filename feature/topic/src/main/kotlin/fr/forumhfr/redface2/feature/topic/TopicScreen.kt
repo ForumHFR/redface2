@@ -2017,7 +2017,7 @@ private data class NavBarScrollSample(
     val index: Int,
     val offset: Int,
     val canScrollForward: Boolean,
-    val scrolling: Boolean,
+    val itemCount: Int,
 )
 
 /**
@@ -2027,13 +2027,26 @@ private data class NavBarScrollSample(
  * MANUAL mode) it only clears any stale facts once. `:feature:topic` stays free of the reveal-mode enum
  * — it ships facts, `:app` decides.
  *
- * CRITICAL anti-feedback-loop: revealing the bar consumes the bottom system-bar inset, which shrinks the
- * list viewport and can flip `canScrollForward` / `firstVisibleItemScrollOffset` ON ITS OWN — with no
- * user gesture. If those rest-time, inset-induced changes fed the decision, « at bottom » reveal would
- * grow the inset → flip canScrollForward → un-reveal → shrink the inset → … (a visible jitter), and a
- * pure layout shift would read as a fake scroll direction. So facts are only trusted DURING an active
- * user scroll ([LazyListState.isScrollInProgress]); the first sample is emitted once to seed the static
- * case (a short topic already at the bottom), and afterwards the last facts are LATCHED at rest.
+ * CRITICAL anti-feedback-loop. Revealing the bar consumes the bottom system-bar inset, which SHRINKS the
+ * list viewport and so flips `canScrollForward` (and `layoutInfo`) ON ITS OWN — no user gesture. Naively
+ * deriving `atBottom = !canScrollForward` would then loop: reach bottom → reveal → inset grows →
+ * canScrollForward true → un-reveal → inset shrinks → canScrollForward false → … (the « sursaut » at the
+ * bottom, including mid-fling since `isScrollInProgress` stays true while a fling settles).
+ *
+ * The fix exploits that a viewport-height change leaves `firstVisibleItemIndex` / `firstVisibleItemScroll-
+ * Offset` UNTOUCHED (LazyColumn is top-anchored): only a genuine user scroll moves them. So we LATCH
+ * `atBottom`: it is SET when the content end is reached while not moving up AND the list actually has
+ * content (`itemCount > 0 && !canScrollForward && !scrollingUp` — the itemCount guard avoids latching on
+ * an empty/loading list, which would otherwise wrongly reveal the bar at the TOP of a long topic once it
+ * loads; it still covers a loaded short topic). It is only CLEARED by a real upward index/offset
+ * decrease. The inset-induced `canScrollForward = true` after a reveal therefore cannot clear it (no
+ * upward move), and the inset-induced `canScrollForward = false` after a hide cannot re-set it (it lands
+ * while `scrollingUp` is true / held).
+ *
+ * `scrollingUp` is derived only from index/offset deltas, which an inset resize never produces — a pure
+ * layout shift is never misread as a scroll direction. (A PROGRAMMATIC scroll — #307 restore — does move
+ * index/offset, so it can momentarily seed the direction; a one-shot at landing that self-corrects on the
+ * first real user scroll, accepted.)
  */
 @Composable
 private fun ImmersiveNavBarScrollReporter(
@@ -2050,6 +2063,7 @@ private fun ImmersiveNavBarScrollReporter(
         var prevIndex = listState.firstVisibleItemIndex
         var prevOffset = listState.firstVisibleItemScrollOffset
         var scrollingUp = false
+        var atBottomLatched = false
         var emitted = false
         var lastAtBottom: Boolean? = null
         var lastScrollingUp: Boolean? = null
@@ -2058,32 +2072,35 @@ private fun ImmersiveNavBarScrollReporter(
                 index = listState.firstVisibleItemIndex,
                 offset = listState.firstVisibleItemScrollOffset,
                 canScrollForward = listState.canScrollForward,
-                scrolling = listState.isScrollInProgress,
+                itemCount = listState.layoutInfo.totalItemsCount,
             )
         }
             .collect { sample ->
+                val movedUp = sample.index < prevIndex ||
+                    (sample.index == prevIndex && sample.offset < prevOffset)
                 val positionChanged = sample.index != prevIndex || sample.offset != prevOffset
-                // Trust a direction change ONLY during an active user scroll; a rest-time shift (the nav
-                // bar's own inset toggling) must never be read as a scroll direction.
-                if (sample.scrolling && positionChanged) {
-                    scrollingUp = if (sample.index != prevIndex) {
-                        sample.index < prevIndex
-                    } else {
-                        sample.offset < prevOffset
-                    }
+                if (positionChanged) {
+                    // Genuine scroll direction — index/offset only move on a real user (or programmatic)
+                    // scroll, never on an inset-driven viewport resize.
+                    scrollingUp = movedUp
+                    // A real upward move is the ONLY thing that clears « at bottom ».
+                    if (movedUp) atBottomLatched = false
                 }
                 prevIndex = sample.index
                 prevOffset = sample.offset
-                val atBottom = !sample.canScrollForward
-                // Emit the first sample once (seed the static case: a short topic already at the bottom),
-                // then only while actively scrolling — never on a rest-time inset-induced change (loop).
-                val mayEmit = !emitted || sample.scrolling
-                val factsChanged = atBottom != lastAtBottom || scrollingUp != lastScrollingUp
-                if (mayEmit && factsChanged) {
-                    lastAtBottom = atBottom
+                // Reaching the content end of a NON-EMPTY list while not moving up latches « at bottom ».
+                // The itemCount guard avoids latching on an empty/loading list (which would wrongly reveal
+                // the bar at the top of a long topic). Once latched, the bar's own inset flipping
+                // canScrollForward back to true cannot clear it (no upward move).
+                if (sample.itemCount > 0 && !sample.canScrollForward && !scrollingUp) {
+                    atBottomLatched = true
+                }
+                val factsChanged = atBottomLatched != lastAtBottom || scrollingUp != lastScrollingUp
+                if (!emitted || factsChanged) {
+                    lastAtBottom = atBottomLatched
                     lastScrollingUp = scrollingUp
                     emitted = true
-                    report(atBottom, scrollingUp)
+                    report(atBottomLatched, scrollingUp)
                 }
             }
     }
