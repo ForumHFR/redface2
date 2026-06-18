@@ -325,4 +325,17 @@ interface UserPreferencesRepository {
 
     /** Persists [observeHideSystemNavBar]. Default `false` until the first call. */
     suspend fun setHideSystemNavBar(enabled: Boolean)
+
+    /**
+     * Immersive full-screen companion (#518 follow-up): when `true`, an in-app « back » button is shown
+     * while [observeHideSystemNavBar] is active, so the user can go back without swiping the hidden
+     * Android nav bar back into view (a real need in 3-button mode, where there is no system back
+     * gesture). Default `true` — it only ever renders WHEN immersive mode is on, so off-by-default would
+     * leave immersive 3-button users stranded; the toggle lets gesture-nav users (who keep the edge
+     * back-swipe) turn it off. Observed at the app root, toggled in Settings > Affichage.
+     */
+    fun observeImmersiveBackButton(): Flow<Boolean>
+
+    /** Persists [observeImmersiveBackButton]. Default `true` until the first call. */
+    suspend fun setImmersiveBackButton(enabled: Boolean)
 }

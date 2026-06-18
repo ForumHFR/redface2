@@ -125,6 +125,13 @@ data class SettingsState(
     val isUpdatingHideSystemNavBar: Boolean = false,
     val hideSystemNavBarError: Boolean = false,
     val hideSystemNavBarTouchedLocally: Boolean = false,
+    // #518 follow-up — bouton « retour » flottant affiché en mode plein écran (compagnon du toggle
+    // ci-dessus). Même machinerie optimistic-flip + garde de course. Default TRUE (il ne s'affiche que
+    // quand le plein écran est actif) ; l'option permet de le retirer pour les utilisateurs en gestes.
+    val immersiveBackButton: Boolean = true,
+    val isUpdatingImmersiveBackButton: Boolean = false,
+    val immersiveBackButtonError: Boolean = false,
+    val immersiveBackButtonTouchedLocally: Boolean = false,
     // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
     // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
     // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
@@ -242,6 +249,10 @@ data class SettingsState(
     val canToggleHideSystemNavBar: Boolean
         get() = !isUpdatingHideSystemNavBar
 
+    // #518 follow-up — the immersive back-button toggle is gated only by its own write.
+    val canToggleImmersiveBackButton: Boolean
+        get() = !isUpdatingImmersiveBackButton
+
     // #312 — the confirm-before-posting toggle is gated only by its own write.
     val canToggleConfirmBeforePosting: Boolean
         get() = !isUpdatingConfirmBeforePosting
@@ -358,6 +369,9 @@ sealed interface SettingsIntent {
 
     /** #518 — masquer la barre de navigation système Android (plein écran immersif). */
     data class HideSystemNavBarChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #518 follow-up — afficher le bouton « retour » flottant en mode plein écran. */
+    data class ImmersiveBackButtonChanged(val enabled: Boolean) : SettingsIntent
 
     // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
     // the boolean is the desired post-flip state.

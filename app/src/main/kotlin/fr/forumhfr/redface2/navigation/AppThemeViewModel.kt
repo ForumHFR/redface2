@@ -70,4 +70,10 @@ class AppThemeViewModel @Inject constructor(
     val hideSystemNavBar: StateFlow<Boolean> =
         userPreferencesRepository.observeHideSystemNavBar()
             .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    // #518 follow-up — in-app back button shown while immersive mode is active. Default true (it only
+    // renders when hideSystemNavBar is on), eager like the presets above.
+    val immersiveBackButton: StateFlow<Boolean> =
+        userPreferencesRepository.observeImmersiveBackButton()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 }

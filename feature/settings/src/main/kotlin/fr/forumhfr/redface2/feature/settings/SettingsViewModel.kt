@@ -118,6 +118,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(hideSystemNavBar = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeImmersiveBackButton().first() },
+            isLocked = { it.immersiveBackButtonTouchedLocally || it.isUpdatingImmersiveBackButton },
+            apply = { state, value -> state.copy(immersiveBackButton = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeConfirmBeforePosting().first() },
             isLocked = { it.confirmBeforePostingTouchedLocally || it.isUpdatingConfirmBeforePosting },
             apply = { state, value -> state.copy(confirmBeforePosting = value) },
@@ -226,6 +231,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.TopicSignaturesChanged -> updateTopicSignatures(intent.enabled)
             is SettingsIntent.FoldLongQuotesChanged -> updateFoldLongQuotes(intent.enabled)
             is SettingsIntent.HideSystemNavBarChanged -> updateHideSystemNavBar(intent.enabled)
+            is SettingsIntent.ImmersiveBackButtonChanged -> updateImmersiveBackButton(intent.enabled)
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
@@ -839,6 +845,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setHideSystemNavBar,
+        )
+    }
+
+    private fun updateImmersiveBackButton(desired: Boolean) {
+        val previous = _state.value.immersiveBackButton
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    immersiveBackButton = desired,
+                    isUpdatingImmersiveBackButton = true,
+                    immersiveBackButtonError = false,
+                    immersiveBackButtonTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(immersiveBackButton = desired, isUpdatingImmersiveBackButton = false)
+                } else {
+                    state.copy(
+                        immersiveBackButton = previous,
+                        isUpdatingImmersiveBackButton = false,
+                        immersiveBackButtonError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setImmersiveBackButton,
         )
     }
 

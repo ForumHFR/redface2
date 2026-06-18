@@ -19,6 +19,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,13 +32,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.navigationBars
@@ -530,6 +540,12 @@ fun RedfaceApp(intent: Intent?) {
     // #518 — immersive mode: hide the bottom Android system navigation bar (3 buttons or gesture pill,
     // device-dependent). Off by default; applied on the host window below.
     val hideSystemNavBar by themeViewModel.hideSystemNavBar.collectAsStateWithLifecycle()
+    // #518 follow-up — in-app back button shown while immersive mode is active (companion to the above).
+    val immersiveBackButton by themeViewModel.immersiveBackButton.collectAsStateWithLifecycle()
+    // #518 follow-up — the in-app back FAB fires the SAME dispatcher the system back button drives, so a
+    // press follows nav3's onBack (pop the active tab's back stack). Resolved here in composable scope;
+    // null only on the @Preview path (no host Activity), where the FAB also never renders.
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
     val darkTheme = when (themeMode) {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
@@ -770,100 +786,119 @@ fun RedfaceApp(intent: Intent?) {
             // so the nav host no longer steals 8 dp/side from every screen. The Surface is kept
             // for the theme background/elevation; only its horizontal padding was removed.
             // #529 — consumes the bottom nav-bar inset under a bottom-bar layout (no-op otherwise).
-            Surface(modifier = contentInsetModifier) {
-                val activeBackStack = backStacks.getValue(currentDestination)
-                val accountMenu: @Composable () -> Unit = {
-                    RedfaceAccountMenu(
-                        authState = authState,
-                        versionName = BuildConfig.VERSION_NAME,
-                        versionCode = BuildConfig.VERSION_CODE,
-                        onLogin = { activeBackStack.add(LoginRoute) },
-                        onLogout = accountViewModel::logout,
-                        onOpenDiagnostics = { activeBackStack.add(DiagnosticsRoute) },
+            val activeBackStack = backStacks.getValue(currentDestination)
+            Box(modifier = Modifier.fillMaxSize()) {
+                Surface(modifier = contentInsetModifier) {
+                    val accountMenu: @Composable () -> Unit = {
+                        RedfaceAccountMenu(
+                            authState = authState,
+                            versionName = BuildConfig.VERSION_NAME,
+                            versionCode = BuildConfig.VERSION_CODE,
+                            onLogin = { activeBackStack.add(LoginRoute) },
+                            onLogout = accountViewModel::logout,
+                            onOpenDiagnostics = { activeBackStack.add(DiagnosticsRoute) },
+                            onReportContent = {
+                                startReportEmail(context, reportEmailSubject, reportNoEmailClient)
+                            },
+                            avatarUrl = accountAvatarUrl,
+                        )
+                    }
+                    RedfaceNavHost(
+                        backStack = activeBackStack,
+                        accountMenu = accountMenu,
                         onReportContent = {
                             startReportEmail(context, reportEmailSubject, reportNoEmailClient)
                         },
-                        avatarUrl = accountAvatarUrl,
+                        privateMessageNavState = PrivateMessageNavState(
+                            readThreadIds = readPrivateMessageThreadIds,
+                            multiRecipientThreadIds = multiRecipientThreadIds,
+                            onThreadLoaded = { threadId ->
+                                // #453 (Codex review) — decrement the badge ONLY when the conversation was
+                                // unread when opened AND this is its first read of the session (predicate
+                                // extracted to keep this composable under detekt's complexity threshold).
+                                val decrement = shouldDecrementUnreadBadge(
+                                    threadId = threadId,
+                                    unreadOnOpen = unreadOnOpenThreadIds,
+                                    alreadyRead = readPrivateMessageThreadIds,
+                                )
+                                if (decrement) {
+                                    mpBadgeViewModel.onThreadRead(threadId)
+                                }
+                                readPrivateMessageThreadIds = readPrivateMessageThreadIds + threadId
+                            },
+                            onThreadOpenedAsMulti = { threadId ->
+                                multiRecipientThreadIds = multiRecipientThreadIds + threadId
+                            },
+                            onThreadOpenedUnread = { threadId ->
+                                unreadOnOpenThreadIds = unreadOnOpenThreadIds + threadId
+                            },
+                            sentSignal = privateMessageSentSignal,
+                            onConversationSent = {
+                                privateMessageSentSignal = System.currentTimeMillis()
+                            },
+                        ),
+                        topicTitleNavState = TopicTitleNavState(
+                            titles = topicTitleCache,
+                            onTitleLoaded = { cat, post, title ->
+                                topicTitleCache = topicTitleCache.withTitle(TopicTitleKey(cat, post), title)
+                            },
+                        ),
+                        topicScrollNavState = TopicScrollNavState(
+                            anchors = topicScrollAnchorCache,
+                            onAnchorSaved = { cat, post, page, anchor ->
+                                topicScrollAnchorCache = topicScrollAnchorCache.withScrollAnchor(
+                                    TopicScrollKey(cat, post, page),
+                                    anchor,
+                                )
+                            },
+                            pendingBottomLanding = topicPendingBottomLanding,
+                            onPendingBottomLanding = { topicPendingBottomLanding = it },
+                        ),
+                        multiQuoteNavState = MultiQuoteNavState(
+                            basket = multiQuoteBasket,
+                            onToggle = { cat, post, numreponse ->
+                                multiQuoteBasket = multiQuoteBasket.toggled(cat, post, numreponse)
+                            },
+                            onClear = { multiQuoteBasket = null },
+                        ),
+                        topicPollNavState = TopicPollNavState(
+                            expansions = topicPollExpansionCache,
+                            onExpansionChanged = { cat, post, expanded ->
+                                topicPollExpansionCache = topicPollExpansionCache.withPollExpansion(
+                                    TopicPollKey(cat, post),
+                                    expanded,
+                                )
+                            },
+                        ),
+                        onOpenProfile = { userId, pseudo, avatarUrl ->
+                            // Review feedback I3: capture the **origin** tab so that
+                            // « Voir le profil complet » lands on the correct back stack
+                            // even if the user switches tabs while the sheet is open.
+                            profileSheetRequest = ProfileSheetRequest(
+                                userId = userId,
+                                pseudo = pseudo,
+                                avatarUrl = avatarUrl,
+                                origin = currentDestination,
+                            )
+                        },
                     )
                 }
-                RedfaceNavHost(
-                    backStack = activeBackStack,
-                    accountMenu = accountMenu,
-                    onReportContent = {
-                        startReportEmail(context, reportEmailSubject, reportNoEmailClient)
-                    },
-                    privateMessageNavState = PrivateMessageNavState(
-                        readThreadIds = readPrivateMessageThreadIds,
-                        multiRecipientThreadIds = multiRecipientThreadIds,
-                        onThreadLoaded = { threadId ->
-                            // #453 (Codex review) — decrement the badge ONLY when the conversation was
-                            // unread when opened AND this is its first read of the session (predicate
-                            // extracted to keep this composable under detekt's complexity threshold).
-                            val decrement = shouldDecrementUnreadBadge(
-                                threadId = threadId,
-                                unreadOnOpen = unreadOnOpenThreadIds,
-                                alreadyRead = readPrivateMessageThreadIds,
-                            )
-                            if (decrement) {
-                                mpBadgeViewModel.onThreadRead(threadId)
-                            }
-                            readPrivateMessageThreadIds = readPrivateMessageThreadIds + threadId
-                        },
-                        onThreadOpenedAsMulti = { threadId ->
-                            multiRecipientThreadIds = multiRecipientThreadIds + threadId
-                        },
-                        onThreadOpenedUnread = { threadId ->
-                            unreadOnOpenThreadIds = unreadOnOpenThreadIds + threadId
-                        },
-                        sentSignal = privateMessageSentSignal,
-                        onConversationSent = {
-                            privateMessageSentSignal = System.currentTimeMillis()
-                        },
+                // #518 follow-up — in-app back affordance for immersive mode: a discreet FAB that
+                // fires the SAME back action as the system button (OnBackPressedDispatcher), so the
+                // hidden Android nav bar never has to be swiped back in. Visibility predicate is a pure
+                // helper (keeps RedfaceApp under detekt's complexity threshold); the composable no-ops
+                // when not visible so the `.align`/`.padding` BoxScope modifier stays at this call site.
+                ImmersiveBackButton(
+                    visible = shouldShowImmersiveBackButton(
+                        hideSystemNavBar = hideSystemNavBar,
+                        immersiveBackButton = immersiveBackButton,
+                        backStackSize = activeBackStack.size,
+                        topRoute = topRoute,
                     ),
-                    topicTitleNavState = TopicTitleNavState(
-                        titles = topicTitleCache,
-                        onTitleLoaded = { cat, post, title ->
-                            topicTitleCache = topicTitleCache.withTitle(TopicTitleKey(cat, post), title)
-                        },
-                    ),
-                    topicScrollNavState = TopicScrollNavState(
-                        anchors = topicScrollAnchorCache,
-                        onAnchorSaved = { cat, post, page, anchor ->
-                            topicScrollAnchorCache = topicScrollAnchorCache.withScrollAnchor(
-                                TopicScrollKey(cat, post, page),
-                                anchor,
-                            )
-                        },
-                        pendingBottomLanding = topicPendingBottomLanding,
-                        onPendingBottomLanding = { topicPendingBottomLanding = it },
-                    ),
-                    multiQuoteNavState = MultiQuoteNavState(
-                        basket = multiQuoteBasket,
-                        onToggle = { cat, post, numreponse ->
-                            multiQuoteBasket = multiQuoteBasket.toggled(cat, post, numreponse)
-                        },
-                        onClear = { multiQuoteBasket = null },
-                    ),
-                    topicPollNavState = TopicPollNavState(
-                        expansions = topicPollExpansionCache,
-                        onExpansionChanged = { cat, post, expanded ->
-                            topicPollExpansionCache = topicPollExpansionCache.withPollExpansion(
-                                TopicPollKey(cat, post),
-                                expanded,
-                            )
-                        },
-                    ),
-                    onOpenProfile = { userId, pseudo, avatarUrl ->
-                        // Review feedback I3: capture the **origin** tab so that
-                        // « Voir le profil complet » lands on the correct back stack
-                        // even if the user switches tabs while the sheet is open.
-                        profileSheetRequest = ProfileSheetRequest(
-                            userId = userId,
-                            pseudo = pseudo,
-                            avatarUrl = avatarUrl,
-                            origin = currentDestination,
-                        )
-                    },
+                    onBack = { backDispatcher?.onBackPressed() },
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(16.dp),
                 )
             }
         }
@@ -922,6 +957,56 @@ fun RedfaceApp(intent: Intent?) {
 private fun DevDebugBoundsOverlay(enabled: Boolean) {
     if (enabled && BuildConfig.FLAVOR == DEV_CHANNEL) {
         DebugBoundsOverlay()
+    }
+}
+
+/**
+ * #518 follow-up — whether to show the in-app immersive « back » FAB. Pure predicate, extracted so
+ * [RedfaceApp] stays under detekt's cyclomatic-complexity threshold. Shown only when:
+ * - immersive mode hides the system navigation bar ([hideSystemNavBar]), AND
+ * - the companion option is on ([immersiveBackButton]), AND
+ * - there is a back entry in the active tab ([backStackSize] > 1) — never an app-exit at a tab root, AND
+ * - the current route is not a full-screen editor ([topRoute] does not hide the navigation suite): those
+ *   own the bottom region for their IME-pinned submit bar, so a bottom-start FAB would overlap it. A
+ *   3-button user there can still swipe-reveal the bar; gesture users keep the edge back gesture.
+ */
+private fun shouldShowImmersiveBackButton(
+    hideSystemNavBar: Boolean,
+    immersiveBackButton: Boolean,
+    backStackSize: Int,
+    topRoute: NavKey?,
+): Boolean = hideSystemNavBar &&
+    immersiveBackButton &&
+    backStackSize > 1 &&
+    !topRoute.hidesNavigationSuite()
+
+/**
+ * #518 follow-up — discreet in-app « back » affordance for immersive mode. A [SmallFloatingActionButton]
+ * pinned bottom-start that fires [onBack] — wired in [RedfaceApp] to the host's `OnBackPressedDispatcher`,
+ * i.e. the EXACT action of the system back button (nav3 pops the active tab's back stack). It lets a user
+ * navigate back without swiping the hidden Android navigation bar in. Low-key secondary-container colours
+ * so it does not fight the content. No-ops when [visible] is false (the visibility rule lives in
+ * [shouldShowImmersiveBackButton]); the early return keeps the BoxScope `.align`/`.padding` modifier at
+ * the single call site rather than duplicated here.
+ */
+@Composable
+private fun ImmersiveBackButton(
+    visible: Boolean,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (!visible) return
+    val description = stringResource(R.string.immersive_back_description)
+    SmallFloatingActionButton(
+        onClick = onBack,
+        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = modifier.semantics { contentDescription = description },
+    ) {
+        Icon(
+            painter = painterResource(CoreUiR.drawable.ic_arrow_back),
+            contentDescription = null,
+        )
     }
 }
 

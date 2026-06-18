@@ -648,6 +648,27 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeImmersiveBackButton defaults to true then persists false and true`() = runTest(dispatcher) {
+        // #518 follow-up — default ON (only shown while immersive is active); an empty store reports true.
+        repository.observeImmersiveBackButton().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImmersiveBackButton(false)
+        repository.observeImmersiveBackButton().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImmersiveBackButton(true)
+        repository.observeImmersiveBackButton().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `saving disabled proxy removes optional fields from effective config`() = runTest(dispatcher) {
         repository.saveProxyConfig(
             ProxyConfig(

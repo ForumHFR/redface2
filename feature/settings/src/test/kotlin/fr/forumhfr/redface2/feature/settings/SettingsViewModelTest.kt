@@ -1089,6 +1089,41 @@ class SettingsViewModelTest {
         assertTrue(viewModel.state.value.hideSystemNavBarError)
     }
 
+    @Test
+    fun `init hydrates immersiveBackButton from a persisted false`() = runTest {
+        // Default is true — only a persisted opt-OUT exercises the hydration path.
+        repository.emitImmersiveBackButton(false)
+
+        val viewModel = newViewModel()
+
+        assertFalse(viewModel.state.value.immersiveBackButton)
+        assertFalse(viewModel.state.value.immersiveBackButtonError)
+    }
+
+    @Test
+    fun `ImmersiveBackButtonChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertTrue("back button on by default", viewModel.state.value.immersiveBackButton)
+
+        viewModel.submit(SettingsIntent.ImmersiveBackButtonChanged(false))
+
+        assertFalse(viewModel.state.value.immersiveBackButton)
+        assertFalse(viewModel.state.value.isUpdatingImmersiveBackButton)
+        assertEquals(1, repository.immersiveBackButtonSetCalls)
+    }
+
+    @Test
+    fun `ImmersiveBackButtonChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnImmersiveBackButtonSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ImmersiveBackButtonChanged(false))
+
+        assertTrue("failed persist must revert to the previous value", viewModel.state.value.immersiveBackButton)
+        assertFalse(viewModel.state.value.isUpdatingImmersiveBackButton)
+        assertTrue(viewModel.state.value.immersiveBackButtonError)
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // Debug bounds overlay (#445)
     // ──────────────────────────────────────────────────────────────────────
@@ -1851,6 +1886,24 @@ class SettingsViewModelTest {
 
         fun emitHideSystemNavBar(value: Boolean) {
             hideSystemNavBar.value = value
+        }
+
+        // #518 follow-up — immersive back button. Default TRUE, same optimistic-flip seam as above.
+        private val immersiveBackButton = MutableStateFlow(true)
+        var immersiveBackButtonSetCalls: Int = 0
+            private set
+        var failOnImmersiveBackButtonSet: Boolean = false
+
+        override fun observeImmersiveBackButton(): Flow<Boolean> = immersiveBackButton
+
+        override suspend fun setImmersiveBackButton(enabled: Boolean) {
+            immersiveBackButtonSetCalls += 1
+            check(!failOnImmersiveBackButtonSet) { "boom" }
+            immersiveBackButton.value = enabled
+        }
+
+        fun emitImmersiveBackButton(value: Boolean) {
+            immersiveBackButton.value = value
         }
     }
 
