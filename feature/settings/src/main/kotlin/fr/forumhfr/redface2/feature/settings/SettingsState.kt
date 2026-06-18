@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.settings
 
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -132,6 +133,12 @@ data class SettingsState(
     val isUpdatingImmersiveBackButton: Boolean = false,
     val immersiveBackButtonError: Boolean = false,
     val immersiveBackButtonTouchedLocally: Boolean = false,
+    // #518 follow-up — quand la barre système masquée se révèle automatiquement (selon le scroll).
+    // Default MANUAL (balayage seul, comportement #518 historique). Même machinerie que DisplayDensity.
+    val immersiveNavBarReveal: ImmersiveNavBarReveal = ImmersiveNavBarReveal.MANUAL,
+    val isUpdatingImmersiveNavBarReveal: Boolean = false,
+    val immersiveNavBarRevealError: Boolean = false,
+    val immersiveNavBarRevealTouchedLocally: Boolean = false,
     // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
     // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
     // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
@@ -253,6 +260,10 @@ data class SettingsState(
     val canToggleImmersiveBackButton: Boolean
         get() = !isUpdatingImmersiveBackButton
 
+    // #518 follow-up — the nav-bar reveal-mode selector is gated only by its own write.
+    val canChangeImmersiveNavBarReveal: Boolean
+        get() = !isUpdatingImmersiveNavBarReveal
+
     // #312 — the confirm-before-posting toggle is gated only by its own write.
     val canToggleConfirmBeforePosting: Boolean
         get() = !isUpdatingConfirmBeforePosting
@@ -372,6 +383,9 @@ sealed interface SettingsIntent {
 
     /** #518 follow-up — afficher le bouton « retour » flottant en mode plein écran. */
     data class ImmersiveBackButtonChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #518 follow-up — comportement de révélation de la barre système masquée (plein écran). */
+    data class ImmersiveNavBarRevealChanged(val mode: ImmersiveNavBarReveal) : SettingsIntent
 
     // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
     // the boolean is the desired post-flip state.

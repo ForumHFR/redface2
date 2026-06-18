@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -1439,6 +1440,11 @@ class TopicFormViewModelTest {
         override fun observeImmersiveBackButton(): Flow<Boolean> = MutableStateFlow(true)
 
         override suspend fun setImmersiveBackButton(enabled: Boolean) = Unit
+
+        override fun observeImmersiveNavBarReveal(): Flow<ImmersiveNavBarReveal> =
+            MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
+
+        override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) = Unit
     }
 
     /** #405 — in-memory fake [EditorDraftStore], same shape as the one in `PostEditorViewModelTest`. */

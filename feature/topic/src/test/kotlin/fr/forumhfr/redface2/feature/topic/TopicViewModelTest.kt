@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -1572,4 +1573,9 @@ private class FakeUserPreferencesRepository(
     override fun observeImmersiveBackButton(): Flow<Boolean> = MutableStateFlow(true)
 
     override suspend fun setImmersiveBackButton(enabled: Boolean) = Unit
+
+    override fun observeImmersiveNavBarReveal(): Flow<ImmersiveNavBarReveal> =
+        MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
+
+    override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) = Unit
 }

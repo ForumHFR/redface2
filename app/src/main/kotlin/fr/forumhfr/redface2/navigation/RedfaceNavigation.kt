@@ -79,6 +79,8 @@ import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.shouldRevealNavBar
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -546,6 +548,14 @@ fun RedfaceApp(intent: Intent?) {
     // press follows nav3's onBack (pop the active tab's back stack). Resolved here in composable scope;
     // null only on the @Preview path (no host Activity), where the FAB also never renders.
     val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    // #518 follow-up — scroll-driven reveal of the hidden system nav bar. The MODE is the user preference;
+    // the raw scroll FACTS are reported up by the active topic screen. RedfaceApp stays the single owner
+    // of the window bar (no dual ownership): it combines mode + facts via the pure shouldRevealNavBar and
+    // drives the window below. topicNavBarScroll resets when the active route is no longer a topic.
+    val immersiveNavBarReveal by themeViewModel.immersiveNavBarReveal.collectAsStateWithLifecycle()
+    var topicNavBarScroll by remember { mutableStateOf(NavBarScrollFacts()) }
+    // Effective hide + scroll-report gate are pure helpers so RedfaceApp stays under detekt's complexity.
+    val hideNavBarNow = immersiveNavBarHidden(hideSystemNavBar, immersiveNavBarReveal, topicNavBarScroll)
     val darkTheme = when (themeMode) {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
@@ -567,16 +577,17 @@ fun RedfaceApp(intent: Intent?) {
             controller.isAppearanceLightStatusBars = !darkTheme
             controller.isAppearanceLightNavigationBars = !darkTheme
         }
-        // #518 — apply immersive mode whenever the preference changes, and re-assert it on ON_RESUME
-        // (returning from another app / the recents screen restores the bar without a recomposition).
-        // The transient-bars-by-swipe behaviour handles user swipes; hiding sets the bottom inset to 0
-        // so navigationBarsPadding() collapses cleanly, while a transient swipe-reveal does NOT change
-        // insets (no layout jump). Status bar and the in-app tab bar are untouched.
-        LaunchedEffect(hideSystemNavBar) {
-            applyImmersiveNavBar(window, view, hideSystemNavBar)
+        // #518 — apply immersive mode whenever the EFFECTIVE hide state changes (the master toggle, or a
+        // scroll-driven reveal request flipping, #518 follow-up), and re-assert it on ON_RESUME (returning
+        // from another app / the recents screen restores the bar without a recomposition). The
+        // transient-bars-by-swipe behaviour handles user swipes; hiding sets the bottom inset to 0 so
+        // navigationBarsPadding() collapses cleanly, while a transient swipe-reveal does NOT change insets
+        // (no layout jump). Status bar and the in-app tab bar are untouched.
+        LaunchedEffect(hideNavBarNow) {
+            applyImmersiveNavBar(window, view, hideNavBarNow)
         }
         LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-            applyImmersiveNavBar(window, view, hideSystemNavBar)
+            applyImmersiveNavBar(window, view, hideNavBarNow)
         }
     }
     RedfaceTheme(
@@ -757,6 +768,11 @@ fun RedfaceApp(intent: Intent?) {
         // routes makes the editor full-screen: its submit bar then sits at the window bottom and the IME
         // inset lands exactly on the keyboard. Bonus UX: no tab switching mid-compose (would drop the draft).
         val topRoute = backStacks.getValue(currentDestination).lastOrNull()
+        // #518 follow-up — only a topic screen reports scroll facts; clear them whenever the active top
+        // route is something else (other tab, editor, profile…) so a stale « at bottom » never keeps the
+        // nav bar revealed off-topic. Returning to a topic re-emits its current facts on first frame. The
+        // branch lives in the helper composable to keep RedfaceApp under detekt's complexity threshold.
+        ResetNavBarScrollOffTopic(topRoute) { topicNavBarScroll = NavBarScrollFacts() }
         val adaptiveType = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
         val navLayoutType = resolveNavLayoutType(topRoute.hidesNavigationSuite(), adaptiveType)
         // #529 — consume the bottom nav-bar inset for the content only under a bottom-bar layout
@@ -868,6 +884,14 @@ fun RedfaceApp(intent: Intent?) {
                                     TopicPollKey(cat, post),
                                     expanded,
                                 )
+                            },
+                        ),
+                        immersiveNavBarNavState = ImmersiveNavBarNavState(
+                            // #518 follow-up — observe scroll only when immersive is on AND a scroll-driven
+                            // mode is selected (helper keeps the && out of RedfaceApp's complexity budget).
+                            active = immersiveScrollReportActive(hideSystemNavBar, immersiveNavBarReveal),
+                            onScrollFacts = { atBottom, scrollingUp ->
+                                topicNavBarScroll = NavBarScrollFacts(atBottom, scrollingUp)
                             },
                         ),
                         onOpenProfile = { userId, pseudo, avatarUrl ->
@@ -1149,6 +1173,61 @@ private data class TopicPollNavState(
 )
 
 /**
+ * #518 follow-up — raw scroll facts of the active topic, reported UP so RedfaceApp (the single owner of
+ * the window navigation bar) can decide whether to reveal the hidden bar (cf. [shouldRevealNavBar]).
+ * Plain booleans, structural equality so re-reporting identical facts is a recomposition no-op.
+ */
+private data class NavBarScrollFacts(
+    val atBottom: Boolean = false,
+    val scrollingUp: Boolean = false,
+)
+
+/**
+ * #518 follow-up — immersive nav-bar reveal plumbing threaded into [RedfaceNavHost], same hoisted-bundle
+ * shape as [TopicScrollNavState]. [active] (immersive on AND mode != MANUAL) gates the topic screen's
+ * scroll observer so it is a no-op otherwise; [onScrollFacts] bubbles the facts up to the `var` in
+ * [RedfaceApp].
+ */
+private data class ImmersiveNavBarNavState(
+    val active: Boolean,
+    val onScrollFacts: (atBottom: Boolean, scrollingUp: Boolean) -> Unit,
+)
+
+/**
+ * #518 follow-up — effective « hide the system nav bar now » state: immersive on AND no active
+ * scroll-driven reveal ([shouldRevealNavBar]). Extracted so the `&&` stays out of RedfaceApp's
+ * cyclomatic-complexity budget.
+ */
+private fun immersiveNavBarHidden(
+    hideSystemNavBar: Boolean,
+    mode: ImmersiveNavBarReveal,
+    scroll: NavBarScrollFacts,
+): Boolean = hideSystemNavBar && !shouldRevealNavBar(mode, scroll.atBottom, scroll.scrollingUp)
+
+/**
+ * #518 follow-up — whether the topic screen should report its scroll facts: immersive on AND a
+ * scroll-driven reveal mode selected (MANUAL / immersive-off makes the reporter a no-op). Extracted
+ * to keep the `&&` out of RedfaceApp's complexity budget.
+ */
+private fun immersiveScrollReportActive(
+    hideSystemNavBar: Boolean,
+    mode: ImmersiveNavBarReveal,
+): Boolean = hideSystemNavBar && mode != ImmersiveNavBarReveal.MANUAL
+
+/**
+ * #518 follow-up — clears the reported scroll facts whenever the active top route is NOT a topic, so a
+ * stale « at bottom » can never keep the nav bar revealed off-topic. The `topRoute is TopicRoute` guard
+ * (and thus its branch) lives here rather than in RedfaceApp's body, keeping the latter under detekt's
+ * cyclomatic-complexity threshold.
+ */
+@Composable
+private fun ResetNavBarScrollOffTopic(topRoute: NavKey?, onReset: () -> Unit) {
+    LaunchedEffect(topRoute) {
+        if (topRoute !is TopicRoute) onReset()
+    }
+}
+
+/**
  * #291 — multi-quote selection, hoisted to RedfaceApp (same survival rationale as
  * [TopicScrollNavState]: a page change replaces the TopicRoute entry, so any state owned by the
  * topic screen dies with it). [numreponses] keeps SELECTION ORDER — the quotes are concatenated
@@ -1231,6 +1310,8 @@ private fun RedfaceNavHost(
     multiQuoteNavState: MultiQuoteNavState,
     // #465 — per-topic poll-expansion cache, same hoisting rationale (survives the per-page swap).
     topicPollNavState: TopicPollNavState,
+    // #518 follow-up — immersive nav-bar reveal: the topic reports scroll facts up through this bundle.
+    immersiveNavBarNavState: ImmersiveNavBarNavState,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     NavDisplay(
@@ -1844,6 +1925,11 @@ private fun RedfaceNavHost(
                             postSubmitOverflowLanding = true,
                         )
                     },
+                    // #518 follow-up — report scroll facts so RedfaceApp can reveal the hidden system
+                    // nav bar per the chosen mode. `active` is false (no-op) unless immersive + a
+                    // scroll-driven mode are on; the screen clears stale facts when inactive.
+                    immersiveNavBarRevealActive = immersiveNavBarNavState.active,
+                    onImmersiveNavBarScroll = immersiveNavBarNavState.onScrollFacts,
                 )
             }
             entry<PostEditorRoute> { route ->

@@ -23,6 +23,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
@@ -61,6 +62,21 @@ fun SettingsDisplayScreen(
         RedfaceSettingsChoice(FontScalePreference.S, stringResource(R.string.settings_display_font_scale_small)),
         RedfaceSettingsChoice(FontScalePreference.M, stringResource(R.string.settings_display_font_scale_medium)),
         RedfaceSettingsChoice(FontScalePreference.L, stringResource(R.string.settings_display_font_scale_large)),
+    )
+    // #518 follow-up — immersive nav-bar reveal behaviours.
+    val navBarRevealOptions = listOf(
+        RedfaceSettingsChoice(
+            ImmersiveNavBarReveal.MANUAL,
+            stringResource(R.string.settings_display_nav_bar_reveal_manual),
+        ),
+        RedfaceSettingsChoice(
+            ImmersiveNavBarReveal.AT_BOTTOM,
+            stringResource(R.string.settings_display_nav_bar_reveal_at_bottom),
+        ),
+        RedfaceSettingsChoice(
+            ImmersiveNavBarReveal.ON_SCROLL_UP,
+            stringResource(R.string.settings_display_nav_bar_reveal_on_scroll_up),
+        ),
     )
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -174,6 +190,22 @@ fun SettingsDisplayScreen(
             )
             if (state.immersiveBackButtonError) {
                 PreferencePersistError(R.string.settings_display_immersive_back_button_persist_failed)
+            }
+            // #518 follow-up — sous-option du plein écran : quand révéler la barre système masquée selon
+            // le défilement. Désactivée tant que le plein écran est off (en plus de sa propre garde).
+            Text(
+                text = stringResource(R.string.settings_display_nav_bar_reveal_intro),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            RedfaceSettingsChoiceGroup(
+                options = navBarRevealOptions,
+                selected = state.immersiveNavBarReveal,
+                onSelected = { viewModel.submit(SettingsIntent.ImmersiveNavBarRevealChanged(it)) },
+                enabled = state.hideSystemNavBar && state.canChangeImmersiveNavBarReveal,
+            )
+            if (state.immersiveNavBarRevealError) {
+                PreferencePersistError(R.string.settings_display_nav_bar_reveal_persist_failed)
             }
         }
     }

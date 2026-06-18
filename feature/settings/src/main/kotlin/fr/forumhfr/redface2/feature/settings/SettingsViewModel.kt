@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -123,6 +124,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(immersiveBackButton = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeImmersiveNavBarReveal().first() },
+            isLocked = { it.immersiveNavBarRevealTouchedLocally || it.isUpdatingImmersiveNavBarReveal },
+            apply = { state, value -> state.copy(immersiveNavBarReveal = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeConfirmBeforePosting().first() },
             isLocked = { it.confirmBeforePostingTouchedLocally || it.isUpdatingConfirmBeforePosting },
             apply = { state, value -> state.copy(confirmBeforePosting = value) },
@@ -232,6 +238,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FoldLongQuotesChanged -> updateFoldLongQuotes(intent.enabled)
             is SettingsIntent.HideSystemNavBarChanged -> updateHideSystemNavBar(intent.enabled)
             is SettingsIntent.ImmersiveBackButtonChanged -> updateImmersiveBackButton(intent.enabled)
+            is SettingsIntent.ImmersiveNavBarRevealChanged -> updateImmersiveNavBarReveal(intent.mode)
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
@@ -873,6 +880,36 @@ class SettingsViewModel @Inject constructor(
             },
             persist = userPreferencesRepository::setImmersiveBackButton,
         )
+    }
+
+    // #518 follow-up — enum preference; same bespoke optimistic-flip shape as updateDisplayDensity.
+    private fun updateImmersiveNavBarReveal(desired: ImmersiveNavBarReveal) {
+        val previous = _state.value.immersiveNavBarReveal
+        _state.update {
+            it.copy(
+                immersiveNavBarReveal = desired,
+                isUpdatingImmersiveNavBarReveal = true,
+                immersiveNavBarRevealError = false,
+                immersiveNavBarRevealTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setImmersiveNavBarReveal(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(immersiveNavBarReveal = desired, isUpdatingImmersiveNavBarReveal = false)
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            immersiveNavBarReveal = previous,
+                            isUpdatingImmersiveNavBarReveal = false,
+                            immersiveNavBarRevealError = true,
+                        )
+                    }
+                }
+        }
     }
 
     private fun updateMpUnreadBadge(desired: Boolean) {
