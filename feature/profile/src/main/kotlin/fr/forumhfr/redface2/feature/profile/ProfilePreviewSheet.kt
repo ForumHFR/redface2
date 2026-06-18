@@ -199,6 +199,31 @@ private fun ProfilePreviewContent(
         }
 
         Spacer(Modifier.height(8.dp))
+
+        // #509 — blacklist toggle, parity with the post menu entry. The sheet stays open so the label
+        // flips in place as immediate feedback; the post collapse to its « masqué » placeholder shows
+        // once the sheet is dismissed. Shown regardless of the load mode (the pseudo is known even while
+        // the profile loads), but HIDDEN on one's own profile (blacklisting oneself is pointless — same
+        // guard as the post menu's `isOwnPost`), and DISABLED while a write is in flight (double-tap).
+        if (!state.isOwnProfile) {
+            OutlinedButton(
+                onClick = { onIntent(ProfileIntent.ToggleBlocked) },
+                enabled = !state.isUpdatingBlocked,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    stringResource(
+                        if (state.isBlocked) {
+                            R.string.profile_action_unblock_user
+                        } else {
+                            R.string.profile_action_block_user
+                        },
+                    ),
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+        }
     }
 }
 

@@ -24,6 +24,9 @@
     <string name="profile_action_open_full">Voir le profil complet</string>
     <string name="profile_action_retry">Réessayer</string>
     <string name="profile_action_recent_posts">Derniers messages</string>
+    <!-- #509 — blacklist toggle, parity with the post menu « Masquer cet utilisateur ». -->
+    <string name="profile_action_block_user">Masquer cet utilisateur</string>
+    <string name="profile_action_unblock_user">Ne plus masquer cet utilisateur</string>
 
     <!-- Error messages -->
     <string name="profile_error_load_failed">Impossible de charger le profil.</string>

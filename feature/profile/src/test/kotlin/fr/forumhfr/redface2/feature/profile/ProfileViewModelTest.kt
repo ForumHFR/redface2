@@ -1,23 +1,32 @@
 package fr.forumhfr.redface2.feature.profile
 
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.profile.ProfileRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.UserProfile
+import fr.forumhfr.redface2.core.model.blacklist.BlacklistEntry
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -36,6 +45,7 @@ import org.junit.Test
 class ProfileViewModelTest {
 
     private lateinit var repository: ProfileRepository
+    private lateinit var blacklist: FakeBlacklistRepository
 
     @Before
     fun setUp() {
@@ -43,6 +53,7 @@ class ProfileViewModelTest {
         // synchronously, matching the test pattern used in FlagsViewModelTest.
         Dispatchers.setMain(UnconfinedTestDispatcher())
         repository = mockk()
+        blacklist = FakeBlacklistRepository()
     }
 
     @After
@@ -64,8 +75,11 @@ class ProfileViewModelTest {
         userId: Int = 54596,
         pseudo: String = "XaTriX",
         avatarUrl: String? = null,
+        authState: AuthState = AuthState.Anonymous,
     ): ProfileViewModel = ProfileViewModel(
         profileRepository = repository,
+        blacklistRepository = blacklist,
+        authRepository = mockk { every { observeAuthState() } returns MutableStateFlow(authState) },
         userId = userId,
         pseudoHint = pseudo,
         avatarUrlHint = avatarUrl,
@@ -218,6 +232,79 @@ class ProfileViewModelTest {
     }
 
     @Test
+    fun `ToggleBlocked blocks then unblocks the previewed user and isBlocked tracks the store`() = runTest {
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+
+        // UnconfinedTestDispatcher runs the toggle's launch{} to completion before onIntent returns,
+        // so the settled state is readable directly (the intermediate isUpdatingBlocked=true emission
+        // would otherwise trip a strict awaitItem sequence).
+        val vm = createViewModel(pseudo = "XaTriX")
+        assertFalse("Not blocked initially", vm.state.value.isBlocked)
+
+        vm.onIntent(ProfileIntent.ToggleBlocked)
+        assertTrue("Blocked after first toggle", vm.state.value.isBlocked)
+        assertTrue("Store holds the canonical pseudo", blacklist.isBlocked("XaTriX"))
+        assertFalse("Write settled", vm.state.value.isUpdatingBlocked)
+
+        vm.onIntent(ProfileIntent.ToggleBlocked)
+        assertFalse("Unblocked after second toggle", vm.state.value.isBlocked)
+        assertFalse("Store cleared", blacklist.isBlocked("XaTriX"))
+    }
+
+    @Test
+    fun `isBlocked is true on first frame when the user is already blacklisted`() = runTest {
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+        blacklist.block("XaTriX")
+
+        val vm = createViewModel(pseudo = "XaTriX")
+
+        vm.state.test {
+            assertTrue("Already-blocked user renders the unblock label from frame one", awaitItem().isBlocked)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `the blacklist toggle is hidden on one's own profile`() = runTest {
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+
+        // Same numeric id AND pseudo as the logged-in user → own profile.
+        val vm = createViewModel(
+            pseudo = "XaTriX",
+            authState = AuthState.Authenticated(pseudo = "XaTriX", userId = 54596),
+        )
+
+        assertTrue("own profile detected", vm.state.value.isOwnProfile)
+        assertFalse("toggle hidden / not actionable on own profile", vm.state.value.canToggleBlocked)
+    }
+
+    @Test
+    fun `own profile is matched on the canonical pseudo when the auth userId is missing`() = runTest {
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+
+        // Older session without md_id → userId null, but the pseudo still matches (case-insensitive).
+        val vm = createViewModel(
+            pseudo = "XaTriX",
+            authState = AuthState.Authenticated(pseudo = "xatrix", userId = null),
+        )
+
+        assertTrue(vm.state.value.isOwnProfile)
+    }
+
+    @Test
+    fun `another user's profile is not flagged as own`() = runTest {
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+
+        val vm = createViewModel(
+            pseudo = "XaTriX",
+            authState = AuthState.Authenticated(pseudo = "SomeoneElse", userId = 999),
+        )
+
+        assertFalse(vm.state.value.isOwnProfile)
+        assertTrue("toggle available on another user's profile", vm.state.value.canToggleBlocked)
+    }
+
+    @Test
     fun `rapid Retry taps - only the last result is observable in state`() = runTest {
         // Review feedback I8: when the user taps Retry multiple times before the previous
         // attempt completes, only the freshest result should land in the state — otherwise
@@ -248,5 +335,31 @@ class ProfileViewModelTest {
             assertEquals(dummyProfile, lastState.mode.profile)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+}
+
+/**
+ * In-memory [BlacklistRepository] mirroring the real repo's canonical semantics (block/unblock match on
+ * [canonicalizePseudo]) so the profile sheet's toggle is exercised against the same normalisation the
+ * post menu uses. Backed by a [MutableStateFlow] so `observeBlockedCanonicals` emits its current value
+ * immediately, as the production contract requires.
+ */
+private class FakeBlacklistRepository : BlacklistRepository {
+    private val canonicals = MutableStateFlow<Set<String>>(emptySet())
+
+    override fun observeEntries(): Flow<List<BlacklistEntry>> =
+        canonicals.map { set -> set.map { BlacklistEntry(canonical = it, display = it, addedAt = 0L) } }
+
+    override fun observeBlockedCanonicals(): Flow<Set<String>> = canonicals
+
+    override suspend fun isBlocked(pseudo: String): Boolean =
+        canonicalizePseudo(pseudo) in canonicals.value
+
+    override suspend fun block(pseudo: String) {
+        canonicals.value = canonicals.value + canonicalizePseudo(pseudo)
+    }
+
+    override suspend fun unblock(pseudo: String) {
+        canonicals.value = canonicals.value - canonicalizePseudo(pseudo)
     }
 }
