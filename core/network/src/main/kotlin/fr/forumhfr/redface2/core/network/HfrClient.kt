@@ -306,6 +306,30 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * MPStorage write (#6, ADR-014 §4) — POST the edited FIRST post of the dedicated storage MP to
+     * `bdd.php?config=hfr.inc`, the same endpoint as [submitEditPost]. The ONLY wire difference is
+     * that the storage post lives under `cat=prive`, so the [formBody] carries `cat=prive` as a
+     * **String** (the public edit flow passes `cat` as an Int) — that is why this is a distinct
+     * method rather than a reuse of [submitEditPost] : the typed public path cannot express `prive`.
+     * Everything else (`hash_check`, `verifrequet`, `content_form`, `numreponse`, `sujet`, the
+     * preserved hidden fields) is shaped identically by the repository.
+     *
+     * NOT OBSERVED LIVE : the `bdd.php cat=prive` write contract has never been captured (no device
+     * round-trip). The caller GUARDS this — it is reached only via the repository's module-internal,
+     * test-only POST path (never from app/prod code). Same HTTP-200-with-body-text contract as the reply
+     * / edit flows ; the response
+     * (when ever exercised) is classified by `ReplySubmitResponseParser`. `hash_check` is never logged.
+     */
+    suspend fun submitPrivateMessageEdit(formBody: FormBody): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("bdd.php")
+            .addQueryParameter("config", "hfr.inc")
+            .build()
+        val request = Request.Builder().url(url).post(formBody).build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Phase 2E (#149) — GET the HFR new-topic form for [cat] / [entrySubcat].
      * `entrySubcat` is nullable because the user can land on the create-topic
      * composer either with a sub-category chip selected (`entrySubcat = 550`)

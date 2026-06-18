@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageDocument
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageResult
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageWriteResult
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageListParser
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageThreadParser
@@ -24,6 +25,7 @@ import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -74,6 +76,7 @@ class DefaultMpStorageRepositoryTest {
             threadParser = PrivateMessageThreadParser(),
             replyFormParser = ReplyFormParser(),
             storageParser = storageParser,
+            envelopeWriter = MpStorageEnvelopeWriter(),
             locationStore = locationStore,
             authRepository = mockk<AuthRepository> {
                 every { observeAuthState() } returns MutableStateFlow(authState)
@@ -206,6 +209,143 @@ class DefaultMpStorageRepositoryTest {
         assertEquals("9100200", edit.queryParameter("post"))
         assertEquals("1980664234", edit.queryParameter("numreponse"))
     }
+
+    // --- WRITE path (#6, ADR-014 §4) — GUARDED, NOT OBSERVED LIVE ---------------------------------
+
+    @Test
+    fun `writeBackFlag (public path) prepares the mutated body and sends NO POST`() = runTest {
+        val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [] } } ], "sourceName": "DTCloud" }"""
+        repository = buildRepository(
+            storageParser = mockk {
+                every { parse(any()) } returns Result.success(
+                    MpStorageDocument(sourceName = "DTCloud", mpFlags = emptyList(), rawEnvelope = raw),
+                )
+            },
+        )
+        locationStore.saved[OWNER] = MpStorageLocation(threadId = 9100200, numreponse = 1980664234)
+        // Only the edit-form GET is enqueued — a dry run must not POST anything.
+        server.enqueue(MockResponse().setBody(fixture("write_edit_form_test_post.html")))
+
+        val result = repository.writeBackFlag(MpStorageFlagEntry(threadId = 777, page = 4, numreponse = 9, uri = "/u"))
+
+        val prepared = result as MpStorageWriteResult.Prepared
+        assertEquals(false, prepared.posted)
+        assertTrue("the new flag must be in the prepared body", prepared.body.contains("\"post\":777"))
+        // Exactly one request: the GET of the edit form. No POST hit the wire.
+        assertEquals(1, server.requestCount)
+        assertEquals("GET", server.takeRequest().method)
+    }
+
+    @Test
+    fun `writeBackFlagLive POSTs bdd_php with cat=prive and the preserved hidden fields`() = runTest {
+        val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [] } } ] }"""
+        repository = buildRepository(
+            storageParser = mockk {
+                every { parse(any()) } returns Result.success(
+                    MpStorageDocument(sourceName = null, mpFlags = emptyList(), rawEnvelope = raw),
+                )
+            },
+        )
+        locationStore.saved[OWNER] = MpStorageLocation(threadId = 9100200, numreponse = 2784595)
+        server.enqueue(MockResponse().setBody(fixture("write_edit_form_test_post.html"))) // GET edit form
+        server.enqueue(MockResponse().setBody("<html><body>ok</body></html>")) // POST bdd.php
+
+        // writeBackFlagLive is the module-internal, TEST-ONLY POST path (not on the public interface).
+        val result = repository.writeBackFlagLive(
+            MpStorageFlagEntry(threadId = 42, page = 2, numreponse = 5, uri = null),
+        )
+
+        val prepared = result as MpStorageWriteResult.Prepared
+        assertTrue("the live POST branch reports posted = true", prepared.posted)
+        assertEquals(2, server.requestCount)
+
+        server.takeRequest() // skip the GET
+        val post = server.takeRequest()
+        assertEquals("POST", post.method)
+        assertEquals("bdd.php", requireNotNull(post.requestUrl).pathSegments.first())
+        val body = formFields(post.body.readUtf8())
+        // The whole point of submitPrivateMessageEdit : cat is the String "prive", not an Int.
+        assertEquals("prive", body["cat"])
+        assertEquals("9100200", body["post"])
+        assertEquals("2784595", body["numreponse"])
+        assertEquals("", body["numrep"])
+        assertEquals("1100", body["verifrequet"])
+        // content_form carries the mutated JSON, not BBCode.
+        assertTrue(body["content_form"]!!.contains("\"post\":42"))
+        // hash_check + sujet come from the parsed edit form; hidden fields preserved.
+        assertEquals("REDACTED_HASH_CHECK", body["hash_check"])
+        assertEquals("Redface 2 — PHASE 2 @ ALPHA", body["sujet"])
+        // password / delete are hard-denied — never resent.
+        assertNull("password must never be resent", body["password"])
+        assertNull("the delete checkbox must never be resent", body["delete"])
+    }
+
+    @Test
+    fun `writeBackFlag returns TargetNotFound when no storage MP exists and writes nothing`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("mp_storage_inbox_no_hit.html")))
+
+        val result = repository.writeBackFlag(MpStorageFlagEntry(threadId = 1, page = 1, numreponse = 1, uri = null))
+
+        assertEquals(MpStorageWriteResult.TargetNotFound, result)
+        // Only the inbox scan happened — anti-doublon: NEVER create a fresh document (ADR-014 §3).
+        assertEquals(1, server.requestCount)
+        assertNull(locationStore.saved[OWNER])
+    }
+
+    @Test
+    fun `writeBackFlag returns TargetNotFound on an anonymous session without any request`() = runTest {
+        repository = buildRepository(authState = AuthState.Anonymous)
+
+        val result = repository.writeBackFlag(MpStorageFlagEntry(threadId = 1, page = 1, numreponse = 1, uri = null))
+
+        assertEquals(MpStorageWriteResult.TargetNotFound, result)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `writeBackFlag returns TargetUnreadable when the located document is not a v01 envelope`() = runTest {
+        // The real edit-form fixture's content_form is plain BBCode — not a readable v0.1 envelope.
+        // Per ADR-014 §3 this is surfaced, NEVER repaired / overwritten with a default.
+        locationStore.saved[OWNER] = MpStorageLocation(threadId = 9100200, numreponse = 2784595)
+        server.enqueue(MockResponse().setBody(fixture("write_edit_form_test_post.html")))
+
+        val result = repository.writeBackFlag(MpStorageFlagEntry(threadId = 1, page = 1, numreponse = 1, uri = null))
+
+        assertEquals(MpStorageWriteResult.TargetUnreadable, result)
+        // GET the form only — no POST: an unreadable target must never be written over.
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `writeBackFlag returns TooLarge when the mutated body exceeds the 256 KiB cap`() = runTest {
+        val filler = "x".repeat(260 * 1024)
+        val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [] } } ], "blob": "$filler" }"""
+        repository = buildRepository(
+            storageParser = mockk {
+                every { parse(any()) } returns Result.success(
+                    MpStorageDocument(sourceName = null, mpFlags = emptyList(), rawEnvelope = raw),
+                )
+            },
+        )
+        locationStore.saved[OWNER] = MpStorageLocation(threadId = 9100200, numreponse = 2784595)
+        server.enqueue(MockResponse().setBody(fixture("write_edit_form_test_post.html")))
+
+        val result = repository.writeBackFlag(MpStorageFlagEntry(threadId = 1, page = 1, numreponse = 1, uri = null))
+
+        assertTrue(result is MpStorageWriteResult.TooLarge)
+        // The oversize body is never POSTed (fail-closed): only the GET happened.
+        assertEquals(1, server.requestCount)
+    }
+
+    /** Decodes an `application/x-www-form-urlencoded` POST body into a field map (absent field ⇒ null). */
+    private fun formFields(body: String): Map<String, String> =
+        body.split("&")
+            .filter { it.isNotEmpty() }
+            .associate { pair ->
+                val name = java.net.URLDecoder.decode(pair.substringBefore("="), "UTF-8")
+                val value = java.net.URLDecoder.decode(pair.substringAfter("=", ""), "UTF-8")
+                name to value
+            }
 
     private fun fixture(name: String): String {
         val stream = requireNotNull(
