@@ -820,6 +820,31 @@ class TopicPageParserTest {
         }
     }
 
+    // ─── intra-topic search form (#546) ──────────────────────────────────────────
+
+    @Test
+    fun `parsed topic surfaces the transsearch form with a usable hash_check when authenticated`() {
+        // Chantier C (#546) — the authenticated multipage capture carries a non-empty hash_check in
+        // its transsearch form, so the parsed Topic exposes a searchForm with canSearch=true.
+        val topic = parser.parse(fixture("topic_page_multipage.html"))
+
+        val form = requireNotNull(topic.searchForm)
+        assertEquals(21748, form.topicId)
+        assertEquals(23, form.cat)
+        assertEquals(520051, form.firstnum)
+        assertTrue("authenticated page ⇒ intra-topic search is available", form.canSearch)
+    }
+
+    @Test
+    fun `parsed topic searchForm is present but not usable on a logged-out page`() {
+        // Logged-out capture : the form ships with an empty hash_check, so canSearch=false (the
+        // affordance stays disabled until a live authenticated re-fetch).
+        val topic = parser.parse(fixture("topic_khakha_page_1.html"))
+
+        val form = requireNotNull(topic.searchForm)
+        assertFalse("empty hash_check ⇒ search not available", form.canSearch)
+    }
+
     private fun fixture(name: String): String {
         return requireNotNull(javaClass.getResource("/fixtures/$name")) {
             "Fixture not found: $name"

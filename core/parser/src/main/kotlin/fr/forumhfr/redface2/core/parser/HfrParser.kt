@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.parser
 
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.TopicSearchForm
 import fr.forumhfr.redface2.core.model.UserProfile
 import fr.forumhfr.redface2.core.parser.profile.ProfileParser
 
@@ -9,8 +10,17 @@ class HfrParser(
     private val topicPageParser: TopicPageParser = TopicPageParser(),
     private val bbcodeContentParser: BbcodeContentParser = BbcodeContentParser(),
     private val profileParser: ProfileParser = ProfileParser(),
+    private val topicSearchFormParser: TopicSearchFormParser = TopicSearchFormParser(),
 ) {
     fun parseTopicPage(html: String): Topic = topicPageParser.parse(html)
+
+    /**
+     * Chantier C (#546) — extracts the intra-topic search form (`transsearch.php`) hidden fields
+     * (`hash_check`, `post`, `cat`, `firstnum`, …) from a loaded topic page so the data layer can
+     * build the search POST. Returns `null` when the page carries no usable search form. The
+     * `transsearch` RESPONSE is itself a topic page and is re-parsed with [parseTopicPage].
+     */
+    fun parseTopicSearchForm(html: String): TopicSearchForm? = topicSearchFormParser.parse(html)
 
     /**
      * Phase 2 finish (#208) — parses a HFR user profile page (`/hfr/profil-{userId}.htm`)

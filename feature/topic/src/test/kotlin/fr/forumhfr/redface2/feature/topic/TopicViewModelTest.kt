@@ -16,6 +16,9 @@ import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
+import fr.forumhfr.redface2.core.model.TopicSearchForm
+import fr.forumhfr.redface2.core.model.TopicSearchRequest
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
@@ -33,6 +36,7 @@ import java.net.UnknownHostException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,6 +46,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -776,6 +781,173 @@ class TopicViewModelTest {
         }
     }
 
+    // ─── intra-topic search (#546) ───────────────────────────────────────────────
+
+    @Test
+    fun `OpenSearch is a no-op when the loaded page exposes no usable search form`() = runTest {
+        // No searchForm ⇒ canSearchInTopic=false ⇒ the bar must not open.
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+
+        assertEquals(false, viewModel.state.value.search.isActive)
+    }
+
+    @Test
+    fun `SubmitSearch posts the parsed form plus criteria and renders the returned page`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val resultTopic = fakeTopic(page = 1, totalPages = 1, title = "filtered", searchForm = form)
+        val searchRepo = FakeTopicSearchRepository(result = resultTopic)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        assertEquals(true, viewModel.state.value.search.isActive)
+        viewModel.send(TopicIntent.SearchWordChanged("betatest"))
+        viewModel.send(TopicIntent.SearchPseudoChanged("XaTriX"))
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        assertEquals(1, searchRepo.requests.size)
+        val request = searchRepo.requests.single()
+        assertEquals("betatest", request.word)
+        assertEquals("XaTriX", request.spseudo)
+        assertEquals(true, request.onlyMatches)
+        assertEquals(form, request.form)
+        assertEquals(null, request.currentNum)
+        val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("filtered", loaded.topic.title)
+        assertEquals(TopicSearchStatus.Done, viewModel.state.value.search.status)
+    }
+
+    @Test
+    fun `SubmitSearch does not POST when neither term nor author is set`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val searchRepo = FakeTopicSearchRepository(result = fakeTopic(1, 1))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 1, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        assertEquals(0, searchRepo.requests.size)
+    }
+
+    @Test
+    fun `SubmitSearch failure keeps the current page and emits SearchFailed`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val searchRepo = FakeTopicSearchRepository(error = IllegalStateException("boom"))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                // A single flow: the failure path never switches to Mode.Loading and never reloads the
+                // page — the page on screen is kept as-is, so observeTopicPage is collected only once.
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 3, title = "loaded", searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.OpenSearch)
+            viewModel.send(TopicIntent.SearchWordChanged("x"))
+            viewModel.send(TopicIntent.SubmitSearch)
+
+            assertEquals(TopicEffect.SearchFailed, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        // The page the user was reading stays on screen (never stranded on Loading, never reloaded).
+        val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("loaded", loaded.topic.title)
+        // #546 finding #4 — the search bar reflects the failure and stays open so the user can retry
+        // or close it; the status settles on Error rather than back to Idle / Loading.
+        assertEquals(TopicSearchStatus.Error, viewModel.state.value.search.status)
+        assertTrue(
+            "the search bar stays open after a failure so the user can retry",
+            viewModel.state.value.search.isActive,
+        )
+    }
+
+    @Test
+    fun `a stale SubmitSearch reply never clobbers a more recent normal page (#546)`() = runTest {
+        // #546 finding #1 (latest-wins) — a search POST is on the wire when the user pulls to refresh.
+        // The refresh (a normal-load path) bumps the search generation, so when the slow transsearch
+        // reply finally lands it must be DROPPED, never overwrite the freshly-refreshed page.
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val loaded = fakeTopic(page = 1, totalPages = 3, title = "loaded", searchForm = form)
+        val refreshed = fakeTopic(page = 1, totalPages = 3, title = "refreshed", searchForm = form)
+        // The (now stale) search result, would-be title if the guard were missing.
+        val staleSearch = fakeTopic(page = 1, totalPages = 1, title = "stale-search", searchForm = form)
+        val searchRepo = FakeTopicSearchRepository(result = staleSearch)
+        val gate = CompletableDeferred<Unit>()
+        searchRepo.gate = { gate.await() }
+        // Non-cooperative wait: cancelling searchJob (the refresh taking over) must NOT cut the await,
+        // so the fake truly DELIVERS staleSearch after the refresh. This is what forces the result
+        // through the `generation` guard — with a cancellable await the reply would never be produced
+        // and the test would stay green even if the guard were deleted.
+        searchRepo.ignoreCancellation = true
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SubmitSearch) // suspends in the gate → search in flight
+        assertEquals(TopicSearchStatus.Loading, viewModel.state.value.search.status)
+
+        // A normal-load path takes over while the search is still on the wire.
+        viewModel.send(TopicIntent.Refresh)
+        assertEquals(
+            "the refresh wins, not the stale search",
+            "refreshed",
+            (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title,
+        )
+        // Fix 1 — the takeover clears the dangling Loading spinner instead of leaving it stuck (the
+        // search reply will be guarded out, so submitSearch never writes its own Done/Error status).
+        assertEquals(
+            "the dangling search spinner is cleared by the takeover, not left spinning",
+            TopicSearchStatus.Idle,
+            viewModel.state.value.search.status,
+        )
+
+        // Release the slow search reply: it IS produced (non-cancellable await) but the generation
+        // moved on, so the guard discards it. Without `generation != searchGeneration` the line below
+        // would clobber the refreshed page with "stale-search" and flip the status back to Done.
+        gate.complete(Unit)
+        val finalMode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("the stale search reply must not clobber the refreshed page", "refreshed", finalMode.topic.title)
+        // The stale reply must not rewrite the search status either (it stays at the takeover's Idle,
+        // never re-flipped to Done by the dropped reply).
+        assertEquals(
+            "the dropped stale reply must not rewrite the search status",
+            TopicSearchStatus.Idle,
+            viewModel.state.value.search.status,
+        )
+    }
+
     @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun topicViewModel(
         request: TopicRequest,
@@ -784,6 +956,7 @@ class TopicViewModelTest {
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
         deletePostRepository: DeletePostRepository = FakeDeletePostRepository(),
         blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
+        topicSearchRepository: TopicSearchRepository = FakeTopicSearchRepository(),
     ): TopicViewModel = TopicViewModel(
         request = request,
         topicRepository = topicRepository,
@@ -791,6 +964,7 @@ class TopicViewModelTest {
         userPreferencesRepository = userPreferencesRepository,
         deletePostRepository = deletePostRepository,
         blacklistRepository = blacklistRepository,
+        topicSearchRepository = topicSearchRepository,
     )
 
     private fun topicRequest(
@@ -1285,12 +1459,14 @@ class TopicViewModelTest {
         )
     }
 
+    @Suppress("LongParameterList") // test builder mirroring the Topic model's fields, all defaulted.
     private fun fakeTopic(
         page: Int,
         totalPages: Int,
         title: String = "fake",
         posts: List<Post> = emptyList(),
         subcat: Int = SAMPLE_SUBCAT,
+        searchForm: TopicSearchForm? = null,
     ): Topic = Topic(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
@@ -1304,6 +1480,7 @@ class TopicViewModelTest {
         // read-only topic (the previous default was the Topic model's `false`, never asserted here).
         canReply = true,
         poll = null,
+        searchForm = searchForm,
     )
 
     private fun fakePost(numreponse: Int, isEditable: Boolean = false, author: String = "tester"): Post = Post(
@@ -1428,6 +1605,39 @@ private class FakeBlacklistRepository(
 
     override suspend fun unblock(pseudo: String) {
         canonicals.value = canonicals.value - canonicalizePseudo(pseudo)
+    }
+}
+
+/**
+ * Chantier C (#546) — intra-topic search fake. Returns [result] on `searchInTopic`, or throws
+ * [error] when set, and records the request for assertions.
+ */
+private class FakeTopicSearchRepository(
+    private val result: Topic? = null,
+    private val error: Throwable? = null,
+) : TopicSearchRepository {
+    val requests = mutableListOf<TopicSearchRequest>()
+
+    /**
+     * Optional gate to suspend inside `searchInTopic` so a test can hold the `transsearch` reply
+     * in flight, drive a competing normal-load path, then release it to prove the stale-write guard.
+     */
+    var gate: (suspend () -> Unit)? = null
+
+    /**
+     * When `true`, the [gate] wait is run under [NonCancellable] so that cancelling [searchJob] (a
+     * normal-load path taking over) does NOT short-circuit the await. The fake then truly returns its
+     * (now stale) [result] AFTER the competing refresh — the only setup that actually exercises the
+     * `generation != searchGeneration` guard in `submitSearch`. Without this the await is cancellable,
+     * the reply is never produced, and the test would pass even with the guard removed.
+     */
+    var ignoreCancellation: Boolean = false
+
+    override suspend fun searchInTopic(request: TopicSearchRequest): Topic {
+        requests += request
+        gate?.let { g -> if (ignoreCancellation) withContext(NonCancellable) { g() } else g() }
+        error?.let { throw it }
+        return result ?: error("FakeTopicSearchRepository has no result configured")
     }
 }
 
