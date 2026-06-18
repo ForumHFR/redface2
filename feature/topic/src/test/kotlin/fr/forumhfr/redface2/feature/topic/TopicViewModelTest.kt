@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.topic
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
@@ -749,6 +750,30 @@ class TopicViewModelTest {
         }
     }
 
+    @Test
+    fun `SetAuthorBlocked intent blocks then unblocks the author live`() = runTest {
+        val topic = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = FakeBlacklistRepository(),
+        )
+
+        viewModel.state.test {
+            assertEquals(emptySet<Int>(), assertMode<TopicUiState.Mode.Loaded>(awaitItem()).hiddenNumreponses)
+            viewModel.send(TopicIntent.SetAuthorBlocked("Alice", blocked = true))
+            assertEquals(setOf(100), assertMode<TopicUiState.Mode.Loaded>(awaitItem()).hiddenNumreponses)
+            viewModel.send(TopicIntent.SetAuthorBlocked("Alice", blocked = false))
+            assertEquals(emptySet<Int>(), assertMode<TopicUiState.Mode.Loaded>(awaitItem()).hiddenNumreponses)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun topicViewModel(
         request: TopicRequest,
@@ -1391,14 +1416,16 @@ private class FakeBlacklistRepository(
 
     override fun observeBlockedCanonicals(): Flow<Set<String>> = canonicals
 
-    override suspend fun isBlocked(pseudo: String): Boolean = pseudo in canonicals.value
+    // Mirror the real repository: the stored/observed keys are canonical, so block/unblock/isBlocked
+    // canonicalise their raw-pseudo argument (a post author like "Alice" → "alice").
+    override suspend fun isBlocked(pseudo: String): Boolean = canonicalizePseudo(pseudo) in canonicals.value
 
     override suspend fun block(pseudo: String) {
-        canonicals.value = canonicals.value + pseudo
+        canonicals.value = canonicals.value + canonicalizePseudo(pseudo)
     }
 
     override suspend fun unblock(pseudo: String) {
-        canonicals.value = canonicals.value - pseudo
+        canonicals.value = canonicals.value - canonicalizePseudo(pseudo)
     }
 }
 

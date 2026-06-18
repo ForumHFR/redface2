@@ -813,6 +813,9 @@ internal fun TopicContent(
                                 listState = listState,
                                 multiQuoteSelection = multiQuoteSelection,
                                 onToggleMultiQuote = onToggleMultiQuote,
+                                onSetAuthorBlocked = { author, blocked ->
+                                    onIntent(TopicIntent.SetAuthorBlocked(author, blocked))
+                                },
                                 pollManualExpanded = pollManualExpanded,
                                 onPollExpansionChanged = onPollExpansionChanged,
                             )
@@ -852,6 +855,8 @@ private fun TopicLoadedContent(
     // #291 — selection state + toggle for the post menu's multi-quote entry.
     multiQuoteSelection: List<Int> = emptyList(),
     onToggleMultiQuote: (numreponse: Int) -> Unit = {},
+    // #509 — block/unblock a post's author from the post menu (blacklist).
+    onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit = { _, _ -> },
     // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) + the
     // callback recording a tap on the poll card. Threaded down to the header card's poll.
     pollManualExpanded: Boolean? = null,
@@ -1120,6 +1125,15 @@ private fun TopicLoadedContent(
                 { onToggleMultiQuote(post.numreponse) }
             } else {
                 null
+            },
+            // #509 — a post reachable through the menu is either not blocked, or blocked-but-revealed;
+            // either way `numreponse in hiddenNumreponses` tells whether the author is blacklisted, so
+            // the entry flips between Masquer / Ne plus masquer. Hidden for the user's own posts.
+            authorBlocked = post.numreponse in hiddenNumreponses,
+            onToggleBlockAuthor = if (post.isOwnPost) {
+                null
+            } else {
+                { onSetAuthorBlocked(post.author, post.numreponse !in hiddenNumreponses) }
             },
         )
     }
