@@ -38,6 +38,57 @@ class PostMediaDisplayPolicyTest {
         assertEquals(PostMediaDisplayPolicy.persoSmiley, PostMediaDisplayPolicy.smileyBox(variant))
     }
 
+    // #249 / #249 follow-up — reserved block-image height: exact aspect at full width, clamped to the
+    // [blockImageMinHeight, blockImageMaxHeight] slot, null when the size is unknown/invalid.
+    @Test
+    fun `reserved height is the aspect-exact height at full width when within the slot`() {
+        // 400 dp wide, 4:3 image → 300 dp, inside [160, 480].
+        val height = PostMediaDisplayPolicy.reservedBlockImageHeight(
+            measured = PixelSize(width = 400, height = 300),
+            availableWidthDp = 400f,
+        )
+        assertEquals(300.dp, height)
+    }
+
+    @Test
+    fun `reserved height clamps a tall portrait to the max slot`() {
+        // 400 dp wide, very tall (1:3) → 1200 dp raw → clamped to 480 dp (letterbox is the intended cap).
+        val height = PostMediaDisplayPolicy.reservedBlockImageHeight(
+            measured = PixelSize(width = 400, height = 1200),
+            availableWidthDp = 400f,
+        )
+        assertEquals(PostMediaDisplayPolicy.blockImageMaxHeight, height)
+    }
+
+    @Test
+    fun `reserved height clamps a very wide image to the min slot`() {
+        // 400 dp wide, very flat (10:1) → 40 dp raw → floored to 160 dp.
+        val height = PostMediaDisplayPolicy.reservedBlockImageHeight(
+            measured = PixelSize(width = 400, height = 40),
+            availableWidthDp = 400f,
+        )
+        assertEquals(PostMediaDisplayPolicy.blockImageMinHeight, height)
+    }
+
+    @Test
+    fun `reserved height is null when the size is unknown or invalid`() {
+        assertEquals(null, PostMediaDisplayPolicy.reservedBlockImageHeight(measured = null, availableWidthDp = 400f))
+        assertEquals(
+            null,
+            PostMediaDisplayPolicy.reservedBlockImageHeight(
+                measured = PixelSize(width = 0, height = 300),
+                availableWidthDp = 400f,
+            ),
+        )
+        assertEquals(
+            null,
+            PostMediaDisplayPolicy.reservedBlockImageHeight(
+                measured = PixelSize(width = 400, height = 300),
+                availableWidthDp = 0f,
+            ),
+        )
+    }
+
     @Test
     fun `builtin and perso buckets are distinct`() {
         // Sanity check: if these collapse to the same instance, the parser dispatch becomes
