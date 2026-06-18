@@ -134,14 +134,26 @@ class DefaultMpStorageRepository @Inject constructor(
      * ([MpStorageEnvelopeWriter] — third-party namespaces preserved), enforces the
      * [MpStorageRepository.MAX_CONTENT_FORM_BYTES] cap, and builds the `bdd.php cat=prive` POST body.
      *
-     * GUARD : [dryRun] defaults to `true` → the POST is NEVER sent (the body is built & validated only).
-     * Nothing in the app calls this with `dryRun = false`, and there is no UI trigger — the
-     * `bdd.php cat=prive` write contract is unconfirmed (device down). A located-but-unreadable document
-     * or a [MpStorageWriteResult.TargetNotFound] is surfaced, NEVER repaired / created (ADR-014 §3 :
-     * creating a fresh document would fork the cross-userscript storage).
+     * GUARD (structural, Codex review) : the public [writeBackFlag] runs with [post] = `false` → the POST is
+     * NEVER sent (body built & validated only). The live POST is reachable ONLY through the module-internal,
+     * test-only [writeBackFlagLive] — it is NOT on the public interface, so app/prod code cannot flip it. The
+     * `bdd.php cat=prive` write contract is unconfirmed (device down). A located-but-unreadable document or a
+     * [MpStorageWriteResult.TargetNotFound] is surfaced, NEVER repaired / created (ADR-014 §3 : creating a
+     * fresh document would fork the cross-userscript storage).
      */
+    override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
+        runWriteBack(entry, post = false)
+
+    /**
+     * Module-INTERNAL, TEST-ONLY live POST path — deliberately NOT on the [MpStorageRepository] interface
+     * so app/prod code cannot reach it (Codex review : the guard is structural, not a default parameter).
+     * The `bdd.php cat=prive` write contract is unconfirmed — NOT OBSERVED LIVE.
+     */
+    internal suspend fun writeBackFlagLive(entry: MpStorageFlagEntry): MpStorageWriteResult =
+        runWriteBack(entry, post = true)
+
     @Suppress("ReturnCount") // Guard clauses (auth / not-found / unreadable / oversize) + the prepared return.
-    override suspend fun writeBackFlag(entry: MpStorageFlagEntry, dryRun: Boolean): MpStorageWriteResult {
+    private suspend fun runWriteBack(entry: MpStorageFlagEntry, post: Boolean): MpStorageWriteResult {
         return withContext(ioDispatcher) {
             val owner = activePseudo()
                 ?: return@withContext MpStorageWriteResult.TargetNotFound
@@ -170,35 +182,35 @@ class DefaultMpStorageRepository @Inject constructor(
                 }
 
                 is MpStorageEnvelopeWriter.Outcome.Mutated ->
-                    prepareAndMaybePost(location, read.form, outcome.body, dryRun)
+                    prepareAndMaybePost(location, read.form, outcome.body, post)
             }
         }
     }
 
     /**
      * Builds the `bdd.php cat=prive` [FormBody] from the mutated [body] and the parsed [form], then —
-     * ONLY when [dryRun] is `false` — POSTs it. By default ([dryRun] = `true`) NO request is sent : the
-     * body is built and validated, and [MpStorageWriteResult.Prepared] carries `posted = false`.
-     * The live POST branch is unconfirmed (NOT OBSERVED LIVE).
+     * ONLY when [post] is `true` (the internal test-only path) — POSTs it. From the public [writeBackFlag]
+     * ([post] = `false`) NO request is sent : the body is built and validated, and
+     * [MpStorageWriteResult.Prepared] carries `posted = false`. The live POST branch is NOT OBSERVED LIVE.
      */
     private suspend fun prepareAndMaybePost(
         location: MpStorageLocation,
         form: ReplyForm,
         body: String,
-        dryRun: Boolean,
+        post: Boolean,
     ): MpStorageWriteResult {
         val formBody = buildPrivateMessageEditBody(location, form, body)
-        if (dryRun) {
+        if (!post) {
             diagnostics.record(
                 DiagnosticsLog.Level.INFO,
                 LOG_TAG,
-                "writeBackFlag dryRun: body built (${body.length} chars), POST skipped — not observed live",
+                "writeBackFlag dry-run: body built (${body.length} chars), POST skipped — not observed live",
             )
             return MpStorageWriteResult.Prepared(body = body, posted = false)
         }
-        // GUARDED branch — reached only with dryRun=false, which nothing in the app sets. The
-        // bdd.php cat=prive write contract is unconfirmed; the response is intentionally NOT parsed
-        // here (no live success/error capture). Surfaced as Prepared(posted = true).
+        // GUARDED branch — reached only via the internal writeBackFlagLive (tests). The bdd.php cat=prive
+        // write contract is unconfirmed; the response is intentionally NOT parsed here (no live
+        // success/error capture). Surfaced as Prepared(posted = true).
         hfrClient.submitPrivateMessageEdit(formBody)
         diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, "writeBackFlag POSTED (live, unconfirmed contract)")
         return MpStorageWriteResult.Prepared(body = body, posted = true)

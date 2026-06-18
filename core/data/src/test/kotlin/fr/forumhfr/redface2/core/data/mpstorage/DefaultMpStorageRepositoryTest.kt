@@ -213,7 +213,7 @@ class DefaultMpStorageRepositoryTest {
     // --- WRITE path (#6, ADR-014 §4) — GUARDED, NOT OBSERVED LIVE ---------------------------------
 
     @Test
-    fun `writeBackFlag dryRun prepares the mutated body and sends NO POST`() = runTest {
+    fun `writeBackFlag (public path) prepares the mutated body and sends NO POST`() = runTest {
         val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [] } } ], "sourceName": "DTCloud" }"""
         repository = buildRepository(
             storageParser = mockk {
@@ -237,7 +237,7 @@ class DefaultMpStorageRepositoryTest {
     }
 
     @Test
-    fun `writeBackFlag with dryRun=false POSTs bdd_php with cat=prive and the preserved hidden fields`() = runTest {
+    fun `writeBackFlagLive POSTs bdd_php with cat=prive and the preserved hidden fields`() = runTest {
         val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [] } } ] }"""
         repository = buildRepository(
             storageParser = mockk {
@@ -250,10 +250,9 @@ class DefaultMpStorageRepositoryTest {
         server.enqueue(MockResponse().setBody(fixture("write_edit_form_test_post.html"))) // GET edit form
         server.enqueue(MockResponse().setBody("<html><body>ok</body></html>")) // POST bdd.php
 
-        // dryRun=false is the GUARDED branch — exercised only by this test, never by app code.
-        val result = repository.writeBackFlag(
+        // writeBackFlagLive is the module-internal, TEST-ONLY POST path (not on the public interface).
+        val result = repository.writeBackFlagLive(
             MpStorageFlagEntry(threadId = 42, page = 2, numreponse = 5, uri = null),
-            dryRun = false,
         )
 
         val prepared = result as MpStorageWriteResult.Prepared

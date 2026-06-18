@@ -64,10 +64,10 @@ data class MpStorageFlagEntry(
  *
  * NOTE — NOT OBSERVED LIVE : the `bdd.php cat=prive` write contract has never been captured
  * (device down, no real round-trip). The write mechanism is implemented and unit-tested but
- * stays GUARDED — by default [fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository.writeBackFlag]
- * runs `dryRun = true` (read-modify-build only, no POST) and nothing in the app calls it with
- * `dryRun = false`. There is no UI entry point. These variants describe what the path WOULD
- * return once the contract is confirmed.
+ * stays GUARDED — the public [fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository.writeBackFlag]
+ * only ever read-modify-builds (no POST), and the live POST is reachable solely via a module-internal,
+ * test-only path (not on the public interface). There is no UI entry point. These variants describe
+ * what the path WOULD return once the contract is confirmed.
  */
 sealed interface MpStorageWriteResult {
 

@@ -34,10 +34,11 @@ interface MpStorageRepository {
      * build the `bdd.php cat=prive` POST body.
      *
      * GUARDED BY DESIGN — NOT OBSERVED LIVE. The `bdd.php cat=prive` write contract was never captured
-     * (device down). This method exists, is unit-tested, but is **impossible to trigger by accident** :
-     *  - [dryRun] defaults to `true` → the body is built & validated but **no request hits the wire** ;
-     *  - nothing in the app calls it with `dryRun = false`, and there is **no UI entry point** ;
-     *  - the ADR-014 §4 trigger (« on leaving a DT conversation ») is intentionally NOT wired.
+     * (device down). This public method is **DRY-RUN ONLY** : it locates, mutates, validates and builds the
+     * body, then returns [MpStorageWriteResult.Prepared] with `posted = false` — **no request ever hits the
+     * wire**, and there is no parameter to make it. The actual POST lives behind a module-internal,
+     * test-only path on the implementation (NOT on this public interface) so it is **structurally
+     * impossible to trigger from app/prod code** (Codex review) ; the ADR-014 §4 trigger is NOT wired.
      *
      * Target selection (Codex decision) is DETERMINISTIC : the first MP whose subject equals EXACTLY
      * [STORAGE_SUBJECT_HASH]. A miss is [MpStorageWriteResult.TargetNotFound] — NEVER a creation /
@@ -48,12 +49,8 @@ interface MpStorageRepository {
      * past it) : the real HFR MP body limit is unknown, so the cap fails CLOSED.
      *
      * @param entry the DT reading-resume position to upsert.
-     * @param dryRun keep `true` until the live write contract is confirmed ; `true` skips the POST.
      */
-    suspend fun writeBackFlag(
-        entry: MpStorageFlagEntry,
-        dryRun: Boolean = true,
-    ): MpStorageWriteResult
+    suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult
 
     companion object {
         /** Fixed storage subject — the de-facto v0.1 contract's discriminator (#6). */
