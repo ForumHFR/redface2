@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
@@ -1163,6 +1164,44 @@ class SettingsViewModelTest {
         assertTrue(viewModel.state.value.immersiveNavBarRevealError)
     }
 
+    @Test
+    fun `init hydrates accentColor from a persisted value`() = runTest {
+        repository.emitAccentColor(AccentColor.ROUGE_REDFACE1)
+
+        val viewModel = newViewModel()
+
+        assertEquals(AccentColor.ROUGE_REDFACE1, viewModel.state.value.accentColor)
+        assertFalse(viewModel.state.value.accentColorError)
+    }
+
+    @Test
+    fun `AccentColorChanged persists the chosen colour`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals(AccentColor.ROSE, viewModel.state.value.accentColor)
+
+        viewModel.submit(SettingsIntent.AccentColorChanged(AccentColor.ROUGE_REDFACE1))
+
+        assertEquals(AccentColor.ROUGE_REDFACE1, viewModel.state.value.accentColor)
+        assertFalse(viewModel.state.value.isUpdatingAccentColor)
+        assertEquals(1, repository.accentColorSetCalls)
+    }
+
+    @Test
+    fun `AccentColorChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnAccentColorSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.AccentColorChanged(AccentColor.ROUGE_REDFACE1))
+
+        assertEquals(
+            "failed persist must revert to the previous colour",
+            AccentColor.ROSE,
+            viewModel.state.value.accentColor,
+        )
+        assertFalse(viewModel.state.value.isUpdatingAccentColor)
+        assertTrue(viewModel.state.value.accentColorError)
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // Debug bounds overlay (#445)
     // ──────────────────────────────────────────────────────────────────────
@@ -1961,6 +2000,24 @@ class SettingsViewModelTest {
 
         fun emitImmersiveNavBarReveal(value: ImmersiveNavBarReveal) {
             immersiveNavBarReveal.value = value
+        }
+
+        // TU 2788511 — accent colour family. Default ROSE, enum optimistic-flip seam.
+        private val accentColor = MutableStateFlow(AccentColor.ROSE)
+        var accentColorSetCalls: Int = 0
+            private set
+        var failOnAccentColorSet: Boolean = false
+
+        override fun observeAccentColor(): Flow<AccentColor> = accentColor
+
+        override suspend fun setAccentColor(color: AccentColor) {
+            accentColorSetCalls += 1
+            check(!failOnAccentColorSet) { "boom" }
+            accentColor.value = color
+        }
+
+        fun emitAccentColor(value: AccentColor) {
+            accentColor.value = value
         }
     }
 

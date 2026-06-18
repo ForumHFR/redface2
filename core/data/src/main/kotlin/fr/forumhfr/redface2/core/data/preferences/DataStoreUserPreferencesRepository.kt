@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
@@ -222,6 +223,24 @@ class DataStoreUserPreferencesRepository @Inject constructor(
                 prefs[KEY_AMOLED_ENABLED] = enabled
             }
             themeBootstrapStore.writeAmoledEnabled(enabled)
+        }
+    }
+
+    override fun observeAccentColor(): Flow<AccentColor> =
+        dataStore.data
+            // Default ROSE (TU 2788511): the historical maroon/rose scheme until the user opts into red.
+            .map(::readAccentColor)
+            // Keep the accent flow quiet unless it actually changes so RedfaceApp doesn't recompose
+            // the whole tree on unrelated edits — same stance as observeThemeMode. No bootstrap mirror:
+            // the accent does not paint the window background (cf. observeDisplayDensity).
+            .distinctUntilChanged()
+            .catch { emit(AccentColor.ROSE) }
+
+    override suspend fun setAccentColor(color: AccentColor) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_ACCENT_COLOR] = color.name
+            }
         }
     }
 
@@ -589,6 +608,15 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             ?: ImmersiveNavBarReveal.MANUAL
 
     /**
+     * Reads [KEY_ACCENT_COLOR] defensively (TU 2788511): an unknown / corrupt stored value falls back
+     * to [AccentColor.ROSE] instead of crashing on `AccentColor.valueOf`, same stance as [readThemeMode].
+     */
+    private fun readAccentColor(prefs: Preferences): AccentColor =
+        prefs[KEY_ACCENT_COLOR]
+            ?.let { stored -> runCatching { AccentColor.valueOf(stored) }.getOrNull() }
+            ?: AccentColor.ROSE
+
+    /**
      * Reads [KEY_FONT_SCALE] defensively (#287): an unknown / corrupt stored value falls back to
      * [FontScalePreference.M] instead of crashing on `FontScalePreference.valueOf`.
      */
@@ -682,6 +710,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // #286 — app theme selection (ThemeMode.name, defensively parsed) + AMOLED toggle.
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_AMOLED_ENABLED = booleanPreferencesKey("amoled_enabled")
+        val KEY_ACCENT_COLOR = stringPreferencesKey("accent_color")
 
         // build 89 follow-up — topic top app bar auto-hide on scroll.
         val KEY_TOPIC_TOPBAR_AUTO_HIDE = booleanPreferencesKey("topic_topbar_auto_hide")

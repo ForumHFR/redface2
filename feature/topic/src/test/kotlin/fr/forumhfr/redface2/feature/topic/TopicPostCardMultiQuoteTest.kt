@@ -45,7 +45,6 @@ class TopicPostCardMultiQuoteTest {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 TopicPostCard(
                     post = samplePost(),
-                    highlighted = false,
                     citedCount = 0,
                     onQuote = {},
                     onEdit = null,
@@ -71,7 +70,6 @@ class TopicPostCardMultiQuoteTest {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 TopicPostCard(
                     post = samplePost(),
-                    highlighted = false,
                     citedCount = 0,
                     onQuote = {},
                     onEdit = null,
@@ -98,7 +96,6 @@ class TopicPostCardMultiQuoteTest {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 TopicPostCard(
                     post = samplePost(),
-                    highlighted = false,
                     citedCount = 0,
                     onQuote = null,
                     onEdit = {},

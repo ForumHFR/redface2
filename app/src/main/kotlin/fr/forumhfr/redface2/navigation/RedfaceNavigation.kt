@@ -531,6 +531,8 @@ fun RedfaceApp(intent: Intent?) {
     val themeViewModel: AppThemeViewModel = hiltViewModel()
     val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
     val amoledEnabled by themeViewModel.amoledEnabled.collectAsStateWithLifecycle()
+    // TU 2788511 — accent colour family (rose ↔ vivid « REDFACE1 » red), resolved at the root for RedfaceTheme.
+    val accentColor by themeViewModel.accentColor.collectAsStateWithLifecycle()
     // #287 — reading presets (density + font scale) resolved at the root and bundled for RedfaceTheme.
     val displayDensity by themeViewModel.displayDensity.collectAsStateWithLifecycle()
     val fontScale by themeViewModel.fontScale.collectAsStateWithLifecycle()
@@ -593,6 +595,7 @@ fun RedfaceApp(intent: Intent?) {
     RedfaceTheme(
         darkTheme = darkTheme,
         amoledTheme = amoledEnabled,
+        accentColor = accentColor,
         reading = ReadingDisplaySettings(
             density = displayDensity,
             fontScale = fontScale,

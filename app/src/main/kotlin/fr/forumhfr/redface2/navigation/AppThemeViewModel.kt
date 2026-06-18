@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.navigation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
@@ -40,6 +41,13 @@ class AppThemeViewModel @Inject constructor(
     val amoledEnabled: StateFlow<Boolean> =
         userPreferencesRepository.observeAmoledEnabled()
             .stateIn(viewModelScope, SharingStarted.Eagerly, bootstrap.amoledEnabled)
+
+    // TU 2788511 — accent colour family (rose default ↔ vivid « REDFACE1 » red). Eager like the
+    // reading presets; ROSE seed. No bootstrap mirror: the accent re-tints only primary/secondary
+    // roles, NOT the window background, so there is no pre-first-frame window to seed (cf. density).
+    val accentColor: StateFlow<AccentColor> =
+        userPreferencesRepository.observeAccentColor()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, AccentColor.ROSE)
 
     // #287 — reading presets. No bootstrap mirror (they do not paint the pre-first-frame window),
     // so the seed is just the enum default; DataStore resolves on the first Eagerly read.

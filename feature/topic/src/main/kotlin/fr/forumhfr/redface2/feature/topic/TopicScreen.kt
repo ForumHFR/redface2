@@ -884,7 +884,6 @@ private fun TopicLoadedContent(
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
 ) {
-    val highlight = state.request.scrollTo
     // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
     // the « cité N fois » badge below. Pure + page-scoped (cf. citationCountsByNumreponse KDoc).
     val citationCounts = remember(topic.posts) { citationCountsByNumreponse(topic.posts) }
@@ -1074,7 +1073,6 @@ private fun TopicLoadedContent(
             } else {
                 TopicPostCard(
                     post = post,
-                    highlighted = highlight == post.numreponse,
                     citedCount = citationCounts[post.numreponse] ?: 0,
                     // #330 — render the author signature beneath the body when the reading preference
                     // is on (the signature is always parsed/cached on the Post; this is render-only).
@@ -1504,7 +1502,7 @@ private fun CreatorPseudoText(author: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-// Rich post card : each optional affordance (highlight anchor, multi-quote border + pill + « + »
+// Rich post card : each optional affordance (multi-quote border + pill + « + »
 // toggle, citation badge, profile tap, contextual menu, edit, quote) is its own guarded branch, so
 // the cyclomatic count is inherently high — same call as PostRenderer. Splitting it would scatter a
 // single visual unit across helpers. LongParameterList : state-hoisted, each param has a distinct
@@ -1514,7 +1512,6 @@ private fun CreatorPseudoText(author: String, modifier: Modifier = Modifier) {
 // « + » affordance (gating, label flip, tap). Same visibility relaxation as other tested internals.
 internal fun TopicPostCard(
     post: Post,
-    highlighted: Boolean,
     /**
      * #239 — number of posts on the current page that cite this one. 0 hides the badge.
      */
@@ -1540,9 +1537,7 @@ internal fun TopicPostCard(
     /**
      * #436 — true when this post sits in the multi-quote basket (#291). Marks the card with a
      * primary border + an « Ajouté à la citation » pill in the identity band, so the selection
-     * is visible without opening the per-post menu (dev feedback by Dintr-un lemn). Orthogonal
-     * to [highlighted] (the scroll anchor) : both can be true at once, the border and the
-     * container tint compose without colliding.
+     * is visible without opening the per-post menu (dev feedback by Dintr-un lemn).
      */
     multiQuoteSelected: Boolean = false,
     /**
@@ -1563,24 +1558,18 @@ internal fun TopicPostCard(
             null
         },
         colors = CardDefaults.cardColors(
-            containerColor = if (highlighted) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainer
-            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
     ) {
         // Identity band — the avatar/pseudo/date header gets its own tinted strip across the
-        // full card width (forum idiom, dogfooding v109) : secondaryContainer over the neutral
-        // card, tertiaryContainer when the card itself is highlighted secondaryContainer so the
-        // band stays distinct. The Surface also sets LocalContentColor to the matching
-        // on-container colour for the pseudo. The Card clips the strip to its rounded corners.
+        // full card width (forum idiom, dogfooding v109): secondaryContainer over the neutral card.
+        // TU 2788511 — the scroll-anchor « mis en avant » highlight (a secondaryContainer card +
+        // a tertiaryContainer/yellow band) was removed at XaTriX's request: the per-post header band
+        // already delineates each post, so the extra tint was redundant noise. The Surface sets
+        // LocalContentColor to onSecondaryContainer for the pseudo. The Card clips the strip to its
+        // rounded corners.
         Surface(
-            color = if (highlighted) {
-                MaterialTheme.colorScheme.tertiaryContainer
-            } else {
-                MaterialTheme.colorScheme.secondaryContainer
-            },
+            color = MaterialTheme.colorScheme.secondaryContainer,
             modifier = Modifier.fillMaxWidth(),
         ) {
             // #201 — avatar + author header in a Row so the visual identity of the poster
@@ -1792,9 +1781,8 @@ internal fun TopicPostCard(
                         }
                         if (multiQuoteSelected) {
                             // #436 — basket-membership pill, same shape family as the #239 pill.
-                            // primaryContainer : distinct from the band (secondaryContainer) AND
-                            // from a highlighted band (tertiaryContainer), and it echoes the primary
-                            // border so the two marks read as one signal.
+                            // primaryContainer : distinct from the band (secondaryContainer), and it
+                            // echoes the primary border so the two marks read as one signal.
                             Surface(
                                 color = MaterialTheme.colorScheme.primaryContainer,
                                 shape = MaterialTheme.shapes.small,

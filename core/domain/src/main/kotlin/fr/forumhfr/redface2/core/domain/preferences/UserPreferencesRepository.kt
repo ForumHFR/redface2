@@ -129,6 +129,17 @@ interface UserPreferencesRepository {
     suspend fun setAmoledEnabled(enabled: Boolean)
 
     /**
+     * Accent colour family (TU 2788511): [AccentColor.ROSE] (default) keeps the historical muted
+     * maroon/rose scheme; [AccentColor.ROUGE_REDFACE1] switches to the vivid Redface 1 red. Observed
+     * at the app root and passed to `RedfaceTheme`, and mirrored in Settings. Compose-only (does not
+     * paint the window background), so no cold-start mirror — same stance as the display density.
+     */
+    fun observeAccentColor(): Flow<AccentColor>
+
+    /** Persists [observeAccentColor]. Default [AccentColor.ROSE] until the first call. */
+    suspend fun setAccentColor(color: AccentColor)
+
+    /**
      * Topic top app bar auto-hide (build 89 follow-up): when `true`, the topic top bar (title +
      * page counter) collapses while the user scrolls down through the posts and re-appears as soon
      * as they scroll back toward the top — Material3 `enterAlways` behaviour — freeing reading

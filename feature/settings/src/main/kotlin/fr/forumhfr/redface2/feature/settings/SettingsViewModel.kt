@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
@@ -129,6 +130,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(immersiveNavBarReveal = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeAccentColor().first() },
+            isLocked = { it.accentColorTouchedLocally || it.isUpdatingAccentColor },
+            apply = { state, value -> state.copy(accentColor = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeConfirmBeforePosting().first() },
             isLocked = { it.confirmBeforePostingTouchedLocally || it.isUpdatingConfirmBeforePosting },
             apply = { state, value -> state.copy(confirmBeforePosting = value) },
@@ -230,6 +236,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FlagsPerTabOverrideChanged -> updateFlagsPerTabOverride(intent.enabled)
             is SettingsIntent.ThemeModeChanged -> updateThemeMode(intent.mode)
             is SettingsIntent.AmoledEnabledChanged -> updateAmoled(intent.enabled)
+            is SettingsIntent.AccentColorChanged -> updateAccentColor(intent.color)
             is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
             is SettingsIntent.TopicPageFabsChanged -> updateTopicPageFabs(intent.enabled)
             is SettingsIntent.MpUnreadBadgeChanged -> updateMpUnreadBadge(intent.enabled)
@@ -906,6 +913,36 @@ class SettingsViewModel @Inject constructor(
                             immersiveNavBarReveal = previous,
                             isUpdatingImmersiveNavBarReveal = false,
                             immersiveNavBarRevealError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // TU 2788511 — enum preference; same bespoke optimistic-flip shape as updateImmersiveNavBarReveal.
+    private fun updateAccentColor(desired: AccentColor) {
+        val previous = _state.value.accentColor
+        _state.update {
+            it.copy(
+                accentColor = desired,
+                isUpdatingAccentColor = true,
+                accentColorError = false,
+                accentColorTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setAccentColor(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(accentColor = desired, isUpdatingAccentColor = false)
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            accentColor = previous,
+                            isUpdatingAccentColor = false,
+                            accentColorError = true,
                         )
                     }
                 }

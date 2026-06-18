@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
@@ -691,6 +692,27 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeAccentColor defaults to ROSE then persists the chosen colour`() = runTest(dispatcher) {
+        // TU 2788511 — default ROSE (the historical maroon/rose scheme) on an empty store.
+        repository.observeAccentColor().test {
+            assertEquals(AccentColor.ROSE, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setAccentColor(AccentColor.ROUGE_REDFACE1)
+        repository.observeAccentColor().test {
+            assertEquals(AccentColor.ROUGE_REDFACE1, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setAccentColor(AccentColor.ROSE)
+        repository.observeAccentColor().test {
+            assertEquals(AccentColor.ROSE, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `saving disabled proxy removes optional fields from effective config`() = runTest(dispatcher) {
         repository.saveProxyConfig(
             ProxyConfig(
@@ -803,6 +825,17 @@ class DataStoreUserPreferencesRepositoryTest {
 
         repository.observeDisplayDensity().test {
             assertEquals(DisplayDensity.COMFORT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt accent_color value falls back to ROSE instead of crashing`() = runTest(dispatcher) {
+        // TU 2788511 — an unknown value (older build / manual edit) must degrade to ROSE, not crash valueOf.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("accent_color")] = "BOGUS" }
+
+        repository.observeAccentColor().test {
+            assertEquals(AccentColor.ROSE, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

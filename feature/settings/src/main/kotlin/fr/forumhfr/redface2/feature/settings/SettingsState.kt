@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.settings
 
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
@@ -82,6 +83,12 @@ data class SettingsState(
     val isUpdatingAmoled: Boolean = false,
     val amoledError: Boolean = false,
     val amoledTouchedLocally: Boolean = false,
+    // TU 2788511 — accent colour family (rose default ↔ vivid « REDFACE1 » red). Same enum
+    // optimistic-flip + startup-race-guard machinery as `immersiveNavBarReveal`.
+    val accentColor: AccentColor = AccentColor.ROSE,
+    val isUpdatingAccentColor: Boolean = false,
+    val accentColorError: Boolean = false,
+    val accentColorTouchedLocally: Boolean = false,
     // Topic reading preferences (build 89 follow-up). Same optimistic-flip + startup-race-guard
     // machinery: `topicTopBarAutoHide` is the displayed value, `isUpdating*` gates the switch while
     // DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init`
@@ -229,6 +236,10 @@ data class SettingsState(
     val canToggleAmoled: Boolean
         get() = !isUpdatingAmoled
 
+    // TU 2788511 — the accent colour control is gated only by its own in-flight write.
+    val canChangeAccentColor: Boolean
+        get() = !isUpdatingAccentColor
+
     // Build 89 follow-up — the topic top-bar auto-hide toggle is gated only by its own write.
     val canToggleTopicTopBarAutoHide: Boolean
         get() = !isUpdatingTopicTopBarAutoHide
@@ -357,6 +368,7 @@ sealed interface SettingsIntent {
     // both applied optimistically with revert-on-failure, like the flags toggles.
     data class ThemeModeChanged(val mode: ThemeMode) : SettingsIntent
     data class AmoledEnabledChanged(val enabled: Boolean) : SettingsIntent
+    data class AccentColorChanged(val color: AccentColor) : SettingsIntent
 
     // Build 89 follow-up — topic top-bar auto-hide toggle. Optimistic-flip contract, like the
     // flags toggles: the boolean is the desired post-flip state.

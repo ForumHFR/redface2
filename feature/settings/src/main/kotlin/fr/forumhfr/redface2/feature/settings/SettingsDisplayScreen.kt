@@ -23,6 +23,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
@@ -126,6 +127,14 @@ fun SettingsDisplayScreen(
             if (state.amoledError) {
                 PreferencePersistError(R.string.settings_theme_amoled_persist_failed)
             }
+            // TU 2788511 — accent colour family (rose ↔ vivid « REDFACE1 » red). Extracted to keep
+            // SettingsDisplayScreen under detekt's cyclomatic-complexity budget.
+            AccentColorSetting(
+                selected = state.accentColor,
+                enabled = state.canChangeAccentColor,
+                error = state.accentColorError,
+                onSelected = { viewModel.submit(SettingsIntent.AccentColorChanged(it)) },
+            )
 
             // Reading presets (#287).
             Text(
@@ -240,5 +249,40 @@ private fun DisplayToggleRow(
             )
         }
         Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+    }
+}
+
+/**
+ * TU 2788511 — accent colour family setting (rose ↔ vivid « REDFACE1 » red). Extracted from
+ * [SettingsDisplayScreen] so the host stays under detekt's cyclomatic-complexity budget; emits the
+ * intro text, the two-choice group and the persist-error line into the caller's Column.
+ */
+@Composable
+private fun AccentColorSetting(
+    selected: AccentColor,
+    enabled: Boolean,
+    error: Boolean,
+    onSelected: (AccentColor) -> Unit,
+) {
+    val options = listOf(
+        RedfaceSettingsChoice(AccentColor.ROSE, stringResource(R.string.settings_theme_accent_rose)),
+        RedfaceSettingsChoice(
+            AccentColor.ROUGE_REDFACE1,
+            stringResource(R.string.settings_theme_accent_rouge_redface1),
+        ),
+    )
+    Text(
+        text = stringResource(R.string.settings_theme_accent_intro),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    RedfaceSettingsChoiceGroup(
+        options = options,
+        selected = selected,
+        onSelected = onSelected,
+        enabled = enabled,
+    )
+    if (error) {
+        PreferencePersistError(R.string.settings_theme_accent_persist_failed)
     }
 }
