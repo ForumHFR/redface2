@@ -1719,5 +1719,9 @@ class FlagsViewModelTest {
         override fun observeHideSystemNavBar(): Flow<Boolean> = MutableStateFlow(false)
 
         override suspend fun setHideSystemNavBar(enabled: Boolean) = Unit
+
+        override fun observeImmersiveBackButton(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setImmersiveBackButton(enabled: Boolean) = Unit
     }
 }

@@ -58,6 +58,8 @@ class AppThemeViewModelTest {
             every { observeFoldLongQuotes() } returns MutableStateFlow(true)
             // #518 — eagerly collected by the VM constructor; default off is enough here.
             every { observeHideSystemNavBar() } returns MutableStateFlow(false)
+            // #518 follow-up — eagerly collected by the VM constructor; default on is enough here.
+            every { observeImmersiveBackButton() } returns MutableStateFlow(true)
         }
 
         val vm = AppThemeViewModel(
@@ -83,6 +85,8 @@ class AppThemeViewModelTest {
             every { observeFoldLongQuotes() } returns MutableStateFlow(true)
             // #518 — eagerly collected by the VM constructor; default off is enough here.
             every { observeHideSystemNavBar() } returns MutableStateFlow(false)
+            // #518 follow-up — eagerly collected by the VM constructor; default on is enough here.
+            every { observeImmersiveBackButton() } returns MutableStateFlow(true)
         }
 
         val vm = AppThemeViewModel(

@@ -162,6 +162,19 @@ fun SettingsDisplayScreen(
             if (state.hideSystemNavBarError) {
                 PreferencePersistError(R.string.settings_display_hide_nav_bar_persist_failed)
             }
+            // #518 follow-up — sous-option du plein écran : le bouton retour flottant ne sert que
+            // lorsque la barre système est masquée, donc la ligne reste désactivée tant que le
+            // plein écran est off (en plus de sa propre garde d'écriture optimiste).
+            DisplayToggleRow(
+                title = stringResource(R.string.settings_display_immersive_back_button_title),
+                description = stringResource(R.string.settings_display_immersive_back_button_description),
+                checked = state.immersiveBackButton,
+                enabled = state.hideSystemNavBar && state.canToggleImmersiveBackButton,
+                onCheckedChange = { viewModel.submit(SettingsIntent.ImmersiveBackButtonChanged(it)) },
+            )
+            if (state.immersiveBackButtonError) {
+                PreferencePersistError(R.string.settings_display_immersive_back_button_persist_failed)
+            }
         }
     }
 }

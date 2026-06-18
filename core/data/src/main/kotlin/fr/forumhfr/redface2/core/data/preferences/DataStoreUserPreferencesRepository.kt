@@ -520,6 +520,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeImmersiveBackButton(): Flow<Boolean> =
+        dataStore.data
+            // Default `true` (#518 follow-up): only ever shown WHILE immersive mode is on, so the
+            // default-on keeps 3-button users able to go back; the toggle is the opt-out.
+            .map { prefs -> prefs[KEY_IMMERSIVE_BACK_BUTTON] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setImmersiveBackButton(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_IMMERSIVE_BACK_BUTTON] = enabled
+            }
+        }
+    }
+
     /**
      * Reads [KEY_UPLOAD_PROVIDER] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [UploadProviderId.DIBERIE] instead of crashing on
@@ -684,5 +700,6 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // #445 — debug bounds overlay toggle (default false; exposed on the dev channel only).
         val KEY_DEBUG_BOUNDS_OVERLAY = booleanPreferencesKey("debug_bounds_overlay")
         val KEY_HIDE_SYSTEM_NAV_BAR = booleanPreferencesKey("hide_system_nav_bar")
+        val KEY_IMMERSIVE_BACK_BUTTON = booleanPreferencesKey("immersive_back_button")
     }
 }
