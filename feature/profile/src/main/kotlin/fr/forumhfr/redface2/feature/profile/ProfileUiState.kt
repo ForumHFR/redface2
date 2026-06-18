@@ -23,6 +23,12 @@ data class ProfileUiState(
      */
     val avatarUrlHint: String?,
     val mode: Mode,
+    /**
+     * #509 — whether this user is currently on the local blacklist. Driven by the repository's
+     * `observeBlockedCanonicals` flow so the « Masquer / Ne plus masquer » button label always
+     * reflects the live state (including a toggle made from the post menu while the sheet is open).
+     */
+    val isBlocked: Boolean = false,
 ) {
     sealed interface Mode {
         data object Loading : Mode
@@ -58,6 +64,9 @@ data class ProfileUiState(
 
 sealed interface ProfileIntent {
     data object Retry : ProfileIntent
+
+    /** #509 — add or remove this user from the local blacklist (toggles on [ProfileUiState.isBlocked]). */
+    data object ToggleBlocked : ProfileIntent
 }
 
 /**

@@ -199,6 +199,27 @@ private fun ProfilePreviewContent(
         }
 
         Spacer(Modifier.height(8.dp))
+
+        // #509 — blacklist toggle, parity with the post menu entry. The sheet stays open so the label
+        // flips in place as immediate feedback; the post collapse to its « masqué » placeholder shows
+        // once the sheet is dismissed. Always available (the pseudo is known even while the profile
+        // loads), so it sits outside the mode branch above.
+        OutlinedButton(
+            onClick = { onIntent(ProfileIntent.ToggleBlocked) },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                stringResource(
+                    if (state.isBlocked) {
+                        R.string.profile_action_unblock_user
+                    } else {
+                        R.string.profile_action_block_user
+                    },
+                ),
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
     }
 }
 
