@@ -62,6 +62,9 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -884,6 +887,10 @@ private fun TopicLoadedContent(
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
 ) {
+    // Scroll-anchor (#104 follow-up): the post the reader was sent to (quote link, deep link, last-read).
+    // Re-introduced as a DISCREET left rail on the card — the noisy yellow « mis en avant » band was
+    // removed; this marks the anchored post without a filled tint (XaTriX request, Codex-framed).
+    val highlight = state.request.scrollTo
     // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
     // the « cité N fois » badge below. Pure + page-scoped (cf. citationCountsByNumreponse KDoc).
     val citationCounts = remember(topic.posts) { citationCountsByNumreponse(topic.posts) }
@@ -1073,6 +1080,7 @@ private fun TopicLoadedContent(
             } else {
                 TopicPostCard(
                     post = post,
+                    highlighted = highlight == post.numreponse,
                     citedCount = citationCounts[post.numreponse] ?: 0,
                     // #330 — render the author signature beneath the body when the reading preference
                     // is on (the signature is always parsed/cached on the Post; this is render-only).
@@ -1513,6 +1521,12 @@ private fun CreatorPseudoText(author: String, modifier: Modifier = Modifier) {
 internal fun TopicPostCard(
     post: Post,
     /**
+     * #104 follow-up — true for the scroll-anchor post (quote link / deep link / last-read landing).
+     * Draws a discreet left rail (tertiary) on the card instead of the removed yellow band, so the
+     * anchored post is findable without a filled highlight. Default false.
+     */
+    highlighted: Boolean = false,
+    /**
      * #239 — number of posts on the current page that cite this one. 0 hides the badge.
      */
     citedCount: Int,
@@ -1551,7 +1565,29 @@ internal fun TopicPostCard(
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
+    // #104 follow-up — discreet scroll-anchor rail: a 4dp tertiary stripe down the card's left edge,
+    // drawn OVER the content (drawWithContent) so it adds zero layout — no pop/reflow when it appears.
+    // tertiary (not primary) keeps it distinct from the multi-quote primary border; the two geometries
+    // (full border vs left rail) can coexist without reading as one mark (Codex framing).
+    val railColor = MaterialTheme.colorScheme.tertiary
     Card(
+        modifier = if (highlighted) {
+            Modifier.drawWithContent {
+                drawContent()
+                // Inset the rail by the card corner radius (CardDefaults medium = 12dp) so it never
+                // paints square corners over the card's rounded top/bottom-left (Codex review). The
+                // rare anchor+multi-quote combo lets the 4dp rail overlap the 2dp primary border on
+                // the left edge — accepted minor (two states still both legible).
+                val inset = 12.dp.toPx()
+                drawRect(
+                    color = railColor,
+                    topLeft = Offset(x = 0f, y = inset),
+                    size = Size(width = 4.dp.toPx(), height = (size.height - inset * 2).coerceAtLeast(0f)),
+                )
+            }
+        } else {
+            Modifier
+        },
         border = if (multiQuoteSelected) {
             BorderStroke(width = 2.dp, color = MaterialTheme.colorScheme.primary)
         } else {
@@ -1600,11 +1636,6 @@ internal fun TopicPostCard(
             } else {
                 Modifier
             }
-            // #476 — width of the avatar slot in the identity Row, used below to indent the
-            // pills under the pseudo (not under the avatar). minimumInteractiveComponentSize()
-            // inflates the clickable avatar to the 48dp touch target; otherwise it is the
-            // RedfaceUserAvatar default (40dp). Kept in sync with `avatarModifier` above.
-            val avatarSlotWidth = if (onOpenProfile != null) 48.dp else 40.dp
             val pseudoModifier = if (onOpenProfile != null) {
                 // No minimumInteractiveComponentSize() on the pseudo: it reserves a 48dp-tall box
                 // and centres the text inside it, which inflated the header Row and left the pseudo
@@ -1741,62 +1772,57 @@ internal fun TopicPostCard(
                             .semantics { contentDescription = menuLabel },
                     )
                 }
-                // #476 — citation + multi-quote pills, hoisted OUT of the pseudo+date Column and
-                // placed below the identity Row, preserving the original « pills sit under the date,
-                // flush with the pseudo » look. The start padding reproduces where the pseudo column
-                // begins in the identity Row: the avatar slot width PLUS that Row's 12.dp
-                // avatar-to-name gap. (A leading Spacer + spacedBy would only add the 8.dp inter-pill
-                // gap, landing the pills 4.dp left of the pseudo.) Because they no longer share a
-                // Column with the avatar/⋯ vertical-centering, toggling the multi-quote pill only
-                // grows the card downward — the identity line never moves.
-                if (citedCount > 0 || multiQuoteSelected) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = avatarSlotWidth + 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+            }
+        }
+        // #436/#476 follow-up (XaTriX) — citation + multi-quote pills moved OUT of the identity band
+        // (the secondaryContainer Surface above): when the « Ajouté à la citation » pill appeared inside
+        // the band, the coloured band itself grew taller (« pop »). Rendered here, on the neutral card
+        // surface just below the band, the band keeps a FIXED height; only the neutral area grows.
+        if (citedCount > 0 || multiQuoteSelected) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // Aligned with the post body gutter (the pills now live on the card, below the
+                    // identity band rather than inside it). top/bottom give breathing room.
+                    .padding(start = m.cardBodyHorizontal, end = m.cardBodyHorizontal, top = 6.dp, bottom = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (citedCount > 0) {
+                    // #239 — sober pill: how many posts of THIS page cite this one. Page-scoped (cf.
+                    // citationCountsByNumreponse); jumping to the citing posts is a follow-up.
+                    // surfaceContainerHighest : a touch above the surfaceContainer card so the pill reads.
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = MaterialTheme.shapes.small,
                     ) {
-                        if (citedCount > 0) {
-                            // #239 — sober pill: how many posts of THIS page cite this one.
-                            // Page-scoped (cf. citationCountsByNumreponse); jumping to the citing
-                            // posts is a follow-up. `surface` container : the pill lives on the
-                            // secondaryContainer identity band, where a secondaryContainer pill
-                            // would be invisible.
-                            Surface(
-                                color = MaterialTheme.colorScheme.surface,
-                                shape = MaterialTheme.shapes.small,
-                            ) {
-                                Text(
-                                    text = pluralStringResource(
-                                        R.plurals.topic_post_cited_count,
-                                        citedCount,
-                                        citedCount,
-                                    ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                )
-                            }
-                        }
-                        if (multiQuoteSelected) {
-                            // #436 — basket-membership pill, same shape family as the #239 pill.
-                            // primaryContainer : distinct from the band (secondaryContainer), and it
-                            // echoes the primary border so the two marks read as one signal.
-                            Surface(
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                shape = MaterialTheme.shapes.small,
-                            ) {
-                                Text(
-                                    text = stringResource(
-                                        R.string.topic_post_multiquote_selected,
-                                    ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                )
-                            }
-                        }
+                        Text(
+                            text = pluralStringResource(
+                                R.plurals.topic_post_cited_count,
+                                citedCount,
+                                citedCount,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+                if (multiQuoteSelected) {
+                    // #436 — basket-membership pill. primaryContainer : echoes the primary multi-quote
+                    // border so the two marks read as one selection signal.
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = MaterialTheme.shapes.small,
+                    ) {
+                        Text(
+                            text = stringResource(
+                                R.string.topic_post_multiquote_selected,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        )
                     }
                 }
             }
