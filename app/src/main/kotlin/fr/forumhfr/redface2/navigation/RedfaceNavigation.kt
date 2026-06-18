@@ -527,8 +527,8 @@ fun RedfaceApp(intent: Intent?) {
     // #445 — debug bounds overlay preference (the dev-channel gate + render live in
     // [DevDebugBoundsOverlay], emitted last so it paints over everything; off by default).
     val debugBoundsOverlay by themeViewModel.debugBoundsOverlay.collectAsStateWithLifecycle()
-    // #518 — immersive mode: hide the bottom Android system navigation bar (the 3 buttons). Off by
-    // default; applied on the host window below.
+    // #518 — immersive mode: hide the bottom Android system navigation bar (3 buttons or gesture pill,
+    // device-dependent). Off by default; applied on the host window below.
     val hideSystemNavBar by themeViewModel.hideSystemNavBar.collectAsStateWithLifecycle()
     val darkTheme = when (themeMode) {
         ThemeMode.LIGHT -> false
