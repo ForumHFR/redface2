@@ -81,6 +81,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
@@ -93,6 +94,7 @@ import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
+import fr.forumhfr.redface2.core.ui.theme.rememberCreatorPseudoBrush
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -1464,6 +1466,23 @@ private fun HiddenPostCard(
     }
 }
 
+/**
+ * #221 — a Redface 2 creator's pseudo, painted with the animated gold sheen. Kept as its own leaf
+ * composable so the per-frame shimmer ([rememberCreatorPseudoBrush]) invalidates only this text node,
+ * never the enclosing (and expensive) post card.
+ */
+@Composable
+private fun CreatorPseudoText(author: String, modifier: Modifier = Modifier) {
+    Text(
+        text = author,
+        style = MaterialTheme.typography.titleSmall.copy(brush = rememberCreatorPseudoBrush()),
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
+}
+
 @Composable
 // Rich post card : each optional affordance (highlight anchor, multi-quote border + pill + « + »
 // toggle, citation badge, profile tap, contextual menu, edit, quote) is its own guarded branch, so
@@ -1641,17 +1660,27 @@ internal fun TopicPostCard(
                                     fontWeight = FontWeight.SemiBold,
                                 )
                             }
-                            Text(
-                                text = post.author,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                // Clickable on the pseudo only — the date stays inert.
-                                modifier = Modifier
-                                    .weight(weight = 1f, fill = false)
-                                    .then(pseudoModifier),
-                            )
+                            // Clickable on the pseudo only — the date stays inert.
+                            val pseudoLayout = Modifier
+                                .weight(weight = 1f, fill = false)
+                                .then(pseudoModifier)
+                            // #221 — the RF2 creator's pseudo gets the gold sheen easter egg.
+                            // remember() keyed on the author so canonicalizePseudo (NFC + char walk)
+                            // runs once per author, not on every recomposition of this hot list row —
+                            // same off-the-render-path stance #509 took with hiddenNumreponses.
+                            val isCreator = remember(post.author) { isRf2Creator(post.author) }
+                            if (isCreator) {
+                                CreatorPseudoText(author = post.author, modifier = pseudoLayout)
+                            } else {
+                                Text(
+                                    text = post.author,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = pseudoLayout,
+                                )
+                            }
                         }
                         // #483 — the date line carries a compact « · édité » marker when the post was
                         // edited (beta feedback Azgor). The exact edit time stays in the « … » menu
