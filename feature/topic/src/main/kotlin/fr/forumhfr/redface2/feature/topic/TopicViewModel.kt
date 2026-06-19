@@ -31,7 +31,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -65,9 +64,10 @@ class TopicViewModel @AssistedInject constructor(
     val state: StateFlow<TopicUiState> = _state.asStateFlow()
 
     /**
-     * #509 — latest set of blacklisted canonical pseudos. Kept fresh by the [loadCurrentPage] combine
-     * so the refresh / post-submit / post-delete paths (which bypass `observeTopicPage`) can recompute
-     * the hidden set without re-subscribing to the blacklist.
+     * #509 — latest set of blacklisted canonical pseudos. Kept fresh by the independent
+     * [observeBlockedCanonicals] collector launched in [init] (NOT by a load job), so EVERY page that
+     * is on screen — whatever path put it there (cache-aside load, pull-to-refresh, post-submit force
+     * refresh, post-delete refetch, intra-topic search) — re-filters live when the blacklist changes.
      */
     private var blockedCanonicals: Set<String> = emptySet()
 
@@ -123,6 +123,13 @@ class TopicViewModel @AssistedInject constructor(
     private var firstContentInFlight: Boolean = false
 
     init {
+        // #509 — own the blacklist as a single independent collector (NOT tied to a load job). It
+        // seeds [blockedCanonicals] and re-filters the page on screen live, so a block / unblock
+        // applies on every load path (refresh / force-refresh / search) and not just the cache-aside
+        // load. Launched FIRST so observeBlockedCanonicals' immediate first emission (its documented
+        // contract) seeds [blockedCanonicals] before the load below computes the initial hidden set —
+        // a blocked post therefore never flashes before it is hidden, even on the force-refresh path.
+        observeBlockedCanonicals()
         if (request.submitSignal != null) {
             // Issue #200 — the user just published a reply / quote / edit / edit-FP and the
             // navigation host signalled us to skip the cache so the freshly-published post
@@ -200,13 +207,53 @@ class TopicViewModel @AssistedInject constructor(
      * #509 — block / unblock [author] from the post menu. This launch is on [viewModelScope], but the
      * DataStore commit still survives the sheet/ViewModel going away mid-write: the repository's
      * `persist {}` offloads the actual write to the application scope (the #507 pattern), so only the
-     * `await` is cancelled, not the commit. The page re-filters live via the [loadCurrentPage] combine,
-     * so no manual state poke is needed here.
+     * `await` is cancelled, not the commit. The page re-filters live through the independent
+     * [observeBlockedCanonicals] collector (launched in [init]), so the write here applies on whatever
+     * page is currently on screen, regardless of how it was loaded — no manual state poke is needed.
      */
     private fun setAuthorBlocked(author: String, blocked: Boolean) {
         viewModelScope.launch {
             if (blocked) blacklistRepository.block(author) else blacklistRepository.unblock(author)
         }
+    }
+
+    /**
+     * #509 — single, load-independent owner of the blacklist. Collected once on [viewModelScope] (NOT
+     * inside [loadJob], which the refresh / force-refresh / post-delete / search paths cancel and
+     * replace), so a block / unblock applies live on the page currently on screen whatever path put it
+     * there. On each emission it (a) caches the set in [blockedCanonicals] (so every load path can
+     * compute the initial hidden set with the up-to-date blacklist) and (b) recomputes
+     * [TopicUiState.Mode.Loaded.hiddenNumreponses] on the current loaded page and re-emits it. A
+     * non-loaded state (Loading / Error) is left untouched; the next load reads the freshest
+     * [blockedCanonicals].
+     *
+     * Launched FIRST in [init] so its emission usually seeds [blockedCanonicals] before the initial
+     * page renders. But `observeBlockedCanonicals` is a COLD DataStore flow (not a StateFlow), so that
+     * first emission is asynchronous — the ordering vs the initial load is NOT guaranteed (Codex
+     * review). The (b) re-filter is the real guarantee: even if a load renders before the blacklist
+     * lands, this collector immediately re-hides the blocked posts. The residual is at most a one-frame
+     * flash on a cold open whose page-1 already contains a blocked author — and in practice the network
+     * page load is slower than the (memory-cached) DataStore read, so it rarely shows.
+     */
+    private fun observeBlockedCanonicals() {
+        blacklistRepository.observeBlockedCanonicals()
+            .onEach { blocked ->
+                blockedCanonicals = blocked
+                _state.update { current ->
+                    val loaded = current.mode as? TopicUiState.Mode.Loaded ?: return@update current
+                    current.copy(
+                        mode = loaded.copy(
+                            hiddenNumreponses = computeHiddenNumreponses(loaded.topic, blocked),
+                        ),
+                    )
+                }
+            }
+            // This collector is independent of any load job, so an unhandled error here would tear
+            // down viewModelScope and kill the screen. A DataStore read hiccup on the blacklist must
+            // not do that — keep the last known set; the next emission recovers (Codex review; mirrors
+            // the catch the former loadCurrentPage combine carried).
+            .catch { error -> android.util.Log.w(LOG_TAG, "Blacklist observe failed", error) }
+            .launchIn(viewModelScope)
     }
 
     /**
@@ -284,15 +331,13 @@ class TopicViewModel @AssistedInject constructor(
         beginFirstContentSection()
         _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
         loadJob = viewModelScope.launch {
-            combine(
-                topicRepository
-                    .observeTopicPage(request.cat, request.post, request.page, forceRefresh = request.forceRefresh),
-                // #509 — gate the first Loaded on the blacklist being known so a blocked post never
-                // flashes before it is hidden, and re-filter live when the blacklist changes.
-                // observeBlockedCanonicals emits its current set immediately (its documented contract),
-                // so combine never stalls waiting on the blacklist.
-                blacklistRepository.observeBlockedCanonicals(),
-            ) { topic, blocked -> topic to blocked }
+            topicRepository
+                .observeTopicPage(request.cat, request.post, request.page, forceRefresh = request.forceRefresh)
+                // #509 — the blacklist is owned by the independent observeBlockedCanonicals collector
+                // (launched in init), NOT combined here: it has already seeded blockedCanonicals by the
+                // time this load runs (its first emission is synchronous, documented contract), so the
+                // initial hidden set below is correct and there is no double-source / clignotement
+                // between this load and the live re-filter — the init collector is the sole re-filter.
                 .catch { error ->
                     if (error is CancellationException) throw error
                     // Cache-first UX: if we already showed a cached page, keep it on screen
@@ -317,8 +362,7 @@ class TopicViewModel @AssistedInject constructor(
                     // still draws a bounded sliver from intent to terminal state.
                     endFirstContentSectionIfNeeded()
                 }
-                .collect { (topic, blocked) ->
-                    blockedCanonicals = blocked
+                .collect { topic ->
                     _state.update {
                         it.copy(
                             mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
