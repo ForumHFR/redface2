@@ -138,7 +138,12 @@ fun FlagsRoute(
 
     // Opt-in « DT » tab (Settings toggle). Its MultiMP list is fetched on tab open (#6).
     val showDtTab by viewModel.showDtTab.collectAsStateWithLifecycle()
-    val dtListState by viewModel.dtListState.collectAsStateWithLifecycle()
+    // #546 directive XaTriX — the screen consumes the FILTERED DT state (dtDisplayState), not the raw
+    // union: DT defaults to « non-lus uniquement » and a re-tap of the DT tab toggles « +lus ».
+    val dtListState by viewModel.dtDisplayState.collectAsStateWithLifecycle()
+    val dtIsRefreshing by viewModel.dtIsRefreshing.collectAsStateWithLifecycle()
+    // « +lus » suffix on the DT tab, mirroring [cyanShowsRead]: DT selected AND its unread filter off.
+    val dtShowsRead by viewModel.dtShowsRead.collectAsStateWithLifecycle()
 
     // #6 — trigger the DT scan only when the DT tab is OPENED (a stable LaunchedEffect, not the raw
     // composition): fetchStorage scans the inbox and must stay off the per-category auto-refresh.
@@ -290,6 +295,8 @@ fun FlagsRoute(
                                 removeFlagState = removeFlagState,
                                 showDtTab = showDtTab,
                                 dtListState = dtListState,
+                                dtShowsRead = dtShowsRead,
+                                dtIsRefreshing = dtIsRefreshing,
                             ),
                             actions = AuthenticatedActions(
                                 onSelectTab = viewModel::selectTab,
@@ -618,6 +625,7 @@ private fun ColumnScope.AuthenticatedBody(
 ) {
     val selectedTab = state.selectedTab
     val cyanShowsRead = state.cyanShowsRead
+    val dtShowsRead = state.dtShowsRead
     val tabs = buildList {
         add(FlagTab.Cyan to stringResource(R.string.flags_tab_my_topics))
         add(FlagTab.Red to stringResource(R.string.flags_tab_read_only))
@@ -629,15 +637,16 @@ private fun ColumnScope.AuthenticatedBody(
     }
     val selectedIndex = tabs.indexOfFirst { it.first == selectedTab }.coerceAtLeast(0)
     // Discreet « +lus » suffix on the Cyan label so the user knows read participated topics
-    // are currently shown — re-tapping the (already selected) Cyan tab toggles it.
-    val cyanReadSuffix = stringResource(R.string.flags_tab_cyan_read_shown_suffix)
+    // are currently shown — re-tapping the (already selected) Cyan tab toggles it. #546 directive
+    // XaTriX — the SAME suffix marks the DT tab when its read conversations are shown (mirror).
+    val readSuffix = stringResource(R.string.flags_tab_cyan_read_shown_suffix)
 
     PrimaryTabRow(selectedTabIndex = selectedIndex) {
         tabs.forEachIndexed { index, (tab, label) ->
-            val displayLabel = if (tab == FlagTab.Cyan && cyanShowsRead) {
-                label + cyanReadSuffix
-            } else {
-                label
+            val displayLabel = when {
+                tab == FlagTab.Cyan && cyanShowsRead -> label + readSuffix
+                tab == FlagTab.Dt && dtShowsRead -> label + readSuffix
+                else -> label
             }
             // Low-level `content` overload INSTEAD of the `text` slot : the text slot pads a
             // non-configurable 16 dp each side, which left « Mes sujets » with exactly its own
@@ -703,7 +712,11 @@ private fun ColumnScope.AuthenticatedBody(
             FlagTab.Super -> SuperPlaceholderBody()
             // #6 — DT is a real list now: the user's MultiMP conversations, enriched best-effort
             // with the MPStorage reading positions.
-            FlagTab.Dt -> DtListBody(state = state.dtListState, actions = actions)
+            FlagTab.Dt -> DtListBody(
+                state = state.dtListState,
+                isRefreshing = state.dtIsRefreshing,
+                actions = actions,
+            )
             else -> FlagListBody(state = state, actions = actions, listState = listState)
         }
     }
@@ -1172,8 +1185,28 @@ private fun DtTabOpenEffect(
  * list intact, just without badges (cf. [FlagsViewModel.loadDt]). Only an inbox load failure
  * reaches [DtListUiState.Error], which offers a reconnect/retry CTA like the flag list.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DtListBody(state: DtListUiState, actions: AuthenticatedActions) {
+private fun DtListBody(state: DtListUiState, isRefreshing: Boolean, actions: AuthenticatedActions) {
+    // #546 directive XaTriX — pull-to-refresh (swipe down) on the DT list, like the flag tabs. Wraps
+    // the whole body (every branch) so the indicator stays anchored over the existing content during
+    // the refresh round-trip and the gesture has a target even on the listless states (#229 pattern).
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = actions.onRefreshDt,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        DtListContent(state = state, actions = actions)
+    }
+}
+
+/**
+ * The DT body content under the [DtListBody] pull-to-refresh layer. Dispatches the [DtListUiState]
+ * to its branch. The listless states ([DtListUiState.Loading]/[Empty]/[NoUnread]/[Error]) are made
+ * vertically scrollable so the surrounding `PullToRefreshBox` keeps a target (#229).
+ */
+@Composable
+private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions) {
     when (state) {
         DtListUiState.Loading -> Box(
             modifier = Modifier
@@ -1185,6 +1218,10 @@ private fun DtListBody(state: DtListUiState, actions: AuthenticatedActions) {
         }
 
         DtListUiState.Empty -> DtMessageBody(text = stringResource(R.string.flags_dt_empty))
+
+        // #546 — the union is non-empty but « non-lus uniquement » hid every row: a dedicated message
+        // (not the « aucune conversation » empty copy). Re-tapping the DT tab reveals « +lus ».
+        DtListUiState.NoUnread -> DtNoUnreadBody()
 
         is DtListUiState.Error -> DtErrorBody(cause = state.cause, actions = actions)
 
@@ -1244,6 +1281,35 @@ private fun DtRow(item: DtListItem, onOpenMultiMp: (threadId: Int, page: Int) ->
             item = item,
             // No lastPage for an orphan: open on the MPStorage resume page (clamped ≥ 1), else page 1.
             onClick = { onOpenMultiMp(item.threadId, (item.resumePage ?: 1).coerceAtLeast(1)) },
+        )
+    }
+}
+
+/**
+ * #546 directive XaTriX — body for the « filtered to no unread » state ([DtListUiState.NoUnread]):
+ * the union holds conversations but none is unread. Shows a discreet « aucune conversation non lue »
+ * message and keeps the scan-note footer visible (the user can re-tap the DT tab for « +lus »).
+ * Scrollable so the surrounding `PullToRefreshBox` keeps a swipe target (#229).
+ */
+@Composable
+private fun DtNoUnreadBody() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 24.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.flags_dt_no_unread),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(R.string.flags_dt_scan_note),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -1412,8 +1478,12 @@ private data class FlagsBodyState(
     val removeFlagState: RemoveFlagState,
     /** Whether the opt-in « DT » tab is shown (Settings toggle). */
     val showDtTab: Boolean,
-    /** #6 — the DT (MultiMP) tab list state, fetched on tab open. */
+    /** #6 — the DT (MultiMP) tab list state, fetched on tab open, FILTERED by « non-lus uniquement ». */
     val dtListState: DtListUiState,
+    /** #546 — whether the DT tab currently shows read conversations (« +lus » suffix). */
+    val dtShowsRead: Boolean,
+    /** #546 — toggled around the DT pull-to-refresh round-trip (anchors the indicator). */
+    val dtIsRefreshing: Boolean,
 )
 
 private data class AuthenticatedActions(

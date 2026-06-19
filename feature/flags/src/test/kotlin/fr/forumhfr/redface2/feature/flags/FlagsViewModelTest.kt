@@ -1740,6 +1740,194 @@ class FlagsViewModelTest {
         }
     }
 
+    // #546 directive XaTriX — DT « non-lus par défaut » + re-tap toggle (« +lus ») + pull-to-refresh.
+
+    @Test
+    fun `dtUnreadOnly defaults to true`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        assertTrue("DT opens on the unread subset by default", vm.dtUnreadOnly.value)
+    }
+
+    @Test
+    fun `re-tapping the already selected DT tab toggles its unread-only filter`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        vm.selectTab(FlagTab.Dt) // first tap from Cyan: just select, no toggle
+        assertEquals(FlagTab.Dt, vm.selectedTab.value)
+        assertTrue("a plain selection must not toggle the filter", vm.dtUnreadOnly.value)
+
+        vm.selectTab(FlagTab.Dt) // re-tap: true → false (« +lus » shown)
+        assertFalse(vm.dtUnreadOnly.value)
+        vm.selectTab(FlagTab.Dt) // re-tap: false → true
+        assertTrue(vm.dtUnreadOnly.value)
+        // The re-tap must not move the selected tab nor recall the list to the top (like Cyan).
+        assertEquals(FlagTab.Dt, vm.selectedTab.value)
+        assertFalse("DT re-tap must not recall the list to the top", vm.recallListToTop.value)
+    }
+
+    @Test
+    fun `selecting DT from another tab does not toggle the filter`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        vm.selectTab(FlagTab.Red)
+        vm.selectTab(FlagTab.Dt) // first tap onto DT: selects, keeps the default unread-only
+        assertEquals(FlagTab.Dt, vm.selectedTab.value)
+        assertTrue(vm.dtUnreadOnly.value)
+    }
+
+    @Test
+    fun `dtShowsRead mirrors DT selected and unread filter off`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        assertFalse("Cyan selected, no suffix", vm.dtShowsRead.value)
+        vm.selectTab(FlagTab.Dt)
+        assertFalse("DT selected but unread-only on → no « +lus »", vm.dtShowsRead.value)
+        vm.selectTab(FlagTab.Dt) // re-tap → +lus
+        assertTrue("DT selected with read shown → « +lus »", vm.dtShowsRead.value)
+    }
+
+    @Test
+    fun `dtDisplayState keeps only unread inbox rows by default and excludes orphans and read rows`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(
+                inboxPage(
+                    stubSummary(threadId = 10, isMultiRecipient = true, hasUnread = true),
+                    stubSummary(threadId = 20, isMultiRecipient = true, hasUnread = false),
+                ),
+            ),
+        )
+        // An orphan storage-only entry (state unknown) must be excluded by the unread filter.
+        val mpStorage = FakeMpStorageRepository(
+            result = MpStorageResult.Found(
+                mpDoc(MpStorageFlagEntry(threadId = 99, page = 2, numreponse = null, uri = null)),
+            ),
+        )
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages, mpStorage = mpStorage)
+
+        vm.dtDisplayState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            val unreadOnly = awaitItem() as DtListUiState.Content
+            assertEquals(
+                "default unread-only keeps only the unread inbox row (10)",
+                listOf(10),
+                unreadOnly.items.map { it.threadId },
+            )
+            // The raw union still carries all three (10 + 20 + orphan 99).
+            assertEquals(listOf(10, 20, 99), (vm.dtListState.value as DtListUiState.Content).items.map { it.threadId })
+
+            vm.selectTab(FlagTab.Dt) // re-tap → +lus reveals the full union
+            val full = awaitItem() as DtListUiState.Content
+            assertEquals(listOf(10, 20, 99), full.items.map { it.threadId })
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `dtDisplayState is NoUnread when the union is non-empty but nothing is unread`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(
+                inboxPage(stubSummary(threadId = 10, isMultiRecipient = true, hasUnread = false)),
+            ),
+        )
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+        vm.dtDisplayState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            // Union is non-empty (one read conversation) but the unread filter hides it → NoUnread,
+            // distinct from Empty (which means no conversation at all).
+            assertEquals(DtListUiState.NoUnread, awaitItem())
+            assertTrue("the raw union still holds the read conversation", vm.dtListState.value is DtListUiState.Content)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `dtDisplayState stays Empty (not NoUnread) when there is no conversation at all`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(inboxPage(stubSummary(threadId = 20, isMultiRecipient = false))),
+        )
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+        vm.dtDisplayState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            assertEquals(DtListUiState.Empty, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `refreshDt toggles dtIsRefreshing around the round-trip without blanking the content to Loading`() =
+        runTest {
+            val flags = FakeFlagRepository()
+            val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+            val messages = FakeMessagesRepository(
+                inboxResult = Result.success(
+                    inboxPage(stubSummary(threadId = 10, isMultiRecipient = true, hasUnread = true)),
+                ),
+            )
+            messages.blockInboxUntil = kotlinx.coroutines.CompletableDeferred()
+            val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+            // Cold open first (ungated), so there is content to keep during the refresh.
+            messages.blockInboxUntil!!.complete(Unit)
+            vm.onDtTabOpened()
+            assertTrue(vm.dtListState.value is DtListUiState.Content)
+
+            // Now gate the refresh round-trip so the in-flight indicator is observable.
+            messages.blockInboxUntil = kotlinx.coroutines.CompletableDeferred()
+            vm.refreshDt()
+            assertTrue("dtIsRefreshing rises during the refresh", vm.dtIsRefreshing.value)
+            assertTrue(
+                "the content must NOT blank to Loading during a refresh (#225 pattern)",
+                vm.dtListState.value is DtListUiState.Content,
+            )
+
+            messages.blockInboxUntil!!.complete(Unit)
+            advanceUntilIdle()
+            assertFalse("dtIsRefreshing falls after the round-trip", vm.dtIsRefreshing.value)
+            assertTrue(vm.dtListState.value is DtListUiState.Content)
+        }
+
+    @Test
+    fun `account switch keeps the DT unread filter but clears the refresh indicator`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(
+                inboxPage(stubSummary(threadId = 10, isMultiRecipient = true, hasUnread = true)),
+            ),
+        )
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
+
+        vm.selectTab(FlagTab.Dt)
+        vm.selectTab(FlagTab.Dt) // re-tap → +lus (unread filter off)
+        assertFalse(vm.dtUnreadOnly.value)
+
+        auth.emit(AuthState.Authenticated("other")) // account switch → resetDtState
+
+        assertEquals(DtListUiState.Loading, vm.dtListState.value)
+        assertFalse("the refresh indicator is reset on account switch", vm.dtIsRefreshing.value)
+        assertFalse("the « +lus » display preference survives the account switch", vm.dtUnreadOnly.value)
+    }
+
     private fun stubSummary(
         threadId: Int,
         isMultiRecipient: Boolean,
