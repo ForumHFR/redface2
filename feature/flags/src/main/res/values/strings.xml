@@ -33,6 +33,10 @@
          différé (cf. DT_INBOX_PAGE). Le wording assume « récente » pour ne pas affirmer qu'AUCUNE
          MultiMP n'existe ailleurs (ni en page 1, ni connue de la synchro DT). -->
     <string name="flags_dt_empty">Aucune conversation multi-destinataires récente.</string>
+    <!-- #546 — état « non-lus uniquement » actif mais aucune conversation non lue (l'union n'est pas
+         vide, juste filtrée). Re-taper l'onglet DT affiche aussi les lues (« +lus »). Distinct de
+         flags_dt_empty (aucune conversation du tout). -->
+    <string name="flags_dt_no_unread">Aucune conversation non lue. Re-tape l\'onglet DT pour afficher aussi les lues.</string>
     <!-- Description a11y d'une ligne DT : état lu/non-lu, annoncé par TalkBack (le point coloré
          est purement décoratif). %1$s = sujet de la conversation. -->
     <string name="flags_dt_row_unread">Non lu : %1$s</string>
