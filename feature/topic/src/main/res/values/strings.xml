@@ -19,6 +19,7 @@
     <string name="topic_loading">Chargement…</string>
     <!-- #379 — marqueur explicite de fin de sujet, rendu après le dernier post de la DERNIÈRE page. -->
     <string name="topic_end_of_topic">Dernier message du sujet</string>
+    <string name="topic_more_pages">Suite à la page suivante</string>
     <!-- #285 — top app bar : back affordance (content description) + fallback title shown while
          the topic page has not loaded yet (or errored), so the bar never reads blank. -->
     <string name="topic_back">Retour</string>

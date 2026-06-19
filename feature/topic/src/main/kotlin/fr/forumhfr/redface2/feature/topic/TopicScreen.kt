@@ -1251,6 +1251,13 @@ private fun TopicLoadedContent(
             item {
                 EndOfTopicFooter()
             }
+        } else if (topic.page < topic.totalPages) {
+            // #110 (nicko) — symmetric marker on an intermediate page: « Suite à la page suivante »,
+            // purely informative (navigation lives in the page controls / swipe #282). Same no-key
+            // sentinel rationale as EndOfTopicFooter above.
+            item {
+                MorePagesFooter()
+            }
         }
     }
     // #362 — per-post contextual menu. The permalink is rebuilt from the LOADED topic's
@@ -1328,6 +1335,36 @@ private fun EndOfTopicFooter() {
         )
         Text(
             text = stringResource(R.string.topic_end_of_topic),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+    }
+}
+
+/**
+ * #110 (nicko) — symmetric « more pages below » marker, mirroring [EndOfTopicFooter] but rendered as the
+ * LAST LazyColumn item of an INTERMEDIATE page (`topic.page < topic.totalPages`, condition at the call
+ * site). Informative only — no tap action (navigation is the page controls / swipe #282). Same style.
+ */
+@Composable
+private fun MorePagesFooter() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+        Text(
+            text = stringResource(R.string.topic_more_pages),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
