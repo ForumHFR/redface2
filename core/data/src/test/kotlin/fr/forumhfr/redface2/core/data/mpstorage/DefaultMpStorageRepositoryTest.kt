@@ -345,14 +345,16 @@ class DefaultMpStorageRepositoryTest {
     }
 
     @Test
-    fun `writeBackFlag restores the backup when the re-read does not match the mutated body`() = runTest {
+    fun `writeBackFlag restores the backup when the re-read is CORRUPTED (truncated, not valid JSON)`() = runTest {
         val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [] } } ] }"""
-        // GET = backup ; RE-GET after POST = a DIFFERENT body (mismatch) ; RE-GET after restore = the backup.
+        // GET = backup ; RE-GET after POST = a TRUNCATED/non-JSON body (real corruption, the HFR
+        // non-UTF-8 truncation) ; RE-GET after restore = the backup. Only corruption restores — a valid
+        // but different envelope is kept (see the concurrent-write test below).
         repository = buildRepository(
             replyFormParser = mockk {
                 every { parse(any()) } returnsMany listOf(
                     Result.success(storageForm(initialContent = raw)), // GET (backup)
-                    Result.success(storageForm(initialContent = "{\"unexpected\":true}")), // verify (mismatch)
+                    Result.success(storageForm(initialContent = "{ \"data\": [ { \"versi")), // truncated → corrupt
                     Result.success(storageForm(initialContent = raw)), // verify after restore (OK)
                 )
             },
@@ -388,7 +390,7 @@ class DefaultMpStorageRepositoryTest {
             replyFormParser = mockk {
                 every { parse(any()) } returnsMany listOf(
                     Result.success(storageForm(initialContent = raw)), // GET (backup)
-                    Result.success(storageForm(initialContent = "{\"unexpected\":true}")), // verify (mismatch)
+                    Result.success(storageForm(initialContent = "{ truncated")), // verify (CORRUPT → restore)
                     Result.success(storageForm(initialContent = "{\"still\":\"wrong\"}")), // restore verify (FAIL)
                 )
             },
@@ -400,6 +402,34 @@ class DefaultMpStorageRepositoryTest {
         val result = repository.writeBackFlag(MpStorageFlagEntry(threadId = 99, page = 1, numreponse = 1, uri = null))
 
         assertTrue(result is MpStorageWriteResult.VerificationFailedRestoreFailed)
+    }
+
+    @Test
+    fun `writeBackFlag keeps a valid-but-different re-read (concurrent write) without restoring`() = runTest {
+        val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [] } } ] }"""
+        // RE-GET returns a VALID envelope that differs from what we posted (HFR re-encoded entities, or
+        // a concurrent client wrote in the meantime). The doc is healthy → Success(verified=false), and
+        // we must NOT restore (that would clobber a legitimate last-write-wins update). Codex review.
+        val concurrent = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [ {"post":7} ] } } ] }"""
+        repository = buildRepository(
+            replyFormParser = mockk {
+                every { parse(any()) } returnsMany listOf(
+                    Result.success(storageForm(initialContent = raw)), // GET (backup)
+                    Result.success(storageForm(initialContent = concurrent)), // verify: valid but different
+                )
+            },
+        )
+        preferences.enabled.value = true
+        locationStore.saved[OWNER] = STORAGE_LOCATION
+        server.enqueue(MockResponse().setBody(storageEditFormHtml(raw))) // GET edit form
+        server.enqueue(MockResponse().setBody("<html><body>ok</body></html>")) // POST mutation
+        server.enqueue(MockResponse().setBody(storageEditFormHtml(concurrent))) // RE-GET (valid, different)
+
+        val result = repository.writeBackFlag(MpStorageFlagEntry(threadId = 99, page = 1, numreponse = 1, uri = null))
+
+        assertEquals(MpStorageWriteResult.Success(verified = false), result)
+        // GET + POST + RE-GET only — NO restore POST.
+        assertEquals(3, server.requestCount)
     }
 
     /** The exact mutated body the real path would build, so a test can script the RE-GET to match it. */

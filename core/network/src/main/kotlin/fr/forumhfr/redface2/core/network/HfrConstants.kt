@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.network
 
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import java.time.Duration
 
 object HfrConstants {
@@ -23,8 +24,12 @@ object HfrConstants {
      * private message. The write path sends this CONSTANT verbatim as the `sujet` field (NEVER the
      * `sujet` parsed back from the edit form) and refuses to POST when the parsed form's subject does
      * not equal it — a structural guard against ever writing into the wrong conversation.
+     *
+     * SINGLE SOURCE OF TRUTH = [MpStorageRepository.STORAGE_SUBJECT_HASH] (domain, also used by the
+     * discovery subject-match). Aliased here so the network/write layer and discovery can never drift
+     * to two different hashes (Codex review).
      */
-    const val MP_STORAGE_SUBJECT_HASH: String = "a2bcc09b796b8c6fab77058ff8446c34"
+    const val MP_STORAGE_SUBJECT_HASH: String = MpStorageRepository.STORAGE_SUBJECT_HASH
 
     val ConnectTimeout: Duration = Duration.ofSeconds(15)
     val ReadTimeout: Duration = Duration.ofSeconds(20)

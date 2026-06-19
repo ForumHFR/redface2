@@ -105,6 +105,14 @@ class MpStorageEnvelopeWriter @Inject constructor(
         return Outcome.Mutated(body)
     }
 
+    /**
+     * Whether [rawEnvelope] still parses as a JSON object. Used by the write-back verify step to tell
+     * a HEALTHY document (valid JSON — our write, or a concurrent valid write by another client) from
+     * a CORRUPTED one (truncated / non-JSON, the HFR non-UTF-8 truncation), so a restore only fires on
+     * real corruption and never clobbers a legitimate concurrent update (Codex review).
+     */
+    fun isJsonEnvelope(rawEnvelope: String): Boolean = parseObjectOrNull(rawEnvelope) != null
+
     private fun parseObjectOrNull(rawEnvelope: String): JsonObject? {
         if (rawEnvelope.isBlank()) return null
         return try {

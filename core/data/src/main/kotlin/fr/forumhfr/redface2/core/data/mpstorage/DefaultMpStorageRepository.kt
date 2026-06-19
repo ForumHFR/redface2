@@ -251,13 +251,26 @@ class DefaultMpStorageRepository @Inject constructor(
             return MpStorageWriteResult.Success(verified = true)
         }
 
-        // Mismatch : restore the verbatim backup through the same guarded builder.
+        // Not byte-identical. Tell a HEALTHY document apart from a CORRUPTED one before deciding to
+        // restore (Codex review): a valid JSON envelope that merely differs means HFR re-encoded
+        // entities OR a concurrent client (DTCloud) wrote between our GET and this re-GET — restoring
+        // the backup there would CLOBBER a legitimate last-write-wins update. Only a null / non-JSON
+        // read-back is real corruption (the HFR non-UTF-8 truncation, #114) → that is what we restore.
+        if (readBack != null && envelopeWriter.isJsonEnvelope(readBack)) {
+            diagnostics.record(
+                DiagnosticsLog.Level.INFO,
+                LOG_TAG,
+                "writeBackFlag: valid-but-different read-back (re-encoding / concurrent) — kept, not restored",
+            )
+            return MpStorageWriteResult.Success(verified = false)
+        }
+
         val expectedBytes = mutatedBody.toByteArray(Charsets.UTF_8).size
         val actualBytes = readBack?.toByteArray(Charsets.UTF_8)?.size ?: 0
         diagnostics.record(
             DiagnosticsLog.Level.WARN,
             LOG_TAG,
-            "writeBackFlag verify MISMATCH (expected=$expectedBytes actual=$actualBytes) → restoring backup",
+            "writeBackFlag verify CORRUPTION (expected=$expectedBytes actual=$actualBytes) → restoring backup",
         )
         return restoreBackup(location, form, pseudo, backupBody, expectedBytes, actualBytes)
     }
@@ -270,6 +283,9 @@ class DefaultMpStorageRepository @Inject constructor(
         expectedBytes: Int,
         actualBytes: Int,
     ): MpStorageWriteResult {
+        // Reuse the initial edit form: HFR's hash_check is session-stable (verified live, NOT rotated
+        // per-request), so the original form is valid for the restore. The guarded builder still
+        // refuses if its subject is not the storage hash.
         val restoreBody = buildPrivateMessageEditBody(location, form, pseudo, backupBody)
             ?: return MpStorageWriteResult.VerificationFailedRestoreFailed(expectedBytes, actualBytes)
 
@@ -293,13 +309,16 @@ class DefaultMpStorageRepository @Inject constructor(
         }
     }
 
-    /** Re-reads the raw `content_form` of the first post at [location] for verification (null when unreadable). */
-    private suspend fun reReadContentForm(location: MpStorageLocation): String? =
+    /** Re-fetches the full edit [ReplyForm] of the first post at [location] (null when unreadable). */
+    private suspend fun reReadForm(location: MpStorageLocation): ReplyForm? =
         replyFormParser
             .parse(hfrClient.getPrivateMessageEditForm(location.threadId, location.numreponse))
             .getOrNull()
             ?.takeUnless { it.isAnonymous }
-            ?.initialContent
+
+    /** Re-reads the raw `content_form` of the first post at [location] for verification (null when unreadable). */
+    private suspend fun reReadContentForm(location: MpStorageLocation): String? =
+        reReadForm(location)?.initialContent
 
     /**
      * The `bdd.php cat=prive` POST body for the storage first post. TWO deliberate differences from
