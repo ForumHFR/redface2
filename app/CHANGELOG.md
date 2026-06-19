@@ -16,6 +16,30 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v174 — `0.15.0` — `open` (beta) — 2026-06-19
+
+Bêta **0.15.0** (open testing) — promotion de tout le dev depuis la bêta 0.14.0 (`v156`). Revue 4-flavor
+(code-review + review holistique + superpowers + Codex, seuil >60, **0 bloquant** ; 2 MAJOR corrigés avant le cut).
+
+**Nouveautés**
+- **Blacklist** #509 : masquer un utilisateur (menu post + fiche profil + sous-page Réglages) ; ses posts se replient derrière un placeholder.
+- **Plein écran** #518 : masquer la barre de navigation Android (révélation auto + bouton retour flottant, options).
+- **Pseudo créateur en doré** #221.
+- **Couleur d'accent « Rouge REDFACE1 »** (option) + retrait du fond de mise en avant (TU 2788511).
+- **Onglet DT** : MultiMP + reprise de lecture MPStorage, **non-lus par défaut**, clic sur l'onglet pour « +lus », pull-to-refresh (#6/#509).
+- **Recherche dans le sujet** : mot/pseudo + filtre, **saut précédent/suivant** entre résultats, couvre **tout le sujet**, « aucun résultat » distinct d'une erreur (#546).
+- Ligne « Suite à la page suivante » (#110), retour en haut au changement d'onglet Drapeaux (#106), option « Afficher l'ascenseur » (#105).
+
+**Correctifs (revue bêta)**
+- Blacklist : repli **en direct** désormais sur tous les chemins (refresh / réponse / suppression / recherche) #509.
+- Badge MP décrémenté à l'ouverture d'un MultiMP via l'onglet DT.
+- Recherche : ne renvoie plus « aucun résultat » à tort sur un gros sujet (#586).
+
+**Coulisses**
+- Mécanique d'écriture MPStorage v1 (RMW guardée) ; contrat d'écriture validé en live (activation opt-in à venir, #6/#577).
+
+Consolide les builds dev `v157–v173`. La bêta précédente `0.14.0`/`v156` reste documentée ci-dessous.
+
 ## v157–v170 — `0.14.0` — `internal` (dev) — 2026-06-18/19
 
 Builds **dev (internal)** accumulés depuis la bêta 0.14.0 (`v156`), même `versionName 0.14.0`. À consolider en

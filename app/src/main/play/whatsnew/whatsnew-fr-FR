@@ -1,16 +1,13 @@
-Redface 2 v0.14.0 — bêta.
+Redface 2 v0.15.0 — bêta.
 
 Nouveautés :
-- Signatures affichées sous le message (réglage dédié).
-- Avatar du compte dans la barre du haut.
-- Longues citations repliables.
-- Barre d'actions drapeaux masquée au scroll.
-
-Améliorations :
-- Infos des sujets unifiées, icônes harmonisées, images sans à-coup.
+- Masquer un utilisateur (blacklist) : ses messages se replient.
+- Mode plein écran : masquer la barre de navigation Android.
+- Recherche dans un sujet : par mot ou pseudo, navigation entre les résultats, couvre tout le sujet.
+- Onglet DT (MultiMP) : non-lus par défaut, clic sur l'onglet pour voir les lus, tirer pour rafraîchir.
+- Pseudo du créateur en doré ; couleur d'accent « Rouge REDFACE1 » en option.
 
 Correctifs :
-- Drapeaux recalés en haut après le rafraîchissement.
-- Signatures plus lisibles : couleurs auteur neutralisées, séparateur « --- » retiré.
+- Blacklist appliquée en direct ; badge des MP corrigé à l'ouverture d'un MultiMP.
 
 Signalez les bugs via la bêta ou GitHub.
