@@ -610,16 +610,19 @@ class TopicViewModel @AssistedInject constructor(
         // next/prev would step from a position that no longer matches what is on screen. Reset it
         // and clear the navigation affordances. (Covers closeSearch, which routes through here.)
         resetSearchCursors()
-        if (_state.value.search.status == TopicSearchStatus.Loading) {
-            _state.update {
-                it.copy(
-                    search = it.search.copy(
-                        status = TopicSearchStatus.Idle,
-                        canGoPreviousResult = false,
-                        canGoNextResult = false,
-                    ),
-                )
-            }
+        // Clear the prev/next affordances UNCONDITIONALLY — not just on a mid-flight Loading search:
+        // after a completed (Done) search, a refresh / page change / normal load takes over the page,
+        // and lingering arrows would become no-op clicks over a non-search page (Codex review). Also
+        // reset a dangling Loading to Idle so the bar doesn't spin forever after the takeover.
+        _state.update {
+            val s = it.search
+            it.copy(
+                search = s.copy(
+                    status = if (s.status == TopicSearchStatus.Loading) TopicSearchStatus.Idle else s.status,
+                    canGoPreviousResult = false,
+                    canGoNextResult = false,
+                ),
+            )
         }
     }
 
@@ -743,13 +746,20 @@ class TopicViewModel @AssistedInject constructor(
                 val topic = topicSearchRepository.searchInTopic(request)
                 // Drop a stale reply: a newer normal load / refresh / search bumped the generation.
                 if (generation != searchGeneration) return@launch
-                applySearchResult(topic, isFresh = isFresh, rewindToIndex = rewindToIndex)
+                applySearchResult(
+                    topic,
+                    isFresh = isFresh,
+                    rewindToIndex = rewindToIndex,
+                    onlyMatches = request.onlyMatches,
+                )
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (noResults: NoTopicSearchResultsException) {
                 android.util.Log.i(LOG_TAG, "Intra-topic search returned no result", noResults)
                 if (generation != searchGeneration) return@launch
-                if (isFresh) onFreshNoResults() else onStepEnd()
+                // Same dispatch as a parsed reply with no usable landing (fresh→no results,
+                // rewind→replay failure ≠ end, forward→end of results).
+                signalNoLanding(isFresh, rewindToIndex)
             } catch (@Suppress("TooGenericExceptionCaught") searchError: Exception) {
                 android.util.Log.w(LOG_TAG, "Intra-topic search failed", searchError)
                 if (generation != searchGeneration) return@launch
@@ -770,33 +780,34 @@ class TopicViewModel @AssistedInject constructor(
      * scroll to the match. A cursor that is null OR no longer a post on the page means : fresh → no
      * results ; step → end of results.
      */
-    private suspend fun applySearchResult(topic: Topic, isFresh: Boolean, rewindToIndex: Int?) {
-        if (_state.value.search.onlyMatches) {
+    private suspend fun applySearchResult(
+        topic: Topic,
+        isFresh: Boolean,
+        rewindToIndex: Int?,
+        // Snapshot of the MODE the request was launched with — NOT the live toggle, which the user
+        // may have flipped mid-flight (Codex review : that would apply a non-filtered reply as
+        // filtered or vice-versa).
+        onlyMatches: Boolean,
+    ) {
+        if (onlyMatches) {
             // Matches-only page: it is the whole result set, no scroll / cursor navigation.
             renderSearchPage(topic, TopicSearchStatus.Done, canPrev = false, canNext = false)
             return
         }
+        // `landed` = the returned cursor IF it is a real post on the page. A null cursor, or one
+        // absent from the page (HFR's end sentinel is lastPost+1, never a real post), means no usable
+        // match here.
         val cursor = topic.searchForm?.currentNum
-        // Forward step that did not move on (HFR re-anchored on the same cursor) = end of results.
-        val sameAsCurrent = !isFresh && rewindToIndex == null && cursor == searchCursors.getOrNull(searchCursorIndex)
-        if (cursor == null || cursor !in topic.posts.map { it.numreponse } || sameAsCurrent) {
-            // No usable match on this reply. Fresh → no results ; step → end of results (keep page).
-            if (isFresh) onFreshNoResults() else onStepEnd()
+        val landed = cursor?.takeIf { c -> topic.posts.any { it.numreponse == c } }
+        // A forward step must ADVANCE — matches are in increasing numreponse order. A cursor that did
+        // not move past the current one (re-anchor / stale parse) is the end of results, not a new hit.
+        val forwardNoProgress = !isFresh && rewindToIndex == null && landed != null &&
+            landed <= (searchCursors.getOrNull(searchCursorIndex) ?: Int.MIN_VALUE)
+        if (landed == null || forwardNoProgress) {
+            signalNoLanding(isFresh, rewindToIndex)
             return
         }
-        // Usable landing: update the history slot, render THIS page, then scroll to the match.
-        when {
-            rewindToIndex != null -> searchCursorIndex = rewindToIndex
-            isFresh -> {
-                searchCursors.clear()
-                searchCursors += cursor
-                searchCursorIndex = 0
-            }
-            else -> {
-                searchCursors += cursor
-                searchCursorIndex = searchCursors.lastIndex
-            }
-        }
+        recordLanding(landed, isFresh, rewindToIndex)
         renderSearchPage(
             topic,
             TopicSearchStatus.Done,
@@ -805,7 +816,44 @@ class TopicViewModel @AssistedInject constructor(
             // actually reports the end (onStepEnd disables it).
             canNext = true,
         )
-        _effects.send(TopicEffect.ScrollToPost(cursor))
+        _effects.send(TopicEffect.ScrollToPost(landed))
+    }
+
+    /**
+     * Chantier B (#546) — record a usable match in the client cursor history. Fresh seeds it ; a
+     * backward replay just repositions the index ; a forward step DROPS any history beyond the current
+     * position before appending — a blind append corrupted the history when stepping back then forward
+     * (e.g. `[100,200,300]` at index 1 → next would yield `[100,200,300,200]`) (Codex review).
+     */
+    private fun recordLanding(landed: Int, isFresh: Boolean, rewindToIndex: Int?) {
+        when {
+            rewindToIndex != null -> searchCursorIndex = rewindToIndex
+            isFresh -> {
+                searchCursors.clear()
+                searchCursors += landed
+                searchCursorIndex = 0
+            }
+            else -> {
+                while (searchCursors.lastIndex > searchCursorIndex) {
+                    searchCursors.removeAt(searchCursors.lastIndex)
+                }
+                searchCursors += landed
+                searchCursorIndex = searchCursors.lastIndex
+            }
+        }
+    }
+
+    /**
+     * Chantier B (#546) — a reply with no usable landing (null/absent cursor, end sentinel, or a
+     * NoResults page). Fresh → no results ; a backward replay that failed → non-destructive failure
+     * (≠ end) ; a forward step → end of results.
+     */
+    private suspend fun signalNoLanding(isFresh: Boolean, rewindToIndex: Int?) {
+        when {
+            isFresh -> onFreshNoResults()
+            rewindToIndex != null -> onReplayFailed()
+            else -> onStepEnd()
+        }
     }
 
     /**
@@ -856,6 +904,26 @@ class TopicViewModel @AssistedInject constructor(
             )
         }
         _effects.send(TopicEffect.SearchResultsEnd)
+    }
+
+    /**
+     * Chantier B (#546) — a « previous » replay HFR could not honour (no-result / inconsistency).
+     * Distinct from [onStepEnd] (the end of FORWARD results) : the current match stays on screen,
+     * « next » is NOT disabled, and a generic search-failure Toast is surfaced (Codex review). The
+     * cursor index is unchanged (the rewind never landed), so the affordances reflect the position
+     * we are still on.
+     */
+    private suspend fun onReplayFailed() {
+        _state.update {
+            it.copy(
+                search = it.search.copy(
+                    status = TopicSearchStatus.Done,
+                    canGoPreviousResult = searchCursorIndex > 0,
+                    canGoNextResult = true,
+                ),
+            )
+        }
+        _effects.send(TopicEffect.SearchFailed)
     }
 
     @AssistedFactory

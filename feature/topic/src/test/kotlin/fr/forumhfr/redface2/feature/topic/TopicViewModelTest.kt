@@ -1115,6 +1115,54 @@ class TopicViewModelTest {
         assertEquals(true, viewModel.state.value.search.isActive)
     }
 
+    @Test
+    fun `NextResult after stepping back re-walks history without corrupting it (#546)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 7)
+        val m100 = fakeTopic(1, 1, posts = listOf(fakePost(100)), searchForm = form.copy(currentNum = 100))
+        val m200 = fakeTopic(1, 1, posts = listOf(fakePost(200)), searchForm = form.copy(currentNum = 200))
+        val m300 = fakeTopic(1, 1, posts = listOf(fakePost(300)), searchForm = form.copy(currentNum = 300))
+        val searchRepo = FakeTopicSearchRepository()
+        // Fresh → 100 ; STEP advances by the cursor sent (100→200, 200→300). A « previous » replay is
+        // a step from the predecessor, so it also resolves through this map.
+        searchRepo.responder = { req ->
+            when {
+                !req.isStep -> m100
+                req.currentNum == "100" -> m200
+                req.currentNum == "200" -> m300
+                else -> error("unexpected step from ${req.currentNum}")
+            }
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = searchableRepo(form),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToPost(100), awaitItem())
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.ScrollToPost(200), awaitItem())
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.ScrollToPost(300), awaitItem())
+            // Step back to 200, then forward again: history must stay [100,200,300], so the next
+            // forward lands on 300 and a further « previous » walks back to 200 — NOT a corrupted
+            // [100,200,300,200] that would send « previous » back to 300 (Codex review).
+            viewModel.send(TopicIntent.PrevResult)
+            assertEquals(TopicEffect.ScrollToPost(200), awaitItem())
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.ScrollToPost(300), awaitItem())
+            viewModel.send(TopicIntent.PrevResult)
+            assertEquals(TopicEffect.ScrollToPost(200), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
     /** Chantier B (#546) — a topic repo that loads a 5-page topic carrying [form] (keeps lines short). */
     private fun searchableRepo(form: TopicSearchForm): FakeTopicRepository =
         FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }))
