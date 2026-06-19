@@ -28,6 +28,10 @@ interface TopicSearchRepository {
      * Failures surface as exceptions (typed where the network layer typed them, e.g.
      * [fr.forumhfr.redface2.core.domain.auth.SessionExpiredException] /
      * [fr.forumhfr.redface2.core.domain.error.HfrServerException]).
+     *
+     * A successful round-trip that found no match raises [NoTopicSearchResultsException] (Chantier B
+     * / #546) — HFR answers a « aucune réponse n'a été trouvée » page rather than an HTTP error, so the
+     * caller must distinguish « no result » from a genuine failure.
      */
     suspend fun searchInTopic(request: TopicSearchRequest): Topic
 }

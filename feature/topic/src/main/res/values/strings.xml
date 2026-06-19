@@ -32,6 +32,11 @@
     <string name="topic_search_only_matches">Filtrer (résultats uniquement)</string>
     <string name="topic_search_submit">Rechercher</string>
     <string name="topic_search_failed">La recherche dans le sujet a échoué.</string>
+    <!-- Chantier B (#546) — navigation entre résultats + cas « aucun résultat ». -->
+    <string name="topic_search_no_results">Aucun résultat</string>
+    <string name="topic_search_prev_result">Résultat précédent</string>
+    <string name="topic_search_next_result">Résultat suivant</string>
+    <string name="topic_search_results_end">Aucun résultat suivant</string>
     <string name="topic_error_title">Erreur de chargement</string>
     <string name="topic_error_body">Impossible d’ouvrir la page %1$d.\n\n%2$s</string>
     <string name="topic_caption">post %1$d • page %2$d / %3$d</string>

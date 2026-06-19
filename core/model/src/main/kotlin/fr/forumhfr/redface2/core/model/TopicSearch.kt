@@ -36,6 +36,12 @@ package fr.forumhfr.redface2.core.model
  *   HFR uses it as the search anchor ; forwarded verbatim.
  * @property owntopic the `owntopic` flag verbatim from the form (`0` on a normal topic, `1` observed
  *   on the cat-IA owned-topic capture). Wire detail, kept as-is.
+ * @property currentNum the server-side navigation cursor parsed from the form's `currentnum` hidden
+ *   input. `null` on a NORMAL topic page (HFR's static form ships no `currentnum` input — its own JS
+ *   creates one at runtime), and non-null only on a `transsearch` RESPONSE page, where it points at the
+ *   `numreponse` of the match HFR anchored. The ViewModel reads it back after a search to drive the
+ *   next/previous result navigation (Chantier B / #546) and to detect the end of results — a cursor
+ *   value that is no longer a post present on the page means HFR ran past the last match.
  */
 data class TopicSearchForm(
     val hashCheck: String,
@@ -43,6 +49,7 @@ data class TopicSearchForm(
     val cat: Int,
     val firstnum: Int,
     val owntopic: Int = 0,
+    val currentNum: Int? = null,
 ) {
     /**
      * `transsearch.php` rejects an empty `hash_check`, so the search affordance must only be
@@ -63,8 +70,13 @@ data class TopicSearchForm(
  *   the topic page showing ONLY the messages matching the search ; when `false` it returns the
  *   page with the matches highlighted in place. Named for intent, not for the wire (`filter=1`).
  * @property currentNum the server-side navigation cursor (HFR's JS-managed `currentnum`). `null`/blank
- *   for a fresh search (the documented "clear on submit" behaviour) ; a value is carried only for
- *   the EXPERIMENTAL next/previous navigation. **Never observed live** — see [TopicSearchForm].
+ *   for a FRESH search (the documented "clear on submit" behaviour : HFR re-anchors on the first
+ *   match) ; carries the current match's `numreponse` for a next/previous STEP so HFR advances to the
+ *   following match. Built by the ViewModel from the previous response's [TopicSearchForm.currentNum].
+ * @property isStep `true` for a next/previous navigation step (as opposed to a fresh search). When
+ *   stepping, the repository OMITS `firstnum` (and `dep`) from the POST : re-sending `firstnum`
+ *   re-anchors HFR on the FIRST match and the cursor never progresses (the live-verified stepping bug
+ *   — Chantier B / #546). A fresh search keeps `firstnum` (the page anchor HFR expects).
  */
 data class TopicSearchRequest(
     val form: TopicSearchForm,
@@ -72,6 +84,7 @@ data class TopicSearchRequest(
     val spseudo: String,
     val onlyMatches: Boolean,
     val currentNum: String? = null,
+    val isStep: Boolean = false,
 ) {
     /** HFR needs at least a term or an author ; an all-blank search is meaningless. */
     val isMeaningful: Boolean get() = word.isNotBlank() || spseudo.isNotBlank()

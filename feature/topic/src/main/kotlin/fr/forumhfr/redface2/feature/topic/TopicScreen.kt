@@ -282,6 +282,8 @@ fun TopicScreen(
     val refreshManualFailedMsg = stringResource(R.string.topic_refresh_failed)
     // Chantier C (#546) — intra-topic search failure message (resolved upfront, same rationale).
     val searchFailedMsg = stringResource(R.string.topic_search_failed)
+    // Chantier B (#546) — « no further result » Toast (resolved upfront, same rationale).
+    val searchResultsEndMsg = stringResource(R.string.topic_search_results_end)
     // #292 — delete feedback messages, resolved upfront (same rationale as refreshFailedMsg).
     val deleteSuccessMsg = stringResource(R.string.topic_post_delete_success)
     val deleteFailedLoginMsg = stringResource(R.string.topic_post_delete_failed_login)
@@ -410,6 +412,15 @@ fun TopicScreen(
                         context,
                         searchFailedMsg,
                         android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+                TopicEffect.SearchResultsEnd -> {
+                    // Chantier B (#546) — a « next » step ran past the last match; the current match
+                    // stays on screen and a sober Toast confirms there is nothing further.
+                    android.widget.Toast.makeText(
+                        context,
+                        searchResultsEndMsg,
+                        android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 }
             }
@@ -921,9 +932,12 @@ private fun TopicTopBar(
  *
  * Two fields (term / author) + a « Filtrer » toggle (HFR's `filter`, i.e. show only matching posts)
  * + submit + close. Submitting POSTs `transsearch.php` ; the response (a topic page) replaces the
- * loaded page. There is intentionally no next/previous control : the server-side `currentnum`
- * cursor was never observed live, so result navigation is left out of the MVP rather than guessed
- * (see the ViewModel / model KDoc — best-effort, not yet wired).
+ * loaded page.
+ *
+ * Chantier B (#546) — in NON-FILTERED mode, once a search is `Done`, a « précédent / suivant » pair of
+ * arrows steps between matches (`currentnum`), enabled per the ViewModel's client-side cursor history.
+ * A `NoResults` status shows a sober « Aucun résultat » line instead. Filtered mode keeps no per-result
+ * navigation (the page already IS the matches list).
  */
 @Composable
 private fun TopicSearchBar(
@@ -991,6 +1005,53 @@ private fun TopicSearchBar(
                     enabled = search.canSubmit && search.status != TopicSearchStatus.Loading,
                 ) {
                     Text(stringResource(R.string.topic_search_submit))
+                }
+            }
+            // Chantier B (#546) — per-result navigation (non-filtered) / « no result » feedback.
+            TopicSearchResultNav(search = search, onIntent = onIntent)
+        }
+    }
+}
+
+/**
+ * Chantier B (#546) — the result-navigation footer of [TopicSearchBar]. In NON-FILTERED mode, once the
+ * search is `Done`, shows « précédent / suivant » arrows (enabled per the ViewModel's cursor history).
+ * A `NoResults` status shows a sober « Aucun résultat » line. Renders nothing otherwise (filtered mode,
+ * idle, loading), so the bar collapses back to its two-row shape.
+ */
+@Composable
+private fun TopicSearchResultNav(
+    search: TopicSearchUiState,
+    onIntent: (TopicIntent) -> Unit,
+) {
+    when {
+        search.status == TopicSearchStatus.NoResults -> {
+            Text(
+                text = stringResource(R.string.topic_search_no_results),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        search.status == TopicSearchStatus.Done && !search.onlyMatches -> {
+            val prevLabel = stringResource(R.string.topic_search_prev_result)
+            val nextLabel = stringResource(R.string.topic_search_next_result)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = { onIntent(TopicIntent.PrevResult) },
+                    enabled = search.canGoPreviousResult,
+                    modifier = Modifier.semantics { contentDescription = prevLabel },
+                ) {
+                    RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_left)
+                }
+                IconButton(
+                    onClick = { onIntent(TopicIntent.NextResult) },
+                    enabled = search.canGoNextResult,
+                    modifier = Modifier.semantics { contentDescription = nextLabel },
+                ) {
+                    RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right)
                 }
             }
         }

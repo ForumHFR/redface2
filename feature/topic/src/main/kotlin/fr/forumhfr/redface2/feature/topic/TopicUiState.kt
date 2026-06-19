@@ -136,7 +136,12 @@ data class TopicUiState(
  * @property onlyMatches the « Filtrer » toggle — HFR's `filter` checkbox (only show matching posts).
  * @property status the search lifecycle. Idle before the first submit ; Loading while the POST is in
  *   flight ; Done once a `transsearch` page has been loaded into [TopicUiState.Mode.Loaded] (the
- *   page itself carries the matches) ; Error on failure.
+ *   page itself carries the matches) ; NoResults when HFR found nothing ; Error on failure.
+ * @property canGoPreviousResult whether a « previous result » step is available (Chantier B / #546).
+ *   Mirrors the ViewModel's client-side cursor history (HFR's search is forward-only) : `true` once the
+ *   user has navigated past the first match. Only meaningful in non-filtered mode (`!onlyMatches`).
+ * @property canGoNextResult whether a « next result » step is available. `true` while HFR has not yet
+ *   reported the end of results. Only meaningful in non-filtered mode (`!onlyMatches`).
  */
 data class TopicSearchUiState(
     val isActive: Boolean = false,
@@ -144,6 +149,8 @@ data class TopicSearchUiState(
     val spseudo: String = "",
     val onlyMatches: Boolean = true,
     val status: TopicSearchStatus = TopicSearchStatus.Idle,
+    val canGoPreviousResult: Boolean = false,
+    val canGoNextResult: Boolean = false,
 ) {
     /** HFR needs at least a term or an author ; the submit button is disabled otherwise. */
     val canSubmit: Boolean get() = word.isNotBlank() || spseudo.isNotBlank()
@@ -153,6 +160,9 @@ enum class TopicSearchStatus {
     Idle,
     Loading,
     Done,
+
+    /** Chantier B (#546) — the search round-trip succeeded but HFR found no matching message. */
+    NoResults,
     Error,
 }
 
@@ -199,6 +209,18 @@ sealed interface TopicIntent {
 
     /** Submit the intra-topic search (`POST transsearch.php`). */
     data object SubmitSearch : TopicIntent
+
+    /**
+     * Chantier B (#546) — jump to the NEXT search result (non-filtered mode). Steps HFR's
+     * `currentnum` cursor forward and scrolls to the new match. No-op past the last result.
+     */
+    data object NextResult : TopicIntent
+
+    /**
+     * Chantier B (#546) — jump to the PREVIOUS search result (non-filtered mode). HFR's search is
+     * forward-only, so this replays the client-side cursor history. No-op on the first result.
+     */
+    data object PrevResult : TopicIntent
 }
 
 /**
@@ -293,4 +315,11 @@ sealed interface TopicEffect {
      * Toast inviting a retry.
      */
     data object SearchFailed : TopicEffect
+
+    /**
+     * Chantier B (#546) — emitted when a « next result » step ran past the last match (HFR returned a
+     * sentinel cursor / a no-result page). The current match stays on screen ; the screen surfaces a
+     * sober Toast (« Aucun résultat suivant ») and the next arrow disables.
+     */
+    data object SearchResultsEnd : TopicEffect
 }

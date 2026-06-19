@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.model.TopicSearchForm
@@ -948,6 +949,224 @@ class TopicViewModelTest {
         )
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Chantier B (#546) — non-filtered result navigation (next / previous)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `fresh non-filtered search scrolls to the first match and marks Done (#546)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        // The transsearch reply: full page anchored on match 100 (currentNum=100), 100 present.
+        val resultForm = form.copy(currentNum = 100)
+        val resultTopic = fakeTopic(
+            page = 1, totalPages = 1, title = "match-1",
+            posts = listOf(fakePost(100), fakePost(200)), searchForm = resultForm,
+        )
+        val searchRepo = FakeTopicSearchRepository(result = resultTopic)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = searchableRepo(form),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.OpenSearch)
+            viewModel.send(TopicIntent.SearchWordChanged("x"))
+            viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+            viewModel.send(TopicIntent.SubmitSearch)
+
+            assertEquals(TopicEffect.ScrollToPost(100), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        val request = searchRepo.requests.single()
+        assertEquals(false, request.isStep)
+        assertEquals(null, request.currentNum)
+        assertEquals(TopicSearchStatus.Done, viewModel.state.value.search.status)
+        assertEquals(false, viewModel.state.value.search.canGoPreviousResult)
+        assertEquals(true, viewModel.state.value.search.canGoNextResult)
+    }
+
+    @Test
+    fun `NextResult steps the cursor forward without firstnum and scrolls to the new match (#546)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 7)
+        val first = fakeTopic(1, 1, posts = listOf(fakePost(100)), searchForm = form.copy(currentNum = 100))
+        val second = fakeTopic(1, 1, posts = listOf(fakePost(200)), searchForm = form.copy(currentNum = 200))
+        val searchRepo = FakeTopicSearchRepository()
+        searchRepo.responder = { req -> if (req.isStep) second else first }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = searchableRepo(form),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToPost(100), awaitItem()) // fresh first match
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.ScrollToPost(200), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        val step = searchRepo.requests.last()
+        assertEquals(true, step.isStep)
+        assertEquals("100", step.currentNum)
+        assertEquals(true, viewModel.state.value.search.canGoPreviousResult)
+        assertEquals(true, viewModel.state.value.search.canGoNextResult)
+    }
+
+    @Test
+    fun `NextResult past the last match keeps the page and signals the end (#546)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 7)
+        val first = fakeTopic(
+            1, 1, title = "match-1", posts = listOf(fakePost(100)), searchForm = form.copy(currentNum = 100),
+        )
+        // The end sentinel: currentNum points at a post NOT present on the returned page.
+        val sentinel = fakeTopic(
+            1, 1, title = "sentinel", posts = listOf(fakePost(100)), searchForm = form.copy(currentNum = 999),
+        )
+        val searchRepo = FakeTopicSearchRepository()
+        searchRepo.responder = { req -> if (req.isStep) sentinel else first }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = searchableRepo(form),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToPost(100), awaitItem()) // fresh first match
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.SearchResultsEnd, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        // The current match's page stays on screen (the sentinel page was NOT rendered).
+        val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("match-1", loaded.topic.title)
+        assertEquals(false, viewModel.state.value.search.canGoNextResult)
+    }
+
+    @Test
+    fun `PrevResult replays the cursor history and scrolls back to the earlier match (#546)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 7)
+        val first = fakeTopic(1, 1, posts = listOf(fakePost(100)), searchForm = form.copy(currentNum = 100))
+        val second = fakeTopic(1, 1, posts = listOf(fakePost(200)), searchForm = form.copy(currentNum = 200))
+        val searchRepo = FakeTopicSearchRepository()
+        // Fresh and the prev-replay (back to index 0) are fresh requests → first; step → second.
+        searchRepo.responder = { req -> if (req.isStep) second else first }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = searchableRepo(form),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToPost(100), awaitItem()) // fresh first match (index 0)
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.ScrollToPost(200), awaitItem()) // now on match 200 (index 1)
+            viewModel.send(TopicIntent.PrevResult)
+            assertEquals(TopicEffect.ScrollToPost(100), awaitItem()) // back to match 100
+            cancelAndIgnoreRemainingEvents()
+        }
+        // Going back to the first match: the replay re-issues a FRESH request (index 0).
+        assertEquals(false, searchRepo.requests.last().isStep)
+        assertEquals(false, viewModel.state.value.search.canGoPreviousResult)
+    }
+
+    @Test
+    fun `a fresh search with no match settles on NoResults, not Error (#546)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val searchRepo = FakeTopicSearchRepository(error = NoTopicSearchResultsException())
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 3, title = "loaded", searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.OpenSearch)
+            viewModel.send(TopicIntent.SearchWordChanged("topic"))
+            viewModel.send(TopicIntent.SubmitSearch)
+            // No-result is NOT a failure: no SearchFailed effect is emitted.
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(TopicSearchStatus.NoResults, viewModel.state.value.search.status)
+        // The page the user was reading stays on screen.
+        assertEquals("loaded", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+        assertEquals(true, viewModel.state.value.search.isActive)
+    }
+
+    @Test
+    fun `NextResult after stepping back re-walks history without corrupting it (#546)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 7)
+        val m100 = fakeTopic(1, 1, posts = listOf(fakePost(100)), searchForm = form.copy(currentNum = 100))
+        val m200 = fakeTopic(1, 1, posts = listOf(fakePost(200)), searchForm = form.copy(currentNum = 200))
+        val m300 = fakeTopic(1, 1, posts = listOf(fakePost(300)), searchForm = form.copy(currentNum = 300))
+        val searchRepo = FakeTopicSearchRepository()
+        // Fresh → 100 ; STEP advances by the cursor sent (100→200, 200→300). A « previous » replay is
+        // a step from the predecessor, so it also resolves through this map.
+        searchRepo.responder = { req ->
+            when {
+                !req.isStep -> m100
+                req.currentNum == "100" -> m200
+                req.currentNum == "200" -> m300
+                else -> error("unexpected step from ${req.currentNum}")
+            }
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = searchableRepo(form),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToPost(100), awaitItem())
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.ScrollToPost(200), awaitItem())
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.ScrollToPost(300), awaitItem())
+            // Step back to 200, then forward again: history must stay [100,200,300], so the next
+            // forward lands on 300 and a further « previous » walks back to 200 — NOT a corrupted
+            // [100,200,300,200] that would send « previous » back to 300 (Codex review).
+            viewModel.send(TopicIntent.PrevResult)
+            assertEquals(TopicEffect.ScrollToPost(200), awaitItem())
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.ScrollToPost(300), awaitItem())
+            viewModel.send(TopicIntent.PrevResult)
+            assertEquals(TopicEffect.ScrollToPost(200), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    /** Chantier B (#546) — a topic repo that loads a 5-page topic carrying [form] (keeps lines short). */
+    private fun searchableRepo(form: TopicSearchForm): FakeTopicRepository =
+        FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }))
+
     @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun topicViewModel(
         request: TopicRequest,
@@ -1609,14 +1828,22 @@ private class FakeBlacklistRepository(
 }
 
 /**
- * Chantier C (#546) — intra-topic search fake. Returns [result] on `searchInTopic`, or throws
- * [error] when set, and records the request for assertions.
+ * Chantier C/B (#546) — intra-topic search fake. Returns [result] on `searchInTopic`, or throws
+ * [error] when set, and records the request for assertions. For the next/previous navigation tests, a
+ * [responder] (set after construction) maps each request to the reply (or throws), so a sequence of
+ * fresh → step → step → end can be scripted from the request's `isStep` / `currentNum`.
  */
 private class FakeTopicSearchRepository(
     private val result: Topic? = null,
     private val error: Throwable? = null,
 ) : TopicSearchRepository {
     val requests = mutableListOf<TopicSearchRequest>()
+
+    /**
+     * Optional per-request responder for the navigation tests. When set, it fully drives the reply
+     * (returns a [Topic] or throws), letting a test script fresh/step/end from the request shape.
+     */
+    var responder: ((TopicSearchRequest) -> Topic)? = null
 
     /**
      * Optional gate to suspend inside `searchInTopic` so a test can hold the `transsearch` reply
@@ -1636,6 +1863,7 @@ private class FakeTopicSearchRepository(
     override suspend fun searchInTopic(request: TopicSearchRequest): Topic {
         requests += request
         gate?.let { g -> if (ignoreCancellation) withContext(NonCancellable) { g() } else g() }
+        responder?.let { return it(request) }
         error?.let { throw it }
         return result ?: error("FakeTopicSearchRepository has no result configured")
     }
