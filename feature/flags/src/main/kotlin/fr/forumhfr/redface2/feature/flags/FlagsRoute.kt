@@ -39,7 +39,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Card
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -80,6 +79,7 @@ import fr.forumhfr.redface2.core.ui.FlagItem
 import fr.forumhfr.redface2.core.ui.FlagItemDivider
 import fr.forumhfr.redface2.core.ui.FlagItemLongPress
 import fr.forumhfr.redface2.core.ui.FlagMetadata
+import fr.forumhfr.redface2.core.ui.ForumListRow
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import kotlinx.coroutines.launch
@@ -1185,10 +1185,15 @@ private fun DtListBody(state: DtListUiState, actions: AuthenticatedActions) {
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.surface),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(state.items, key = { it.conversation.threadId }) { item ->
+            // DT now renders through the SAME row primitive + divider as the Cyan/Red/Favorite lists
+            // (no Card, no contentPadding/spacing) so the four lists stay visually identical and a
+            // row change propagates to all (arbitrage XaTriX 2026-06-19).
+            items(
+                items = state.items,
+                key = { it.conversation.threadId },
+                contentType = { CONTENT_TYPE_ROW },
+            ) { item ->
                 DtConversationRow(
                     item = item,
                     // Open on the page the badge ADVERTISES: the MPStorage resume page when present,
@@ -1201,6 +1206,7 @@ private fun DtListBody(state: DtListUiState, actions: AuthenticatedActions) {
                         actions.onOpenMultiMp(item.conversation.threadId, target)
                     },
                 )
+                FlagItemDivider()
             }
         }
     }
@@ -1270,53 +1276,35 @@ private fun DtErrorBody(cause: Throwable, actions: AuthenticatedActions) {
 @Composable
 private fun DtConversationRow(item: DtListItem, onClick: () -> Unit) {
     val conversation = item.conversation
-    // a11y — the read/unread dot is purely decorative (no semantics of its own), so the row carries
-    // the read state for TalkBack: « Non lu : <sujet> » / « Lu : <sujet> » (Codex review). The
-    // « Interlocuteurs multiples » caption and the resume badge stay separately announced beneath it.
+    // DT renders through the shared [ForumListRow]: the inbox dot is the leading slot, the subject is
+    // the title (unread → SemiBold), and the « Interlocuteurs multiples » caption + the « reprise p.N »
+    // MPStorage badge become the two-segment metadata line (badge in `end`, never truncated — Codex).
+    // The badge is a reading POSITION, never a read/unread state (#361/ADR-013).
+    val multiLabel = stringResource(R.string.flags_dt_multi_recipient)
+    val resumeBadge = item.resumePage?.let { stringResource(R.string.flags_dt_resume_badge, it) }.orEmpty()
+    // a11y — the dot is decorative, so the row carries the full announcement for TalkBack: read state
+    // + subject, then « Interlocuteurs multiples » and the resume page when present (Codex review).
     val rowStateDescription = stringResource(
         if (conversation.hasUnread) R.string.flags_dt_row_unread else R.string.flags_dt_row_read,
         conversation.subject,
     )
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .semantics { contentDescription = rowStateDescription },
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            DtUnreadDot(unread = conversation.hasUnread)
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.flags_dt_multi_recipient),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = conversation.subject,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            item.resumePage?.let { page ->
-                Text(
-                    text = stringResource(R.string.flags_dt_resume_badge, page),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+    val contentDescription = buildString {
+        append(rowStateDescription)
+        append(". ")
+        append(multiLabel)
+        if (resumeBadge.isNotEmpty()) {
+            append(". ")
+            append(resumeBadge)
         }
     }
+    ForumListRow(
+        title = conversation.subject,
+        metadata = FlagMetadata(start = multiLabel, end = resumeBadge),
+        onClick = onClick,
+        emphasized = conversation.hasUnread,
+        leading = { DtUnreadDot(unread = conversation.hasUnread) },
+        contentDescription = contentDescription,
+    )
 }
 
 /**
@@ -1329,13 +1317,13 @@ private fun DtUnreadDot(unread: Boolean) {
     if (unread) {
         Box(
             modifier = Modifier
-                .size(10.dp)
+                .size(12.dp)
                 .background(MaterialTheme.colorScheme.primary, CircleShape),
         )
     } else {
         Box(
             modifier = Modifier
-                .size(10.dp)
+                .size(12.dp)
                 .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
         )
     }
