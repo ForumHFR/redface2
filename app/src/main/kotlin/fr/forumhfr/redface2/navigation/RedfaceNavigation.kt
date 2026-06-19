@@ -1378,8 +1378,15 @@ private fun RedfaceNavHost(
                     // #6 — DT (MultiMP) row tap: open the existing PrivateMessageThread route inside
                     // the Flags tab. DT rows are always multi-recipient, so record the hint (the
                     // route itself stays opaque, like the Messages tab does, cf. onOpenThread).
-                    onOpenMultiMp = { threadId, page ->
+                    onOpenMultiMp = { threadId, page, wasUnread ->
                         privateMessageNavState.onThreadOpenedAsMulti(threadId)
+                        // Badge fix — record the unread-on-open state so the badge decrements on
+                        // first read, exactly like the Messages tab's onOpenThread. Without this the
+                        // DT path never fed `unreadOnOpenThreadIds`, so shouldDecrementUnreadBadge
+                        // was always false for a DT-opened conversation and the MP badge stayed high.
+                        if (wasUnread) {
+                            privateMessageNavState.onThreadOpenedUnread(threadId)
+                        }
                         backStack.add(PrivateMessageThreadRoute(threadId = threadId, page = page))
                     },
                     topBarActions = accountMenu,

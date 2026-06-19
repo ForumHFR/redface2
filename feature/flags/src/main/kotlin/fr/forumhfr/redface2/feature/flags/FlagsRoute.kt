@@ -116,8 +116,10 @@ fun FlagsRoute(
     onLoginRequested: () -> Unit,
     onOpenCategory: (Int) -> Unit = {},
     // #6 — open a DT (MultiMP) conversation : the host pushes the existing PrivateMessageThread
-    // route. `page` is the conversation's last inbox page (web parity, #430).
-    onOpenMultiMp: (threadId: Int, page: Int) -> Unit = { _, _ -> },
+    // route. `page` is the conversation's last inbox page (web parity, #430). `wasUnread` lets the
+    // host decrement the MP unread badge on first read, mirroring the Messages tab's onOpenThread
+    // (badge regression: the DT path never reported it, so the badge stayed stuck high).
+    onOpenMultiMp: (threadId: Int, page: Int, wasUnread: Boolean) -> Unit = { _, _, _ -> },
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel: FlagsViewModel = hiltViewModel()
@@ -1262,7 +1264,7 @@ private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions) {
  * the page the « reprise p.N » badge advertises (clamped ≥ 1).
  */
 @Composable
-private fun DtRow(item: DtListItem, onOpenMultiMp: (threadId: Int, page: Int) -> Unit) {
+private fun DtRow(item: DtListItem, onOpenMultiMp: (threadId: Int, page: Int, wasUnread: Boolean) -> Unit) {
     when (item) {
         is DtListItem.InboxBacked -> DtConversationRow(
             item = item,
@@ -1270,19 +1272,34 @@ private fun DtRow(item: DtListItem, onOpenMultiMp: (threadId: Int, page: Int) ->
             // conversation's last inbox page (#430). Tapping must land where the « reprise p.N » badge
             // says it will — opening lastPage while showing « reprise p.N » was a badge/action
             // contradiction (Codex review). Clamp ≥ 1 so a bogus stored 0/negative page never
-            // produces an invalid route argument.
+            // produces an invalid route argument. `wasUnread` mirrors the Messages tab so the host
+            // decrements the MP badge on first read (HFR has no server read flag, so a stuck-high
+            // badge never self-corrects on re-fetch).
             onClick = {
                 val target = (item.resumePage ?: item.conversation.lastPage).coerceAtLeast(1)
-                onOpenMultiMp(item.threadId, target)
+                onOpenMultiMp(item.threadId, target, dtRowWasUnread(item))
             },
         )
 
         is DtListItem.StorageOnly -> DtStorageOnlyRow(
             item = item,
             // No lastPage for an orphan: open on the MPStorage resume page (clamped ≥ 1), else page 1.
-            onClick = { onOpenMultiMp(item.threadId, (item.resumePage ?: 1).coerceAtLeast(1)) },
+            // The read/unread state of an orphan is unknown off inbox PAGE 1, so wasUnread = false
+            // (dtRowWasUnread) — never speculatively decrement the badge for an unknown state.
+            onClick = { onOpenMultiMp(item.threadId, (item.resumePage ?: 1).coerceAtLeast(1), dtRowWasUnread(item)) },
         )
     }
+}
+
+/**
+ * #6 / badge — whether a DT row was UNREAD when tapped, used by the host to decrement the MP unread
+ * badge on first read (mirror of the Messages tab's onOpenThread `wasUnread`). An [DtListItem.InboxBacked]
+ * carries the live inbox read state ([PrivateMessageSummary.hasUnread]); an orphan [DtListItem.StorageOnly]
+ * has no known read state off inbox PAGE 1, so it reports `false` (never speculatively decrement).
+ */
+internal fun dtRowWasUnread(item: DtListItem): Boolean = when (item) {
+    is DtListItem.InboxBacked -> item.conversation.hasUnread
+    is DtListItem.StorageOnly -> false
 }
 
 /**
@@ -1498,8 +1515,8 @@ private data class AuthenticatedActions(
     val onRequestRemoveFlag: (Flag) -> Unit,
     /** #414 — tap on a category band opens that category's topic listing. */
     val onOpenCategory: (Int) -> Unit,
-    /** #6 — open a DT conversation (threadId, last inbox page). */
-    val onOpenMultiMp: (threadId: Int, page: Int) -> Unit = { _, _ -> },
+    /** #6 — open a DT conversation (threadId, last inbox page, unread-on-open for the badge). */
+    val onOpenMultiMp: (threadId: Int, page: Int, wasUnread: Boolean) -> Unit = { _, _, _ -> },
     /** #6 — explicit user reload of the DT list (retry). */
     val onRefreshDt: () -> Unit = {},
 )

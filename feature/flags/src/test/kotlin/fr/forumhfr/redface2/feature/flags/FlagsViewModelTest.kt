@@ -1936,6 +1936,35 @@ class FlagsViewModelTest {
         assertFalse("the « +lus » display preference survives the account switch", vm.dtUnreadOnly.value)
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Badge regression (beta) — DT row unread-on-open reported to the host
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `dtRowWasUnread reports the inbox-backed conversation unread state for the badge`() {
+        // The DT-open handler never fed unreadOnOpenThreadIds, so the MP badge never decremented when a
+        // MultiMP was read via the DT tab. dtRowWasUnread is the value DtRow now passes to onOpenMultiMp;
+        // for an inbox-backed row it MUST mirror the conversation's live hasUnread (like onOpenThread).
+        val unread = DtListItem.InboxBacked(
+            conversation = stubSummary(threadId = 1, isMultiRecipient = true, hasUnread = true),
+            resumePage = null,
+        )
+        val read = DtListItem.InboxBacked(
+            conversation = stubSummary(threadId = 2, isMultiRecipient = true, hasUnread = false),
+            resumePage = 3,
+        )
+        assertTrue("an unread inbox-backed DT row must report wasUnread = true", dtRowWasUnread(unread))
+        assertFalse("a read inbox-backed DT row must report wasUnread = false", dtRowWasUnread(read))
+    }
+
+    @Test
+    fun `dtRowWasUnread reports false for a storage-only orphan whose read state is unknown`() {
+        // An orphan off inbox PAGE 1 has no known read/unread state, so the badge must never be
+        // speculatively decremented for it: wasUnread = false.
+        val orphan = DtListItem.StorageOnly(threadId = 9, resumePage = 4, numreponse = null)
+        assertFalse("a storage-only DT row must report wasUnread = false", dtRowWasUnread(orphan))
+    }
+
     private fun stubSummary(
         threadId: Int,
         isMultiRecipient: Boolean,

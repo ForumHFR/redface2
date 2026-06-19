@@ -782,6 +782,124 @@ class TopicViewModelTest {
         }
     }
 
+    @Test
+    fun `blocking an author after a pull-to-refresh hides their posts live (#509 beta)`() = runTest {
+        // Beta regression: the blacklist used to be collected only inside loadCurrentPage's combine, so
+        // a refresh (which cancels loadJob and runs a one-shot refetch) FROZE the live re-filter — a
+        // block after a pull did nothing until the next page change. The independent init collector now
+        // owns the re-filter so it applies on the refreshed page too.
+        val loaded = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val refreshed = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "refreshed",
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val blacklist = FakeBlacklistRepository()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = blacklist,
+        )
+
+        viewModel.send(TopicIntent.Refresh)
+        assertEquals(
+            "the refreshed page is on screen with nothing hidden yet",
+            "refreshed",
+            assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title,
+        )
+        assertEquals(emptySet<Int>(), assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).hiddenNumreponses)
+
+        viewModel.send(TopicIntent.SetAuthorBlocked("Alice", blocked = true))
+
+        // Live re-filter on the refreshed page — NOT only after a page change.
+        val mode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("refreshed", mode.topic.title)
+        assertEquals(setOf(100), mode.hiddenNumreponses)
+    }
+
+    @Test
+    fun `a post-submit landing hides authors already blacklisted before the force refresh (#509 beta)`() =
+        runTest {
+            // Beta regression: a VM created with submitSignal != null lands via forceRefreshCurrentPage
+            // and NEVER calls loadCurrentPage, so the blacklist combine never ran → blockedCanonicals
+            // stayed emptySet() and an already-blocked author was NOT hidden on the landing page. The
+            // init collector now seeds blockedCanonicals before the force refresh computes its hidden set.
+            val fresh = fakeTopic(
+                page = 2,
+                totalPages = 5,
+                posts = listOf(fakePost(900, author = "Alice"), fakePost(901, author = "Bob")),
+            )
+            val repository = FakeTopicRepository(
+                flowsToReturn = emptyList(),
+                refreshTopicsToReturn = listOf(fresh),
+            )
+            val viewModel = topicViewModel(
+                request = topicRequest(page = 2, submitSignal = 1_700_000_000_000L),
+                topicRepository = repository,
+                authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+                // Alice is ALREADY blacklisted when the VM is constructed.
+                blacklistRepository = FakeBlacklistRepository(blockedCanonicals = setOf("alice")),
+            )
+
+            val mode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+            assertEquals(fresh, mode.topic)
+            assertEquals(
+                "an already-blacklisted author must be hidden on the force-refresh landing page",
+                setOf(900),
+                mode.hiddenNumreponses,
+            )
+            assertTrue("the landing went through the force-refresh path", repository.calls.isEmpty())
+        }
+
+    @Test
+    fun `blocking an author while a search result page is shown hides them live (#509 beta)`() = runTest {
+        // Beta regression: a transsearch result page is rendered outside loadCurrentPage (launchSearch),
+        // so the frozen combine never re-filtered it. The init collector now re-filters whatever page is
+        // on screen, including a search result page.
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val resultForm = form.copy(currentNum = 100)
+        val resultTopic = fakeTopic(
+            page = 1, totalPages = 1, title = "search-result",
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(200, author = "Bob")),
+            searchForm = resultForm,
+        )
+        val searchRepo = FakeTopicSearchRepository(result = resultTopic)
+        val blacklist = FakeBlacklistRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = searchableRepo(form),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = blacklist,
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(
+            "the search result page is on screen",
+            "search-result",
+            assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title,
+        )
+
+        viewModel.send(TopicIntent.SetAuthorBlocked("Alice", blocked = true))
+
+        val mode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("search-result", mode.topic.title)
+        assertEquals(setOf(100), mode.hiddenNumreponses)
+    }
+
     // ─── intra-topic search (#546) ───────────────────────────────────────────────
 
     @Test
