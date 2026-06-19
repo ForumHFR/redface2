@@ -1,13 +1,12 @@
 Redface 2 v0.15.0 — beta.
 
 New:
-- Hide a user (blacklist): their posts collapse away.
-- Full-screen mode: hide the Android navigation bar.
-- In-topic search: by word or username, navigate between results, covers the whole topic.
-- DT tab (MultiMP): unread-only by default, tap the tab to reveal read ones, pull to refresh.
-- Topic creator's name in gold; optional "Rouge REDFACE1" accent colour.
+- Hide a user (blacklist).
+- Full-screen mode (hide the Android nav bar).
+- In-topic search: word/username, jump between results, whole topic.
+- DT tab: unread-only by default, tap to show read, pull to refresh.
+- Creator's name in gold; optional "Rouge REDFACE1" accent.
 
-Fixes:
-- Blacklist now applies live; MP badge fixed when opening a MultiMP.
+Fixes: live blacklist, MP badge.
 
-Report bugs via the beta or GitHub.
+Bugs: via the beta or GitHub.
