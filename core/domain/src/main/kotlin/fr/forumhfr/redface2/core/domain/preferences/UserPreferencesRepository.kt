@@ -175,6 +175,20 @@ interface UserPreferencesRepository {
     suspend fun setShowDtSection(enabled: Boolean)
 
     /**
+     * EXPERIMENTAL opt-in (#6, ADR-014 §4) — whether Redface 2 may WRITE BACK DT reading positions
+     * into the cross-userscript MPStorage document (a full-overwrite `bdd.php cat=prive` POST,
+     * verify-after-write). Default `false`, and DELIBERATELY so : the write contract was never
+     * observed live and a bad write touches the shared storage of EVERY userscript. When OFF (the
+     * default) the write path returns immediately without any network access — the absence of a
+     * write trigger is therefore harmless. Observed by the MPStorage write path, toggled in
+     * Settings > Messages privés (with an experimental warning).
+     */
+    fun observeSyncPrivateMessagesWriteEnabled(): Flow<Boolean>
+
+    /** Persists [observeSyncPrivateMessagesWriteEnabled]. Default `false` until the first call. */
+    suspend fun setSyncPrivateMessagesWriteEnabled(enabled: Boolean)
+
+    /**
      * Auto-refresh of the Drapeaux lists (#378): when `true`, landing on the flags screen
      * (app open, back from a topic, return from another tab) silently re-fetches the current
      * tab — throttled by the ViewModel so rapid back-and-forth does not hammer the REST

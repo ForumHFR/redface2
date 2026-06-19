@@ -60,24 +60,21 @@ data class MpStorageFlagEntry(
 )
 
 /**
- * Outcome of an MPStorage WRITE attempt (#6, ADR-014 §4 — deferred / opt-in).
+ * Outcome of an MPStorage WRITE attempt (#6, ADR-014 §4 — opt-in, OFF by default).
  *
- * NOTE — NOT OBSERVED LIVE : the `bdd.php cat=prive` write contract has never been captured
- * (device down, no real round-trip). The write mechanism is implemented and unit-tested but
- * stays GUARDED — the public [fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository.writeBackFlag]
- * only ever read-modify-builds (no POST), and the live POST is reachable solely via a module-internal,
- * test-only path (not on the public interface). There is no UI entry point. These variants describe
- * what the path WOULD return once the contract is confirmed.
+ * The write path is the REAL read-modify-write of the storage document, gated by the
+ * `syncPrivateMessagesWriteEnabled` preference (default `false`) AND a verify-after-write guard
+ * (re-read the first post after the POST and confirm it matches the mutated body ; restore the
+ * verbatim backup on a mismatch). NOT OBSERVED LIVE : the `bdd.php cat=prive` write contract has
+ * never been captured against a real document — these variants describe what the gated path returns.
  */
 sealed interface MpStorageWriteResult {
 
     /**
-     * The read-modify-write completed. [body] is the verbatim mutated JSON that WOULD be (or was)
-     * sent as `content_form`. [posted] is `false` for the guarded dry-run (the nominal case today:
-     * the body was built and validated but no request hit the wire), `true` once a real POST is
-     * confirmed accepted by HFR.
+     * The opt-in preference is OFF (the default). NO request hit the wire — the path returns before
+     * reading anything. This is the nominal case for every user who has not explicitly opted in.
      */
-    data class Prepared(val body: String, val posted: Boolean) : MpStorageWriteResult
+    data object DisabledByPreference : MpStorageWriteResult
 
     /**
      * The target storage document could not be located (ADR-014 §3 : NEVER create or overwrite a
@@ -87,13 +84,36 @@ sealed interface MpStorageWriteResult {
     data object TargetNotFound : MpStorageWriteResult
 
     /** The located document is not a readable v0.1 envelope — surfaced, never repaired (ADR-014 §3). */
-    data object TargetUnreadable : MpStorageWriteResult
+    data object Unreadable : MpStorageWriteResult
 
     /**
      * The mutated `content_form` exceeds the hard size cap
      * ([fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository.MAX_CONTENT_FORM_BYTES]).
      * The real HFR MP body limit is unknown (never observed) ; this cap fails CLOSED rather than
-     * risk an uncontrolled / truncated POST. [sizeBytes] is the offending UTF-8 size.
+     * risk an uncontrolled / truncated POST. [sizeBytes] is the offending UTF-8 size. No POST is sent.
      */
     data class TooLarge(val sizeBytes: Int) : MpStorageWriteResult
+
+    /**
+     * The mutation was POSTed and the verify-after-write re-read confirmed the stored first post now
+     * equals the mutated body. [verified] is `true` here (it is the only success variant — there is no
+     * "success without verification" for the real path) ; the no-op case (the target position did not
+     * change, so nothing was written) ALSO returns [verified] = `true` with no POST.
+     */
+    data class Success(val verified: Boolean) : MpStorageWriteResult
+
+    /**
+     * The verify-after-write re-read did NOT match the mutated body, so the verbatim backup was
+     * re-POSTed and the subsequent re-read confirmed the document is back to its pre-write state.
+     * The user's storage is intact ; the write simply did not take. [expectedBytes] / [actualBytes]
+     * are the mutated vs the read-back UTF-8 sizes (diagnostics only — never the content).
+     */
+    data class VerificationFailedRestored(val expectedBytes: Int, val actualBytes: Int) : MpStorageWriteResult
+
+    /**
+     * CRITICAL : the verify-after-write mismatched AND the restore re-POST could NOT bring the document
+     * back to its backup. The storage may be in an inconsistent state — logged at the highest level.
+     * [expectedBytes] / [actualBytes] are the backup vs the read-back UTF-8 sizes (diagnostics only).
+     */
+    data class VerificationFailedRestoreFailed(val expectedBytes: Int, val actualBytes: Int) : MpStorageWriteResult
 }

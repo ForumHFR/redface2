@@ -1376,6 +1376,10 @@ class TopicFormViewModelTest {
 
         override suspend fun setShowDtSection(enabled: Boolean) = Unit
 
+        override fun observeSyncPrivateMessagesWriteEnabled(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setSyncPrivateMessagesWriteEnabled(enabled: Boolean) = Unit
+
         override fun observeFlagsAutoRefresh(): Flow<Boolean> = MutableStateFlow(true)
 
         override suspend fun setFlagsAutoRefresh(enabled: Boolean) = Unit
