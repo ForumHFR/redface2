@@ -18,6 +18,14 @@ object HfrConstants {
      */
     const val VERIF_REQUET: String = "1100"
 
+    /**
+     * MPStorage (#6, ADR-014 §4) — the fixed subject hash of the dedicated cross-userscript storage
+     * private message. The write path sends this CONSTANT verbatim as the `sujet` field (NEVER the
+     * `sujet` parsed back from the edit form) and refuses to POST when the parsed form's subject does
+     * not equal it — a structural guard against ever writing into the wrong conversation.
+     */
+    const val MP_STORAGE_SUBJECT_HASH: String = "a2bcc09b796b8c6fab77058ff8446c34"
+
     val ConnectTimeout: Duration = Duration.ofSeconds(15)
     val ReadTimeout: Duration = Duration.ofSeconds(20)
     val WriteTimeout: Duration = Duration.ofSeconds(20)
