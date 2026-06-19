@@ -14,6 +14,7 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
+import fr.forumhfr.redface2.core.ui.theme.LocalShowScrollbar
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import fr.forumhfr.redface2.core.ui.theme.RedfaceAmoledColorScheme
 import fr.forumhfr.redface2.core.ui.theme.RedfaceDarkColorScheme
@@ -49,6 +50,9 @@ fun RedfaceTheme(
         // #332 — expose the « fold long quotes » preference to the post renderer (read via
         // LocalFoldLongQuotes.current in QuoteBlock) so flipping the toggle re-renders posts.
         LocalFoldLongQuotes provides reading.foldLongQuotes,
+        // #105 — expose the « afficher l'ascenseur » preference to the reading scrollbar (read via
+        // LocalShowScrollbar.current in LazyListScrollbar) so flipping the toggle hides/shows it.
+        LocalShowScrollbar provides reading.showScrollbar,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

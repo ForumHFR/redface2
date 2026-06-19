@@ -127,6 +127,12 @@ data class SettingsState(
     val isUpdatingFoldLongQuotes: Boolean = false,
     val foldLongQuotesError: Boolean = false,
     val foldLongQuotesTouchedLocally: Boolean = false,
+    // #105 — afficher l'ascenseur de lecture. Même machinerie optimistic-flip + garde de course au
+    // démarrage. Default TRUE (ascenseur historique) : le toggle est l'opt-out (retour bêta styx42).
+    val showScrollbar: Boolean = true,
+    val isUpdatingShowScrollbar: Boolean = false,
+    val showScrollbarError: Boolean = false,
+    val showScrollbarTouchedLocally: Boolean = false,
     // #518 — masquer la barre de navigation système Android (plein écran immersif). Même machinerie
     // optimistic-flip + garde de course. Default FALSE (opt-in).
     val hideSystemNavBar: Boolean = false,
@@ -263,6 +269,10 @@ data class SettingsState(
     val canToggleFoldLongQuotes: Boolean
         get() = !isUpdatingFoldLongQuotes
 
+    // #105 — the show-scrollbar toggle is gated only by its own write.
+    val canToggleShowScrollbar: Boolean
+        get() = !isUpdatingShowScrollbar
+
     // #518 — the hide-system-nav-bar toggle is gated only by its own write.
     val canToggleHideSystemNavBar: Boolean
         get() = !isUpdatingHideSystemNavBar
@@ -389,6 +399,9 @@ sealed interface SettingsIntent {
 
     /** #332 — replier les longues citations sur une ligne. */
     data class FoldLongQuotesChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #105 — afficher l'ascenseur de lecture (sujets et MP). */
+    data class ShowScrollbarChanged(val enabled: Boolean) : SettingsIntent
 
     /** #518 — masquer la barre de navigation système Android (plein écran immersif). */
     data class HideSystemNavBarChanged(val enabled: Boolean) : SettingsIntent

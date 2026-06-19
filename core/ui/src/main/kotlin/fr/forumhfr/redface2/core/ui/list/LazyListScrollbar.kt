@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.ui.theme.LocalShowScrollbar
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -83,6 +84,11 @@ fun LazyListScrollbar(
     listState: LazyListState,
     modifier: Modifier = Modifier,
 ) {
+    // #105 — « afficher l'ascenseur » opt-out: render nothing when the preference is off (sujets AND
+    // MP, both call-sites go through this composable). Read at the call-site of the local so flipping
+    // the Settings toggle recomposes this away; the early-return keeps the scrollbar's per-frame
+    // derivedState machinery from running at all while hidden.
+    if (!LocalShowScrollbar.current) return
     val canScroll by remember {
         derivedStateOf { listState.canScrollForward || listState.canScrollBackward }
     }

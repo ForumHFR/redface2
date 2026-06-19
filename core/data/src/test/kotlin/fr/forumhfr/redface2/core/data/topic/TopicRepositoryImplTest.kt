@@ -583,6 +583,10 @@ class TopicRepositoryImplTest {
 
         override suspend fun setFoldLongQuotes(enabled: Boolean) = Unit
 
+        override fun observeShowScrollbar(): Flow<Boolean> = MutableStateFlow(true)
+
+        override suspend fun setShowScrollbar(enabled: Boolean) = Unit
+
         override fun observeStartScreen(): Flow<StartScreenPreference> =
             MutableStateFlow(StartScreenPreference())
 

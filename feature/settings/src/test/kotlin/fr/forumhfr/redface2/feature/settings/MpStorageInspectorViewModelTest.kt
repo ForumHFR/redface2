@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageDocument
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageResult
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageWriteResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -171,6 +172,10 @@ class MpStorageInspectorViewModelTest {
                     ),
                 )
             }
+
+            // Read-only inspector: a write must NEVER happen here — fail loudly if one slips in (Codex review).
+            override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
+                error("Unexpected writeBackFlag call in the read-only inspector test")
         }
         val auth = FakeAuthRepository(AuthState.Authenticated("Alice"))
         val viewModel = MpStorageInspectorViewModel(repo, FakeLocationStore(), auth)
@@ -216,6 +221,10 @@ class MpStorageInspectorViewModelTest {
             error?.let { throw it }
             return result
         }
+
+        // Read-only inspector: a write must NEVER happen here — fail loudly if one slips in (Codex review).
+        override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
+            error("Unexpected writeBackFlag call in the read-only inspector test")
     }
 
     private class FakeLocationStore(

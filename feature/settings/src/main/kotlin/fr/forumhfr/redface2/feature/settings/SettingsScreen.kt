@@ -536,6 +536,17 @@ internal fun buildSettingsCatalogue(
                     .takeIf { state.foldLongQuotesError },
                 onCheckedChange = { onIntent(SettingsIntent.FoldLongQuotesChanged(it)) },
             ),
+            // #105 — afficher l'ascenseur de lecture (sujets et MP), retour bêta styx42.
+            toggleRow(
+                id = "show_scrollbar",
+                title = stringResource(R.string.settings_show_scrollbar_title),
+                description = stringResource(R.string.settings_show_scrollbar_description),
+                checked = state.showScrollbar,
+                enabled = state.canToggleShowScrollbar,
+                errorRes = R.string.settings_show_scrollbar_persist_failed
+                    .takeIf { state.showScrollbarError },
+                onCheckedChange = { onIntent(SettingsIntent.ShowScrollbarChanged(it)) },
+            ),
             futureRow(
                 id = "future_restore_read_position",
                 title = stringResource(R.string.settings_future_restore_read_position),

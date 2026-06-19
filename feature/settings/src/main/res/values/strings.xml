@@ -326,6 +326,9 @@
     <string name="settings_fold_long_quotes_title">Replier les longues citations</string>
     <string name="settings_fold_long_quotes_description">Les longues citations sont repliées sur une ligne, dépliables au clic ; sinon elles restent affichées en entier.</string>
     <string name="settings_fold_long_quotes_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+    <string name="settings_show_scrollbar_title">Afficher l\'ascenseur</string>
+    <string name="settings_show_scrollbar_description">Affiche l\'ascenseur de défilement sur le bord droit lors de la lecture d\'un sujet ou d\'un message privé.</string>
+    <string name="settings_show_scrollbar_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- #312 — Publication. Confirmation avant chaque envoi (réponse/édition de message, sujet,
          message privé) ; persisté en DataStore et lu en direct par les éditeurs.

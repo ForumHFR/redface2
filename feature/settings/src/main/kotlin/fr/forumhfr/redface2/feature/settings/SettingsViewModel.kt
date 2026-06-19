@@ -115,6 +115,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(foldLongQuotes = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeShowScrollbar().first() },
+            isLocked = { it.showScrollbarTouchedLocally || it.isUpdatingShowScrollbar },
+            apply = { state, value -> state.copy(showScrollbar = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeHideSystemNavBar().first() },
             isLocked = { it.hideSystemNavBarTouchedLocally || it.isUpdatingHideSystemNavBar },
             apply = { state, value -> state.copy(hideSystemNavBar = value) },
@@ -243,6 +248,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.TopicPollsExpandedChanged -> updateTopicPollsExpanded(intent.enabled)
             is SettingsIntent.TopicSignaturesChanged -> updateTopicSignatures(intent.enabled)
             is SettingsIntent.FoldLongQuotesChanged -> updateFoldLongQuotes(intent.enabled)
+            is SettingsIntent.ShowScrollbarChanged -> updateShowScrollbar(intent.enabled)
             is SettingsIntent.HideSystemNavBarChanged -> updateHideSystemNavBar(intent.enabled)
             is SettingsIntent.ImmersiveBackButtonChanged -> updateImmersiveBackButton(intent.enabled)
             is SettingsIntent.ImmersiveNavBarRevealChanged -> updateImmersiveNavBarReveal(intent.mode)
@@ -832,6 +838,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setFoldLongQuotes,
+        )
+    }
+
+    private fun updateShowScrollbar(desired: Boolean) {
+        val previous = _state.value.showScrollbar
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    showScrollbar = desired,
+                    isUpdatingShowScrollbar = true,
+                    showScrollbarError = false,
+                    showScrollbarTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(showScrollbar = desired, isUpdatingShowScrollbar = false)
+                } else {
+                    state.copy(
+                        showScrollbar = previous,
+                        isUpdatingShowScrollbar = false,
+                        showScrollbarError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setShowScrollbar,
         )
     }
 

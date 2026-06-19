@@ -587,6 +587,27 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeShowScrollbar defaults to true then persists false and true`() = runTest(dispatcher) {
+        // #105 — the reading scrollbar is the historical behaviour; disabling it is the opt-out.
+        repository.observeShowScrollbar().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setShowScrollbar(false)
+        repository.observeShowScrollbar().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setShowScrollbar(true)
+        repository.observeShowScrollbar().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeConfirmBeforePosting defaults to false then persists true and false`() = runTest(dispatcher) {
         // #312 — publishing stays one-tap by default; the guard is strictly opt-in.
         repository.observeConfirmBeforePosting().test {
