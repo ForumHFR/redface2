@@ -1,13 +1,12 @@
 Redface 2 v0.15.0 — bêta.
 
 Nouveautés :
-- Masquer un utilisateur (blacklist) : ses messages se replient.
-- Mode plein écran : masquer la barre de navigation Android.
-- Recherche dans un sujet : par mot ou pseudo, navigation entre les résultats, couvre tout le sujet.
-- Onglet DT (MultiMP) : non-lus par défaut, clic sur l'onglet pour voir les lus, tirer pour rafraîchir.
-- Pseudo du créateur en doré ; couleur d'accent « Rouge REDFACE1 » en option.
+- Masquer un utilisateur (blacklist).
+- Mode plein écran (masquer la barre Android).
+- Recherche dans un sujet : mot/pseudo, navigation entre résultats, tout le sujet.
+- Onglet DT : non-lus par défaut, clic pour voir les lus, tirer pour rafraîchir.
+- Pseudo créateur en doré ; accent « Rouge REDFACE1 » optionnel.
 
-Correctifs :
-- Blacklist appliquée en direct ; badge des MP corrigé à l'ouverture d'un MultiMP.
+Correctifs : blacklist en direct, badge des MP.
 
-Signalez les bugs via la bêta ou GitHub.
+Bugs : via la bêta ou GitHub.
