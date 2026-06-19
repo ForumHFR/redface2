@@ -538,6 +538,8 @@ fun RedfaceApp(intent: Intent?) {
     val fontScale by themeViewModel.fontScale.collectAsStateWithLifecycle()
     // #332 — « fold long quotes » reading preference, provided to the post renderer via RedfaceTheme.
     val foldLongQuotes by themeViewModel.foldLongQuotes.collectAsStateWithLifecycle()
+    // #105 — « afficher l'ascenseur » reading preference, provided to the reading scrollbar via RedfaceTheme.
+    val showScrollbar by themeViewModel.showScrollbar.collectAsStateWithLifecycle()
     // #445 — debug bounds overlay preference (the dev-channel gate + render live in
     // [DevDebugBoundsOverlay], emitted last so it paints over everything; off by default).
     val debugBoundsOverlay by themeViewModel.debugBoundsOverlay.collectAsStateWithLifecycle()
@@ -600,6 +602,7 @@ fun RedfaceApp(intent: Intent?) {
             density = displayDensity,
             fontScale = fontScale,
             foldLongQuotes = foldLongQuotes,
+            showScrollbar = showScrollbar,
         ),
     ) {
         // #458 — cold-start screen, read synchronously from the bootstrap mirror and frozen for

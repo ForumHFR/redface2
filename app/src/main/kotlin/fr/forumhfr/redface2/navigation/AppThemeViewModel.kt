@@ -66,6 +66,13 @@ class AppThemeViewModel @Inject constructor(
         userPreferencesRepository.observeFoldLongQuotes()
             .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    // #105 — « afficher l'ascenseur » reading preference, eagerly collected like the presets above.
+    // No bootstrap mirror (it does not paint the pre-first-frame window); the seed is the `true`
+    // default and DataStore resolves on the first Eagerly read.
+    val showScrollbar: StateFlow<Boolean> =
+        userPreferencesRepository.observeShowScrollbar()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
     // #445 — debug bounds overlay toggle (dev channel only; the channel gate lives in RedfaceApp).
     // No bootstrap mirror: it does not paint the pre-first-frame window, so the seed is the `false`
     // default and DataStore resolves on the first Eagerly read.

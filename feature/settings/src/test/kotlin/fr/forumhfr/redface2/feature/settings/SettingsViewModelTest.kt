@@ -1052,6 +1052,41 @@ class SettingsViewModelTest {
         assertTrue(viewModel.state.value.foldLongQuotesError)
     }
 
+    @Test
+    fun `init hydrates showScrollbar from a persisted false`() = runTest {
+        // #105 — default is true; only a persisted opt-OUT exercises the hydration path.
+        repository.emitShowScrollbar(false)
+
+        val viewModel = newViewModel()
+
+        assertFalse(viewModel.state.value.showScrollbar)
+        assertFalse(viewModel.state.value.showScrollbarError)
+    }
+
+    @Test
+    fun `ShowScrollbarChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertTrue("scrollbar shown by default", viewModel.state.value.showScrollbar)
+
+        viewModel.submit(SettingsIntent.ShowScrollbarChanged(false))
+
+        assertFalse(viewModel.state.value.showScrollbar)
+        assertFalse(viewModel.state.value.isUpdatingShowScrollbar)
+        assertEquals(1, repository.showScrollbarSetCalls)
+    }
+
+    @Test
+    fun `ShowScrollbarChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnShowScrollbarSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ShowScrollbarChanged(false))
+
+        assertTrue("failed persist must revert to the previous value", viewModel.state.value.showScrollbar)
+        assertFalse(viewModel.state.value.isUpdatingShowScrollbar)
+        assertTrue(viewModel.state.value.showScrollbarError)
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // Hide system navigation bar (#518)
     // ──────────────────────────────────────────────────────────────────────
@@ -1783,6 +1818,24 @@ class SettingsViewModelTest {
 
         fun emitFoldLongQuotes(value: Boolean) {
             foldLongQuotes.value = value
+        }
+
+        // #105 — afficher l'ascenseur. Même seam optimistic-flip ; default TRUE (ascenseur affiché).
+        private val showScrollbar = MutableStateFlow(true)
+        var showScrollbarSetCalls: Int = 0
+            private set
+        var failOnShowScrollbarSet: Boolean = false
+
+        override fun observeShowScrollbar(): Flow<Boolean> = showScrollbar
+
+        override suspend fun setShowScrollbar(enabled: Boolean) {
+            showScrollbarSetCalls += 1
+            check(!failOnShowScrollbarSet) { "boom" }
+            showScrollbar.value = enabled
+        }
+
+        fun emitShowScrollbar(value: Boolean) {
+            showScrollbar.value = value
         }
 
         // #458 — start screen lives on its own StartScreenSettingsViewModel; this fake only

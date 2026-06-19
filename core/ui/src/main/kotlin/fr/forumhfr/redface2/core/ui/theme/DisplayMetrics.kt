@@ -72,6 +72,16 @@ val LocalDisplayMetrics = staticCompositionLocalOf { DisplayMetrics.Comfort }
 val LocalFoldLongQuotes = staticCompositionLocalOf { true }
 
 /**
+ * Project CompositionLocal carrying the #105 « afficher l'ascenseur » reading preference. Same
+ * `staticCompositionLocalOf` rationale as [LocalFoldLongQuotes]: the value changes only when the
+ * user flips the toggle, so the subtree recomposes once on change. Defaults to `true` (the
+ * historical scrollbar) for previews / hosts that do not provide it; `RedfaceTheme` provides the
+ * resolved value from [ReadingDisplaySettings.showScrollbar]. Read by
+ * [fr.forumhfr.redface2.core.ui.list.LazyListScrollbar], which renders nothing when `false`.
+ */
+val LocalShowScrollbar = staticCompositionLocalOf { true }
+
+/**
  * Project CompositionLocal asking the post renderer to IGNORE the author's inline `[color]` styling
  * for the subtree it wraps (#553). HFR signatures embed colours chosen for the white web background;
  * rendered as-is on the app theme (especially dark) they read as unreadable/garish, so the signature

@@ -368,6 +368,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeShowScrollbar(): Flow<Boolean> =
+        dataStore.data
+            // Default `true` (#105): the reading scrollbar is the historical behaviour; hiding it is
+            // the opt-out requested in the beta thread (styx42).
+            .map { prefs -> prefs[KEY_SHOW_SCROLLBAR] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setShowScrollbar(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_SHOW_SCROLLBAR] = enabled
+            }
+        }
+    }
+
     override fun observeStartScreen(): Flow<StartScreenPreference> =
         dataStore.data
             .map(::readStartScreen)
@@ -734,6 +750,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #332 — fold long top-level citations by default (default true = historical fold; opt-out).
         val KEY_FOLD_LONG_QUOTES = booleanPreferencesKey("fold_long_quotes")
+
+        // #105 — show the intra-page reading scrollbar (default true = historical; opt-out).
+        val KEY_SHOW_SCROLLBAR = booleanPreferencesKey("show_scrollbar")
 
         // #458 — cold-start tab (StartScreenChoice.name, defensively parsed) + optional Forum
         // category id (absent unless screen == FORUM and a category was picked).
