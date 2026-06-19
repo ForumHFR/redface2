@@ -18,7 +18,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
@@ -60,6 +63,54 @@ fun FlagItem(
     modifier: Modifier = Modifier,
     longPress: FlagItemLongPress? = null,
 ) {
+    // FlagItem is now a thin `Flag`-typed binding over the shared [ForumListRow] : the bucket dot is
+    // the leading slot, the unread state drives the title emphasis. Keeping FlagItem's public
+    // signature stable means its existing callers / tests are untouched while DT (and any future
+    // forum list) renders through the SAME row primitive — change the row once, every list follows.
+    ForumListRow(
+        title = flag.title,
+        metadata = metadata,
+        onClick = onClick,
+        modifier = modifier,
+        emphasized = flag.hasUnread,
+        longPress = longPress,
+        leading = { FlagDot(type = flag.type, isFavorite = flag.isFavorite, hasUnread = flag.hasUnread) },
+    )
+}
+
+/**
+ * The single source of truth for a forum-list row (drapeaux Cyan/Red/Favorite, DT MultiMP, and any
+ * future list). It owns the visual contract — leading slot + a two-line stack (title + shared
+ * [TopicMetadataLine]) — the 16 dp horizontal / density-driven vertical rhythm (#287), the tap /
+ * long-press interaction and the `surface` colours. It is deliberately NOT coupled to [Flag] : a row
+ * is `title` + [metadata] + an optional [leading] composable, so non-drapeau lists (DT) reuse it
+ * without smuggling a fake [Flag] through.
+ *
+ * @param emphasized renders the title in [FontWeight.SemiBold] (unread state across every list).
+ * @param longPress optional long-press affordance (#457) ; `null` keeps a plain tap with no
+ *   long-press semantics advertised.
+ * @param leading optional leading slot (the bucket dot for drapeaux, the inbox dot for DT).
+ * @param contentDescription when non-null, REPLACES the row's announced text via
+ *   [clearAndSetSemantics] on the content (the title + [metadata] texts are folded into this single
+ *   description) — for rows like DT whose visible text is terse but whose state (lu/non-lu,
+ *   interlocuteurs, reprise) must be spoken in full. The tap/long-press action stays announced (it
+ *   lives on the row's own clickable, outside the cleared content subtree). `null` keeps the default
+ *   (title + metadata read as-is), which the drapeau rows rely on alongside their removal action.
+ */
+// A Compose row component legitimately exposes many slots; bundling the @Composable [leading] slot
+// and the [onClick] lambda into a data class would be anti-idiomatic and hurt readability.
+@Suppress("LongParameterList")
+@Composable
+fun ForumListRow(
+    title: String,
+    metadata: FlagMetadata,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    emphasized: Boolean = false,
+    longPress: FlagItemLongPress? = null,
+    leading: (@Composable () -> Unit)? = null,
+    contentDescription: String? = null,
+) {
     val rowInteraction = if (longPress != null) {
         Modifier.combinedClickable(
             onLongClick = longPress.onLongPress,
@@ -79,20 +130,29 @@ fun FlagItem(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        FlagDot(type = flag.type, isFavorite = flag.isFavorite, hasUnread = flag.hasUnread)
+        leading?.invoke()
         Column(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (contentDescription != null) {
+                        Modifier.clearAndSetSemantics { this.contentDescription = contentDescription }
+                    } else {
+                        Modifier
+                    },
+                ),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
-                text = flag.title,
+                text = title,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = if (flag.hasUnread) FontWeight.SemiBold else FontWeight.Normal,
+                fontWeight = if (emphasized) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
-            // #376 — shared two-segment metadata line (start truncatable + date pinned right),
-            // common to the drapeaux / catégorie / recherche lists.
+            // #376 — shared two-segment metadata line (start truncatable + end pinned right),
+            // common to the drapeaux / catégorie / recherche / DT lists.
             TopicMetadataLine(
                 metadata = metadata,
                 style = MaterialTheme.typography.labelSmall,
