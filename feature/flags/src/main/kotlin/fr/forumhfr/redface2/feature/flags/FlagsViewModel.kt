@@ -1093,15 +1093,18 @@ internal fun buildDtItems(
     inboxMulti: List<PrivateMessageSummary>,
     storageEntries: List<MpStorageFlagEntry>,
 ): List<DtListItem> {
-    val resumeByThread = storageEntries.associate { it.threadId to it.page }
+    // Dedup the MPStorage entries by threadId FIRST (keep first occurrence) so both the inbox-row
+    // resume join and the orphan rows agree on the same page when mpFlags carries a duplicate
+    // threadId (Codex review: `associate` kept the LAST, diverging from the orphans' `distinctBy`).
+    val dedupedEntries = storageEntries.distinctBy { it.threadId }
+    val resumeByThread = dedupedEntries.associate { it.threadId to it.page }
     val inboxThreadIds = inboxMulti.mapTo(HashSet()) { it.threadId }
     return buildList {
         inboxMulti.forEach { summary ->
             add(DtListItem.InboxBacked(summary, resumeByThread[summary.threadId]))
         }
-        storageEntries.asSequence()
+        dedupedEntries.asSequence()
             .filter { it.threadId !in inboxThreadIds }
-            .distinctBy { it.threadId }
             .forEach { entry ->
                 add(DtListItem.StorageOnly(entry.threadId, entry.page, entry.numreponse))
             }
