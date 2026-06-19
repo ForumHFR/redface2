@@ -204,7 +204,8 @@ class DefaultTopicFormRepository @Inject constructor(
         val overrides = buildMap {
             put("hash_check", form.hashCheck)
             put("verifrequet", HfrConstants.VERIF_REQUET)
-            put("content_form", bbcodeContent)
+            // #114 — strip non-BMP code points (emojis) HFR would silently truncate the post at.
+            put("content_form", sanitizeContentForm(bbcodeContent))
             put("sujet", subject)
             put("numreponse", context.numreponse.toString())
             put("numrep", "")
@@ -391,7 +392,8 @@ class DefaultTopicFormRepository @Inject constructor(
         val overrides = buildMap {
             put("hash_check", form.hashCheck)
             put("verifrequet", HfrConstants.VERIF_REQUET)
-            put("content_form", bbcodeContent)
+            // #114 — strip non-BMP code points (emojis) HFR would silently truncate the post at.
+            put("content_form", sanitizeContentForm(bbcodeContent))
             put("sujet", subject)
             put("cat", context.cat.toString())
             // User's dropdown choice — always > 0 thanks to guardAgainstInvalidSubmission.

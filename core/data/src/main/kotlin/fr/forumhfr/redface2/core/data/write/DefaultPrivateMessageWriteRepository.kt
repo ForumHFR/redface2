@@ -298,7 +298,8 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
         val builder = FormBody.Builder(Charsets.UTF_8)
         builder.add("hash_check", form.hashCheck)
         builder.add("verifrequet", HfrConstants.VERIF_REQUET)
-        builder.add("content_form", bbcodeContent)
+        // #114 — strip non-BMP code points (emojis) HFR would silently truncate the message at.
+        builder.add("content_form", sanitizeContentForm(bbcodeContent))
         // Browser-style opt-in: a field is only present when the user enabled it (`emaill` keeps
         // HFR's own two-`l` spelling). The matching keys are marked emitted so the verbatim
         // forwarder below cannot resurrect a stale `value="1"` default from the parsed checkbox.
@@ -337,7 +338,8 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
         val builder = FormBody.Builder(Charsets.UTF_8)
         builder.add("hash_check", form.hashCheck)
         builder.add("verifrequet", HfrConstants.VERIF_REQUET)
-        builder.add("content_form", bbcodeContent)
+        // #114 — strip non-BMP code points (emojis) HFR would silently truncate the message at.
+        builder.add("content_form", sanitizeContentForm(bbcodeContent))
         builder.add("dest", recipients)
         builder.add("sujet", subject)
         if (options.signatureEnabled) builder.add("signature", "1")
