@@ -90,9 +90,9 @@ class FlagsViewModel @Inject constructor(
     val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
 
     /**
-     * Whether the opt-in « DT » placeholder tab is shown (Settings toggle, default off).
-     * The content arrives with the MPStorage sync (#6) — until then the tab only renders
-     * a placeholder body, like [FlagTab.Super].
+     * Whether the opt-in « DT » tab is shown (Settings toggle, default off). The tab lists the user's
+     * MultiMP conversations enriched with MPStorage reading positions (see [dtListState]) — it is a
+     * real backed list now (#6), NOT a placeholder like [FlagTab.Super].
      */
     val showDtTab: StateFlow<Boolean> = userPreferencesRepository.observeShowDtSection()
         .stateIn(
@@ -106,8 +106,8 @@ class FlagsViewModel @Inject constructor(
      * [PrivateMessageSummary.isMultiRecipient]) enriched best-effort with the MPStorage reading
      * positions (DTCloud's `mpFlags`). A dedicated state (NOT a [FlagsListUiState] / [Flag] reuse,
      * arbitrage Codex): the DT channel is a private-message list, not a flag list, so it never
-     * shares the flag model's contract (`flagType == null` stays a pure « no backend » marker for
-     * Super/DT placeholders elsewhere in this ViewModel).
+     * shares the flag model's contract (`flagType == null` stays a pure « no flag-pipeline fetch »
+     * marker — for the [FlagTab.Super] placeholder, and for DT which is served by [dtListState] instead).
      *
      * The fetch is triggered on tab OPENING ([onDtTabOpened]) — never from the per-category
      * auto-refresh — because [MpStorageRepository.fetchStorage] is expensive (it scans the inbox to

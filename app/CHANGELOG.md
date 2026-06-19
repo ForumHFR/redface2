@@ -16,6 +16,27 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v157–v170 — `0.14.0` — `internal` (dev) — 2026-06-18/19
+
+Builds **dev (internal)** accumulés depuis la bêta 0.14.0 (`v156`), même `versionName 0.14.0`. À consolider en
+entrées propres + bump `versionName 0.15.0` avant la prochaine bêta (le `CHANGELOG.md` racine reste à mettre à jour aussi).
+
+- **v157** — Blacklist locale #509 (masquer un utilisateur : menu post + fiche profil + sous-page Réglages).
+- **v158** — Plein écran #518 : masquer la barre de navigation Android (+ pseudo créateur doré #221).
+- **v159** — Bouton retour flottant en plein écran (#518, option).
+- **v160** — Fix régression images postées seules (#568).
+- **v161** — Révélation auto de la barre système en plein écran (#518, multi-comportements).
+- **v162** — Fix jitter de la barre système à l'arrivée en bas (#518).
+- **v163** — Option couleur d'accent « Rouge REDFACE1 » + retrait du fond de mise en avant (TU 2788511).
+- **v164** — Liseré post ciblé + pastille « Ajouté à la citation » hors du bandeau d'identité.
+- **v165** — Post ciblé : bandeau d'identité teinté `tertiaryContainer` (remplace le liseré).
+- **v166** — Onglet « DT » des Drapeaux = liste des MultiMP + reprise de lecture MPStorage (#509/#6).
+- **v167** — Recherche intra-topic (`transsearch.php`) : mot/pseudo + filtre serveur (#150 suite ; next/prev différé).
+- **v168** — Ligne « Suite à la page suivante » sur les pages intermédiaires d'un sujet (#110).
+- **v169** — Changement d'onglet Drapeaux → retour en haut de liste (#106).
+- **v170** — Option « Afficher l'ascenseur » (#105).
+- *(mergé sans release)* — Mécanique d'écriture MPStorage v1 RMW **guardée** (POST différé, non observé live, #6/#577).
+
 ## v156 — `0.14.0` — 2026-06-17
 
 **Statut** : `open` (track open testing — canal beta, Play Edit committed) + F-Droid `.beta`

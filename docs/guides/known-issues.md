@@ -42,6 +42,12 @@ Liste **vivante** des limitations connues de Redface 2 et des compromis **assum�
 - **Prefetch non authentifié — volontaire.** Le préchargement utilise des requêtes non authentifiées, délibérément, pour **ne pas marquer les drapeaux comme lus** côté serveur.
 - **Deep links HFR — domaine non vérifiable.** Le domaine HFR n'est pas vérifiable côté Play Console ; les fragments d'URI (`#t<id>`) sont parsés dans `RedfaceApp` (Compose Navigation 3 ne gère pas les fragments nativement) (cf. #127).
 
+## Messages privés &amp; DT (Phase 3 — éléments reportés)
+
+- **Écriture MPStorage v1 non activée — POST non observé.** La mécanique de write-back (read-modify-write préservant tous les namespaces tiers du document JSON, cap 256 KiB, sélection déterministe du document cible) est implémentée et unit-testée, mais **aucun POST réel n'est déclenché** : le contrat `bdd.php cat=prive` n'a jamais été capturé en conditions réelles (pas de device cette nuit-là). L'API publique reste en lecture/préparation ; le POST live n'est accessible que par un chemin module-interne test-only. Activation réelle reportée après observation du contrat (#6, ADR-014 §4).
+- **Onglet « DT » — première page de l'inbox seulement.** La liste des MultiMP se base sur la 1ʳᵉ page de la boîte (conversations récentes) ; le balayage multi-pages est différé (coût du scan MPStorage). Le badge « reprise p.N » est une **position de reprise de lecture** (MPStorage), **pas** un état lu/non-lu — le non-lu vient du dot inbox (`hasUnread`). Pas de « vrais » `Flag` MP (HFR n'expose pas de drapeaux côté MP).
+- **Recherche intra-topic — pas de navigation résultat suivant/précédent.** La recherche `transsearch.php` (mot/pseudo) et le filtre serveur (« n'afficher que les correspondances ») sont livrés, mais la navigation entre résultats (`currentnum`) n'est **pas** câblée : la réponse `transsearch` n'a jamais été observée live. À finir après capture du comportement serveur.
+
 ---
 
 *Page maintenue au fil de l'eau : ajouter ici tout compromis délibéré ou limite plateforme nouvellement constaté, avec un lien vers l'issue de suivi.*
