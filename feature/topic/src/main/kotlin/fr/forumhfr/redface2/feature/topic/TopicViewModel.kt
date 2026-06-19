@@ -223,11 +223,17 @@ class TopicViewModel @AssistedInject constructor(
      * replace), so a block / unblock applies live on the page currently on screen whatever path put it
      * there. On each emission it (a) caches the set in [blockedCanonicals] (so every load path can
      * compute the initial hidden set with the up-to-date blacklist) and (b) recomputes
-     * [TopicUiState.Mode.Loaded.hiddenNumreponses] on the current loaded page and re-emits it. The
-     * `observeBlockedCanonicals` flow emits its current value immediately (documented contract), so
-     * launching this FIRST in [init] seeds [blockedCanonicals] before the initial load computes its own
-     * hidden set — no blocked post flashes unhidden. A non-loaded state (Loading / Error) is left
-     * untouched; the next load reads the freshest [blockedCanonicals].
+     * [TopicUiState.Mode.Loaded.hiddenNumreponses] on the current loaded page and re-emits it. A
+     * non-loaded state (Loading / Error) is left untouched; the next load reads the freshest
+     * [blockedCanonicals].
+     *
+     * Launched FIRST in [init] so its emission usually seeds [blockedCanonicals] before the initial
+     * page renders. But `observeBlockedCanonicals` is a COLD DataStore flow (not a StateFlow), so that
+     * first emission is asynchronous — the ordering vs the initial load is NOT guaranteed (Codex
+     * review). The (b) re-filter is the real guarantee: even if a load renders before the blacklist
+     * lands, this collector immediately re-hides the blocked posts. The residual is at most a one-frame
+     * flash on a cold open whose page-1 already contains a blocked author — and in practice the network
+     * page load is slower than the (memory-cached) DataStore read, so it rarely shows.
      */
     private fun observeBlockedCanonicals() {
         blacklistRepository.observeBlockedCanonicals()
@@ -242,6 +248,11 @@ class TopicViewModel @AssistedInject constructor(
                     )
                 }
             }
+            // This collector is independent of any load job, so an unhandled error here would tear
+            // down viewModelScope and kill the screen. A DataStore read hiccup on the blacklist must
+            // not do that — keep the last known set; the next emission recovers (Codex review; mirrors
+            // the catch the former loadCurrentPage combine carried).
+            .catch { error -> android.util.Log.w(LOG_TAG, "Blacklist observe failed", error) }
             .launchIn(viewModelScope)
     }
 
