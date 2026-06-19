@@ -37,6 +37,7 @@ import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageDocument
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageResult
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageWriteResult
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
@@ -164,6 +165,25 @@ class FlagsViewModelTest {
 
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `selectTab to a different tab recalls the list to the top (#106)`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository(catIds = listOf(1))
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, forum)
+
+        assertFalse("no recall before any tab change", vm.recallListToTop.value)
+
+        vm.selectTab(FlagTab.Red) // real transition (tap or swipe commit both route here)
+        assertTrue("a real tab switch recalls the list to the top", vm.recallListToTop.value)
+
+        vm.consumeRecallListToTop()
+        assertFalse(vm.recallListToTop.value)
+
+        vm.selectTab(FlagTab.Red) // re-tap the same tab: no-op, no recall (keeps scroll position)
+        assertFalse("re-tapping the already-selected tab must not recall", vm.recallListToTop.value)
     }
 
     @Test
@@ -2124,5 +2144,11 @@ class FlagsViewModelTest {
             thrown?.let { throw it }
             return result
         }
+
+        // The DT tab only READS MPStorage; the write path (#6, guarded) is never exercised here, so the
+        // fake stubs it. Added when chantier B extended MpStorageRepository with writeBackFlag (cross-module
+        // fake update the B build missed — its validation didn't compile :feature:flags tests).
+        override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
+            MpStorageWriteResult.TargetNotFound
     }
 }

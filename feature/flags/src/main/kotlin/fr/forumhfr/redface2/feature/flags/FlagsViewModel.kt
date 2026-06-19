@@ -455,7 +455,16 @@ class FlagsViewModel @Inject constructor(
             setFlagsUnreadOnly(!cyanUnreadOnly.value)
             return
         }
+        // #106 (tinc) — re-tapping the already-selected (non-Cyan) tab is a no-op : keep its scroll
+        // position, raise nothing.
+        if (tab == _selectedTab.value) return
         _selectedTab.value = tab
+        // #106 — a real tab transition (tap OR swipe commit, both route through selectTab) recalls the
+        // shared list to the top, reusing the one-shot #546 signal (consumed by the screen via
+        // recallListToTop → requestScrollToItem(0)). NOT raised on the Cyan « +lus » filter re-tap (the
+        // FilterFlipScrollResetEffect handles that) nor on a no-op re-tap nor on return-from-topic
+        // (selectedTab unchanged there) — so no spurious reset on rotation either.
+        _recallListToTop.value = true
     }
 
     /** User tapped « Retirer le drapeau » on [flag] : raise the confirmation dialog. */
