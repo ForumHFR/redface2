@@ -1612,18 +1612,16 @@ class FlagsViewModelTest {
         val messages = FakeMessagesRepository(inboxResult = Result.failure(IllegalStateException("net")))
         val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages)
 
-        vm.dtListState.test {
-            assertEquals(DtListUiState.Loading, awaitItem())
-            vm.onDtTabOpened()
-            assertTrue(awaitItem() is DtListUiState.Error)
+        vm.onDtTabOpened()
+        advanceUntilIdle()
+        assertTrue(vm.dtListState.value is DtListUiState.Error)
 
-            messages.inboxResult =
-                Result.success(inboxPage(stubSummary(threadId = 10, isMultiRecipient = true)))
-            vm.onDtTabOpened() // guard was reset by the failure → retry re-runs
-            val content = awaitItem() as DtListUiState.Content
-            assertEquals(listOf(10), content.items.map { it.threadId })
-            cancelAndIgnoreRemainingEvents()
-        }
+        messages.inboxResult =
+            Result.success(inboxPage(stubSummary(threadId = 10, isMultiRecipient = true)))
+        vm.onDtTabOpened() // guard was reset by the failure → retry re-runs
+        advanceUntilIdle()
+        val content = vm.dtListState.value as DtListUiState.Content
+        assertEquals(listOf(10), content.items.map { it.threadId })
         assertEquals(2, messages.getListCalls)
     }
 
@@ -1760,6 +1758,9 @@ class FlagsViewModelTest {
         vm.selectTab(FlagTab.Dt) // first tap from Cyan: just select, no toggle
         assertEquals(FlagTab.Dt, vm.selectedTab.value)
         assertTrue("a plain selection must not toggle the filter", vm.dtUnreadOnly.value)
+        // That first tap was a real Cyan→DT switch, which legitimately raised the « recall to top »
+        // signal (#106/#546). Consume it so the assertion below proves the RE-TAPS don't raise it.
+        vm.consumeRecallListToTop()
 
         vm.selectTab(FlagTab.Dt) // re-tap: true → false (« +lus » shown)
         assertFalse(vm.dtUnreadOnly.value)
@@ -1815,23 +1816,30 @@ class FlagsViewModelTest {
         )
         val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages, mpStorage = mpStorage)
 
-        vm.dtDisplayState.test {
-            assertEquals(DtListUiState.Loading, awaitItem())
-            vm.onDtTabOpened()
-            val unreadOnly = awaitItem() as DtListUiState.Content
-            assertEquals(
-                "default unread-only keeps only the unread inbox row (10)",
-                listOf(10),
-                unreadOnly.items.map { it.threadId },
-            )
-            // The raw union still carries all three (10 + 20 + orphan 99).
-            assertEquals(listOf(10, 20, 99), (vm.dtListState.value as DtListUiState.Content).items.map { it.threadId })
+        vm.onDtTabOpened()
+        advanceUntilIdle()
+        // Default unread-only keeps only the unread inbox row (10); the read row (20) and the
+        // storage-only orphan (99, read state unknown) are excluded.
+        assertEquals(
+            listOf(10),
+            (vm.dtDisplayState.value as DtListUiState.Content).items.map { it.threadId },
+        )
+        // The raw union still carries all three (10 + 20 + orphan 99).
+        assertEquals(
+            listOf(10, 20, 99),
+            (vm.dtListState.value as DtListUiState.Content).items.map { it.threadId },
+        )
 
-            vm.selectTab(FlagTab.Dt) // re-tap → +lus reveals the full union
-            val full = awaitItem() as DtListUiState.Content
-            assertEquals(listOf(10, 20, 99), full.items.map { it.threadId })
-            cancelAndIgnoreRemainingEvents()
-        }
+        // Reveal « +lus »: switch onto DT (a plain selection, no toggle) then re-tap to turn the
+        // unread filter OFF — the full union is then displayed.
+        vm.selectTab(FlagTab.Dt)
+        vm.selectTab(FlagTab.Dt)
+        advanceUntilIdle()
+        assertFalse(vm.dtUnreadOnly.value)
+        assertEquals(
+            listOf(10, 20, 99),
+            (vm.dtDisplayState.value as DtListUiState.Content).items.map { it.threadId },
+        )
     }
 
     @Test
