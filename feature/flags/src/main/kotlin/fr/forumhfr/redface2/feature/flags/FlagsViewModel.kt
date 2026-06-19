@@ -17,6 +17,7 @@ import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageResult
 import java.time.Clock
 import java.time.Duration
@@ -688,18 +689,27 @@ class FlagsViewModel @Inject constructor(
     }
 
     /**
-     * Loads the DT list: the inbox MultiMP rows, each joined best-effort with its MPStorage reading
-     * position. The join tolerates every degraded MPStorage outcome ([MpStorageResult.NotFound] /
-     * [MpStorageResult.Unreadable] / an exception): the list still renders, just without the
-     * « reprise p.N » badge — the storage scan must never fail the conversation list.
+     * Loads the DT list as the UNION of two sources, deduplicated by `threadId` (#6, directive
+     * XaTriX 2026-06-19):
+     *  - the inbox MultiMP rows of PAGE 1 ([DT_INBOX_PAGE]) — the hard, fully-described source
+     *    ([DtListItem.InboxBacked]: subject, unread dot, lastPage), each best-effort joined with its
+     *    MPStorage resume page ;
+     *  - the MPStorage `mpFlags` entries whose `threadId` is ABSENT from that page
+     *    ([DtListItem.StorageOnly]: thread id + resume page only — no subject, no read/unread state).
+     *
+     * Rows are concatenated inbox-first (recent activity, complete + reliable data) then the orphan
+     * entries in `mpFlags.list` order (no per-entry date to sort on). The MPStorage read is
+     * best-effort: every degraded outcome ([MpStorageResult.NotFound] / [MpStorageResult.Unreadable]
+     * / an exception) yields no entries, so the list still renders from the inbox alone — the storage
+     * scan never fails the conversation list.
      *
      * Only the inbox load itself is fatal: it is the list's primary source, so a network/session
      * error there surfaces [DtListUiState.Error] (the screen offers a retry / reconnect CTA).
      *
-     * MVP scope (#6): only inbox PAGE 1 ([DT_INBOX_PAGE]) is scanned — the most recent conversations.
-     * A full multi-page sweep is deliberately DEFERRED (it would multiply the cost of the already
-     * expensive MPStorage scan), so [DtListUiState.Empty] means « none on the recent page », not
-     * « none at all » — the empty-state copy assumes that semantics (`flags_dt_empty`).
+     * [DtListUiState.Empty] iff the inbox PAGE 1 has no MultiMP AND MPStorage has no orphan entry.
+     * Scope (#6): only inbox PAGE 1 is scanned + whatever MPStorage already knows ; a full multi-page
+     * inbox sweep stays DEFERRED, so older pages are not covered — the UI carries a scan note footer
+     * (`flags_dt_scan_note`) and the empty-state copy (`flags_dt_empty`) assumes that semantics.
      */
     private fun loadDt() {
         dtFetchStarted = true
@@ -709,7 +719,7 @@ class FlagsViewModel @Inject constructor(
         val generation = ++dtGeneration
         dtFetchJob = viewModelScope.launch {
             _dtListState.value = DtListUiState.Loading
-            val conversations = try {
+            val inboxMulti = try {
                 messagesRepository.getPrivateMessageList(page = DT_INBOX_PAGE)
                     .items
                     .filter { it.isMultiRecipient }
@@ -726,46 +736,42 @@ class FlagsViewModel @Inject constructor(
                 return@launch
             }
 
-            if (conversations.isEmpty()) {
-                if (generation == dtGeneration) _dtListState.value = DtListUiState.Empty
-                return@launch
-            }
-
-            // Best-effort enrichment: a missing / unreadable / failed storage read leaves an empty
-            // map, so every row simply renders without a resume badge (the list is never blocked).
-            val resumeByThread = fetchResumePositions()
+            // Best-effort: a missing / unreadable / failed storage read leaves an empty list, so the
+            // union degrades to the inbox rows alone (no resume badge, no orphan rows). The list is
+            // never blocked. NOTE: no early-return on an empty inbox — orphan MPStorage entries may
+            // still populate the list (a page-1 box without any MultiMP is NOT necessarily Empty).
+            val entries = fetchStorageEntries()
             // Re-check the generation AFTER the (suspending) storage scan too: the account may have
             // switched while the scan was in flight, so the stale result must not republish.
             if (generation != dtGeneration) return@launch
-            _dtListState.value = DtListUiState.Content(
-                conversations.map { summary ->
-                    DtListItem(
-                        conversation = summary,
-                        resumePage = resumeByThread[summary.threadId],
-                    )
-                },
-            )
+
+            val items = buildDtItems(inboxMulti, entries)
+            if (items.isEmpty()) {
+                if (generation == dtGeneration) _dtListState.value = DtListUiState.Empty
+                return@launch
+            }
+            _dtListState.value = DtListUiState.Content(items)
         }
     }
 
     /**
-     * Best-effort MPStorage read for the « reprise p.N » badges. Returns a `threadId → page` map of
-     * the DTCloud `mpFlags` entries, EMPTY for every degraded outcome ([MpStorageResult.NotFound] /
+     * Best-effort MPStorage read for the DT union. Returns the FULL list of DTCloud `mpFlags`
+     * entries, EMPTY for every degraded outcome ([MpStorageResult.NotFound] /
      * [MpStorageResult.Unreadable]) or transport failure — the caller renders the list regardless.
-     * `mpFlags` is a reading-RESUME position, NOT a read/unread state (#361/ADR-013): the unread dot
-     * is the inbox [PrivateMessageSummary.hasUnread], never this page number.
+     * Each entry's `page` is a reading-RESUME position, NOT a read/unread state (#361/ADR-013): the
+     * unread dot is the inbox [PrivateMessageSummary.hasUnread], never this page number.
      */
     @Suppress("SwallowedException") // best-effort: a storage read failure deliberately degrades to
-    // « no resume badge » so the conversation list still renders (cf. KDoc); the cause is irrelevant.
-    private suspend fun fetchResumePositions(): Map<Int, Int> = try {
+    // « inbox rows only, no orphan, no resume badge » so the list still renders; the cause is irrelevant.
+    private suspend fun fetchStorageEntries(): List<MpStorageFlagEntry> = try {
         when (val storage = mpStorageRepository.fetchStorage()) {
-            is MpStorageResult.Found -> storage.document.mpFlags.associate { it.threadId to it.page }
-            MpStorageResult.NotFound, MpStorageResult.Unreadable -> emptyMap()
+            is MpStorageResult.Found -> storage.document.mpFlags
+            MpStorageResult.NotFound, MpStorageResult.Unreadable -> emptyList()
         }
     } catch (cancellation: kotlinx.coroutines.CancellationException) {
         throw cancellation
     } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
-        emptyMap()
+        emptyList()
     }
 
     // Round-2 review (PR #207): `logout()` was removed from this ViewModel — the global account
@@ -1028,7 +1034,11 @@ sealed interface DtListUiState {
     /** The inbox loaded but holds no MultiMP conversation. */
     data object Empty : DtListUiState
 
-    /** Loaded MultiMP conversations, each best-effort joined with its MPStorage resume position. */
+    /**
+     * The DT union: inbox PAGE 1 MultiMP rows ∪ orphan MPStorage entries, deduplicated by
+     * `threadId` and ordered inbox-first then `mpFlags.list` order (#6). The multi-page inbox limit
+     * remains — surfaced by the scan-note footer (`flags_dt_scan_note`).
+     */
     data class Content(val items: List<DtListItem>) : DtListUiState
 
     /** The inbox load failed (network / session). The MPStorage read NEVER reaches this state —
@@ -1037,13 +1047,66 @@ sealed interface DtListUiState {
 }
 
 /**
- * One DT row: a MultiMP [conversation] plus its optional MPStorage reading-resume page
- * ([resumePage], DTCloud `mpFlags`). [resumePage] is the « reprise p.N » badge — a reading
- * POSITION, never a read/unread state (#361/ADR-013): the unread dot is
- * [PrivateMessageSummary.hasUnread]. `null` when the conversation has no MPStorage entry (or the
- * storage was absent / unreadable / failed to load).
+ * One DT row (#6). Two natures, both carrying a [threadId] (identity / dedup key) and an optional
+ * MPStorage [resumePage] — the « reprise p.N » badge, a reading POSITION never a read/unread state
+ * (#361/ADR-013).
  */
-data class DtListItem(
-    val conversation: PrivateMessageSummary,
-    val resumePage: Int?,
-)
+sealed interface DtListItem {
+    val threadId: Int
+    val resumePage: Int?
+
+    /**
+     * A conversation present on inbox PAGE 1: the rich, fully-described row (subject, `hasUnread`
+     * dot, `lastPage`). [resumePage] is `null` when the conversation has no MPStorage entry (or the
+     * storage was absent / unreadable / failed to load).
+     */
+    data class InboxBacked(
+        val conversation: PrivateMessageSummary,
+        override val resumePage: Int?,
+    ) : DtListItem {
+        override val threadId: Int get() = conversation.threadId
+    }
+
+    /**
+     * An MPStorage `mpFlags` entry absent from inbox PAGE 1: only [threadId] + reading position are
+     * known — NO subject, NO read/unread state. [resumePage] is the entry's `page` (non-null in
+     * practice; the parser falls back to 1). [numreponse] is kept for a future anchor but does not
+     * influence navigation today.
+     */
+    data class StorageOnly(
+        override val threadId: Int,
+        override val resumePage: Int?,
+        val numreponse: Int?,
+    ) : DtListItem
+}
+
+/**
+ * Pure builder of the DT union (#6, directive XaTriX 2026-06-19). [inboxMulti] are the inbox PAGE 1
+ * MultiMP summaries (already filtered) ; [storageEntries] are the DTCloud `mpFlags` entries
+ * (best-effort, possibly empty). Returns inbox-backed rows first (in inbox order, each joined with
+ * its MPStorage resume page), then the orphan storage-only rows whose `threadId` is absent from the
+ * inbox, in `mpFlags.list` order. Dedup is by `threadId`: an entry already inbox-backed is never
+ * doubled as storage-only, and an internal `mpFlags` `threadId` duplicate keeps the first occurrence
+ * (so the [Content] list never holds two items with the same LazyColumn key).
+ */
+internal fun buildDtItems(
+    inboxMulti: List<PrivateMessageSummary>,
+    storageEntries: List<MpStorageFlagEntry>,
+): List<DtListItem> {
+    // Dedup the MPStorage entries by threadId FIRST (keep first occurrence) so both the inbox-row
+    // resume join and the orphan rows agree on the same page when mpFlags carries a duplicate
+    // threadId (Codex review: `associate` kept the LAST, diverging from the orphans' `distinctBy`).
+    val dedupedEntries = storageEntries.distinctBy { it.threadId }
+    val resumeByThread = dedupedEntries.associate { it.threadId to it.page }
+    val inboxThreadIds = inboxMulti.mapTo(HashSet()) { it.threadId }
+    return buildList {
+        inboxMulti.forEach { summary ->
+            add(DtListItem.InboxBacked(summary, resumeByThread[summary.threadId]))
+        }
+        dedupedEntries.asSequence()
+            .filter { it.threadId !in inboxThreadIds }
+            .forEach { entry ->
+                add(DtListItem.StorageOnly(entry.threadId, entry.page, entry.numreponse))
+            }
+    }
+}

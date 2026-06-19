@@ -1360,7 +1360,7 @@ class FlagsViewModelTest {
     // #6 — DT tab: MultiMP list + best-effort MPStorage enrichment.
 
     @Test
-    fun `onDtTabOpened lists the MultiMP conversations joined with their MPStorage resume page`() = runTest {
+    fun `onDtTabOpened unions inbox MultiMP rows with orphan MPStorage entries`() = runTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val messages = FakeMessagesRepository(
@@ -1374,7 +1374,11 @@ class FlagsViewModelTest {
         )
         val mpStorage = FakeMpStorageRepository(
             result = MpStorageResult.Found(
-                mpDoc(MpStorageFlagEntry(threadId = 10, page = 7, numreponse = null, uri = null)),
+                mpDoc(
+                    MpStorageFlagEntry(threadId = 10, page = 7, numreponse = null, uri = null),
+                    // Orphan: a known DT conversation absent from inbox page 1 → StorageOnly row.
+                    MpStorageFlagEntry(threadId = 99, page = 2, numreponse = 555, uri = null),
+                ),
             ),
         )
         val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages, mpStorage = mpStorage)
@@ -1383,11 +1387,16 @@ class FlagsViewModelTest {
             assertEquals(DtListUiState.Loading, awaitItem())
             vm.onDtTabOpened()
             val content = awaitItem() as DtListUiState.Content
-            // The 1:1 MP (20) is dropped; only the two MultiMP rows remain, in inbox order.
-            assertEquals(listOf(10, 30), content.items.map { it.conversation.threadId })
+            // Inbox MultiMP rows first (1:1 MP 20 dropped), then orphan MPStorage entries.
+            assertEquals(listOf(10, 30, 99), content.items.map { it.threadId })
             // Thread 10 has an mpFlags entry → its resume page joins; 30 has none → null badge.
-            assertEquals(7, content.items.first { it.conversation.threadId == 10 }.resumePage)
-            assertNull(content.items.first { it.conversation.threadId == 30 }.resumePage)
+            assertEquals(7, content.items.first { it.threadId == 10 }.resumePage)
+            assertNull(content.items.first { it.threadId == 30 }.resumePage)
+            // The two inbox rows are InboxBacked, the orphan is StorageOnly carrying its resume page.
+            assertTrue(content.items.first { it.threadId == 10 } is DtListItem.InboxBacked)
+            val orphan = content.items.first { it.threadId == 99 } as DtListItem.StorageOnly
+            assertEquals(2, orphan.resumePage)
+            assertEquals(555, orphan.numreponse)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -1406,7 +1415,7 @@ class FlagsViewModelTest {
             assertEquals(DtListUiState.Loading, awaitItem())
             vm.onDtTabOpened()
             val content = awaitItem() as DtListUiState.Content
-            assertEquals(listOf(10), content.items.map { it.conversation.threadId })
+            assertEquals(listOf(10), content.items.map { it.threadId })
             assertNull("NotFound storage → no resume badge", content.items.single().resumePage)
             cancelAndIgnoreRemainingEvents()
         }
@@ -1427,14 +1436,15 @@ class FlagsViewModelTest {
             assertEquals(DtListUiState.Loading, awaitItem())
             vm.onDtTabOpened()
             val content = awaitItem() as DtListUiState.Content
-            assertEquals(listOf(10), content.items.map { it.conversation.threadId })
+            assertEquals(listOf(10), content.items.map { it.threadId })
             assertNull("a failed storage read degrades to no badge", content.items.single().resumePage)
             cancelAndIgnoreRemainingEvents()
         }
     }
 
     @Test
-    fun `onDtTabOpened surfaces Empty when the inbox holds no MultiMP`() = runTest {
+    fun `onDtTabOpened surfaces Empty only when inbox has no MultiMP AND MPStorage has no entry`() = runTest {
+        // True-empty: no inbox MultiMP and the default fake returns NotFound (no orphan) → Empty.
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val messages = FakeMessagesRepository(
@@ -1448,6 +1458,99 @@ class FlagsViewModelTest {
             assertEquals(DtListUiState.Loading, awaitItem())
             vm.onDtTabOpened()
             assertEquals(DtListUiState.Empty, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `onDtTabOpened is Content (not Empty) when inbox has no MultiMP but MPStorage has an entry`() = runTest {
+        // Regression on the removed `conversations.isEmpty()` early-return: a page-1 box without any
+        // MultiMP but with a known DT entry must still render that orphan (#6), never Empty.
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(
+                inboxPage(stubSummary(threadId = 20, isMultiRecipient = false)), // 1:1 only
+            ),
+        )
+        val mpStorage = FakeMpStorageRepository(
+            result = MpStorageResult.Found(
+                mpDoc(MpStorageFlagEntry(threadId = 99, page = 2, numreponse = null, uri = null)),
+            ),
+        )
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages, mpStorage = mpStorage)
+
+        vm.dtListState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            val content = awaitItem() as DtListUiState.Content
+            assertEquals(listOf(99), content.items.map { it.threadId })
+            assertTrue(content.items.single() is DtListItem.StorageOnly)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `onDtTabOpened dedups a threadId present in both inbox and MPStorage to a single InboxBacked row`() =
+        runTest {
+            // A threadId in BOTH sources appears once, as InboxBacked (never doubled as StorageOnly),
+            // carrying the joined resume badge — and the LazyColumn key (threadId) stays unique.
+            val flags = FakeFlagRepository()
+            val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+            val messages = FakeMessagesRepository(
+                inboxResult = Result.success(
+                    inboxPage(stubSummary(threadId = 10, isMultiRecipient = true)),
+                ),
+            )
+            val mpStorage = FakeMpStorageRepository(
+                result = MpStorageResult.Found(
+                    mpDoc(MpStorageFlagEntry(threadId = 10, page = 4, numreponse = null, uri = null)),
+                ),
+            )
+            val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages, mpStorage = mpStorage)
+
+            vm.dtListState.test {
+                assertEquals(DtListUiState.Loading, awaitItem())
+                vm.onDtTabOpened()
+                val content = awaitItem() as DtListUiState.Content
+                assertEquals(listOf(10), content.items.map { it.threadId })
+                val row = content.items.single()
+                assertTrue(row is DtListItem.InboxBacked)
+                assertEquals(4, row.resumePage)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `onDtTabOpened orders inbox rows first then orphans in mpFlags list order`() = runTest {
+        val flags = FakeFlagRepository()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val messages = FakeMessagesRepository(
+            inboxResult = Result.success(
+                inboxPage(
+                    stubSummary(threadId = 10, isMultiRecipient = true),
+                    stubSummary(threadId = 30, isMultiRecipient = true),
+                ),
+            ),
+        )
+        // mpFlags carries one inbox-backed (10) and two orphans (88, 99) in this list order.
+        val mpStorage = FakeMpStorageRepository(
+            result = MpStorageResult.Found(
+                mpDoc(
+                    MpStorageFlagEntry(threadId = 10, page = 1, numreponse = null, uri = null),
+                    MpStorageFlagEntry(threadId = 88, page = 5, numreponse = null, uri = null),
+                    MpStorageFlagEntry(threadId = 99, page = 2, numreponse = null, uri = null),
+                ),
+            ),
+        )
+        val vm = viewModel(auth, flags, FakeForumRepository(), messages = messages, mpStorage = mpStorage)
+
+        vm.dtListState.test {
+            assertEquals(DtListUiState.Loading, awaitItem())
+            vm.onDtTabOpened()
+            val content = awaitItem() as DtListUiState.Content
+            // Inbox order (10, 30) first, then orphans in mpFlags.list order (88, 99).
+            assertEquals(listOf(10, 30, 88, 99), content.items.map { it.threadId })
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -1518,7 +1621,7 @@ class FlagsViewModelTest {
                 Result.success(inboxPage(stubSummary(threadId = 10, isMultiRecipient = true)))
             vm.onDtTabOpened() // guard was reset by the failure → retry re-runs
             val content = awaitItem() as DtListUiState.Content
-            assertEquals(listOf(10), content.items.map { it.conversation.threadId })
+            assertEquals(listOf(10), content.items.map { it.threadId })
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals(2, messages.getListCalls)
@@ -1603,7 +1706,7 @@ class FlagsViewModelTest {
             assertEquals(
                 "the latest refreshDt wins; the cancelled earlier scan's result is dropped",
                 listOf(99),
-                content.items.map { it.conversation.threadId },
+                content.items.map { it.threadId },
             )
         }
 
@@ -1631,7 +1734,7 @@ class FlagsViewModelTest {
             vm.onDtTabOpened()
             val content = awaitItem() as DtListUiState.Content
             // …yet only page 1 is reflected; no further page is scanned (multi-page deferred).
-            assertEquals(listOf(10), content.items.map { it.conversation.threadId })
+            assertEquals(listOf(10), content.items.map { it.threadId })
             assertEquals("only inbox page 1 is ever requested", listOf(1), messages.requestedPages)
             cancelAndIgnoreRemainingEvents()
         }
