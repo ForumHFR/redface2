@@ -59,6 +59,13 @@ data class TopicUiState(
      * the indicator stuck).
      */
     val isRefreshing: Boolean = false,
+    /**
+     * Chantier C (#546) — intra-topic search (HFR `transsearch.php`), a MODE of this screen. Holds
+     * the search bar visibility, the typed criteria and the search lifecycle. The matching topic
+     * page returned by HFR is surfaced through [Mode.Loaded] like any other page (`transsearch`
+     * answers a topic page), so there is no separate "results list" model here.
+     */
+    val search: TopicSearchUiState = TopicSearchUiState(),
 ) {
     /**
      * Helper used by the screen / ViewModel : `true` when the user has navigated to a
@@ -78,6 +85,14 @@ data class TopicUiState(
 
         data class Loaded(
             val topic: Topic,
+            /**
+             * #509 — `numreponse` of the posts whose author is blacklisted, computed from the
+             * blacklist combined with `topic.posts` so it is always coherent with [topic]. The screen
+             * renders these as a collapsed "post masqué" placeholder (never removed from the list, so
+             * pagination/anchors/`numreponse` keys stay intact). Empty = nothing hidden. Gated into the
+             * first emission (combine with the blacklist) so a blocked post never flashes before hiding.
+             */
+            val hiddenNumreponses: Set<Int> = emptySet(),
         ) : Mode
 
         data class Error(
@@ -92,6 +107,15 @@ data class TopicUiState(
         ) : Mode
     }
 
+    /**
+     * Helper used by the screen : `true` when the loaded topic page exposes a usable intra-topic
+     * search form (authenticated, non-empty `hash_check`). Drives the search icon affordance,
+     * symmetric with the reply gate. The form is transient (never cached), so a cold cache row
+     * keeps search disabled until a live authenticated load.
+     */
+    val canSearchInTopic: Boolean
+        get() = (mode as? Mode.Loaded)?.topic?.searchForm?.canSearch == true
+
     companion object {
         fun initial(request: TopicRequest): TopicUiState =
             TopicUiState(
@@ -100,6 +124,46 @@ data class TopicUiState(
                 availablePages = emptyList(),
             )
     }
+}
+
+/**
+ * Chantier C (#546) — UI state for the intra-topic search mode.
+ *
+ * @property isActive whether the search bar is open. When `false`, [word] / [spseudo] are kept so
+ *   re-opening restores the last criteria, but no search is in effect.
+ * @property word the term field (HFR `word`).
+ * @property spseudo the author field (HFR `spseudo`).
+ * @property onlyMatches the « Filtrer » toggle — HFR's `filter` checkbox (only show matching posts).
+ * @property status the search lifecycle. Idle before the first submit ; Loading while the POST is in
+ *   flight ; Done once a `transsearch` page has been loaded into [TopicUiState.Mode.Loaded] (the
+ *   page itself carries the matches) ; NoResults when HFR found nothing ; Error on failure.
+ * @property canGoPreviousResult whether a « previous result » step is available (Chantier B / #546).
+ *   Mirrors the ViewModel's client-side cursor history (HFR's search is forward-only) : `true` once the
+ *   user has navigated past the first match. Only meaningful in non-filtered mode (`!onlyMatches`).
+ * @property canGoNextResult whether a « next result » step is available. `true` while HFR has not yet
+ *   reported the end of results. Only meaningful in non-filtered mode (`!onlyMatches`).
+ */
+data class TopicSearchUiState(
+    val isActive: Boolean = false,
+    val word: String = "",
+    val spseudo: String = "",
+    val onlyMatches: Boolean = true,
+    val status: TopicSearchStatus = TopicSearchStatus.Idle,
+    val canGoPreviousResult: Boolean = false,
+    val canGoNextResult: Boolean = false,
+) {
+    /** HFR needs at least a term or an author ; the submit button is disabled otherwise. */
+    val canSubmit: Boolean get() = word.isNotBlank() || spseudo.isNotBlank()
+}
+
+enum class TopicSearchStatus {
+    Idle,
+    Loading,
+    Done,
+
+    /** Chantier B (#546) — the search round-trip succeeded but HFR found no matching message. */
+    NoResults,
+    Error,
 }
 
 sealed interface TopicIntent {
@@ -118,6 +182,45 @@ sealed interface TopicIntent {
      * identifies the post to delete (unique per category).
      */
     data class DeletePost(val numreponse: Int) : TopicIntent
+
+    /**
+     * #509 — blacklist (or un-blacklist) [author] from the post menu. [blocked] = true blocks (their
+     * posts collapse to the « masqué » placeholder), false unblocks. The ViewModel delegates to
+     * `BlacklistRepository`; the topic re-filters live through the page combine.
+     */
+    data class SetAuthorBlocked(val author: String, val blocked: Boolean) : TopicIntent
+
+    // ─── intra-topic search (#546) ───────────────────────────────────────────────
+
+    /** Open the search bar. No-op if the loaded page has no usable search form. */
+    data object OpenSearch : TopicIntent
+
+    /**
+     * Close the search bar AND clear any active search by reloading the normal current page. Keeps
+     * the typed criteria so re-opening restores them.
+     */
+    data object CloseSearch : TopicIntent
+
+    data class SearchWordChanged(val word: String) : TopicIntent
+
+    data class SearchPseudoChanged(val pseudo: String) : TopicIntent
+
+    data class SearchOnlyMatchesChanged(val onlyMatches: Boolean) : TopicIntent
+
+    /** Submit the intra-topic search (`POST transsearch.php`). */
+    data object SubmitSearch : TopicIntent
+
+    /**
+     * Chantier B (#546) — jump to the NEXT search result (non-filtered mode). Steps HFR's
+     * `currentnum` cursor forward and scrolls to the new match. No-op past the last result.
+     */
+    data object NextResult : TopicIntent
+
+    /**
+     * Chantier B (#546) — jump to the PREVIOUS search result (non-filtered mode). HFR's search is
+     * forward-only, so this replays the client-side cursor history. No-op on the first result.
+     */
+    data object PrevResult : TopicIntent
 }
 
 /**
@@ -205,4 +308,18 @@ sealed interface TopicEffect {
      * and leaves the post in place.
      */
     data class PostDeleteFailed(val reason: DeleteFailureReason) : TopicEffect
+
+    /**
+     * Chantier C (#546) — emitted when the intra-topic search (`transsearch.php`) failed to reach
+     * HFR or returned an unparsable page. The current page stays on screen ; the screen surfaces a
+     * Toast inviting a retry.
+     */
+    data object SearchFailed : TopicEffect
+
+    /**
+     * Chantier B (#546) — emitted when a « next result » step ran past the last match (HFR returned a
+     * sentinel cursor / a no-result page). The current match stays on screen ; the screen surfaces a
+     * sober Toast (« Aucun résultat suivant ») and the next arrow disables.
+     */
+    data object SearchResultsEnd : TopicEffect
 }

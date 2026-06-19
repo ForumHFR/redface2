@@ -16,13 +16,58 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
-## v155 — `0.14.0` — 2026-06-17
+## v174 — `0.15.0` — `open` (beta) — 2026-06-19
 
-**Statut** : candidat bêta (à dispatcher) — destiné au track open testing + F-Droid `.beta`.
-**Commit** : promotion dev→main (cf. PR de promotion).
-**Contenu depuis la 0.13.0/v145** : dogfoodé sur le canal dev (v146 → v154).
+Bêta **0.15.0** (open testing) — promotion de tout le dev depuis la bêta 0.14.0 (`v156`). Revue 4-flavor
+(code-review + review holistique + superpowers + Codex, seuil >60, **0 bloquant** ; 2 MAJOR corrigés avant le cut).
 
-> `0.13.0` ayant déjà été shippé en bêta (v145), le `versionName` est bumpé en `0.14.0` (la garde CI refuse deux bêtas au même `versionName`). Le `versionCode` final est alloué au dispatch (registre de tags) ; le `v155` indiqué ici est le candidat et sera corrigé si d'autres builds dev s'intercalent avant la promotion.
+**Nouveautés**
+- **Blacklist** #509 : masquer un utilisateur (menu post + fiche profil + sous-page Réglages) ; ses posts se replient derrière un placeholder.
+- **Plein écran** #518 : masquer la barre de navigation Android (révélation auto + bouton retour flottant, options).
+- **Pseudo créateur en doré** #221.
+- **Couleur d'accent « Rouge REDFACE1 »** (option) + retrait du fond de mise en avant (TU 2788511).
+- **Onglet DT** : MultiMP + reprise de lecture MPStorage, **non-lus par défaut**, clic sur l'onglet pour « +lus », pull-to-refresh (#6/#509).
+- **Recherche dans le sujet** : mot/pseudo + filtre, **saut précédent/suivant** entre résultats, couvre **tout le sujet**, « aucun résultat » distinct d'une erreur (#546).
+- Ligne « Suite à la page suivante » (#110), retour en haut au changement d'onglet Drapeaux (#106), option « Afficher l'ascenseur » (#105).
+
+**Correctifs (revue bêta)**
+- Blacklist : repli **en direct** désormais sur tous les chemins (refresh / réponse / suppression / recherche) #509.
+- Badge MP décrémenté à l'ouverture d'un MultiMP via l'onglet DT.
+- Recherche : ne renvoie plus « aucun résultat » à tort sur un gros sujet (#586).
+
+**Coulisses**
+- Mécanique d'écriture MPStorage v1 (RMW guardée) ; contrat d'écriture validé en live (activation opt-in à venir, #6/#577).
+
+Consolide les builds dev `v157–v173`. La bêta précédente `0.14.0`/`v156` reste documentée ci-dessous.
+
+## v157–v170 — `0.14.0` — `internal` (dev) — 2026-06-18/19
+
+Builds **dev (internal)** accumulés depuis la bêta 0.14.0 (`v156`), même `versionName 0.14.0`. À consolider en
+entrées propres + bump `versionName 0.15.0` avant la prochaine bêta (le `CHANGELOG.md` racine reste à mettre à jour aussi).
+
+- **v157** — Blacklist locale #509 (masquer un utilisateur : menu post + fiche profil + sous-page Réglages).
+- **v158** — Plein écran #518 : masquer la barre de navigation Android (+ pseudo créateur doré #221).
+- **v159** — Bouton retour flottant en plein écran (#518, option).
+- **v160** — Fix régression images postées seules (#568).
+- **v161** — Révélation auto de la barre système en plein écran (#518, multi-comportements).
+- **v162** — Fix jitter de la barre système à l'arrivée en bas (#518).
+- **v163** — Option couleur d'accent « Rouge REDFACE1 » + retrait du fond de mise en avant (TU 2788511).
+- **v164** — Liseré post ciblé + pastille « Ajouté à la citation » hors du bandeau d'identité.
+- **v165** — Post ciblé : bandeau d'identité teinté `tertiaryContainer` (remplace le liseré).
+- **v166** — Onglet « DT » des Drapeaux = liste des MultiMP + reprise de lecture MPStorage (#509/#6).
+- **v167** — Recherche intra-topic (`transsearch.php`) : mot/pseudo + filtre serveur (#150 suite ; next/prev différé).
+- **v168** — Ligne « Suite à la page suivante » sur les pages intermédiaires d'un sujet (#110).
+- **v169** — Changement d'onglet Drapeaux → retour en haut de liste (#106).
+- **v170** — Option « Afficher l'ascenseur » (#105).
+- *(mergé sans release)* — Mécanique d'écriture MPStorage v1 RMW **guardée** (POST différé, non observé live, #6/#577).
+
+## v156 — `0.14.0` — 2026-06-17
+
+**Statut** : `open` (track open testing — canal beta, Play Edit committed) + F-Droid `.beta`
+**Commit** : promotion dev→main #558 (`182c4fb`), tag `app-v156`.
+**Contenu depuis la 0.13.0/v145** : dogfoodé sur le canal dev (v146 → v155).
+
+> `0.13.0` ayant déjà été shippé en bêta (v145), le `versionName` est bumpé en `0.14.0` (la garde CI refuse deux bêtas au même `versionName`). Le `versionCode` final a été alloué au dispatch par le registre de tags : **`app-v156`** (le candidat noté ici était `v155`, décalé d'un cran par les builds dev intercalés).
 
 ### Added
 - **Signatures des posts** (#330) : la signature de l'auteur s'affiche sous le message, derrière un réglage dédié.

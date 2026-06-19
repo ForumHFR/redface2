@@ -2,21 +2,30 @@ package fr.forumhfr.redface2.feature.topic
 
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
+import fr.forumhfr.redface2.core.model.TopicSearchForm
+import fr.forumhfr.redface2.core.model.TopicSearchRequest
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.blacklist.BlacklistEntry
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -28,6 +37,7 @@ import java.net.UnknownHostException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +47,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -678,18 +689,619 @@ class TopicViewModelTest {
     // Construction seam: the ViewModel now also takes a UserPreferencesRepository (for the build 89
     // top-bar auto-hide preference) which none of these tests exercise, so it defaults to a no-op
     // fake. Keeps every existing call site unchanged bar the constructor → helper rename.
+    @Test
+    fun `blacklisted authors posts are reported hidden by numreponse, others are not`() = runTest {
+        val topic = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(
+                fakePost(100, author = "Alice"),
+                fakePost(101, author = "Bob"),
+                // canonical match is case/whitespace-insensitive: "alice" matches the "Alice" rule.
+                fakePost(102, author = "  alice  "),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = FakeBlacklistRepository(blockedCanonicals = setOf("alice")),
+        )
+
+        viewModel.state.test {
+            val mode = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            assertEquals(setOf(100, 102), mode.hiddenNumreponses)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `empty blacklist hides nothing`() = runTest {
+        val topic = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.state.test {
+            val mode = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
+            assertEquals(emptySet<Int>(), mode.hiddenNumreponses)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `blocking an author after load hides their posts live`() = runTest {
+        val topic = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val blacklist = FakeBlacklistRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = blacklist,
+        )
+
+        viewModel.state.test {
+            assertEquals(emptySet<Int>(), assertMode<TopicUiState.Mode.Loaded>(awaitItem()).hiddenNumreponses)
+            blacklist.block("alice")
+            assertEquals(setOf(100), assertMode<TopicUiState.Mode.Loaded>(awaitItem()).hiddenNumreponses)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `SetAuthorBlocked intent blocks then unblocks the author live`() = runTest {
+        val topic = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = FakeBlacklistRepository(),
+        )
+
+        viewModel.state.test {
+            assertEquals(emptySet<Int>(), assertMode<TopicUiState.Mode.Loaded>(awaitItem()).hiddenNumreponses)
+            viewModel.send(TopicIntent.SetAuthorBlocked("Alice", blocked = true))
+            assertEquals(setOf(100), assertMode<TopicUiState.Mode.Loaded>(awaitItem()).hiddenNumreponses)
+            viewModel.send(TopicIntent.SetAuthorBlocked("Alice", blocked = false))
+            assertEquals(emptySet<Int>(), assertMode<TopicUiState.Mode.Loaded>(awaitItem()).hiddenNumreponses)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `blocking an author after a pull-to-refresh hides their posts live (#509 beta)`() = runTest {
+        // Beta regression: the blacklist used to be collected only inside loadCurrentPage's combine, so
+        // a refresh (which cancels loadJob and runs a one-shot refetch) FROZE the live re-filter — a
+        // block after a pull did nothing until the next page change. The independent init collector now
+        // owns the re-filter so it applies on the refreshed page too.
+        val loaded = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val refreshed = fakeTopic(
+            page = 1,
+            totalPages = 1,
+            title = "refreshed",
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(101, author = "Bob")),
+        )
+        val blacklist = FakeBlacklistRepository()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = blacklist,
+        )
+
+        viewModel.send(TopicIntent.Refresh)
+        assertEquals(
+            "the refreshed page is on screen with nothing hidden yet",
+            "refreshed",
+            assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title,
+        )
+        assertEquals(emptySet<Int>(), assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).hiddenNumreponses)
+
+        viewModel.send(TopicIntent.SetAuthorBlocked("Alice", blocked = true))
+
+        // Live re-filter on the refreshed page — NOT only after a page change.
+        val mode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("refreshed", mode.topic.title)
+        assertEquals(setOf(100), mode.hiddenNumreponses)
+    }
+
+    @Test
+    fun `a post-submit landing hides authors already blacklisted before the force refresh (#509 beta)`() =
+        runTest {
+            // Beta regression: a VM created with submitSignal != null lands via forceRefreshCurrentPage
+            // and NEVER calls loadCurrentPage, so the blacklist combine never ran → blockedCanonicals
+            // stayed emptySet() and an already-blocked author was NOT hidden on the landing page. The
+            // init collector now seeds blockedCanonicals before the force refresh computes its hidden set.
+            val fresh = fakeTopic(
+                page = 2,
+                totalPages = 5,
+                posts = listOf(fakePost(900, author = "Alice"), fakePost(901, author = "Bob")),
+            )
+            val repository = FakeTopicRepository(
+                flowsToReturn = emptyList(),
+                refreshTopicsToReturn = listOf(fresh),
+            )
+            val viewModel = topicViewModel(
+                request = topicRequest(page = 2, submitSignal = 1_700_000_000_000L),
+                topicRepository = repository,
+                authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+                // Alice is ALREADY blacklisted when the VM is constructed.
+                blacklistRepository = FakeBlacklistRepository(blockedCanonicals = setOf("alice")),
+            )
+
+            val mode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+            assertEquals(fresh, mode.topic)
+            assertEquals(
+                "an already-blacklisted author must be hidden on the force-refresh landing page",
+                setOf(900),
+                mode.hiddenNumreponses,
+            )
+            assertTrue("the landing went through the force-refresh path", repository.calls.isEmpty())
+        }
+
+    @Test
+    fun `blocking an author while a search result page is shown hides them live (#509 beta)`() = runTest {
+        // Beta regression: a transsearch result page is rendered outside loadCurrentPage (launchSearch),
+        // so the frozen combine never re-filtered it. The init collector now re-filters whatever page is
+        // on screen, including a search result page.
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val resultForm = form.copy(currentNum = 100)
+        val resultTopic = fakeTopic(
+            page = 1, totalPages = 1, title = "search-result",
+            posts = listOf(fakePost(100, author = "Alice"), fakePost(200, author = "Bob")),
+            searchForm = resultForm,
+        )
+        val searchRepo = FakeTopicSearchRepository(result = resultTopic)
+        val blacklist = FakeBlacklistRepository()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = searchableRepo(form),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            blacklistRepository = blacklist,
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertEquals(
+            "the search result page is on screen",
+            "search-result",
+            assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title,
+        )
+
+        viewModel.send(TopicIntent.SetAuthorBlocked("Alice", blocked = true))
+
+        val mode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("search-result", mode.topic.title)
+        assertEquals(setOf(100), mode.hiddenNumreponses)
+    }
+
+    // ─── intra-topic search (#546) ───────────────────────────────────────────────
+
+    @Test
+    fun `OpenSearch is a no-op when the loaded page exposes no usable search form`() = runTest {
+        // No searchForm ⇒ canSearchInTopic=false ⇒ the bar must not open.
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 1)) })),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+
+        assertEquals(false, viewModel.state.value.search.isActive)
+    }
+
+    @Test
+    fun `SubmitSearch posts the parsed form plus criteria and renders the returned page`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val resultTopic = fakeTopic(page = 1, totalPages = 1, title = "filtered", searchForm = form)
+        val searchRepo = FakeTopicSearchRepository(result = resultTopic)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        assertEquals(true, viewModel.state.value.search.isActive)
+        viewModel.send(TopicIntent.SearchWordChanged("betatest"))
+        viewModel.send(TopicIntent.SearchPseudoChanged("XaTriX"))
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        assertEquals(1, searchRepo.requests.size)
+        val request = searchRepo.requests.single()
+        assertEquals("betatest", request.word)
+        assertEquals("XaTriX", request.spseudo)
+        assertEquals(true, request.onlyMatches)
+        assertEquals(form, request.form)
+        assertEquals(null, request.currentNum)
+        val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("filtered", loaded.topic.title)
+        assertEquals(TopicSearchStatus.Done, viewModel.state.value.search.status)
+    }
+
+    @Test
+    fun `SubmitSearch does not POST when neither term nor author is set`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val searchRepo = FakeTopicSearchRepository(result = fakeTopic(1, 1))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 1, searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SubmitSearch)
+
+        assertEquals(0, searchRepo.requests.size)
+    }
+
+    @Test
+    fun `SubmitSearch failure keeps the current page and emits SearchFailed`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val searchRepo = FakeTopicSearchRepository(error = IllegalStateException("boom"))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                // A single flow: the failure path never switches to Mode.Loading and never reloads the
+                // page — the page on screen is kept as-is, so observeTopicPage is collected only once.
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 3, title = "loaded", searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.OpenSearch)
+            viewModel.send(TopicIntent.SearchWordChanged("x"))
+            viewModel.send(TopicIntent.SubmitSearch)
+
+            assertEquals(TopicEffect.SearchFailed, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        // The page the user was reading stays on screen (never stranded on Loading, never reloaded).
+        val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("loaded", loaded.topic.title)
+        // #546 finding #4 — the search bar reflects the failure and stays open so the user can retry
+        // or close it; the status settles on Error rather than back to Idle / Loading.
+        assertEquals(TopicSearchStatus.Error, viewModel.state.value.search.status)
+        assertTrue(
+            "the search bar stays open after a failure so the user can retry",
+            viewModel.state.value.search.isActive,
+        )
+    }
+
+    @Test
+    fun `a stale SubmitSearch reply never clobbers a more recent normal page (#546)`() = runTest {
+        // #546 finding #1 (latest-wins) — a search POST is on the wire when the user pulls to refresh.
+        // The refresh (a normal-load path) bumps the search generation, so when the slow transsearch
+        // reply finally lands it must be DROPPED, never overwrite the freshly-refreshed page.
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val loaded = fakeTopic(page = 1, totalPages = 3, title = "loaded", searchForm = form)
+        val refreshed = fakeTopic(page = 1, totalPages = 3, title = "refreshed", searchForm = form)
+        // The (now stale) search result, would-be title if the guard were missing.
+        val staleSearch = fakeTopic(page = 1, totalPages = 1, title = "stale-search", searchForm = form)
+        val searchRepo = FakeTopicSearchRepository(result = staleSearch)
+        val gate = CompletableDeferred<Unit>()
+        searchRepo.gate = { gate.await() }
+        // Non-cooperative wait: cancelling searchJob (the refresh taking over) must NOT cut the await,
+        // so the fake truly DELIVERS staleSearch after the refresh. This is what forces the result
+        // through the `generation` guard — with a cancellable await the reply would never be produced
+        // and the test would stay green even if the guard were deleted.
+        searchRepo.ignoreCancellation = true
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(loaded) }),
+            refreshTopicsToReturn = listOf(refreshed),
+        )
+
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SubmitSearch) // suspends in the gate → search in flight
+        assertEquals(TopicSearchStatus.Loading, viewModel.state.value.search.status)
+
+        // A normal-load path takes over while the search is still on the wire.
+        viewModel.send(TopicIntent.Refresh)
+        assertEquals(
+            "the refresh wins, not the stale search",
+            "refreshed",
+            (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title,
+        )
+        // Fix 1 — the takeover clears the dangling Loading spinner instead of leaving it stuck (the
+        // search reply will be guarded out, so submitSearch never writes its own Done/Error status).
+        assertEquals(
+            "the dangling search spinner is cleared by the takeover, not left spinning",
+            TopicSearchStatus.Idle,
+            viewModel.state.value.search.status,
+        )
+
+        // Release the slow search reply: it IS produced (non-cancellable await) but the generation
+        // moved on, so the guard discards it. Without `generation != searchGeneration` the line below
+        // would clobber the refreshed page with "stale-search" and flip the status back to Done.
+        gate.complete(Unit)
+        val finalMode = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("the stale search reply must not clobber the refreshed page", "refreshed", finalMode.topic.title)
+        // The stale reply must not rewrite the search status either (it stays at the takeover's Idle,
+        // never re-flipped to Done by the dropped reply).
+        assertEquals(
+            "the dropped stale reply must not rewrite the search status",
+            TopicSearchStatus.Idle,
+            viewModel.state.value.search.status,
+        )
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Chantier B (#546) — non-filtered result navigation (next / previous)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `fresh non-filtered search scrolls to the first match and marks Done (#546)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        // The transsearch reply: full page anchored on match 100 (currentNum=100), 100 present.
+        val resultForm = form.copy(currentNum = 100)
+        val resultTopic = fakeTopic(
+            page = 1, totalPages = 1, title = "match-1",
+            posts = listOf(fakePost(100), fakePost(200)), searchForm = resultForm,
+        )
+        val searchRepo = FakeTopicSearchRepository(result = resultTopic)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = searchableRepo(form),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.OpenSearch)
+            viewModel.send(TopicIntent.SearchWordChanged("x"))
+            viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+            viewModel.send(TopicIntent.SubmitSearch)
+
+            assertEquals(TopicEffect.ScrollToPost(100), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        val request = searchRepo.requests.single()
+        assertEquals(false, request.isStep)
+        assertEquals(null, request.currentNum)
+        assertEquals(TopicSearchStatus.Done, viewModel.state.value.search.status)
+        assertEquals(false, viewModel.state.value.search.canGoPreviousResult)
+        assertEquals(true, viewModel.state.value.search.canGoNextResult)
+    }
+
+    @Test
+    fun `NextResult steps the cursor forward without firstnum and scrolls to the new match (#546)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 7)
+        val first = fakeTopic(1, 1, posts = listOf(fakePost(100)), searchForm = form.copy(currentNum = 100))
+        val second = fakeTopic(1, 1, posts = listOf(fakePost(200)), searchForm = form.copy(currentNum = 200))
+        val searchRepo = FakeTopicSearchRepository()
+        searchRepo.responder = { req -> if (req.isStep) second else first }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = searchableRepo(form),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToPost(100), awaitItem()) // fresh first match
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.ScrollToPost(200), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        val step = searchRepo.requests.last()
+        assertEquals(true, step.isStep)
+        assertEquals("100", step.currentNum)
+        assertEquals(true, viewModel.state.value.search.canGoPreviousResult)
+        assertEquals(true, viewModel.state.value.search.canGoNextResult)
+    }
+
+    @Test
+    fun `NextResult past the last match keeps the page and signals the end (#546)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 7)
+        val first = fakeTopic(
+            1, 1, title = "match-1", posts = listOf(fakePost(100)), searchForm = form.copy(currentNum = 100),
+        )
+        // The end sentinel: currentNum points at a post NOT present on the returned page.
+        val sentinel = fakeTopic(
+            1, 1, title = "sentinel", posts = listOf(fakePost(100)), searchForm = form.copy(currentNum = 999),
+        )
+        val searchRepo = FakeTopicSearchRepository()
+        searchRepo.responder = { req -> if (req.isStep) sentinel else first }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = searchableRepo(form),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToPost(100), awaitItem()) // fresh first match
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.SearchResultsEnd, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        // The current match's page stays on screen (the sentinel page was NOT rendered).
+        val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+        assertEquals("match-1", loaded.topic.title)
+        assertEquals(false, viewModel.state.value.search.canGoNextResult)
+    }
+
+    @Test
+    fun `PrevResult replays the cursor history and scrolls back to the earlier match (#546)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 7)
+        val first = fakeTopic(1, 1, posts = listOf(fakePost(100)), searchForm = form.copy(currentNum = 100))
+        val second = fakeTopic(1, 1, posts = listOf(fakePost(200)), searchForm = form.copy(currentNum = 200))
+        val searchRepo = FakeTopicSearchRepository()
+        // Fresh and the prev-replay (back to index 0) are fresh requests → first; step → second.
+        searchRepo.responder = { req -> if (req.isStep) second else first }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = searchableRepo(form),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToPost(100), awaitItem()) // fresh first match (index 0)
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.ScrollToPost(200), awaitItem()) // now on match 200 (index 1)
+            viewModel.send(TopicIntent.PrevResult)
+            assertEquals(TopicEffect.ScrollToPost(100), awaitItem()) // back to match 100
+            cancelAndIgnoreRemainingEvents()
+        }
+        // Going back to the first match: the replay re-issues a FRESH request (index 0).
+        assertEquals(false, searchRepo.requests.last().isStep)
+        assertEquals(false, viewModel.state.value.search.canGoPreviousResult)
+    }
+
+    @Test
+    fun `a fresh search with no match settles on NoResults, not Error (#546)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 1)
+        val searchRepo = FakeTopicSearchRepository(error = NoTopicSearchResultsException())
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(flow { emit(fakeTopic(1, 3, title = "loaded", searchForm = form)) }),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.OpenSearch)
+            viewModel.send(TopicIntent.SearchWordChanged("topic"))
+            viewModel.send(TopicIntent.SubmitSearch)
+            // No-result is NOT a failure: no SearchFailed effect is emitted.
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertEquals(TopicSearchStatus.NoResults, viewModel.state.value.search.status)
+        // The page the user was reading stays on screen.
+        assertEquals("loaded", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+        assertEquals(true, viewModel.state.value.search.isActive)
+    }
+
+    @Test
+    fun `NextResult after stepping back re-walks history without corrupting it (#546)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 7)
+        val m100 = fakeTopic(1, 1, posts = listOf(fakePost(100)), searchForm = form.copy(currentNum = 100))
+        val m200 = fakeTopic(1, 1, posts = listOf(fakePost(200)), searchForm = form.copy(currentNum = 200))
+        val m300 = fakeTopic(1, 1, posts = listOf(fakePost(300)), searchForm = form.copy(currentNum = 300))
+        val searchRepo = FakeTopicSearchRepository()
+        // Fresh → 100 ; STEP advances by the cursor sent (100→200, 200→300). A « previous » replay is
+        // a step from the predecessor, so it also resolves through this map.
+        searchRepo.responder = { req ->
+            when {
+                !req.isStep -> m100
+                req.currentNum == "100" -> m200
+                req.currentNum == "200" -> m300
+                else -> error("unexpected step from ${req.currentNum}")
+            }
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = searchableRepo(form),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("x"))
+        viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToPost(100), awaitItem())
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.ScrollToPost(200), awaitItem())
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.ScrollToPost(300), awaitItem())
+            // Step back to 200, then forward again: history must stay [100,200,300], so the next
+            // forward lands on 300 and a further « previous » walks back to 200 — NOT a corrupted
+            // [100,200,300,200] that would send « previous » back to 300 (Codex review).
+            viewModel.send(TopicIntent.PrevResult)
+            assertEquals(TopicEffect.ScrollToPost(200), awaitItem())
+            viewModel.send(TopicIntent.NextResult)
+            assertEquals(TopicEffect.ScrollToPost(300), awaitItem())
+            viewModel.send(TopicIntent.PrevResult)
+            assertEquals(TopicEffect.ScrollToPost(200), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    /** Chantier B (#546) — a topic repo that loads a 5-page topic carrying [form] (keeps lines short). */
+    private fun searchableRepo(form: TopicSearchForm): FakeTopicRepository =
+        FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(1, 5, searchForm = form)) }))
+
+    @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun topicViewModel(
         request: TopicRequest,
         topicRepository: TopicRepository,
         authRepository: AuthRepository,
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
         deletePostRepository: DeletePostRepository = FakeDeletePostRepository(),
+        blacklistRepository: BlacklistRepository = FakeBlacklistRepository(),
+        topicSearchRepository: TopicSearchRepository = FakeTopicSearchRepository(),
     ): TopicViewModel = TopicViewModel(
         request = request,
         topicRepository = topicRepository,
         authRepository = authRepository,
         userPreferencesRepository = userPreferencesRepository,
         deletePostRepository = deletePostRepository,
+        blacklistRepository = blacklistRepository,
+        topicSearchRepository = topicSearchRepository,
     )
 
     private fun topicRequest(
@@ -1184,12 +1796,14 @@ class TopicViewModelTest {
         )
     }
 
+    @Suppress("LongParameterList") // test builder mirroring the Topic model's fields, all defaulted.
     private fun fakeTopic(
         page: Int,
         totalPages: Int,
         title: String = "fake",
         posts: List<Post> = emptyList(),
         subcat: Int = SAMPLE_SUBCAT,
+        searchForm: TopicSearchForm? = null,
     ): Topic = Topic(
         cat = SAMPLE_CAT,
         post = SAMPLE_POST,
@@ -1203,11 +1817,12 @@ class TopicViewModelTest {
         // read-only topic (the previous default was the Topic model's `false`, never asserted here).
         canReply = true,
         poll = null,
+        searchForm = searchForm,
     )
 
-    private fun fakePost(numreponse: Int, isEditable: Boolean = false): Post = Post(
+    private fun fakePost(numreponse: Int, isEditable: Boolean = false, author: String = "tester"): Post = Post(
         numreponse = numreponse,
-        author = "tester",
+        author = author,
         date = java.time.Instant.parse("2026-05-04T12:00:00Z"),
         content = PostContent(blocks = emptyList()),
         avatarUrl = null,
@@ -1304,6 +1919,71 @@ private class FakeDeletePostRepository(
     override suspend fun deletePost(context: EditPostContext): DeletePostResult {
         calls += context
         return result
+    }
+}
+
+private class FakeBlacklistRepository(
+    blockedCanonicals: Set<String> = emptySet(),
+) : BlacklistRepository {
+    private val canonicals = MutableStateFlow(blockedCanonicals)
+
+    override fun observeEntries(): Flow<List<BlacklistEntry>> =
+        MutableStateFlow(canonicals.value.map { BlacklistEntry(it, it, 0L) })
+
+    override fun observeBlockedCanonicals(): Flow<Set<String>> = canonicals
+
+    // Mirror the real repository: the stored/observed keys are canonical, so block/unblock/isBlocked
+    // canonicalise their raw-pseudo argument (a post author like "Alice" → "alice").
+    override suspend fun isBlocked(pseudo: String): Boolean = canonicalizePseudo(pseudo) in canonicals.value
+
+    override suspend fun block(pseudo: String) {
+        canonicals.value = canonicals.value + canonicalizePseudo(pseudo)
+    }
+
+    override suspend fun unblock(pseudo: String) {
+        canonicals.value = canonicals.value - canonicalizePseudo(pseudo)
+    }
+}
+
+/**
+ * Chantier C/B (#546) — intra-topic search fake. Returns [result] on `searchInTopic`, or throws
+ * [error] when set, and records the request for assertions. For the next/previous navigation tests, a
+ * [responder] (set after construction) maps each request to the reply (or throws), so a sequence of
+ * fresh → step → step → end can be scripted from the request's `isStep` / `currentNum`.
+ */
+private class FakeTopicSearchRepository(
+    private val result: Topic? = null,
+    private val error: Throwable? = null,
+) : TopicSearchRepository {
+    val requests = mutableListOf<TopicSearchRequest>()
+
+    /**
+     * Optional per-request responder for the navigation tests. When set, it fully drives the reply
+     * (returns a [Topic] or throws), letting a test script fresh/step/end from the request shape.
+     */
+    var responder: ((TopicSearchRequest) -> Topic)? = null
+
+    /**
+     * Optional gate to suspend inside `searchInTopic` so a test can hold the `transsearch` reply
+     * in flight, drive a competing normal-load path, then release it to prove the stale-write guard.
+     */
+    var gate: (suspend () -> Unit)? = null
+
+    /**
+     * When `true`, the [gate] wait is run under [NonCancellable] so that cancelling [searchJob] (a
+     * normal-load path taking over) does NOT short-circuit the await. The fake then truly returns its
+     * (now stale) [result] AFTER the competing refresh — the only setup that actually exercises the
+     * `generation != searchGeneration` guard in `submitSearch`. Without this the await is cancellable,
+     * the reply is never produced, and the test would pass even with the guard removed.
+     */
+    var ignoreCancellation: Boolean = false
+
+    override suspend fun searchInTopic(request: TopicSearchRequest): Topic {
+        requests += request
+        gate?.let { g -> if (ignoreCancellation) withContext(NonCancellable) { g() } else g() }
+        responder?.let { return it(request) }
+        error?.let { throw it }
+        return result ?: error("FakeTopicSearchRepository has no result configured")
     }
 }
 
@@ -1410,6 +2090,10 @@ private class FakeUserPreferencesRepository(
 
     override suspend fun setFoldLongQuotes(enabled: Boolean) = Unit
 
+    override fun observeShowScrollbar(): Flow<Boolean> = MutableStateFlow(true)
+
+    override suspend fun setShowScrollbar(enabled: Boolean) = Unit
+
     override fun observeStartScreen(): Flow<StartScreenPreference> =
         MutableStateFlow(StartScreenPreference())
 
@@ -1442,4 +2126,19 @@ private class FakeUserPreferencesRepository(
     override fun observeDebugBoundsOverlay(): Flow<Boolean> = MutableStateFlow(false)
 
     override suspend fun setDebugBoundsOverlay(enabled: Boolean) = Unit
+
+    override fun observeHideSystemNavBar(): Flow<Boolean> = MutableStateFlow(false)
+
+    override suspend fun setHideSystemNavBar(enabled: Boolean) = Unit
+
+    override fun observeImmersiveBackButton(): Flow<Boolean> = MutableStateFlow(true)
+
+    override suspend fun setImmersiveBackButton(enabled: Boolean) = Unit
+
+    override fun observeImmersiveNavBarReveal(): Flow<ImmersiveNavBarReveal> =
+        MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
+
+    override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) = Unit
+    override fun observeAccentColor(): Flow<AccentColor> = MutableStateFlow(AccentColor.ROSE)
+    override suspend fun setAccentColor(color: AccentColor) = Unit
 }

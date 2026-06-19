@@ -129,6 +129,17 @@ interface UserPreferencesRepository {
     suspend fun setAmoledEnabled(enabled: Boolean)
 
     /**
+     * Accent colour family (TU 2788511): [AccentColor.ROSE] (default) keeps the historical muted
+     * maroon/rose scheme; [AccentColor.ROUGE_REDFACE1] switches to the vivid Redface 1 red. Observed
+     * at the app root and passed to `RedfaceTheme`, and mirrored in Settings. Compose-only (does not
+     * paint the window background), so no cold-start mirror — same stance as the display density.
+     */
+    fun observeAccentColor(): Flow<AccentColor>
+
+    /** Persists [observeAccentColor]. Default [AccentColor.ROSE] until the first call. */
+    suspend fun setAccentColor(color: AccentColor)
+
+    /**
      * Topic top app bar auto-hide (build 89 follow-up): when `true`, the topic top bar (title +
      * page counter) collapses while the user scrolls down through the posts and re-appears as soon
      * as they scroll back toward the top — Material3 `enterAlways` behaviour — freeing reading
@@ -226,6 +237,19 @@ interface UserPreferencesRepository {
     suspend fun setFoldLongQuotes(enabled: Boolean)
 
     /**
+     * #105 — whether the intra-page reading scrollbar ([LazyListScrollbar], the thin auto-hiding
+     * fast-scroll thumb on the right edge of a topic page / private-message thread) is shown. Default
+     * `true` (the historical behaviour); `false` hides it entirely (sujets AND MP) — the beta feedback
+     * from styx42 that the ascenseur is unwanted. Pure render-time switch (no refetch), provided to the
+     * scrollbar through a CompositionLocal at the app root ([fr.forumhfr.redface2.navigation.RedfaceApp])
+     * and mirrored in Settings.
+     */
+    fun observeShowScrollbar(): Flow<Boolean>
+
+    /** Persists [observeShowScrollbar]. Default `true` until the first call. */
+    suspend fun setShowScrollbar(enabled: Boolean)
+
+    /**
      * #458 — which top-level tab (and optional Forum category) a cold start opens on. Default
      * [StartScreenChoice.FLAGS] (historical behaviour). The navigation reads the SYNCHRONOUS
      * [StartScreenBootstrapStore] mirror at cold start; this flow is the source of truth and
@@ -312,4 +336,42 @@ interface UserPreferencesRepository {
 
     /** Persists [observeDebugBoundsOverlay]. Default `false` until the first call. */
     suspend fun setDebugBoundsOverlay(enabled: Boolean)
+
+    /**
+     * Immersive full-screen (#518): when `true`, the app hides the bottom Android system navigation
+     * bar (the 3 buttons, or the gesture pill depending on the device) — the top status bar and the
+     * in-app tab bar stay visible. A swipe from the
+     * bottom edge re-reveals the bar transiently (Android `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`,
+     * documented behaviour, not a bug), then it re-hides. Default `false`. Applied at the app root
+     * ([fr.forumhfr.redface2.navigation.RedfaceApp]) on the host window, toggled in Settings > Affichage.
+     */
+    fun observeHideSystemNavBar(): Flow<Boolean>
+
+    /** Persists [observeHideSystemNavBar]. Default `false` until the first call. */
+    suspend fun setHideSystemNavBar(enabled: Boolean)
+
+    /**
+     * Immersive full-screen companion (#518 follow-up): when `true`, an in-app « back » button is shown
+     * while [observeHideSystemNavBar] is active, so the user can go back without swiping the hidden
+     * Android nav bar back into view (a real need in 3-button mode, where there is no system back
+     * gesture). Default `true` — it only ever renders WHEN immersive mode is on, so off-by-default would
+     * leave immersive 3-button users stranded; the toggle lets gesture-nav users (who keep the edge
+     * back-swipe) turn it off. Observed at the app root, toggled in Settings > Affichage.
+     */
+    fun observeImmersiveBackButton(): Flow<Boolean>
+
+    /** Persists [observeImmersiveBackButton]. Default `true` until the first call. */
+    suspend fun setImmersiveBackButton(enabled: Boolean)
+
+    /**
+     * Immersive full-screen companion (#518 follow-up): WHEN the hidden Android navigation bar should be
+     * revealed again from inside the app, based on the reading scroll position (cf. [ImmersiveNavBarReveal]).
+     * Only meaningful while [observeHideSystemNavBar] is active. Default [ImmersiveNavBarReveal.MANUAL]
+     * (the historical #518 behaviour: swipe-from-bottom only). Observed at the app root, set in
+     * Settings > Affichage.
+     */
+    fun observeImmersiveNavBarReveal(): Flow<ImmersiveNavBarReveal>
+
+    /** Persists [observeImmersiveNavBarReveal]. Default [ImmersiveNavBarReveal.MANUAL] until the first call. */
+    suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal)
 }

@@ -26,6 +26,23 @@ object HfrSelectors {
     const val POST_EDITED = "div.edited"
     const val POST_SIGNATURE = "span.signature"
 
+    // Chantier C (#546) — the intra-topic search form HFR renders in the topic-page header
+    // (`<form action="/transsearch.php" method="post">`). Its hidden inputs carry the anti-CSRF
+    // `hash_check`, the `(post, cat)` ids and the `firstnum` page anchor. We scope every field
+    // lookup to THIS form (not `input[name=cat]` document-wide) because the topic page also ships
+    // a `cat`/`post` input on the reply + fast-search forms.
+    const val TOPIC_SEARCH_FORM = "form[action*=transsearch.php]"
+    const val TOPIC_SEARCH_HASH_CHECK = "input[name=hash_check]"
+    const val TOPIC_SEARCH_POST = "input[name=post]"
+    const val TOPIC_SEARCH_CAT = "input[name=cat]"
+    const val TOPIC_SEARCH_FIRSTNUM = "input[name=firstnum]"
+    const val TOPIC_SEARCH_OWNTOPIC = "input[name=owntopic]"
+    // Chantier B (#546) — the navigation cursor. A NORMAL topic page ships no `currentnum` input
+    // (HFR's own JS injects one client-side), so this resolves to null there ; a `transsearch`
+    // RESPONSE page carries it with the `numreponse` of the anchored match, which we read back to
+    // drive next/previous result navigation and detect the end of results.
+    const val TOPIC_SEARCH_CURRENTNUM = "input[name=currentnum]"
+
     const val POLL = "div.sondage"
     const val POLL_QUESTION = "b.s2"
     const val POLL_OPTION_BAR = ".sondageLeft"

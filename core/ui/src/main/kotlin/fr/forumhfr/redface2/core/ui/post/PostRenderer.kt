@@ -309,11 +309,7 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     LaunchedEffect(measurableUrls) {
         val loader = SingletonImageLoader.get(platformContext)
         measurableUrls.forEach { url ->
-            val now = System.currentTimeMillis()
-            if (sizeCache.get(url) == null && !sizeCache.isFailureFresh(url, now)) {
-                val size = measureIntrinsicMediaSize(url, platformContext, loader)
-                if (size != null) sizeCache.putSuccess(url, size) else sizeCache.putFailure(url, now)
-            }
+            measureAndCacheIntrinsicMediaSize(url, sizeCache, platformContext, loader)
         }
     }
 
@@ -648,11 +644,26 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
     val openLabel = stringResource(R.string.post_image_open_link)
     val animationsEnabled = rememberAnimationsEnabled()
 
-    // #249 — reserve the exact final box from the measured intrinsic size when known. The same cache the
-    // #175/#224 paragraph measure effect fills feeds promoted images; a standalone PostBlock.Image is
-    // unmeasured (null) and falls back to the legacy min/max slot below.
+    // #249 — reserve the exact final box from the measured intrinsic size when known. The cache is fed by
+    // the #175/#224 paragraph measure effect (promoted images) AND, since #249 follow-up, by the effect
+    // just below for standalone PostBlock.Image. Until a measurement lands (cold cache) it is null and the
+    // legacy min/max slot is used for that first frame.
     val sizeCache = LocalIntrinsicMediaSizeCache.current
     val measured: IntSize? = sizeCache.get(url)
+    // #249 follow-up — a standalone PostBlock.Image is NOT covered by the paragraph measure effect, so
+    // without this its intrinsic size never lands in the cache: reservedBlockImageHeight stays null, the
+    // image falls into the legacy min/max slot and loses both the full-width fit and the reserved loading
+    // space (#249 anti-CLS). Measure it here through the same guarded seam the paragraph effect uses; the
+    // SnapshotStateMap write then recomposes this block onto the reserved-box path.
+    val platformContext = LocalPlatformContext.current
+    LaunchedEffect(url, sizeCache, platformContext) {
+        measureAndCacheIntrinsicMediaSize(
+            url = url,
+            cache = sizeCache,
+            context = platformContext,
+            imageLoader = SingletonImageLoader.get(platformContext),
+        )
+    }
 
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val reservedHeight = PostMediaDisplayPolicy.reservedBlockImageHeight(
@@ -683,9 +694,8 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
                     Modifier
                 },
             )
-        val context = LocalPlatformContext.current
-        val request = remember(url, animationsEnabled, context) {
-            ImageRequest.Builder(context)
+        val request = remember(url, animationsEnabled, platformContext) {
+            ImageRequest.Builder(platformContext)
                 .data(url)
                 // #249 — fondu natif Coil dans la box déjà dimensionnée → zéro saut. Désactivé quand le
                 // système demande de réduire les animations (apparition directe, §4 de l'issue).

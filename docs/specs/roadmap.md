@@ -26,8 +26,8 @@ Pour la liste des capabilities et des non-goals, voir le [scope fonctionnel]({{ 
 |---|---|---|---|---|
 | **0 — Bootstrap** | Squelette qui compile, CI, thème, navigation | S | — | ✅ Livrée |
 | **1 — Core** | Lecture du forum (drapeaux, topics, forum, deep links) | XL | Phase 0 | ✅ Livrée (AAB `0.1.0-phase1.7` / `app-v38` / specs v0.8.4) |
-| **2 — Écriture** | Post / edit / quote / create topic / recherche / proxy alpha | L | Phase 1 | En close-out |
-| **3 — Messages** | MPs classiques + MultiMPs avec sync | M | Phase 2 + **MPStorage2** (hfr-redkit) | À faire |
+| **2 — Écriture** | Post / edit / quote / create topic / recherche / proxy alpha | L | Phase 1 | ✅ Livrée |
+| **3 — Messages** | MPs classiques + MultiMPs avec sync | M | Phase 2 + **MPStorage2** (hfr-redkit) | ✅ Livrée (fonctionnelle ; sync/écriture MPStorage reportée → #6, Phase 4) |
 | **4 — Extensions** | Bookmarks, Blacklist, Qualitay, Redflag | L | Phase 3 + **hfr-redflag Worker** | À faire |
 | **5 — Polish** | Animations, offline, thème dynamique, Play Store | M | Phases 2, 3, 4 | À faire |
 
@@ -151,14 +151,18 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 **Objectif :** les messages privés, classiques et multi.
 
 - [x] Inbox MPs classiques — liste + lecture en read-only (#298)
-- [ ] Reply / quote MP classique
-- [ ] Nouveau MP — création
-- [ ] MultiMPs — liste avec vue drapeaux, lecture, reply, quote
-- [ ] Nouveau MultiMP — création (2+ destinataires)
-- [ ] Intégration MPStorage — synchronisation avec le MP de stockage HFR + cache Room
-- [ ] Notifications MP
+- [x] Reply / quote MP classique (#301)
+- [x] Nouveau MP — création
+- [x] MultiMPs — liste avec vue drapeaux, lecture, reply, quote (onglet « DT » des Drapeaux listant les MultiMP + reprise de lecture MPStorage livré 2026-06-19, app-v166)
+- [x] Nouveau MultiMP — création (2+ destinataires)
+- [~] Intégration MPStorage — **lecture livrée** (découverte + parsing + seed des positions DT) ; **synchronisation/écriture + cache Room reportées → #6, Phase 4** (ADR-013 déc. 2/3 + ADR-014 §4). Mécanique d'écriture RMW guardée préparée (POST différé, non observé live, app-v168/dev).
+- [x] Notifications MP (#313)
 
 **Livrable :** gestion complète des MPs, y compris les MultiMPs avec état lu/non-lu.
+
+> **Statut (2026-06-19)** : Phase 3 **fonctionnellement livrée et shippée**. Le seul reste est la
+> synchronisation/écriture MPStorage, explicitement reportée hors clôture Phase 3 (suivie par #6, Phase 4).
+> Lancer `/spec-reality` pour figer l'alignement specs↔code avant un bump de version specs.
 
 ---
 

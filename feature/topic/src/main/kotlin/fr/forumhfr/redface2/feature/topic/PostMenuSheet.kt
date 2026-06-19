@@ -100,6 +100,16 @@ internal fun PostMenuSheet(
      * as « Citer » (`shouldShowQuoteAction`): locked topic or anonymous session.
      */
     onToggleMultiQuote: (() -> Unit)? = null,
+    /**
+     * #509 — whether this post's author is currently blacklisted; flips the entry's label between
+     * « Masquer cet utilisateur » and « Ne plus masquer cet utilisateur ».
+     */
+    authorBlocked: Boolean = false,
+    /**
+     * #509 — blocks / unblocks this post's author. Null hides the entry (e.g. the user's own posts —
+     * blacklisting oneself is pointless).
+     */
+    onToggleBlockAuthor: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState()
     val coroutineScope = rememberCoroutineScope()
@@ -202,6 +212,29 @@ internal fun PostMenuSheet(
                                 R.string.topic_post_menu_multi_quote_remove
                             } else {
                                 R.string.topic_post_menu_multi_quote_add
+                            },
+                        ),
+                    )
+                }
+            }
+
+            if (onToggleBlockAuthor != null) {
+                Spacer(Modifier.height(8.dp))
+                // #509 — blacklist the post's author (or lift it). Closing on tap lets the reader see
+                // the post collapse to the « masqué » placeholder immediately as feedback.
+                OutlinedButton(
+                    onClick = {
+                        onToggleBlockAuthor()
+                        hideThenDismiss(coroutineScope, sheetState, onDismiss)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        stringResource(
+                            if (authorBlocked) {
+                                R.string.topic_post_menu_unblock_author
+                            } else {
+                                R.string.topic_post_menu_block_author
                             },
                         ),
                     )

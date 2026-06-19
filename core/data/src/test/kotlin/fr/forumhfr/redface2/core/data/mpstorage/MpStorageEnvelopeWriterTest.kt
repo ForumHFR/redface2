@@ -1,0 +1,243 @@
+package fr.forumhfr.redface2.core.data.mpstorage
+
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * MPStorage read-modify-WRITE core (#6, ADR-014 §4). The mutation operates on the RAW JSON tree of
+ * the verbatim `rawEnvelope`, never on the projected model — so the cross-userscript namespaces must
+ * survive every round-trip. These are the highest-value tests of the write chantier (Codex : RMW > UI).
+ *
+ * The output is re-parsed (not string-compared) so the assertions are robust to key ordering /
+ * whitespace : what matters is the semantic shape, not the exact bytes (NOT OBSERVED LIVE — no real
+ * HFR round-trip to byte-match against).
+ */
+class MpStorageEnvelopeWriterTest {
+
+    private val writer = MpStorageEnvelopeWriter()
+    private val json = Json
+
+    private fun mutate(raw: String, entry: MpStorageFlagEntry): MpStorageEnvelopeWriter.Outcome =
+        writer.upsertFlag(raw, entry)
+
+    private fun bodyOf(outcome: MpStorageEnvelopeWriter.Outcome): JsonObject {
+        val mutated = outcome as MpStorageEnvelopeWriter.Outcome.Mutated
+        return json.parseToJsonElement(mutated.body).jsonObject
+    }
+
+    private fun JsonObject.v01Entry(): JsonObject =
+        this["data"]!!.jsonArray.map { it.jsonObject }
+            .first { it["version"]?.jsonPrimitive?.content == "0.1" }
+
+    private fun JsonObject.flagList(): JsonArray =
+        v01Entry()["mpFlags"]!!.jsonObject["list"]!!.jsonArray
+
+    @Test
+    fun `upsert preserves an unknown third-party top-level key and a sibling tool key in the v01 entry`() {
+        val raw = """
+            {
+              "data": [
+                { "version": "0.1",
+                  "hfr4k": { "opaque": [1, 2, 3], "nested": { "k": "v" } },
+                  "mpFlags": { "list": [] } }
+              ],
+              "sourceName": "HFR4K",
+              "lastUpdate": 1718064000000,
+              "someOtherTool": { "deep": [ { "x": true } ] }
+            }
+        """.trimIndent()
+
+        val body = bodyOf(mutate(raw, MpStorageFlagEntry(threadId = 999, page = 2, numreponse = 7, uri = "/u")))
+
+        // Third-party TOP-LEVEL keys survive verbatim.
+        assertEquals("HFR4K", body["sourceName"]!!.jsonPrimitive.content)
+        assertEquals(JsonPrimitive(1718064000000L), body["lastUpdate"])
+        assertTrue("unknown top-level tool key must survive", body.containsKey("someOtherTool"))
+        assertEquals(
+            true,
+            body["someOtherTool"]!!.jsonObject["deep"]!!.jsonArray.first().jsonObject["x"]!!.jsonPrimitive.content
+                .toBoolean(),
+        )
+
+        // The sibling tool key INSIDE the v0.1 entry survives untouched.
+        val v01 = body.v01Entry()
+        assertTrue("sibling tool key in v0.1 entry must survive", v01.containsKey("hfr4k"))
+        assertEquals(
+            "v",
+            v01["hfr4k"]!!.jsonObject["nested"]!!.jsonObject["k"]!!.jsonPrimitive.content,
+        )
+
+        // The new flag was appended.
+        assertEquals(1, body.flagList().size)
+        assertEquals(999, body.flagList().first().jsonObject["post"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun `upsert preserves a sibling data entry written by another tool (version != 0_1)`() {
+        val raw = """
+            { "data": [
+                { "version": "0.2", "somethingNew": true },
+                { "version": "0.1", "mpFlags": { "list": [] } }
+            ] }
+        """.trimIndent()
+
+        val body = bodyOf(mutate(raw, MpStorageFlagEntry(threadId = 5, page = 1, numreponse = null, uri = null)))
+
+        val entries = body["data"]!!.jsonArray.map { it.jsonObject }
+        assertEquals(2, entries.size)
+        val v02 = entries.first { it["version"]?.jsonPrimitive?.content == "0.2" }
+        assertEquals(true, v02["somethingNew"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(1, body.flagList().size)
+    }
+
+    @Test
+    fun `updating an existing entry by threadId overwrites wire fields and preserves its extra keys`() {
+        val raw = """
+            { "data": [ { "version": "0.1", "mpFlags": { "list": [
+                { "uri": "/old", "post": 12345, "page": 3, "href": "t1980000001", "p": 2, "custom": "keepme" },
+                { "post": 67890, "page": 1, "href": "t42", "p": 9 }
+            ] } } ] }
+        """.trimIndent()
+
+        val body = bodyOf(
+            mutate(raw, MpStorageFlagEntry(threadId = 12345, page = 7, numreponse = 555, uri = "/new")),
+        )
+
+        // SAME list size — this is an UPDATE, not an append.
+        val list = body.flagList()
+        assertEquals(2, list.size)
+        val updated = list.map { it.jsonObject }.first { it["post"]!!.jsonPrimitive.content.toInt() == 12345 }
+        assertEquals(7, updated["page"]!!.jsonPrimitive.content.toInt())
+        assertEquals("t555", updated["href"]!!.jsonPrimitive.content)
+        assertEquals("/new", updated["uri"]!!.jsonPrimitive.content)
+        // The non-owned key on the matched item survives.
+        assertEquals("keepme", updated["custom"]!!.jsonPrimitive.content)
+        // The OTHER entry is untouched.
+        val other = list.map { it.jsonObject }.first { it["post"]!!.jsonPrimitive.content.toInt() == 67890 }
+        assertEquals("t42", other["href"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `a new threadId is appended without disturbing existing entries`() {
+        val raw = """
+            { "data": [ { "version": "0.1", "mpFlags": { "list": [
+                { "post": 111, "page": 1, "href": "t1" }
+            ] } } ] }
+        """.trimIndent()
+
+        val body = bodyOf(mutate(raw, MpStorageFlagEntry(threadId = 222, page = 4, numreponse = 2, uri = null)))
+
+        val list = body.flagList()
+        assertEquals(2, list.size)
+        assertEquals(111, list[0].jsonObject["post"]!!.jsonPrimitive.content.toInt())
+        assertEquals(222, list[1].jsonObject["post"]!!.jsonPrimitive.content.toInt())
+        assertEquals("t2", list[1].jsonObject["href"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `a null numreponse and null uri are emitted as JSON null`() {
+        val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [] } } ] }"""
+
+        val body = bodyOf(mutate(raw, MpStorageFlagEntry(threadId = 7, page = 1, numreponse = null, uri = null)))
+
+        val item = body.flagList().first().jsonObject
+        assertNull(item["href"]!!.jsonPrimitive.contentOrNullSafe())
+        assertNull(item["uri"]!!.jsonPrimitive.contentOrNullSafe())
+    }
+
+    @Test
+    fun `an envelope with a data array but no v01 entry gets a minimal v01 entry appended`() {
+        val raw = """{ "data": [ { "version": "0.2", "foo": 1 } ], "sourceName": "Other" }"""
+
+        val body = bodyOf(mutate(raw, MpStorageFlagEntry(threadId = 9, page = 1, numreponse = 3, uri = null)))
+
+        // The pre-existing non-v0.1 entry is kept, a v0.1 entry is created.
+        assertEquals(2, body["data"]!!.jsonArray.size)
+        assertEquals("Other", body["sourceName"]!!.jsonPrimitive.content)
+        assertEquals(9, body.flagList().first().jsonObject["post"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun `an envelope with no data array at all gets the minimal v01 structure created`() {
+        val raw = """{ "sourceName": "DTCloud", "lastUpdate": 1 }"""
+
+        val body = bodyOf(mutate(raw, MpStorageFlagEntry(threadId = 4, page = 2, numreponse = 6, uri = "/x")))
+
+        // Third-party keys preserved, minimal data[]/v0.1/mpFlags/list created.
+        assertEquals("DTCloud", body["sourceName"]!!.jsonPrimitive.content)
+        assertEquals(1, body["data"]!!.jsonArray.size)
+        assertEquals(1, body.flagList().size)
+        assertEquals(4, body.flagList().first().jsonObject["post"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun `string-typed post from a JS-written list is matched as an update, not appended`() {
+        // The original userscript serialises loosely — an existing entry may carry post as a String.
+        val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [
+            { "post": "12345", "page": "1", "href": "t1" }
+        ] } } ] }"""
+
+        val body = bodyOf(mutate(raw, MpStorageFlagEntry(threadId = 12345, page = 9, numreponse = 8, uri = null)))
+
+        assertEquals(1, body.flagList().size)
+        assertEquals(9, body.flagList().first().jsonObject["page"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun `a content_form mutation over 256 KiB is rejected as TooLarge`() {
+        // Stuff a huge third-party blob so the mutated body crosses the cap. The mutation itself is
+        // tiny — the cap protects against an uncontrolled POST when the storage is already huge
+        // (the DTCloud list is never pruned — ADR-014 risk).
+        val filler = "x".repeat(MpStorageRepository.MAX_CONTENT_FORM_BYTES + 1024)
+        val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [] } } ], "blob": "$filler" }"""
+
+        val outcome = mutate(raw, MpStorageFlagEntry(threadId = 1, page = 1, numreponse = 1, uri = null))
+
+        assertTrue(outcome is MpStorageEnvelopeWriter.Outcome.TooLarge)
+        val sizeBytes = (outcome as MpStorageEnvelopeWriter.Outcome.TooLarge).sizeBytes
+        assertTrue(sizeBytes > MpStorageRepository.MAX_CONTENT_FORM_BYTES)
+    }
+
+    @Test
+    fun `a mutation just under the cap is accepted`() {
+        // Build a body that lands comfortably under 256 KiB after the mutation.
+        val filler = "x".repeat(100 * 1024)
+        val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [] } } ], "blob": "$filler" }"""
+
+        val outcome = mutate(raw, MpStorageFlagEntry(threadId = 1, page = 1, numreponse = 1, uri = null))
+
+        assertTrue(outcome is MpStorageEnvelopeWriter.Outcome.Mutated)
+    }
+
+    @Test
+    fun `non-JSON-object content yields NotJsonEnvelope, never a repaired default`() {
+        assertEquals(
+            MpStorageEnvelopeWriter.Outcome.NotJsonEnvelope,
+            mutate("Bonjour, ceci est un MP normal.", MpStorageFlagEntry(1, 1, 1, null)),
+        )
+        // A JSON array (not an object) is also rejected.
+        assertEquals(
+            MpStorageEnvelopeWriter.Outcome.NotJsonEnvelope,
+            mutate("[1, 2, 3]", MpStorageFlagEntry(1, 1, 1, null)),
+        )
+        assertEquals(
+            MpStorageEnvelopeWriter.Outcome.NotJsonEnvelope,
+            mutate("   ", MpStorageFlagEntry(1, 1, 1, null)),
+        )
+    }
+
+    /** `JsonPrimitive.content` is "null" for a literal null — distinguish it from the string "null". */
+    private fun JsonPrimitive.contentOrNullSafe(): String? =
+        if (this is kotlinx.serialization.json.JsonNull) null else content
+}

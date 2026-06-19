@@ -5,8 +5,10 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -113,6 +115,31 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(foldLongQuotes = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeShowScrollbar().first() },
+            isLocked = { it.showScrollbarTouchedLocally || it.isUpdatingShowScrollbar },
+            apply = { state, value -> state.copy(showScrollbar = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeHideSystemNavBar().first() },
+            isLocked = { it.hideSystemNavBarTouchedLocally || it.isUpdatingHideSystemNavBar },
+            apply = { state, value -> state.copy(hideSystemNavBar = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeImmersiveBackButton().first() },
+            isLocked = { it.immersiveBackButtonTouchedLocally || it.isUpdatingImmersiveBackButton },
+            apply = { state, value -> state.copy(immersiveBackButton = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeImmersiveNavBarReveal().first() },
+            isLocked = { it.immersiveNavBarRevealTouchedLocally || it.isUpdatingImmersiveNavBarReveal },
+            apply = { state, value -> state.copy(immersiveNavBarReveal = value) },
+        )
+        hydratePreference(
+            read = { userPreferencesRepository.observeAccentColor().first() },
+            isLocked = { it.accentColorTouchedLocally || it.isUpdatingAccentColor },
+            apply = { state, value -> state.copy(accentColor = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeConfirmBeforePosting().first() },
             isLocked = { it.confirmBeforePostingTouchedLocally || it.isUpdatingConfirmBeforePosting },
             apply = { state, value -> state.copy(confirmBeforePosting = value) },
@@ -214,12 +241,17 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.FlagsPerTabOverrideChanged -> updateFlagsPerTabOverride(intent.enabled)
             is SettingsIntent.ThemeModeChanged -> updateThemeMode(intent.mode)
             is SettingsIntent.AmoledEnabledChanged -> updateAmoled(intent.enabled)
+            is SettingsIntent.AccentColorChanged -> updateAccentColor(intent.color)
             is SettingsIntent.TopicTopBarAutoHideChanged -> updateTopicTopBarAutoHide(intent.enabled)
             is SettingsIntent.TopicPageFabsChanged -> updateTopicPageFabs(intent.enabled)
             is SettingsIntent.MpUnreadBadgeChanged -> updateMpUnreadBadge(intent.enabled)
             is SettingsIntent.TopicPollsExpandedChanged -> updateTopicPollsExpanded(intent.enabled)
             is SettingsIntent.TopicSignaturesChanged -> updateTopicSignatures(intent.enabled)
             is SettingsIntent.FoldLongQuotesChanged -> updateFoldLongQuotes(intent.enabled)
+            is SettingsIntent.ShowScrollbarChanged -> updateShowScrollbar(intent.enabled)
+            is SettingsIntent.HideSystemNavBarChanged -> updateHideSystemNavBar(intent.enabled)
+            is SettingsIntent.ImmersiveBackButtonChanged -> updateImmersiveBackButton(intent.enabled)
+            is SettingsIntent.ImmersiveNavBarRevealChanged -> updateImmersiveNavBarReveal(intent.mode)
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
@@ -807,6 +839,147 @@ class SettingsViewModel @Inject constructor(
             },
             persist = userPreferencesRepository::setFoldLongQuotes,
         )
+    }
+
+    private fun updateShowScrollbar(desired: Boolean) {
+        val previous = _state.value.showScrollbar
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    showScrollbar = desired,
+                    isUpdatingShowScrollbar = true,
+                    showScrollbarError = false,
+                    showScrollbarTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(showScrollbar = desired, isUpdatingShowScrollbar = false)
+                } else {
+                    state.copy(
+                        showScrollbar = previous,
+                        isUpdatingShowScrollbar = false,
+                        showScrollbarError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setShowScrollbar,
+        )
+    }
+
+    private fun updateHideSystemNavBar(desired: Boolean) {
+        val previous = _state.value.hideSystemNavBar
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    hideSystemNavBar = desired,
+                    isUpdatingHideSystemNavBar = true,
+                    hideSystemNavBarError = false,
+                    hideSystemNavBarTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(hideSystemNavBar = desired, isUpdatingHideSystemNavBar = false)
+                } else {
+                    state.copy(
+                        hideSystemNavBar = previous,
+                        isUpdatingHideSystemNavBar = false,
+                        hideSystemNavBarError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setHideSystemNavBar,
+        )
+    }
+
+    private fun updateImmersiveBackButton(desired: Boolean) {
+        val previous = _state.value.immersiveBackButton
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    immersiveBackButton = desired,
+                    isUpdatingImmersiveBackButton = true,
+                    immersiveBackButtonError = false,
+                    immersiveBackButtonTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(immersiveBackButton = desired, isUpdatingImmersiveBackButton = false)
+                } else {
+                    state.copy(
+                        immersiveBackButton = previous,
+                        isUpdatingImmersiveBackButton = false,
+                        immersiveBackButtonError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setImmersiveBackButton,
+        )
+    }
+
+    // #518 follow-up — enum preference; same bespoke optimistic-flip shape as updateDisplayDensity.
+    private fun updateImmersiveNavBarReveal(desired: ImmersiveNavBarReveal) {
+        val previous = _state.value.immersiveNavBarReveal
+        _state.update {
+            it.copy(
+                immersiveNavBarReveal = desired,
+                isUpdatingImmersiveNavBarReveal = true,
+                immersiveNavBarRevealError = false,
+                immersiveNavBarRevealTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setImmersiveNavBarReveal(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(immersiveNavBarReveal = desired, isUpdatingImmersiveNavBarReveal = false)
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            immersiveNavBarReveal = previous,
+                            isUpdatingImmersiveNavBarReveal = false,
+                            immersiveNavBarRevealError = true,
+                        )
+                    }
+                }
+        }
+    }
+
+    // TU 2788511 — enum preference; same bespoke optimistic-flip shape as updateImmersiveNavBarReveal.
+    private fun updateAccentColor(desired: AccentColor) {
+        val previous = _state.value.accentColor
+        _state.update {
+            it.copy(
+                accentColor = desired,
+                isUpdatingAccentColor = true,
+                accentColorError = false,
+                accentColorTouchedLocally = true,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { userPreferencesRepository.setAccentColor(desired) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(accentColor = desired, isUpdatingAccentColor = false)
+                    }
+                }
+                .onFailure {
+                    _state.update {
+                        it.copy(
+                            accentColor = previous,
+                            isUpdatingAccentColor = false,
+                            accentColorError = true,
+                        )
+                    }
+                }
+        }
     }
 
     private fun updateMpUnreadBadge(desired: Boolean) {

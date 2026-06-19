@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
@@ -585,6 +587,27 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeShowScrollbar defaults to true then persists false and true`() = runTest(dispatcher) {
+        // #105 — the reading scrollbar is the historical behaviour; disabling it is the opt-out.
+        repository.observeShowScrollbar().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setShowScrollbar(false)
+        repository.observeShowScrollbar().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setShowScrollbar(true)
+        repository.observeShowScrollbar().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeConfirmBeforePosting defaults to false then persists true and false`() = runTest(dispatcher) {
         // #312 — publishing stays one-tap by default; the guard is strictly opt-in.
         repository.observeConfirmBeforePosting().test {
@@ -622,6 +645,90 @@ class DataStoreUserPreferencesRepositoryTest {
         repository.setDebugBoundsOverlay(false)
         repository.observeDebugBoundsOverlay().test {
             assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeHideSystemNavBar defaults to false then persists true and false`() = runTest(dispatcher) {
+        // #518 — immersive mode is opt-in; an empty store keeps the system nav bar visible.
+        repository.observeHideSystemNavBar().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setHideSystemNavBar(true)
+        repository.observeHideSystemNavBar().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setHideSystemNavBar(false)
+        repository.observeHideSystemNavBar().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeImmersiveBackButton defaults to true then persists false and true`() = runTest(dispatcher) {
+        // #518 follow-up — default ON (only shown while immersive is active); an empty store reports true.
+        repository.observeImmersiveBackButton().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImmersiveBackButton(false)
+        repository.observeImmersiveBackButton().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImmersiveBackButton(true)
+        repository.observeImmersiveBackButton().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeImmersiveNavBarReveal defaults to MANUAL then persists chosen modes`() = runTest(dispatcher) {
+        // #518 follow-up — default MANUAL (swipe-only) on an empty store.
+        repository.observeImmersiveNavBarReveal().test {
+            assertEquals(ImmersiveNavBarReveal.MANUAL, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImmersiveNavBarReveal(ImmersiveNavBarReveal.AT_BOTTOM)
+        repository.observeImmersiveNavBarReveal().test {
+            assertEquals(ImmersiveNavBarReveal.AT_BOTTOM, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImmersiveNavBarReveal(ImmersiveNavBarReveal.ON_SCROLL_UP)
+        repository.observeImmersiveNavBarReveal().test {
+            assertEquals(ImmersiveNavBarReveal.ON_SCROLL_UP, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `observeAccentColor defaults to ROSE then persists the chosen colour`() = runTest(dispatcher) {
+        // TU 2788511 — default ROSE (the historical maroon/rose scheme) on an empty store.
+        repository.observeAccentColor().test {
+            assertEquals(AccentColor.ROSE, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setAccentColor(AccentColor.ROUGE_REDFACE1)
+        repository.observeAccentColor().test {
+            assertEquals(AccentColor.ROUGE_REDFACE1, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setAccentColor(AccentColor.ROSE)
+        repository.observeAccentColor().test {
+            assertEquals(AccentColor.ROSE, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -739,6 +846,17 @@ class DataStoreUserPreferencesRepositoryTest {
 
         repository.observeDisplayDensity().test {
             assertEquals(DisplayDensity.COMFORT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt accent_color value falls back to ROSE instead of crashing`() = runTest(dispatcher) {
+        // TU 2788511 — an unknown value (older build / manual edit) must degrade to ROSE, not crash valueOf.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("accent_color")] = "BOGUS" }
+
+        repository.observeAccentColor().test {
+            assertEquals(AccentColor.ROSE, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

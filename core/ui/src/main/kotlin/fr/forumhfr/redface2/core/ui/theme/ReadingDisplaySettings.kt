@@ -18,4 +18,7 @@ data class ReadingDisplaySettings(
     // #332 — whether a long top-level citation folds to a one-line header by default. `true`
     // (default) keeps the historical fold; `false` disables it so a long quote renders expanded.
     val foldLongQuotes: Boolean = true,
+    // #105 — whether the intra-page reading scrollbar is shown. `true` (default) keeps the
+    // historical ascenseur; `false` hides it entirely (topic pages AND private-message threads).
+    val showScrollbar: Boolean = true,
 )

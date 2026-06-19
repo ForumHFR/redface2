@@ -8,7 +8,9 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
@@ -224,6 +226,24 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeAccentColor(): Flow<AccentColor> =
+        dataStore.data
+            // Default ROSE (TU 2788511): the historical maroon/rose scheme until the user opts into red.
+            .map(::readAccentColor)
+            // Keep the accent flow quiet unless it actually changes so RedfaceApp doesn't recompose
+            // the whole tree on unrelated edits — same stance as observeThemeMode. No bootstrap mirror:
+            // the accent does not paint the window background (cf. observeDisplayDensity).
+            .distinctUntilChanged()
+            .catch { emit(AccentColor.ROSE) }
+
+    override suspend fun setAccentColor(color: AccentColor) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_ACCENT_COLOR] = color.name
+            }
+        }
+    }
+
     override fun observeTopicTopBarAutoHide(): Flow<Boolean> =
         dataStore.data
             // Default `false`: the topic top bar stays pinned unless the user opts into auto-hide.
@@ -344,6 +364,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         persist {
             dataStore.edit { prefs ->
                 prefs[KEY_FOLD_LONG_QUOTES] = enabled
+            }
+        }
+    }
+
+    override fun observeShowScrollbar(): Flow<Boolean> =
+        dataStore.data
+            // Default `true` (#105): the reading scrollbar is the historical behaviour; hiding it is
+            // the opt-out requested in the beta thread (styx42).
+            .map { prefs -> prefs[KEY_SHOW_SCROLLBAR] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setShowScrollbar(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_SHOW_SCROLLBAR] = enabled
             }
         }
     }
@@ -505,6 +541,52 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeHideSystemNavBar(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#518): immersive mode is opt-in — most users expect the 3 buttons.
+            .map { prefs -> prefs[KEY_HIDE_SYSTEM_NAV_BAR] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setHideSystemNavBar(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_HIDE_SYSTEM_NAV_BAR] = enabled
+            }
+        }
+    }
+
+    override fun observeImmersiveBackButton(): Flow<Boolean> =
+        dataStore.data
+            // Default `true` (#518 follow-up): only ever shown WHILE immersive mode is on, so the
+            // default-on keeps 3-button users able to go back; the toggle is the opt-out.
+            .map { prefs -> prefs[KEY_IMMERSIVE_BACK_BUTTON] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setImmersiveBackButton(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_IMMERSIVE_BACK_BUTTON] = enabled
+            }
+        }
+    }
+
+    override fun observeImmersiveNavBarReveal(): Flow<ImmersiveNavBarReveal> =
+        dataStore.data
+            // Default MANUAL (#518 follow-up): swipe-from-bottom only, the historical immersive behaviour.
+            .map(::readImmersiveNavBarReveal)
+            .distinctUntilChanged()
+            .catch { emit(ImmersiveNavBarReveal.MANUAL) }
+
+    override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_IMMERSIVE_NAV_BAR_REVEAL] = mode.name
+            }
+        }
+    }
+
     /**
      * Reads [KEY_UPLOAD_PROVIDER] defensively: an unknown / corrupt stored value (older build with a
      * renamed enum, manual edit) falls back to [UploadProviderId.DIBERIE] instead of crashing on
@@ -530,6 +612,25 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_DISPLAY_DENSITY]
             ?.let { stored -> runCatching { DisplayDensity.valueOf(stored) }.getOrNull() }
             ?: DisplayDensity.COMFORT
+
+    /**
+     * Reads [KEY_IMMERSIVE_NAV_BAR_REVEAL] defensively (#518 follow-up): an unknown / corrupt stored
+     * value falls back to [ImmersiveNavBarReveal.MANUAL] instead of crashing on
+     * `ImmersiveNavBarReveal.valueOf`, same stance as [readDisplayDensity].
+     */
+    private fun readImmersiveNavBarReveal(prefs: Preferences): ImmersiveNavBarReveal =
+        prefs[KEY_IMMERSIVE_NAV_BAR_REVEAL]
+            ?.let { stored -> runCatching { ImmersiveNavBarReveal.valueOf(stored) }.getOrNull() }
+            ?: ImmersiveNavBarReveal.MANUAL
+
+    /**
+     * Reads [KEY_ACCENT_COLOR] defensively (TU 2788511): an unknown / corrupt stored value falls back
+     * to [AccentColor.ROSE] instead of crashing on `AccentColor.valueOf`, same stance as [readThemeMode].
+     */
+    private fun readAccentColor(prefs: Preferences): AccentColor =
+        prefs[KEY_ACCENT_COLOR]
+            ?.let { stored -> runCatching { AccentColor.valueOf(stored) }.getOrNull() }
+            ?: AccentColor.ROSE
 
     /**
      * Reads [KEY_FONT_SCALE] defensively (#287): an unknown / corrupt stored value falls back to
@@ -625,6 +726,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // #286 — app theme selection (ThemeMode.name, defensively parsed) + AMOLED toggle.
         val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_AMOLED_ENABLED = booleanPreferencesKey("amoled_enabled")
+        val KEY_ACCENT_COLOR = stringPreferencesKey("accent_color")
 
         // build 89 follow-up — topic top app bar auto-hide on scroll.
         val KEY_TOPIC_TOPBAR_AUTO_HIDE = booleanPreferencesKey("topic_topbar_auto_hide")
@@ -649,6 +751,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // #332 — fold long top-level citations by default (default true = historical fold; opt-out).
         val KEY_FOLD_LONG_QUOTES = booleanPreferencesKey("fold_long_quotes")
 
+        // #105 — show the intra-page reading scrollbar (default true = historical; opt-out).
+        val KEY_SHOW_SCROLLBAR = booleanPreferencesKey("show_scrollbar")
+
         // #458 — cold-start tab (StartScreenChoice.name, defensively parsed) + optional Forum
         // category id (absent unless screen == FORUM and a category was picked).
         val KEY_START_SCREEN = stringPreferencesKey("start_screen")
@@ -668,5 +773,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #445 — debug bounds overlay toggle (default false; exposed on the dev channel only).
         val KEY_DEBUG_BOUNDS_OVERLAY = booleanPreferencesKey("debug_bounds_overlay")
+        val KEY_HIDE_SYSTEM_NAV_BAR = booleanPreferencesKey("hide_system_nav_bar")
+        val KEY_IMMERSIVE_BACK_BUTTON = booleanPreferencesKey("immersive_back_button")
+        val KEY_IMMERSIVE_NAV_BAR_REVEAL = stringPreferencesKey("immersive_nav_bar_reveal")
     }
 }

@@ -8,12 +8,19 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.TopicSearchForm
+import fr.forumhfr.redface2.core.model.TopicSearchRequest
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import kotlinx.coroutines.CancellationException
@@ -42,16 +49,27 @@ import kotlinx.coroutines.launch
  * synthetic chain of pages.
  */
 @HiltViewModel(assistedFactory = TopicViewModel.Factory::class)
+@Suppress("LongParameterList") // ViewModel aggregates its injected repositories; one per concern.
 class TopicViewModel @AssistedInject constructor(
     @Assisted private val request: TopicRequest,
     private val topicRepository: TopicRepository,
     private val authRepository: AuthRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val deletePostRepository: DeletePostRepository,
+    private val blacklistRepository: BlacklistRepository,
+    private val topicSearchRepository: TopicSearchRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
     val state: StateFlow<TopicUiState> = _state.asStateFlow()
+
+    /**
+     * #509 — latest set of blacklisted canonical pseudos. Kept fresh by the independent
+     * [observeBlockedCanonicals] collector launched in [init] (NOT by a load job), so EVERY page that
+     * is on screen — whatever path put it there (cache-aside load, pull-to-refresh, post-submit force
+     * refresh, post-delete refetch, intra-topic search) — re-filters live when the blacklist changes.
+     */
+    private var blockedCanonicals: Set<String> = emptySet()
 
     private val _effects: Channel<TopicEffect> = Channel(capacity = Channel.BUFFERED)
     val effects: Flow<TopicEffect> = _effects.receiveAsFlow()
@@ -59,6 +77,30 @@ class TopicViewModel @AssistedInject constructor(
     private var loadJob: Job? = null
     private var prefetchJob: Job? = null
     private var prefetchedPage: Int? = null
+
+    /** Chantier C (#546) — at most one intra-topic search POST in flight at a time. */
+    private var searchJob: Job? = null
+
+    /**
+     * Chantier C (#546) — monotonic token guarding against a stale `transsearch` write.
+     * Incremented whenever ANY flow that owns the page (a normal load, refresh, force-refresh,
+     * post-delete refetch or a new search) takes over. [submitSearch] snapshots it before the POST
+     * and only applies the returned page + final `search.status` while the token is still current —
+     * so a slow `transsearch` reply can never clobber a more recent normal page (latest-wins strict).
+     * Symmetric with cancelling [searchJob] at the head of every normal-load path.
+     */
+    private var searchGeneration: Int = 0
+
+    /**
+     * Chantier B (#546) — client-side cursor history for next/previous result navigation in
+     * NON-FILTERED mode. HFR's `transsearch` is forward-only (it has no « previous » endpoint), so we
+     * record the `numreponse` of every visited match in order and replay the list to go back.
+     * `searchCursors[0]` is the first match (reached by a FRESH search) ; subsequent entries are
+     * reached by stepping. [searchCursorIndex] points at the entry currently shown (-1 when no search
+     * is active / filtered mode). Reset on every fresh submit and on closing the search.
+     */
+    private val searchCursors = mutableListOf<Int>()
+    private var searchCursorIndex = -1
 
     /**
      * Tracks whether the current value of [TopicRequest.scrollTo] has already been
@@ -81,6 +123,13 @@ class TopicViewModel @AssistedInject constructor(
     private var firstContentInFlight: Boolean = false
 
     init {
+        // #509 — own the blacklist as a single independent collector (NOT tied to a load job). It
+        // seeds [blockedCanonicals] and re-filters the page on screen live, so a block / unblock
+        // applies on every load path (refresh / force-refresh / search) and not just the cache-aside
+        // load. Launched FIRST so observeBlockedCanonicals' immediate first emission (its documented
+        // contract) seeds [blockedCanonicals] before the load below computes the initial hidden set —
+        // a blocked post therefore never flashes before it is hidden, even on the force-refresh path.
+        observeBlockedCanonicals()
         if (request.submitSignal != null) {
             // Issue #200 — the user just published a reply / quote / edit / edit-FP and the
             // navigation host signalled us to skip the cache so the freshly-published post
@@ -139,7 +188,72 @@ class TopicViewModel @AssistedInject constructor(
             TopicIntent.Retry -> loadCurrentPage()
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
             TopicIntent.Refresh -> refresh()
+            is TopicIntent.SetAuthorBlocked -> setAuthorBlocked(intent.author, intent.blocked)
+            TopicIntent.OpenSearch -> openSearch()
+            TopicIntent.CloseSearch -> closeSearch()
+            is TopicIntent.SearchWordChanged ->
+                _state.update { it.copy(search = it.search.copy(word = intent.word)) }
+            is TopicIntent.SearchPseudoChanged ->
+                _state.update { it.copy(search = it.search.copy(spseudo = intent.pseudo)) }
+            is TopicIntent.SearchOnlyMatchesChanged ->
+                _state.update { it.copy(search = it.search.copy(onlyMatches = intent.onlyMatches)) }
+            TopicIntent.SubmitSearch -> submitSearch()
+            TopicIntent.NextResult -> nextResult()
+            TopicIntent.PrevResult -> prevResult()
         }
+    }
+
+    /**
+     * #509 — block / unblock [author] from the post menu. This launch is on [viewModelScope], but the
+     * DataStore commit still survives the sheet/ViewModel going away mid-write: the repository's
+     * `persist {}` offloads the actual write to the application scope (the #507 pattern), so only the
+     * `await` is cancelled, not the commit. The page re-filters live through the independent
+     * [observeBlockedCanonicals] collector (launched in [init]), so the write here applies on whatever
+     * page is currently on screen, regardless of how it was loaded — no manual state poke is needed.
+     */
+    private fun setAuthorBlocked(author: String, blocked: Boolean) {
+        viewModelScope.launch {
+            if (blocked) blacklistRepository.block(author) else blacklistRepository.unblock(author)
+        }
+    }
+
+    /**
+     * #509 — single, load-independent owner of the blacklist. Collected once on [viewModelScope] (NOT
+     * inside [loadJob], which the refresh / force-refresh / post-delete / search paths cancel and
+     * replace), so a block / unblock applies live on the page currently on screen whatever path put it
+     * there. On each emission it (a) caches the set in [blockedCanonicals] (so every load path can
+     * compute the initial hidden set with the up-to-date blacklist) and (b) recomputes
+     * [TopicUiState.Mode.Loaded.hiddenNumreponses] on the current loaded page and re-emits it. A
+     * non-loaded state (Loading / Error) is left untouched; the next load reads the freshest
+     * [blockedCanonicals].
+     *
+     * Launched FIRST in [init] so its emission usually seeds [blockedCanonicals] before the initial
+     * page renders. But `observeBlockedCanonicals` is a COLD DataStore flow (not a StateFlow), so that
+     * first emission is asynchronous — the ordering vs the initial load is NOT guaranteed (Codex
+     * review). The (b) re-filter is the real guarantee: even if a load renders before the blacklist
+     * lands, this collector immediately re-hides the blocked posts. The residual is at most a one-frame
+     * flash on a cold open whose page-1 already contains a blocked author — and in practice the network
+     * page load is slower than the (memory-cached) DataStore read, so it rarely shows.
+     */
+    private fun observeBlockedCanonicals() {
+        blacklistRepository.observeBlockedCanonicals()
+            .onEach { blocked ->
+                blockedCanonicals = blocked
+                _state.update { current ->
+                    val loaded = current.mode as? TopicUiState.Mode.Loaded ?: return@update current
+                    current.copy(
+                        mode = loaded.copy(
+                            hiddenNumreponses = computeHiddenNumreponses(loaded.topic, blocked),
+                        ),
+                    )
+                }
+            }
+            // This collector is independent of any load job, so an unhandled error here would tear
+            // down viewModelScope and kill the screen. A DataStore read hiccup on the blacklist must
+            // not do that — keep the last known set; the next emission recovers (Codex review; mirrors
+            // the catch the former loadCurrentPage combine carried).
+            .catch { error -> android.util.Log.w(LOG_TAG, "Blacklist observe failed", error) }
+            .launchIn(viewModelScope)
     }
 
     /**
@@ -156,6 +270,7 @@ class TopicViewModel @AssistedInject constructor(
      */
     private fun refresh() {
         if (_state.value.mode !is TopicUiState.Mode.Loaded || _state.value.isRefreshing) return
+        takeOverFromSearch()
         loadJob?.cancel()
         prefetchJob?.cancel()
         prefetchedPage = null
@@ -165,7 +280,7 @@ class TopicViewModel @AssistedInject constructor(
                 val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
                 _state.update {
                     it.copy(
-                        mode = TopicUiState.Mode.Loaded(topic),
+                        mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
                         availablePages = (1..topic.totalPages).toList(),
                     )
                 }
@@ -209,6 +324,7 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     private fun loadCurrentPage() {
+        takeOverFromSearch()
         loadJob?.cancel()
         prefetchJob?.cancel()
         prefetchedPage = null
@@ -217,6 +333,11 @@ class TopicViewModel @AssistedInject constructor(
         loadJob = viewModelScope.launch {
             topicRepository
                 .observeTopicPage(request.cat, request.post, request.page, forceRefresh = request.forceRefresh)
+                // #509 — the blacklist is owned by the independent observeBlockedCanonicals collector
+                // (launched in init), NOT combined here: it has already seeded blockedCanonicals by the
+                // time this load runs (its first emission is synchronous, documented contract), so the
+                // initial hidden set below is correct and there is no double-source / clignotement
+                // between this load and the live re-filter — the init collector is the sole re-filter.
                 .catch { error ->
                     if (error is CancellationException) throw error
                     // Cache-first UX: if we already showed a cached page, keep it on screen
@@ -244,7 +365,7 @@ class TopicViewModel @AssistedInject constructor(
                 .collect { topic ->
                     _state.update {
                         it.copy(
-                            mode = TopicUiState.Mode.Loaded(topic),
+                            mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
                             availablePages = (1..topic.totalPages).toList(),
                         )
                     }
@@ -256,6 +377,19 @@ class TopicViewModel @AssistedInject constructor(
                     maybeSchedulePrefetch(totalPages = topic.totalPages)
                 }
         }
+    }
+
+    /**
+     * #509 — `numreponse` of the posts in [topic] whose author is blacklisted (canonical match). The
+     * full [Topic.posts] list is kept intact; the screen renders a collapsed placeholder for these so
+     * pagination, anchors and `numreponse` keys are unaffected. Fast-paths the common empty blacklist.
+     */
+    private fun computeHiddenNumreponses(topic: Topic, blocked: Set<String>): Set<Int> {
+        if (blocked.isEmpty()) return emptySet()
+        return topic.posts.asSequence()
+            .filter { canonicalizePseudo(it.author) in blocked }
+            .map { it.numreponse }
+            .toSet()
     }
 
     private suspend fun maybeEmitScroll(visiblePosts: List<Int>) {
@@ -294,6 +428,7 @@ class TopicViewModel @AssistedInject constructor(
      * not an anonymous warmup escalating to authenticated.
      */
     private fun forceRefreshCurrentPage() {
+        takeOverFromSearch()
         loadJob?.cancel()
         prefetchJob?.cancel()
         prefetchedPage = null
@@ -304,7 +439,7 @@ class TopicViewModel @AssistedInject constructor(
                 val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
                 _state.update {
                     it.copy(
-                        mode = TopicUiState.Mode.Loaded(topic),
+                        mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
                         availablePages = (1..topic.totalPages).toList(),
                     )
                 }
@@ -450,6 +585,7 @@ class TopicViewModel @AssistedInject constructor(
      * user-confirmed deletion, not an anonymous warmup escalating to authenticated.
      */
     private fun refreshAfterDelete() {
+        takeOverFromSearch()
         loadJob?.cancel()
         prefetchJob?.cancel()
         prefetchedPage = null
@@ -459,7 +595,7 @@ class TopicViewModel @AssistedInject constructor(
                 val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
                 _state.update {
                     it.copy(
-                        mode = TopicUiState.Mode.Loaded(topic),
+                        mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
                         availablePages = (1..topic.totalPages).toList(),
                     )
                 }
@@ -470,6 +606,368 @@ class TopicViewModel @AssistedInject constructor(
                 loadCurrentPage()
             }
         }
+    }
+
+    // ─── intra-topic search (#546) ───────────────────────────────────────────────
+
+    /**
+     * Open the search bar. No-op unless the loaded page exposes a usable search form
+     * ([TopicUiState.canSearchInTopic]) — the screen only shows the affordance in that case, but we
+     * re-check here so a stale tap can never open an inert bar.
+     */
+    private fun openSearch() {
+        if (!_state.value.canSearchInTopic) return
+        _state.update { it.copy(search = it.search.copy(isActive = true)) }
+    }
+
+    /**
+     * Close the search bar and drop any active filtered view by reloading the normal current page.
+     * The typed criteria are kept so re-opening restores them. We only reload when a search was
+     * actually applied (`status == Done`) to avoid a needless refetch on a cancel-before-submit.
+     */
+    private fun closeSearch() {
+        val hadResults = _state.value.search.status == TopicSearchStatus.Done
+        _state.update {
+            it.copy(search = it.search.copy(isActive = false, status = TopicSearchStatus.Idle))
+        }
+        // loadCurrentPage already cancels searchJob + bumps the generation (takeOverFromSearch). When
+        // there is nothing to reload, drop the in-flight search ourselves so a late reply can't write.
+        if (hadResults) loadCurrentPage() else takeOverFromSearch()
+    }
+
+    /**
+     * Cancel any in-flight intra-topic search and bump [searchGeneration] so a `transsearch` reply
+     * that is still on the wire is dropped on arrival. Called at the head of every normal-load path
+     * (load / refresh / force-refresh / post-delete) so a stale search result can never overwrite a
+     * more recent normal page (latest-wins strict).
+     *
+     * Also clears a `status == Loading` left dangling by the cancelled search: bumping the generation
+     * drops the reply, but [submitSearch]'s own `status = Done/Error` write is then guarded out, so
+     * without this reset the search bar would spin forever after a normal load took over. We reset to
+     * [TopicSearchStatus.Idle] only the Loading state — the bar stays open (`isActive` kept) with the
+     * typed criteria preserved so the user can retry; we never close the bar from here.
+     */
+    private fun takeOverFromSearch() {
+        searchJob?.cancel()
+        searchGeneration++
+        // A normal-load path owns the page now, so the result cursor history is stale: a later
+        // next/prev would step from a position that no longer matches what is on screen. Reset it
+        // and clear the navigation affordances. (Covers closeSearch, which routes through here.)
+        resetSearchCursors()
+        // Clear the prev/next affordances UNCONDITIONALLY — not just on a mid-flight Loading search:
+        // after a completed (Done) search, a refresh / page change / normal load takes over the page,
+        // and lingering arrows would become no-op clicks over a non-search page (Codex review). Also
+        // reset a dangling Loading to Idle so the bar doesn't spin forever after the takeover.
+        _state.update {
+            val s = it.search
+            it.copy(
+                search = s.copy(
+                    status = if (s.status == TopicSearchStatus.Loading) TopicSearchStatus.Idle else s.status,
+                    canGoPreviousResult = false,
+                    canGoNextResult = false,
+                ),
+            )
+        }
+    }
+
+    /** Chantier B (#546) — drop the client-side result cursor history (no search position active). */
+    private fun resetSearchCursors() {
+        searchCursors.clear()
+        searchCursorIndex = -1
+    }
+
+    /**
+     * Submit a FRESH intra-topic search : `POST transsearch.php` (authenticated) with the parsed form +
+     * the typed criteria, then render the returned topic page in [TopicUiState.Mode.Loaded].
+     *
+     * The current page STAYS visible while the POST is in flight — only `search.status` flips to
+     * [TopicSearchStatus.Loading] (the search bar shows the progress), per the documented contract
+     * ([TopicEffect.SearchFailed]'s KDoc : « the current page stays on screen »). We never switch the
+     * whole screen to [TopicUiState.Mode.Loading], which would blank the posts the user is reading.
+     *
+     * Latest-wins : a generation token is snapshotted before the POST (incremented by every normal-load
+     * path AND by a fresh submit through [searchJob]'s cancellation). The result page + final status
+     * are applied ONLY while that token is still current, so a slow `transsearch` reply that lost the
+     * race to a more recent normal page (refresh / page change / new search) is dropped, never written.
+     *
+     * Chantier B (#546) — in NON-FILTERED mode (`!onlyMatches`) HFR returns the FULL page of the first
+     * match anchored on `#t<currentnum>` (no highlight), so we seed the result cursor history with that
+     * match and scroll to it. Filtered mode (`onlyMatches`) keeps the prior behaviour : HFR returns the
+     * matches-only page, which IS the result list, so there is no per-result navigation or scroll. A
+     * « no result » page surfaces as [TopicSearchStatus.NoResults] (≠ Error), never a failure Toast.
+     */
+    private fun submitSearch() {
+        val current = _state.value
+        val form = (current.mode as? TopicUiState.Mode.Loaded)?.topic?.searchForm
+        // Re-validate the gate server-side: never POST without a usable (authenticated) form.
+        if (form == null || !form.canSearch || !current.search.canSubmit) return
+        val request = TopicSearchRequest(
+            form = form,
+            word = current.search.word.trim(),
+            spseudo = current.search.spseudo.trim(),
+            onlyMatches = current.search.onlyMatches,
+            // Fresh search: no cursor, keep firstnum (isStep = false). HFR re-anchors on the first match.
+        )
+        if (!request.isMeaningful) return
+        resetSearchCursors()
+        launchSearch(request, isFresh = true)
+    }
+
+    /**
+     * Chantier B (#546) — jump to the NEXT search result (non-filtered mode). Steps HFR's `currentnum`
+     * cursor forward from the current match, OMITTING `firstnum` (the repository does, keyed on
+     * [TopicSearchRequest.isStep]) so HFR truly advances instead of re-anchoring on the first match.
+     */
+    private fun nextResult() {
+        val current = _state.value
+        val form = navigableSearchForm(current).takeIf { searchCursorIndex >= 0 } ?: return
+        launchSearch(stepRequest(form, current.search, cursor = searchCursors[searchCursorIndex]), isFresh = false)
+    }
+
+    /**
+     * Chantier B (#546) — jump to the PREVIOUS search result (non-filtered mode). HFR is forward-only,
+     * so we replay the cursor history : re-issue a FRESH search to reach the first match again, or a
+     * STEP from the match just before the target, then scroll to the now-current cursor.
+     */
+    private fun prevResult() {
+        val current = _state.value
+        val form = navigableSearchForm(current).takeIf { searchCursorIndex > 0 } ?: return
+        val targetIndex = searchCursorIndex - 1
+        val request = if (targetIndex == 0) {
+            TopicSearchRequest(
+                form = form,
+                word = current.search.word.trim(),
+                spseudo = current.search.spseudo.trim(),
+                onlyMatches = false,
+            )
+        } else {
+            stepRequest(form, current.search, cursor = searchCursors[targetIndex - 1])
+        }
+        launchSearch(request, isFresh = false, rewindToIndex = targetIndex)
+    }
+
+    /**
+     * Chantier B (#546) — the usable (authenticated) search form of the loaded page IF result
+     * navigation applies, i.e. NON-filtered mode and a loaded page whose form `canSearch`. Returns
+     * `null` to short-circuit a no-op next/previous, keeping those single-exit (detekt ReturnCount).
+     */
+    private fun navigableSearchForm(current: TopicUiState): TopicSearchForm? {
+        if (current.search.onlyMatches) return null
+        return (current.mode as? TopicUiState.Mode.Loaded)?.topic?.searchForm?.takeIf { it.canSearch }
+    }
+
+    /** Chantier B (#546) — a next/previous STEP request (cursor set, firstnum omitted via isStep). */
+    private fun stepRequest(
+        form: TopicSearchForm,
+        search: TopicSearchUiState,
+        cursor: Int,
+    ): TopicSearchRequest = TopicSearchRequest(
+        form = form,
+        word = search.word.trim(),
+        spseudo = search.spseudo.trim(),
+        onlyMatches = false,
+        currentNum = cursor.toString(),
+        isStep = true,
+    )
+
+    /**
+     * Chantier B (#546) — shared launcher for a fresh search, a forward step or a backward replay.
+     * Snapshots the generation (latest-wins), keeps the current page on screen while the POST is in
+     * flight and dispatches the result to [applySearchResult]. [rewindToIndex] is non-null only for a
+     * « previous » replay : it tells [applySearchResult] which existing history slot we are landing on
+     * instead of appending a new one.
+     */
+    private fun launchSearch(request: TopicSearchRequest, isFresh: Boolean, rewindToIndex: Int? = null) {
+        // Take over from any previous search; cancel the in-flight normal load / prefetch so a late
+        // observeTopicPage emission cannot land on top of the page this search is about to render.
+        searchJob?.cancel()
+        loadJob?.cancel()
+        prefetchJob?.cancel()
+        val generation = ++searchGeneration
+        _state.update { it.copy(search = it.search.copy(status = TopicSearchStatus.Loading)) }
+        searchJob = viewModelScope.launch {
+            try {
+                val topic = topicSearchRepository.searchInTopic(request)
+                // Drop a stale reply: a newer normal load / refresh / search bumped the generation.
+                if (generation != searchGeneration) return@launch
+                applySearchResult(
+                    topic,
+                    isFresh = isFresh,
+                    rewindToIndex = rewindToIndex,
+                    onlyMatches = request.onlyMatches,
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (noResults: NoTopicSearchResultsException) {
+                android.util.Log.i(LOG_TAG, "Intra-topic search returned no result", noResults)
+                if (generation != searchGeneration) return@launch
+                // Same dispatch as a parsed reply with no usable landing (fresh→no results,
+                // rewind→replay failure ≠ end, forward→end of results).
+                signalNoLanding(isFresh, rewindToIndex)
+            } catch (@Suppress("TooGenericExceptionCaught") searchError: Exception) {
+                android.util.Log.w(LOG_TAG, "Intra-topic search failed", searchError)
+                if (generation != searchGeneration) return@launch
+                _effects.send(TopicEffect.SearchFailed)
+                // The current page is still on screen — just mark the search as failed so the user can
+                // retry or close it.
+                _state.update { it.copy(search = it.search.copy(status = TopicSearchStatus.Error)) }
+            }
+        }
+    }
+
+    /**
+     * Chantier B (#546) — apply a `transsearch` result page. In FILTERED mode the page IS the result
+     * list (no per-result navigation), so we render it and stop. In NON-FILTERED mode HFR anchors a
+     * single match : we only swap the page on screen once we know the match is USABLE (so a step past
+     * the last result leaves the current match in place — « ne pas naviguer en fin »). The client
+     * cursor history is maintained (fresh seeds it, forward appends/advances, backward rewinds) and we
+     * scroll to the match. A cursor that is null OR no longer a post on the page means : fresh → no
+     * results ; step → end of results.
+     */
+    private suspend fun applySearchResult(
+        topic: Topic,
+        isFresh: Boolean,
+        rewindToIndex: Int?,
+        // Snapshot of the MODE the request was launched with — NOT the live toggle, which the user
+        // may have flipped mid-flight (Codex review : that would apply a non-filtered reply as
+        // filtered or vice-versa).
+        onlyMatches: Boolean,
+    ) {
+        if (onlyMatches) {
+            // Matches-only page: it is the whole result set, no scroll / cursor navigation.
+            renderSearchPage(topic, TopicSearchStatus.Done, canPrev = false, canNext = false)
+            return
+        }
+        // `landed` = the returned cursor IF it is a real post on the page. A null cursor, or one
+        // absent from the page (HFR's end sentinel is lastPost+1, never a real post), means no usable
+        // match here.
+        val cursor = topic.searchForm?.currentNum
+        val landed = cursor?.takeIf { c -> topic.posts.any { it.numreponse == c } }
+        // A forward step must ADVANCE — matches are in increasing numreponse order. A cursor that did
+        // not move past the current one (re-anchor / stale parse) is the end of results, not a new hit.
+        val forwardNoProgress = !isFresh && rewindToIndex == null && landed != null &&
+            landed <= (searchCursors.getOrNull(searchCursorIndex) ?: Int.MIN_VALUE)
+        if (landed == null || forwardNoProgress) {
+            signalNoLanding(isFresh, rewindToIndex)
+            return
+        }
+        recordLanding(landed, isFresh, rewindToIndex)
+        renderSearchPage(
+            topic,
+            TopicSearchStatus.Done,
+            canPrev = searchCursorIndex > 0,
+            // Forward-only HFR never reports a count up front; keep « next » enabled until a step
+            // actually reports the end (onStepEnd disables it).
+            canNext = true,
+        )
+        _effects.send(TopicEffect.ScrollToPost(landed))
+    }
+
+    /**
+     * Chantier B (#546) — record a usable match in the client cursor history. Fresh seeds it ; a
+     * backward replay just repositions the index ; a forward step DROPS any history beyond the current
+     * position before appending — a blind append corrupted the history when stepping back then forward
+     * (e.g. `[100,200,300]` at index 1 → next would yield `[100,200,300,200]`) (Codex review).
+     */
+    private fun recordLanding(landed: Int, isFresh: Boolean, rewindToIndex: Int?) {
+        when {
+            rewindToIndex != null -> searchCursorIndex = rewindToIndex
+            isFresh -> {
+                searchCursors.clear()
+                searchCursors += landed
+                searchCursorIndex = 0
+            }
+            else -> {
+                while (searchCursors.lastIndex > searchCursorIndex) {
+                    searchCursors.removeAt(searchCursors.lastIndex)
+                }
+                searchCursors += landed
+                searchCursorIndex = searchCursors.lastIndex
+            }
+        }
+    }
+
+    /**
+     * Chantier B (#546) — a reply with no usable landing (null/absent cursor, end sentinel, or a
+     * NoResults page). Fresh → no results ; a backward replay that failed → non-destructive failure
+     * (≠ end) ; a forward step → end of results.
+     */
+    private suspend fun signalNoLanding(isFresh: Boolean, rewindToIndex: Int?) {
+        when {
+            isFresh -> onFreshNoResults()
+            rewindToIndex != null -> onReplayFailed()
+            else -> onStepEnd()
+        }
+    }
+
+    /**
+     * Chantier B (#546) — render the `transsearch` page into [TopicUiState.Mode.Loaded] with [status]
+     * and the prev/next affordances, keeping the previously-known [TopicUiState.availablePages] (the
+     * transsearch pager is not the canonical topic pager) and never scheduling a prefetch off it.
+     */
+    private fun renderSearchPage(topic: Topic, status: TopicSearchStatus, canPrev: Boolean, canNext: Boolean) {
+        _state.update {
+            it.copy(
+                mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
+                search = it.search.copy(
+                    status = status,
+                    canGoPreviousResult = canPrev,
+                    canGoNextResult = canNext,
+                ),
+            )
+        }
+    }
+
+    /** Chantier B (#546) — a fresh search that matched nothing : NoResults state, no navigation. */
+    private fun onFreshNoResults() {
+        resetSearchCursors()
+        _state.update {
+            it.copy(
+                search = it.search.copy(
+                    status = TopicSearchStatus.NoResults,
+                    canGoPreviousResult = false,
+                    canGoNextResult = false,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Chantier B (#546) — a forward step ran past the last match. The current match STAYS on screen (we
+     * never rendered the sentinel page), « next » disables, and a sober Toast is surfaced. The cursor
+     * history is untouched so « previous » still walks back from the last real match.
+     */
+    private suspend fun onStepEnd() {
+        _state.update {
+            it.copy(
+                search = it.search.copy(
+                    status = TopicSearchStatus.Done,
+                    canGoPreviousResult = searchCursorIndex > 0,
+                    canGoNextResult = false,
+                ),
+            )
+        }
+        _effects.send(TopicEffect.SearchResultsEnd)
+    }
+
+    /**
+     * Chantier B (#546) — a « previous » replay HFR could not honour (no-result / inconsistency).
+     * Distinct from [onStepEnd] (the end of FORWARD results) : the current match stays on screen,
+     * « next » is NOT disabled, and a generic search-failure Toast is surfaced (Codex review). The
+     * cursor index is unchanged (the rewind never landed), so the affordances reflect the position
+     * we are still on.
+     */
+    private suspend fun onReplayFailed() {
+        _state.update {
+            it.copy(
+                search = it.search.copy(
+                    status = TopicSearchStatus.Done,
+                    canGoPreviousResult = searchCursorIndex > 0,
+                    canGoNextResult = true,
+                ),
+            )
+        }
+        _effects.send(TopicEffect.SearchFailed)
     }
 
     @AssistedFactory

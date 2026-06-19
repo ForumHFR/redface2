@@ -13,13 +13,30 @@
     <!-- #291 — entrée du menu contextuel : ajoute/retire le post du panier de citation multiple. -->
     <string name="topic_post_menu_multi_quote_add">Ajouter à la citation multiple</string>
     <string name="topic_post_menu_multi_quote_remove">Retirer de la citation multiple</string>
+    <!-- #509 — placeholder replié à la place d'un post d'auteur masqué (blacklist). %1$s = pseudo. -->
+    <string name="topic_post_hidden_by_author">Post de %1$s masqué</string>
+    <string name="topic_post_hidden_reveal">Afficher</string>
     <string name="topic_loading">Chargement…</string>
     <!-- #379 — marqueur explicite de fin de sujet, rendu après le dernier post de la DERNIÈRE page. -->
     <string name="topic_end_of_topic">Dernier message du sujet</string>
+    <string name="topic_more_pages">Suite à la page suivante</string>
     <!-- #285 — top app bar : back affordance (content description) + fallback title shown while
          the topic page has not loaded yet (or errored), so the bar never reads blank. -->
     <string name="topic_back">Retour</string>
     <string name="topic_topbar_fallback_title">Sujet</string>
+    <!-- Chantier C (#546) — recherche intra-sujet (transsearch.php). -->
+    <string name="topic_search_open">Rechercher dans le sujet</string>
+    <string name="topic_search_close">Fermer la recherche</string>
+    <string name="topic_search_word_hint">Mot</string>
+    <string name="topic_search_pseudo_hint">Pseudo</string>
+    <string name="topic_search_only_matches">Filtrer (résultats uniquement)</string>
+    <string name="topic_search_submit">Rechercher</string>
+    <string name="topic_search_failed">La recherche dans le sujet a échoué.</string>
+    <!-- Chantier B (#546) — navigation entre résultats + cas « aucun résultat ». -->
+    <string name="topic_search_no_results">Aucun résultat</string>
+    <string name="topic_search_prev_result">Résultat précédent</string>
+    <string name="topic_search_next_result">Résultat suivant</string>
+    <string name="topic_search_results_end">Aucun résultat suivant</string>
     <string name="topic_error_title">Erreur de chargement</string>
     <string name="topic_error_body">Impossible d’ouvrir la page %1$d.\n\n%2$s</string>
     <string name="topic_caption">post %1$d • page %2$d / %3$d</string>
@@ -39,6 +56,9 @@
     <string name="topic_post_menu_open_in_browser">Ouvrir dans le navigateur</string>
     <string name="topic_post_menu_no_browser">Aucun navigateur disponible</string>
     <string name="topic_post_menu_report_soon">Alerter (à venir)</string>
+    <!-- #509 — entrée du menu post : masquer / réafficher tous les posts de l'auteur (blacklist). -->
+    <string name="topic_post_menu_block_author">Masquer cet utilisateur</string>
+    <string name="topic_post_menu_unblock_author">Ne plus masquer cet utilisateur</string>
     <string name="topic_post_menu_edited">Édité le %1$s</string>
     <!-- #483 — compact inline marker next to the post date when the post was edited; the full
          « Édité le … » timestamp stays in the post menu (R.string.topic_post_menu_edited). -->

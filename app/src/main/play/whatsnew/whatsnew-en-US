@@ -1,16 +1,13 @@
-Redface 2 v0.14.0 — beta.
+Redface 2 v0.15.0 — beta.
 
 New:
-- Post signatures shown beneath the message (dedicated setting).
-- Account avatar in the top bar.
-- Long quotes are collapsible.
-- Flags action bar hides on scroll.
-
-Improvements:
-- Unified topic info line, harmonized icon buttons, images without layout shift.
+- Hide a user (blacklist): their posts collapse away.
+- Full-screen mode: hide the Android navigation bar.
+- In-topic search: by word or username, navigate between results, covers the whole topic.
+- DT tab (MultiMP): unread-only by default, tap the tab to reveal read ones, pull to refresh.
+- Topic creator's name in gold; optional "Rouge REDFACE1" accent colour.
 
 Fixes:
-- Flags scrolled back to top after refresh.
-- More readable signatures: author colours neutralised, "---" separator removed.
+- Blacklist now applies live; MP badge fixed when opening a MultiMP.
 
 Report bugs via the beta or GitHub.

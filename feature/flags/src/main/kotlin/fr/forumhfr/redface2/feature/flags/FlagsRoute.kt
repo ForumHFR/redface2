@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.flags
 import android.annotation.SuppressLint
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -21,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -71,10 +74,12 @@ import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 import fr.forumhfr.redface2.core.ui.FlagItem
 import fr.forumhfr.redface2.core.ui.FlagItemDivider
 import fr.forumhfr.redface2.core.ui.FlagItemLongPress
 import fr.forumhfr.redface2.core.ui.FlagMetadata
+import fr.forumhfr.redface2.core.ui.ForumListRow
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import kotlinx.coroutines.launch
@@ -110,6 +115,11 @@ fun FlagsRoute(
     onOpenFlag: (Flag) -> Unit,
     onLoginRequested: () -> Unit,
     onOpenCategory: (Int) -> Unit = {},
+    // #6 — open a DT (MultiMP) conversation : the host pushes the existing PrivateMessageThread
+    // route. `page` is the conversation's last inbox page (web parity, #430). `wasUnread` lets the
+    // host decrement the MP unread badge on first read, mirroring the Messages tab's onOpenThread
+    // (badge regression: the DT path never reported it, so the badge stayed stuck high).
+    onOpenMultiMp: (threadId: Int, page: Int, wasUnread: Boolean) -> Unit = { _, _, _ -> },
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel: FlagsViewModel = hiltViewModel()
@@ -128,8 +138,29 @@ fun FlagsRoute(
     // a cold start or a tab switch before DataStore re-resolves the selected tab (#317).
     val cyanShowsRead by viewModel.cyanShowsReadShortcut.collectAsStateWithLifecycle()
 
-    // Opt-in « DT » placeholder tab (Settings toggle ; MPStorage sync #6 lands later).
+    // Opt-in « DT » tab (Settings toggle). Its MultiMP list is fetched on tab open (#6).
     val showDtTab by viewModel.showDtTab.collectAsStateWithLifecycle()
+    // #546 directive XaTriX — the screen consumes the FILTERED DT state (dtDisplayState), not the raw
+    // union: DT defaults to « non-lus uniquement » and a re-tap of the DT tab toggles « +lus ».
+    val dtListState by viewModel.dtDisplayState.collectAsStateWithLifecycle()
+    val dtIsRefreshing by viewModel.dtIsRefreshing.collectAsStateWithLifecycle()
+    // « +lus » suffix on the DT tab, mirroring [cyanShowsRead]: DT selected AND its unread filter off.
+    val dtShowsRead by viewModel.dtShowsRead.collectAsStateWithLifecycle()
+
+    // #6 — trigger the DT scan only when the DT tab is OPENED (a stable LaunchedEffect, not the raw
+    // composition): fetchStorage scans the inbox and must stay off the per-category auto-refresh.
+    // The ViewModel guards it to once per session, so re-selecting DT reuses the loaded list.
+    // Gated on showDtTab (a stale `selectedTab == Dt` while the toggle is off must NOT scan) and
+    // keyed on the auth session pseudo so an account switch — which resets the DT state to Loading
+    // without changing selectedTab — re-runs the effect and re-scans for the new session (Codex
+    // review). Extracted so its branch stays out of FlagsRoute's cyclomatic-complexity budget.
+    val authSessionKey = (authState as? AuthState.Authenticated)?.pseudo
+    DtTabOpenEffect(
+        selectedTab = selectedTab,
+        showDtTab = showDtTab,
+        authSessionKey = authSessionKey,
+        onDtTabOpened = viewModel::onDtTabOpened,
+    )
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -265,6 +296,9 @@ fun FlagsRoute(
                                 isRefreshing = isRefreshing,
                                 removeFlagState = removeFlagState,
                                 showDtTab = showDtTab,
+                                dtListState = dtListState,
+                                dtShowsRead = dtShowsRead,
+                                dtIsRefreshing = dtIsRefreshing,
                             ),
                             actions = AuthenticatedActions(
                                 onSelectTab = viewModel::selectTab,
@@ -279,6 +313,8 @@ fun FlagsRoute(
                                 onLoginRequested = onLoginRequested,
                                 onRequestRemoveFlag = viewModel::requestRemoveFlag,
                                 onOpenCategory = onOpenCategory,
+                                onOpenMultiMp = onOpenMultiMp,
+                                onRefreshDt = viewModel::refreshDt,
                             ),
                             listState = flagsListState,
                         )
@@ -591,6 +627,7 @@ private fun ColumnScope.AuthenticatedBody(
 ) {
     val selectedTab = state.selectedTab
     val cyanShowsRead = state.cyanShowsRead
+    val dtShowsRead = state.dtShowsRead
     val tabs = buildList {
         add(FlagTab.Cyan to stringResource(R.string.flags_tab_my_topics))
         add(FlagTab.Red to stringResource(R.string.flags_tab_read_only))
@@ -602,15 +639,16 @@ private fun ColumnScope.AuthenticatedBody(
     }
     val selectedIndex = tabs.indexOfFirst { it.first == selectedTab }.coerceAtLeast(0)
     // Discreet « +lus » suffix on the Cyan label so the user knows read participated topics
-    // are currently shown — re-tapping the (already selected) Cyan tab toggles it.
-    val cyanReadSuffix = stringResource(R.string.flags_tab_cyan_read_shown_suffix)
+    // are currently shown — re-tapping the (already selected) Cyan tab toggles it. #546 directive
+    // XaTriX — the SAME suffix marks the DT tab when its read conversations are shown (mirror).
+    val readSuffix = stringResource(R.string.flags_tab_cyan_read_shown_suffix)
 
     PrimaryTabRow(selectedTabIndex = selectedIndex) {
         tabs.forEachIndexed { index, (tab, label) ->
-            val displayLabel = if (tab == FlagTab.Cyan && cyanShowsRead) {
-                label + cyanReadSuffix
-            } else {
-                label
+            val displayLabel = when {
+                tab == FlagTab.Cyan && cyanShowsRead -> label + readSuffix
+                tab == FlagTab.Dt && dtShowsRead -> label + readSuffix
+                else -> label
             }
             // Low-level `content` overload INSTEAD of the `text` slot : the text slot pads a
             // non-configurable 16 dp each side, which left « Mes sujets » with exactly its own
@@ -672,9 +710,15 @@ private fun ColumnScope.AuthenticatedBody(
             ),
     ) {
         when (selectedTab) {
-            // Placeholders — no backend, no fetch, no pull-to-refresh (cf. their KDoc).
+            // Super has no backend, no fetch, no pull-to-refresh (cf. its KDoc).
             FlagTab.Super -> SuperPlaceholderBody()
-            FlagTab.Dt -> DtPlaceholderBody()
+            // #6 — DT is a real list now: the user's MultiMP conversations, enriched best-effort
+            // with the MPStorage reading positions.
+            FlagTab.Dt -> DtListBody(
+                state = state.dtListState,
+                isRefreshing = state.dtIsRefreshing,
+                actions = actions,
+            )
             else -> FlagListBody(state = state, actions = actions, listState = listState)
         }
     }
@@ -813,6 +857,10 @@ private const val RECALL_TO_TOP_FRAMES = 3
 private const val CONTENT_TYPE_HEADER = "category_header"
 private const val CONTENT_TYPE_EMPTY = "empty_section"
 private const val CONTENT_TYPE_ROW = "flag_row"
+
+// #6 — the DT scan-note footer is a distinct, non-row item (not a clickable ForumListRow), so it
+// keeps its own recycling pool and never reuses a row slot.
+private const val CONTENT_TYPE_DT_FOOTER = "dt_scan_note"
 
 /**
  * Category-grouped flag list (#179). Renders one sticky band per [FlagCategorySection] in the
@@ -1101,26 +1149,339 @@ private fun DtTabFallbackEffect(
 }
 
 /**
- * Sober M3 placeholder for the opt-in « DT » [FlagTab.Dt] tab. The content (followed
- * discussions whose flags sync through the MPStorage document, #6) lands later.
+ * #6 — fires the DT (MultiMP) scan once the DT tab becomes the selected one. The fetch only starts
+ * when DT is selected AND the Settings toggle still shows it ([showDtTab]) — a stale
+ * `selectedTab == Dt` left behind while the toggle is off (before [DtTabFallbackEffect] swaps back
+ * to Cyan) must never scan the inbox.
+ *
+ * Keyed on the tab, [showDtTab], AND [authSessionKey] (the authenticated pseudo). The session key is
+ * load-bearing: an account switch resets the DT state back to Loading without changing
+ * `selectedTab`, so a Unit/tab-only key would never re-fire and the screen would stay stuck on the
+ * spinner while sitting on the DT tab (Codex review). The ViewModel guards the actual fetch to once
+ * per session, so a benign re-key (returning to DT) reuses the loaded list.
+ *
+ * Extracted so its branch stays out of [FlagsRoute]'s cyclomatic-complexity budget.
  */
 @Composable
-private fun DtPlaceholderBody() {
+private fun DtTabOpenEffect(
+    selectedTab: FlagTab,
+    showDtTab: Boolean,
+    authSessionKey: String?,
+    onDtTabOpened: () -> Unit,
+) {
+    LaunchedEffect(selectedTab, showDtTab, authSessionKey) {
+        if (selectedTab == FlagTab.Dt && showDtTab) onDtTabOpened()
+    }
+}
+
+/**
+ * #6 — body of the opt-in « DT » tab: the UNION of the user's MultiMP conversations on inbox PAGE 1
+ * (`cat=prive`, filtered on [PrivateMessageSummary.isMultiRecipient]) and the orphan MPStorage
+ * entries absent from that page, deduplicated by `threadId`. Inbox rows render the rich
+ * [DtListItem.InboxBacked] (subject, unread dot, « reprise p.N » badge) ; orphans render the
+ * placeholder [DtListItem.StorageOnly] (« Conversation #threadId », neutral dot). A discreet
+ * scan-note footer states the page-1 limit. Tapping a row opens the existing `PrivateMessageThread`
+ * route via [AuthenticatedActions.onOpenMultiMp].
+ *
+ * The MPStorage enrichment is best-effort: a missing / unreadable / failed storage read leaves the
+ * list intact, just without badges (cf. [FlagsViewModel.loadDt]). Only an inbox load failure
+ * reaches [DtListUiState.Error], which offers a reconnect/retry CTA like the flag list.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DtListBody(state: DtListUiState, isRefreshing: Boolean, actions: AuthenticatedActions) {
+    // #546 directive XaTriX — pull-to-refresh (swipe down) on the DT list, like the flag tabs. Wraps
+    // the whole body (every branch) so the indicator stays anchored over the existing content during
+    // the refresh round-trip and the gesture has a target even on the listless states (#229 pattern).
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = actions.onRefreshDt,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        DtListContent(state = state, actions = actions)
+    }
+}
+
+/**
+ * The DT body content under the [DtListBody] pull-to-refresh layer. Dispatches the [DtListUiState]
+ * to its branch. The listless states ([DtListUiState.Loading]/[Empty]/[NoUnread]/[Error]) are made
+ * vertically scrollable so the surrounding `PullToRefreshBox` keeps a target (#229).
+ */
+@Composable
+private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions) {
+    when (state) {
+        DtListUiState.Loading -> Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = 32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator()
+        }
+
+        DtListUiState.Empty -> DtMessageBody(text = stringResource(R.string.flags_dt_empty))
+
+        // #546 — the union is non-empty but « non-lus uniquement » hid every row: a dedicated message
+        // (not the « aucune conversation » empty copy). Re-tapping the DT tab reveals « +lus ».
+        DtListUiState.NoUnread -> DtNoUnreadBody()
+
+        is DtListUiState.Error -> DtErrorBody(cause = state.cause, actions = actions)
+
+        is DtListUiState.Content -> LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface),
+        ) {
+            // DT now renders through the SAME row primitive + divider as the Cyan/Red/Favorite lists
+            // (no Card, no contentPadding/spacing) so the four lists stay visually identical and a
+            // row change propagates to all (arbitrage XaTriX 2026-06-19). The list is the union of
+            // inbox PAGE 1 MultiMP rows + orphan MPStorage entries (#6) — dispatched per variant.
+            items(
+                items = state.items,
+                key = { it.threadId },
+                contentType = { CONTENT_TYPE_ROW },
+            ) { item ->
+                DtRow(item = item, onOpenMultiMp = actions.onOpenMultiMp)
+                FlagItemDivider()
+            }
+            // Scan-note footer (#6): the list only covers inbox PAGE 1 + what the DT sync knows;
+            // older inbox pages are deliberately not swept. A discreet, non-clickable trailing item.
+            item(key = "dt-scan-note", contentType = CONTENT_TYPE_DT_FOOTER) {
+                Text(
+                    text = stringResource(R.string.flags_dt_scan_note),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Dispatches a [DtListItem] to its row composable (#6): an [DtListItem.InboxBacked] renders the rich
+ * inbox row, a [DtListItem.StorageOnly] the placeholder orphan row. Both open via [onOpenMultiMp] on
+ * the page the « reprise p.N » badge advertises (clamped ≥ 1).
+ */
+@Composable
+private fun DtRow(item: DtListItem, onOpenMultiMp: (threadId: Int, page: Int, wasUnread: Boolean) -> Unit) {
+    when (item) {
+        is DtListItem.InboxBacked -> DtConversationRow(
+            item = item,
+            // Open on the page the badge ADVERTISES: the MPStorage resume page when present, else the
+            // conversation's last inbox page (#430). Tapping must land where the « reprise p.N » badge
+            // says it will — opening lastPage while showing « reprise p.N » was a badge/action
+            // contradiction (Codex review). Clamp ≥ 1 so a bogus stored 0/negative page never
+            // produces an invalid route argument. `wasUnread` mirrors the Messages tab so the host
+            // decrements the MP badge on first read (HFR has no server read flag, so a stuck-high
+            // badge never self-corrects on re-fetch).
+            onClick = {
+                val target = (item.resumePage ?: item.conversation.lastPage).coerceAtLeast(1)
+                onOpenMultiMp(item.threadId, target, dtRowWasUnread(item))
+            },
+        )
+
+        is DtListItem.StorageOnly -> DtStorageOnlyRow(
+            item = item,
+            // No lastPage for an orphan: open on the MPStorage resume page (clamped ≥ 1), else page 1.
+            // The read/unread state of an orphan is unknown off inbox PAGE 1, so wasUnread = false
+            // (dtRowWasUnread) — never speculatively decrement the badge for an unknown state.
+            onClick = { onOpenMultiMp(item.threadId, (item.resumePage ?: 1).coerceAtLeast(1), dtRowWasUnread(item)) },
+        )
+    }
+}
+
+/**
+ * #6 / badge — whether a DT row was UNREAD when tapped, used by the host to decrement the MP unread
+ * badge on first read (mirror of the Messages tab's onOpenThread `wasUnread`). An [DtListItem.InboxBacked]
+ * carries the live inbox read state ([PrivateMessageSummary.hasUnread]); an orphan [DtListItem.StorageOnly]
+ * has no known read state off inbox PAGE 1, so it reports `false` (never speculatively decrement).
+ */
+internal fun dtRowWasUnread(item: DtListItem): Boolean = when (item) {
+    is DtListItem.InboxBacked -> item.conversation.hasUnread
+    is DtListItem.StorageOnly -> false
+}
+
+/**
+ * #546 directive XaTriX — body for the « filtered to no unread » state ([DtListUiState.NoUnread]):
+ * the union holds conversations but none is unread. Shows a discreet « aucune conversation non lue »
+ * message and keeps the scan-note footer visible (the user can re-tap the DT tab for « +lus »).
+ * Scrollable so the surrounding `PullToRefreshBox` keeps a swipe target (#229).
+ */
+@Composable
+private fun DtNoUnreadBody() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .verticalScroll(rememberScrollState())
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 24.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(
-            text = stringResource(R.string.flags_dt_placeholder_title),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            text = stringResource(R.string.flags_dt_no_unread),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Text(
-            text = stringResource(R.string.flags_dt_placeholder_body),
-            style = MaterialTheme.typography.bodyMedium,
+            text = stringResource(R.string.flags_dt_scan_note),
+            style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Single-line message body (DT empty state), sharing the surface background. Vertically scrollable
+ * so the surrounding [PullToRefreshBox] keeps a swipe target on this listless state (#229) — a
+ * non-scrollable body would give the pull-to-refresh gesture nothing to anchor on.
+ */
+@Composable
+private fun DtMessageBody(text: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * Error body for the DT list, mirroring the flag-list failure branch: a session-expired cause
+ * offers a reconnect CTA, every other cause a retry. The MPStorage read never lands here (it is
+ * best-effort) — only the inbox primary load.
+ */
+@Composable
+private fun DtErrorBody(cause: Throwable, actions: AuthenticatedActions) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        val sessionExpired = cause is SessionExpiredException
+        Text(
+            text = stringResource(
+                if (sessionExpired) {
+                    R.string.flags_session_expired
+                } else {
+                    classifyHfrError(cause).sharedLabelResOrNull() ?: R.string.flags_dt_error
+                },
+            ),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+        )
+        if (sessionExpired) {
+            TextButton(onClick = actions.onLoginRequested) {
+                Text(stringResource(R.string.flags_login_cta))
+            }
+        } else {
+            TextButton(onClick = actions.onRefreshDt) {
+                Text(stringResource(R.string.flags_retry))
+            }
+        }
+    }
+}
+
+/**
+ * One DT conversation row: the « Interlocuteurs multiples » label, the conversation subject, an
+ * unread dot ([PrivateMessageSummary.hasUnread]), and — when present — the discreet « reprise p.N »
+ * MPStorage badge. The badge is a reading POSITION, never a read/unread state (#361/ADR-013).
+ */
+@Composable
+private fun DtConversationRow(item: DtListItem.InboxBacked, onClick: () -> Unit) {
+    val conversation = item.conversation
+    // DT renders through the shared [ForumListRow]: the inbox dot is the leading slot, the subject is
+    // the title (unread → SemiBold), and the « Interlocuteurs multiples » caption + the « reprise p.N »
+    // MPStorage badge become the two-segment metadata line (badge in `end`, never truncated — Codex).
+    // The badge is a reading POSITION, never a read/unread state (#361/ADR-013).
+    val multiLabel = stringResource(R.string.flags_dt_multi_recipient)
+    val resumeBadge = item.resumePage?.let { stringResource(R.string.flags_dt_resume_badge, it) }.orEmpty()
+    // a11y — the dot is decorative, so the row carries the full announcement for TalkBack: read state
+    // + subject, then « Interlocuteurs multiples » and the resume page when present (Codex review).
+    val rowStateDescription = stringResource(
+        if (conversation.hasUnread) R.string.flags_dt_row_unread else R.string.flags_dt_row_read,
+        conversation.subject,
+    )
+    val contentDescription = buildString {
+        append(rowStateDescription)
+        append(". ")
+        append(multiLabel)
+        if (resumeBadge.isNotEmpty()) {
+            append(". ")
+            append(resumeBadge)
+        }
+    }
+    ForumListRow(
+        title = conversation.subject,
+        metadata = FlagMetadata(start = multiLabel, end = resumeBadge),
+        onClick = onClick,
+        emphasized = conversation.hasUnread,
+        leading = { DtUnreadDot(unread = conversation.hasUnread) },
+        contentDescription = contentDescription,
+    )
+}
+
+/**
+ * One ORPHAN DT row (#6): a MPStorage `mpFlags` entry absent from inbox PAGE 1. No subject and no
+ * read/unread state are available, so the title is a localized placeholder « Conversation #threadId »
+ * and the leading dot is the neutral (hollow) variant whose a11y reads « état inconnu », never
+ * « Lu ». The « reprise p.N » badge ([DtListItem.StorageOnly.resumePage]) is shown when present.
+ */
+@Composable
+private fun DtStorageOnlyRow(item: DtListItem.StorageOnly, onClick: () -> Unit) {
+    val title = stringResource(R.string.flags_dt_storage_only_title, item.threadId)
+    val multiLabel = stringResource(R.string.flags_dt_multi_recipient)
+    val resumeBadge = item.resumePage?.let { stringResource(R.string.flags_dt_resume_badge, it) }.orEmpty()
+    // a11y — the read/unread state is unknown off-inbox, so the row announces « état inconnu » (never
+    // « Lu »/« Non lu ») followed by the placeholder title, « Interlocuteurs multiples » and the badge.
+    // stringResource resolved here (it is @Composable, unusable inside the plain buildString lambda).
+    val stateUnknown = stringResource(R.string.flags_dt_row_state_unknown, title)
+    val contentDescription = buildString {
+        append(stateUnknown)
+        append(". ")
+        append(multiLabel)
+        if (resumeBadge.isNotEmpty()) {
+            append(". ")
+            append(resumeBadge)
+        }
+    }
+    ForumListRow(
+        title = title,
+        metadata = FlagMetadata(start = multiLabel, end = resumeBadge),
+        onClick = onClick,
+        emphasized = false,
+        leading = { DtUnreadDot(unread = false) },
+        contentDescription = contentDescription,
+    )
+}
+
+/**
+ * Inbox unread marker for a DT row: a filled primary dot when unread, a hollow outline ring when
+ * read. Mirrors the Messages tab's `ReadStateDot` without depending on `feature/messages`; the a11y
+ * state is carried by the row text, so this stays decorative.
+ */
+@Composable
+private fun DtUnreadDot(unread: Boolean) {
+    if (unread) {
+        Box(
+            modifier = Modifier
+                .size(12.dp)
+                .background(MaterialTheme.colorScheme.primary, CircleShape),
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(12.dp)
+                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
         )
     }
 }
@@ -1136,8 +1497,14 @@ private data class FlagsBodyState(
     val cyanShowsRead: Boolean,
     val isRefreshing: Boolean,
     val removeFlagState: RemoveFlagState,
-    /** Whether the opt-in « DT » placeholder tab is shown (Settings toggle). */
+    /** Whether the opt-in « DT » tab is shown (Settings toggle). */
     val showDtTab: Boolean,
+    /** #6 — the DT (MultiMP) tab list state, fetched on tab open, FILTERED by « non-lus uniquement ». */
+    val dtListState: DtListUiState,
+    /** #546 — whether the DT tab currently shows read conversations (« +lus » suffix). */
+    val dtShowsRead: Boolean,
+    /** #546 — toggled around the DT pull-to-refresh round-trip (anchors the indicator). */
+    val dtIsRefreshing: Boolean,
 )
 
 private data class AuthenticatedActions(
@@ -1148,6 +1515,10 @@ private data class AuthenticatedActions(
     val onRequestRemoveFlag: (Flag) -> Unit,
     /** #414 — tap on a category band opens that category's topic listing. */
     val onOpenCategory: (Int) -> Unit,
+    /** #6 — open a DT conversation (threadId, last inbox page, unread-on-open for the badge). */
+    val onOpenMultiMp: (threadId: Int, page: Int, wasUnread: Boolean) -> Unit = { _, _, _ -> },
+    /** #6 — explicit user reload of the DT list (retry). */
+    val onRefreshDt: () -> Unit = {},
 )
 
 /**

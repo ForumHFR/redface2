@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
+import android.view.View
+import android.view.Window
 import android.widget.Toast
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
@@ -17,6 +19,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -28,13 +32,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.navigationBars
@@ -46,6 +58,8 @@ import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -65,6 +79,8 @@ import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.shouldRevealNavBar
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -98,6 +114,7 @@ import fr.forumhfr.redface2.feature.settings.SettingsCategoryDetailScreen
 import fr.forumhfr.redface2.feature.settings.SettingsDisplayScreen
 import fr.forumhfr.redface2.feature.settings.SettingsImagesScreen
 import fr.forumhfr.redface2.feature.settings.SettingsMaintenanceScreen
+import fr.forumhfr.redface2.feature.settings.SettingsBlacklistScreen
 import fr.forumhfr.redface2.feature.settings.SettingsProxyScreen
 import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
@@ -361,6 +378,10 @@ data object SettingsImagesRoute : RedfaceNavKey
 @Serializable
 data object SettingsAccountAboutRoute : RedfaceNavKey
 
+/** #509 — sous-page « Utilisateurs masqués » (blacklist). */
+@Serializable
+data object SettingsBlacklistRoute : RedfaceNavKey
+
 /** #494 v2 — détail générique d'une catégorie de réglages (cf. SettingsCategoryDetailScreen). */
 @Serializable
 data class SettingsCategoryRoute(val categoryId: String) : RedfaceNavKey
@@ -510,14 +531,35 @@ fun RedfaceApp(intent: Intent?) {
     val themeViewModel: AppThemeViewModel = hiltViewModel()
     val themeMode by themeViewModel.themeMode.collectAsStateWithLifecycle()
     val amoledEnabled by themeViewModel.amoledEnabled.collectAsStateWithLifecycle()
+    // TU 2788511 — accent colour family (rose ↔ vivid « REDFACE1 » red), resolved at the root for RedfaceTheme.
+    val accentColor by themeViewModel.accentColor.collectAsStateWithLifecycle()
     // #287 — reading presets (density + font scale) resolved at the root and bundled for RedfaceTheme.
     val displayDensity by themeViewModel.displayDensity.collectAsStateWithLifecycle()
     val fontScale by themeViewModel.fontScale.collectAsStateWithLifecycle()
     // #332 — « fold long quotes » reading preference, provided to the post renderer via RedfaceTheme.
     val foldLongQuotes by themeViewModel.foldLongQuotes.collectAsStateWithLifecycle()
+    // #105 — « afficher l'ascenseur » reading preference, provided to the reading scrollbar via RedfaceTheme.
+    val showScrollbar by themeViewModel.showScrollbar.collectAsStateWithLifecycle()
     // #445 — debug bounds overlay preference (the dev-channel gate + render live in
     // [DevDebugBoundsOverlay], emitted last so it paints over everything; off by default).
     val debugBoundsOverlay by themeViewModel.debugBoundsOverlay.collectAsStateWithLifecycle()
+    // #518 — immersive mode: hide the bottom Android system navigation bar (3 buttons or gesture pill,
+    // device-dependent). Off by default; applied on the host window below.
+    val hideSystemNavBar by themeViewModel.hideSystemNavBar.collectAsStateWithLifecycle()
+    // #518 follow-up — in-app back button shown while immersive mode is active (companion to the above).
+    val immersiveBackButton by themeViewModel.immersiveBackButton.collectAsStateWithLifecycle()
+    // #518 follow-up — the in-app back FAB fires the SAME dispatcher the system back button drives, so a
+    // press follows nav3's onBack (pop the active tab's back stack). Resolved here in composable scope;
+    // null only on the @Preview path (no host Activity), where the FAB also never renders.
+    val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+    // #518 follow-up — scroll-driven reveal of the hidden system nav bar. The MODE is the user preference;
+    // the raw scroll FACTS are reported up by the active topic screen. RedfaceApp stays the single owner
+    // of the window bar (no dual ownership): it combines mode + facts via the pure shouldRevealNavBar and
+    // drives the window below. topicNavBarScroll resets when the active route is no longer a topic.
+    val immersiveNavBarReveal by themeViewModel.immersiveNavBarReveal.collectAsStateWithLifecycle()
+    var topicNavBarScroll by remember { mutableStateOf(NavBarScrollFacts()) }
+    // Effective hide + scroll-report gate are pure helpers so RedfaceApp stays under detekt's complexity.
+    val hideNavBarNow = immersiveNavBarHidden(hideSystemNavBar, immersiveNavBarReveal, topicNavBarScroll)
     val darkTheme = when (themeMode) {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
@@ -539,14 +581,28 @@ fun RedfaceApp(intent: Intent?) {
             controller.isAppearanceLightStatusBars = !darkTheme
             controller.isAppearanceLightNavigationBars = !darkTheme
         }
+        // #518 — apply immersive mode whenever the EFFECTIVE hide state changes (the master toggle, or a
+        // scroll-driven reveal request flipping, #518 follow-up), and re-assert it on ON_RESUME (returning
+        // from another app / the recents screen restores the bar without a recomposition). The
+        // transient-bars-by-swipe behaviour handles user swipes; hiding sets the bottom inset to 0 so
+        // navigationBarsPadding() collapses cleanly, while a transient swipe-reveal does NOT change insets
+        // (no layout jump). Status bar and the in-app tab bar are untouched.
+        LaunchedEffect(hideNavBarNow) {
+            applyImmersiveNavBar(window, view, hideNavBarNow)
+        }
+        LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+            applyImmersiveNavBar(window, view, hideNavBarNow)
+        }
     }
     RedfaceTheme(
         darkTheme = darkTheme,
         amoledTheme = amoledEnabled,
+        accentColor = accentColor,
         reading = ReadingDisplaySettings(
             density = displayDensity,
             fontScale = fontScale,
             foldLongQuotes = foldLongQuotes,
+            showScrollbar = showScrollbar,
         ),
     ) {
         // #458 — cold-start screen, read synchronously from the bootstrap mirror and frozen for
@@ -718,6 +774,11 @@ fun RedfaceApp(intent: Intent?) {
         // routes makes the editor full-screen: its submit bar then sits at the window bottom and the IME
         // inset lands exactly on the keyboard. Bonus UX: no tab switching mid-compose (would drop the draft).
         val topRoute = backStacks.getValue(currentDestination).lastOrNull()
+        // #518 follow-up — only a topic screen reports scroll facts; clear them whenever the active top
+        // route is something else (other tab, editor, profile…) so a stale « at bottom » never keeps the
+        // nav bar revealed off-topic. Returning to a topic re-emits its current facts on first frame. The
+        // branch lives in the helper composable to keep RedfaceApp under detekt's complexity threshold.
+        ResetNavBarScrollOffTopic(topRoute) { topicNavBarScroll = NavBarScrollFacts() }
         val adaptiveType = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
         val navLayoutType = resolveNavLayoutType(topRoute.hidesNavigationSuite(), adaptiveType)
         // #529 — consume the bottom nav-bar inset for the content only under a bottom-bar layout
@@ -747,100 +808,127 @@ fun RedfaceApp(intent: Intent?) {
             // so the nav host no longer steals 8 dp/side from every screen. The Surface is kept
             // for the theme background/elevation; only its horizontal padding was removed.
             // #529 — consumes the bottom nav-bar inset under a bottom-bar layout (no-op otherwise).
-            Surface(modifier = contentInsetModifier) {
-                val activeBackStack = backStacks.getValue(currentDestination)
-                val accountMenu: @Composable () -> Unit = {
-                    RedfaceAccountMenu(
-                        authState = authState,
-                        versionName = BuildConfig.VERSION_NAME,
-                        versionCode = BuildConfig.VERSION_CODE,
-                        onLogin = { activeBackStack.add(LoginRoute) },
-                        onLogout = accountViewModel::logout,
-                        onOpenDiagnostics = { activeBackStack.add(DiagnosticsRoute) },
+            val activeBackStack = backStacks.getValue(currentDestination)
+            Box(modifier = Modifier.fillMaxSize()) {
+                Surface(modifier = contentInsetModifier) {
+                    val accountMenu: @Composable () -> Unit = {
+                        RedfaceAccountMenu(
+                            authState = authState,
+                            versionName = BuildConfig.VERSION_NAME,
+                            versionCode = BuildConfig.VERSION_CODE,
+                            onLogin = { activeBackStack.add(LoginRoute) },
+                            onLogout = accountViewModel::logout,
+                            onOpenDiagnostics = { activeBackStack.add(DiagnosticsRoute) },
+                            onReportContent = {
+                                startReportEmail(context, reportEmailSubject, reportNoEmailClient)
+                            },
+                            avatarUrl = accountAvatarUrl,
+                        )
+                    }
+                    RedfaceNavHost(
+                        backStack = activeBackStack,
+                        accountMenu = accountMenu,
                         onReportContent = {
                             startReportEmail(context, reportEmailSubject, reportNoEmailClient)
                         },
-                        avatarUrl = accountAvatarUrl,
+                        privateMessageNavState = PrivateMessageNavState(
+                            readThreadIds = readPrivateMessageThreadIds,
+                            multiRecipientThreadIds = multiRecipientThreadIds,
+                            onThreadLoaded = { threadId ->
+                                // #453 (Codex review) — decrement the badge ONLY when the conversation was
+                                // unread when opened AND this is its first read of the session (predicate
+                                // extracted to keep this composable under detekt's complexity threshold).
+                                val decrement = shouldDecrementUnreadBadge(
+                                    threadId = threadId,
+                                    unreadOnOpen = unreadOnOpenThreadIds,
+                                    alreadyRead = readPrivateMessageThreadIds,
+                                )
+                                if (decrement) {
+                                    mpBadgeViewModel.onThreadRead(threadId)
+                                }
+                                readPrivateMessageThreadIds = readPrivateMessageThreadIds + threadId
+                            },
+                            onThreadOpenedAsMulti = { threadId ->
+                                multiRecipientThreadIds = multiRecipientThreadIds + threadId
+                            },
+                            onThreadOpenedUnread = { threadId ->
+                                unreadOnOpenThreadIds = unreadOnOpenThreadIds + threadId
+                            },
+                            sentSignal = privateMessageSentSignal,
+                            onConversationSent = {
+                                privateMessageSentSignal = System.currentTimeMillis()
+                            },
+                        ),
+                        topicTitleNavState = TopicTitleNavState(
+                            titles = topicTitleCache,
+                            onTitleLoaded = { cat, post, title ->
+                                topicTitleCache = topicTitleCache.withTitle(TopicTitleKey(cat, post), title)
+                            },
+                        ),
+                        topicScrollNavState = TopicScrollNavState(
+                            anchors = topicScrollAnchorCache,
+                            onAnchorSaved = { cat, post, page, anchor ->
+                                topicScrollAnchorCache = topicScrollAnchorCache.withScrollAnchor(
+                                    TopicScrollKey(cat, post, page),
+                                    anchor,
+                                )
+                            },
+                            pendingBottomLanding = topicPendingBottomLanding,
+                            onPendingBottomLanding = { topicPendingBottomLanding = it },
+                        ),
+                        multiQuoteNavState = MultiQuoteNavState(
+                            basket = multiQuoteBasket,
+                            onToggle = { cat, post, numreponse ->
+                                multiQuoteBasket = multiQuoteBasket.toggled(cat, post, numreponse)
+                            },
+                            onClear = { multiQuoteBasket = null },
+                        ),
+                        topicPollNavState = TopicPollNavState(
+                            expansions = topicPollExpansionCache,
+                            onExpansionChanged = { cat, post, expanded ->
+                                topicPollExpansionCache = topicPollExpansionCache.withPollExpansion(
+                                    TopicPollKey(cat, post),
+                                    expanded,
+                                )
+                            },
+                        ),
+                        immersiveNavBarNavState = ImmersiveNavBarNavState(
+                            // #518 follow-up — observe scroll only when immersive is on AND a scroll-driven
+                            // mode is selected (helper keeps the && out of RedfaceApp's complexity budget).
+                            active = immersiveScrollReportActive(hideSystemNavBar, immersiveNavBarReveal),
+                            onScrollFacts = { atBottom, scrollingUp ->
+                                topicNavBarScroll = NavBarScrollFacts(atBottom, scrollingUp)
+                            },
+                        ),
+                        onOpenProfile = { userId, pseudo, avatarUrl ->
+                            // Review feedback I3: capture the **origin** tab so that
+                            // « Voir le profil complet » lands on the correct back stack
+                            // even if the user switches tabs while the sheet is open.
+                            profileSheetRequest = ProfileSheetRequest(
+                                userId = userId,
+                                pseudo = pseudo,
+                                avatarUrl = avatarUrl,
+                                origin = currentDestination,
+                            )
+                        },
                     )
                 }
-                RedfaceNavHost(
-                    backStack = activeBackStack,
-                    accountMenu = accountMenu,
-                    onReportContent = {
-                        startReportEmail(context, reportEmailSubject, reportNoEmailClient)
-                    },
-                    privateMessageNavState = PrivateMessageNavState(
-                        readThreadIds = readPrivateMessageThreadIds,
-                        multiRecipientThreadIds = multiRecipientThreadIds,
-                        onThreadLoaded = { threadId ->
-                            // #453 (Codex review) — decrement the badge ONLY when the conversation was
-                            // unread when opened AND this is its first read of the session (predicate
-                            // extracted to keep this composable under detekt's complexity threshold).
-                            val decrement = shouldDecrementUnreadBadge(
-                                threadId = threadId,
-                                unreadOnOpen = unreadOnOpenThreadIds,
-                                alreadyRead = readPrivateMessageThreadIds,
-                            )
-                            if (decrement) {
-                                mpBadgeViewModel.onThreadRead(threadId)
-                            }
-                            readPrivateMessageThreadIds = readPrivateMessageThreadIds + threadId
-                        },
-                        onThreadOpenedAsMulti = { threadId ->
-                            multiRecipientThreadIds = multiRecipientThreadIds + threadId
-                        },
-                        onThreadOpenedUnread = { threadId ->
-                            unreadOnOpenThreadIds = unreadOnOpenThreadIds + threadId
-                        },
-                        sentSignal = privateMessageSentSignal,
-                        onConversationSent = {
-                            privateMessageSentSignal = System.currentTimeMillis()
-                        },
+                // #518 follow-up — in-app back affordance for immersive mode: a discreet FAB that
+                // fires the SAME back action as the system button (OnBackPressedDispatcher), so the
+                // hidden Android nav bar never has to be swiped back in. Visibility predicate is a pure
+                // helper (keeps RedfaceApp under detekt's complexity threshold); the composable no-ops
+                // when not visible so the `.align`/`.padding` BoxScope modifier stays at this call site.
+                ImmersiveBackButton(
+                    visible = shouldShowImmersiveBackButton(
+                        hideSystemNavBar = hideSystemNavBar,
+                        immersiveBackButton = immersiveBackButton,
+                        backStackSize = activeBackStack.size,
+                        topRoute = topRoute,
                     ),
-                    topicTitleNavState = TopicTitleNavState(
-                        titles = topicTitleCache,
-                        onTitleLoaded = { cat, post, title ->
-                            topicTitleCache = topicTitleCache.withTitle(TopicTitleKey(cat, post), title)
-                        },
-                    ),
-                    topicScrollNavState = TopicScrollNavState(
-                        anchors = topicScrollAnchorCache,
-                        onAnchorSaved = { cat, post, page, anchor ->
-                            topicScrollAnchorCache = topicScrollAnchorCache.withScrollAnchor(
-                                TopicScrollKey(cat, post, page),
-                                anchor,
-                            )
-                        },
-                        pendingBottomLanding = topicPendingBottomLanding,
-                        onPendingBottomLanding = { topicPendingBottomLanding = it },
-                    ),
-                    multiQuoteNavState = MultiQuoteNavState(
-                        basket = multiQuoteBasket,
-                        onToggle = { cat, post, numreponse ->
-                            multiQuoteBasket = multiQuoteBasket.toggled(cat, post, numreponse)
-                        },
-                        onClear = { multiQuoteBasket = null },
-                    ),
-                    topicPollNavState = TopicPollNavState(
-                        expansions = topicPollExpansionCache,
-                        onExpansionChanged = { cat, post, expanded ->
-                            topicPollExpansionCache = topicPollExpansionCache.withPollExpansion(
-                                TopicPollKey(cat, post),
-                                expanded,
-                            )
-                        },
-                    ),
-                    onOpenProfile = { userId, pseudo, avatarUrl ->
-                        // Review feedback I3: capture the **origin** tab so that
-                        // « Voir le profil complet » lands on the correct back stack
-                        // even if the user switches tabs while the sheet is open.
-                        profileSheetRequest = ProfileSheetRequest(
-                            userId = userId,
-                            pseudo = pseudo,
-                            avatarUrl = avatarUrl,
-                            origin = currentDestination,
-                        )
-                    },
+                    onBack = { backDispatcher?.onBackPressed() },
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(16.dp),
                 )
             }
         }
@@ -899,6 +987,56 @@ fun RedfaceApp(intent: Intent?) {
 private fun DevDebugBoundsOverlay(enabled: Boolean) {
     if (enabled && BuildConfig.FLAVOR == DEV_CHANNEL) {
         DebugBoundsOverlay()
+    }
+}
+
+/**
+ * #518 follow-up — whether to show the in-app immersive « back » FAB. Pure predicate, extracted so
+ * [RedfaceApp] stays under detekt's cyclomatic-complexity threshold. Shown only when:
+ * - immersive mode hides the system navigation bar ([hideSystemNavBar]), AND
+ * - the companion option is on ([immersiveBackButton]), AND
+ * - there is a back entry in the active tab ([backStackSize] > 1) — never an app-exit at a tab root, AND
+ * - the current route is not a full-screen editor ([topRoute] does not hide the navigation suite): those
+ *   own the bottom region for their IME-pinned submit bar, so a bottom-start FAB would overlap it. A
+ *   3-button user there can still swipe-reveal the bar; gesture users keep the edge back gesture.
+ */
+private fun shouldShowImmersiveBackButton(
+    hideSystemNavBar: Boolean,
+    immersiveBackButton: Boolean,
+    backStackSize: Int,
+    topRoute: NavKey?,
+): Boolean = hideSystemNavBar &&
+    immersiveBackButton &&
+    backStackSize > 1 &&
+    !topRoute.hidesNavigationSuite()
+
+/**
+ * #518 follow-up — discreet in-app « back » affordance for immersive mode. A [SmallFloatingActionButton]
+ * pinned bottom-start that fires [onBack] — wired in [RedfaceApp] to the host's `OnBackPressedDispatcher`,
+ * i.e. the EXACT action of the system back button (nav3 pops the active tab's back stack). It lets a user
+ * navigate back without swiping the hidden Android navigation bar in. Low-key secondary-container colours
+ * so it does not fight the content. No-ops when [visible] is false (the visibility rule lives in
+ * [shouldShowImmersiveBackButton]); the early return keeps the BoxScope `.align`/`.padding` modifier at
+ * the single call site rather than duplicated here.
+ */
+@Composable
+private fun ImmersiveBackButton(
+    visible: Boolean,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (!visible) return
+    val description = stringResource(R.string.immersive_back_description)
+    SmallFloatingActionButton(
+        onClick = onBack,
+        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        modifier = modifier.semantics { contentDescription = description },
+    ) {
+        Icon(
+            painter = painterResource(CoreUiR.drawable.ic_arrow_back),
+            contentDescription = null,
+        )
     }
 }
 
@@ -1041,6 +1179,61 @@ private data class TopicPollNavState(
 )
 
 /**
+ * #518 follow-up — raw scroll facts of the active topic, reported UP so RedfaceApp (the single owner of
+ * the window navigation bar) can decide whether to reveal the hidden bar (cf. [shouldRevealNavBar]).
+ * Plain booleans, structural equality so re-reporting identical facts is a recomposition no-op.
+ */
+private data class NavBarScrollFacts(
+    val atBottom: Boolean = false,
+    val scrollingUp: Boolean = false,
+)
+
+/**
+ * #518 follow-up — immersive nav-bar reveal plumbing threaded into [RedfaceNavHost], same hoisted-bundle
+ * shape as [TopicScrollNavState]. [active] (immersive on AND mode != MANUAL) gates the topic screen's
+ * scroll observer so it is a no-op otherwise; [onScrollFacts] bubbles the facts up to the `var` in
+ * [RedfaceApp].
+ */
+private data class ImmersiveNavBarNavState(
+    val active: Boolean,
+    val onScrollFacts: (atBottom: Boolean, scrollingUp: Boolean) -> Unit,
+)
+
+/**
+ * #518 follow-up — effective « hide the system nav bar now » state: immersive on AND no active
+ * scroll-driven reveal ([shouldRevealNavBar]). Extracted so the `&&` stays out of RedfaceApp's
+ * cyclomatic-complexity budget.
+ */
+private fun immersiveNavBarHidden(
+    hideSystemNavBar: Boolean,
+    mode: ImmersiveNavBarReveal,
+    scroll: NavBarScrollFacts,
+): Boolean = hideSystemNavBar && !shouldRevealNavBar(mode, scroll.atBottom, scroll.scrollingUp)
+
+/**
+ * #518 follow-up — whether the topic screen should report its scroll facts: immersive on AND a
+ * scroll-driven reveal mode selected (MANUAL / immersive-off makes the reporter a no-op). Extracted
+ * to keep the `&&` out of RedfaceApp's complexity budget.
+ */
+private fun immersiveScrollReportActive(
+    hideSystemNavBar: Boolean,
+    mode: ImmersiveNavBarReveal,
+): Boolean = hideSystemNavBar && mode != ImmersiveNavBarReveal.MANUAL
+
+/**
+ * #518 follow-up — clears the reported scroll facts whenever the active top route is NOT a topic, so a
+ * stale « at bottom » can never keep the nav bar revealed off-topic. The `topRoute is TopicRoute` guard
+ * (and thus its branch) lives here rather than in RedfaceApp's body, keeping the latter under detekt's
+ * cyclomatic-complexity threshold.
+ */
+@Composable
+private fun ResetNavBarScrollOffTopic(topRoute: NavKey?, onReset: () -> Unit) {
+    LaunchedEffect(topRoute) {
+        if (topRoute !is TopicRoute) onReset()
+    }
+}
+
+/**
  * #291 — multi-quote selection, hoisted to RedfaceApp (same survival rationale as
  * [TopicScrollNavState]: a page change replaces the TopicRoute entry, so any state owned by the
  * topic screen dies with it). [numreponses] keeps SELECTION ORDER — the quotes are concatenated
@@ -1123,6 +1316,8 @@ private fun RedfaceNavHost(
     multiQuoteNavState: MultiQuoteNavState,
     // #465 — per-topic poll-expansion cache, same hoisting rationale (survives the per-page swap).
     topicPollNavState: TopicPollNavState,
+    // #518 follow-up — immersive nav-bar reveal: the topic reports scroll facts up through this bundle.
+    immersiveNavBarNavState: ImmersiveNavBarNavState,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     NavDisplay(
@@ -1179,6 +1374,20 @@ private fun RedfaceNavHost(
                     // returns to the flags list (less surprising than switching to the Forum tab).
                     onOpenCategory = { catId ->
                         backStack.add(CategoryRoute(cat = catId, subcat = null, page = 1))
+                    },
+                    // #6 — DT (MultiMP) row tap: open the existing PrivateMessageThread route inside
+                    // the Flags tab. DT rows are always multi-recipient, so record the hint (the
+                    // route itself stays opaque, like the Messages tab does, cf. onOpenThread).
+                    onOpenMultiMp = { threadId, page, wasUnread ->
+                        privateMessageNavState.onThreadOpenedAsMulti(threadId)
+                        // Badge fix — record the unread-on-open state so the badge decrements on
+                        // first read, exactly like the Messages tab's onOpenThread. Without this the
+                        // DT path never fed `unreadOnOpenThreadIds`, so shouldDecrementUnreadBadge
+                        // was always false for a DT-opened conversation and the MP badge stayed high.
+                        if (wasUnread) {
+                            privateMessageNavState.onThreadOpenedUnread(threadId)
+                        }
+                        backStack.add(PrivateMessageThreadRoute(threadId = threadId, page = page))
                     },
                     topBarActions = accountMenu,
                 )
@@ -1364,6 +1573,7 @@ private fun RedfaceNavHost(
                     onOpenDisplay = { backStack.add(SettingsDisplayRoute) },
                     onOpenImages = { backStack.add(SettingsImagesRoute) },
                     onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
+                    onOpenBlacklist = { backStack.add(SettingsBlacklistRoute) },
                     // #494 v2 — catégories sans sous-page dédiée → détail générique.
                     onOpenCategory = { categoryId -> backStack.add(SettingsCategoryRoute(categoryId)) },
                     topBarActions = accountMenu,
@@ -1382,6 +1592,17 @@ private fun RedfaceNavHost(
                     onOpenDisplay = { backStack.add(SettingsDisplayRoute) },
                     onOpenImages = { backStack.add(SettingsImagesRoute) },
                     onOpenAccountAbout = { backStack.add(SettingsAccountAboutRoute) },
+                    onOpenBlacklist = { backStack.add(SettingsBlacklistRoute) },
+                    topBarActions = accountMenu,
+                )
+            }
+            entry<SettingsBlacklistRoute> {
+                SettingsBlacklistScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
                     topBarActions = accountMenu,
                 )
             }
@@ -1724,6 +1945,11 @@ private fun RedfaceNavHost(
                             postSubmitOverflowLanding = true,
                         )
                     },
+                    // #518 follow-up — report scroll facts so RedfaceApp can reveal the hidden system
+                    // nav bar per the chosen mode. `active` is false (no-op) unless immersive + a
+                    // scroll-driven mode are on; the screen clears stale facts when inactive.
+                    immersiveNavBarRevealActive = immersiveNavBarNavState.active,
+                    onImmersiveNavBarScroll = immersiveNavBarNavState.onScrollFacts,
                 )
             }
             entry<PostEditorRoute> { route ->
@@ -1937,6 +2163,23 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
+}
+
+/**
+ * #518 — hide or show ONLY the bottom Android system navigation bar on [window]. Never touches
+ * `Type.statusBars()` (the top bar stays) nor the in-app tab bar. When hiding, the behaviour is set to
+ * [WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE] so a swipe from the bottom edge
+ * re-reveals the bar transiently (documented Android behaviour) without changing layout insets.
+ */
+private fun applyImmersiveNavBar(window: Window, view: View, hide: Boolean) {
+    val controller = WindowCompat.getInsetsController(window, view)
+    if (hide) {
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(WindowInsetsCompat.Type.navigationBars())
+    } else {
+        controller.show(WindowInsetsCompat.Type.navigationBars())
+    }
 }
 
 // #494 — paramètres de transition (Claude + Codex). MotionScheme M3 absent en stable 1.4.x (1.5.0-alpha)

@@ -156,7 +156,15 @@
     <!-- §12 Extensions et filtrage -->
     <string name="settings_future_ext_ignore_list">Liste d\'ignorés</string>
     <string name="settings_future_ext_keyword_filters">Filtres par mots-clés</string>
-    <string name="settings_future_ext_blacklist">Blacklist</string>
+    <string name="settings_future_ext_blacklist">Utilisateurs masqués</string>
+    <!-- #509 — sous-page de gestion de la blacklist (liste + ajout/retrait). -->
+    <string name="settings_blacklist_title">Utilisateurs masqués</string>
+    <string name="settings_blacklist_description">Masquer les posts de certains utilisateurs.</string>
+    <string name="settings_blacklist_intro">Les posts des utilisateurs ajoutés ici sont repliés dans les sujets (« post masqué »). Vous pouvez toujours les afficher au cas par cas.</string>
+    <string name="settings_blacklist_add_label">Pseudo à masquer</string>
+    <string name="settings_blacklist_add_button">Ajouter</string>
+    <string name="settings_blacklist_remove_button">Retirer</string>
+    <string name="settings_blacklist_empty">Aucun utilisateur masqué pour le moment.</string>
     <string name="settings_future_ext_color_tag">Color Tag</string>
     <string name="settings_future_ext_qualitay">Qualitay</string>
     <string name="settings_future_ext_redflag">Redflag</string>
@@ -257,6 +265,11 @@
     <string name="settings_theme_amoled_title">Thème AMOLED (vrai noir)</string>
     <string name="settings_theme_amoled_description">Fond noir pur pour les écrans OLED. S\'applique uniquement en thème sombre.</string>
     <string name="settings_theme_amoled_persist_failed">Impossible de mémoriser le réglage AMOLED. Réessayez.</string>
+    <!-- TU 2788511 — couleur d\'accent (rose ↔ rouge REDFACE1). -->
+    <string name="settings_theme_accent_intro">Couleur d\'accent de l\'app (boutons, sélection, en-têtes de message).</string>
+    <string name="settings_theme_accent_rose">Rose (défaut)</string>
+    <string name="settings_theme_accent_rouge_redface1">Rouge REDFACE1</string>
+    <string name="settings_theme_accent_persist_failed">Impossible de mémoriser la couleur d\'accent. Réessayez.</string>
 
     <!-- #287 — Préréglages de lecture. Densité (Confort/Compact = espacement des listes et des
          messages) + taille de la police de lecture (S/M/L, appliquée en plus du zoom du système),
@@ -271,6 +284,21 @@
     <string name="settings_display_font_scale_medium">Moyenne</string>
     <string name="settings_display_font_scale_large">Grande</string>
     <string name="settings_display_font_scale_persist_failed">Impossible de mémoriser la taille de police. Réessayez.</string>
+    <!-- #518 — plein écran immersif : masquer la barre de navigation système Android (boutons ou barre gestuelle). -->
+    <string name="settings_display_fullscreen_title">Plein écran</string>
+    <string name="settings_display_hide_nav_bar_title">Masquer la barre de navigation Android</string>
+    <string name="settings_display_hide_nav_bar_description">Masque la barre de navigation système du bas (les 3 boutons, ou la barre gestuelle selon votre appareil). La barre du haut et les onglets de l\'app restent affichés. Elle peut réapparaître temporairement avec un geste depuis le bas de l\'écran.</string>
+    <string name="settings_display_hide_nav_bar_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+    <!-- #518 follow-up — sous-option du plein écran : bouton retour flottant pour ne pas avoir à faire réapparaître la barre système. -->
+    <string name="settings_display_immersive_back_button_title">Bouton retour flottant</string>
+    <string name="settings_display_immersive_back_button_description">Affiche un bouton « retour » discret en bas à gauche quand la barre de navigation est masquée, pour revenir en arrière sans faire réapparaître la barre système. Désactivez-le si vous utilisez la navigation gestuelle.</string>
+    <string name="settings_display_immersive_back_button_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+    <!-- #518 follow-up — comportement de révélation de la barre système masquée selon le défilement. -->
+    <string name="settings_display_nav_bar_reveal_intro">Quand faire réapparaître la barre de navigation masquée :</string>
+    <string name="settings_display_nav_bar_reveal_manual">Manuel (balayage depuis le bas)</string>
+    <string name="settings_display_nav_bar_reveal_at_bottom">En bas du sujet</string>
+    <string name="settings_display_nav_bar_reveal_on_scroll_up">En remontant</string>
+    <string name="settings_display_nav_bar_reveal_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- Build 89 follow-up — Lecture des sujets. Masquer la barre du haut (titre + numéro de page)
          en défilant vers le bas pour libérer de la place ; persisté en DataStore et appliqué en direct. -->
@@ -298,6 +326,9 @@
     <string name="settings_fold_long_quotes_title">Replier les longues citations</string>
     <string name="settings_fold_long_quotes_description">Les longues citations sont repliées sur une ligne, dépliables au clic ; sinon elles restent affichées en entier.</string>
     <string name="settings_fold_long_quotes_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
+    <string name="settings_show_scrollbar_title">Afficher l\'ascenseur</string>
+    <string name="settings_show_scrollbar_description">Affiche l\'ascenseur de défilement sur le bord droit lors de la lecture d\'un sujet ou d\'un message privé.</string>
+    <string name="settings_show_scrollbar_persist_failed">Impossible de mémoriser ce réglage. Réessayez.</string>
 
     <!-- #312 — Publication. Confirmation avant chaque envoi (réponse/édition de message, sujet,
          message privé) ; persisté en DataStore et lu en direct par les éditeurs.

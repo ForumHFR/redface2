@@ -8,12 +8,17 @@ import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageResult
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -46,11 +51,17 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
+// Hilt-injected dependency cluster : flags + forum + messages + MPStorage + prefs + auth + clock,
+// each provided independently by the graph — there is no cohesive bundle to extract (a wrapper
+// would only relay them). Same pragmatic exception as the hoisted-composable suppressions elsewhere.
+@Suppress("LongParameterList")
 class FlagsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val flagRepository: FlagRepository,
     private val forumRepository: ForumRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val messagesRepository: MessagesRepository,
+    private val mpStorageRepository: MpStorageRepository,
     private val clock: Clock,
 ) : ViewModel() {
 
@@ -80,9 +91,9 @@ class FlagsViewModel @Inject constructor(
     val selectedTab: StateFlow<FlagTab> = _selectedTab.asStateFlow()
 
     /**
-     * Whether the opt-in « DT » placeholder tab is shown (Settings toggle, default off).
-     * The content arrives with the MPStorage sync (#6) — until then the tab only renders
-     * a placeholder body, like [FlagTab.Super].
+     * Whether the opt-in « DT » tab is shown (Settings toggle, default off). The tab lists the user's
+     * MultiMP conversations enriched with MPStorage reading positions (see [dtListState]) — it is a
+     * real backed list now (#6), NOT a placeholder like [FlagTab.Super].
      */
     val showDtTab: StateFlow<Boolean> = userPreferencesRepository.observeShowDtSection()
         .stateIn(
@@ -90,6 +101,87 @@ class FlagsViewModel @Inject constructor(
             started = SharingStarted.Eagerly,
             initialValue = false,
         )
+
+    /**
+     * #6 — UI state for the « DT » tab: the user's MultiMP conversations (inbox `cat=prive`,
+     * [PrivateMessageSummary.isMultiRecipient]) enriched best-effort with the MPStorage reading
+     * positions (DTCloud's `mpFlags`). A dedicated state (NOT a [FlagsListUiState] / [Flag] reuse,
+     * arbitrage Codex): the DT channel is a private-message list, not a flag list, so it never
+     * shares the flag model's contract (`flagType == null` stays a pure « no flag-pipeline fetch »
+     * marker — for the [FlagTab.Super] placeholder, and for DT which is served by [dtListState] instead).
+     *
+     * The fetch is triggered on tab OPENING ([onDtTabOpened]) — never from the per-category
+     * auto-refresh — because [MpStorageRepository.fetchStorage] is expensive (it scans the inbox to
+     * discover the storage MP). Idle until first opened.
+     */
+    private val _dtListState = MutableStateFlow<DtListUiState>(DtListUiState.Loading)
+    val dtListState: StateFlow<DtListUiState> = _dtListState.asStateFlow()
+
+    /**
+     * #546 directive XaTriX — « non-lus uniquement » filter for the DT tab, mirroring CYAN's
+     * [cyanUnreadOnly]: default `true` so the DT list opens on the actionable unread subset, and a
+     * re-tap of the already-selected DT tab toggles it (the « +lus » shortcut, cf. [selectTab]).
+     *
+     * Per-SESSION only (in-memory ViewModel state), NOT persisted: persisting it would mean adding a
+     * method to [UserPreferencesRepository], which breaks every fake (the eager constructor read of
+     * the new flow throws a MockKException in the theme tests). Persistence is a deliberate FOLLOW-UP.
+     */
+    private val _dtUnreadOnly = MutableStateFlow(true)
+    val dtUnreadOnly: StateFlow<Boolean> = _dtUnreadOnly.asStateFlow()
+
+    /**
+     * #546 directive XaTriX — toggled around the user-driven [refreshDt] round-trip so the Material 3
+     * `PullToRefreshBox` indicator stays anchored over the existing DT list instead of blanking it to
+     * a cold spinner. Same pattern as [isRefreshing] for the flag tabs.
+     */
+    private val _dtIsRefreshing = MutableStateFlow(false)
+    val dtIsRefreshing: StateFlow<Boolean> = _dtIsRefreshing.asStateFlow()
+
+    /**
+     * #546 directive XaTriX — whether the DT tab currently shows read conversations (drives the
+     * discreet « +lus » tab-label suffix): DT selected AND its unread filter off. Mirrors
+     * [cyanShowsReadShortcut].
+     */
+    val dtShowsRead: StateFlow<Boolean> = combine(
+        selectedTab,
+        _dtUnreadOnly,
+    ) { tab, unreadOnly -> tab == FlagTab.Dt && !unreadOnly }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false,
+        )
+
+    /**
+     * #546 directive XaTriX — the DT list state the SCREEN consumes: the raw [_dtListState] union
+     * passed through the « non-lus uniquement » filter ([_dtUnreadOnly]). [dtListState] stays exposed
+     * for the union/dedup tests; this is the displayed projection. When the filter is on, only the
+     * inbox-backed conversations with an unread message survive — orphan storage-only rows (unknown
+     * read state) and read inbox rows are excluded (cf. [filterDt]).
+     */
+    val dtDisplayState: StateFlow<DtListUiState> = combine(
+        _dtListState,
+        _dtUnreadOnly,
+    ) { state, unreadOnly -> filterDt(state, unreadOnly) }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = DtListUiState.Loading,
+        )
+
+    /** One-shot guard so re-entering the composition (recomposition, ON_RESUME) does not re-scan. */
+    private var dtFetchStarted = false
+
+    /**
+     * #6 Codex review — the in-flight DT fetch and a monotonic generation counter, together guarding
+     * against STALE WRITES. A logout / account switch ([resetDtState]) cancels [dtFetchJob] AND bumps
+     * [dtGeneration]; each [loadDt] captures its generation at launch and only publishes [_dtListState]
+     * while that capture still equals [dtGeneration]. So a fetch that was mid-flight when the account
+     * switched can never republish the previous account's MultiMP into the new session. Two rapid
+     * [refreshDt] calls are also latest-wins: the second cancels the first's job and out-generations it.
+     */
+    private var dtFetchJob: kotlinx.coroutines.Job? = null
+    private var dtGeneration = 0
 
     val authState: StateFlow<AuthState?> = authRepository.observeAuthState()
         .stateIn(
@@ -406,17 +498,36 @@ class FlagsViewModel @Inject constructor(
      * another tab only switches to it (no toggle). Other tabs just switch.
      */
     fun selectTab(tab: FlagTab) {
-        if (tab == FlagTab.Cyan && _selectedTab.value == FlagTab.Cyan) {
-            // Re-tapping the already-selected Cyan tab toggles its « non-lus uniquement » filter
-            // (the « +lus » shortcut). It flips the CYAN per-type value, persisted via
-            // [setFlagsUnreadOnly] — the same write the bottom-sheet toggle uses (single mutation
-            // point). Flip from [cyanUnreadOnly], which tracks CYAN specifically (not the selected
-            // tab) with an optimistic shim and an eager `true` default — so a tab switch, the cold
-            // start, or a rapid double re-tap can never feed it a lagging value and lose a toggle.
-            setFlagsUnreadOnly(!cyanUnreadOnly.value)
+        // A re-tap on the already-selected tab is handled in [handleReTap] (Cyan/DT « +lus » toggle,
+        // or a no-op for the other tabs) — it returns true when it consumed the tap, so a real
+        // transition is everything below.
+        if (tab == _selectedTab.value) {
+            handleReTap(tab)
             return
         }
         _selectedTab.value = tab
+        // #106 — a real tab transition (tap OR swipe commit, both route through selectTab) recalls the
+        // shared list to the top, reusing the one-shot #546 signal (consumed by the screen via
+        // recallListToTop → requestScrollToItem(0)). NOT raised on the Cyan « +lus » filter re-tap (the
+        // FilterFlipScrollResetEffect handles that) nor on a no-op re-tap nor on return-from-topic
+        // (selectedTab unchanged there) — so no spurious reset on rotation either.
+        _recallListToTop.value = true
+    }
+
+    /**
+     * Handles a re-tap on the already-selected [tab]. Cyan and DT flip their « non-lus uniquement »
+     * filter (the « +lus » shortcut) — Cyan through the persisted [setFlagsUnreadOnly] write (reading
+     * the optimistic [cyanUnreadOnly]), DT through the in-memory [_dtUnreadOnly] (per-session, not
+     * persisted). Every other tab re-tap is a deliberate no-op (#106 tinc — keep the scroll position).
+     * Never raises [_recallListToTop]: a filter flip is not a tab transition (the screen's
+     * FilterFlipScrollResetEffect handles the scroll for Cyan).
+     */
+    private fun handleReTap(tab: FlagTab) {
+        when (tab) {
+            FlagTab.Cyan -> setFlagsUnreadOnly(!cyanUnreadOnly.value)
+            FlagTab.Dt -> _dtUnreadOnly.value = !_dtUnreadOnly.value
+            else -> Unit // #106 — re-tapping any other tab is a no-op.
+        }
     }
 
     /** User tapped « Retirer le drapeau » on [flag] : raise the confirmation dialog. */
@@ -622,6 +733,139 @@ class FlagsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * #6 — the screen calls this when the « DT » tab is OPENED (a stable [LaunchedEffect], not the
+     * raw composition). Loads the MultiMP conversations once per session: re-entering the
+     * composition reuses the already-loaded state ([dtFetchStarted] guard). The fan-out (inbox page
+     * + MPStorage scan) is deliberately kept off the per-category auto-refresh path. Use
+     * [refreshDt] for an explicit user re-pull.
+     */
+    fun onDtTabOpened() {
+        if (dtFetchStarted) return
+        loadDt(isRefresh = false)
+    }
+
+    /**
+     * Explicit user-driven reload of the DT list (pull-to-refresh / retry), bypassing the guard.
+     * [isRefresh] keeps the current content visible under the `PullToRefreshBox` indicator instead of
+     * blanking it to a cold spinner (#546 directive XaTriX) — the retry CTA path also lands here, so
+     * the (already-Error) state is simply re-loaded; only a refresh-over-content needs the no-blank.
+     */
+    fun refreshDt() {
+        loadDt(isRefresh = true)
+    }
+
+    /**
+     * Loads the DT list as the UNION of two sources, deduplicated by `threadId` (#6, directive
+     * XaTriX 2026-06-19):
+     *  - the inbox MultiMP rows of PAGE 1 ([DT_INBOX_PAGE]) — the hard, fully-described source
+     *    ([DtListItem.InboxBacked]: subject, unread dot, lastPage), each best-effort joined with its
+     *    MPStorage resume page ;
+     *  - the MPStorage `mpFlags` entries whose `threadId` is ABSENT from that page
+     *    ([DtListItem.StorageOnly]: thread id + resume page only — no subject, no read/unread state).
+     *
+     * Rows are concatenated inbox-first (recent activity, complete + reliable data) then the orphan
+     * entries in `mpFlags.list` order (no per-entry date to sort on). The MPStorage read is
+     * best-effort: every degraded outcome ([MpStorageResult.NotFound] / [MpStorageResult.Unreadable]
+     * / an exception) yields no entries, so the list still renders from the inbox alone — the storage
+     * scan never fails the conversation list.
+     *
+     * Only the inbox load itself is fatal: it is the list's primary source, so a network/session
+     * error there surfaces [DtListUiState.Error] (the screen offers a retry / reconnect CTA).
+     *
+     * [DtListUiState.Empty] iff the inbox PAGE 1 has no MultiMP AND MPStorage has no orphan entry.
+     * Scope (#6): only inbox PAGE 1 is scanned + whatever MPStorage already knows ; a full multi-page
+     * inbox sweep stays DEFERRED, so older pages are not covered — the UI carries a scan note footer
+     * (`flags_dt_scan_note`) and the empty-state copy (`flags_dt_empty`) assumes that semantics.
+     */
+    private fun loadDt(isRefresh: Boolean) {
+        dtFetchStarted = true
+        // Latest-wins: cancel any in-flight DT fetch and out-generation it so a previous load's
+        // late completion is ignored (two rapid refreshDt, or a refresh racing a still-running open).
+        dtFetchJob?.cancel()
+        val generation = ++dtGeneration
+        // #546 — a user refresh keeps the current content visible (the PullToRefreshBox indicator
+        // anchors over it); a cold open shows the centered spinner. So only the cold path writes
+        // Loading, and the refresh path raises [_dtIsRefreshing] instead.
+        if (isRefresh) {
+            _dtIsRefreshing.value = true
+        } else {
+            _dtListState.value = DtListUiState.Loading
+        }
+        dtFetchJob = viewModelScope.launch {
+            try {
+                loadDtBody(generation)
+            } finally {
+                // Clear the refresh indicator only for the LIVE generation: a load cancelled by a
+                // newer refreshDt or an account switch (resetDtState bumped the generation and already
+                // owns the indicator reset) must not clear the indicator the new load just raised.
+                if (generation == dtGeneration) _dtIsRefreshing.value = false
+            }
+        }
+    }
+
+    /**
+     * Body of [loadDt], extracted so the [isRefresh] indicator bookkeeping (the `try`/`finally`) stays
+     * out of the fetch logic and the cyclomatic budget. Publishes only for the still-live [generation]
+     * (stale-write guard, cf. [loadDt] KDoc): a fetch invalidated by an account switch or a newer
+     * refresh never overwrites the current session's state.
+     */
+    @Suppress("ReturnCount") // The stale-write generation guards are the natural shape of this fetch.
+    private suspend fun loadDtBody(generation: Int) {
+        val inboxMulti = try {
+            messagesRepository.getPrivateMessageList(page = DT_INBOX_PAGE)
+                .items
+                .filter { it.isMultiRecipient }
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            throw cancellation
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            // Reset the guard so a retry can re-run; the inbox is the list's only hard source.
+            // Only the live generation may publish — a fetch invalidated by an account switch
+            // (resetDtState bumped the generation) must not overwrite the new session's Loading.
+            if (generation == dtGeneration) {
+                dtFetchStarted = false
+                _dtListState.value = DtListUiState.Error(error)
+            }
+            return
+        }
+
+        // Best-effort: a missing / unreadable / failed storage read leaves an empty list, so the
+        // union degrades to the inbox rows alone (no resume badge, no orphan rows). The list is
+        // never blocked. NOTE: no early-return on an empty inbox — orphan MPStorage entries may
+        // still populate the list (a page-1 box without any MultiMP is NOT necessarily Empty).
+        val entries = fetchStorageEntries()
+        // Re-check the generation AFTER the (suspending) storage scan too: the account may have
+        // switched while the scan was in flight, so the stale result must not republish.
+        if (generation != dtGeneration) return
+
+        val items = buildDtItems(inboxMulti, entries)
+        if (items.isEmpty()) {
+            if (generation == dtGeneration) _dtListState.value = DtListUiState.Empty
+            return
+        }
+        if (generation == dtGeneration) _dtListState.value = DtListUiState.Content(items)
+    }
+
+    /**
+     * Best-effort MPStorage read for the DT union. Returns the FULL list of DTCloud `mpFlags`
+     * entries, EMPTY for every degraded outcome ([MpStorageResult.NotFound] /
+     * [MpStorageResult.Unreadable]) or transport failure — the caller renders the list regardless.
+     * Each entry's `page` is a reading-RESUME position, NOT a read/unread state (#361/ADR-013): the
+     * unread dot is the inbox [PrivateMessageSummary.hasUnread], never this page number.
+     */
+    @Suppress("SwallowedException") // best-effort: a storage read failure deliberately degrades to
+    // « inbox rows only, no orphan, no resume badge » so the list still renders; the cause is irrelevant.
+    private suspend fun fetchStorageEntries(): List<MpStorageFlagEntry> = try {
+        when (val storage = mpStorageRepository.fetchStorage()) {
+            is MpStorageResult.Found -> storage.document.mpFlags
+            MpStorageResult.NotFound, MpStorageResult.Unreadable -> emptyList()
+        }
+    } catch (cancellation: kotlinx.coroutines.CancellationException) {
+        throw cancellation
+    } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+        emptyList()
+    }
+
     // Round-2 review (PR #207): `logout()` was removed from this ViewModel — the global account
     // menu (#198) now drives the logout from `AppAccountViewModel.logout()`, which owns the
     // canonical `clearSessionCache → authRepository.logout` ordering. Keeping a second copy
@@ -722,6 +966,7 @@ class FlagsViewModel @Inject constructor(
             null -> Unit
             AuthState.Anonymous -> {
                 observedPseudo = null
+                resetDtState()
                 flagRepository.clearSessionCache()
             }
             is AuthState.Authenticated -> {
@@ -729,11 +974,28 @@ class FlagsViewModel @Inject constructor(
                 // singleton and may outlive this ViewModel, so a recreated Flags screen
                 // must not trust whatever per-user cache was left in memory.
                 if (observedPseudo != state.pseudo) {
+                    resetDtState()
                     flagRepository.clearSessionCache()
                 }
                 observedPseudo = state.pseudo
             }
         }
+    }
+
+    /** Drop the DT list (and its one-shot guard) so a logout / account switch never shows the
+     * previous user's MultiMP conversations; the next [onDtTabOpened] re-scans for the new session.
+     * Cancels any in-flight fetch and bumps [dtGeneration] so a load that was mid-flight when the
+     * account switched can no longer publish the previous account's conversations (stale write). */
+    private fun resetDtState() {
+        dtFetchJob?.cancel()
+        dtFetchJob = null
+        dtGeneration++
+        dtFetchStarted = false
+        _dtListState.value = DtListUiState.Loading
+        // Clear any in-flight refresh indicator (the cancelled fetch's finally is out-generationed
+        // and won't). KEEP [_dtUnreadOnly] — it is a display preference, not session data, so an
+        // account switch must not silently reset the user's « +lus » choice (#546 directive XaTriX).
+        _dtIsRefreshing.value = false
     }
 }
 
@@ -846,4 +1108,131 @@ sealed interface RemoveFlagState {
 sealed interface RemoveFlagEvent {
     data class Success(val title: String) : RemoveFlagEvent
     data class Failure(val title: String) : RemoveFlagEvent
+}
+
+/**
+ * #6 — inbox page scanned for the DT (MultiMP) list. Page 1 holds the most recent conversations;
+ * the inbox is paged at 50 newest-first, so this covers the active DT in practice. A full
+ * multi-page sweep is deliberately deferred (it would multiply the cost of an already-expensive
+ * MPStorage scan) — see the rapport / follow-up note.
+ */
+private const val DT_INBOX_PAGE = 1
+
+/**
+ * #6 — UI state for the « DT » tab (the user's MultiMP conversations). A dedicated channel, NOT a
+ * reuse of [FlagsListUiState] / [Flag] : a DT row is a private-message conversation enriched with
+ * an MPStorage reading position, never a forum flag (arbitrage Codex).
+ */
+sealed interface DtListUiState {
+    /** First scan in flight (or reset after a logout / account switch). */
+    data object Loading : DtListUiState
+
+    /** The inbox loaded but holds no MultiMP conversation. */
+    data object Empty : DtListUiState
+
+    /**
+     * #546 directive XaTriX — the union is NON-empty but the « non-lus uniquement » filter
+     * ([FlagsViewModel.dtUnreadOnly]) hid every row (no unread inbox-backed conversation). Distinct
+     * from [Empty] (no conversation at all): the screen shows « aucune conversation non lue » and the
+     * user can re-tap the DT tab to reveal the read ones (« +lus »). Produced only by [filterDt].
+     */
+    data object NoUnread : DtListUiState
+
+    /**
+     * The DT union: inbox PAGE 1 MultiMP rows ∪ orphan MPStorage entries, deduplicated by
+     * `threadId` and ordered inbox-first then `mpFlags.list` order (#6). The multi-page inbox limit
+     * remains — surfaced by the scan-note footer (`flags_dt_scan_note`).
+     */
+    data class Content(val items: List<DtListItem>) : DtListUiState
+
+    /** The inbox load failed (network / session). The MPStorage read NEVER reaches this state —
+     * it is best-effort and degrades to « no badge ». [cause] drives the reconnect/retry CTA. */
+    data class Error(val cause: Throwable) : DtListUiState
+}
+
+/**
+ * One DT row (#6). Two natures, both carrying a [threadId] (identity / dedup key) and an optional
+ * MPStorage [resumePage] — the « reprise p.N » badge, a reading POSITION never a read/unread state
+ * (#361/ADR-013).
+ */
+sealed interface DtListItem {
+    val threadId: Int
+    val resumePage: Int?
+
+    /**
+     * A conversation present on inbox PAGE 1: the rich, fully-described row (subject, `hasUnread`
+     * dot, `lastPage`). [resumePage] is `null` when the conversation has no MPStorage entry (or the
+     * storage was absent / unreadable / failed to load).
+     */
+    data class InboxBacked(
+        val conversation: PrivateMessageSummary,
+        override val resumePage: Int?,
+    ) : DtListItem {
+        override val threadId: Int get() = conversation.threadId
+    }
+
+    /**
+     * An MPStorage `mpFlags` entry absent from inbox PAGE 1: only [threadId] + reading position are
+     * known — NO subject, NO read/unread state. [resumePage] is the entry's `page` (non-null in
+     * practice; the parser falls back to 1). [numreponse] is kept for a future anchor but does not
+     * influence navigation today.
+     */
+    data class StorageOnly(
+        override val threadId: Int,
+        override val resumePage: Int?,
+        val numreponse: Int?,
+    ) : DtListItem
+}
+
+/**
+ * Pure builder of the DT union (#6, directive XaTriX 2026-06-19). [inboxMulti] are the inbox PAGE 1
+ * MultiMP summaries (already filtered) ; [storageEntries] are the DTCloud `mpFlags` entries
+ * (best-effort, possibly empty). Returns inbox-backed rows first (in inbox order, each joined with
+ * its MPStorage resume page), then the orphan storage-only rows whose `threadId` is absent from the
+ * inbox, in `mpFlags.list` order. Dedup is by `threadId`: an entry already inbox-backed is never
+ * doubled as storage-only, and an internal `mpFlags` `threadId` duplicate keeps the first occurrence
+ * (so the [Content] list never holds two items with the same LazyColumn key).
+ */
+internal fun buildDtItems(
+    inboxMulti: List<PrivateMessageSummary>,
+    storageEntries: List<MpStorageFlagEntry>,
+): List<DtListItem> {
+    // Dedup the MPStorage entries by threadId FIRST (keep first occurrence) so both the inbox-row
+    // resume join and the orphan rows agree on the same page when mpFlags carries a duplicate
+    // threadId (Codex review: `associate` kept the LAST, diverging from the orphans' `distinctBy`).
+    val dedupedEntries = storageEntries.distinctBy { it.threadId }
+    val resumeByThread = dedupedEntries.associate { it.threadId to it.page }
+    val inboxThreadIds = inboxMulti.mapTo(HashSet()) { it.threadId }
+    return buildList {
+        inboxMulti.forEach { summary ->
+            add(DtListItem.InboxBacked(summary, resumeByThread[summary.threadId]))
+        }
+        dedupedEntries.asSequence()
+            .filter { it.threadId !in inboxThreadIds }
+            .forEach { entry ->
+                add(DtListItem.StorageOnly(entry.threadId, entry.page, entry.numreponse))
+            }
+    }
+}
+
+/**
+ * Pure « non-lus uniquement » filter for the DT list (#546 directive XaTriX), applied to the raw
+ * union [state] before it reaches the screen. Mirrors the flag-list [FlagsViewModel.filterUnreadOnly]
+ * but for the DT channel's two item natures:
+ *
+ *  - [unreadOnly] off → passthrough (the full union, « +lus »).
+ *  - [unreadOnly] on, [DtListUiState.Content] → keep ONLY the [DtListItem.InboxBacked] rows whose
+ *    conversation has an unread message. [DtListItem.StorageOnly] orphans (read state UNKNOWN off
+ *    inbox) and read inbox rows are excluded — the unread view is the actionable subset only.
+ *  - Filtered to empty while the raw union was NON-empty → [DtListUiState.NoUnread] (distinct from
+ *    [DtListUiState.Empty]: there ARE conversations, just none unread; the screen invites « +lus »).
+ *  - [DtListUiState.Loading] / [DtListUiState.Empty] / [DtListUiState.Error] → passthrough.
+ */
+internal fun filterDt(state: DtListUiState, unreadOnly: Boolean): DtListUiState {
+    // Passthrough unless we are filtering a loaded Content union (Loading/Empty/Error and the
+    // « +lus » view keep the state as-is). Single return point (detekt ReturnCount).
+    if (!unreadOnly || state !is DtListUiState.Content) return state
+    val unread = state.items.filter { it is DtListItem.InboxBacked && it.conversation.hasUnread }
+    // The union held conversations but none is unread → a dedicated NoUnread state, not Empty.
+    return if (unread.isEmpty()) DtListUiState.NoUnread else DtListUiState.Content(unread)
 }

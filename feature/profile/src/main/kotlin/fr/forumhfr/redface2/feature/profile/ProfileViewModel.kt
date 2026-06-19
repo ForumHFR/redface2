@@ -6,8 +6,12 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.profile.ProfileRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +39,8 @@ import kotlinx.coroutines.launch
 @HiltViewModel(assistedFactory = ProfileViewModel.Factory::class)
 class ProfileViewModel @AssistedInject constructor(
     private val profileRepository: ProfileRepository,
+    private val blacklistRepository: BlacklistRepository,
+    private val authRepository: AuthRepository,
     @Assisted("userId") private val userId: Int,
     @Assisted("pseudoHint") private val pseudoHint: String,
     @Assisted("avatarUrlHint") private val avatarUrlHint: String?,
@@ -46,6 +52,13 @@ class ProfileViewModel @AssistedInject constructor(
     val state: StateFlow<ProfileUiState> = _state.asStateFlow()
 
     /**
+     * #509 — canonical key of the previewed user. [pseudoHint] is the post author pseudo from the tap
+     * site (always present, and the same identity the post menu blocks), so matching the blacklist on
+     * its canonical form keeps the two entry points in sync.
+     */
+    private val pseudoCanonical = canonicalizePseudo(pseudoHint)
+
+    /**
      * In-flight load job. Held so a Retry (or a follow-up [loadProfile] call) can
      * cancel a previous load that has not completed yet — without this, rapid taps
      * on Retry spawn N concurrent coroutines whose results race to update [_state].
@@ -54,11 +67,69 @@ class ProfileViewModel @AssistedInject constructor(
 
     init {
         loadProfile()
+        observeBlacklist()
+        observeOwnProfile()
     }
 
     fun onIntent(intent: ProfileIntent) {
         when (intent) {
             ProfileIntent.Retry -> loadProfile()
+            ProfileIntent.ToggleBlocked -> toggleBlocked()
+        }
+    }
+
+    /**
+     * Keeps [ProfileUiState.isBlocked] in sync with the live blacklist. `observeBlockedCanonicals`
+     * emits its current value immediately (documented contract), so the button renders the right label
+     * from the first frame, and flips if the same user is (un)blocked elsewhere while the sheet is open.
+     */
+    private fun observeBlacklist() {
+        viewModelScope.launch {
+            blacklistRepository.observeBlockedCanonicals().collect { blocked ->
+                _state.update { it.copy(isBlocked = pseudoCanonical in blocked) }
+            }
+        }
+    }
+
+    /**
+     * #509 — flags the previewed user as the logged-in user, so the blacklist toggle is hidden on one's
+     * OWN profile (parity with the post menu, which sets `onToggleBlockAuthor = null` for `isOwnPost` —
+     * « blacklisting oneself is pointless »). Matched on the numeric id when HFR provided it, else on the
+     * canonical pseudo. `observeAuthState` emits immediately and on every login/logout (cold flow).
+     */
+    private fun observeOwnProfile() {
+        viewModelScope.launch {
+            authRepository.observeAuthState().collect { auth ->
+                val own = auth is AuthState.Authenticated &&
+                    (
+                        (auth.userId != null && auth.userId == userId) ||
+                            canonicalizePseudo(auth.pseudo) == pseudoCanonical
+                        )
+                _state.update { it.copy(isOwnProfile = own) }
+            }
+        }
+    }
+
+    private fun toggleBlocked() {
+        // Guard re-entrancy: `isBlocked` only flips once the store write lands and `observeBlacklist`
+        // re-emits, so without this a rapid double-tap reads the same stale value twice and fires the
+        // same direction twice (block+block) instead of toggling. The button is also disabled while
+        // `isUpdatingBlocked` (see ProfilePreviewSheet) — this is the model-side backstop.
+        if (_state.value.isUpdatingBlocked) return
+        val wasBlocked = _state.value.isBlocked
+        _state.update { it.copy(isUpdatingBlocked = true) }
+        viewModelScope.launch {
+            try {
+                if (wasBlocked) {
+                    blacklistRepository.unblock(pseudoHint)
+                } else {
+                    blacklistRepository.block(pseudoHint)
+                }
+                // `isBlocked` is not flipped here: the `observeBlacklist` collector is the single source
+                // of truth and updates it once the store write lands.
+            } finally {
+                _state.update { it.copy(isUpdatingBlocked = false) }
+            }
         }
     }
 

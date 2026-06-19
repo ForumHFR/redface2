@@ -306,6 +306,30 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * MPStorage write (#6, ADR-014 §4) — POST the edited FIRST post of the dedicated storage MP to
+     * `bdd.php?config=hfr.inc`, the same endpoint as [submitEditPost]. The ONLY wire difference is
+     * that the storage post lives under `cat=prive`, so the [formBody] carries `cat=prive` as a
+     * **String** (the public edit flow passes `cat` as an Int) — that is why this is a distinct
+     * method rather than a reuse of [submitEditPost] : the typed public path cannot express `prive`.
+     * Everything else (`hash_check`, `verifrequet`, `content_form`, `numreponse`, `sujet`, the
+     * preserved hidden fields) is shaped identically by the repository.
+     *
+     * NOT OBSERVED LIVE : the `bdd.php cat=prive` write contract has never been captured (no device
+     * round-trip). The caller GUARDS this — it is reached only via the repository's module-internal,
+     * test-only POST path (never from app/prod code). Same HTTP-200-with-body-text contract as the reply
+     * / edit flows ; the response
+     * (when ever exercised) is classified by `ReplySubmitResponseParser`. `hash_check` is never logged.
+     */
+    suspend fun submitPrivateMessageEdit(formBody: FormBody): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("bdd.php")
+            .addQueryParameter("config", "hfr.inc")
+            .build()
+        val request = Request.Builder().url(url).post(formBody).build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * Phase 2E (#149) — GET the HFR new-topic form for [cat] / [entrySubcat].
      * `entrySubcat` is nullable because the user can land on the create-topic
      * composer either with a sub-category chip selected (`entrySubcat = 550`)
@@ -441,6 +465,85 @@ class HfrClient @Inject constructor(
             .build()
         val request = Request.Builder().url(url).get().build()
         return anonymous.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
+     * Chantier C (#546) — POST the intra-topic search to `/transsearch.php`.
+     *
+     * **AUTHENTICATED by design.** `transsearch.php` rejects an empty `hash_check`, so the search is
+     * only meaningful with the token parsed from an authenticated topic page. Routing through the
+     * authenticated client also means a freshly-expired session surfaces [SessionExpiredException]
+     * (via [executeAuthenticatedHtml]) instead of silently returning anonymous HTML.
+     *
+     * Wire shape (cf. the `transsearch` form in fixtures `topic_*.html` / `write_*topic*.html`,
+     * captured 2026-05/06) :
+     *
+     * `POST /transsearch.php` with `hash_check`, `post`(=topic id), `cat`, `config=hfr.inc`, `p=1`,
+     * `sondage=0`, `owntopic`, `word`, `spseudo`, `filter` (=`1` only when [onlyMatches]), `dep=0`,
+     * `firstnum`, `currentnum`.
+     *
+     * - [onlyMatches] maps to the form's `filter` checkbox : included as `filter=1` only when `true`
+     *   (an unchecked HTML checkbox sends no field at all), so HFR re-renders the page showing ONLY
+     *   the matching messages. When `false` we omit `filter`, matching the unchecked form.
+     * - [currentnum] is HFR's JS-managed navigation cursor. The static form has NO `currentnum`
+     *   input — HFR's own script creates it and the submit button clears it. We therefore send it
+     *   empty for a fresh search and carry the current match's `numreponse` for a next/previous
+     *   STEP so HFR advances to the following match.
+     * - [firstnum] is the page anchor HFR expects on a FRESH search. Pass `null` for a navigation
+     *   STEP : when stepping, BOTH `firstnum` AND `dep` are OMITTED from the POST. Re-sending
+     *   `firstnum` re-anchors HFR on the FIRST match so the cursor never progresses (the
+     *   live-verified stepping bug — Chantier B / #546). A non-null value sends `firstnum` + `dep=0`,
+     *   exactly as the web form's fresh submit does.
+     *
+     * The response IS a topic page → the data layer re-parses it with the existing topic-page parser.
+     *
+     * `hashCheck`, `word` and `spseudo` are **never** logged here (cf. the submit-reply precedent ;
+     * the repository performs the redacted diagnostics).
+     */
+    @Suppress("LongParameterList") // HFR transsearch form : one parameter per wire field.
+    suspend fun searchInTopic(
+        cat: Int,
+        topicId: Int,
+        word: String,
+        spseudo: String,
+        onlyMatches: Boolean,
+        hashCheck: String,
+        firstnum: Int?,
+        owntopic: Int = 0,
+        currentnum: String? = null,
+    ): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("transsearch.php")
+            .build()
+        val formBody = FormBody.Builder()
+            .add("hash_check", hashCheck)
+            .add("post", topicId.toString())
+            .add("cat", cat.toString())
+            .add("config", "hfr.inc")
+            .add("p", "1")
+            .add("sondage", "0")
+            .add("owntopic", owntopic.toString())
+            .add("word", word)
+            .add("spseudo", spseudo)
+            .apply {
+                // An unchecked HTML checkbox sends no field at all ; mirror that so HFR's
+                // server-side branch behaves exactly like the web form.
+                if (onlyMatches) add("filter", "1")
+                // Fresh search → send the page anchor (firstnum) + dep=0, like the web form's
+                // initial submit. Navigation STEP (firstnum == null) → OMIT both : re-sending
+                // firstnum re-anchors HFR on the first match and the cursor never advances
+                // (live-verified stepping bug, Chantier B / #546).
+                if (firstnum != null) {
+                    add("dep", "0")
+                    add("firstnum", firstnum.toString())
+                }
+            }
+            // HFR's JS clears `currentnum` on a fresh submit (empty string) and sets it to the
+            // current match's numreponse for in-result navigation, so HFR advances on the step.
+            .add("currentnum", currentnum.orEmpty())
+            .build()
+        val request = Request.Builder().url(url).post(formBody).build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
     }
 
     /**

@@ -5,6 +5,8 @@ import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -1050,6 +1052,191 @@ class SettingsViewModelTest {
         assertTrue(viewModel.state.value.foldLongQuotesError)
     }
 
+    @Test
+    fun `init hydrates showScrollbar from a persisted false`() = runTest {
+        // #105 — default is true; only a persisted opt-OUT exercises the hydration path.
+        repository.emitShowScrollbar(false)
+
+        val viewModel = newViewModel()
+
+        assertFalse(viewModel.state.value.showScrollbar)
+        assertFalse(viewModel.state.value.showScrollbarError)
+    }
+
+    @Test
+    fun `ShowScrollbarChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertTrue("scrollbar shown by default", viewModel.state.value.showScrollbar)
+
+        viewModel.submit(SettingsIntent.ShowScrollbarChanged(false))
+
+        assertFalse(viewModel.state.value.showScrollbar)
+        assertFalse(viewModel.state.value.isUpdatingShowScrollbar)
+        assertEquals(1, repository.showScrollbarSetCalls)
+    }
+
+    @Test
+    fun `ShowScrollbarChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnShowScrollbarSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ShowScrollbarChanged(false))
+
+        assertTrue("failed persist must revert to the previous value", viewModel.state.value.showScrollbar)
+        assertFalse(viewModel.state.value.isUpdatingShowScrollbar)
+        assertTrue(viewModel.state.value.showScrollbarError)
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Hide system navigation bar (#518)
+    // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init hydrates hideSystemNavBar from a persisted true`() = runTest {
+        // Default is false — only a persisted opt-in exercises the hydration path.
+        repository.emitHideSystemNavBar(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.hideSystemNavBar)
+        assertFalse(viewModel.state.value.hideSystemNavBarError)
+    }
+
+    @Test
+    fun `HideSystemNavBarChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse("nav bar shown by default", viewModel.state.value.hideSystemNavBar)
+
+        viewModel.submit(SettingsIntent.HideSystemNavBarChanged(true))
+
+        assertTrue(viewModel.state.value.hideSystemNavBar)
+        assertFalse(viewModel.state.value.isUpdatingHideSystemNavBar)
+        assertEquals(1, repository.hideSystemNavBarSetCalls)
+    }
+
+    @Test
+    fun `HideSystemNavBarChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnHideSystemNavBarSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.HideSystemNavBarChanged(true))
+
+        assertFalse("failed persist must revert to the previous value", viewModel.state.value.hideSystemNavBar)
+        assertFalse(viewModel.state.value.isUpdatingHideSystemNavBar)
+        assertTrue(viewModel.state.value.hideSystemNavBarError)
+    }
+
+    @Test
+    fun `init hydrates immersiveBackButton from a persisted false`() = runTest {
+        // Default is true — only a persisted opt-OUT exercises the hydration path.
+        repository.emitImmersiveBackButton(false)
+
+        val viewModel = newViewModel()
+
+        assertFalse(viewModel.state.value.immersiveBackButton)
+        assertFalse(viewModel.state.value.immersiveBackButtonError)
+    }
+
+    @Test
+    fun `ImmersiveBackButtonChanged persists the flip`() = runTest {
+        val viewModel = newViewModel()
+        assertTrue("back button on by default", viewModel.state.value.immersiveBackButton)
+
+        viewModel.submit(SettingsIntent.ImmersiveBackButtonChanged(false))
+
+        assertFalse(viewModel.state.value.immersiveBackButton)
+        assertFalse(viewModel.state.value.isUpdatingImmersiveBackButton)
+        assertEquals(1, repository.immersiveBackButtonSetCalls)
+    }
+
+    @Test
+    fun `ImmersiveBackButtonChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnImmersiveBackButtonSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ImmersiveBackButtonChanged(false))
+
+        assertTrue("failed persist must revert to the previous value", viewModel.state.value.immersiveBackButton)
+        assertFalse(viewModel.state.value.isUpdatingImmersiveBackButton)
+        assertTrue(viewModel.state.value.immersiveBackButtonError)
+    }
+
+    @Test
+    fun `init hydrates immersiveNavBarReveal from a persisted mode`() = runTest {
+        repository.emitImmersiveNavBarReveal(ImmersiveNavBarReveal.AT_BOTTOM)
+
+        val viewModel = newViewModel()
+
+        assertEquals(ImmersiveNavBarReveal.AT_BOTTOM, viewModel.state.value.immersiveNavBarReveal)
+        assertFalse(viewModel.state.value.immersiveNavBarRevealError)
+    }
+
+    @Test
+    fun `ImmersiveNavBarRevealChanged persists the chosen mode`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals(ImmersiveNavBarReveal.MANUAL, viewModel.state.value.immersiveNavBarReveal)
+
+        viewModel.submit(SettingsIntent.ImmersiveNavBarRevealChanged(ImmersiveNavBarReveal.ON_SCROLL_UP))
+
+        assertEquals(ImmersiveNavBarReveal.ON_SCROLL_UP, viewModel.state.value.immersiveNavBarReveal)
+        assertFalse(viewModel.state.value.isUpdatingImmersiveNavBarReveal)
+        assertEquals(1, repository.immersiveNavBarRevealSetCalls)
+    }
+
+    @Test
+    fun `ImmersiveNavBarRevealChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnImmersiveNavBarRevealSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.ImmersiveNavBarRevealChanged(ImmersiveNavBarReveal.AT_BOTTOM))
+
+        assertEquals(
+            "failed persist must revert to the previous mode",
+            ImmersiveNavBarReveal.MANUAL,
+            viewModel.state.value.immersiveNavBarReveal,
+        )
+        assertFalse(viewModel.state.value.isUpdatingImmersiveNavBarReveal)
+        assertTrue(viewModel.state.value.immersiveNavBarRevealError)
+    }
+
+    @Test
+    fun `init hydrates accentColor from a persisted value`() = runTest {
+        repository.emitAccentColor(AccentColor.ROUGE_REDFACE1)
+
+        val viewModel = newViewModel()
+
+        assertEquals(AccentColor.ROUGE_REDFACE1, viewModel.state.value.accentColor)
+        assertFalse(viewModel.state.value.accentColorError)
+    }
+
+    @Test
+    fun `AccentColorChanged persists the chosen colour`() = runTest {
+        val viewModel = newViewModel()
+        assertEquals(AccentColor.ROSE, viewModel.state.value.accentColor)
+
+        viewModel.submit(SettingsIntent.AccentColorChanged(AccentColor.ROUGE_REDFACE1))
+
+        assertEquals(AccentColor.ROUGE_REDFACE1, viewModel.state.value.accentColor)
+        assertFalse(viewModel.state.value.isUpdatingAccentColor)
+        assertEquals(1, repository.accentColorSetCalls)
+    }
+
+    @Test
+    fun `AccentColorChanged reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnAccentColorSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.AccentColorChanged(AccentColor.ROUGE_REDFACE1))
+
+        assertEquals(
+            "failed persist must revert to the previous colour",
+            AccentColor.ROSE,
+            viewModel.state.value.accentColor,
+        )
+        assertFalse(viewModel.state.value.isUpdatingAccentColor)
+        assertTrue(viewModel.state.value.accentColorError)
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // Debug bounds overlay (#445)
     // ──────────────────────────────────────────────────────────────────────
@@ -1633,6 +1820,24 @@ class SettingsViewModelTest {
             foldLongQuotes.value = value
         }
 
+        // #105 — afficher l'ascenseur. Même seam optimistic-flip ; default TRUE (ascenseur affiché).
+        private val showScrollbar = MutableStateFlow(true)
+        var showScrollbarSetCalls: Int = 0
+            private set
+        var failOnShowScrollbarSet: Boolean = false
+
+        override fun observeShowScrollbar(): Flow<Boolean> = showScrollbar
+
+        override suspend fun setShowScrollbar(enabled: Boolean) {
+            showScrollbarSetCalls += 1
+            check(!failOnShowScrollbarSet) { "boom" }
+            showScrollbar.value = enabled
+        }
+
+        fun emitShowScrollbar(value: Boolean) {
+            showScrollbar.value = value
+        }
+
         // #458 — start screen lives on its own StartScreenSettingsViewModel; this fake only
         // satisfies the interface for the main Settings ViewModel under test.
         override fun observeStartScreen(): Flow<StartScreenPreference> =
@@ -1794,6 +1999,78 @@ class SettingsViewModelTest {
 
         fun emitDebugBoundsOverlay(value: Boolean) {
             debugBoundsOverlay.value = value
+        }
+
+        // #518 — hide system nav bar. Same optimistic-flip seam as above.
+        private val hideSystemNavBar = MutableStateFlow(false)
+        var hideSystemNavBarSetCalls: Int = 0
+            private set
+        var failOnHideSystemNavBarSet: Boolean = false
+
+        override fun observeHideSystemNavBar(): Flow<Boolean> = hideSystemNavBar
+
+        override suspend fun setHideSystemNavBar(enabled: Boolean) {
+            hideSystemNavBarSetCalls += 1
+            check(!failOnHideSystemNavBarSet) { "boom" }
+            hideSystemNavBar.value = enabled
+        }
+
+        fun emitHideSystemNavBar(value: Boolean) {
+            hideSystemNavBar.value = value
+        }
+
+        // #518 follow-up — immersive back button. Default TRUE, same optimistic-flip seam as above.
+        private val immersiveBackButton = MutableStateFlow(true)
+        var immersiveBackButtonSetCalls: Int = 0
+            private set
+        var failOnImmersiveBackButtonSet: Boolean = false
+
+        override fun observeImmersiveBackButton(): Flow<Boolean> = immersiveBackButton
+
+        override suspend fun setImmersiveBackButton(enabled: Boolean) {
+            immersiveBackButtonSetCalls += 1
+            check(!failOnImmersiveBackButtonSet) { "boom" }
+            immersiveBackButton.value = enabled
+        }
+
+        fun emitImmersiveBackButton(value: Boolean) {
+            immersiveBackButton.value = value
+        }
+
+        // #518 follow-up — immersive nav-bar reveal mode. Default MANUAL, enum optimistic-flip seam.
+        private val immersiveNavBarReveal = MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
+        var immersiveNavBarRevealSetCalls: Int = 0
+            private set
+        var failOnImmersiveNavBarRevealSet: Boolean = false
+
+        override fun observeImmersiveNavBarReveal(): Flow<ImmersiveNavBarReveal> = immersiveNavBarReveal
+
+        override suspend fun setImmersiveNavBarReveal(mode: ImmersiveNavBarReveal) {
+            immersiveNavBarRevealSetCalls += 1
+            check(!failOnImmersiveNavBarRevealSet) { "boom" }
+            immersiveNavBarReveal.value = mode
+        }
+
+        fun emitImmersiveNavBarReveal(value: ImmersiveNavBarReveal) {
+            immersiveNavBarReveal.value = value
+        }
+
+        // TU 2788511 — accent colour family. Default ROSE, enum optimistic-flip seam.
+        private val accentColor = MutableStateFlow(AccentColor.ROSE)
+        var accentColorSetCalls: Int = 0
+            private set
+        var failOnAccentColorSet: Boolean = false
+
+        override fun observeAccentColor(): Flow<AccentColor> = accentColor
+
+        override suspend fun setAccentColor(color: AccentColor) {
+            accentColorSetCalls += 1
+            check(!failOnAccentColorSet) { "boom" }
+            accentColor.value = color
+        }
+
+        fun emitAccentColor(value: AccentColor) {
+            accentColor.value = value
         }
     }
 

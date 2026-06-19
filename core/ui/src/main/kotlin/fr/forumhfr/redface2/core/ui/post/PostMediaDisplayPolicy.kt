@@ -133,8 +133,10 @@ internal object PostMediaDisplayPolicy {
      * their real height; only the rare clamp cases differ — exactly the bounds the loaded image already
      * obeys, so no over-reserve vs the #175 sizing.
      *
-     * [measured] is `null` for a not-yet-measured image (a standalone `PostBlock.Image` is not fed by
-     * the paragraph measure effect): callers then fall back to the legacy [blockImageMinHeight] slot.
+     * [measured] is `null` for a not-yet-measured image — a cold cache before the measure effect lands,
+     * or a measurement failure (dead host / 404). Both the paragraph effect (#175/#224) and, since the
+     * #249 follow-up, the standalone `PostBlock.Image` effect feed the cache; callers fall back to the
+     * legacy [blockImageMinHeight] slot until (or unless) a size lands.
      */
     fun reservedBlockImageHeight(measured: PixelSize?, availableWidthDp: Float): Dp? {
         val size = measured?.takeIf { it.width > 0 && it.height > 0 }

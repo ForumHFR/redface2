@@ -11,6 +11,7 @@ import org.jsoup.nodes.TextNode
 
 class TopicPageParser(
     private val postsParser: PostsParser = PostsParser(),
+    private val searchFormParser: TopicSearchFormParser = TopicSearchFormParser(),
 ) {
     fun parse(html: String): Topic {
         val document = Jsoup.parse(html)
@@ -57,6 +58,9 @@ class TopicPageParser(
             // column since v1.
             isFirstPostOwner = pageInfo.current == 1 && posts.firstOrNull()?.isEditable == true,
             poll = parsePoll(document),
+            // Chantier C (#546) — the intra-topic search form is part of THIS page ; parse it here so
+            // the ViewModel gets it for free on every live load. Null when absent ; not persisted.
+            searchForm = searchFormParser.parse(document),
         )
     }
 

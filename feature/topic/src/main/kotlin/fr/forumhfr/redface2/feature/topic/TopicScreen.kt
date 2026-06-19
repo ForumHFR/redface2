@@ -30,6 +30,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -81,6 +82,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
@@ -93,6 +95,7 @@ import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
+import fr.forumhfr.redface2.core.ui.theme.rememberCreatorPseudoBrush
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -100,9 +103,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 
 @Composable
-@Suppress("LongParameterList") // state-hoisted Composable : each callback has a distinct call-site
+// LongParameterList : state-hoisted Composable : each callback has a distinct call-site
 // (reply / quote / edit-post / edit-FP / openPage) and bundling them in a callbacks holder would
 // hide the navigation surface rather than simplify it.
+// CyclomaticComplexMethod : the one-shot effects `when` (scroll / refresh / delete / search) is a
+// flat dispatch table — every branch is a distinct, independent side effect ; splitting it would
+// scatter one logical sink (same stance as TopicContent / TopicLoadedContent).
+@Suppress("LongParameterList", "CyclomaticComplexMethod")
 fun TopicScreen(
     request: TopicRequest,
     /**
@@ -239,12 +246,32 @@ fun TopicScreen(
      * [pollManualExpanded], keeping the poll collapsed / expanded across page navigation.
      */
     onPollExpansionChanged: (Boolean) -> Unit = {},
+    /**
+     * #518 follow-up — `true` when `:app` wants this screen to report its scroll facts for the
+     * immersive nav-bar reveal (immersive on AND a scroll-driven mode selected). When `false` the
+     * reporter is a no-op and clears any stale facts. `:feature:topic` stays free of the reveal-mode
+     * enum: it only reports raw `(atBottom, scrollingUp)` facts; `:app` applies the policy.
+     */
+    immersiveNavBarRevealActive: Boolean = false,
+    /**
+     * #518 follow-up — reports the topic's raw scroll facts UP so `:app` (single owner of the window
+     * nav bar) can reveal the hidden bar per the chosen mode. Only fires while
+     * [immersiveNavBarRevealActive] and only on a change.
+     */
+    onImmersiveNavBarScroll: (atBottom: Boolean, scrollingUp: Boolean) -> Unit = { _, _ -> },
 ) {
     val viewModel = hiltViewModel<TopicViewModel, TopicViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     val lazyListState = rememberLazyListState()
+    // #518 follow-up — report scroll facts up so `:app` can reveal the hidden system nav bar per the
+    // chosen mode. No-op (and clears stale facts) when the feature is inactive.
+    ImmersiveNavBarScrollReporter(
+        listState = lazyListState,
+        active = immersiveNavBarRevealActive,
+        onScrollFacts = onImmersiveNavBarScroll,
+    )
     val context = androidx.compose.ui.platform.LocalContext.current
     // Resolve the string at composition time, not inside the LaunchedEffect collect block.
     // Lint flags `context.getString(R.string.…)` inside a Compose call site (the call is in a
@@ -253,6 +280,10 @@ fun TopicScreen(
     val refreshFailedMsg = stringResource(R.string.topic_post_submit_refresh_failed)
     // #335 — manual pull-to-refresh failure message (resolved upfront, same rationale).
     val refreshManualFailedMsg = stringResource(R.string.topic_refresh_failed)
+    // Chantier C (#546) — intra-topic search failure message (resolved upfront, same rationale).
+    val searchFailedMsg = stringResource(R.string.topic_search_failed)
+    // Chantier B (#546) — « no further result » Toast (resolved upfront, same rationale).
+    val searchResultsEndMsg = stringResource(R.string.topic_search_results_end)
     // #292 — delete feedback messages, resolved upfront (same rationale as refreshFailedMsg).
     val deleteSuccessMsg = stringResource(R.string.topic_post_delete_success)
     val deleteFailedLoginMsg = stringResource(R.string.topic_post_delete_failed_login)
@@ -372,6 +403,24 @@ fun TopicScreen(
                         context,
                         message,
                         android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+                TopicEffect.SearchFailed -> {
+                    // Chantier C (#546) — the transsearch POST failed; the normal page is restored by
+                    // the ViewModel and the Toast invites a retry.
+                    android.widget.Toast.makeText(
+                        context,
+                        searchFailedMsg,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+                TopicEffect.SearchResultsEnd -> {
+                    // Chantier B (#546) — a « next » step ran past the last match; the current match
+                    // stays on screen and a sober Toast confirms there is nothing further.
+                    android.widget.Toast.makeText(
+                        context,
+                        searchResultsEndMsg,
+                        android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 }
             }
@@ -665,37 +714,15 @@ internal fun TopicContent(
             Modifier
         },
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = barTitle,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = stringResource(R.string.topic_page_indicator, barCurrentPage, barTotalPages),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onBack,
-                        modifier = Modifier.semantics { contentDescription = backLabel },
-                    ) {
-                        // #360 / ADR-015 — vector stroke unifié, dimensionné en dp (indépendant de la
-                        // police et de la baseline, contrairement à l'ancien glyphe « ← »), via le
-                        // primitive partagé :core:ui. L'étiquette a11y reste sur l'IconButton, donc
-                        // l'icône est décorative (contentDescription = null par défaut).
-                        RedfaceVectorIcon(
-                            resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back,
-                        )
-                    }
-                },
+            TopicTopBar(
+                state = state,
+                barTitle = barTitle,
+                barCurrentPage = barCurrentPage,
+                barTotalPages = barTotalPages,
+                backLabel = backLabel,
                 scrollBehavior = scrollBehavior,
+                onBack = onBack,
+                onIntent = onIntent,
             )
         },
         floatingActionButton = {
@@ -801,6 +828,7 @@ internal fun TopicContent(
                             TopicLoadedContent(
                                 state = state,
                                 topic = mode.topic,
+                                hiddenNumreponses = mode.hiddenNumreponses,
                                 onReply = onReply,
                                 onQuote = onQuote,
                                 onEdit = onEdit,
@@ -812,6 +840,9 @@ internal fun TopicContent(
                                 listState = listState,
                                 multiQuoteSelection = multiQuoteSelection,
                                 onToggleMultiQuote = onToggleMultiQuote,
+                                onSetAuthorBlocked = { author, blocked ->
+                                    onIntent(TopicIntent.SetAuthorBlocked(author, blocked))
+                                },
                                 pollManualExpanded = pollManualExpanded,
                                 onPollExpansionChanged = onPollExpansionChanged,
                             )
@@ -827,11 +858,217 @@ internal fun TopicContent(
     }
 }
 
+/**
+ * #285/#284 + Chantier C (#546) — the topic top app bar (title + page counter + back) plus the
+ * intra-topic search affordance : a search icon in `actions` (only when the loaded page exposes a
+ * usable, authenticated transsearch form) that opens the [TopicSearchBar] directly beneath the bar.
+ * Extracted from `TopicContent` to keep that builder under detekt's cyclomatic-complexity cap.
+ */
 @Composable
-@Suppress("LongParameterList") // state-hoisted Composable : each param has a distinct call-site.
+@OptIn(ExperimentalMaterial3Api::class)
+@Suppress("LongParameterList") // hoisted bar : title/page/back inputs + the search intent sink.
+private fun TopicTopBar(
+    state: TopicUiState,
+    barTitle: String,
+    barCurrentPage: Int,
+    barTotalPages: Int,
+    backLabel: String,
+    scrollBehavior: androidx.compose.material3.TopAppBarScrollBehavior?,
+    onBack: () -> Unit,
+    onIntent: (TopicIntent) -> Unit,
+) {
+    val searchLabel = stringResource(R.string.topic_search_open)
+    Column {
+        TopAppBar(
+            title = {
+                Column {
+                    Text(
+                        text = barTitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = stringResource(R.string.topic_page_indicator, barCurrentPage, barTotalPages),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            navigationIcon = {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.semantics { contentDescription = backLabel },
+                ) {
+                    // #360 / ADR-015 — vector stroke unifié, dimensionné en dp (indépendant de la
+                    // police et de la baseline, contrairement à l'ancien glyphe « ← »), via le
+                    // primitive partagé :core:ui. L'étiquette a11y reste sur l'IconButton, donc
+                    // l'icône est décorative (contentDescription = null par défaut).
+                    RedfaceVectorIcon(
+                        resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_arrow_back,
+                    )
+                }
+            },
+            actions = {
+                if (state.canSearchInTopic && !state.search.isActive) {
+                    IconButton(
+                        onClick = { onIntent(TopicIntent.OpenSearch) },
+                        modifier = Modifier.semantics { contentDescription = searchLabel },
+                    ) {
+                        RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_search)
+                    }
+                }
+            },
+            scrollBehavior = scrollBehavior,
+        )
+        if (state.search.isActive) {
+            TopicSearchBar(search = state.search, onIntent = onIntent)
+        }
+    }
+}
+
+/**
+ * Chantier C (#546) — the intra-topic search bar, shown under the top app bar when search is active.
+ *
+ * Two fields (term / author) + a « Filtrer » toggle (HFR's `filter`, i.e. show only matching posts)
+ * + submit + close. Submitting POSTs `transsearch.php` ; the response (a topic page) replaces the
+ * loaded page.
+ *
+ * Chantier B (#546) — in NON-FILTERED mode, once a search is `Done`, a « précédent / suivant » pair of
+ * arrows steps between matches (`currentnum`), enabled per the ViewModel's client-side cursor history.
+ * A `NoResults` status shows a sober « Aucun résultat » line instead. Filtered mode keeps no per-result
+ * navigation (the page already IS the matches list).
+ */
+@Composable
+private fun TopicSearchBar(
+    search: TopicSearchUiState,
+    onIntent: (TopicIntent) -> Unit,
+) {
+    val closeLabel = stringResource(R.string.topic_search_close)
+    Surface(
+        tonalElevation = 2.dp,
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = search.word,
+                    onValueChange = { onIntent(TopicIntent.SearchWordChanged(it)) },
+                    label = { Text(stringResource(R.string.topic_search_word_hint)) },
+                    singleLine = true,
+                    enabled = search.status != TopicSearchStatus.Loading,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    value = search.spseudo,
+                    onValueChange = { onIntent(TopicIntent.SearchPseudoChanged(it)) },
+                    label = { Text(stringResource(R.string.topic_search_pseudo_hint)) },
+                    singleLine = true,
+                    enabled = search.status != TopicSearchStatus.Loading,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = search.onlyMatches,
+                    onCheckedChange = { onIntent(TopicIntent.SearchOnlyMatchesChanged(it)) },
+                    enabled = search.status != TopicSearchStatus.Loading,
+                )
+                Text(
+                    text = stringResource(R.string.topic_search_only_matches),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(enabled = search.status != TopicSearchStatus.Loading) {
+                            onIntent(TopicIntent.SearchOnlyMatchesChanged(!search.onlyMatches))
+                        },
+                )
+                IconButton(
+                    onClick = { onIntent(TopicIntent.CloseSearch) },
+                    modifier = Modifier.semantics { contentDescription = closeLabel },
+                ) {
+                    RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_close)
+                }
+                Button(
+                    onClick = { onIntent(TopicIntent.SubmitSearch) },
+                    enabled = search.canSubmit && search.status != TopicSearchStatus.Loading,
+                ) {
+                    Text(stringResource(R.string.topic_search_submit))
+                }
+            }
+            // Chantier B (#546) — per-result navigation (non-filtered) / « no result » feedback.
+            TopicSearchResultNav(search = search, onIntent = onIntent)
+        }
+    }
+}
+
+/**
+ * Chantier B (#546) — the result-navigation footer of [TopicSearchBar]. In NON-FILTERED mode, once the
+ * search is `Done`, shows « précédent / suivant » arrows (enabled per the ViewModel's cursor history).
+ * A `NoResults` status shows a sober « Aucun résultat » line. Renders nothing otherwise (filtered mode,
+ * idle, loading), so the bar collapses back to its two-row shape.
+ */
+@Composable
+private fun TopicSearchResultNav(
+    search: TopicSearchUiState,
+    onIntent: (TopicIntent) -> Unit,
+) {
+    when {
+        search.status == TopicSearchStatus.NoResults -> {
+            Text(
+                text = stringResource(R.string.topic_search_no_results),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        search.status == TopicSearchStatus.Done && !search.onlyMatches -> {
+            val prevLabel = stringResource(R.string.topic_search_prev_result)
+            val nextLabel = stringResource(R.string.topic_search_next_result)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = { onIntent(TopicIntent.PrevResult) },
+                    enabled = search.canGoPreviousResult,
+                    modifier = Modifier.semantics { contentDescription = prevLabel },
+                ) {
+                    RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_left)
+                }
+                IconButton(
+                    onClick = { onIntent(TopicIntent.NextResult) },
+                    enabled = search.canGoNextResult,
+                    modifier = Modifier.semantics { contentDescription = nextLabel },
+                ) {
+                    RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_chevron_right)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+// LongParameterList : state-hoisted Composable, each param has a distinct call-site.
+// CyclomaticComplexMethod : dense list builder (header + per-post action gates + #509 hidden branch);
+// splitting it would scatter one visual unit across helpers (same stance as TopicPostCard).
+@Suppress("LongParameterList", "CyclomaticComplexMethod")
 private fun TopicLoadedContent(
     state: TopicUiState,
     topic: Topic,
+    // #509 — `numreponse` of posts whose author is blacklisted; rendered as a collapsed
+    // "post masqué" placeholder instead of the full card (the post stays in the list).
+    hiddenNumreponses: Set<Int> = emptySet(),
     onReply: (subcat: Int, page: Int) -> Unit,
     onQuote: (subcat: Int, page: Int, quotedNumreponse: Int, quoteRef: Int?) -> Unit,
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
@@ -845,11 +1082,16 @@ private fun TopicLoadedContent(
     // #291 — selection state + toggle for the post menu's multi-quote entry.
     multiQuoteSelection: List<Int> = emptyList(),
     onToggleMultiQuote: (numreponse: Int) -> Unit = {},
+    // #509 — block/unblock a post's author from the post menu (blacklist).
+    onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit = { _, _ -> },
     // #465 — the topic's manual poll choice (owned by :app, null = follow the global default) + the
     // callback recording a tap on the poll card. Threaded down to the header card's poll.
     pollManualExpanded: Boolean? = null,
     onPollExpansionChanged: (Boolean) -> Unit = {},
 ) {
+    // Scroll-anchor (#104 follow-up): the post the reader was sent to (quote link, deep link, last-read).
+    // Marked by tinting ONLY its identity band with tertiaryContainer (XaTriX: the left-rail attempt was
+    // ugly; the old card+band double tint stays removed) — one subtle band, no layout shift.
     val highlight = state.request.scrollTo
     // #239 — how many posts of THIS page cite each post, computed once per loaded post list. Drives
     // the « cité N fois » badge below. Pure + page-scoped (cf. citationCountsByNumreponse KDoc).
@@ -860,6 +1102,17 @@ private fun TopicLoadedContent(
     // it needs a Hilt ViewModel). Deliberately NOT rememberSaveable: Post is not Parcelable
     // and losing an open overflow menu across process death is acceptable.
     var menuPost by remember { mutableStateOf<Post?>(null) }
+    // #509 — posts the reader chose to reveal despite the author being blacklisted. Temporary and
+    // re-keyed on `topic.page`, not persisted: re-hiding on a page change is the intended "masqué by
+    // default" behaviour (decision #6). This composable instance is bound to one (cat, post), so the
+    // page is the only key dimension that matters here.
+    var revealedHiddenPosts by remember(topic.page) { mutableStateOf(emptySet<Int>()) }
+    // #509 — a post hidden (author blacklisted) while it sat in the multi-quote basket is dropped from
+    // the selection: the placeholder exposes no deselect affordance (decision #1), so leaving it
+    // selected would silently quote a masqué post. The basket is hoisted in :app; reuse its toggle.
+    LaunchedEffect(hiddenNumreponses, multiQuoteSelection) {
+        multiQuoteSelection.filter { it in hiddenNumreponses }.forEach(onToggleMultiQuote)
+    }
     // #282 — shared offset between the gesture (drives translationX) and the edge glow. A plain
     // MutableFloatState: the gesture writes it synchronously per frame (no coroutine/alloc), the draw
     // phase reads it; an Animatable inside the gesture handles only release transitions. Lives in the
@@ -1018,24 +1271,34 @@ private fun TopicLoadedContent(
             val profileAction: (() -> Unit)? = post.profileId?.let { profileId ->
                 { onOpenProfile(profileId, post.author, post.avatarUrl) }
             }
-            TopicPostCard(
-                post = post,
-                highlighted = highlight == post.numreponse,
-                citedCount = citationCounts[post.numreponse] ?: 0,
-                // #330 — render the author signature beneath the body when the reading preference
-                // is on (the signature is always parsed/cached on the Post; this is render-only).
-                showSignature = state.showSignatures,
-                onQuote = quoteAction,
-                onEdit = editAction,
-                onOpenProfile = profileAction,
-                onOpenMenu = { menuPost = post },
-                // #436 — same membership source as the menu entry (PostMenuSheet).
-                multiQuoteSelected = post.numreponse in multiQuoteSelection,
-                // #436 — per-post add/remove affordance (RF1 quote+/quote- parity), reachable
-                // without opening the « … » menu. Null/non-null under the SAME gate as « Citer »
-                // (derived together above), so the « + » and « Citer » always appear as a pair.
-                onToggleMultiQuote = multiQuoteToggle,
-            )
+            // #509 — a blacklisted author's post is replaced by a collapsed placeholder (the post is
+            // kept in the list to preserve index/anchor/numreponse invariants), until the reader taps
+            // « Afficher ». The placeholder exposes no quote/edit/menu action by design (decision #1).
+            if (post.numreponse in hiddenNumreponses && post.numreponse !in revealedHiddenPosts) {
+                HiddenPostCard(
+                    author = post.author,
+                    onReveal = { revealedHiddenPosts = revealedHiddenPosts + post.numreponse },
+                )
+            } else {
+                TopicPostCard(
+                    post = post,
+                    highlighted = highlight == post.numreponse,
+                    citedCount = citationCounts[post.numreponse] ?: 0,
+                    // #330 — render the author signature beneath the body when the reading preference
+                    // is on (the signature is always parsed/cached on the Post; this is render-only).
+                    showSignature = state.showSignatures,
+                    onQuote = quoteAction,
+                    onEdit = editAction,
+                    onOpenProfile = profileAction,
+                    onOpenMenu = { menuPost = post },
+                    // #436 — same membership source as the menu entry (PostMenuSheet).
+                    multiQuoteSelected = post.numreponse in multiQuoteSelection,
+                    // #436 — per-post add/remove affordance (RF1 quote+/quote- parity), reachable
+                    // without opening the « … » menu. Null/non-null under the SAME gate as « Citer »
+                    // (derived together above), so the « + » and « Citer » always appear as a pair.
+                    onToggleMultiQuote = multiQuoteToggle,
+                )
+            }
         }
         // #379 — explicit end-of-topic marker after the last post of the LAST page. The
         // « page X/Y » counter (#284) lets the reader deduce it; this says it. Reflects the
@@ -1048,6 +1311,13 @@ private fun TopicLoadedContent(
         if (topic.page == topic.totalPages) {
             item {
                 EndOfTopicFooter()
+            }
+        } else if (topic.page < topic.totalPages) {
+            // #110 (nicko) — symmetric marker on an intermediate page: « Suite à la page suivante »,
+            // purely informative (navigation lives in the page controls / swipe #282). Same no-key
+            // sentinel rationale as EndOfTopicFooter above.
+            item {
+                MorePagesFooter()
             }
         }
     }
@@ -1093,6 +1363,15 @@ private fun TopicLoadedContent(
             } else {
                 null
             },
+            // #509 — a post reachable through the menu is either not blocked, or blocked-but-revealed;
+            // either way `numreponse in hiddenNumreponses` tells whether the author is blacklisted, so
+            // the entry flips between Masquer / Ne plus masquer. Hidden for the user's own posts.
+            authorBlocked = post.numreponse in hiddenNumreponses,
+            onToggleBlockAuthor = if (post.isOwnPost) {
+                null
+            } else {
+                { onSetAuthorBlocked(post.author, post.numreponse !in hiddenNumreponses) }
+            },
         )
     }
 }
@@ -1117,6 +1396,36 @@ private fun EndOfTopicFooter() {
         )
         Text(
             text = stringResource(R.string.topic_end_of_topic),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+    }
+}
+
+/**
+ * #110 (nicko) — symmetric « more pages below » marker, mirroring [EndOfTopicFooter] but rendered as the
+ * LAST LazyColumn item of an INTERMEDIATE page (`topic.page < topic.totalPages`, condition at the call
+ * site). Informative only — no tap action (navigation is the page controls / swipe #282). Same style.
+ */
+@Composable
+private fun MorePagesFooter() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outlineVariant,
+        )
+        Text(
+            text = stringResource(R.string.topic_more_pages),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1384,8 +1693,63 @@ private fun TopicPollCard(
     }
 }
 
+/**
+ * #509 — collapsed placeholder shown in place of a blacklisted author's post. The post is NOT removed
+ * from the list (index/anchor/`numreponse` invariants stay intact); only its body is replaced by this
+ * one-line card. « Afficher » reveals the real card for the current page only. By design it exposes no
+ * quote/edit/menu action (decision #1): the reader reveals first, then acts on the full card.
+ */
 @Composable
-// Rich post card : each optional affordance (highlight anchor, multi-quote border + pill + « + »
+private fun HiddenPostCard(
+    author: String,
+    onReveal: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = stringResource(R.string.topic_post_hidden_by_author, author),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            TextButton(onClick = onReveal) {
+                Text(text = stringResource(R.string.topic_post_hidden_reveal))
+            }
+        }
+    }
+}
+
+/**
+ * #221 — a Redface 2 creator's pseudo, painted with the animated gold sheen. Kept as its own leaf
+ * composable so the per-frame shimmer ([rememberCreatorPseudoBrush]) invalidates only this text node,
+ * never the enclosing (and expensive) post card.
+ */
+@Composable
+private fun CreatorPseudoText(author: String, modifier: Modifier = Modifier) {
+    Text(
+        text = author,
+        style = MaterialTheme.typography.titleSmall.copy(brush = rememberCreatorPseudoBrush()),
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
+}
+
+@Composable
+// Rich post card : each optional affordance (multi-quote border + pill + « + »
 // toggle, citation badge, profile tap, contextual menu, edit, quote) is its own guarded branch, so
 // the cyclomatic count is inherently high — same call as PostRenderer. Splitting it would scatter a
 // single visual unit across helpers. LongParameterList : state-hoisted, each param has a distinct
@@ -1395,7 +1759,12 @@ private fun TopicPollCard(
 // « + » affordance (gating, label flip, tap). Same visibility relaxation as other tested internals.
 internal fun TopicPostCard(
     post: Post,
-    highlighted: Boolean,
+    /**
+     * #104 follow-up — true for the scroll-anchor post (quote link / deep link / last-read landing).
+     * Tints this post's identity band with tertiaryContainer so the anchored post is findable, without
+     * the old card+band double highlight (removed in #104) nor a left rail (dropped as ugly). Default false.
+     */
+    highlighted: Boolean = false,
     /**
      * #239 — number of posts on the current page that cite this one. 0 hides the badge.
      */
@@ -1420,10 +1789,9 @@ internal fun TopicPostCard(
     onOpenMenu: () -> Unit = {},
     /**
      * #436 — true when this post sits in the multi-quote basket (#291). Marks the card with a
-     * primary border + an « Ajouté à la citation » pill in the identity band, so the selection
-     * is visible without opening the per-post menu (dev feedback by Dintr-un lemn). Orthogonal
-     * to [highlighted] (the scroll anchor) : both can be true at once, the border and the
-     * container tint compose without colliding.
+     * primary border + an « Ajouté à la citation » pill rendered BELOW the identity band (moved out of
+     * the band so it no longer grows it on selection), so the selection is visible without opening the
+     * per-post menu (dev feedback by Dintr-un lemn).
      */
     multiQuoteSelected: Boolean = false,
     /**
@@ -1444,18 +1812,15 @@ internal fun TopicPostCard(
             null
         },
         colors = CardDefaults.cardColors(
-            containerColor = if (highlighted) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainer
-            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
     ) {
-        // Identity band — the avatar/pseudo/date header gets its own tinted strip across the
-        // full card width (forum idiom, dogfooding v109) : secondaryContainer over the neutral
-        // card, tertiaryContainer when the card itself is highlighted secondaryContainer so the
-        // band stays distinct. The Surface also sets LocalContentColor to the matching
-        // on-container colour for the pseudo. The Card clips the strip to its rounded corners.
+        // Identity band — the avatar/pseudo/date header gets its own tinted strip across the full card
+        // width (forum idiom, dogfooding v109): secondaryContainer over the neutral card. #104 follow-up
+        // (XaTriX): the scroll-anchor post tints ONLY this band with tertiaryContainer (the left rail was
+        // dropped as ugly) — a single tertiary band, not the old card+band double tint. The Surface sets
+        // LocalContentColor to the matching on-container colour for the pseudo; the Card clips the strip
+        // to its rounded corners.
         Surface(
             color = if (highlighted) {
                 MaterialTheme.colorScheme.tertiaryContainer
@@ -1492,11 +1857,6 @@ internal fun TopicPostCard(
             } else {
                 Modifier
             }
-            // #476 — width of the avatar slot in the identity Row, used below to indent the
-            // pills under the pseudo (not under the avatar). minimumInteractiveComponentSize()
-            // inflates the clickable avatar to the 48dp touch target; otherwise it is the
-            // RedfaceUserAvatar default (40dp). Kept in sync with `avatarModifier` above.
-            val avatarSlotWidth = if (onOpenProfile != null) 48.dp else 40.dp
             val pseudoModifier = if (onOpenProfile != null) {
                 // No minimumInteractiveComponentSize() on the pseudo: it reserves a 48dp-tall box
                 // and centres the text inside it, which inflated the header Row and left the pseudo
@@ -1561,17 +1921,27 @@ internal fun TopicPostCard(
                                     fontWeight = FontWeight.SemiBold,
                                 )
                             }
-                            Text(
-                                text = post.author,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                // Clickable on the pseudo only — the date stays inert.
-                                modifier = Modifier
-                                    .weight(weight = 1f, fill = false)
-                                    .then(pseudoModifier),
-                            )
+                            // Clickable on the pseudo only — the date stays inert.
+                            val pseudoLayout = Modifier
+                                .weight(weight = 1f, fill = false)
+                                .then(pseudoModifier)
+                            // #221 — the RF2 creator's pseudo gets the gold sheen easter egg.
+                            // remember() keyed on the author so canonicalizePseudo (NFC + char walk)
+                            // runs once per author, not on every recomposition of this hot list row —
+                            // same off-the-render-path stance #509 took with hiddenNumreponses.
+                            val isCreator = remember(post.author) { isRf2Creator(post.author) }
+                            if (isCreator) {
+                                CreatorPseudoText(author = post.author, modifier = pseudoLayout)
+                            } else {
+                                Text(
+                                    text = post.author,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = pseudoLayout,
+                                )
+                            }
                         }
                         // #483 — the date line carries a compact « · édité » marker when the post was
                         // edited (beta feedback Azgor). The exact edit time stays in the « … » menu
@@ -1623,63 +1993,57 @@ internal fun TopicPostCard(
                             .semantics { contentDescription = menuLabel },
                     )
                 }
-                // #476 — citation + multi-quote pills, hoisted OUT of the pseudo+date Column and
-                // placed below the identity Row, preserving the original « pills sit under the date,
-                // flush with the pseudo » look. The start padding reproduces where the pseudo column
-                // begins in the identity Row: the avatar slot width PLUS that Row's 12.dp
-                // avatar-to-name gap. (A leading Spacer + spacedBy would only add the 8.dp inter-pill
-                // gap, landing the pills 4.dp left of the pseudo.) Because they no longer share a
-                // Column with the avatar/⋯ vertical-centering, toggling the multi-quote pill only
-                // grows the card downward — the identity line never moves.
-                if (citedCount > 0 || multiQuoteSelected) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = avatarSlotWidth + 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+            }
+        }
+        // #436/#476 follow-up (XaTriX) — citation + multi-quote pills moved OUT of the identity band
+        // (the secondaryContainer Surface above): when the « Ajouté à la citation » pill appeared inside
+        // the band, the coloured band itself grew taller (« pop »). Rendered here, on the neutral card
+        // surface just below the band, the band keeps a FIXED height; only the neutral area grows.
+        if (citedCount > 0 || multiQuoteSelected) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // Aligned with the post body gutter (the pills now live on the card, below the
+                    // identity band rather than inside it). top/bottom give breathing room.
+                    .padding(start = m.cardBodyHorizontal, end = m.cardBodyHorizontal, top = 6.dp, bottom = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (citedCount > 0) {
+                    // #239 — sober pill: how many posts of THIS page cite this one. Page-scoped (cf.
+                    // citationCountsByNumreponse); jumping to the citing posts is a follow-up.
+                    // surfaceContainerHighest : a touch above the surfaceContainer card so the pill reads.
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        shape = MaterialTheme.shapes.small,
                     ) {
-                        if (citedCount > 0) {
-                            // #239 — sober pill: how many posts of THIS page cite this one.
-                            // Page-scoped (cf. citationCountsByNumreponse); jumping to the citing
-                            // posts is a follow-up. `surface` container : the pill lives on the
-                            // secondaryContainer identity band, where a secondaryContainer pill
-                            // would be invisible.
-                            Surface(
-                                color = MaterialTheme.colorScheme.surface,
-                                shape = MaterialTheme.shapes.small,
-                            ) {
-                                Text(
-                                    text = pluralStringResource(
-                                        R.plurals.topic_post_cited_count,
-                                        citedCount,
-                                        citedCount,
-                                    ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                )
-                            }
-                        }
-                        if (multiQuoteSelected) {
-                            // #436 — basket-membership pill, same shape family as the #239 pill.
-                            // primaryContainer : distinct from the band (secondaryContainer) AND
-                            // from a highlighted band (tertiaryContainer), and it echoes the primary
-                            // border so the two marks read as one signal.
-                            Surface(
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                shape = MaterialTheme.shapes.small,
-                            ) {
-                                Text(
-                                    text = stringResource(
-                                        R.string.topic_post_multiquote_selected,
-                                    ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                )
-                            }
-                        }
+                        Text(
+                            text = pluralStringResource(
+                                R.plurals.topic_post_cited_count,
+                                citedCount,
+                                citedCount,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+                if (multiQuoteSelected) {
+                    // #436 — basket-membership pill. primaryContainer : echoes the primary multi-quote
+                    // border so the two marks read as one selection signal.
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = MaterialTheme.shapes.small,
+                    ) {
+                        Text(
+                            text = stringResource(
+                                R.string.topic_post_multiquote_selected,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        )
                     }
                 }
             }
@@ -1881,6 +2245,100 @@ private fun rememberBottomActionsVisible(listState: LazyListState): Boolean {
             }
     }
     return visible
+}
+
+/** #518 follow-up — one snapshot the reveal reporter reacts to (see [ImmersiveNavBarScrollReporter]). */
+private data class NavBarScrollSample(
+    val index: Int,
+    val offset: Int,
+    val canScrollForward: Boolean,
+    val itemCount: Int,
+)
+
+/**
+ * #518 follow-up — reports the topic's raw scroll facts (at-bottom + scrolling-up) UP to `:app` so it
+ * can reveal the hidden system navigation bar per the user's chosen mode. READ-ONLY on [listState]
+ * (never drives scrolling, like [rememberBottomActionsVisible]). When [active] is false (immersive off /
+ * MANUAL mode) it only clears any stale facts once. `:feature:topic` stays free of the reveal-mode enum
+ * — it ships facts, `:app` decides.
+ *
+ * CRITICAL anti-feedback-loop. Revealing the bar consumes the bottom system-bar inset, which SHRINKS the
+ * list viewport and so flips `canScrollForward` (and `layoutInfo`) ON ITS OWN — no user gesture. Naively
+ * deriving `atBottom = !canScrollForward` would then loop: reach bottom → reveal → inset grows →
+ * canScrollForward true → un-reveal → inset shrinks → canScrollForward false → … (the « sursaut » at the
+ * bottom, including mid-fling since `isScrollInProgress` stays true while a fling settles).
+ *
+ * The fix exploits that a viewport-height change leaves `firstVisibleItemIndex` / `firstVisibleItemScroll-
+ * Offset` UNTOUCHED (LazyColumn is top-anchored): only a genuine user scroll moves them. So we LATCH
+ * `atBottom`: it is SET when the content end is reached while not moving up AND the list actually has
+ * content (`itemCount > 0 && !canScrollForward && !scrollingUp` — the itemCount guard avoids latching on
+ * an empty/loading list, which would otherwise wrongly reveal the bar at the TOP of a long topic once it
+ * loads; it still covers a loaded short topic). It is only CLEARED by a real upward index/offset
+ * decrease. The inset-induced `canScrollForward = true` after a reveal therefore cannot clear it (no
+ * upward move), and the inset-induced `canScrollForward = false` after a hide cannot re-set it (it lands
+ * while `scrollingUp` is true / held).
+ *
+ * `scrollingUp` is derived only from index/offset deltas, which an inset resize never produces — a pure
+ * layout shift is never misread as a scroll direction. (A PROGRAMMATIC scroll — #307 restore — does move
+ * index/offset, so it can momentarily seed the direction; a one-shot at landing that self-corrects on the
+ * first real user scroll, accepted.)
+ */
+@Composable
+private fun ImmersiveNavBarScrollReporter(
+    listState: LazyListState,
+    active: Boolean,
+    onScrollFacts: (atBottom: Boolean, scrollingUp: Boolean) -> Unit,
+) {
+    val report by rememberUpdatedState(onScrollFacts)
+    if (!active) {
+        LaunchedEffect(Unit) { report(false, false) }
+        return
+    }
+    LaunchedEffect(listState) {
+        var prevIndex = listState.firstVisibleItemIndex
+        var prevOffset = listState.firstVisibleItemScrollOffset
+        var scrollingUp = false
+        var atBottomLatched = false
+        var emitted = false
+        var lastAtBottom: Boolean? = null
+        var lastScrollingUp: Boolean? = null
+        snapshotFlow {
+            NavBarScrollSample(
+                index = listState.firstVisibleItemIndex,
+                offset = listState.firstVisibleItemScrollOffset,
+                canScrollForward = listState.canScrollForward,
+                itemCount = listState.layoutInfo.totalItemsCount,
+            )
+        }
+            .collect { sample ->
+                val movedUp = sample.index < prevIndex ||
+                    (sample.index == prevIndex && sample.offset < prevOffset)
+                val positionChanged = sample.index != prevIndex || sample.offset != prevOffset
+                if (positionChanged) {
+                    // Genuine scroll direction — index/offset only move on a real user (or programmatic)
+                    // scroll, never on an inset-driven viewport resize.
+                    scrollingUp = movedUp
+                    // A real upward move is the ONLY thing that clears « at bottom ».
+                    if (movedUp) atBottomLatched = false
+                }
+                prevIndex = sample.index
+                prevOffset = sample.offset
+                // Reaching the content end of a NON-EMPTY list while not moving up latches « at bottom ».
+                // The itemCount guard avoids latching on an empty/loading list (which would wrongly reveal
+                // the bar at the top of a long topic). Once latched, the bar's own inset flipping
+                // canScrollForward back to true cannot clear it (no upward move).
+                if (sample.itemCount > 0 && !sample.canScrollForward && !scrollingUp) {
+                    atBottomLatched = true
+                }
+                val factsChanged = atBottomLatched != lastAtBottom || scrollingUp != lastScrollingUp
+                if (!emitted || factsChanged) {
+                    lastAtBottom = atBottomLatched
+                    lastScrollingUp = scrollingUp
+                    emitted = true
+                    report(atBottomLatched, scrollingUp)
+                }
+            }
+    }
 }
 
 /**

@@ -1,7 +1,9 @@
 package fr.forumhfr.redface2.navigation
 
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrap
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -56,6 +58,14 @@ class AppThemeViewModelTest {
             every { observeDebugBoundsOverlay() } returns MutableStateFlow(false)
             // #332 — eagerly collected by the VM constructor; default on is enough here.
             every { observeFoldLongQuotes() } returns MutableStateFlow(true)
+            // #105 — eagerly collected by the VM constructor; default on is enough here.
+            every { observeShowScrollbar() } returns MutableStateFlow(true)
+            // #518 — eagerly collected by the VM constructor; default off is enough here.
+            every { observeHideSystemNavBar() } returns MutableStateFlow(false)
+            // #518 follow-up — eagerly collected by the VM constructor; default on is enough here.
+            every { observeImmersiveBackButton() } returns MutableStateFlow(true)
+            every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
+            every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
         }
 
         val vm = AppThemeViewModel(
@@ -79,6 +89,14 @@ class AppThemeViewModelTest {
             every { observeDebugBoundsOverlay() } returns MutableStateFlow(false)
             // #332 — eagerly collected by the VM constructor; default on is enough here.
             every { observeFoldLongQuotes() } returns MutableStateFlow(true)
+            // #105 — eagerly collected by the VM constructor; default on is enough here.
+            every { observeShowScrollbar() } returns MutableStateFlow(true)
+            // #518 — eagerly collected by the VM constructor; default off is enough here.
+            every { observeHideSystemNavBar() } returns MutableStateFlow(false)
+            // #518 follow-up — eagerly collected by the VM constructor; default on is enough here.
+            every { observeImmersiveBackButton() } returns MutableStateFlow(true)
+            every { observeImmersiveNavBarReveal() } returns MutableStateFlow(ImmersiveNavBarReveal.MANUAL)
+            every { observeAccentColor() } returns MutableStateFlow(AccentColor.ROSE)
         }
 
         val vm = AppThemeViewModel(

@@ -1,7 +1,9 @@
 package fr.forumhfr.redface2.feature.settings
 
+import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -81,6 +83,12 @@ data class SettingsState(
     val isUpdatingAmoled: Boolean = false,
     val amoledError: Boolean = false,
     val amoledTouchedLocally: Boolean = false,
+    // TU 2788511 — accent colour family (rose default ↔ vivid « REDFACE1 » red). Same enum
+    // optimistic-flip + startup-race-guard machinery as `immersiveNavBarReveal`.
+    val accentColor: AccentColor = AccentColor.ROSE,
+    val isUpdatingAccentColor: Boolean = false,
+    val accentColorError: Boolean = false,
+    val accentColorTouchedLocally: Boolean = false,
     // Topic reading preferences (build 89 follow-up). Same optimistic-flip + startup-race-guard
     // machinery: `topicTopBarAutoHide` is the displayed value, `isUpdating*` gates the switch while
     // DataStore writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init`
@@ -119,6 +127,31 @@ data class SettingsState(
     val isUpdatingFoldLongQuotes: Boolean = false,
     val foldLongQuotesError: Boolean = false,
     val foldLongQuotesTouchedLocally: Boolean = false,
+    // #105 — afficher l'ascenseur de lecture. Même machinerie optimistic-flip + garde de course au
+    // démarrage. Default TRUE (ascenseur historique) : le toggle est l'opt-out (retour bêta styx42).
+    val showScrollbar: Boolean = true,
+    val isUpdatingShowScrollbar: Boolean = false,
+    val showScrollbarError: Boolean = false,
+    val showScrollbarTouchedLocally: Boolean = false,
+    // #518 — masquer la barre de navigation système Android (plein écran immersif). Même machinerie
+    // optimistic-flip + garde de course. Default FALSE (opt-in).
+    val hideSystemNavBar: Boolean = false,
+    val isUpdatingHideSystemNavBar: Boolean = false,
+    val hideSystemNavBarError: Boolean = false,
+    val hideSystemNavBarTouchedLocally: Boolean = false,
+    // #518 follow-up — bouton « retour » flottant affiché en mode plein écran (compagnon du toggle
+    // ci-dessus). Même machinerie optimistic-flip + garde de course. Default TRUE (il ne s'affiche que
+    // quand le plein écran est actif) ; l'option permet de le retirer pour les utilisateurs en gestes.
+    val immersiveBackButton: Boolean = true,
+    val isUpdatingImmersiveBackButton: Boolean = false,
+    val immersiveBackButtonError: Boolean = false,
+    val immersiveBackButtonTouchedLocally: Boolean = false,
+    // #518 follow-up — quand la barre système masquée se révèle automatiquement (selon le scroll).
+    // Default MANUAL (balayage seul, comportement #518 historique). Même machinerie que DisplayDensity.
+    val immersiveNavBarReveal: ImmersiveNavBarReveal = ImmersiveNavBarReveal.MANUAL,
+    val isUpdatingImmersiveNavBarReveal: Boolean = false,
+    val immersiveNavBarRevealError: Boolean = false,
+    val immersiveNavBarRevealTouchedLocally: Boolean = false,
     // Publishing preferences (#312). Same optimistic-flip + startup-race-guard machinery:
     // `confirmBeforePosting` is the displayed value, `isUpdating*` gates the switch while DataStore
     // writes, `*Error` surfaces a persist failure, `*TouchedLocally` forbids a late `init` hydration
@@ -209,6 +242,10 @@ data class SettingsState(
     val canToggleAmoled: Boolean
         get() = !isUpdatingAmoled
 
+    // TU 2788511 — the accent colour control is gated only by its own in-flight write.
+    val canChangeAccentColor: Boolean
+        get() = !isUpdatingAccentColor
+
     // Build 89 follow-up — the topic top-bar auto-hide toggle is gated only by its own write.
     val canToggleTopicTopBarAutoHide: Boolean
         get() = !isUpdatingTopicTopBarAutoHide
@@ -231,6 +268,22 @@ data class SettingsState(
     // #332 — the fold-long-quotes toggle is gated only by its own write.
     val canToggleFoldLongQuotes: Boolean
         get() = !isUpdatingFoldLongQuotes
+
+    // #105 — the show-scrollbar toggle is gated only by its own write.
+    val canToggleShowScrollbar: Boolean
+        get() = !isUpdatingShowScrollbar
+
+    // #518 — the hide-system-nav-bar toggle is gated only by its own write.
+    val canToggleHideSystemNavBar: Boolean
+        get() = !isUpdatingHideSystemNavBar
+
+    // #518 follow-up — the immersive back-button toggle is gated only by its own write.
+    val canToggleImmersiveBackButton: Boolean
+        get() = !isUpdatingImmersiveBackButton
+
+    // #518 follow-up — the nav-bar reveal-mode selector is gated only by its own write.
+    val canChangeImmersiveNavBarReveal: Boolean
+        get() = !isUpdatingImmersiveNavBarReveal
 
     // #312 — the confirm-before-posting toggle is gated only by its own write.
     val canToggleConfirmBeforePosting: Boolean
@@ -325,6 +378,7 @@ sealed interface SettingsIntent {
     // both applied optimistically with revert-on-failure, like the flags toggles.
     data class ThemeModeChanged(val mode: ThemeMode) : SettingsIntent
     data class AmoledEnabledChanged(val enabled: Boolean) : SettingsIntent
+    data class AccentColorChanged(val color: AccentColor) : SettingsIntent
 
     // Build 89 follow-up — topic top-bar auto-hide toggle. Optimistic-flip contract, like the
     // flags toggles: the boolean is the desired post-flip state.
@@ -345,6 +399,18 @@ sealed interface SettingsIntent {
 
     /** #332 — replier les longues citations sur une ligne. */
     data class FoldLongQuotesChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #105 — afficher l'ascenseur de lecture (sujets et MP). */
+    data class ShowScrollbarChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #518 — masquer la barre de navigation système Android (plein écran immersif). */
+    data class HideSystemNavBarChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #518 follow-up — afficher le bouton « retour » flottant en mode plein écran. */
+    data class ImmersiveBackButtonChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #518 follow-up — comportement de révélation de la barre système masquée (plein écran). */
+    data class ImmersiveNavBarRevealChanged(val mode: ImmersiveNavBarReveal) : SettingsIntent
 
     // #312 — confirm-before-posting toggle. Optimistic-flip contract, like the flags toggles:
     // the boolean is the desired post-flip state.

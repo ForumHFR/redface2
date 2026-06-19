@@ -39,6 +39,15 @@ data class Topic(
      * logged-out. See `docs/specs/protocol-hfr.md` § POST `bddpost.php`.
      */
     val canReply: Boolean = false,
+    /**
+     * Chantier C (#546) — the intra-topic search form (`transsearch.php`) hidden fields parsed from
+     * THIS page, or `null` when the page carried no usable search form. It is **transient, never
+     * persisted** : the cache mapper reconstructs it as `null`, so a cached row keeps the
+     * intra-topic-search affordance disabled until a live authenticated re-fetch surfaces a usable
+     * form ([TopicSearchForm.canSearch] additionally requires a non-empty `hash_check`). Coupling it
+     * to the parsed page keeps the form in lockstep with the `(cat, post, page)` it belongs to.
+     */
+    val searchForm: TopicSearchForm? = null,
 ) {
     companion object {
         const val SUBCAT_UNKNOWN: Int = -1
