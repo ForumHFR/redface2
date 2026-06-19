@@ -1314,15 +1314,19 @@ private fun DtNoUnreadBody() {
     }
 }
 
-/** Centered single-line message body (DT empty state), sharing the surface background. */
+/**
+ * Single-line message body (DT empty state), sharing the surface background. Vertically scrollable
+ * so the surrounding [PullToRefreshBox] keeps a swipe target on this listless state (#229) — a
+ * non-scrollable body would give the pull-to-refresh gesture nothing to anchor on.
+ */
 @Composable
 private fun DtMessageBody(text: String) {
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
-        contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
