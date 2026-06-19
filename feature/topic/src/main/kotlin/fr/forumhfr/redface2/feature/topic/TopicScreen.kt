@@ -1728,8 +1728,9 @@ internal fun TopicPostCard(
     onOpenMenu: () -> Unit = {},
     /**
      * #436 — true when this post sits in the multi-quote basket (#291). Marks the card with a
-     * primary border + an « Ajouté à la citation » pill in the identity band, so the selection
-     * is visible without opening the per-post menu (dev feedback by Dintr-un lemn).
+     * primary border + an « Ajouté à la citation » pill rendered BELOW the identity band (moved out of
+     * the band so it no longer grows it on selection), so the selection is visible without opening the
+     * per-post menu (dev feedback by Dintr-un lemn).
      */
     multiQuoteSelected: Boolean = false,
     /**

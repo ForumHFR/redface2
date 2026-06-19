@@ -71,7 +71,7 @@ graph TB
 
 ## État du projet
 
-Phase courante : **Phase 2 — Écriture, close-out alpha** ([roadmap]({{ site.baseurl }}/specs/roadmap)). La Phase 1 (lecture : login, drapeaux, forum, topics, cache, deep links, recherche de base) est livrée ; la Phase 2 ferme les derniers flux d'écriture et de polish avant de basculer vers les MPs.
+Phase courante : **Phase 4 — Extensions** ([roadmap]({{ site.baseurl }}/specs/roadmap)). Phases 1 (lecture), 2 (écriture) et 3 (messages) sont **livrées** : login, drapeaux, forum, topics, cache, deep links, recherche, écriture/édition/citation/création, MPs classiques et MultiMPs (lecture, reply, quote, onglet DT). Seule la synchronisation/écriture MPStorage reste reportée (#6, Phase 4). Le dev (canal interne) accumule en `0.14.0` avant la prochaine bêta.
 
 Les specs restent la source de vérité du projet, mais elles doivent désormais refléter le code réel : tout écart entre une page canonique et le repo est traité comme un bug de spec, pas comme une dette future. Voir [`/spec-reality`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/spec-reality/SKILL.md) pour la procédure d'audit cross-fichier.
 
