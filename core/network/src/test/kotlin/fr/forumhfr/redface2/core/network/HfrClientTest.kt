@@ -250,10 +250,34 @@ class HfrClientTest {
         // An unchecked HTML checkbox sends no field at all — `filter` must be absent.
         assertNull("filter must be omitted when onlyMatches=false", body["filter"])
         assertEquals("1", body["owntopic"])
-        // EXPERIMENTAL navigation cursor carried verbatim (best-effort, never observed live).
+        // Navigation cursor carried verbatim so HFR advances to the next match.
         assertEquals("16300", body["currentnum"])
         assertEquals("someone", body["spseudo"])
         assertEquals("", body["word"])
+    }
+
+    @Test
+    fun `searchInTopic omits firstnum and dep on a navigation step (firstnum null)`() = runTest {
+        // Chantier B (#546) — stepping between results must OMIT firstnum (and dep). Re-sending
+        // firstnum re-anchors HFR on the FIRST match so the cursor never advances (the stepping bug).
+        server.enqueue(MockResponse().setResponseCode(200).setBody("<html><body>ok</body></html>"))
+
+        client.searchInTopic(
+            cat = 23,
+            topicId = 35395,
+            word = "betatest",
+            spseudo = "",
+            onlyMatches = false,
+            hashCheck = "tok",
+            firstnum = null,
+            currentnum = "2786594",
+        )
+
+        val body = formFields(server.takeRequest().body.readUtf8())
+        assertNull("firstnum must be omitted on a navigation step", body["firstnum"])
+        assertNull("dep must be omitted on a navigation step", body["dep"])
+        // The cursor still rides along so HFR knows the current match to advance from.
+        assertEquals("2786594", body["currentnum"])
     }
 
     @Test

@@ -57,6 +57,41 @@ class TopicSearchFormParserTest {
     }
 
     @Test
+    fun `currentNum is null on a normal topic page whose form ships no currentnum input`() {
+        // The STATIC transsearch form HFR renders on a normal page has no `currentnum` input (its own
+        // JS injects one client-side), so the parser must read it back as null — the affordance keys
+        // « start a fresh search » on this. (Chantier B / #546.)
+        val form = requireNotNull(parser.parse(fixture("topic_page_multipage.html")))
+
+        assertNull("a normal page carries no currentnum cursor", form.currentNum)
+    }
+
+    @Test
+    fun `parses the currentnum cursor from a transsearch response form`() {
+        // Chantier B (#546) — a `transsearch` RESPONSE re-renders the form WITH a `currentnum` hidden
+        // input pointing at the anchored match. The parser must read it back so the ViewModel can step
+        // to the next/previous result. Synthetic fixture (no live capture exists; hash_check is fake).
+        val html = """
+            <html><body>
+              <form action="/transsearch.php" method="post">
+                <input type="hidden" name="hash_check" value="0000000000000000" />
+                <input type="hidden" name="post" value="35395" />
+                <input type="hidden" name="cat" value="23" />
+                <input type="hidden" name="owntopic" value="0" />
+                <input type="hidden" name="firstnum" value="2783602" />
+                <input type="hidden" name="currentnum" value="2786594" />
+              </form>
+            </body></html>
+        """.trimIndent()
+
+        val form = requireNotNull(parser.parse(html))
+
+        assertEquals(2786594, form.currentNum)
+        assertEquals(2783602, form.firstnum)
+        assertTrue(form.canSearch)
+    }
+
+    @Test
     fun `returns null when the page carries no transsearch form`() {
         // A reply-only / synthetic page without the header search form must degrade to null so the
         // caller hides the search affordance instead of crashing.

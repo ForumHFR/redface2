@@ -55,6 +55,9 @@ class TopicSearchFormParser {
                 cat = cat,
                 firstnum = firstnum,
                 owntopic = form.intValue(HfrSelectors.TOPIC_SEARCH_OWNTOPIC) ?: 0,
+                // Chantier B (#546) — null on a normal page (no `currentnum` input ; HFR's JS injects
+                // one client-side), non-null on a `transsearch` response carrying the anchored match.
+                currentNum = form.intValue(HfrSelectors.TOPIC_SEARCH_CURRENTNUM),
             )
         }
     }

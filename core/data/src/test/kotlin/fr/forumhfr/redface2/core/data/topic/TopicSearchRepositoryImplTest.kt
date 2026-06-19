@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.data.topic
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
 import fr.forumhfr.redface2.core.model.TopicSearchForm
 import fr.forumhfr.redface2.core.model.TopicSearchRequest
 import fr.forumhfr.redface2.core.network.HfrClient
@@ -97,6 +98,69 @@ class TopicSearchRepositoryImplTest {
                 cat = 32, topicId = 7, word = "", spseudo = "someone", onlyMatches = false,
                 hashCheck = "tok", firstnum = 16244, owntopic = 1, currentnum = "16300",
             )
+        }
+    }
+
+    @Test
+    fun `omits firstnum on a navigation step so HFR advances the cursor`() = runTest {
+        // Chantier B (#546) — a STEP request (isStep=true) must drop firstnum so HFR does not re-anchor
+        // on the first match. The repository passes firstnum=null to the client; a fresh search keeps it.
+        val hfrClient = mockk<HfrClient>()
+        coEvery {
+            hfrClient.searchInTopic(
+                cat = any(), topicId = any(), word = any(), spseudo = any(), onlyMatches = any(),
+                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(),
+            )
+        } returns fixture("topic_page_single.html")
+
+        buildRepository(hfrClient).searchInTopic(
+            TopicSearchRequest(
+                form = TopicSearchForm(hashCheck = "tok", topicId = 35395, cat = 23, firstnum = 2783602),
+                word = "betatest",
+                spseudo = "",
+                onlyMatches = false,
+                currentNum = "2786594",
+                isStep = true,
+            ),
+        )
+
+        coVerify(exactly = 1) {
+            hfrClient.searchInTopic(
+                cat = 23, topicId = 35395, word = "betatest", spseudo = "", onlyMatches = false,
+                hashCheck = "tok", firstnum = null, owntopic = 0, currentnum = "2786594",
+            )
+        }
+    }
+
+    @Test
+    fun `raises NoTopicSearchResultsException when HFR returns the no-result page`() {
+        // Chantier B (#546) — HFR answers a « aucune réponse n'a été trouvée » page (not an HTTP error)
+        // when the term/author matched nothing. The repository must detect the marker BEFORE parsing and
+        // raise a typed « no result » so the ViewModel shows NoResults, not a « recherche échouée » error.
+        val hfrClient = mockk<HfrClient>()
+        val noResultPage = """
+            <html><body>
+              <div class="hop">Désolé, aucune réponse n'a été trouvée pour votre recherche.</div>
+            </body></html>
+        """.trimIndent()
+        coEvery {
+            hfrClient.searchInTopic(
+                cat = any(), topicId = any(), word = any(), spseudo = any(), onlyMatches = any(),
+                hashCheck = any(), firstnum = any(), owntopic = any(), currentnum = any(),
+            )
+        } returns noResultPage
+
+        assertThrows(NoTopicSearchResultsException::class.java) {
+            runBlocking {
+                buildRepository(hfrClient).searchInTopic(
+                    TopicSearchRequest(
+                        form = TopicSearchForm(hashCheck = "tok", topicId = 1, cat = 1, firstnum = 1),
+                        word = "topic",
+                        spseudo = "",
+                        onlyMatches = false,
+                    ),
+                )
+            }
         }
     }
 

@@ -37,6 +37,11 @@ object HfrSelectors {
     const val TOPIC_SEARCH_CAT = "input[name=cat]"
     const val TOPIC_SEARCH_FIRSTNUM = "input[name=firstnum]"
     const val TOPIC_SEARCH_OWNTOPIC = "input[name=owntopic]"
+    // Chantier B (#546) — the navigation cursor. A NORMAL topic page ships no `currentnum` input
+    // (HFR's own JS injects one client-side), so this resolves to null there ; a `transsearch`
+    // RESPONSE page carries it with the `numreponse` of the anchored match, which we read back to
+    // drive next/previous result navigation and detect the end of results.
+    const val TOPIC_SEARCH_CURRENTNUM = "input[name=currentnum]"
 
     const val POLL = "div.sondage"
     const val POLL_QUESTION = "b.s2"

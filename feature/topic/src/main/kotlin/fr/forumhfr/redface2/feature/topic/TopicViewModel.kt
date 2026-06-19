@@ -12,12 +12,14 @@ import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Topic
+import fr.forumhfr.redface2.core.model.TopicSearchForm
 import fr.forumhfr.redface2.core.model.TopicSearchRequest
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -88,6 +90,17 @@ class TopicViewModel @AssistedInject constructor(
      * Symmetric with cancelling [searchJob] at the head of every normal-load path.
      */
     private var searchGeneration: Int = 0
+
+    /**
+     * Chantier B (#546) — client-side cursor history for next/previous result navigation in
+     * NON-FILTERED mode. HFR's `transsearch` is forward-only (it has no « previous » endpoint), so we
+     * record the `numreponse` of every visited match in order and replay the list to go back.
+     * `searchCursors[0]` is the first match (reached by a FRESH search) ; subsequent entries are
+     * reached by stepping. [searchCursorIndex] points at the entry currently shown (-1 when no search
+     * is active / filtered mode). Reset on every fresh submit and on closing the search.
+     */
+    private val searchCursors = mutableListOf<Int>()
+    private var searchCursorIndex = -1
 
     /**
      * Tracks whether the current value of [TopicRequest.scrollTo] has already been
@@ -178,6 +191,8 @@ class TopicViewModel @AssistedInject constructor(
             is TopicIntent.SearchOnlyMatchesChanged ->
                 _state.update { it.copy(search = it.search.copy(onlyMatches = intent.onlyMatches)) }
             TopicIntent.SubmitSearch -> submitSearch()
+            TopicIntent.NextResult -> nextResult()
+            TopicIntent.PrevResult -> prevResult()
         }
     }
 
@@ -591,13 +606,31 @@ class TopicViewModel @AssistedInject constructor(
     private fun takeOverFromSearch() {
         searchJob?.cancel()
         searchGeneration++
+        // A normal-load path owns the page now, so the result cursor history is stale: a later
+        // next/prev would step from a position that no longer matches what is on screen. Reset it
+        // and clear the navigation affordances. (Covers closeSearch, which routes through here.)
+        resetSearchCursors()
         if (_state.value.search.status == TopicSearchStatus.Loading) {
-            _state.update { it.copy(search = it.search.copy(status = TopicSearchStatus.Idle)) }
+            _state.update {
+                it.copy(
+                    search = it.search.copy(
+                        status = TopicSearchStatus.Idle,
+                        canGoPreviousResult = false,
+                        canGoNextResult = false,
+                    ),
+                )
+            }
         }
     }
 
+    /** Chantier B (#546) — drop the client-side result cursor history (no search position active). */
+    private fun resetSearchCursors() {
+        searchCursors.clear()
+        searchCursorIndex = -1
+    }
+
     /**
-     * Submit the intra-topic search : `POST transsearch.php` (authenticated) with the parsed form +
+     * Submit a FRESH intra-topic search : `POST transsearch.php` (authenticated) with the parsed form +
      * the typed criteria, then render the returned topic page in [TopicUiState.Mode.Loaded].
      *
      * The current page STAYS visible while the POST is in flight — only `search.status` flips to
@@ -610,11 +643,11 @@ class TopicViewModel @AssistedInject constructor(
      * are applied ONLY while that token is still current, so a slow `transsearch` reply that lost the
      * race to a more recent normal page (refresh / page change / new search) is dropped, never written.
      *
-     * Best-effort by contract : the `transsearch` response was never observed live, so we trust it
-     * is a topic page and parse it as one — no result counter is promised. Server-side result
-     * navigation (HFR `currentnum`) is intentionally NOT wired yet : the cursor value is only known
-     * from a live response we have never captured, so navigating would guess. We surface the
-     * filtered page HFR returns and stop there (documented in the brief / model KDoc).
+     * Chantier B (#546) — in NON-FILTERED mode (`!onlyMatches`) HFR returns the FULL page of the first
+     * match anchored on `#t<currentnum>` (no highlight), so we seed the result cursor history with that
+     * match and scroll to it. Filtered mode (`onlyMatches`) keeps the prior behaviour : HFR returns the
+     * matches-only page, which IS the result list, so there is no per-result navigation or scroll. A
+     * « no result » page surfaces as [TopicSearchStatus.NoResults] (≠ Error), never a failure Toast.
      */
     private fun submitSearch() {
         val current = _state.value
@@ -626,45 +659,203 @@ class TopicViewModel @AssistedInject constructor(
             word = current.search.word.trim(),
             spseudo = current.search.spseudo.trim(),
             onlyMatches = current.search.onlyMatches,
+            // Fresh search: no cursor, keep firstnum (isStep = false). HFR re-anchors on the first match.
         )
         if (!request.isMeaningful) return
-        // Take over from any previous search and snapshot the generation this POST belongs to.
+        resetSearchCursors()
+        launchSearch(request, isFresh = true)
+    }
+
+    /**
+     * Chantier B (#546) — jump to the NEXT search result (non-filtered mode). Steps HFR's `currentnum`
+     * cursor forward from the current match, OMITTING `firstnum` (the repository does, keyed on
+     * [TopicSearchRequest.isStep]) so HFR truly advances instead of re-anchoring on the first match.
+     */
+    private fun nextResult() {
+        val current = _state.value
+        val form = navigableSearchForm(current).takeIf { searchCursorIndex >= 0 } ?: return
+        launchSearch(stepRequest(form, current.search, cursor = searchCursors[searchCursorIndex]), isFresh = false)
+    }
+
+    /**
+     * Chantier B (#546) — jump to the PREVIOUS search result (non-filtered mode). HFR is forward-only,
+     * so we replay the cursor history : re-issue a FRESH search to reach the first match again, or a
+     * STEP from the match just before the target, then scroll to the now-current cursor.
+     */
+    private fun prevResult() {
+        val current = _state.value
+        val form = navigableSearchForm(current).takeIf { searchCursorIndex > 0 } ?: return
+        val targetIndex = searchCursorIndex - 1
+        val request = if (targetIndex == 0) {
+            TopicSearchRequest(
+                form = form,
+                word = current.search.word.trim(),
+                spseudo = current.search.spseudo.trim(),
+                onlyMatches = false,
+            )
+        } else {
+            stepRequest(form, current.search, cursor = searchCursors[targetIndex - 1])
+        }
+        launchSearch(request, isFresh = false, rewindToIndex = targetIndex)
+    }
+
+    /**
+     * Chantier B (#546) — the usable (authenticated) search form of the loaded page IF result
+     * navigation applies, i.e. NON-filtered mode and a loaded page whose form `canSearch`. Returns
+     * `null` to short-circuit a no-op next/previous, keeping those single-exit (detekt ReturnCount).
+     */
+    private fun navigableSearchForm(current: TopicUiState): TopicSearchForm? {
+        if (current.search.onlyMatches) return null
+        return (current.mode as? TopicUiState.Mode.Loaded)?.topic?.searchForm?.takeIf { it.canSearch }
+    }
+
+    /** Chantier B (#546) — a next/previous STEP request (cursor set, firstnum omitted via isStep). */
+    private fun stepRequest(
+        form: TopicSearchForm,
+        search: TopicSearchUiState,
+        cursor: Int,
+    ): TopicSearchRequest = TopicSearchRequest(
+        form = form,
+        word = search.word.trim(),
+        spseudo = search.spseudo.trim(),
+        onlyMatches = false,
+        currentNum = cursor.toString(),
+        isStep = true,
+    )
+
+    /**
+     * Chantier B (#546) — shared launcher for a fresh search, a forward step or a backward replay.
+     * Snapshots the generation (latest-wins), keeps the current page on screen while the POST is in
+     * flight and dispatches the result to [applySearchResult]. [rewindToIndex] is non-null only for a
+     * « previous » replay : it tells [applySearchResult] which existing history slot we are landing on
+     * instead of appending a new one.
+     */
+    private fun launchSearch(request: TopicSearchRequest, isFresh: Boolean, rewindToIndex: Int? = null) {
+        // Take over from any previous search; cancel the in-flight normal load / prefetch so a late
+        // observeTopicPage emission cannot land on top of the page this search is about to render.
         searchJob?.cancel()
-        // Cancel the in-flight normal load / prefetch so a late `observeTopicPage` refresh emission
-        // cannot land on top of the filtered page this search is about to render. The screen keeps
-        // the page currently on display until the search reply (or its failure) settles.
         loadJob?.cancel()
         prefetchJob?.cancel()
         val generation = ++searchGeneration
-        // Stay on the loaded page — only drive the search status, never blank the posts.
         _state.update { it.copy(search = it.search.copy(status = TopicSearchStatus.Loading)) }
         searchJob = viewModelScope.launch {
             try {
                 val topic = topicSearchRepository.searchInTopic(request)
-                // Drop a stale reply: a newer normal load / refresh / search bumped the generation
-                // while this POST was on the wire, so its page must not clobber the current one.
+                // Drop a stale reply: a newer normal load / refresh / search bumped the generation.
                 if (generation != searchGeneration) return@launch
-                _state.update {
-                    it.copy(
-                        mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
-                        // The transsearch response is a filtered/anchored view of the topic — its
-                        // pager is not the canonical topic pager, so we do NOT touch availablePages
-                        // (leaving the previously-known set) and never schedule a prefetch off it.
-                        search = it.search.copy(status = TopicSearchStatus.Done),
-                    )
-                }
+                applySearchResult(topic, isFresh = isFresh, rewindToIndex = rewindToIndex)
             } catch (cancellation: CancellationException) {
                 throw cancellation
+            } catch (noResults: NoTopicSearchResultsException) {
+                android.util.Log.i(LOG_TAG, "Intra-topic search returned no result", noResults)
+                if (generation != searchGeneration) return@launch
+                if (isFresh) onFreshNoResults() else onStepEnd()
             } catch (@Suppress("TooGenericExceptionCaught") searchError: Exception) {
                 android.util.Log.w(LOG_TAG, "Intra-topic search failed", searchError)
-                // A stale failure must not stomp a fresher page's status either.
                 if (generation != searchGeneration) return@launch
                 _effects.send(TopicEffect.SearchFailed)
-                // The current page is still on screen (we never left Mode.Loaded) — just mark the
-                // search as failed in the bar so the user can retry or close it.
+                // The current page is still on screen — just mark the search as failed so the user can
+                // retry or close it.
                 _state.update { it.copy(search = it.search.copy(status = TopicSearchStatus.Error)) }
             }
         }
+    }
+
+    /**
+     * Chantier B (#546) — apply a `transsearch` result page. In FILTERED mode the page IS the result
+     * list (no per-result navigation), so we render it and stop. In NON-FILTERED mode HFR anchors a
+     * single match : we only swap the page on screen once we know the match is USABLE (so a step past
+     * the last result leaves the current match in place — « ne pas naviguer en fin »). The client
+     * cursor history is maintained (fresh seeds it, forward appends/advances, backward rewinds) and we
+     * scroll to the match. A cursor that is null OR no longer a post on the page means : fresh → no
+     * results ; step → end of results.
+     */
+    private suspend fun applySearchResult(topic: Topic, isFresh: Boolean, rewindToIndex: Int?) {
+        if (_state.value.search.onlyMatches) {
+            // Matches-only page: it is the whole result set, no scroll / cursor navigation.
+            renderSearchPage(topic, TopicSearchStatus.Done, canPrev = false, canNext = false)
+            return
+        }
+        val cursor = topic.searchForm?.currentNum
+        // Forward step that did not move on (HFR re-anchored on the same cursor) = end of results.
+        val sameAsCurrent = !isFresh && rewindToIndex == null && cursor == searchCursors.getOrNull(searchCursorIndex)
+        if (cursor == null || cursor !in topic.posts.map { it.numreponse } || sameAsCurrent) {
+            // No usable match on this reply. Fresh → no results ; step → end of results (keep page).
+            if (isFresh) onFreshNoResults() else onStepEnd()
+            return
+        }
+        // Usable landing: update the history slot, render THIS page, then scroll to the match.
+        when {
+            rewindToIndex != null -> searchCursorIndex = rewindToIndex
+            isFresh -> {
+                searchCursors.clear()
+                searchCursors += cursor
+                searchCursorIndex = 0
+            }
+            else -> {
+                searchCursors += cursor
+                searchCursorIndex = searchCursors.lastIndex
+            }
+        }
+        renderSearchPage(
+            topic,
+            TopicSearchStatus.Done,
+            canPrev = searchCursorIndex > 0,
+            // Forward-only HFR never reports a count up front; keep « next » enabled until a step
+            // actually reports the end (onStepEnd disables it).
+            canNext = true,
+        )
+        _effects.send(TopicEffect.ScrollToPost(cursor))
+    }
+
+    /**
+     * Chantier B (#546) — render the `transsearch` page into [TopicUiState.Mode.Loaded] with [status]
+     * and the prev/next affordances, keeping the previously-known [TopicUiState.availablePages] (the
+     * transsearch pager is not the canonical topic pager) and never scheduling a prefetch off it.
+     */
+    private fun renderSearchPage(topic: Topic, status: TopicSearchStatus, canPrev: Boolean, canNext: Boolean) {
+        _state.update {
+            it.copy(
+                mode = TopicUiState.Mode.Loaded(topic, computeHiddenNumreponses(topic, blockedCanonicals)),
+                search = it.search.copy(
+                    status = status,
+                    canGoPreviousResult = canPrev,
+                    canGoNextResult = canNext,
+                ),
+            )
+        }
+    }
+
+    /** Chantier B (#546) — a fresh search that matched nothing : NoResults state, no navigation. */
+    private fun onFreshNoResults() {
+        resetSearchCursors()
+        _state.update {
+            it.copy(
+                search = it.search.copy(
+                    status = TopicSearchStatus.NoResults,
+                    canGoPreviousResult = false,
+                    canGoNextResult = false,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Chantier B (#546) — a forward step ran past the last match. The current match STAYS on screen (we
+     * never rendered the sentinel page), « next » disables, and a sober Toast is surfaced. The cursor
+     * history is untouched so « previous » still walks back from the last real match.
+     */
+    private suspend fun onStepEnd() {
+        _state.update {
+            it.copy(
+                search = it.search.copy(
+                    status = TopicSearchStatus.Done,
+                    canGoPreviousResult = searchCursorIndex > 0,
+                    canGoNextResult = false,
+                ),
+            )
+        }
+        _effects.send(TopicEffect.SearchResultsEnd)
     }
 
     @AssistedFactory

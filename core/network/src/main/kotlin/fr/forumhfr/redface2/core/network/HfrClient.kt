@@ -487,10 +487,13 @@ class HfrClient @Inject constructor(
      *   the matching messages. When `false` we omit `filter`, matching the unchecked form.
      * - [currentnum] is HFR's JS-managed navigation cursor. The static form has NO `currentnum`
      *   input — HFR's own script creates it and the submit button clears it. We therefore send it
-     *   empty for a fresh search and only carry a value for the **EXPERIMENTAL / best-effort**
-     *   next/previous navigation. **The `transsearch` response has NEVER been observed live** (no
-     *   fixture), so the cursor semantics are unverified ; callers must treat navigation as
-     *   best-effort and re-parse whatever topic page comes back.
+     *   empty for a fresh search and carry the current match's `numreponse` for a next/previous
+     *   STEP so HFR advances to the following match.
+     * - [firstnum] is the page anchor HFR expects on a FRESH search. Pass `null` for a navigation
+     *   STEP : when stepping, BOTH `firstnum` AND `dep` are OMITTED from the POST. Re-sending
+     *   `firstnum` re-anchors HFR on the FIRST match so the cursor never progresses (the
+     *   live-verified stepping bug — Chantier B / #546). A non-null value sends `firstnum` + `dep=0`,
+     *   exactly as the web form's fresh submit does.
      *
      * The response IS a topic page → the data layer re-parses it with the existing topic-page parser.
      *
@@ -505,7 +508,7 @@ class HfrClient @Inject constructor(
         spseudo: String,
         onlyMatches: Boolean,
         hashCheck: String,
-        firstnum: Int,
+        firstnum: Int?,
         owntopic: Int = 0,
         currentnum: String? = null,
     ): String {
@@ -526,11 +529,17 @@ class HfrClient @Inject constructor(
                 // An unchecked HTML checkbox sends no field at all ; mirror that so HFR's
                 // server-side branch behaves exactly like the web form.
                 if (onlyMatches) add("filter", "1")
+                // Fresh search → send the page anchor (firstnum) + dep=0, like the web form's
+                // initial submit. Navigation STEP (firstnum == null) → OMIT both : re-sending
+                // firstnum re-anchors HFR on the first match and the cursor never advances
+                // (live-verified stepping bug, Chantier B / #546).
+                if (firstnum != null) {
+                    add("dep", "0")
+                    add("firstnum", firstnum.toString())
+                }
             }
-            .add("dep", "0")
-            .add("firstnum", firstnum.toString())
-            // HFR's JS clears `currentnum` on a fresh submit (empty string) and only sets it for
-            // in-result navigation. Best-effort : the value is unverified (no live response capture).
+            // HFR's JS clears `currentnum` on a fresh submit (empty string) and sets it to the
+            // current match's numreponse for in-result navigation, so HFR advances on the step.
             .add("currentnum", currentnum.orEmpty())
             .build()
         val request = Request.Builder().url(url).post(formBody).build()

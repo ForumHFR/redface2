@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.data.topic
 
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.model.TopicSearchRequest
@@ -45,7 +46,8 @@ class TopicSearchRepositoryImpl @Inject constructor(
             // No word / spseudo / hash_check verbatim — only presence flags + the filter mode.
             "POST transsearch cat=${request.form.cat} post=${request.form.topicId} " +
                 "hasWord=${request.word.isNotBlank()} hasPseudo=${request.spseudo.isNotBlank()} " +
-                "onlyMatches=${request.onlyMatches} hasCursor=${!request.currentNum.isNullOrBlank()}",
+                "onlyMatches=${request.onlyMatches} isStep=${request.isStep} " +
+                "hasCursor=${!request.currentNum.isNullOrBlank()}",
         )
         val html = client.searchInTopic(
             cat = request.form.cat,
@@ -54,17 +56,37 @@ class TopicSearchRepositoryImpl @Inject constructor(
             spseudo = request.spseudo,
             onlyMatches = request.onlyMatches,
             hashCheck = request.form.hashCheck,
-            firstnum = request.form.firstnum,
+            // Chantier B (#546) — a navigation STEP omits firstnum (the client drops `dep` too).
+            // Re-sending firstnum re-anchors HFR on the first match (the live-verified stepping bug).
+            firstnum = if (request.isStep) null else request.form.firstnum,
             owntopic = request.form.owntopic,
             currentnum = request.currentNum,
         )
-        // The transsearch response IS a topic page (documented contract — never observed live, so
-        // best-effort). Re-parse with the canonical topic-page parser ; an unexpected shape would
-        // surface as a normal parse error the ViewModel reports, never a poisoned cache row.
+        if (html.hasNoSearchResults()) {
+            // Chantier B (#546) — HFR rendered « aucune réponse n'a été trouvée » (a frequent term
+            // hitting the MyISAM fulltext 50%-rule, or a genuine miss). Raise a typed « no result »
+            // BEFORE parsing so the empty page never surfaces as a misleading « recherche échouée ».
+            throw NoTopicSearchResultsException()
+        }
+        // The transsearch response IS a topic page (documented contract). Re-parse with the canonical
+        // topic-page parser ; an unexpected shape would surface as a normal parse error the ViewModel
+        // reports, never a poisoned cache row.
         parser.parseTopicPage(html)
     }
 
+    /**
+     * HFR's « no result » page is a short body carrying the literal « aucune réponse n'a été trouvée »
+     * inside a `.hop` block (verified live, Chantier B / #546). The marker text is the robust signal —
+     * the page length varies — so we match case-insensitively on it.
+     */
+    private fun String.hasNoSearchResults(): Boolean =
+        contains(NO_RESULT_MARKER, ignoreCase = true)
+
     private companion object {
         private const val LOG_TAG = "TopicSearchRepository"
+
+        // Literal text HFR renders when transsearch matched nothing. Anchored on the message, not the
+        // `.hop` wrapper class, so a future markup tweak around the same copy keeps working.
+        private const val NO_RESULT_MARKER = "aucune réponse n'a été trouvée"
     }
 }
