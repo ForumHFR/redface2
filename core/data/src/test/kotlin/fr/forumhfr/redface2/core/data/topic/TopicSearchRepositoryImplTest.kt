@@ -31,7 +31,7 @@ import org.junit.Test
 class TopicSearchRepositoryImplTest {
 
     @Test
-    fun `forwards every form field and the filter flag to the HfrClient`() = runTest {
+    fun `forwards every form field and the filter flag, but never firstnum (whole-topic search)`() = runTest {
         val hfrClient = mockk<HfrClient>()
         coEvery {
             hfrClient.searchInTopic(
@@ -66,7 +66,10 @@ class TopicSearchRepositoryImplTest {
                 spseudo = "XaTriX",
                 onlyMatches = true,
                 hashCheck = "tok",
-                firstnum = 2783602,
+                // #546 (bug tinc 2788609) — a FRESH search must NOT send firstnum: with firstnum HFR
+                // anchors the search ahead of the current page and misses earlier matches. firstnum=null
+                // makes it cover the whole topic from the start, even though form.firstnum is non-null.
+                firstnum = null,
                 owntopic = 0,
                 currentnum = null,
             )
@@ -74,7 +77,7 @@ class TopicSearchRepositoryImplTest {
     }
 
     @Test
-    fun `carries the navigation cursor and owntopic verbatim`() = runTest {
+    fun `carries the navigation cursor and owntopic verbatim, still omitting firstnum`() = runTest {
         val hfrClient = mockk<HfrClient>()
         coEvery {
             hfrClient.searchInTopic(
@@ -94,17 +97,19 @@ class TopicSearchRepositoryImplTest {
         )
 
         coVerify(exactly = 1) {
+            // owntopic + currentnum forwarded verbatim ; firstnum dropped (#546 whole-topic search).
             hfrClient.searchInTopic(
                 cat = 32, topicId = 7, word = "", spseudo = "someone", onlyMatches = false,
-                hashCheck = "tok", firstnum = 16244, owntopic = 1, currentnum = "16300",
+                hashCheck = "tok", firstnum = null, owntopic = 1, currentnum = "16300",
             )
         }
     }
 
     @Test
-    fun `omits firstnum on a navigation step so HFR advances the cursor`() = runTest {
-        // Chantier B (#546) — a STEP request (isStep=true) must drop firstnum so HFR does not re-anchor
-        // on the first match. The repository passes firstnum=null to the client; a fresh search keeps it.
+    fun `omits firstnum on a navigation step and forwards currentnum so HFR advances the cursor`() = runTest {
+        // #546 — a STEP request (isStep=true) drops firstnum so HFR does not re-anchor on the first match,
+        // and advances via currentnum. Since the bug-tinc fix, a FRESH search ALSO drops firstnum (whole
+        // topic) — both modes pass firstnum=null ; only currentnum tells fresh (null) from step here.
         val hfrClient = mockk<HfrClient>()
         coEvery {
             hfrClient.searchInTopic(

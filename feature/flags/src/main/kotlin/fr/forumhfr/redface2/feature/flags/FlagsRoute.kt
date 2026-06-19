@@ -843,6 +843,10 @@ private const val CONTENT_TYPE_HEADER = "category_header"
 private const val CONTENT_TYPE_EMPTY = "empty_section"
 private const val CONTENT_TYPE_ROW = "flag_row"
 
+// #6 — the DT scan-note footer is a distinct, non-row item (not a clickable ForumListRow), so it
+// keeps its own recycling pool and never reuses a row slot.
+private const val CONTENT_TYPE_DT_FOOTER = "dt_scan_note"
+
 /**
  * Category-grouped flag list (#179). Renders one sticky band per [FlagCategorySection] in the
  * canonical category order the ViewModel produced, with the rows under each band. Empty sections
@@ -1156,10 +1160,13 @@ private fun DtTabOpenEffect(
 }
 
 /**
- * #6 — body of the opt-in « DT » tab: the user's MultiMP conversations (inbox `cat=prive`,
- * filtered on [PrivateMessageSummary.isMultiRecipient]) enriched best-effort with the MPStorage
- * reading positions (a discreet « reprise p.N » badge). Tapping a row opens the existing
- * `PrivateMessageThread` route via [AuthenticatedActions.onOpenMultiMp].
+ * #6 — body of the opt-in « DT » tab: the UNION of the user's MultiMP conversations on inbox PAGE 1
+ * (`cat=prive`, filtered on [PrivateMessageSummary.isMultiRecipient]) and the orphan MPStorage
+ * entries absent from that page, deduplicated by `threadId`. Inbox rows render the rich
+ * [DtListItem.InboxBacked] (subject, unread dot, « reprise p.N » badge) ; orphans render the
+ * placeholder [DtListItem.StorageOnly] (« Conversation #threadId », neutral dot). A discreet
+ * scan-note footer states the page-1 limit. Tapping a row opens the existing `PrivateMessageThread`
+ * route via [AuthenticatedActions.onOpenMultiMp].
  *
  * The MPStorage enrichment is best-effort: a missing / unreadable / failed storage read leaves the
  * list intact, just without badges (cf. [FlagsViewModel.loadDt]). Only an inbox load failure
@@ -1188,27 +1195,56 @@ private fun DtListBody(state: DtListUiState, actions: AuthenticatedActions) {
         ) {
             // DT now renders through the SAME row primitive + divider as the Cyan/Red/Favorite lists
             // (no Card, no contentPadding/spacing) so the four lists stay visually identical and a
-            // row change propagates to all (arbitrage XaTriX 2026-06-19).
+            // row change propagates to all (arbitrage XaTriX 2026-06-19). The list is the union of
+            // inbox PAGE 1 MultiMP rows + orphan MPStorage entries (#6) — dispatched per variant.
             items(
                 items = state.items,
-                key = { it.conversation.threadId },
+                key = { it.threadId },
                 contentType = { CONTENT_TYPE_ROW },
             ) { item ->
-                DtConversationRow(
-                    item = item,
-                    // Open on the page the badge ADVERTISES: the MPStorage resume page when present,
-                    // else the conversation's last inbox page (#430). Tapping must land where the
-                    // « reprise p.N » badge says it will — opening lastPage while showing « reprise
-                    // p.N » was a badge/action contradiction (Codex review). Clamp ≥ 1 so a bogus
-                    // stored 0/negative page never produces an invalid route argument.
-                    onClick = {
-                        val target = (item.resumePage ?: item.conversation.lastPage).coerceAtLeast(1)
-                        actions.onOpenMultiMp(item.conversation.threadId, target)
-                    },
-                )
+                DtRow(item = item, onOpenMultiMp = actions.onOpenMultiMp)
                 FlagItemDivider()
             }
+            // Scan-note footer (#6): the list only covers inbox PAGE 1 + what the DT sync knows;
+            // older inbox pages are deliberately not swept. A discreet, non-clickable trailing item.
+            item(key = "dt-scan-note", contentType = CONTENT_TYPE_DT_FOOTER) {
+                Text(
+                    text = stringResource(R.string.flags_dt_scan_note),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                )
+            }
         }
+    }
+}
+
+/**
+ * Dispatches a [DtListItem] to its row composable (#6): an [DtListItem.InboxBacked] renders the rich
+ * inbox row, a [DtListItem.StorageOnly] the placeholder orphan row. Both open via [onOpenMultiMp] on
+ * the page the « reprise p.N » badge advertises (clamped ≥ 1).
+ */
+@Composable
+private fun DtRow(item: DtListItem, onOpenMultiMp: (threadId: Int, page: Int) -> Unit) {
+    when (item) {
+        is DtListItem.InboxBacked -> DtConversationRow(
+            item = item,
+            // Open on the page the badge ADVERTISES: the MPStorage resume page when present, else the
+            // conversation's last inbox page (#430). Tapping must land where the « reprise p.N » badge
+            // says it will — opening lastPage while showing « reprise p.N » was a badge/action
+            // contradiction (Codex review). Clamp ≥ 1 so a bogus stored 0/negative page never
+            // produces an invalid route argument.
+            onClick = {
+                val target = (item.resumePage ?: item.conversation.lastPage).coerceAtLeast(1)
+                onOpenMultiMp(item.threadId, target)
+            },
+        )
+
+        is DtListItem.StorageOnly -> DtStorageOnlyRow(
+            item = item,
+            // No lastPage for an orphan: open on the MPStorage resume page (clamped ≥ 1), else page 1.
+            onClick = { onOpenMultiMp(item.threadId, (item.resumePage ?: 1).coerceAtLeast(1)) },
+        )
     }
 }
 
@@ -1274,7 +1310,7 @@ private fun DtErrorBody(cause: Throwable, actions: AuthenticatedActions) {
  * MPStorage badge. The badge is a reading POSITION, never a read/unread state (#361/ADR-013).
  */
 @Composable
-private fun DtConversationRow(item: DtListItem, onClick: () -> Unit) {
+private fun DtConversationRow(item: DtListItem.InboxBacked, onClick: () -> Unit) {
     val conversation = item.conversation
     // DT renders through the shared [ForumListRow]: the inbox dot is the leading slot, the subject is
     // the title (unread → SemiBold), and the « Interlocuteurs multiples » caption + the « reprise p.N »
@@ -1303,6 +1339,40 @@ private fun DtConversationRow(item: DtListItem, onClick: () -> Unit) {
         onClick = onClick,
         emphasized = conversation.hasUnread,
         leading = { DtUnreadDot(unread = conversation.hasUnread) },
+        contentDescription = contentDescription,
+    )
+}
+
+/**
+ * One ORPHAN DT row (#6): a MPStorage `mpFlags` entry absent from inbox PAGE 1. No subject and no
+ * read/unread state are available, so the title is a localized placeholder « Conversation #threadId »
+ * and the leading dot is the neutral (hollow) variant whose a11y reads « état inconnu », never
+ * « Lu ». The « reprise p.N » badge ([DtListItem.StorageOnly.resumePage]) is shown when present.
+ */
+@Composable
+private fun DtStorageOnlyRow(item: DtListItem.StorageOnly, onClick: () -> Unit) {
+    val title = stringResource(R.string.flags_dt_storage_only_title, item.threadId)
+    val multiLabel = stringResource(R.string.flags_dt_multi_recipient)
+    val resumeBadge = item.resumePage?.let { stringResource(R.string.flags_dt_resume_badge, it) }.orEmpty()
+    // a11y — the read/unread state is unknown off-inbox, so the row announces « état inconnu » (never
+    // « Lu »/« Non lu ») followed by the placeholder title, « Interlocuteurs multiples » and the badge.
+    // stringResource resolved here (it is @Composable, unusable inside the plain buildString lambda).
+    val stateUnknown = stringResource(R.string.flags_dt_row_state_unknown, title)
+    val contentDescription = buildString {
+        append(stateUnknown)
+        append(". ")
+        append(multiLabel)
+        if (resumeBadge.isNotEmpty()) {
+            append(". ")
+            append(resumeBadge)
+        }
+    }
+    ForumListRow(
+        title = title,
+        metadata = FlagMetadata(start = multiLabel, end = resumeBadge),
+        onClick = onClick,
+        emphasized = false,
+        leading = { DtUnreadDot(unread = false) },
         contentDescription = contentDescription,
     )
 }
