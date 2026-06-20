@@ -227,7 +227,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
                 // Swallowed: the resume position is a nicety, never worth surfacing an error.
             }
-            syncMpStoragePosition(page, lastPostNumreponse)
+            syncMpStoragePosition(page, owner, lastPostNumreponse)
         }
     }
 
@@ -242,8 +242,14 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
      * page land (anti-pollution of the cross-userscript storage). The whole call is silent : the opt-in
      * is OFF by default (no network then), and any failure — transport, session, an unwritable document —
      * is swallowed. A null [numreponse] preserves the entry's existing anchor (the repository keeps it).
+     *
+     * Re-checks the session AFTER the local save's suspension point: the launch's initial
+     * `owner == authenticatedPseudo` guard only held when the job started, but `savePage` suspends, so
+     * the active account may have changed in between. We must never write the shared MPStorage document
+     * under a session other than the one that actually read this page (invariant: authenticated user only).
      */
-    private suspend fun syncMpStoragePosition(page: Int, numreponse: Int?) {
+    private suspend fun syncMpStoragePosition(page: Int, owner: String, numreponse: Int?) {
+        if (owner != authenticatedPseudo) return
         try {
             mpStorageRepository.writeBackFlagIfPresent(
                 MpStorageFlagEntry(
