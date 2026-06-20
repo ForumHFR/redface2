@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
+import fr.forumhfr.redface2.core.parser.messages.PrivateMessageReplyLinkParser
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
 import fr.forumhfr.redface2.core.parser.write.TopicFormParser
@@ -52,6 +53,13 @@ abstract class ReplyRepositoryModule {
         @Provides
         @Singleton
         fun provideReplyFormParser(): ReplyFormParser = ReplyFormParser()
+
+        // #612 — extracts the message.php reply link off a conversation page so the MP write
+        // repository can source the form (and its owner-only `newdest`) from message.php.
+        @Provides
+        @Singleton
+        fun providePrivateMessageReplyLinkParser(): PrivateMessageReplyLinkParser =
+            PrivateMessageReplyLinkParser()
 
         @Provides
         @Singleton

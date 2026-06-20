@@ -154,27 +154,24 @@ fun PrivateMessageThreadScreen(
                         )
                     }
                 },
-                actions = { topBarActions?.invoke() },
+                actions = {
+                    // #612 — « Participants » action + the caller's slot. Extracted to keep the
+                    // screen host under detekt's cyclomatic-complexity threshold.
+                    ThreadTopBarActions(
+                        isMultiRecipient = (mode as? PrivateMessageThreadUiState.Mode.Content)
+                            ?.thread?.isMultiRecipient == true || isMultiRecipientHint,
+                        onOpenRoster = viewModel::openRoster,
+                        topBarActions = topBarActions,
+                    )
+                },
             )
         },
         floatingActionButton = {
-            // #301 — reply affordance, shown only once the page proved a reply form is available
-            // (`canReply`). Carries the page the user is viewing so the form HFR pre-fills (and its
-            // `numrep`) matches what's on screen.
-            val content = mode as? PrivateMessageThreadUiState.Mode.Content
-            if (content?.thread?.canReply == true) {
-                val replyLabel = stringResource(R.string.messages_reply)
-                ExtendedFloatingActionButton(
-                    text = { Text(replyLabel) },
-                    // #360 / ADR-015 — crayon en vector stroke unifié via le primitive :core:ui,
-                    // à la place du glyphe « ✎ » (poids optique aligné sur la flèche retour / les
-                    // chevrons). Pas de Material icons (detekt ForbiddenImport).
-                    icon = {
-                        RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_edit)
-                    },
-                    onClick = { onReply(request.threadId, state.page) },
-                )
-            }
+            ThreadReplyFab(
+                // #301 — reply affordance, shown only once the page proved a reply form is available.
+                canReply = (mode as? PrivateMessageThreadUiState.Mode.Content)?.thread?.canReply == true,
+                onReply = { onReply(request.threadId, state.page) },
+            )
         },
     ) { innerPadding ->
         Box(
@@ -267,6 +264,60 @@ fun PrivateMessageThreadScreen(
             }
         }
     }
+
+    // #612 — participant roster sheet. Renders nothing while Hidden; the ViewModel drives the
+    // open / loading / loaded / unavailable / error states (lazy fetch + memory cache).
+    ParticipantRosterSheet(
+        roster = state.roster,
+        onDismiss = viewModel::dismissRoster,
+        onRetry = viewModel::retryRoster,
+    )
+}
+
+/**
+ * #612 — the conversation top-bar actions: a « Participants » button (shown only for a
+ * multi-recipient conversation — a one-to-one MP has no roster) followed by the caller's optional
+ * slot. The owner-vs-participant resolution happens lazily when the sheet opens (the roster fetch),
+ * so the button is offered to every member of a DT; the sheet then shows the full list (owner) or a
+ * « non disponible » note (participant). Extracted from the screen host to keep it under detekt's
+ * cyclomatic-complexity threshold.
+ */
+@Composable
+private fun ThreadTopBarActions(
+    isMultiRecipient: Boolean,
+    onOpenRoster: () -> Unit,
+    topBarActions: @Composable (() -> Unit)?,
+) {
+    if (isMultiRecipient) {
+        val rosterLabel = stringResource(R.string.messages_roster_action)
+        IconButton(
+            onClick = onOpenRoster,
+            modifier = Modifier.semantics { contentDescription = rosterLabel },
+        ) {
+            RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_group)
+        }
+    }
+    topBarActions?.invoke()
+}
+
+/**
+ * #301 — reply FAB, extracted from the screen host (with [ThreadTopBarActions]) to keep it under
+ * detekt's cyclomatic-complexity threshold. Shown only once the page proved a writable reply form
+ * ([canReply]); [onReply] carries the page the user is viewing so HFR's prefilled `numrep` matches
+ * what is on screen.
+ */
+@Composable
+private fun ThreadReplyFab(canReply: Boolean, onReply: () -> Unit) {
+    if (!canReply) return
+    val replyLabel = stringResource(R.string.messages_reply)
+    ExtendedFloatingActionButton(
+        text = { Text(replyLabel) },
+        // #360 / ADR-015 — crayon en vector stroke unifié via le primitive :core:ui, à la place du
+        // glyphe « ✎ » (poids optique aligné sur la flèche retour / les chevrons). Pas de Material
+        // icons (detekt ForbiddenImport).
+        icon = { RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_edit) },
+        onClick = onReply,
+    )
 }
 
 /**

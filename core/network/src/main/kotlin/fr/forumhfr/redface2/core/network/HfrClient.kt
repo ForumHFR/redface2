@@ -122,6 +122,38 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * #612 — GET the dedicated `message.php` reply form a conversation page links to. The
+     * conversation page (`forum2.php?cat=prive`) embeds a *quick-reply* `bddpost.php` form that
+     * carries **no** `newdest` ; the owner-only member list lives only on this standalone
+     * `message.php` form, reachable through the page's « Ajouter une réponse » link. The repository
+     * extracts that link (server-filled `numrep` / `ref` / `page` — never invented) and hands its
+     * relative path here.
+     *
+     * [replyPath] is the href EXACTLY as HFR rendered it (a relative `/message.php?…` path). We
+     * resolve it against [baseUrl] and GUARD it before following : it must target this host's
+     * `message.php` under `cat=prive`. Anything else (a foreign host slipped into the attribute, a
+     * non-`message.php` path) raises [IllegalArgumentException] rather than issuing the request —
+     * the repository treats that as « no dedicated form » and falls back to the embedded quick-reply.
+     *
+     * Always authenticated : `newdest` is session-bound and a session-expired GET must surface
+     * [SessionExpiredException] via [executeAuthenticatedHtml], never the anonymous composer.
+     */
+    suspend fun getPrivateMessageReplyPage(replyPath: String): String {
+        val resolved = requireNotNull(baseUrl.resolve(replyPath)) {
+            "Unresolvable MP reply link"
+        }
+        require(resolved.host == baseUrl.host) { "MP reply link points at a foreign host" }
+        require(resolved.pathSegments.lastOrNull() == "message.php") {
+            "MP reply link is not a message.php form"
+        }
+        require(resolved.queryParameter("cat") == "prive") {
+            "MP reply link is not a cat=prive form"
+        }
+        val request = Request.Builder().url(resolved).get().build()
+        return authenticated.newCall(request).executeAuthenticatedHtml()
+    }
+
+    /**
      * #301 follow-up — GET the « new private message » composer. The URL is the one HFR's own
      * « Créer un nouveau message » buttons carry on the MP list (captured live 2026-06-11,
      * fixture `mp_compose_form.html`) : `message.php?config=hfr.inc&cat=prive&sond=0&p=1

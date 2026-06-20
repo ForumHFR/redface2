@@ -11,8 +11,11 @@ import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
+import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
+import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
+import fr.forumhfr.redface2.core.model.write.ReplyForm
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -38,6 +41,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private val authRepository: AuthRepository,
     private val readPositionStore: PrivateMessageReadPositionStore,
     private val mpStorageRepository: MpStorageRepository,
+    private val writeRepository: PrivateMessageWriteRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PrivateMessageThreadUiState.initial(request))
@@ -52,6 +56,12 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     // #430 — single in-flight position write, latest-wins (cf. savePosition).
     private var saveJob: Job? = null
     private var authenticatedPseudo: String? = null
+
+    // #612 — participant roster. Single in-flight fetch (dedup on rapid taps / recomposition) and a
+    // memory cache for the life of the screen: re-opening the sheet reuses the parsed list without a
+    // second network round-trip. `null` means « not yet loaded ».
+    private var rosterJob: Job? = null
+    private var cachedRosterForm: ReplyForm? = null
 
     init {
         viewModelScope.launch {
@@ -89,10 +99,87 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         load(current.page)
     }
 
+    /**
+     * #612 — open the « Participants » sheet. LAZY (Codex framing): the reply form is fetched here,
+     * on demand, never on screen entry — it is an owner-only, rarely-used GET that also carries a
+     * session `hash_check`. A cached form (from a previous open this screen-life) is reused, so
+     * re-opening is instant. The fetch is deduplicated: a tap while a load is already in flight is a
+     * no-op rather than a second round-trip.
+     */
+    fun openRoster() {
+        // Reuse the cached form if we already loaded it this screen-life (no second GET).
+        cachedRosterForm?.let { form ->
+            _state.update { it.copy(roster = form.toRoster()) }
+            return
+        }
+        if (rosterJob?.isActive == true) {
+            // A fetch is already running (e.g. a double tap) — just make sure the sheet is open.
+            _state.update { it.copy(roster = PrivateMessageThreadUiState.Roster.Loading) }
+            return
+        }
+        loadRoster()
+    }
+
+    /** #612 — retry a failed roster load, from the sheet's retry affordance. */
+    fun retryRoster() {
+        if (rosterJob?.isActive == true) return
+        loadRoster()
+    }
+
+    /** #612 — close the sheet. The cached form survives so the next open is instant. */
+    fun dismissRoster() {
+        _state.update { it.copy(roster = PrivateMessageThreadUiState.Roster.Hidden) }
+    }
+
+    private fun loadRoster() {
+        if (authenticatedPseudo == null) {
+            clearPrivateState()
+            return
+        }
+        _state.update { it.copy(roster = PrivateMessageThreadUiState.Roster.Loading) }
+        rosterJob = viewModelScope.launch {
+            try {
+                val form = writeRepository.fetchReplyForm(
+                    PrivateMessageReplyContext(
+                        threadId = request.threadId,
+                        page = _state.value.page.coerceAtLeast(1),
+                    ),
+                )
+                cachedRosterForm = form
+                _state.update { it.copy(roster = form.toRoster()) }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (
+                // #316 — the raw message can embed the private conversation URL: surface only the
+                // type-derived kind (classifyHfrError), never the throwable text.
+                @Suppress("TooGenericExceptionCaught") error: Exception,
+            ) {
+                _state.update {
+                    it.copy(roster = PrivateMessageThreadUiState.Roster.Error(classifyHfrError(error)))
+                }
+            }
+        }
+    }
+
+    /**
+     * #612 — maps a loaded reply form to a roster state. An owner form carries `newdest` (the full
+     * member list) → [PrivateMessageThreadUiState.Roster.Loaded]; otherwise the user is a simple
+     * participant and HFR exposes no authoritative roster → [PrivateMessageThreadUiState.Roster.Unavailable]
+     * (no misleading partial list of visible authors).
+     */
+    private fun ReplyForm.toRoster(): PrivateMessageThreadUiState.Roster =
+        if (canManageRecipients) {
+            PrivateMessageThreadUiState.Roster.Loaded(RecipientCsv.parse(manageableRecipients))
+        } else {
+            PrivateMessageThreadUiState.Roster.Unavailable
+        }
+
     private fun clearPrivateState() {
         authenticatedPseudo = null
         loadJob?.cancel()
         saveJob?.cancel()
+        rosterJob?.cancel()
+        cachedRosterForm = null
         _state.value = PrivateMessageThreadUiState.initial(request)
             .copy(mode = PrivateMessageThreadUiState.Mode.RequiresLogin)
     }

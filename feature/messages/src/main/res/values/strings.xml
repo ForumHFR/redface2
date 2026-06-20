@@ -66,4 +66,16 @@
     <!-- #606 — libellé du champ destinataires du nouveau message (compose). -->
     <string name="messages_compose_recipients_label_v2">Pseudo des destinataires</string>
     <string name="messages_compose_recipients_help">Plusieurs pseudos séparés par des virgules = discussion de groupe.</string>
+
+    <!-- #612 — liste des participants d'une discussion de groupe (bottom sheet). -->
+    <string name="messages_roster_action">Participants</string>
+    <string name="messages_roster_title">Participants</string>
+    <string name="messages_roster_loading">Chargement des participants…</string>
+    <string name="messages_roster_unavailable_title">Liste indisponible</string>
+    <string name="messages_roster_unavailable_body">Seul le créateur de la discussion peut voir la liste complète des participants.</string>
+    <string name="messages_roster_error">Impossible de charger les participants.</string>
+    <plurals name="messages_roster_count">
+        <item quantity="one">%1$d participant</item>
+        <item quantity="other">%1$d participants</item>
+    </plurals>
 </resources>

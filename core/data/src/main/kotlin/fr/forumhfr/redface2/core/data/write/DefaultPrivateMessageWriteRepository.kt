@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.network.HfrConstants
+import fr.forumhfr.redface2.core.parser.messages.PrivateMessageReplyLinkParser
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
 import javax.inject.Inject
@@ -21,14 +22,24 @@ import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 
 /**
- * Default [PrivateMessageWriteRepository] implementation (#301). Replies to an HFR private
+ * Default [PrivateMessageWriteRepository] implementation (#301, #612). Replies to an HFR private
  * conversation reuse the topic-reply machinery:
  *
- * 1. GET the conversation page (`forum2.php?cat=prive&post={threadId}&page={page}`) — HFR embeds a
- *    `bddpost.php` reply form there (verified on the real fixture `private_message_thread.html`) —
- *    and parse it with the shared [ReplyFormParser] to grab a fresh `hash_check` + every hidden field.
+ * 1. GET the conversation page (`forum2.php?cat=prive&post={threadId}&page={page}`) and read the
+ *    REAL « Ajouter une réponse » link it embeds — a `message.php?cat=prive…` href whose
+ *    `numrep` / `ref` / `page` HFR has already filled in (we never invent them). Follow that link
+ *    to the dedicated `message.php` reply form and parse it with the shared [ReplyFormParser] to
+ *    grab a fresh `hash_check` + every hidden field.
  * 2. POST `bddpost.php` (the same endpoint a topic reply uses) and classify the response with the
  *    shared [ReplySubmitResponseParser].
+ *
+ * Why message.php and not the embedded quick-reply form (#612) : the conversation page also embeds
+ * a `bddpost.php` *quick-reply* form, but HFR serves the owner-only `newdest` field (the full member
+ * list of a DT / MultiMP) **only** on the standalone `message.php` form. Sourcing from message.php
+ * is therefore what makes [ReplyForm.canManageRecipients] / [ReplyForm.manageableRecipients] true
+ * for an owner — the prerequisite for #606's member editor and #612's participant roster. When the
+ * page exposes no such link (a one-to-one MP, or a shape HFR reshaped), we fall back to parsing the
+ * embedded quick-reply form — the pre-#612 behaviour, which never carries `newdest` anyway.
  *
  * The crucial difference from [DefaultReplyRepository] is the POST body: a private conversation
  * carries `cat=prive` (a String), `post={threadId}`, `subcat=0` and a server-prefilled `numrep`
@@ -42,6 +53,7 @@ import okhttp3.FormBody
 class DefaultPrivateMessageWriteRepository @Inject constructor(
     private val hfrClient: HfrClient,
     private val replyFormParser: ReplyFormParser,
+    private val replyLinkParser: PrivateMessageReplyLinkParser,
     private val replySubmitResponseParser: ReplySubmitResponseParser,
     private val diagnostics: DiagnosticsLog,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
@@ -55,20 +67,26 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
         )
         return try {
             withContext(ioDispatcher) {
-                // The conversation page already embeds the bddpost.php reply form; no dedicated
-                // message.php GET is needed (and there is no anonymous variant — a session-expired
-                // GET surfaces SessionExpiredException via the authenticated client).
-                val html = hfrClient.getPrivateMessageThreadPage(
+                // #612 — GET the conversation page, then follow its real « Ajouter une réponse »
+                // link to the dedicated message.php form (the only one carrying the owner-only
+                // `newdest`). When the page exposes no such link, fall back to the embedded
+                // quick-reply form (pre-#612 behaviour). There is no anonymous variant — a
+                // session-expired GET surfaces SessionExpiredException via the authenticated client.
+                val threadHtml = hfrClient.getPrivateMessageThreadPage(
                     threadId = context.threadId,
                     page = context.page,
                 )
+                val html = fetchReplyFormHtml(threadHtml)
                 replyFormParser.parse(html).fold(
                     onSuccess = { form ->
+                        // #612 — `canManageRecipients` (owner-only `newdest` presence) is a boolean
+                        // derived from the field's existence, NOT its value: safe to log, never
+                        // leaks a pseudo (#316). The member CSV itself is never recorded.
                         diagnostics.record(
                             DiagnosticsLog.Level.DEBUG,
                             LOG_TAG,
                             "MP reply form parsed: hiddenFields=${form.hiddenFields.size} " +
-                                "anonymous=${form.isAnonymous}",
+                                "anonymous=${form.isAnonymous} ownerManaged=${form.canManageRecipients}",
                         )
                         form
                     },
@@ -97,6 +115,40 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
                 "GET MP reply form FAILED: ${error::class.simpleName}",
             )
             throw error
+        }
+    }
+
+    /**
+     * #612 — resolves the HTML the reply form is parsed from. Reads the real « Ajouter une réponse »
+     * link off the conversation page ([threadHtml]) and follows it to the dedicated `message.php`
+     * form (the only one carrying the owner-only `newdest`). Falls back to the conversation page
+     * itself — its embedded `bddpost.php` quick-reply form is what [ReplyFormParser] parsed before
+     * #612 — when no link is present (a one-to-one MP, or a shape HFR reshaped) or the follow GET
+     * fails. The fallback never carries `newdest`, so an owner whose link disappeared simply loses
+     * the member editor / roster until a refetch, never a broken reply.
+     *
+     * The follow GET's `host` / path / `cat=prive` guard lives in
+     * [HfrClient.getPrivateMessageReplyPage]; a [SessionExpiredException] is rethrown (the session
+     * really is gone — do not paper over it with the stale thread page), every other failure
+     * degrades to the embedded form.
+     */
+    private suspend fun fetchReplyFormHtml(threadHtml: String): String {
+        val replyLink = replyLinkParser.parse(threadHtml) ?: return threadHtml
+        return try {
+            hfrClient.getPrivateMessageReplyPage(replyLink)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (expired: SessionExpiredException) {
+            throw expired
+        } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
+            // The link was malformed or the follow GET failed — fall back to the embedded
+            // quick-reply form so a reply is still possible. No raw message logged (#316).
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "MP message.php reply form fetch failed, using embedded form: ${error::class.simpleName}",
+            )
+            threadHtml
         }
     }
 
