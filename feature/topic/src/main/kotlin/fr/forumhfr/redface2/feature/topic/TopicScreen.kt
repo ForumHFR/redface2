@@ -1997,9 +1997,9 @@ private fun TopicPostIdentityHeader(
             }
         },
         // #483 — the compact « · édité » marker (beta feedback Azgor). The exact edit time stays in the
-        // « … » menu (PostMenuSheet « Édité le … »). Rendered on the date sub-line, same labelMedium /
-        // onSurfaceVariant style as the date it follows.
-        subline = if (post.editedAt != null) {
+        // « … » menu (PostMenuSheet « Édité le … »). Rendered INLINE to the right of the date (dateTrailing
+        // slot), same labelMedium / onSurfaceVariant style — identical to the pre-shell single-row layout.
+        dateTrailing = if (post.editedAt != null) {
             {
                 val editedLabel = stringResource(R.string.topic_post_edited_inline)
                 Text(

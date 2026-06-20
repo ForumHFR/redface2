@@ -79,9 +79,9 @@ fun PostCardShell(
  */
 @Composable
 fun PostIdentityBand(
-    content: @Composable () -> Unit,
     containerColor: Color,
     modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
