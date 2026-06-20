@@ -142,9 +142,15 @@ class HfrClient @Inject constructor(
         val resolved = requireNotNull(baseUrl.resolve(replyPath)) {
             "Unresolvable MP reply link"
         }
-        require(resolved.host == baseUrl.host) { "MP reply link points at a foreign host" }
-        require(resolved.pathSegments.lastOrNull() == "message.php") {
-            "MP reply link is not a message.php form"
+        // Anti-SSRF: pin the FULL origin (scheme + host + port), not just the host, and require the
+        // EXACT `/message.php` path — a last-segment check would let `/evil/message.php` through.
+        require(
+            resolved.scheme == baseUrl.scheme &&
+                resolved.host == baseUrl.host &&
+                resolved.port == baseUrl.port,
+        ) { "MP reply link points at a foreign origin" }
+        require(resolved.encodedPath == "/message.php") {
+            "MP reply link is not the message.php form"
         }
         require(resolved.queryParameter("cat") == "prive") {
             "MP reply link is not a cat=prive form"

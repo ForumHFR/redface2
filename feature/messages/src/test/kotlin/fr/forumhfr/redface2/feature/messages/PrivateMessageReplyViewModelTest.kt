@@ -105,7 +105,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `loads the form on init and hydrates signature from the hidden field`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
 
         val viewModel = PrivateMessageReplyViewModel(
             request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
@@ -122,7 +122,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `the wiki search carries the loaded form's userId (#440)`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form().copy(userId = 54596)
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form().copy(userId = 54596)
         val smileys = smileyRepository()
 
         val viewModel = PrivateMessageReplyViewModel(
@@ -139,7 +139,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `submit success raises SubmitSucceeded for the conversation`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
@@ -163,7 +163,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `empty-message failure shows the banner and keeps the draft`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
 
@@ -182,7 +182,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `invalid hash check refetches the form silently`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
@@ -194,13 +194,13 @@ class PrivateMessageReplyViewModelTest {
 
         assertEquals(PrivateMessageReplyError.InvalidHashCheck, viewModel.state.value.submitError)
         // init fetch + the silent refetch after the expired hash_check.
-        coVerify(exactly = 2) { repository.fetchReplyForm(any()) }
+        coVerify(exactly = 2) { repository.fetchReplyForm(any(), any()) }
     }
 
     @Test
     fun `invalid hash check refetch preserves the user option toggles`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
@@ -218,13 +218,13 @@ class PrivateMessageReplyViewModelTest {
             "InvalidHashCheck refetch must preserve the user's signature toggle",
             viewModel.state.value.signatureEnabled,
         )
-        coVerify(exactly = 2) { repository.fetchReplyForm(any()) }
+        coVerify(exactly = 2) { repository.fetchReplyForm(any(), any()) }
     }
 
     @Test
     fun `unknown response maps to the non-destructive unexpected banner`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
 
@@ -243,7 +243,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `form fetch failure shows the retry state`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } throws IOException("network down")
+        coEvery { repository.fetchReplyForm(any(), any()) } throws IOException("network down")
 
         val viewModel = PrivateMessageReplyViewModel(
             request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
@@ -258,7 +258,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `anonymous form is treated as a form error`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form(isAnonymous = true)
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form(isAnonymous = true)
 
         val viewModel = PrivateMessageReplyViewModel(
             request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
@@ -281,7 +281,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `confirm-before-posting OFF keeps the one-tap submit unchanged`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
@@ -298,7 +298,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `confirm-before-posting ON parks the submit behind the confirmation dialog`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
 
         val viewModel = PrivateMessageReplyViewModel(
             request,
@@ -319,7 +319,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `confirm-before-posting ON onSubmitConfirmed executes the real submission without re-confirming`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
@@ -351,7 +351,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `confirm-before-posting ON dismissing the dialog sends nothing and keeps the draft`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
 
         val viewModel = PrivateMessageReplyViewModel(
             request,
@@ -377,7 +377,7 @@ class PrivateMessageReplyViewModelTest {
         // The confirmation slots in AFTER validation : a blank draft fails `canSubmit`, so no
         // dialog may appear (confirming an unsendable form would be a lie).
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
 
         val viewModel = PrivateMessageReplyViewModel(
             request,
@@ -396,7 +396,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `confirm-before-posting ON re-submitting while the dialog is up keeps it armed without posting`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
 
         val viewModel = PrivateMessageReplyViewModel(
             request,
@@ -422,7 +422,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `confirm-before-posting ON rapid double onSubmitConfirmed posts exactly once`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         // Hold the first confirmed submit in flight : with UnconfinedTestDispatcher a
         // non-suspending mock would complete synchronously and the second confirm would
         // legitimately re-fire. The gate keeps `submitJob` active across both confirms.
@@ -459,7 +459,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `autosave persists the private body under the mpReply key after the debounce`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         val viewModel = PrivateMessageReplyViewModel(
             request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
         )
@@ -475,7 +475,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `a stored MP draft is surfaced as restorable on init`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         draftStore.preload(
             EditorDraftKey.mpReply(request.threadId),
             EditorDraftStore.Draft(body = "rescued MP", isPrivate = true),
@@ -495,7 +495,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `discarding deletes the cached MP draft`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         val key = EditorDraftKey.mpReply(request.threadId)
         draftStore.preload(key, EditorDraftStore.Draft(body = "rescued MP", isPrivate = true))
         val viewModel = PrivateMessageReplyViewModel(
@@ -512,7 +512,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `a successful MP reply submit deletes the cached draft`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
         val viewModel = PrivateMessageReplyViewModel(
@@ -531,7 +531,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `a non-owner form exposes no member editor and never overrides newdest`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns form() // no newdest
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form() // no newdest
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
@@ -564,7 +564,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `an owner form hydrates the members CSV preserving order, accents, plus and spaces`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns ownerForm()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm()
 
         val viewModel = PrivateMessageReplyViewModel(
             request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
@@ -580,7 +580,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `owner submit without edits reposts the member CSV verbatim`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns ownerForm()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm()
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
@@ -608,7 +608,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `owner adds a member appended at the end`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns ownerForm(newdest = "alice, bob")
+        coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm(newdest = "alice, bob")
 
         val viewModel = PrivateMessageReplyViewModel(
             request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
@@ -621,7 +621,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `owner add refuses an exact-trimmed duplicate`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns ownerForm(newdest = "alice, bob")
+        coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm(newdest = "alice, bob")
 
         val viewModel = PrivateMessageReplyViewModel(
             request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
@@ -634,7 +634,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `owner remove is exact-match so bob does not delete bob2`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns ownerForm(newdest = "alice, bob, bob2")
+        coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm(newdest = "alice, bob, bob2")
 
         val viewModel = PrivateMessageReplyViewModel(
             request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
@@ -647,7 +647,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `owner can remove down to one but never the last member`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns ownerForm(newdest = "alice, bob")
+        coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm(newdest = "alice, bob")
 
         val viewModel = PrivateMessageReplyViewModel(
             request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
@@ -663,7 +663,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `owner edits travel to the repository as the recomposed CSV`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns ownerForm(newdest = "alice, bob")
+        coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm(newdest = "alice, bob")
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
@@ -689,7 +689,7 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun `the member list survives a silent hash-check refetch`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any()) } returns ownerForm(newdest = "alice, bob")
+        coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm(newdest = "alice, bob")
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
@@ -703,7 +703,7 @@ class PrivateMessageReplyViewModelTest {
         // The silent refetch after the expired hash_check must NOT re-hydrate the member list back
         // to HFR's prefill — the user's removal survives.
         assertEquals(listOf("bob"), viewModel.state.value.recipients)
-        coVerify(exactly = 2) { repository.fetchReplyForm(any()) }
+        coVerify(exactly = 2) { repository.fetchReplyForm(any(), any()) }
     }
 
     @Test
@@ -712,7 +712,7 @@ class PrivateMessageReplyViewModelTest {
         // 1st load: alice, bob. The silent refetch after InvalidHashCheck returns a fresher form
         // where a member changed elsewhere (charlie added). With no local edit (recipientsDirty
         // false), the VM must pick up the fresher list rather than keep the stale prefill.
-        coEvery { repository.fetchReplyForm(any()) } returnsMany listOf(
+        coEvery { repository.fetchReplyForm(any(), any()) } returnsMany listOf(
             ownerForm(newdest = "alice, bob"),
             ownerForm(newdest = "alice, bob, charlie"),
         )

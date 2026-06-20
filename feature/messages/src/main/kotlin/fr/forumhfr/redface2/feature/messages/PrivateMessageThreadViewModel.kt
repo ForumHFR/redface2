@@ -109,7 +109,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     fun openRoster() {
         // Reuse the cached form if we already loaded it this screen-life (no second GET).
         cachedRosterForm?.let { form ->
-            _state.update { it.copy(roster = form.toRoster()) }
+            _state.update { it.copy(roster = form.toRoster(authenticatedPseudo)) }
             return
         }
         if (rosterJob?.isActive == true) {
@@ -128,6 +128,9 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
 
     /** #612 — close the sheet. The cached form survives so the next open is instant. */
     fun dismissRoster() {
+        // Cancel any in-flight load so a late response can't flip the roster back to Loaded/Error and
+        // reopen the just-dismissed sheet (Codex).
+        rosterJob?.cancel()
         _state.update { it.copy(roster = PrivateMessageThreadUiState.Roster.Hidden) }
     }
 
@@ -144,9 +147,12 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                         threadId = request.threadId,
                         page = _state.value.page.coerceAtLeast(1),
                     ),
+                    // The roster NEEDS newdest (message.php only); never degrade to the quick-reply
+                    // form on a follow-GET failure — surface it as Error+retry instead (Codex).
+                    allowEmbeddedFallback = false,
                 )
                 cachedRosterForm = form
-                _state.update { it.copy(roster = form.toRoster()) }
+                _state.update { it.copy(roster = form.toRoster(authenticatedPseudo)) }
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (
@@ -162,14 +168,21 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     }
 
     /**
-     * #612 — maps a loaded reply form to a roster state. An owner form carries `newdest` (the full
-     * member list) → [PrivateMessageThreadUiState.Roster.Loaded]; otherwise the user is a simple
-     * participant and HFR exposes no authoritative roster → [PrivateMessageThreadUiState.Roster.Unavailable]
-     * (no misleading partial list of visible authors).
+     * #612 — maps a loaded reply form to a roster state. An owner form carries `newdest` (the member
+     * list MINUS the owner — HFR never lists the creator in their own `newdest`) → the roster prepends
+     * [owner] so the « Participants » sheet shows the FULL group including the viewer (Codex). Otherwise
+     * the user is a simple participant and HFR exposes no authoritative roster →
+     * [PrivateMessageThreadUiState.Roster.Unavailable] (no misleading partial list of visible authors).
      */
-    private fun ReplyForm.toRoster(): PrivateMessageThreadUiState.Roster =
+    private fun ReplyForm.toRoster(owner: String?): PrivateMessageThreadUiState.Roster =
         if (canManageRecipients) {
-            PrivateMessageThreadUiState.Roster.Loaded(RecipientCsv.parse(manageableRecipients))
+            val members = RecipientCsv.parse(manageableRecipients)
+            val full = if (owner != null && members.none { it == owner.trim() }) {
+                listOf(owner.trim()) + members
+            } else {
+                members
+            }
+            PrivateMessageThreadUiState.Roster.Loaded(full)
         } else {
             PrivateMessageThreadUiState.Roster.Unavailable
         }

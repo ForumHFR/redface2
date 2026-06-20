@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -148,6 +149,31 @@ class DefaultPrivateMessageWriteRepositoryTest {
         assertEquals(1, server.requestCount)
         assertEquals("forum2.php", requireNotNull(server.takeRequest().requestUrl).pathSegments.first())
     }
+
+    @Test
+    fun `roster path (no fallback) propagates a message_php follow failure instead of degrading`() = runTest {
+        // #612 — the thread page HAS a reply link, but the followed message.php GET fails. With the
+        // fallback DISABLED (roster path), the failure must surface (→ Roster.Error + retry), never
+        // degrade to the newdest-less quick-reply that would read as « no roster ».
+        server.enqueue(MockResponse().setBody(fixture("private_message_dt_owner_thread.html")))
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+
+        var threw = false
+        try {
+            repository.fetchReplyForm(
+                PrivateMessageReplyContext(threadId = 4242424, page = 3),
+                allowEmbeddedFallback = false,
+            )
+        } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+            threw = true
+        }
+        assertTrue("roster fetch must propagate the message.php failure, not fall back", threw)
+    }
+
+    // NB: the reply-path fallback on a *follow-GET failure* (allowEmbeddedFallback=true) is covered by
+    // the no-link fallback test above (same code path: return threadHtml → parse the embedded form) and
+    // by the existing #301 VM tests. The roster's no-fallback propagation — the actual #612 invariant —
+    // is the test directly above. An injected mid-follow socket failure proved flaky to assert here.
 
     @Test
     fun `submitReply forwards cat=prive, post, numrep, subcat verbatim and never overwrites them`() = runTest {

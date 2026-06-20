@@ -59,11 +59,14 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : PrivateMessageWriteRepository {
 
-    override suspend fun fetchReplyForm(context: PrivateMessageReplyContext): ReplyForm {
+    override suspend fun fetchReplyForm(
+        context: PrivateMessageReplyContext,
+        allowEmbeddedFallback: Boolean,
+    ): ReplyForm {
         diagnostics.record(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
-            "GET MP reply form post=${context.threadId} page=${context.page}",
+            "GET MP reply form post=${context.threadId} page=${context.page} fallback=$allowEmbeddedFallback",
         )
         return try {
             withContext(ioDispatcher) {
@@ -76,7 +79,7 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
                     threadId = context.threadId,
                     page = context.page,
                 )
-                val html = fetchReplyFormHtml(threadHtml)
+                val html = fetchReplyFormHtml(threadHtml, allowEmbeddedFallback)
                 replyFormParser.parse(html).fold(
                     onSuccess = { form ->
                         // #612 — `canManageRecipients` (owner-only `newdest` presence) is a boolean
@@ -132,17 +135,28 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
      * really is gone — do not paper over it with the stale thread page), every other failure
      * degrades to the embedded form.
      */
-    private suspend fun fetchReplyFormHtml(threadHtml: String): String {
+    // ThrowsCount: two mandatory control-flow rethrows (coroutine cancel + session expiry, each its
+    // own catch block per InstanceOfCheckForException) plus one conditional propagation for the
+    // roster path — all legitimate, splitting the function would not help.
+    @Suppress("ThrowsCount")
+    private suspend fun fetchReplyFormHtml(threadHtml: String, allowEmbeddedFallback: Boolean): String {
+        // No « Ajouter une réponse » link (1-to-1 MP, reshaped page) → the embedded quick-reply IS the
+        // only form ; that is not a failure, so we return it in BOTH modes (it simply carries no
+        // `newdest`, which the roster maps to « Unavailable », not « Error »).
         val replyLink = replyLinkParser.parse(threadHtml) ?: return threadHtml
         return try {
             hfrClient.getPrivateMessageReplyPage(replyLink)
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (expired: SessionExpiredException) {
+            // The session really is gone — never paper over it with the stale thread page.
             throw expired
         } catch (@Suppress("TooGenericExceptionCaught") error: Throwable) {
-            // The link was malformed or the follow GET failed — fall back to the embedded
-            // quick-reply form so a reply is still possible. No raw message logged (#316).
+            // The follow GET to message.php failed. The roster path (allowEmbeddedFallback=false) NEEDS
+            // `newdest`, so its failure must surface (→ Roster.Error + retry) rather than silently
+            // degrade to a newdest-less form read as « no roster ». The reply path can still post via
+            // the embedded quick-reply, so it falls back. No raw message logged (#316).
+            if (!allowEmbeddedFallback) throw error
             diagnostics.record(
                 DiagnosticsLog.Level.WARN,
                 LOG_TAG,

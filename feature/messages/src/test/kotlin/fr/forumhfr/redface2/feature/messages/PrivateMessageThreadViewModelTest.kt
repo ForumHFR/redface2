@@ -482,7 +482,7 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } returns thread(page = 1, totalPages = 1)
         val write = mockk<PrivateMessageWriteRepository>()
-        coEvery { write.fetchReplyForm(any()) } returns replyForm(newdest = "alice, bob, Bébé Yoda")
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice, bob, Bébé Yoda")
 
         val viewModel = threadViewModel(repository, writeRepository = write)
         // LAZY: no fetch on screen entry.
@@ -493,11 +493,31 @@ class PrivateMessageThreadViewModelTest {
 
         val roster = viewModel.state.value.roster
         assertTrue("expected Loaded, got $roster", roster is PrivateMessageThreadUiState.Roster.Loaded)
+        // The owner (« xaat », the authenticated pseudo) is PREPENDED: HFR's `newdest` lists the members
+        // MINUS the creator, but the « Participants » sheet must show the full group including the viewer.
         assertEquals(
-            listOf("alice", "bob", "Bébé Yoda"),
+            listOf("xaat", "alice", "bob", "Bébé Yoda"),
             (roster as PrivateMessageThreadUiState.Roster.Loaded).members,
         )
-        coVerify(exactly = 1) { write.fetchReplyForm(any()) }
+        coVerify(exactly = 1) { write.fetchReplyForm(any(), any()) }
+    }
+
+    @Test
+    fun `dismissing the roster mid-load cancels the fetch so a late response cannot reopen it`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        // Never resolves within the test: the dismiss must cancel it before it can answer.
+        coEvery { write.fetchReplyForm(any(), any()) } coAnswers { kotlinx.coroutines.awaitCancellation() }
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        viewModel.openRoster() // fetch in flight (not advanced)
+        viewModel.dismissRoster()
+        advanceUntilIdle()
+
+        assertEquals(PrivateMessageThreadUiState.Roster.Hidden, viewModel.state.value.roster)
     }
 
     @Test
@@ -508,7 +528,7 @@ class PrivateMessageThreadViewModelTest {
         } returns thread(page = 1, totalPages = 1)
         val write = mockk<PrivateMessageWriteRepository>()
         // No newdest → a simple participant, not the owner.
-        coEvery { write.fetchReplyForm(any()) } returns replyForm(newdest = null)
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = null)
 
         val viewModel = threadViewModel(repository, writeRepository = write)
         viewModel.openRoster()
@@ -524,7 +544,7 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } returns thread(page = 1, totalPages = 1)
         val write = mockk<PrivateMessageWriteRepository>()
-        coEvery { write.fetchReplyForm(any()) } returns replyForm(newdest = "alice, bob")
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice, bob")
 
         val viewModel = threadViewModel(repository, writeRepository = write)
         viewModel.openRoster()
@@ -537,7 +557,7 @@ class PrivateMessageThreadViewModelTest {
 
         assertTrue(viewModel.state.value.roster is PrivateMessageThreadUiState.Roster.Loaded)
         // The cache served the second open — exactly one network fetch overall.
-        coVerify(exactly = 1) { write.fetchReplyForm(any()) }
+        coVerify(exactly = 1) { write.fetchReplyForm(any(), any()) }
     }
 
     @Test
@@ -547,7 +567,7 @@ class PrivateMessageThreadViewModelTest {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } returns thread(page = 1, totalPages = 1)
         val write = mockk<PrivateMessageWriteRepository>()
-        coEvery { write.fetchReplyForm(any()) } throws IOException("offline")
+        coEvery { write.fetchReplyForm(any(), any()) } throws IOException("offline")
 
         val viewModel = threadViewModel(repository, writeRepository = write)
         viewModel.openRoster()
@@ -559,7 +579,7 @@ class PrivateMessageThreadViewModelTest {
         assertEquals(HfrErrorKind.Network, (roster as PrivateMessageThreadUiState.Roster.Error).kind)
 
         // Retry succeeds → Loaded.
-        coEvery { write.fetchReplyForm(any()) } returns replyForm(newdest = "alice")
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice")
         viewModel.retryRoster()
         advanceUntilIdle()
         assertTrue(viewModel.state.value.roster is PrivateMessageThreadUiState.Roster.Loaded)
