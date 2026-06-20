@@ -17,18 +17,25 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -105,6 +112,92 @@ internal fun MessageDraftRestoreBanner(
                     Text(text = stringResource(R.string.messages_draft_discard))
                 }
             }
+        }
+    }
+}
+
+/**
+ * #606 — DT/MultiMP member editor, shown only to the conversation OWNER (gated by
+ * `state.canManageRecipients` at the call site). Renders each current member as an [InputChip] with
+ * a remove affordance, plus a text field + button to append a new member. The change is sent with
+ * the reply (HFR mutates the member list only via a posted reply). Removing « Administration »
+ * raises an inline warning but is not blocked. The last remaining member can't be removed — the VM
+ * enforces « un destinataire au minimum », so its remove chip is disabled here too.
+ */
+@Composable
+@Suppress("LongParameterList") // List + 2 callbacks + enabled — each call-site distinct.
+internal fun MessageRecipientsEditor(
+    recipients: List<String>,
+    enabled: Boolean,
+    onAddRecipient: (String) -> Unit,
+    onRemoveRecipient: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var pendingPseudo by remember { mutableStateOf("") }
+    val canRemove = recipients.size > 1
+    val showsAdminWarning = recipients.none { it.equals(ADMIN_PSEUDO, ignoreCase = true) }
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.messages_members_title),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(R.string.messages_members_help),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            recipients.forEach { pseudo ->
+                val removeLabel = stringResource(R.string.messages_members_remove, pseudo)
+                InputChip(
+                    selected = false,
+                    enabled = enabled && canRemove,
+                    onClick = { onRemoveRecipient(pseudo) },
+                    label = { Text(pseudo) },
+                    trailingIcon = {
+                        Icon(
+                            painter = painterResource(fr.forumhfr.redface2.core.ui.R.drawable.ic_close),
+                            contentDescription = removeLabel,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = pendingPseudo,
+                onValueChange = { pendingPseudo = it },
+                singleLine = true,
+                enabled = enabled,
+                label = { Text(stringResource(R.string.messages_members_add_label)) },
+                placeholder = { Text(stringResource(R.string.messages_members_add_placeholder)) },
+                modifier = Modifier.weight(1f),
+            )
+            FilledTonalButton(
+                onClick = {
+                    onAddRecipient(pendingPseudo)
+                    pendingPseudo = ""
+                },
+                enabled = enabled && pendingPseudo.isNotBlank(),
+            ) {
+                Text(text = stringResource(R.string.messages_members_add))
+            }
+        }
+        if (showsAdminWarning) {
+            Text(
+                text = stringResource(R.string.messages_members_admin_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }
@@ -267,6 +360,9 @@ private fun MessageOptionToggle(
         Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
     }
 }
+
+/** #606 — HFR's system member of a group conversation ; removing it warrants a warning, not a block. */
+private const val ADMIN_PSEUDO = "Administration"
 
 internal val PrivateMessageReplyError.bannerResId: Int
     get() = when (this) {

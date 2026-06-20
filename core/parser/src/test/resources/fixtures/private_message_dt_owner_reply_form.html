@@ -1,0 +1,35 @@
+<!--
+  #606 — SANITISED fixture : reply form of a DT/MultiMP where the logged-in user is the OWNER.
+  HFR serves an extra `<input name="newdest">` (text input, prefilled with the CSV of all current
+  members minus the owner) ONLY to the owner of a group conversation. Everything here is fake:
+  bogus pseudos (alice, bob, "Bébé Yoda", "stitch+"), no real private content, no real hash_check
+  (value="TESTHASH"). Reduced to the bddpost.php reply form so the parser test has the smallest
+  faithful shape carrying `newdest`. cf. /work/xaat/spec-dt-membership.md
+-->
+<html><body>
+<form name="hop" action="/bddpost.php" method="post" onsubmit="document.hop.submit.style.visibility='hidden';">
+<input type="hidden" name="hash_check" value="TESTHASH" />
+<div class="s2Ext"><b>Réponse rapide</b>
+<tr class="reponse">
+  <th class="repCase1">Destinataires</th>
+  <td class="repCase2"><input size="25" name="newdest" value="alice, bob, Bébé Yoda, stitch+, Administration" id="newdest" />
+   Vous pouvez ajouter ou supprimer des destinataires (un destinataire au minimum !)</td>
+</tr>
+<textarea rows="5" cols="60" name="content_form" class="reponserapide" id="content_form" accesskey="c"></textarea>
+<input type="submit" accesskey="s" value="Valider votre message" name="submit" id="submitreprap"/>
+<input type="hidden" name="new" value="0" />
+<input type="hidden" name="post" value="4242424" /><input type="hidden" name="numrep" value="1990000111" /><input type="hidden" name="cat" value="prive" />
+<input type="hidden" name="subcat" value="0" />
+<input type="hidden" name="page" value="1" />
+<input type="hidden" name="verifrequet" value="1100" />
+<input type="hidden" name="p" value="1" />
+<input type="hidden" name="sondage" value="0" />
+<input type="hidden" name="cache" value="" />
+<input type="hidden" name="owntopic" value="1" />
+<input type="hidden" name="config" value="hfr.inc" />
+<input type="hidden" name="emaill" value="" />
+<input type="hidden" name="pseudo" value="TestOwner" />
+<input type="hidden" name="sujet" value="Discussion de groupe de test" />
+<input type="hidden" value="1" name="signature" />
+</div></form>
+</body></html>

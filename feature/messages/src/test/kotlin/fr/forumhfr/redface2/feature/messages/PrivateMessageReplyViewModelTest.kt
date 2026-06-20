@@ -88,6 +88,20 @@ class PrivateMessageReplyViewModelTest {
         isAnonymous = isAnonymous,
     )
 
+    /** #606 — owner DT/MultiMP form: HFR serves the `newdest` CSV (members minus the owner). */
+    private fun ownerForm(
+        newdest: String = "alice, bob, Bébé Yoda, stitch+, Administration",
+    ): ReplyForm = form(
+        hiddenFields = mapOf(
+            "cat" to "prive",
+            "post" to "4242424",
+            "numrep" to "1990000111",
+            "owntopic" to "1",
+            "signature" to "1",
+            "newdest" to newdest,
+        ),
+    )
+
     @Test
     fun `loads the form on init and hydrates signature from the hidden field`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
@@ -126,7 +140,7 @@ class PrivateMessageReplyViewModelTest {
     fun `submit success raises SubmitSucceeded for the conversation`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any()) } returns form()
-        coEvery { repository.submitReply(any(), any(), any(), any()) } returns
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
         val viewModel = PrivateMessageReplyViewModel(
@@ -150,7 +164,7 @@ class PrivateMessageReplyViewModelTest {
     fun `empty-message failure shows the banner and keeps the draft`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any()) } returns form()
-        coEvery { repository.submitReply(any(), any(), any(), any()) } returns
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
 
         val viewModel = PrivateMessageReplyViewModel(
@@ -169,7 +183,7 @@ class PrivateMessageReplyViewModelTest {
     fun `invalid hash check refetches the form silently`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any()) } returns form()
-        coEvery { repository.submitReply(any(), any(), any(), any()) } returns
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
         val viewModel = PrivateMessageReplyViewModel(
@@ -187,7 +201,7 @@ class PrivateMessageReplyViewModelTest {
     fun `invalid hash check refetch preserves the user option toggles`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any()) } returns form()
-        coEvery { repository.submitReply(any(), any(), any(), any()) } returns
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
         val viewModel = PrivateMessageReplyViewModel(
@@ -211,7 +225,7 @@ class PrivateMessageReplyViewModelTest {
     fun `unknown response maps to the non-destructive unexpected banner`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any()) } returns form()
-        coEvery { repository.submitReply(any(), any(), any(), any()) } returns
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
 
         val viewModel = PrivateMessageReplyViewModel(
@@ -268,7 +282,7 @@ class PrivateMessageReplyViewModelTest {
     fun `confirm-before-posting OFF keeps the one-tap submit unchanged`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any()) } returns form()
-        coEvery { repository.submitReply(any(), any(), any(), any()) } returns
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
         val viewModel = PrivateMessageReplyViewModel(
@@ -277,7 +291,7 @@ class PrivateMessageReplyViewModelTest {
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
         viewModel.onSubmit()
 
-        coVerify(exactly = 1) { repository.submitReply(any(), any(), any(), any()) }
+        coVerify(exactly = 1) { repository.submitReply(any(), any(), any(), any(), any()) }
         assertFalse(viewModel.state.value.showSubmitConfirmation)
     }
 
@@ -299,14 +313,14 @@ class PrivateMessageReplyViewModelTest {
 
         assertTrue("the confirmation dialog must be armed", viewModel.state.value.showSubmitConfirmation)
         assertFalse("nothing is in flight while the dialog is up", viewModel.state.value.isSubmitting)
-        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `confirm-before-posting ON onSubmitConfirmed executes the real submission without re-confirming`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any()) } returns form()
-        coEvery { repository.submitReply(any(), any(), any(), any()) } returns
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
         val viewModel = PrivateMessageReplyViewModel(
@@ -319,7 +333,7 @@ class PrivateMessageReplyViewModelTest {
         )
         viewModel.onContentChanged(TextFieldValue("Coucou en privé."))
         viewModel.onSubmit()
-        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
 
         viewModel.effects.test {
             viewModel.onSubmitConfirmed()
@@ -330,7 +344,7 @@ class PrivateMessageReplyViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
         // Confirm bypasses the preference re-check : exactly one POST, no dialog re-arm.
-        coVerify(exactly = 1) { repository.submitReply(any(), any(), any(), any()) }
+        coVerify(exactly = 1) { repository.submitReply(any(), any(), any(), any(), any()) }
         assertFalse(viewModel.state.value.showSubmitConfirmation)
     }
 
@@ -355,7 +369,7 @@ class PrivateMessageReplyViewModelTest {
         assertFalse(viewModel.state.value.showSubmitConfirmation)
         assertEquals("the draft survives the dismissal", "Coucou en privé.", viewModel.state.value.draft.text)
         assertNull(viewModel.state.value.submitError)
-        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -376,7 +390,7 @@ class PrivateMessageReplyViewModelTest {
         viewModel.onSubmit()
 
         assertFalse("invalid form must not raise the dialog", viewModel.state.value.showSubmitConfirmation)
-        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -402,7 +416,7 @@ class PrivateMessageReplyViewModelTest {
 
         assertTrue("the dialog must stay armed", viewModel.state.value.showSubmitConfirmation)
         assertFalse("nothing is in flight while the dialog is up", viewModel.state.value.isSubmitting)
-        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -413,7 +427,7 @@ class PrivateMessageReplyViewModelTest {
         // non-suspending mock would complete synchronously and the second confirm would
         // legitimately re-fire. The gate keeps `submitJob` active across both confirms.
         val gate = CompletableDeferred<Unit>()
-        coEvery { repository.submitReply(any(), any(), any(), any()) } coAnswers {
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } coAnswers {
             gate.await()
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
         }
@@ -435,7 +449,7 @@ class PrivateMessageReplyViewModelTest {
 
         gate.complete(Unit)
 
-        coVerify(exactly = 1) { repository.submitReply(any(), any(), any(), any()) }
+        coVerify(exactly = 1) { repository.submitReply(any(), any(), any(), any(), any()) }
         assertFalse(viewModel.state.value.showSubmitConfirmation)
         assertFalse(viewModel.state.value.isSubmitting)
     }
@@ -499,7 +513,7 @@ class PrivateMessageReplyViewModelTest {
     fun `a successful MP reply submit deletes the cached draft`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any()) } returns form()
-        coEvery { repository.submitReply(any(), any(), any(), any()) } returns
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
         val viewModel = PrivateMessageReplyViewModel(
             request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
@@ -510,6 +524,200 @@ class PrivateMessageReplyViewModelTest {
         advanceUntilIdle()
 
         assertTrue(draftStore.deletedKeys.contains(EditorDraftKey.mpReply(request.threadId)))
+    }
+
+    // ----- #606 : owner manages DT/MultiMP members --------------------------------
+
+    @Test
+    fun `a non-owner form exposes no member editor and never overrides newdest`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns form() // no newdest
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+
+        assertFalse(viewModel.state.value.canManageRecipients)
+        assertTrue(viewModel.state.value.recipients.isEmpty())
+
+        // Even if add/remove are called on a participant form, they no-op.
+        viewModel.onAddRecipient("intruder")
+        viewModel.onRemoveRecipient("anyone")
+        assertTrue(viewModel.state.value.recipients.isEmpty())
+
+        viewModel.onContentChanged(TextFieldValue("hello"))
+        viewModel.onSubmit()
+        // A participant never overrides the member list — recipientsOverride stays null.
+        coVerify {
+            repository.submitReply(
+                context = any(),
+                form = any(),
+                bbcodeContent = any(),
+                options = any(),
+                recipientsOverride = null,
+            )
+        }
+    }
+
+    @Test
+    fun `an owner form hydrates the members CSV preserving order, accents, plus and spaces`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns ownerForm()
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+
+        assertTrue(viewModel.state.value.canManageRecipients)
+        assertEquals(
+            listOf("alice", "bob", "Bébé Yoda", "stitch+", "Administration"),
+            viewModel.state.value.recipients,
+        )
+    }
+
+    @Test
+    fun `owner submit without edits reposts the member CSV verbatim`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns ownerForm()
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+        viewModel.onContentChanged(TextFieldValue("hello"))
+
+        viewModel.onSubmit()
+        // Round-trip is loss-less: same members, HFR's own `, ` separator.
+        coVerify {
+            repository.submitReply(
+                context = any(),
+                form = any(),
+                bbcodeContent = any(),
+                options = any(),
+                recipientsOverride = "alice, bob, Bébé Yoda, stitch+, Administration",
+            )
+        }
+    }
+
+    @Test
+    fun `owner adds a member appended at the end`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns ownerForm(newdest = "alice, bob")
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+
+        viewModel.onAddRecipient("  charlie  ") // trimmed before insertion
+        assertEquals(listOf("alice", "bob", "charlie"), viewModel.state.value.recipients)
+    }
+
+    @Test
+    fun `owner add refuses an exact-trimmed duplicate`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns ownerForm(newdest = "alice, bob")
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+
+        viewModel.onAddRecipient(" alice ")
+        assertEquals("no duplicate appended", listOf("alice", "bob"), viewModel.state.value.recipients)
+    }
+
+    @Test
+    fun `owner remove is exact-match so bob does not delete bob2`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns ownerForm(newdest = "alice, bob, bob2")
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+
+        viewModel.onRemoveRecipient("bob")
+        assertEquals(listOf("alice", "bob2"), viewModel.state.value.recipients)
+    }
+
+    @Test
+    fun `owner can remove down to one but never the last member`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns ownerForm(newdest = "alice, bob")
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+
+        viewModel.onRemoveRecipient("alice")
+        assertEquals("down to one is allowed", listOf("bob"), viewModel.state.value.recipients)
+
+        viewModel.onRemoveRecipient("bob")
+        assertEquals("the last member can't be removed", listOf("bob"), viewModel.state.value.recipients)
+    }
+
+    @Test
+    fun `owner edits travel to the repository as the recomposed CSV`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns ownerForm(newdest = "alice, bob")
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+        viewModel.onRemoveRecipient("alice")
+        viewModel.onAddRecipient("Bébé Yoda")
+        viewModel.onContentChanged(TextFieldValue("hello"))
+
+        viewModel.onSubmit()
+        coVerify {
+            repository.submitReply(
+                context = any(),
+                form = any(),
+                bbcodeContent = any(),
+                options = any(),
+                recipientsOverride = "bob, Bébé Yoda",
+            )
+        }
+    }
+
+    @Test
+    fun `the member list survives a silent hash-check refetch`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any()) } returns ownerForm(newdest = "alice, bob")
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+        viewModel.onRemoveRecipient("alice") // user edit before the failed submit
+        viewModel.onContentChanged(TextFieldValue("hello"))
+        viewModel.onSubmit()
+
+        // The silent refetch after the expired hash_check must NOT re-hydrate the member list back
+        // to HFR's prefill — the user's removal survives.
+        assertEquals(listOf("bob"), viewModel.state.value.recipients)
+        coVerify(exactly = 2) { repository.fetchReplyForm(any()) }
+    }
+
+    // ----- #606 : RecipientCsv codec ----------------------------------------------
+
+    @Test
+    fun `RecipientCsv parse trims each element, drops empties and preserves order`() {
+        assertEquals(
+            listOf("alice", "bob", "Bébé Yoda", "stitch+"),
+            RecipientCsv.parse(" alice ,bob,  Bébé Yoda , stitch+ , "),
+        )
+        assertTrue(RecipientCsv.parse(null).isEmpty())
+        assertTrue(RecipientCsv.parse("").isEmpty())
+    }
+
+    @Test
+    fun `RecipientCsv join uses HFR's comma-space separator`() {
+        assertEquals("alice, bob, stitch+", RecipientCsv.join(listOf("alice", "bob", "stitch+")))
     }
 
     /** #405 — in-memory fake [EditorDraftStore], same shape as the one in `PostEditorViewModelTest`. */

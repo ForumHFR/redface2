@@ -78,6 +78,8 @@ fun PrivateMessageReplyScreen(
         onRetryFormLoad = viewModel::retryFormLoad,
         onDraftRestore = viewModel::onDraftRestoreRequested,
         onDraftDiscard = viewModel::onDraftDiscardRequested,
+        onAddRecipient = viewModel::onAddRecipient,
+        onRemoveRecipient = viewModel::onRemoveRecipient,
         smileyPicker = viewModel.smileyPicker,
         onSmileySelected = viewModel::onSmileySelected,
         modifier = modifier,
@@ -102,6 +104,8 @@ private fun PrivateMessageReplyContent(
     onRetryFormLoad: () -> Unit,
     onDraftRestore: () -> Unit,
     onDraftDiscard: () -> Unit,
+    onAddRecipient: (String) -> Unit,
+    onRemoveRecipient: (String) -> Unit,
     smileyPicker: SmileyPickerController,
     onSmileySelected: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -122,6 +126,8 @@ private fun PrivateMessageReplyContent(
                         onErrorDismissed = onErrorDismissed,
                         onDraftRestore = onDraftRestore,
                         onDraftDiscard = onDraftDiscard,
+                        onAddRecipient = onAddRecipient,
+                        onRemoveRecipient = onRemoveRecipient,
                         modifier = Modifier.weight(1f),
                     )
                     MessageSubmitBar(
@@ -175,6 +181,8 @@ private fun ReplyEditorBody(
     onErrorDismissed: () -> Unit,
     onDraftRestore: () -> Unit,
     onDraftDiscard: () -> Unit,
+    onAddRecipient: (String) -> Unit,
+    onRemoveRecipient: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // No outer scroll : the draft field is weighted so it stretches down to the bar (same
@@ -186,6 +194,18 @@ private fun ReplyEditorBody(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // #606 — owner-only member editor, above the body. Hidden for a simple participant /
+        // one-to-one MP (canManageRecipients is false).
+        if (state.canManageRecipients) {
+            MessageRecipientsEditor(
+                recipients = state.recipients,
+                enabled = !state.isSubmitting,
+                onAddRecipient = onAddRecipient,
+                onRemoveRecipient = onRemoveRecipient,
+            )
+            HorizontalDivider()
+        }
+
         BbcodeToolbar(onAction = onToolbarAction)
 
         BbcodeTextField(

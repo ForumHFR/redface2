@@ -22,7 +22,6 @@
     <string name="messages_reply_title">Répondre</string>
     <string name="messages_compose_title">Nouveau message</string>
     <string name="messages_compose_new">Nouveau</string>
-    <string name="messages_compose_recipients_label">Destinataire(s)</string>
     <string name="messages_compose_recipients_placeholder">Pseudo(s), séparés par des virgules…</string>
     <string name="messages_compose_subject_label">Sujet</string>
     <string name="messages_compose_subject_counter">%1$d/%2$d</string>
@@ -54,4 +53,17 @@
     <string name="messages_draft_restore_message">Un brouillon non envoyé a été retrouvé.</string>
     <string name="messages_draft_restore">Restaurer</string>
     <string name="messages_draft_discard">Ignorer</string>
+
+    <!-- #606 — gestion des membres d'une discussion de groupe (réservé au créateur). -->
+    <string name="messages_members_title">Membres de la discussion</string>
+    <string name="messages_members_help">Vous êtes le créateur : vous pouvez ajouter ou retirer des membres (un destinataire au minimum). La modification est envoyée avec votre réponse.</string>
+    <string name="messages_members_add_label">Ajouter un membre</string>
+    <string name="messages_members_add_placeholder">Pseudo à ajouter…</string>
+    <string name="messages_members_add">Ajouter</string>
+    <string name="messages_members_remove">Retirer %1$s</string>
+    <string name="messages_members_admin_warning">Retirer « Administration » d\'une discussion de groupe est déconseillé.</string>
+
+    <!-- #606 — libellé du champ destinataires du nouveau message (compose). -->
+    <string name="messages_compose_recipients_label_v2">Pseudo des destinataires</string>
+    <string name="messages_compose_recipients_help">Plusieurs pseudos séparés par des virgules = discussion de groupe.</string>
 </resources>

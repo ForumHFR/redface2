@@ -196,6 +196,16 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                             current.emailNotificationEnabled
                         },
                         optionsHydratedFromForm = true,
+                        // #606 — owner-only member editor. Hydrate the working list from HFR's
+                        // `newdest` CSV on the FIRST load only : a silent refetch after an expired
+                        // hash_check (InvalidHashCheck) must not clobber a member the user added /
+                        // removed in between — same `hydrateOptions` guard as the option toggles.
+                        canManageRecipients = form.canManageRecipients,
+                        recipients = if (hydrateOptions) {
+                            RecipientCsv.parse(form.manageableRecipients)
+                        } else {
+                            current.recipients
+                        },
                     )
                 }
             } catch (cancellation: CancellationException) {
@@ -283,6 +293,42 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     fun onToggleEmailNotification(enabled: Boolean) =
         _state.update { it.copy(emailNotificationEnabled = enabled) }
 
+    /**
+     * #606 — owner adds a member to the DT/MultiMP. The pseudo is appended at the end (HFR keeps
+     * insertion order), trimmed of leading / trailing whitespace but otherwise verbatim (case,
+     * accents, `+`, internal spaces preserved). A blank entry or an exact-trimmed duplicate of an
+     * existing member is refused (no-op). Ignored entirely when the user is not the owner.
+     */
+    fun onAddRecipient(pseudo: String) {
+        if (!_state.value.canManageRecipients) return
+        val trimmed = pseudo.trim()
+        if (trimmed.isEmpty()) return
+        _state.update { current ->
+            if (current.recipients.any { it == trimmed }) {
+                current
+            } else {
+                current.copy(recipients = current.recipients + trimmed)
+            }
+        }
+    }
+
+    /**
+     * #606 — owner removes a member. Exact match after trim (`bob` never removes `bob2`). The last
+     * remaining member can't be removed — HFR enforces « un destinataire au minimum ». Ignored when
+     * the user is not the owner.
+     */
+    fun onRemoveRecipient(pseudo: String) {
+        if (!_state.value.canManageRecipients) return
+        val target = pseudo.trim()
+        _state.update { current ->
+            if (current.recipients.size <= 1 || current.recipients.none { it == target }) {
+                current
+            } else {
+                current.copy(recipients = current.recipients.filterNot { it == target })
+            }
+        }
+    }
+
     fun onErrorDismissed() = _state.update { it.copy(submitError = null) }
 
     /**
@@ -327,6 +373,14 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             smileyDisabled = snapshot.smileyDisabled,
             emailNotificationEnabled = snapshot.emailNotificationEnabled,
         )
+        // #606 — only an owner (canManageRecipients) overrides the member list ; a simple
+        // participant always passes null so the repository forwards HFR's `newdest`, if any,
+        // verbatim. The CSV is recomposed with HFR's own `, ` separator.
+        val recipientsOverride = if (snapshot.canManageRecipients) {
+            RecipientCsv.join(snapshot.recipients)
+        } else {
+            null
+        }
         _state.update { it.copy(isSubmitting = true, submitError = null) }
         submitJob = viewModelScope.launch {
             val outcome = runCatching {
@@ -335,6 +389,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                     form = form,
                     bbcodeContent = snapshot.draft.text,
                     options = options,
+                    recipientsOverride = recipientsOverride,
                 )
             }
             outcome.fold(
@@ -428,4 +483,26 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
  */
 sealed interface PrivateMessageReplyEffect {
     data class SubmitSucceeded(val threadId: Int, val page: Int) : PrivateMessageReplyEffect
+}
+
+/**
+ * #606 — pure CSV codec for the DT/MultiMP member list HFR ships in `newdest`. Kept separate from
+ * the ViewModel so it is trivially unit-testable and shares no mutable state.
+ *
+ * - [parse] splits on `,`, trims each element's surrounding whitespace and drops empties, while
+ *   preserving order, case, accents, `+` and any internal spaces (« Bébé Yoda », « stitch+ »). A
+ *   null / blank CSV (a non-owner form, or HFR sending an empty value) yields an empty list.
+ * - [join] recomposes with HFR's own `, ` separator so the POST `newdest` mirrors the field HFR
+ *   prefills.
+ */
+internal object RecipientCsv {
+    private const val SEPARATOR = ", "
+
+    fun parse(csv: String?): List<String> =
+        csv.orEmpty()
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
+    fun join(recipients: List<String>): String = recipients.joinToString(SEPARATOR)
 }
