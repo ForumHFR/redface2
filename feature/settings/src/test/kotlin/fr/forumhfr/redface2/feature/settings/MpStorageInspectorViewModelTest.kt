@@ -177,6 +177,9 @@ class MpStorageInspectorViewModelTest {
             override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
                 error("Unexpected writeBackFlag call in the read-only inspector test")
 
+            override suspend fun writeBackFlagIfPresent(entry: MpStorageFlagEntry): MpStorageWriteResult =
+                error("Unexpected writeBackFlagIfPresent call in the read-only inspector test")
+
             override suspend fun previewWriteBackFlag(
                 entry: MpStorageFlagEntry,
             ): fr.forumhfr.redface2.core.domain.mpstorage.MpStorageWritePreview =
@@ -230,6 +233,9 @@ class MpStorageInspectorViewModelTest {
         // Read-only inspector: a write must NEVER happen here — fail loudly if one slips in (Codex review).
         override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
             error("Unexpected writeBackFlag call in the read-only inspector test")
+
+        override suspend fun writeBackFlagIfPresent(entry: MpStorageFlagEntry): MpStorageWriteResult =
+            error("Unexpected writeBackFlagIfPresent call in the read-only inspector test")
 
         override suspend fun previewWriteBackFlag(
             entry: MpStorageFlagEntry,

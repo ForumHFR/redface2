@@ -273,6 +273,96 @@ class MpStorageEnvelopeWriterTest {
         )
     }
 
+    // --- UPDATE-ONLY mode (#597 auto trigger) -----------------------------------------------------
+
+    @Test
+    fun `updateOnly skips an absent threadId without appending — anti-pollution`() {
+        val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [
+            { "post": 111, "page": 1, "href": "t1" }
+        ] } } ] }"""
+
+        val entry = MpStorageFlagEntry(threadId = 999, page = 4, numreponse = 2, uri = "/u")
+        val outcome = writer.upsertFlag(raw, entry, updateOnly = true)
+
+        // The unknown threadId is NOT added; the verbatim original is returned for the caller to skip the POST.
+        val skipped = outcome as MpStorageEnvelopeWriter.Outcome.SkippedNotPresent
+        assertEquals(raw, skipped.body)
+    }
+
+    @Test
+    fun `updateOnly skips when there is no v01 entry or list at all (never creates)`() {
+        assertTrue(
+            writer.upsertFlag(
+                """{ "sourceName": "DTCloud" }""",
+                MpStorageFlagEntry(threadId = 1, page = 1, numreponse = 1, uri = null),
+                updateOnly = true,
+            ) is MpStorageEnvelopeWriter.Outcome.SkippedNotPresent,
+        )
+        assertTrue(
+            writer.upsertFlag(
+                """{ "data": [ { "version": "0.2", "foo": 1 } ] }""",
+                MpStorageFlagEntry(threadId = 1, page = 1, numreponse = 1, uri = null),
+                updateOnly = true,
+            ) is MpStorageEnvelopeWriter.Outcome.SkippedNotPresent,
+        )
+    }
+
+    @Test
+    fun `updateOnly updates a present threadId (page, anchor, uri) and preserves third-party keys`() {
+        val raw = """
+            { "data": [ { "version": "0.1",
+                "hfr4k": { "opaque": 1 },
+                "mpFlags": { "list": [
+                    { "post": 12345, "page": 3, "href": "t1", "uri": "/old", "p": 2 }
+                ] } } ],
+              "someOtherTool": { "deep": true } }
+        """.trimIndent()
+
+        val entry = MpStorageFlagEntry(threadId = 12345, page = 7, numreponse = 555, uri = "/new")
+        val body = bodyOf(writer.upsertFlag(raw, entry, updateOnly = true))
+
+        val updated = body.flagList().first().jsonObject
+        assertEquals(7, updated["page"]!!.jsonPrimitive.content.toInt())
+        assertEquals("t555", updated["href"]!!.jsonPrimitive.content)
+        assertEquals("/new", updated["uri"]!!.jsonPrimitive.content)
+        assertEquals("2", updated["p"]!!.jsonPrimitive.content)
+        // Third-party keys survive both at the v0.1 entry and the top level.
+        assertTrue(body.v01Entry().containsKey("hfr4k"))
+        assertTrue(body.containsKey("someOtherTool"))
+    }
+
+    @Test
+    fun `updateOnly with a null anchor PRESERVES the existing href and uri (never nulls them)`() {
+        // The auto trigger landed on a page but has no current anchor → it must keep the known anchor/uri.
+        val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [
+            { "post": 7, "page": 2, "href": "t99", "uri": "/keep" }
+        ] } } ] }"""
+
+        val entry = MpStorageFlagEntry(threadId = 7, page = 5, numreponse = null, uri = null)
+        val body = bodyOf(writer.upsertFlag(raw, entry, updateOnly = true))
+
+        val updated = body.flagList().first().jsonObject
+        // Page advanced…
+        assertEquals(5, updated["page"]!!.jsonPrimitive.content.toInt())
+        // …but the existing anchor and uri are kept verbatim, NOT nulled.
+        assertEquals("t99", updated["href"]!!.jsonPrimitive.content)
+        assertEquals("/keep", updated["uri"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `the manual path (updateOnly = false) still appends an absent threadId and nulls absent fields`() {
+        // Regression guard: the default behaviour is unchanged by #597.
+        val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [] } } ] }"""
+
+        val body = bodyOf(mutate(raw, MpStorageFlagEntry(threadId = 222, page = 1, numreponse = null, uri = null)))
+
+        // Appended (not skipped), and the absent anchor/uri are written as JSON null (historical).
+        val item = body.flagList().single().jsonObject
+        assertEquals(222, item["post"]!!.jsonPrimitive.content.toInt())
+        assertNull(item["href"]!!.jsonPrimitive.contentOrNullSafe())
+        assertNull(item["uri"]!!.jsonPrimitive.contentOrNullSafe())
+    }
+
     /** `JsonPrimitive.content` is "null" for a literal null — distinguish it from the string "null". */
     private fun JsonPrimitive.contentOrNullSafe(): String? =
         if (this is kotlinx.serialization.json.JsonNull) null else content

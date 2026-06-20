@@ -55,6 +55,24 @@ interface MpStorageRepository {
     suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult
 
     /**
+     * UPDATE-ONLY variant of [writeBackFlag] (#597) — the AUTO reading-position trigger.
+     *
+     * Identical to [writeBackFlag] (same opt-in gate, same session guard, same locate / verify-after-write
+     * pipeline, same third-party-key preservation) EXCEPT the upsert is constrained to entries ALREADY
+     * present in the document : if no `mpFlags.list[]` item matches [MpStorageFlagEntry.threadId], the
+     * write is DECLINED with [MpStorageWriteResult.SkippedNotPresent] and NO POST is sent. This is the
+     * anti-pollution guarantee of the page-land hook — a shared cross-userscript document (DTCloud /
+     * HFR4K) must never gain a Redface-2-invented entry from a passive page land (a 1-to-1 MP wrongly
+     * recorded as a DT would corrupt the shared storage).
+     *
+     * On an UPDATE, a null [MpStorageFlagEntry.numreponse] / [MpStorageFlagEntry.uri] PRESERVES the
+     * existing anchor / uri of the matched entry rather than nulling it (the trigger always knows the
+     * landed page but not always the current anchor). The MANUAL path ([writeBackFlag] / [previewWriteBackFlag])
+     * keeps the historical add-or-update + null-erase behaviour, unchanged.
+     */
+    suspend fun writeBackFlagIfPresent(entry: MpStorageFlagEntry): MpStorageWriteResult
+
+    /**
      * DRY-RUN of [writeBackFlag] for tests / dev tooling : locates, mutates and validates the body but
      * NEVER hits the wire, NEVER consults the opt-in preference, and NEVER verifies. Returns the verbatim
      * mutated body that the real path WOULD POST, or a typed failure (not-found / unreadable / oversize).

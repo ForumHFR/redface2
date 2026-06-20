@@ -77,6 +77,16 @@ sealed interface MpStorageWriteResult {
     data object DisabledByPreference : MpStorageWriteResult
 
     /**
+     * UPDATE-ONLY path only (#597) : the storage document was located and read, but its
+     * `mpFlags.list[]` holds NO entry for this `threadId`, so the auto reading-position trigger
+     * declined to ADD a new one. This is the anti-pollution guarantee of the AUTO hook — a shared
+     * cross-userscript document (DTCloud / HFR4K) must never gain a Redface-2-invented entry from a
+     * mere page land (a 1-to-1 MP wrongly recorded as a DT would corrupt the storage). No POST was
+     * sent. The MANUAL / preview path never returns this (it upserts add-or-update).
+     */
+    data object SkippedNotPresent : MpStorageWriteResult
+
+    /**
      * The target storage document could not be located (ADR-014 §3 : NEVER create or overwrite a
      * fresh document — that would fork the cross-userscript storage / spawn a duplicate). The
      * caller must surface this, not "repair" it.

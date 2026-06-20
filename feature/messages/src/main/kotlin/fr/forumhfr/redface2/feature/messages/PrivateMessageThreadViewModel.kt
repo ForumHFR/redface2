@@ -10,7 +10,9 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -35,6 +37,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private val repository: MessagesRepository,
     private val authRepository: AuthRepository,
     private val readPositionStore: PrivateMessageReadPositionStore,
+    private val mpStorageRepository: MpStorageRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PrivateMessageThreadUiState.initial(request))
@@ -168,7 +171,10 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                     isRefreshing = false,
                 )
             }
-            savePosition(thread.page, owner)
+            // The anchor of the LAST post on the landed page — the furthest the reader can have reached
+            // on it. Null when the page has no posts (defensive); the auto MPStorage update then keeps
+            // any existing anchor rather than nulling it.
+            savePosition(thread.page, owner, lastPostNumreponse = thread.messages.lastOrNull()?.numreponse)
         } catch (cancellation: CancellationException) {
             // Deliberately does NOT clear isRefreshing: a cancellation only comes from a
             // superseding load() (which owns the flag from its own start) or from
@@ -210,7 +216,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
      *   started; if the active session changed before this write fires, it is dropped (the
      *   store also re-resolves the active session and no-ops when none is left).
      */
-    private fun savePosition(page: Int, owner: String) {
+    private fun savePosition(page: Int, owner: String, lastPostNumreponse: Int?) {
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             if (owner != authenticatedPseudo) return@launch
@@ -221,6 +227,40 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
                 // Swallowed: the resume position is a nicety, never worth surfacing an error.
             }
+            syncMpStoragePosition(page, lastPostNumreponse)
+        }
+    }
+
+    /**
+     * #597 — best-effort AUTO sync of the landed reading position to the shared MPStorage document,
+     * inside the SAME [saveJob] launch as the local save (so it shares its serialize-latest-wins and
+     * session guards) and AFTER it (the local write is the source of truth ; the remote sync is a
+     * bonus that must never delay or break the local save).
+     *
+     * UPDATE-ONLY ([MpStorageRepository.writeBackFlagIfPresent]) : it only refreshes a `threadId` the
+     * document ALREADY tracks (DTCloud's DT conversations) and NEVER adds a new entry from a passive
+     * page land (anti-pollution of the cross-userscript storage). The whole call is silent : the opt-in
+     * is OFF by default (no network then), and any failure — transport, session, an unwritable document —
+     * is swallowed. A null [numreponse] preserves the entry's existing anchor (the repository keeps it).
+     */
+    private suspend fun syncMpStoragePosition(page: Int, numreponse: Int?) {
+        try {
+            mpStorageRepository.writeBackFlagIfPresent(
+                MpStorageFlagEntry(
+                    threadId = request.threadId,
+                    page = page,
+                    numreponse = numreponse,
+                    // uri↔page coherence: only emit a fresh desktop uri when the anchor is known (so the
+                    // uri's #t<anchor> matches the page). With no anchor, pass null → the update-only path
+                    // PRESERVES both the existing href AND uri rather than minting an anchorless / stale uri.
+                    uri = numreponse?.let { buildDesktopUri(request.threadId, page, it) },
+                ),
+            )
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+            // Swallowed: the MPStorage sync is a bonus on top of the (already done) local save. A failure
+            // must never break the reading session — the local resume position is the source of truth.
         }
     }
 
@@ -229,3 +269,13 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         fun create(request: PrivateMessageThreadRequest): PrivateMessageThreadViewModel
     }
 }
+
+/**
+ * Rebuilds the canonical DTCloud desktop URI for an MPStorage `mpFlags.list[]` entry (#597) :
+ * `/forum2.php?config=hfr.inc&cat=prive&post=<threadId>&page=<page>#t<numreponse>`. This is the exact
+ * shape DTCloud stores (cf. the MpStorage parser fixtures) — relative path, the `t<numreponse>` anchor
+ * as a fragment. The caller only builds it when the anchor is known, so the `#t…` fragment always
+ * matches the page (uri↔page coherence); with no anchor the entry keeps its existing uri instead.
+ */
+internal fun buildDesktopUri(threadId: Int, page: Int, numreponse: Int): String =
+    "/forum2.php?config=hfr.inc&cat=prive&post=$threadId&page=$page#t$numreponse"

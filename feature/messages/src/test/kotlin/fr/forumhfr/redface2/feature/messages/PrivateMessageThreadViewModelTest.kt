@@ -5,12 +5,19 @@ import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageWritePreview
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageWriteResult
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import java.io.IOException
+import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -52,7 +59,10 @@ class PrivateMessageThreadViewModelTest {
         repository: MessagesRepository,
         authRepository: AuthRepository = FakeAuthRepository(),
         readPositionStore: PrivateMessageReadPositionStore = FakeReadPositionStore(),
-    ) = PrivateMessageThreadViewModel(request, repository, authRepository, readPositionStore)
+        mpStorageRepository: MpStorageRepository = FakeMpStorageRepository(),
+    ) = PrivateMessageThreadViewModel(
+        request, repository, authRepository, readPositionStore, mpStorageRepository,
+    )
 
     @Test
     fun `loads the thread on init without private route metadata fallback`() = runTest {
@@ -83,6 +93,7 @@ class PrivateMessageThreadViewModelTest {
             repository = repository,
             authRepository = FakeAuthRepository(AuthState.Anonymous),
             readPositionStore = FakeReadPositionStore(),
+            mpStorageRepository = FakeMpStorageRepository(),
         )
 
         assertEquals(PrivateMessageThreadUiState.Mode.RequiresLogin, viewModel.state.value.mode)
@@ -267,6 +278,7 @@ class PrivateMessageThreadViewModelTest {
             repository = repository,
             authRepository = FakeAuthRepository(),
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 7)),
+            mpStorageRepository = FakeMpStorageRepository(),
         )
 
         coVerify(exactly = 1) {
@@ -288,6 +300,7 @@ class PrivateMessageThreadViewModelTest {
             repository = repository,
             authRepository = FakeAuthRepository(),
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 3)),
+            mpStorageRepository = FakeMpStorageRepository(),
         )
 
         coVerify(exactly = 1) {
@@ -307,7 +320,9 @@ class PrivateMessageThreadViewModelTest {
         val store = FakeReadPositionStore()
 
         val viewModel =
-            PrivateMessageThreadViewModel(request, repository, FakeAuthRepository(), store)
+            PrivateMessageThreadViewModel(
+                request, repository, FakeAuthRepository(), store, FakeMpStorageRepository(),
+            )
         assertEquals(1, store.saved[42])
 
         viewModel.selectPage(5)
@@ -368,14 +383,113 @@ class PrivateMessageThreadViewModelTest {
         assertEquals(5, store.saved[42])
     }
 
-    private fun thread(page: Int, totalPages: Int) = PrivateMessageThread(
+    @Test
+    fun `a landed page triggers the update-only MPStorage sync with page, anchor and desktop uri (#597)`() = runTest {
+        // The auto trigger fires AFTER the local save, in the same launch. It builds the entry from the
+        // landed page + the last post's anchor and the canonical DTCloud desktop uri.
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 3, messages = listOf(post(1000), post(2784595)))
+        val mpStorage = FakeMpStorageRepository()
+
+        threadViewModel(repository, mpStorageRepository = mpStorage)
+        advanceUntilIdle()
+
+        assertEquals(1, mpStorage.ifPresentCalls.size)
+        val entry = mpStorage.ifPresentCalls.single()
+        assertEquals(42, entry.threadId)
+        assertEquals(1, entry.page)
+        // Anchor = the LAST post on the page (the furthest the reader reached).
+        assertEquals(2784595, entry.numreponse)
+        // Canonical DTCloud desktop uri, with the #t<anchor> fragment matching the page.
+        assertEquals("/forum2.php?config=hfr.inc&cat=prive&post=42&page=1#t2784595", entry.uri)
+    }
+
+    @Test
+    fun `the MPStorage sync omits the uri and anchor when the page has no posts (#597)`() = runTest {
+        // No anchor available → numreponse null AND uri null, so the update-only path preserves the
+        // entry's existing href/uri rather than nulling them (the repository keeps the absent fields).
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1, messages = emptyList())
+        val mpStorage = FakeMpStorageRepository()
+
+        threadViewModel(repository, mpStorageRepository = mpStorage)
+        advanceUntilIdle()
+
+        val entry = mpStorage.ifPresentCalls.single()
+        assertEquals(null, entry.numreponse)
+        assertEquals(null, entry.uri)
+    }
+
+    @Test
+    fun `a failing MPStorage sync is swallowed and never breaks the local save (#597)`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1, messages = listOf(post(7)))
+        val store = FakeReadPositionStore()
+        val mpStorage = FakeMpStorageRepository(thrown = IOException("storage write down"))
+
+        val viewModel = threadViewModel(repository, readPositionStore = store, mpStorageRepository = mpStorage)
+        advanceUntilIdle()
+
+        // The thrown sync did not break the session: content is loaded and the local position is saved.
+        assertTrue(viewModel.state.value.mode is PrivateMessageThreadUiState.Mode.Content)
+        assertEquals(1, store.saved[42])
+        assertEquals(1, mpStorage.ifPresentCalls.size)
+    }
+
+    @Test
+    fun `an account switch seals the MPStorage sync to the reading session (#597 + #462)`() = runTest {
+        // The sync lives in the same saveJob/session guard as the local save: a save attributed to a
+        // session that changed before it fires is dropped before any MPStorage call.
+        val repository = mockk<MessagesRepository>()
+        val gate = CompletableDeferred<PrivateMessageThread>()
+        var calls = 0
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } coAnswers { if (calls++ == 0) gate.await() else thread(page = 1, totalPages = 1, messages = listOf(post(9))) }
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        val mpStorage = FakeMpStorageRepository()
+
+        threadViewModel(repository, authRepository, mpStorageRepository = mpStorage)
+        authRepository.emit(AuthState.Authenticated("bob"))
+        advanceUntilIdle()
+        gate.complete(thread(page = 3, totalPages = 9, messages = listOf(post(123))))
+        advanceUntilIdle()
+
+        // Only bob's landing reached the MPStorage sync — alice's sealed (cancelled) job never did.
+        assertEquals(1, mpStorage.ifPresentCalls.size)
+        assertEquals(1, mpStorage.ifPresentCalls.single().page)
+    }
+
+    private fun thread(
+        page: Int,
+        totalPages: Int,
+        messages: List<Post> = emptyList(),
+    ) = PrivateMessageThread(
         threadId = 42,
         subject = "Sujet",
         correspondent = "Correspondant",
-        messages = emptyList(),
+        messages = messages,
         page = page,
         totalPages = totalPages,
         canReply = true,
+    )
+
+    private fun post(numreponse: Int) = Post(
+        numreponse = numreponse,
+        author = "auteur",
+        date = Instant.EPOCH,
+        content = PostContent(blocks = emptyList()),
+        avatarUrl = null,
+        isEditable = false,
+        isOwnPost = false,
+        quotedAuthors = emptyList(),
+        postIndex = null,
     )
 
     private class FakeAuthRepository(
@@ -419,5 +533,32 @@ class PrivateMessageThreadViewModelTest {
             lastSaveOwner = owner?.lowercase()
             saved[threadId] = page
         }
+    }
+
+    /**
+     * Fake [MpStorageRepository] for the #597 auto-sync trigger. Records every
+     * [writeBackFlagIfPresent] entry (so a test can assert the page/anchor/uri the trigger built),
+     * returns [result] (default = the opt-in-OFF nominal case), or throws [thrown] to prove the sync
+     * failure is swallowed. The read / manual-write paths are never exercised by the thread VM.
+     */
+    private class FakeMpStorageRepository(
+        private val result: MpStorageWriteResult = MpStorageWriteResult.DisabledByPreference,
+        private val thrown: Throwable? = null,
+    ) : MpStorageRepository {
+        val ifPresentCalls = mutableListOf<MpStorageFlagEntry>()
+
+        override suspend fun fetchStorage() = error("read path not used by the thread VM")
+
+        override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
+            error("the auto trigger uses writeBackFlagIfPresent, never writeBackFlag")
+
+        override suspend fun writeBackFlagIfPresent(entry: MpStorageFlagEntry): MpStorageWriteResult {
+            ifPresentCalls += entry
+            thrown?.let { throw it }
+            return result
+        }
+
+        override suspend fun previewWriteBackFlag(entry: MpStorageFlagEntry): MpStorageWritePreview =
+            error("preview path not used by the thread VM")
     }
 }

@@ -2482,8 +2482,11 @@ class FlagsViewModelTest {
         }
 
         // The DT tab only READS MPStorage; the write path (#6, opt-in OFF) is never exercised here, so the
-        // fake stubs both write entry points. The default opt-in OFF maps to DisabledByPreference.
+        // fake stubs the write entry points. The default opt-in OFF maps to DisabledByPreference.
         override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
+            MpStorageWriteResult.DisabledByPreference
+
+        override suspend fun writeBackFlagIfPresent(entry: MpStorageFlagEntry): MpStorageWriteResult =
             MpStorageWriteResult.DisabledByPreference
 
         override suspend fun previewWriteBackFlag(

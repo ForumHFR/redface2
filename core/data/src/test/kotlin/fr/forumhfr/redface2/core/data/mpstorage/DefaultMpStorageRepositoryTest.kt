@@ -301,6 +301,77 @@ class DefaultMpStorageRepositoryTest {
         assertEquals(1, server.requestCount) // GET only — no POST on a no-op.
     }
 
+    // --- UPDATE-ONLY auto trigger (#597) ----------------------------------------------------------
+
+    @Test
+    fun `writeBackFlagIfPresent with the opt-in OFF returns DisabledByPreference and sends NO request`() = runTest {
+        // The default. The auto trigger never touches the network when the user has not opted in.
+        locationStore.saved[OWNER] = MpStorageLocation(threadId = 9100200, numreponse = 7)
+
+        val entry = MpStorageFlagEntry(threadId = 1, page = 1, numreponse = 1, uri = null)
+        val result = repository.writeBackFlagIfPresent(entry)
+
+        assertEquals(MpStorageWriteResult.DisabledByPreference, result)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `writeBackFlagIfPresent skips (no POST) when the threadId is absent from the document`() = runTest {
+        // UPDATE-ONLY anti-pollution: a threadId not already tracked is never added from the trigger.
+        val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [
+            { "post": 555, "page": 1, "href": "t1" }
+        ] } } ] }"""
+        repository = buildRepository(
+            replyFormParser = mockk {
+                every { parse(any()) } returns Result.success(storageForm(initialContent = raw))
+            },
+        )
+        preferences.enabled.value = true
+        locationStore.saved[OWNER] = STORAGE_LOCATION
+        server.enqueue(MockResponse().setBody(storageEditFormHtml(raw)))
+
+        val entry = MpStorageFlagEntry(threadId = 42, page = 2, numreponse = 5, uri = "/u")
+        val result = repository.writeBackFlagIfPresent(entry)
+
+        assertEquals(MpStorageWriteResult.SkippedNotPresent, result)
+        // GET the form only — no POST: the absent threadId is never appended (anti-doublon, ADR-014 §3).
+        assertEquals(1, server.requestCount)
+        assertEquals("GET", server.takeRequest().method)
+    }
+
+    @Test
+    fun `writeBackFlagIfPresent updates a present threadId end-to-end (POST + verify)`() = runTest {
+        val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [
+            { "post": 42, "page": 1, "href": "t1", "uri": "/old" }
+        ] } } ] }"""
+        val entry = MpStorageFlagEntry(threadId = 42, page = 2, numreponse = 5, uri = "/forum2.php?post=42&page=2#t5")
+        // The exact body the update-only path POSTs (matched by the verify RE-GET).
+        val mutated = MpStorageEnvelopeWriter(fixedClock).upsertFlag(raw, entry, updateOnly = true)
+            .let { (it as MpStorageEnvelopeWriter.Outcome.Mutated).body }
+        repository = buildRepository(
+            replyFormParser = mockk {
+                every { parse(any()) } returnsMany listOf(
+                    Result.success(storageForm(initialContent = raw)),
+                    Result.success(storageForm(initialContent = mutated)),
+                )
+            },
+        )
+        preferences.enabled.value = true
+        locationStore.saved[OWNER] = STORAGE_LOCATION
+        server.enqueue(MockResponse().setBody(storageEditFormHtml(raw))) // GET edit form
+        server.enqueue(MockResponse().setBody("<html><body>ok</body></html>")) // POST bdd.php
+        server.enqueue(MockResponse().setBody(storageEditFormHtml(mutated))) // RE-GET verify
+
+        val result = repository.writeBackFlagIfPresent(entry)
+
+        assertEquals(MpStorageWriteResult.Success(verified = true), result)
+        assertEquals(3, server.requestCount)
+        server.takeRequest() // GET
+        val body = formFields(server.takeRequest().body.readUtf8())
+        assertEquals("prive", body["cat"])
+        assertTrue(body["content_form"]!!.contains("\"page\":2"))
+    }
+
     @Test
     fun `writeBackFlag POSTs the mutated body with cat=prive, the active pseudo and the hash subject`() = runTest {
         val raw = """{ "data": [ { "version": "0.1", "mpFlags": { "list": [] } } ] }"""
