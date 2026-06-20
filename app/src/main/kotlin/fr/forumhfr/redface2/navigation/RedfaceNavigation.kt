@@ -719,6 +719,15 @@ fun RedfaceApp(intent: Intent?) {
         // page only) and the date is private metadata, so it is held here in memory — purged on every
         // auth transition like the hints above — rather than carried in PrivateMessageThreadRoute.
         var openThreadDates by remember { mutableStateOf(emptyMap<Int, Instant>()) }
+        // #531 (Codex BLOCKER 1) — highest inbox load generation already reconciled, held OUTSIDE the
+        // MessagesScreen composition so the once-per-fetch guarantee survives the screen re-entering
+        // composition (thread → back re-runs the reconcile effect on a stale page-1 Content for the
+        // SAME generation). The handler ignores `generation <= lastReconciledGeneration`. Reset to 0
+        // on every auth transition, in lockstep with the read-mark purge and with the ViewModel's own
+        // generation reset (clearPrivateState rebuilds the state, so the generation restarts at 0 on
+        // Anonymous) — keeping a positive value here would then silently swallow the next session's
+        // first reconcile.
+        var lastReconciledGeneration by remember { mutableStateOf(0) }
         // #301 follow-up — bumped when the new-conversation composer pops back after a successful
         // send. The MP list collects the signal and refreshes itself so the created conversation
         // appears at the top (its thread id is unknown — the bddpost success response of a new MP
@@ -765,6 +774,8 @@ fun RedfaceApp(intent: Intent?) {
                     multiRecipientThreadIds = emptySet()
                     unreadOnOpenThreadIds = emptySet()
                     openThreadDates = emptyMap()
+                    // #531 — stay in lockstep with the VM's generation reset (clearPrivateState).
+                    lastReconciledGeneration = 0
                     privateMessageSentSignal = null
                     // #291 — a write intention armed under another session must not survive the
                     // transition (Codex review: stale « Citer N » after logout/login).
@@ -776,6 +787,9 @@ fun RedfaceApp(intent: Intent?) {
                     multiRecipientThreadIds = emptySet()
                     unreadOnOpenThreadIds = emptySet()
                     openThreadDates = emptyMap()
+                    // #531 — the VM reloads page 1 (generation back to 1) on a fresh authentication;
+                    // resetting here lets that first reconcile run.
+                    lastReconciledGeneration = 0
                     privateMessageSentSignal = null
                     multiQuoteBasket = null
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
@@ -865,16 +879,29 @@ fun RedfaceApp(intent: Intent?) {
                                 }
                                 // #531 — record the mark keyed by the conversation date captured at
                                 // open-time (openThreadDates). reconcileReadMarks later compares the
-                                // server date against it; a thread with no captured date (DT/deep-link
-                                // path) falls back to EPOCH so any later server date reconciles it.
+                                // server date against it. (Codex MAJOR 3) the open-time date is a
+                                // PER-OPEN pending: CONSUME it here so a later re-open of the same
+                                // thread WITHOUT a fresh inbox date can't reuse this stale baseline —
+                                // it falls back to the MAX sentinel (never reconciled) instead.
                                 readPrivateMessageThreadIds = readPrivateMessageThreadIds
                                     .withReadMark(threadId, openThreadDates)
+                                openThreadDates = openThreadDates - threadId
                             },
                             // #531 — fresh page-1 network result: drop the marks HFR now reports as
                             // genuinely unread again (server date strictly newer than the open-time date).
-                            onReconcileReadMarks = { conversations ->
-                                readPrivateMessageThreadIds =
-                                    readPrivateMessageThreadIds.withoutReconciled(conversations)
+                            // (Codex BLOCKER 1) dedupe by generation OUTSIDE the screen composition: the
+                            // reconcile effect can refire for the same generation on a stale page-1
+                            // Content, so ignore an already-reconciled generation; otherwise record it
+                            // BEFORE reconciling.
+                            onReconcileReadMarks = { generation, conversations ->
+                                val pass = reconcilePass(
+                                    marks = readPrivateMessageThreadIds,
+                                    lastReconciled = lastReconciledGeneration,
+                                    generation = generation,
+                                    freshConversations = conversations,
+                                )
+                                lastReconciledGeneration = pass.lastReconciled
+                                readPrivateMessageThreadIds = pass.marks
                             },
                             onThreadOpenedAsMulti = { threadId ->
                                 multiRecipientThreadIds = multiRecipientThreadIds + threadId
@@ -1116,8 +1143,10 @@ private const val DEV_CHANNEL: String = "dev"
  * @property onThreadOpenedAt #531 — records the conversation date seen when a thread is opened from
  *   the inbox; that date becomes the read mark's value so a later, strictly-newer server date can
  *   reconcile (re-unread) it (see [reconcileReadMarks]).
- * @property onReconcileReadMarks #531 — invoked once per fresh page-1 network result with the server
- *   conversations; drops the optimistic read marks HFR now reports as genuinely unread again.
+ * @property onReconcileReadMarks #531 — invoked on each fresh page-1 network result with the load
+ *   GENERATION and the server conversations; drops the optimistic read marks HFR now reports as
+ *   genuinely unread again. Deduped by generation in the host (Codex BLOCKER 1) so a re-fired effect
+ *   on the same generation reconciles at most once.
  */
 private data class PrivateMessageNavState(
     val readThreadIds: Set<Int>,
@@ -1126,7 +1155,8 @@ private data class PrivateMessageNavState(
     val onThreadOpenedAsMulti: (Int) -> Unit,
     val onThreadOpenedUnread: (Int) -> Unit = {},
     val onThreadOpenedAt: (threadId: Int, date: Instant) -> Unit = { _, _ -> },
-    val onReconcileReadMarks: (List<PrivateMessageSummary>) -> Unit = {},
+    val onReconcileReadMarks: (generation: Int, conversations: List<PrivateMessageSummary>) -> Unit =
+        { _, _ -> },
     /** #301 follow-up — last successful new-conversation send ; the MP list refreshes on change. */
     val sentSignal: Long? = null,
     /** #301 follow-up — bumps [sentSignal] when the composer reports a successful send. */
@@ -1187,16 +1217,58 @@ internal fun Map<Int, Instant>.withoutReconciled(
 }
 
 /**
+ * #531 (Codex BLOCKER 1) — result of a generation-deduped reconcile pass. Both fields are returned so
+ * the caller updates its two pieces of state atomically (the high-water generation and the read-mark
+ * map). When [generation] is not newer than [lastReconciled], [marks] is the input map unchanged and
+ * [lastReconciled] is unchanged too — the pass was a no-op.
+ */
+internal data class ReconcilePass(
+    val marks: Map<Int, Instant>,
+    val lastReconciled: Int,
+)
+
+/**
+ * #531 (Codex BLOCKER 1) — once-per-generation reconciliation, hoisted OUT of the MessagesScreen
+ * composition. The reconcile effect can re-fire for the SAME [generation] when the screen re-enters
+ * composition (thread → back lands on a stale page-1 [MessagesUiState.Mode.Content]); keying the
+ * effect alone does not guard that. So the host keeps a high-water mark ([lastReconciled]) and this
+ * pure function:
+ *  - ignores `generation <= lastReconciled` (returns the inputs untouched → idempotent re-fire), else
+ *  - advances the high-water mark to [generation] AND applies [withoutReconciled].
+ *
+ * Compose-free so the dedupe + idempotence are unit-testable without a UI host.
+ */
+internal fun reconcilePass(
+    marks: Map<Int, Instant>,
+    lastReconciled: Int,
+    generation: Int,
+    freshConversations: List<PrivateMessageSummary>,
+): ReconcilePass = if (generation <= lastReconciled) {
+    ReconcilePass(marks, lastReconciled)
+} else {
+    ReconcilePass(marks.withoutReconciled(freshConversations), generation)
+}
+
+/**
+ * #531 (Codex BLOCKER 2) — baseline used for a read mark when NO real open-time date was captured (the
+ * DT / deep-link open path never records one). It is [Instant.MAX] on purpose: `serverDate.isAfter(MAX)`
+ * is ALWAYS false, so such a mark is NEVER dropped by [reconcileReadMarks] — it only ever clears on the
+ * auth purge. This is the conservative choice: a just-read thread with no baseline must never be
+ * re-flagged unread on a mere echo of its dot. (The original [Instant.EPOCH] was the inverse: every
+ * server date exceeded it, so any dot echo re-unread the thread.)
+ */
+private val NO_RECONCILE_BASELINE: Instant = Instant.MAX
+
+/**
  * #531 — adds an optimistic read mark for [threadId], keyed by the conversation date captured at
- * open-time ([openDates]). A thread with no captured date (the DT / deep-link open path never records
- * one) falls back to [Instant.EPOCH], so any later server date reconciles it (the conservative choice:
- * a missing baseline never blocks a re-unread). Extracted to keep [RedfaceApp]'s Elvis out of its
- * cyclomatic-complexity budget.
+ * open-time ([openDates]). A thread with no captured date falls back to [NO_RECONCILE_BASELINE]
+ * ([Instant.MAX]), so it is never reconciled back to unread (see that constant). Extracted to keep
+ * [RedfaceApp]'s Elvis out of its cyclomatic-complexity budget.
  */
 internal fun Map<Int, Instant>.withReadMark(
     threadId: Int,
     openDates: Map<Int, Instant>,
-): Map<Int, Instant> = this + (threadId to (openDates[threadId] ?: Instant.EPOCH))
+): Map<Int, Instant> = this + (threadId to (openDates[threadId] ?: NO_RECONCILE_BASELINE))
 
 /**
  * Bug fix (build 89) — per-topic title cache plumbed into [RedfaceNavHost]. A topic page change

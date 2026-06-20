@@ -75,9 +75,13 @@ fun MessagesScreen(
         openedAtDate: Instant,
     ) -> Unit,
     readThreadIds: Set<Int> = emptySet(),
-    // #531 — invoked once per fresh page-1 network result with the server conversations, so the host
-    // can drop the optimistic read marks HFR now reports as genuinely unread again (gated by date).
-    onReconcileReadMarks: (List<PrivateMessageSummary>) -> Unit = {},
+    // #531 — invoked on each fresh page-1 network result with the LOAD GENERATION and the server
+    // conversations, so the host can drop the optimistic read marks HFR now reports as genuinely
+    // unread again (gated by date). The generation lets the host dedupe out-of-composition: the
+    // effect below can refire for the SAME generation when the screen re-enters composition (e.g.
+    // returning from a thread on a stale page-1 Content), so the host ignores a generation it has
+    // already reconciled instead of relying on the effect key alone (Codex BLOCKER 1).
+    onReconcileReadMarks: (generation: Int, conversations: List<PrivateMessageSummary>) -> Unit = { _, _ -> },
     topBarActions: @Composable (() -> Unit)? = null,
     // #301 follow-up — opens the new-conversation composer. Null hides the button.
     onComposeNew: (() -> Unit)? = null,
@@ -95,14 +99,18 @@ fun MessagesScreen(
         }
     }
     // #531 — reconcile optimistic read marks on a genuine page-1 network success. Keyed on the
-    // ViewModel's load generation (not the conversation list) so it fires exactly once per fetch and
-    // never on a bare recomposition. Page 1 only: it is where HFR re-signals a thread unread, and a
-    // conversation appears on a single inbox page so reconciling elsewhere has nothing to add.
+    // ViewModel's load generation (not the conversation list) so it fires once per fetch and never on
+    // a bare recomposition. The effect can still REFIRE for the same generation when the screen
+    // re-enters composition (thread → back lands on a stale page-1 Content), so the actual once-per-
+    // generation guarantee lives in the host (Codex BLOCKER 1): the generation is forwarded and the
+    // host ignores any generation it has already reconciled. Page 1 only: it is where HFR re-signals a
+    // thread unread, and a conversation appears on a single inbox page so reconciling elsewhere adds
+    // nothing.
     val currentMode = state.mode
     LaunchedEffect(state.networkLoadGeneration) {
         val freshContent = currentMode as? MessagesUiState.Mode.Content
         if (state.networkLoadGeneration > 0 && state.page == 1 && freshContent != null) {
-            onReconcileReadMarks(freshContent.conversations)
+            onReconcileReadMarks(state.networkLoadGeneration, freshContent.conversations)
         }
     }
 
