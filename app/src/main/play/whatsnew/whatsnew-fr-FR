@@ -1,12 +1,10 @@
-Redface 2 v0.15.0 — bêta.
+Redface 2 v0.16.0 — bêta.
 
 Nouveautés :
-- Masquer un utilisateur (blacklist).
-- Mode plein écran (masquer la barre Android).
-- Recherche dans un sujet : mot/pseudo, navigation entre résultats, tout le sujet.
-- Onglet DT : non-lus par défaut, clic pour voir les lus, tirer pour rafraîchir.
-- Pseudo créateur en doré ; accent « Rouge REDFACE1 » optionnel.
+- DT/MultiMP : le créateur peut ajouter ou retirer des participants (via une réponse).
+- DT : liste des participants (bouton « Participants »).
+- Synchro de la position de lecture des DT vers MPStorage (en option, désactivée par défaut).
 
-Correctifs : blacklist en direct, badge des MP.
+Correctif : les emojis qui tronquaient un message à l'envoi.
 
 Bugs : via la bêta ou GitHub.

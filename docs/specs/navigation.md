@@ -42,7 +42,7 @@ graph TB
         MSGS[Messages]
     end
 
-    FLAGS -->|"onglets: cyan / lu / favoris / super"| FLAGS
+    FLAGS -->|"onglets: cyan / lu / favoris / super / DT (conditionnel)"| FLAGS
     FLAGS -->|"groupé par catégorie (#179)"| FLAGS
     FLAGS --> TOPIC
 
@@ -55,15 +55,12 @@ graph TB
     SEARCH --> RESULTS[Résultats]
     RESULTS --> TOPIC
 
-    MSGS --> TABMP["MPs classiques"]
-    MSGS --> TABMULTI["MultiMPs (vue drapeaux)"]
-    TABMP --> CONV[Conversation]
-    TABMP --> NEWMP["Nouveau MP"]
-    TABMULTI --> CONVMULTI["Conversation groupe"]
-    TABMULTI --> NEWMULTI["Nouveau MultiMP"]
-    CONV --> REPLYMP[Reply MP]
-    CONVMULTI --> REPLYMULTI[Reply MultiMP]
-    CONVMULTI --> QUOTEMULTI["Quote → Reply"]
+    MSGS --> INBOX["Inbox MP (mono-onglet, MP + MultiMP)"]
+    INBOX --> CONV[Conversation]
+    INBOX --> NEWMP["Nouveau MP"]
+    INBOX --> NEWMULTI["Nouveau MultiMP"]
+    CONV --> REPLYMP["Reply / Quote MP"]
+    CONV --> MEMBERS["Gérer membres MultiMP (newdest)"]
 
     TOPIC --> REPLY[Reply]
     TOPIC --> EDIT["Edit post"]
@@ -80,7 +77,7 @@ graph TB
     style TOPIC fill:#e74c3c,color:#fff
 ```
 
-> **Lecture du graphe** : ce diagramme décrit le **flow utilisateur**, pas le découpage en `NavKey`. Les routes typées réelles sont `FlagsListRoute`, `ForumRoute`, `CategoryRoute`, `TopicRoute`, `SearchRoute`, `MessagesRoute`, `PrivateMessageThreadRoute`, `PostEditorRoute`, `TopicFormRoute`, `ProfileFullRoute` (Phase 2 finish #208) (cf. § Implémentation ci-dessous). Plusieurs nœuds du graphe sont des **states internes au screen** plutôt que des routes distinctes : `TABMP` / `TABMULTI` représentent les surfaces MP classique / MultiMP (seul le MP classique read-only est livré dans le MVP #298) ; `CATS` / `SUBCATS` / `TOPICLIST` sont couverts par la même `CategoryRoute(cat, subcat?, page)`. Le mapping flow → routes typées est explicite dans le code de `entryProvider` plus bas.
+> **Lecture du graphe** : ce diagramme décrit le **flow utilisateur**, pas le découpage en `NavKey`. Les routes typées réelles sont `FlagsListRoute`, `ForumRoute`, `CategoryRoute`, `TopicRoute`, `SearchRoute`, `MessagesRoute`, `PrivateMessageThreadRoute`, `PostEditorRoute`, `TopicFormRoute`, `ProfileFullRoute` (Phase 2 finish #208) (cf. § Implémentation ci-dessous). Plusieurs nœuds du graphe sont des **states internes au screen** plutôt que des routes distinctes : `INBOX` est la boîte de réception MP **mono-onglet** (MP classiques et MultiMP confondus ; l'onglet « DT » dédié vit dans les Drapeaux, pas dans Messages) ; `CATS` / `SUBCATS` / `TOPICLIST` sont couverts par la même `CategoryRoute(cat, subcat?, page)`. Le mapping flow → routes typées est explicite dans le code de `entryProvider` plus bas.
 
 ---
 
@@ -90,11 +87,16 @@ graph TB
 
 L'écran le plus important de l'app. Affiche les topics suivis par l'utilisateur.
 
-**Onglets** (`FlagTab`, un `FlagType` chacun sauf `Super`) :
+**Onglets** (`FlagTab`, un `FlagType` chacun sauf `Super` et `Dt`) :
 - **Mes sujets** (cyan) : topics où l'utilisateur a participé. Re-tap de l'onglet déjà sélectionné → toggle « +lus » (afficher/masquer les cyans déjà lus, #154).
 - **Lu** (rouge) : topics lus uniquement (drapeau de lecture sans participation).
 - **Favoris** : topics marqués d'une étoile jaune.
 - **Super** : placeholder « super favoris » (pas de backend, pas de fetch).
+- **DT** (conditionnel) : 5e onglet listant les conversations MultiMP / DT. **Visible uniquement** quand le réglage « section DT » est actif (`state.showDtTab`, persisté via `UserPreferencesRepository`, **défaut OFF**). Source code : `FlagsViewModel` (sealed `FlagTab` incl. `Dt`), `FlagsRoute.kt` (rendu conditionnel). Comportement :
+  - **Liste** = union des MultiMP connus de **MPStorage** (`mpFlags.list[]`) et de la **1re page de l'inbox** MP. **Limite connue** : seule la première page de l'inbox est scannée — une conversation MultiMP poussée au-delà de la 1re page (et absente de MPStorage) n'apparaît pas dans l'onglet DT.
+  - **Non-lus par défaut** : l'onglet affiche d'abord les conversations non lues ; un **clic sur l'onglet** déjà sélectionné révèle aussi les conversations lues.
+  - **Pull-to-refresh** (#588) pour resynchroniser.
+  - **Reprise de lecture** = **position** (page/ancre), pas un lu/non-lu serveur (MPStorage ne stocke qu'une position de reprise par conversation, cf. [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) étage 1 / #361 et [ADR-014]({{ site.baseurl }}/adr/014-mpstorage-v01-de-facto) §5).
 
 **Regroupement par catégorie (#179, vue par défaut)** :
 - À l'intérieur de chaque onglet réel, les topics sont **groupés par catégorie**, dans l'ordre canonique du forum (cf. `ForumRepository.observeCategories()` ; ordre de secours en dur si le catalogue n'est pas encore chargé). C'est la parité avec la vue web « Vos sujets ».
@@ -202,32 +204,37 @@ Issue #198 — chaque écran principal (Drapeaux, Forum, Recherche, Messages) ac
 
 Le badge est un carré à coins arrondis (8dp), **pas un cercle**, cohérent avec [`RedfaceUserAvatar`]({{ site.baseurl }}/specs/models#post). L'anti-flicker auth est préservé : tant que `authState == null`, le badge montre `…` plutôt que `?` pour ne pas surfacer transitoirement un état « Anonyme ». La déconnexion (`AppAccountViewModel.logout`) vide d'abord `FlagRepository.clearSessionCache()` avant `AuthRepository.logout()` ; cet ordering est verrouillé par `AppAccountViewModelTest` côté `:app`.
 
-Depuis le MVP Phase 3 (#298), l'onglet `Messages` affiche la liste des MP classiques et
-ouvre une conversation en lecture seule. L'écran observe l'état d'authentification : en
+Depuis le MVP Phase 3 (#298), l'onglet `Messages` affiche l'inbox des MP (MP classiques et
+MultiMP confondus, cf. § Messages ci-dessous) et ouvre une conversation ; la lecture seule
+du MVP a depuis été étendue à la réponse/citation (#301), la composition de MP/MultiMP et la
+gestion des membres d'un MultiMP (#606/#612). L'écran observe l'état d'authentification : en
 anonyme ou après déconnexion, les données privées déjà chargées sont purgées et remplacées
 par un état « connexion requise ».
 
 ### Messages
 
-Deux onglets :
+Inbox **mono-onglet** : `MessagesScreen` (`feature/messages/.../MessagesScreen.kt`, KDoc « the private-message inbox ») affiche la boîte de réception MP, MP classiques 1-to-1 et conversations de groupe (MultiMP / DT) confondus dans la même liste. Il n'y a **pas** d'onglet « MultiMPs » distinct dans Messages : les MultiMP apparaissent dans l'inbox (drapeau « Interlocuteurs multiples », `isMultiRecipient`) et disposent d'un **onglet « DT » conditionnel dans les Drapeaux** (cf. § Drapeaux > Onglets ci-dessus), pas d'une surface dédiée ici.
 
-**MPs classiques :**
-- Inbox : liste des conversations 1-to-1, triées par date (`forum1.php?cat=prive`)
-- Lecture d'une conversation : `forum2.php?cat=prive&post={threadId}&page={page}`
-- Chaque MP affiche : sujet, correspondant, date, lu/non-lu
-- Nouveau MP, réponse et quote MP : à faire en Phase 3 suivante
+- **Inbox** : liste des conversations triées par date (`forum1.php?cat=prive`). Chaque entrée affiche sujet, correspondant, date, indicateur lu/non-lu (dot binaire serveur, cf. [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch)/#361 — **pas** d'état MPStorage/Room en lieu et place du drapeau serveur), et un marqueur « Interlocuteurs multiples » pour les MultiMP.
+- **Lecture d'une conversation** : `forum2.php?cat=prive&post={threadId}&page={page}`, même rendu `PostRenderer` que les posts de topic. Swipe de pages in-place + ascenseur + pull-to-refresh (#351 a/b, ADR-013).
+- **Réponse / citation** (#301) : formulaire de réponse embarqué dans la page de conversation ; le bouton « Répondre » est gaté sur `thread.canReply`.
+- **Nouveau MP** : composition d'un MP 1-to-1 (destinataire + sujet + contenu).
+- **Nouveau MultiMP** : composition d'une conversation de groupe (2+ destinataires + sujet + contenu).
+- **Gérer les membres d'un MultiMP** (#606/#612) : l'owner peut ajouter/retirer des destinataires via le champ `newdest` au POST de réponse (cf. [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#mpdt--ajoutretrait-de-membres-newdest)).
+- **Badge MP** (#313) : compteur de MP non lus surfacé dans la bottom nav.
 
-**MultiMPs :**
-- Vue style drapeaux : fils de groupe triés par dernier message
-- État lu/non-lu géré via **MPStorage** (données synchronisées depuis un MP HFR dédié, cachées en Room)
-- Chaque MultiMP se comporte comme un topic : pagination, quote, reply
-- Nouveau MultiMP : destinataires (2+) + sujet + contenu
+> La **position de reprise de lecture** des conversations est locale (table Room `mp_read_positions`, ADR-013 étage 1), seedée depuis MPStorage pour les DT (ADR-014 §5). Ce n'est **pas** un lu/non-lu : l'état lu/non-lu serveur reste le dot binaire par conversation.
 
 ### Recherche
 
-- Recherche dans les topics (titre) et dans les posts (contenu)
-- Filtres : catégorie, auteur, date
-- Résultats avec preview du contexte
+**Recherche globale / filtrée** (Phase 2) :
+- Recherche dans les topics (titre) et dans les posts (contenu) sur tout le forum, via `GET /forum1.php?recherches=1&...`
+- Filtres : catégorie (pivot), titre seul / titre + contenu, fourchette de dates
+- Résultats avec preview du contexte (`Dernier message correspondant`)
+
+**Recherche intra-topic** (#576/#585/#546, livrée) :
+- Rechercher un mot-clé **dans le sujet courant** depuis l'écran Topic, avec saut entre les occurrences (résultat précédent / suivant), mode **filtre par pseudo** (`spseudo`) et option **tout le sujet**.
+- `TopicSearch` / `TopicSearchRepository(Impl)` / `HfrClient.searchInTopic` via `POST /transsearch.php` (cf. [protocol-hfr.md]({{ site.baseurl }}/specs/protocol-hfr#post-transsearchphp--recherche-intra-topic)). La réponse est une page de topic re-parsée, positionnée sur l'occurrence.
 
 ---
 

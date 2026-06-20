@@ -41,5 +41,5 @@ Les numéros `004` à `007` sont volontairement laissés libres pour des décisi
 | [ADR-011]({{ site.baseurl }}/adr/011-postcontent-ast) | AST sémantique `PostContent` comme contrat de rendu |
 | [ADR-012]({{ site.baseurl }}/adr/012-credentials-proxy) | Credentials proxy : extension d'Option A |
 | [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) | Lecture MP : partage topic↔MP, cache à trois étages, prefetch borné |
-| [ADR-014]({{ site.baseurl }}/adr/014-mpstorage-v01-de-facto) | MPStorage : enveloppe v0.1 de facto, lecture d'abord, écriture différée |
+| [ADR-014]({{ site.baseurl }}/adr/014-mpstorage-v01-de-facto) | MPStorage : enveloppe v0.1 de facto, lecture d'abord, écriture opt-in (OFF par défaut) |
 | [ADR-015]({{ site.baseurl }}/adr/015-iconographie-boutons-icones) | Iconographie des boutons-icônes : vector drawables stroke locaux, primitive `RedfaceVectorIcon` |
