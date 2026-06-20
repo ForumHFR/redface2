@@ -150,8 +150,20 @@ class DefaultMpStorageRepository @Inject constructor(
      * The discovery is the same deterministic exact-hash match as [fetchStorage] ; a miss is
      * [MpStorageWriteResult.TargetNotFound], NEVER a creation (ADR-014 §3).
      */
-    @Suppress("ReturnCount") // Guard clauses (pref / auth / not-found / unreadable / no-op / oversize) + verify return.
-    override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult {
+    override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
+        writeBack(entry, updateOnly = false)
+
+    /**
+     * UPDATE-ONLY write path (#597) — the AUTO reading-position trigger. Same pipeline / gates as
+     * [writeBackFlag] but constrains the upsert to entries already present : an absent `threadId` is
+     * declined with [MpStorageWriteResult.SkippedNotPresent] (no POST), so a passive page land never
+     * pollutes the shared cross-userscript document with a Redface-2-invented entry (ADR-014 anti-doublon).
+     */
+    override suspend fun writeBackFlagIfPresent(entry: MpStorageFlagEntry): MpStorageWriteResult =
+        writeBack(entry, updateOnly = true)
+
+    @Suppress("ReturnCount") // Guard clauses (pref / auth / not-found / unreadable / skip / no-op / oversize) + verify.
+    private suspend fun writeBack(entry: MpStorageFlagEntry, updateOnly: Boolean): MpStorageWriteResult {
         return withContext(ioDispatcher) {
             // 1-2. Opt-in gate FIRST — no network when OFF (the default), so a missing trigger is harmless.
             if (!syncWriteEnabled()) {
@@ -175,12 +187,23 @@ class DefaultMpStorageRepository @Inject constructor(
             // 5. Verbatim backup (the raw content_form BEFORE any mutation) for the restore path.
             val backup = read.form.initialContent
 
-            // 7-9. Pure read-modify-write + no-op short-circuit + cap.
-            when (val outcome = envelopeWriter.upsertFlag(document.rawEnvelope, entry)) {
+            // 7-9. Pure read-modify-write + skip / no-op short-circuit + cap.
+            when (val outcome = envelopeWriter.upsertFlag(document.rawEnvelope, entry, updateOnly = updateOnly)) {
                 MpStorageEnvelopeWriter.Outcome.NotJsonEnvelope ->
                     // Defensive : the parser already accepted it, so this should not happen — but if the
                     // raw text is somehow not a JSON object we surface it, never overwrite (ADR-014 §3).
                     MpStorageWriteResult.Unreadable
+
+                is MpStorageEnvelopeWriter.Outcome.SkippedNotPresent -> {
+                    // #597 UPDATE-ONLY : the threadId is not already tracked → never add it (anti-pollution
+                    // of the shared document). No POST; the document is left byte-fidèle.
+                    diagnostics.record(
+                        DiagnosticsLog.Level.INFO,
+                        LOG_TAG,
+                        "writeBackFlag: skipped (threadId not present, update-only)",
+                    )
+                    MpStorageWriteResult.SkippedNotPresent
+                }
 
                 is MpStorageEnvelopeWriter.Outcome.NoOp -> {
                     // 8. The target position did not change : success WITHOUT a POST (the document is
@@ -212,8 +235,11 @@ class DefaultMpStorageRepository @Inject constructor(
             val read = readFormAndDocument(location) ?: return@withContext MpStorageWritePreview.TargetNotFound
             val document = read.document ?: return@withContext MpStorageWritePreview.Unreadable
 
+            // Preview is the MANUAL path : upsert add-or-update (updateOnly = false), so SkippedNotPresent
+            // is never produced here — mapped to Prepared(verbatim) for an exhaustive `when` regardless.
             when (val outcome = envelopeWriter.upsertFlag(document.rawEnvelope, entry)) {
                 MpStorageEnvelopeWriter.Outcome.NotJsonEnvelope -> MpStorageWritePreview.Unreadable
+                is MpStorageEnvelopeWriter.Outcome.SkippedNotPresent -> MpStorageWritePreview.Prepared(outcome.body)
                 is MpStorageEnvelopeWriter.Outcome.NoOp -> MpStorageWritePreview.Prepared(outcome.body)
                 is MpStorageEnvelopeWriter.Outcome.TooLarge -> MpStorageWritePreview.TooLarge(outcome.sizeBytes)
                 is MpStorageEnvelopeWriter.Outcome.Mutated -> MpStorageWritePreview.Prepared(outcome.body)

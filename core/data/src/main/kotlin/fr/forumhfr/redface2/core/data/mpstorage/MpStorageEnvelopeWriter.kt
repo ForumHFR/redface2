@@ -62,6 +62,16 @@ class MpStorageEnvelopeWriter @Inject constructor(
          */
         data class NoOp(val body: String) : Outcome
 
+        /**
+         * UPDATE-ONLY mode only (#597) : [entry]'s `threadId` is ABSENT from the list and `updateOnly`
+         * was set, so the writer declined to APPEND a new item. [body] is the ORIGINAL content,
+         * byte-fidèle (no re-serialisation, no stamp) — the caller skips the POST entirely. This is the
+         * anti-pollution skip of the auto reading-position trigger : a shared cross-userscript document
+         * must never gain a Redface-2-invented entry from a page land. Never returned when `updateOnly`
+         * is `false` (the manual / preview path appends as before).
+         */
+        data class SkippedNotPresent(val body: String) : Outcome
+
         data object NotJsonEnvelope : Outcome
         data class TooLarge(val sizeBytes: Int) : Outcome
     }
@@ -81,14 +91,30 @@ class MpStorageEnvelopeWriter @Inject constructor(
      *    rejects the result ([Outcome.TooLarge]) when its UTF-8 size exceeds
      *    [MpStorageRepository.MAX_CONTENT_FORM_BYTES].
      *
+     * UPDATE-ONLY mode ([updateOnly] = `true`, #597 auto trigger) changes two things versus the default
+     * manual/preview behaviour :
+     *  - an ABSENT `threadId` is NOT appended — the writer returns [Outcome.SkippedNotPresent] with the
+     *    verbatim original (anti-pollution of the shared cross-userscript document) ; nothing is created
+     *    when there is no v0.1 entry / no list either ;
+     *  - on an UPDATE, a `null` [MpStorageFlagEntry.numreponse] / [MpStorageFlagEntry.uri] PRESERVES the
+     *    existing `href` / `uri` of the matched item instead of nulling them (the auto trigger never
+     *    erases a known anchor when the current page anchor is unknown).
+     * The default ([updateOnly] = `false`) keeps the historical add-or-update + null-erases semantics.
+     *
      * Returns [Outcome.NotJsonEnvelope] when [rawEnvelope] is not a JSON object (the caller maps this
      * to "unreadable" and NEVER writes a repaired default — ADR-014 §3).
      */
-    @Suppress("ReturnCount") // Guard (not-JSON) + no-op short-circuit + cap rejection + the mutated return.
-    fun upsertFlag(rawEnvelope: String, entry: MpStorageFlagEntry): Outcome {
+    @Suppress("ReturnCount") // Guard (not-JSON) + not-present skip + no-op short-circuit + cap + mutated return.
+    fun upsertFlag(rawEnvelope: String, entry: MpStorageFlagEntry, updateOnly: Boolean = false): Outcome {
         val root = parseObjectOrNull(rawEnvelope) ?: return Outcome.NotJsonEnvelope
 
-        val withFlag = mutateEnvelope(root, entry)
+        if (updateOnly && !containsThread(root, entry.threadId)) {
+            // UPDATE-ONLY : the threadId is not already tracked → never add it. Return the verbatim
+            // original so the caller skips the POST (anti-pollution of the shared document).
+            return Outcome.SkippedNotPresent(rawEnvelope)
+        }
+
+        val withFlag = mutateEnvelope(root, entry, updateOnly)
         if (withFlag == root) {
             // The upsert produced an identical tree : the target position did not change. Return the
             // ORIGINAL text byte-fidèle (no stamp, no re-serialisation) so the caller skips the POST.
@@ -122,10 +148,21 @@ class MpStorageEnvelopeWriter @Inject constructor(
         }
     }
 
+    /**
+     * Whether the v0.1 `mpFlags.list[]` already holds an item whose `post` matches [threadId]. The
+     * UPDATE-ONLY guard (#597) : a `false` here means the auto trigger must NOT add the entry.
+     */
+    private fun containsThread(root: JsonObject, threadId: Int): Boolean {
+        val dataArray = root["data"] as? JsonArray
+        val v01Entry = dataArray?.firstOrNull { (it as? JsonObject)?.let(::isV01) == true } as? JsonObject
+        val list = (v01Entry?.get("mpFlags") as? JsonObject)?.get("list") as? JsonArray
+        return list?.any { (it as? JsonObject)?.get("post")?.asIntOrNull() == threadId } == true
+    }
+
     /** Rebuilds the top-level object preserving every key, replacing only `data` with the mutated array. */
-    private fun mutateEnvelope(root: JsonObject, entry: MpStorageFlagEntry): JsonObject {
+    private fun mutateEnvelope(root: JsonObject, entry: MpStorageFlagEntry, updateOnly: Boolean): JsonObject {
         val dataArray = root["data"] as? JsonArray ?: JsonArray(emptyList())
-        val mutatedData = mutateDataArray(dataArray, entry)
+        val mutatedData = mutateDataArray(dataArray, entry, updateOnly)
         return JsonObject(root.toMutableMap().apply { put("data", mutatedData) })
     }
 
@@ -177,62 +214,88 @@ class MpStorageEnvelopeWriter @Inject constructor(
      * Replaces (or creates) the v0.1 entry inside `data[]`, preserving the order and every sibling
      * entry. When no v0.1 entry exists yet, a minimal one is appended (other entries untouched).
      */
-    private fun mutateDataArray(dataArray: JsonArray, entry: MpStorageFlagEntry): JsonArray {
+    private fun mutateDataArray(dataArray: JsonArray, entry: MpStorageFlagEntry, updateOnly: Boolean): JsonArray {
         val v01Index = dataArray.indexOfFirst { (it as? JsonObject)?.let(::isV01) == true }
         return if (v01Index >= 0) {
             val v01Entry = dataArray[v01Index] as JsonObject
             JsonArray(
-                dataArray.toMutableList().apply { this[v01Index] = mutateV01Entry(v01Entry, entry) },
+                dataArray.toMutableList().apply { this[v01Index] = mutateV01Entry(v01Entry, entry, updateOnly) },
             )
         } else {
-            JsonArray(dataArray + mutateV01Entry(emptyV01Entry(), entry))
+            JsonArray(dataArray + mutateV01Entry(emptyV01Entry(), entry, updateOnly))
         }
     }
 
     private fun emptyV01Entry(): JsonObject = buildJsonObject { put("version", V01) }
 
     /** Preserves every key of the v0.1 entry, replacing only its `mpFlags` (itself merged, not clobbered). */
-    private fun mutateV01Entry(v01Entry: JsonObject, entry: MpStorageFlagEntry): JsonObject {
+    private fun mutateV01Entry(v01Entry: JsonObject, entry: MpStorageFlagEntry, updateOnly: Boolean): JsonObject {
         val mpFlags = v01Entry["mpFlags"] as? JsonObject ?: JsonObject(emptyMap())
         val list = mpFlags["list"] as? JsonArray ?: JsonArray(emptyList())
-        val mutatedList = upsertList(list, entry)
+        val mutatedList = upsertList(list, entry, updateOnly)
         val mutatedMpFlags = JsonObject(mpFlags.toMutableMap().apply { put("list", mutatedList) })
         return JsonObject(v01Entry.toMutableMap().apply { put("mpFlags", mutatedMpFlags) })
     }
 
     /**
      * Upserts the item whose `post` matches [MpStorageFlagEntry.threadId]. On an UPDATE, only the
-     * four owned wire fields are written ; all other keys on the matched item survive verbatim.
+     * owned wire fields are written ; all other keys on the matched item survive verbatim. In
+     * UPDATE-ONLY mode an absent threadId is never reached here (the caller short-circuits to
+     * [Outcome.SkippedNotPresent]) — the append branch is dead in that mode, kept only for the
+     * manual/preview path.
      */
-    private fun upsertList(list: JsonArray, entry: MpStorageFlagEntry): JsonArray {
+    private fun upsertList(list: JsonArray, entry: MpStorageFlagEntry, updateOnly: Boolean): JsonArray {
         val matchIndex = list.indexOfFirst { item ->
             (item as? JsonObject)?.get("post")?.asIntOrNull() == entry.threadId
         }
         return if (matchIndex >= 0) {
             val existing = list[matchIndex] as JsonObject
             JsonArray(
-                list.toMutableList().apply { this[matchIndex] = writeWireFields(existing, entry) },
+                list.toMutableList().apply { this[matchIndex] = writeWireFields(existing, entry, updateOnly) },
             )
         } else {
-            JsonArray(list + writeWireFields(JsonObject(emptyMap()), entry))
+            JsonArray(list + writeWireFields(JsonObject(emptyMap()), entry, updateOnly = false))
         }
     }
 
     /**
-     * Overwrites the four owned wire fields on [base] (preserving any other key, e.g. `p`):
-     * `post`, `page`, `href` (= `"t<numreponse>"`, omitted/null when [MpStorageFlagEntry.numreponse]
-     * is null), `uri` (omitted/null when absent). Numbers are emitted as JSON numbers (the read parser
-     * tolerates both, the original userscript writes numbers).
+     * Overwrites the owned wire fields on [base] (preserving any other key, e.g. `p`):
+     * `post`, `page`, `href` (= `"t<numreponse>"`), `uri`. Numbers are emitted as JSON numbers (the
+     * read parser tolerates both, the original userscript writes numbers).
+     *
+     * When [MpStorageFlagEntry.numreponse] / [MpStorageFlagEntry.uri] is null :
+     *  - [preserveAbsent] = `false` (manual/preview) → the field is written as JSON `null` (historical) ;
+     *  - [preserveAbsent] = `true` (#597 auto UPDATE) → the field is LEFT AS-IS on [base] (the existing
+     *    anchor / uri is kept, never erased — the auto trigger only knows page, not always the anchor).
      */
-    private fun writeWireFields(base: JsonObject, entry: MpStorageFlagEntry): JsonObject =
+    private fun writeWireFields(base: JsonObject, entry: MpStorageFlagEntry, updateOnly: Boolean): JsonObject =
         JsonObject(
             base.toMutableMap().apply {
                 put("post", JsonPrimitive(entry.threadId))
                 put("page", JsonPrimitive(entry.page))
-                put("href", entry.numreponse?.let { JsonPrimitive("t$it") } ?: JsonNull)
-                put("uri", entry.uri?.let { JsonPrimitive(it) } ?: JsonNull)
+                putAnchorField("href", entry.numreponse?.let { "t$it" }, base, updateOnly)
+                putAnchorField("uri", entry.uri, base, updateOnly)
             },
         )
+
+    /**
+     * Writes [value] under [key], or — when [value] is null — either preserves the existing key from
+     * [base] ([preserveAbsent] = `true`, the #597 auto path) or emits JSON `null` ([preserveAbsent] =
+     * `false`, the historical manual/preview path). Preserving leaves [base]'s key untouched in the
+     * mutable copy (it is already present), or omits it entirely when [base] had none.
+     */
+    private fun MutableMap<String, JsonElement>.putAnchorField(
+        key: String,
+        value: String?,
+        base: JsonObject,
+        preserveAbsent: Boolean,
+    ) {
+        when {
+            value != null -> put(key, JsonPrimitive(value))
+            preserveAbsent -> base[key]?.let { put(key, it) } // keep the existing anchor/uri verbatim, never null it
+            else -> put(key, JsonNull)
+        }
+    }
 
     private fun JsonElement.asIntOrNull(): Int? = (this as? JsonPrimitive)?.content?.toIntOrNull()
 
