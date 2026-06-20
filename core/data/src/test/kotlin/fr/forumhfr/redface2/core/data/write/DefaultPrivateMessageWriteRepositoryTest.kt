@@ -170,10 +170,11 @@ class DefaultPrivateMessageWriteRepositoryTest {
         assertTrue("roster fetch must propagate the message.php failure, not fall back", threw)
     }
 
-    // NB: the reply-path fallback on a *follow-GET failure* (allowEmbeddedFallback=true) is covered by
-    // the no-link fallback test above (same code path: return threadHtml → parse the embedded form) and
-    // by the existing #301 VM tests. The roster's no-fallback propagation — the actual #612 invariant —
-    // is the test directly above. An injected mid-follow socket failure proved flaky to assert here.
+    // NB: the #612 invariant — the roster path (allowEmbeddedFallback=false) PROPAGATES a follow-GET
+    // failure rather than degrading — is the test directly above. The reply path's *fallback on a
+    // follow-GET failure* (allowEmbeddedFallback=true) is a distinct branch from the no-link fallback
+    // test above; it is exercised in production but not unit-pinned here (an injected mid-follow socket
+    // failure proved flaky to assert deterministically over MockWebServer).
 
     @Test
     fun `submitReply forwards cat=prive, post, numrep, subcat verbatim and never overwrites them`() = runTest {
