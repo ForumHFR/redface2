@@ -34,7 +34,18 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
  */
 interface PrivateMessageWriteRepository {
 
-    suspend fun fetchReplyForm(context: PrivateMessageReplyContext): ReplyForm
+    /**
+     * #612 — fetches the MP reply form. By default it follows the conversation's real « Ajouter une
+     * réponse » link to the dedicated `message.php` form (the only one carrying the owner-only
+     * `newdest`), falling back to the embedded `forum2.php` quick-reply when the follow GET fails so a
+     * reply stays possible. [allowEmbeddedFallback] = `false` DISABLES that fallback: the roster path
+     * needs `newdest`, so a failed `message.php` GET must surface as an error (retry), not silently
+     * degrade to a quick-reply that lacks `newdest` and reads as « no roster ».
+     */
+    suspend fun fetchReplyForm(
+        context: PrivateMessageReplyContext,
+        allowEmbeddedFallback: Boolean = true,
+    ): ReplyForm
 
     /**
      * POSTs a reply to the conversation. [recipientsOverride] (#606) is honoured **only when the

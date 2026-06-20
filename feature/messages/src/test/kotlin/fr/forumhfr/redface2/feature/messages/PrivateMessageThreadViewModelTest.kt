@@ -7,6 +7,8 @@ import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageWritePreview
+import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostContent
@@ -60,8 +62,9 @@ class PrivateMessageThreadViewModelTest {
         authRepository: AuthRepository = FakeAuthRepository(),
         readPositionStore: PrivateMessageReadPositionStore = FakeReadPositionStore(),
         mpStorageRepository: MpStorageRepository = FakeMpStorageRepository(),
+        writeRepository: PrivateMessageWriteRepository = mockk(relaxed = true),
     ) = PrivateMessageThreadViewModel(
-        request, repository, authRepository, readPositionStore, mpStorageRepository,
+        request, repository, authRepository, readPositionStore, mpStorageRepository, writeRepository,
     )
 
     @Test
@@ -94,6 +97,7 @@ class PrivateMessageThreadViewModelTest {
             authRepository = FakeAuthRepository(AuthState.Anonymous),
             readPositionStore = FakeReadPositionStore(),
             mpStorageRepository = FakeMpStorageRepository(),
+            writeRepository = mockk(relaxed = true),
         )
 
         assertEquals(PrivateMessageThreadUiState.Mode.RequiresLogin, viewModel.state.value.mode)
@@ -279,6 +283,7 @@ class PrivateMessageThreadViewModelTest {
             authRepository = FakeAuthRepository(),
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 7)),
             mpStorageRepository = FakeMpStorageRepository(),
+            writeRepository = mockk(relaxed = true),
         )
 
         coVerify(exactly = 1) {
@@ -301,6 +306,7 @@ class PrivateMessageThreadViewModelTest {
             authRepository = FakeAuthRepository(),
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 3)),
             mpStorageRepository = FakeMpStorageRepository(),
+            writeRepository = mockk(relaxed = true),
         )
 
         coVerify(exactly = 1) {
@@ -322,6 +328,7 @@ class PrivateMessageThreadViewModelTest {
         val viewModel =
             PrivateMessageThreadViewModel(
                 request, repository, FakeAuthRepository(), store, FakeMpStorageRepository(),
+                mockk(relaxed = true),
             )
         assertEquals(1, store.saved[42])
 
@@ -465,6 +472,129 @@ class PrivateMessageThreadViewModelTest {
         assertEquals(1, mpStorage.ifPresentCalls.size)
         assertEquals(1, mpStorage.ifPresentCalls.single().page)
     }
+
+    // #612 — participant roster.
+
+    @Test
+    fun `openRoster lazily fetches the reply form and exposes the owner member list`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice, bob, Bébé Yoda")
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        // LAZY: no fetch on screen entry.
+        assertEquals(PrivateMessageThreadUiState.Roster.Hidden, viewModel.state.value.roster)
+
+        viewModel.openRoster()
+        advanceUntilIdle()
+
+        val roster = viewModel.state.value.roster
+        assertTrue("expected Loaded, got $roster", roster is PrivateMessageThreadUiState.Roster.Loaded)
+        // The owner (« xaat », the authenticated pseudo) is PREPENDED: HFR's `newdest` lists the members
+        // MINUS the creator, but the « Participants » sheet must show the full group including the viewer.
+        assertEquals(
+            listOf("xaat", "alice", "bob", "Bébé Yoda"),
+            (roster as PrivateMessageThreadUiState.Roster.Loaded).members,
+        )
+        coVerify(exactly = 1) { write.fetchReplyForm(any(), any()) }
+    }
+
+    @Test
+    fun `dismissing the roster mid-load cancels the fetch so a late response cannot reopen it`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        // Never resolves within the test: the dismiss must cancel it before it can answer.
+        coEvery { write.fetchReplyForm(any(), any()) } coAnswers { kotlinx.coroutines.awaitCancellation() }
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        viewModel.openRoster() // fetch in flight (not advanced)
+        viewModel.dismissRoster()
+        advanceUntilIdle()
+
+        assertEquals(PrivateMessageThreadUiState.Roster.Hidden, viewModel.state.value.roster)
+    }
+
+    @Test
+    fun `openRoster maps a non-owner form to Unavailable`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        // No newdest → a simple participant, not the owner.
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = null)
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        viewModel.openRoster()
+        advanceUntilIdle()
+
+        assertEquals(PrivateMessageThreadUiState.Roster.Unavailable, viewModel.state.value.roster)
+    }
+
+    @Test
+    fun `re-opening the roster reuses the cached form without a second fetch`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice, bob")
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        viewModel.openRoster()
+        advanceUntilIdle()
+        viewModel.dismissRoster()
+        assertEquals(PrivateMessageThreadUiState.Roster.Hidden, viewModel.state.value.roster)
+
+        viewModel.openRoster()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.roster is PrivateMessageThreadUiState.Roster.Loaded)
+        // The cache served the second open — exactly one network fetch overall.
+        coVerify(exactly = 1) { write.fetchReplyForm(any(), any()) }
+    }
+
+    @Test
+    fun `a roster load failure surfaces an Error kept open for retry`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        coEvery { write.fetchReplyForm(any(), any()) } throws IOException("offline")
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        viewModel.openRoster()
+        advanceUntilIdle()
+
+        val roster = viewModel.state.value.roster
+        assertTrue("expected Error, got $roster", roster is PrivateMessageThreadUiState.Roster.Error)
+        // #316 — no raw message, only the type-derived kind.
+        assertEquals(HfrErrorKind.Network, (roster as PrivateMessageThreadUiState.Roster.Error).kind)
+
+        // Retry succeeds → Loaded.
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice")
+        viewModel.retryRoster()
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.roster is PrivateMessageThreadUiState.Roster.Loaded)
+    }
+
+    private fun replyForm(newdest: String?) = ReplyForm(
+        hashCheck = "h",
+        sujet = "Sujet",
+        hiddenFields = buildMap {
+            put("cat", "prive")
+            put("post", "42")
+            if (newdest != null) put("newdest", newdest)
+        },
+        isAnonymous = false,
+    )
 
     private fun thread(
         page: Int,

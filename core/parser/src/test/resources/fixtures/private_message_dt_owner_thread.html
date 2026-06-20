@@ -1,0 +1,40 @@
+<!--
+  #612 — SANITISED fixture : a DT / MultiMP conversation page (`forum2.php?cat=prive&post=4242424`)
+  as seen by its OWNER. The page itself shows only the authors who have posted (here 2 of the DT's
+  members) and embeds, as every conversation page does:
+    - a `bddpost.php` QUICK-REPLY form WITHOUT `newdest` (the contract that motivates #612), and
+    - the real « Ajouter une réponse » link / `repondre_form` whose action is the dedicated
+      `message.php?cat=prive…` reply form (the one carrying the owner-only `newdest`).
+  The write repository FOLLOWS that message.php link to source the form. `numrep` / `ref` / `page`
+  on the link are HFR's own — never invented by the app.
+
+  All fake : bogus pseudos (TestOwner, alice, bob), no private content, hash_check=0.
+-->
+<html><body>
+<table cellspacing="0" cellpadding="4" width="100%" class="messagetable"><tr class="message cBackCouleurTab2"><td class="messCase1" width="180" valign="top" rowspan="1"><a name="t1990000110"></a><div><b class="s2">TestOwner</b></div></td><td class="messCase2" valign="top"><div class="toolbar"><div class="left">Posté le 24-05-2026&nbsp;à&nbsp;14:29:15&nbsp;&nbsp;<a rel="nofollow" href="/message.php?config=hfr.inc&amp;cat=prive&amp;post=4242424&amp;numreponse=1990000110&amp;page=3&amp;p=1&amp;subcat=0&amp;sondage=0&amp;owntopic=1#formulaire"><img src="https://forum-images.hardware.fr/themes_static/images_forum/1/edit-in.gif" alt="Edition rapide" /></a></div></div><div id="para1990000110">Message de groupe de test.</div></td></tr></table>
+<table cellspacing="0" cellpadding="4" width="100%" class="messagetable"><tr class="message cBackCouleurTab1"><td class="messCase1" width="180" valign="top" rowspan="1"><a name="t1990000111"></a><a name="bas"></a><div><b class="s2">alice</b></div></td><td class="messCase2" valign="top"><div class="toolbar"><div class="left">Posté le 03-06-2026&nbsp;à&nbsp;19:01:40</div></div><div id="para1990000111">Réponse de test.</div></td></tr></table>
+<br />
+<form action="/forum1.php" method="get" id="goto"><input type="hidden" name="hash_check" value="0" /></form>
+<div class="left"><form action="/message.php?config=hfr.inc&amp;cat=prive&amp;post=4242424&amp;numrep=1990000111&amp;ref=0&amp;page=3&amp;p=1&amp;subcat=0&amp;sondage=0&amp;owntopic=1&amp;new=0" method="post" name="repondre_form" id="repondre_form"><input type="hidden" name="hash_check" value="0" /><input type="hidden" name="repondre_contenu" id="repondre_contenu" value="" />
+  <a rel="nofollow" href="/message.php?config=hfr.inc&amp;cat=prive&amp;post=4242424&amp;numrep=1990000111&amp;ref=0&amp;page=3&amp;p=1&amp;subcat=0&amp;sondage=0&amp;owntopic=1&amp;new=0" onclick="choper_reponse_rapide(0,0); return false;" accesskey="r"><img src="https://forum-images.hardware.fr/themes_static/images_forum/1/repondre.gif" title="Ajouter une réponse" alt="Ajouter une réponse" /></a>
+</form></div>
+<h1 id="md_arbo_tree_b_3">Discussion de groupe de test</h1>
+<form name="hop" action="/bddpost.php" method="post" onsubmit="document.hop.submit.style.visibility='hidden';"><input type="hidden" name="hash_check" value="0" /><div class="s2Ext" id="md_fast_search"><b>Réponse rapide</b>
+  <textarea rows="5" cols="60" name="content_form" class="reponserapide" id="content_form" accesskey="c"></textarea>
+  <input type="submit" accesskey="s" value="Valider votre message" name="submit" id="submitreprap"/>
+  <input type="hidden" name="new" value="0" />
+  <input type="hidden" name="post" value="4242424" /><input type="hidden" name="numrep" value="1990000111" /><input type="hidden" name="cat" value="prive" />
+  <input type="hidden" name="subcat" value="0" />
+  <input type="hidden" name="page" value="3" />
+  <input type="hidden" name="verifrequet" value="1100" />
+  <input type="hidden" name="p" value="1" />
+  <input type="hidden" name="sondage" value="0" />
+  <input type="hidden" name="cache" value="" />
+  <input type="hidden" name="owntopic" value="1" />
+  <input type="hidden" name="config" value="hfr.inc" />
+  <input type="hidden" name="emaill" value="" />
+  <input type="hidden" name="pseudo" value="TestOwner" />
+  <input type="hidden" name="sujet" value="Discussion de groupe de test" />
+  <input type="hidden" value="1" name="signature" />
+</div></form>
+</body></html>

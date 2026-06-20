@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.network.HfrClient
+import fr.forumhfr.redface2.core.parser.messages.PrivateMessageReplyLinkParser
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
 import java.net.URLDecoder
@@ -15,6 +16,7 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -49,6 +51,7 @@ class DefaultPrivateMessageWriteRepositoryTest {
         repository = DefaultPrivateMessageWriteRepository(
             hfrClient = client,
             replyFormParser = ReplyFormParser(),
+            replyLinkParser = PrivateMessageReplyLinkParser(),
             replySubmitResponseParser = ReplySubmitResponseParser(),
             diagnostics = DiagnosticsLog(),
             ioDispatcher = Dispatchers.Unconfined,
@@ -63,7 +66,12 @@ class DefaultPrivateMessageWriteRepositoryTest {
     private val context = PrivateMessageReplyContext(threadId = 3195237, page = 1)
 
     @Test
-    fun `fetchReplyForm GETs the conversation page on forum2_php with cat=prive`() = runTest {
+    fun `fetchReplyForm GETs the conversation page then follows its message_php reply link`() = runTest {
+        // #612 — two GETs: the conversation page (forum2.php) carries the real « Ajouter une
+        // réponse » link, which the repository follows to the dedicated message.php reply form
+        // (the only one carrying the owner-only `newdest`). Both responses reuse the thread fixture
+        // here — its embedded bddpost.php form is enough for the #301 contract assertions.
+        server.enqueue(MockResponse().setBody(fixture("private_message_thread.html")))
         server.enqueue(MockResponse().setBody(fixture("private_message_thread.html")))
 
         val form = repository.fetchReplyForm(context)
@@ -71,15 +79,107 @@ class DefaultPrivateMessageWriteRepositoryTest {
         assertFalse(form.isAnonymous)
         assertEquals("prive", form.hiddenFields["cat"])
 
-        val url = requireNotNull(server.takeRequest().requestUrl)
-        assertEquals("forum2.php", url.pathSegments.first())
-        assertEquals("prive", url.queryParameter("cat"))
-        assertEquals("3195237", url.queryParameter("post"))
-        assertEquals("1", url.queryParameter("page"))
+        val first = requireNotNull(server.takeRequest().requestUrl)
+        assertEquals("forum2.php", first.pathSegments.first())
+        assertEquals("prive", first.queryParameter("cat"))
+        assertEquals("3195237", first.queryParameter("post"))
+        assertEquals("1", first.queryParameter("page"))
+
+        // The followed link is a message.php?cat=prive form — never invented, read off the page.
+        val second = requireNotNull(server.takeRequest().requestUrl)
+        assertEquals("message.php", second.pathSegments.last())
+        assertEquals("prive", second.queryParameter("cat"))
+        assertEquals("3195237", second.queryParameter("post"))
     }
 
     @Test
+    fun `fetchReplyForm sources the owner DT newdest from the message_php form`() = runTest {
+        // #612 — the conversation page (forum2.php) embeds a quick-reply with NO newdest; the
+        // owner-only member list lives only on the message.php form the repository follows.
+        server.enqueue(MockResponse().setBody(fixture("private_message_dt_owner_thread.html")))
+        server.enqueue(MockResponse().setBody(fixture("private_message_dt_owner_reply_form.html")))
+
+        val form = repository.fetchReplyForm(PrivateMessageReplyContext(threadId = 4242424, page = 3))
+
+        assertFalse(form.isAnonymous)
+        assertTrue("owner form must expose the member editor", form.canManageRecipients)
+        assertEquals("alice, bob, Bébé Yoda, stitch+, Administration", form.manageableRecipients)
+        // The message.php form's server-filled routing is carried verbatim.
+        assertEquals("prive", form.hiddenFields["cat"])
+        assertEquals("4242424", form.hiddenFields["post"])
+        assertEquals("1990000111", form.hiddenFields["numrep"])
+        assertEquals("3", form.hiddenFields["page"])
+
+        // The second GET targets the message.php link verbatim (server-filled numrep / ref / page).
+        server.takeRequest() // drop the forum2.php GET
+        val followed = requireNotNull(server.takeRequest().requestUrl)
+        assertEquals("message.php", followed.pathSegments.last())
+        assertEquals("4242424", followed.queryParameter("post"))
+        assertEquals("1990000111", followed.queryParameter("numrep"))
+        assertEquals("0", followed.queryParameter("ref"))
+        assertEquals("3", followed.queryParameter("page"))
+    }
+
+    @Test
+    fun `fetchReplyForm falls back to the embedded quick-reply form when no message_php link is present`() = runTest {
+        // A conversation page with no « Ajouter une réponse » link (read-only / reshaped) — the
+        // repository must still produce a usable reply form from the embedded bddpost.php quick
+        // reply, with a single GET. No newdest there, which is correct (no roster / member editor).
+        val readOnlyThread = """
+            <html><body>
+            <form name="hop" action="/bddpost.php" method="post">
+              <input type="hidden" name="hash_check" value="ZZ" />
+              <input type="hidden" name="cat" value="prive" />
+              <input type="hidden" name="post" value="3195237" />
+              <input type="hidden" name="numrep" value="42" />
+              <input type="hidden" name="pseudo" value="TestUser" />
+              <textarea name="content_form"></textarea>
+            </form>
+            </body></html>
+        """.trimIndent()
+        server.enqueue(MockResponse().setBody(readOnlyThread))
+
+        val form = repository.fetchReplyForm(context)
+
+        assertFalse(form.isAnonymous)
+        assertFalse("no link → no message.php form → no member editor", form.canManageRecipients)
+        assertEquals("prive", form.hiddenFields["cat"])
+        assertEquals("42", form.hiddenFields["numrep"])
+        // Exactly ONE GET: no link to follow.
+        assertEquals(1, server.requestCount)
+        assertEquals("forum2.php", requireNotNull(server.takeRequest().requestUrl).pathSegments.first())
+    }
+
+    @Test
+    fun `roster path (no fallback) propagates a message_php follow failure instead of degrading`() = runTest {
+        // #612 — the thread page HAS a reply link, but the followed message.php GET fails. With the
+        // fallback DISABLED (roster path), the failure must surface (→ Roster.Error + retry), never
+        // degrade to the newdest-less quick-reply that would read as « no roster ».
+        server.enqueue(MockResponse().setBody(fixture("private_message_dt_owner_thread.html")))
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+
+        var threw = false
+        try {
+            repository.fetchReplyForm(
+                PrivateMessageReplyContext(threadId = 4242424, page = 3),
+                allowEmbeddedFallback = false,
+            )
+        } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+            threw = true
+        }
+        assertTrue("roster fetch must propagate the message.php failure, not fall back", threw)
+    }
+
+    // NB: the #612 invariant — the roster path (allowEmbeddedFallback=false) PROPAGATES a follow-GET
+    // failure rather than degrading — is the test directly above. The reply path's *fallback on a
+    // follow-GET failure* (allowEmbeddedFallback=true) is a distinct branch from the no-link fallback
+    // test above; it is exercised in production but not unit-pinned here (an injected mid-follow socket
+    // failure proved flaky to assert deterministically over MockWebServer).
+
+    @Test
     fun `submitReply forwards cat=prive, post, numrep, subcat verbatim and never overwrites them`() = runTest {
+        // #612 — fetchReplyForm now does two GETs (thread page + followed message.php form).
+        server.enqueue(MockResponse().setBody(fixture("private_message_thread.html")))
         server.enqueue(MockResponse().setBody(fixture("private_message_thread.html")))
         server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
 
@@ -88,7 +188,8 @@ class DefaultPrivateMessageWriteRepositoryTest {
 
         assertTrue("Expected success, got $result", result is ReplySubmitResult.Success)
 
-        server.takeRequest() // drop the GET
+        server.takeRequest() // drop the forum2.php GET
+        server.takeRequest() // drop the followed message.php GET
         val recorded = server.takeRequest()
         assertEquals("POST", recorded.method)
         assertEquals("bddpost.php", requireNotNull(recorded.requestUrl).pathSegments.first())
@@ -113,6 +214,7 @@ class DefaultPrivateMessageWriteRepositoryTest {
     @Test
     fun `submitReply adds signature only when the option is enabled`() = runTest {
         server.enqueue(MockResponse().setBody(fixture("private_message_thread.html")))
+        server.enqueue(MockResponse().setBody(fixture("private_message_thread.html")))
         server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
 
         val form = repository.fetchReplyForm(context)
@@ -123,13 +225,15 @@ class DefaultPrivateMessageWriteRepositoryTest {
             options = ReplyFormOptions(signatureEnabled = true),
         )
 
-        server.takeRequest()
+        server.takeRequest() // forum2.php
+        server.takeRequest() // followed message.php
         val body = parseFormBody(server.takeRequest().body.readUtf8())
         assertEquals("1", body["signature"])
     }
 
     @Test
     fun `submitReply omits signature when the option is disabled`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("private_message_thread.html")))
         server.enqueue(MockResponse().setBody(fixture("private_message_thread.html")))
         server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
 
@@ -138,7 +242,8 @@ class DefaultPrivateMessageWriteRepositoryTest {
         // browser would omit an unchecked field.
         repository.submitReply(context, form, bbcodeContent = "Sans signature.")
 
-        server.takeRequest()
+        server.takeRequest() // forum2.php
+        server.takeRequest() // followed message.php
         val body = parseFormBody(server.takeRequest().body.readUtf8())
         assertFalse("signature must be omitted when disabled", body.containsKey("signature"))
     }

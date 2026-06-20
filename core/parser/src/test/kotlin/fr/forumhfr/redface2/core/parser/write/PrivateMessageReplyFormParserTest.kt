@@ -47,16 +47,21 @@ class PrivateMessageReplyFormParserTest {
     }
 
     @Test
-    fun `a one-to-one MP form is not an owner-managed DT (no newdest)`() {
+    fun `the forum2 quick-reply form embedded in the conversation page carries no newdest`() {
+        // #612 contract lock : the conversation page (forum2.php) embeds a bddpost.php QUICK-REPLY
+        // form that NEVER carries `newdest` — even for an owner. This is exactly why the repository
+        // must follow the page's message.php link instead of parsing this embedded form. Parsing it
+        // would always yield canManageRecipients=false and break the #606 editor / #612 roster.
         val form = parser.parse(fixture("private_message_thread.html")).getOrThrow()
 
-        // #606 — a regular conversation has no `newdest` field, so the user can't manage members.
-        assertFalse("a one-to-one MP exposes no member editor", form.canManageRecipients)
+        assertFalse("the embedded quick-reply form exposes no member editor", form.canManageRecipients)
         assertEquals(null, form.manageableRecipients)
     }
 
     @Test
-    fun `an owner DT form exposes the prefilled member CSV via newdest`() {
+    fun `an owner DT message_php form exposes the prefilled member CSV via newdest`() {
+        // #612 — sourced from the dedicated message.php reply form (the one the repository follows),
+        // NOT from the forum2.php quick-reply above.
         val form = parser.parse(fixture("private_message_dt_owner_reply_form.html")).getOrThrow()
 
         assertFalse("authenticated owner form is never anonymous", form.isAnonymous)
@@ -66,9 +71,19 @@ class PrivateMessageReplyFormParserTest {
             "alice, bob, Bébé Yoda, stitch+, Administration",
             form.manageableRecipients,
         )
-        // The owner-only DT carries owntopic=1 and cat=prive, forwarded verbatim on POST.
+        // The owner-only DT carries owntopic=1 and cat=prive, forwarded verbatim on POST. The
+        // message.php form also carries the server-filled numrep / ref / page verbatim.
         assertEquals("prive", form.hiddenFields["cat"])
         assertEquals("1", form.hiddenFields["owntopic"])
+        assertEquals("1990000111", form.hiddenFields["numrep"])
+        assertEquals("0", form.hiddenFields["ref"])
+        assertEquals("3", form.hiddenFields["page"])
+        // Fresh hash_check from message.php + never a password.
+        assertEquals("TESTHASH", form.hashCheck)
+        assertFalse("password must never be collected", form.hiddenFields.containsKey("password"))
+        // The message.php form renders options as real checkboxes — signature is the checked default.
+        assertTrue("signature is the checked default on the message.php form", form.options.signatureEnabled)
+        assertEquals("1", form.msgIcon)
     }
 
     private fun fixture(name: String): String {
