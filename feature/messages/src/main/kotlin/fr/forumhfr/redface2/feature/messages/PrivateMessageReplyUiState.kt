@@ -59,6 +59,13 @@ data class PrivateMessageReplyUiState(
      * of each CSV element is trimmed. Empty when [canManageRecipients] is false.
      */
     val recipients: List<String> = emptyList(),
+    /**
+     * #606 — true once the owner has actually added / removed a member. Until then the submit sends
+     * `recipientsOverride = null` so the repository forwards HFR's original `newdest` **verbatim**
+     * (a normal owner reply must never round-trip the member list through parse → join, which would
+     * normalise whitespace / drop entries and risk losing members). Only an explicit edit arms it.
+     */
+    val recipientsDirty: Boolean = false,
 ) {
     val canSubmit: Boolean
         get() = formAvailable && !isLoadingForm && !isSubmitting && draft.text.isNotBlank()

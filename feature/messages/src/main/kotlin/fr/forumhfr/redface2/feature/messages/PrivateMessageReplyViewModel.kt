@@ -201,7 +201,13 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                         // hash_check (InvalidHashCheck) must not clobber a member the user added /
                         // removed in between — same `hydrateOptions` guard as the option toggles.
                         canManageRecipients = form.canManageRecipients,
-                        recipients = if (hydrateOptions) {
+                        // Re-hydrate from the freshly-parsed `newdest` on the first load AND on any
+                        // silent refetch where the user has NOT edited the list : that way a
+                        // concurrent membership change made elsewhere is picked up, and — since a
+                        // non-dirty submit sends `recipientsOverride = null` — the original `newdest`
+                        // is still forwarded verbatim. Only an in-progress edit (`recipientsDirty`)
+                        // is preserved across the refetch.
+                        recipients = if (hydrateOptions || !current.recipientsDirty) {
                             RecipientCsv.parse(form.manageableRecipients)
                         } else {
                             current.recipients
@@ -307,7 +313,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             if (current.recipients.any { it == trimmed }) {
                 current
             } else {
-                current.copy(recipients = current.recipients + trimmed)
+                current.copy(recipients = current.recipients + trimmed, recipientsDirty = true)
             }
         }
     }
@@ -324,7 +330,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             if (current.recipients.size <= 1 || current.recipients.none { it == target }) {
                 current
             } else {
-                current.copy(recipients = current.recipients.filterNot { it == target })
+                current.copy(
+                    recipients = current.recipients.filterNot { it == target },
+                    recipientsDirty = true,
+                )
             }
         }
     }
@@ -373,10 +382,12 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             smileyDisabled = snapshot.smileyDisabled,
             emailNotificationEnabled = snapshot.emailNotificationEnabled,
         )
-        // #606 — only an owner (canManageRecipients) overrides the member list ; a simple
-        // participant always passes null so the repository forwards HFR's `newdest`, if any,
-        // verbatim. The CSV is recomposed with HFR's own `, ` separator.
-        val recipientsOverride = if (snapshot.canManageRecipients) {
+        // #606 — only an owner who ACTUALLY edited the member list overrides it. Without an edit
+        // (`recipientsDirty == false`) — including every non-owner reply — we pass null so the
+        // repository forwards HFR's original `newdest` VERBATIM : a normal owner reply must never
+        // round-trip the list through parse → join (which normalises whitespace / drops entries and
+        // could silently lose members). The CSV is recomposed with HFR's own `, ` separator.
+        val recipientsOverride = if (snapshot.canManageRecipients && snapshot.recipientsDirty) {
             RecipientCsv.join(snapshot.recipients)
         } else {
             null

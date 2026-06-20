@@ -590,14 +590,17 @@ class PrivateMessageReplyViewModelTest {
         viewModel.onContentChanged(TextFieldValue("hello"))
 
         viewModel.onSubmit()
-        // Round-trip is loss-less: same members, HFR's own `, ` separator.
+        // No edit was made, so the VM passes `recipientsOverride = null`: the repository then
+        // forwards HFR's original `newdest` hidden field VERBATIM (covered by the repo test), never
+        // round-tripping the list through parse → join. This is the loss-less invariant for a normal
+        // owner reply — the member list must not change just because the owner replied.
         coVerify {
             repository.submitReply(
                 context = any(),
                 form = any(),
                 bbcodeContent = any(),
                 options = any(),
-                recipientsOverride = "alice, bob, Bébé Yoda, stitch+, Administration",
+                recipientsOverride = null,
             )
         }
     }
@@ -701,6 +704,28 @@ class PrivateMessageReplyViewModelTest {
         // to HFR's prefill — the user's removal survives.
         assertEquals(listOf("bob"), viewModel.state.value.recipients)
         coVerify(exactly = 2) { repository.fetchReplyForm(any()) }
+    }
+
+    @Test
+    fun `an unedited list re-hydrates from a fresher form on a silent refetch`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        // 1st load: alice, bob. The silent refetch after InvalidHashCheck returns a fresher form
+        // where a member changed elsewhere (charlie added). With no local edit (recipientsDirty
+        // false), the VM must pick up the fresher list rather than keep the stale prefill.
+        coEvery { repository.fetchReplyForm(any()) } returnsMany listOf(
+            ownerForm(newdest = "alice, bob"),
+            ownerForm(newdest = "alice, bob, charlie"),
+        )
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore, smileyRepository(),
+        )
+        viewModel.onContentChanged(TextFieldValue("hello")) // no member edit
+        viewModel.onSubmit()
+
+        assertEquals(listOf("alice", "bob", "charlie"), viewModel.state.value.recipients)
     }
 
     // ----- #606 : RecipientCsv codec ----------------------------------------------
