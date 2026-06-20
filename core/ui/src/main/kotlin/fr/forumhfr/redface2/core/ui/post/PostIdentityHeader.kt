@@ -31,7 +31,9 @@ import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
  *    `CreatorPseudoText` (#221). When `null`, a plain ellipsised [Text] of [author] is drawn. Note:
  *    [onAuthorClick] is applied to that fallback text only — a supplied [pseudo] owns its own
  *    interaction, the header does not wrap it.
- *  - [subline] (optional) — extra line under the date (the topic's `· édité` marker / nothing on MP).
+ *  - [dateTrailing] (optional) — a marker on the SAME row as the date, to its right (the topic's
+ *    `· édité` #483); `null` on the MP keeps the date as a plain single line.
+ *  - [subline] (optional) — extra line under the date; unused by the topic now, available for MP.
  *  - [trailing] (optional) — the `⋯` per-post menu glyph (topic); `null` on the MP.
  *
  * Clicks: [RedfaceUserAvatar] carries no `onClick` of its own, so the avatar tap is a
@@ -60,6 +62,7 @@ fun PostIdentityHeader(
     lineSpacing: Dp = DEFAULT_LINE_SPACING,
     pseudo: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
+    dateTrailing: (@Composable () -> Unit)? = null,
     subline: (@Composable () -> Unit)? = null,
 ) {
     Row(
@@ -109,11 +112,29 @@ fun PostIdentityHeader(
                     modifier = pseudoModifier,
                 )
             }
-            Text(
-                text = dateText,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (dateTrailing != null) {
+                // Date + an inline trailing marker on the SAME row (e.g. the topic's « · édité » #483),
+                // 4.dp apart — kept on one line rather than stacked, so an edited post reads exactly
+                // like the pre-shell layout. A bare [Text] is used when no trailing is supplied so the
+                // common case (MP, non-edited post) stays byte-identical to a single date line.
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = dateText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    dateTrailing()
+                }
+            } else {
+                Text(
+                    text = dateText,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             subline?.invoke()
         }
         trailing?.invoke()

@@ -11,7 +11,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -77,6 +75,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -87,11 +86,13 @@ import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.ui.RedfacePlaceholderScreen
-import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
-import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
+import fr.forumhfr.redface2.core.ui.post.PostCardShell
+import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
+import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
+import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
@@ -821,36 +822,31 @@ internal fun TopicContent(
                         onRefresh = { onIntent(TopicIntent.Refresh) },
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        // #300 — wrap the list in a Box so the intra-page scrollbar can overlay its
-                        // right edge. The scrollbar is pure UI derived from `listState`; it never moves
-                        // the read position on its own — only an explicit thumb drag fast-scrolls.
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            TopicLoadedContent(
-                                state = state,
-                                topic = mode.topic,
-                                hiddenNumreponses = mode.hiddenNumreponses,
-                                onReply = onReply,
-                                onQuote = onQuote,
-                                onEdit = onEdit,
-                                onEditFirstPost = onEditFirstPost,
-                                onOpenPage = onOpenPage,
-                                onOpenProfile = onOpenProfile,
-                                onDeleteRequest = onDeleteRequest,
-                                onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
-                                listState = listState,
-                                multiQuoteSelection = multiQuoteSelection,
-                                onToggleMultiQuote = onToggleMultiQuote,
-                                onSetAuthorBlocked = { author, blocked ->
-                                    onIntent(TopicIntent.SetAuthorBlocked(author, blocked))
-                                },
-                                pollManualExpanded = pollManualExpanded,
-                                onPollExpansionChanged = onPollExpansionChanged,
-                            )
-                            LazyListScrollbar(
-                                listState = listState,
-                                modifier = Modifier.align(Alignment.CenterEnd),
-                            )
-                        }
+                        // #300/#351 — the intra-page scrollbar now rides inside PostListScaffold
+                        // (overlaying the list's right edge, outside the scrolled element), so the
+                        // manual Box + LazyListScrollbar wrapper is gone. PullToRefreshBox stays the
+                        // feature's wrapper (its refresh state belongs to the ViewModel).
+                        TopicLoadedContent(
+                            state = state,
+                            topic = mode.topic,
+                            hiddenNumreponses = mode.hiddenNumreponses,
+                            onReply = onReply,
+                            onQuote = onQuote,
+                            onEdit = onEdit,
+                            onEditFirstPost = onEditFirstPost,
+                            onOpenPage = onOpenPage,
+                            onOpenProfile = onOpenProfile,
+                            onDeleteRequest = onDeleteRequest,
+                            onDoubleTapRefresh = { onIntent(TopicIntent.Refresh) },
+                            listState = listState,
+                            multiQuoteSelection = multiQuoteSelection,
+                            onToggleMultiQuote = onToggleMultiQuote,
+                            onSetAuthorBlocked = { author, blocked ->
+                                onIntent(TopicIntent.SetAuthorBlocked(author, blocked))
+                            },
+                            pollManualExpanded = pollManualExpanded,
+                            onPollExpansionChanged = onPollExpansionChanged,
+                        )
                     }
                 }
             }
@@ -1140,9 +1136,22 @@ private fun TopicLoadedContent(
     LaunchedEffect(topic.page) {
         dragOffset.floatValue = 0f
     }
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
+    // #351 — the list overlay (LazyColumn + auto-hiding scrollbar) is now the shared PostListScaffold
+    // (#300/#351). The swipe machinery stays feature-owned and is threaded through `listModifier`,
+    // applied to the LazyColumn itself (so the list follows the finger and the scrollbar overlay stays
+    // fixed); the contentPadding / verticalArrangement / scrollbar gate are passed unchanged.
+    PostListScaffold(
+        listState = listState,
+        // #283 — extra bottom padding so the last post's right-aligned actions clear the floating
+        // bottom-action cluster (the Scaffold FAB slot floats over the content). Harmless extra
+        // breathing room when the cluster is absent (anon + single page).
+        // #398 — the nav host no longer pads screens by 8 dp/side, so the reader carries its own
+        // 8 dp side gutter here (previously 0 + 8 host = 8). Same effective 8 dp, now owned locally.
+        contentPadding = PaddingValues(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 88.dp),
+        // 8 dp vertical rhythm, matching the 8 dp effective side gutters — a uniform grid (and
+        // a denser feed, cf. the #287 density feedback).
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        listModifier = Modifier
             // #285 — system-bar insets (status + navigation) are now consumed by the Scaffold/TopAppBar
             // in TopicContent and applied via the content Surface's padding(innerPadding); the list no
             // longer adds statusBarsPadding()/navigationBarsPadding() here to avoid double-insetting.
@@ -1189,16 +1198,6 @@ private fun TopicLoadedContent(
                     },
                 )
             },
-        state = listState,
-        // #283 — extra bottom padding so the last post's right-aligned actions clear the floating
-        // bottom-action cluster (the Scaffold FAB slot floats over the content). Harmless extra
-        // breathing room when the cluster is absent (anon + single page).
-        // #398 — the nav host no longer pads screens by 8 dp/side, so the reader carries its own
-        // 8 dp side gutter here (previously 0 + 8 host = 8). Same effective 8 dp, now owned locally.
-        contentPadding = PaddingValues(start = 8.dp, top = 16.dp, end = 8.dp, bottom = 88.dp),
-        // 8 dp vertical rhythm, matching the 8 dp effective side gutters — a uniform grid (and
-        // a denser feed, cf. the #287 density feedback).
-        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
             // Phase 2D #148 — the « Modifier le premier message » action is
@@ -1805,352 +1804,360 @@ internal fun TopicPostCard(
 ) {
     // #287 — structural spacing from the active density preset (Comfort = the historical rhythm).
     val m = LocalDisplayMetrics.current
-    Card(
+    // #436 — the per-post actions row (Citer / Modifier / multi-quote) is gated as a unit. Computed
+    // once so the body slot knows whether the footer slot will render (it owns the card's bottom
+    // padding when there is no footer, so the body↔card bottom gap stays exactly m.cardBodyBottom).
+    val hasFooter = onQuote != null || onEdit != null || onToggleMultiQuote != null
+    val hasBadges = citedCount > 0 || multiQuoteSelected
+    PostCardShell(
+        // #436 — multi-quote selection outline (lot 1), unchanged.
         border = if (multiQuoteSelected) {
             BorderStroke(width = 2.dp, color = MaterialTheme.colorScheme.primary)
         } else {
             null
         },
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        ),
-    ) {
         // Identity band — the avatar/pseudo/date header gets its own tinted strip across the full card
         // width (forum idiom, dogfooding v109): secondaryContainer over the neutral card. #104 follow-up
         // (XaTriX): the scroll-anchor post tints ONLY this band with tertiaryContainer (the left rail was
-        // dropped as ugly) — a single tertiary band, not the old card+band double tint. The Surface sets
-        // LocalContentColor to the matching on-container colour for the pseudo; the Card clips the strip
-        // to its rounded corners.
-        Surface(
-            color = if (highlighted) {
-                MaterialTheme.colorScheme.tertiaryContainer
-            } else {
-                MaterialTheme.colorScheme.secondaryContainer
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            // #201 — avatar + author header in a Row so the visual identity of the poster
-            // is immediately visible. Falls back to a placeholder square (cf.
-            // `RedfaceUserAvatar`) when `Post.avatarUrl == null` or the load errors.
-            // Phase 2 finish (#208) — tapping the avatar OR the author pseudo opens the
-            // profile bottom sheet when `onOpenProfile` is non-null. Review feedback I6:
-            // the clickable surface is now restricted to the avatar + the pseudo Text. The
-            // date Text below is intentionally outside the clickable zone so a tap on the
-            // date does NOT open the profile (the legacy implementation clickable-d the
-            // whole parent Row, which made the date erroneously open the profile). Each
-            // clickable element keeps `minimumInteractiveComponentSize()` so it still
-            // meets the Material 48dp touch target — the avatar default is 40dp and the
-            // pseudo line height is smaller than 48dp.
-            val openProfileLabel = if (onOpenProfile != null) {
-                stringResource(R.string.topic_open_profile_action)
-            } else {
-                null
-            }
-            val avatarModifier = if (onOpenProfile != null) {
-                Modifier
-                    .minimumInteractiveComponentSize()
-                    .clickable(
-                        onClick = onOpenProfile,
-                        role = Role.Button,
-                        onClickLabel = openProfileLabel,
-                    )
-            } else {
-                Modifier
-            }
-            val pseudoModifier = if (onOpenProfile != null) {
-                // No minimumInteractiveComponentSize() on the pseudo: it reserves a 48dp-tall box
-                // and centres the text inside it, which inflated the header Row and left the pseudo
-                // floating mid-height with the date pushed far below it. The avatar beside it is the
-                // 48dp-compliant touch target for the very same `onOpenProfile` action, so the pseudo
-                // stays a convenience tap at its natural text height without bloating the layout.
-                Modifier.clickable(
-                    onClick = onOpenProfile,
-                    role = Role.Button,
-                    onClickLabel = openProfileLabel,
+        // dropped as ugly) — a single tertiary band, not the old card+band double tint. The shared
+        // PostIdentityBand (#351) sets LocalContentColor from its containerColor for the pseudo; the
+        // enclosing Card clips the strip to its rounded corners. The #104 tint logic is UNCHANGED — it
+        // stays the topic's decision, passed in as containerColor.
+        header = {
+            PostIdentityBand(
+                containerColor = if (highlighted) {
+                    MaterialTheme.colorScheme.tertiaryContainer
+                } else {
+                    MaterialTheme.colorScheme.secondaryContainer
+                },
+            ) {
+                TopicPostIdentityHeader(
+                    post = post,
+                    onOpenProfile = onOpenProfile,
+                    onOpenMenu = onOpenMenu,
+                    // #287 — the band's header padding (12.dp horizontal, m.cardHeaderVertical vertical)
+                    // is reinjected on the header slot's modifier (densities stay feature-owned, #351).
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = m.cardHeaderVertical),
                 )
-            } else {
-                Modifier
             }
-            // #476 — wrap the identity Row in a Column so the selection/citation pills can sit
-            // BELOW the identity line instead of inside it. Previously the pills lived in the
-            // pseudo+date Column, which the avatar and the « ⋯ » were CenterVertically-aligned
-            // against : toggling the multi-quote pill grew that Column and re-centred the avatar
-            // and the « ⋯ », so the identity line visibly shifted (dev feedback). Hoisting the
-            // pills out of that Column means a pill appearing/disappearing only grows the card
-            // downward, leaving the avatar/pseudo/⋯ line perfectly still. The header padding moves
-            // from the Row to this wrapper so the band geometry is unchanged.
+        },
+        // #436/#476 follow-up (XaTriX) — citation + multi-quote pills sit OUT of the identity band (the
+        // secondaryContainer Surface above): when the « Ajouté à la citation » pill appeared inside the
+        // band, the coloured band itself grew taller (« pop »). On the shell's badges slot — the neutral
+        // card surface just below the band — the band keeps a FIXED height; only the neutral area grows.
+        badges = if (hasBadges) {
+            {
+                TopicPostBadges(
+                    citedCount = citedCount,
+                    multiQuoteSelected = multiQuoteSelected,
+                    horizontalPadding = m.cardBodyHorizontal,
+                )
+            }
+        } else {
+            null
+        },
+        body = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // #287 — header band vertical padding tightens under the Compact preset.
-                    .padding(horizontal = 12.dp, vertical = m.cardHeaderVertical),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                    // #287 — post-body inner gutters from the density preset. Comfort = the lot A
+                    // values (12/10/12/8) that buy the body ~24 dp of extra reading width per line;
+                    // Compact tightens them for a denser feed. When there is NO footer slot, this body
+                    // also owns the card's bottom padding so the gap to the card edge stays identical.
+                    .padding(
+                        start = m.cardBodyHorizontal,
+                        top = m.cardBodyTop,
+                        end = m.cardBodyHorizontal,
+                        bottom = if (hasFooter) 0.dp else m.cardBodyBottom,
+                    ),
+                verticalArrangement = Arrangement.spacedBy(m.postSpacing),
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    // Centre the avatar against the name+date block so the identity line reads as
-                    // one tidy unit (the previous Top alignment + the inflated pseudo made the
-                    // pseudo look vertically centred while the date dropped well below the avatar).
-                    // #476 — this Row now holds ONLY the stable pseudo+date block, so CenterVertically
-                    // can never be perturbed by the pills (which moved below this Row).
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RedfaceUserAvatar(
-                        avatarUrl = post.avatarUrl,
-                        author = post.author,
-                        modifier = avatarModifier,
-                    )
-                    Column(
-                        // #362 — weight(1f) instead of fillMaxWidth so the menu button beside it gets
-                        // its slot at the right edge of the header; the pseudo keeps its own weight.
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            post.postIndex?.let { postIndex ->
-                                Text(
-                                    text = stringResource(
-                                        R.string.topic_post_index_prefix,
-                                        postIndex,
-                                    ),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                            }
-                            // Clickable on the pseudo only — the date stays inert.
-                            val pseudoLayout = Modifier
-                                .weight(weight = 1f, fill = false)
-                                .then(pseudoModifier)
-                            // #221 — the RF2 creator's pseudo gets the gold sheen easter egg.
-                            // remember() keyed on the author so canonicalizePseudo (NFC + char walk)
-                            // runs once per author, not on every recomposition of this hot list row —
-                            // same off-the-render-path stance #509 took with hiddenNumreponses.
-                            val isCreator = remember(post.author) { isRf2Creator(post.author) }
-                            if (isCreator) {
-                                CreatorPseudoText(author = post.author, modifier = pseudoLayout)
-                            } else {
-                                Text(
-                                    text = post.author,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = pseudoLayout,
-                                )
-                            }
-                        }
-                        // #483 — the date line carries a compact « · édité » marker when the post was
-                        // edited (beta feedback Azgor). The exact edit time stays in the « … » menu
-                        // (PostMenuSheet « Édité le … »). On the date line, INSIDE the pseudo+date
-                        // Column but OUTSIDE the pseudo Row, so it never reflows the avatar nor breaks
-                        // the pseudo ellipsis — and it composes with #476's stable header (pills hoisted
-                        // below this Row) since the date block never grows the identity line sideways.
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text(
-                                text = post.date.asTopicDate(),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
+                PostRenderer(content = post.content, selectable = true)
+                // #330 — the author signature (web parity), gated by the reading preference. Rendered
+                // with the shared PostRenderer (the signature is BBCode/HTML like the body) but in a
+                // subdued style: a divider separates it from the body and a reduced alpha makes it
+                // subordinate to the post content. No-op when the post carries no signature.
+                post.signature?.let { signature ->
+                    if (showSignature) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        // #553 — drop the author's web-tuned `[color]` in the signature: on the app theme
+                        // (especially dark) those colours read as garish/illegible. The signature then
+                        // renders in the neutral subdued body colour (the reduced alpha keeps it
+                        // subordinate). Post bodies are unaffected (they don't provide this local).
+                        CompositionLocalProvider(LocalIgnoreInlineColors provides true) {
+                            PostRenderer(
+                                content = signature,
+                                modifier = Modifier.alpha(SIGNATURE_ALPHA),
                             )
-                            if (post.editedAt != null) {
-                                val editedLabel = stringResource(R.string.topic_post_edited_inline)
-                                Text(
-                                    // « · » is a decorative separator — TalkBack reads the
-                                    // contentDescription (« édité »), so the dot is never vocalised.
-                                    text = "· $editedLabel",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.semantics { contentDescription = editedLabel },
-                                )
-                            }
                         }
                     }
-                    // #362 — per-post contextual menu trigger, flush right of the header. The post
-                    // number that used to trail the pseudo lives in the menu now. A text glyph, not
-                    // a Material icon (detekt ForbiddenImport blocks androidx.compose.material.*) —
-                    // same pattern as PageFab/ReplyFab. Sits in the identity Row (next to the
-                    // pseudo+date block) so its 48dp touch target never inflates the pseudo line
-                    // (cf. the pseudo minimumInteractiveComponentSize note above).
-                    val menuLabel = stringResource(R.string.topic_post_menu_action)
-                    Text(
-                        text = "⋯",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .minimumInteractiveComponentSize()
-                            .clickable(
-                                onClick = onOpenMenu,
-                                role = Role.Button,
-                                onClickLabel = menuLabel,
-                            )
-                            .semantics { contentDescription = menuLabel },
-                    )
                 }
             }
-        }
-        // #436/#476 follow-up (XaTriX) — citation + multi-quote pills moved OUT of the identity band
-        // (the secondaryContainer Surface above): when the « Ajouté à la citation » pill appeared inside
-        // the band, the coloured band itself grew taller (« pop »). Rendered here, on the neutral card
-        // surface just below the band, the band keeps a FIXED height; only the neutral area grows.
-        if (citedCount > 0 || multiQuoteSelected) {
+        },
+        footer = if (hasFooter) {
+            {
+                TopicPostActions(
+                    onQuote = onQuote,
+                    onEdit = onEdit,
+                    onToggleMultiQuote = onToggleMultiQuote,
+                    multiQuoteSelected = multiQuoteSelected,
+                    // Reinjected paddings (#351): the actions row keeps the body gutters, a
+                    // m.postSpacing gap above it (the spacing the single body Column used to apply
+                    // between the body content and this row) and the card's m.cardBodyBottom below.
+                    modifier = Modifier.padding(
+                        start = m.cardBodyHorizontal,
+                        top = m.postSpacing,
+                        end = m.cardBodyHorizontal,
+                        bottom = m.cardBodyBottom,
+                    ),
+                )
+            }
+        } else {
+            null
+        },
+    )
+}
+
+/**
+ * #351/#201/#208/#221/#362/#476/#483 — the topic post card's identity line, on the shared
+ * [PostIdentityHeader]. A thin adapter: it maps the [Post] fields to the primitive's slots and reinjects
+ * the topic's header padding via [modifier] (densities stay feature-owned). The neutral shape — avatar,
+ * pseudo, date, optional `⋯` trailing — lives in `:core:ui`; the topic-specific bits stay here:
+ *  - `pseudo` slot — the optional `topic_post_index_prefix` + the pseudo (gold-sheen [CreatorPseudoText]
+ *    for an RF2 creator #221, plain ellipsised text otherwise), tappable to open the profile (#208);
+ *  - `subline` slot — the compact « · édité » marker (#483) when the post was edited;
+ *  - `trailing` slot — the per-post `⋯` contextual-menu glyph (#362).
+ * Profile-tap labels/min-size and the pseudo's no-min-size convention come from the primitive.
+ */
+@Composable
+private fun TopicPostIdentityHeader(
+    post: Post,
+    onOpenProfile: (() -> Unit)?,
+    onOpenMenu: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    // Phase 2 finish (#208) — tapping the avatar OR the author pseudo opens the profile bottom sheet
+    // when `onOpenProfile` is non-null (the date stays inert: review feedback I6). The min-size on the
+    // avatar vs no-min-size on the pseudo (so it does not inflate the line) is the primitive's contract.
+    val openProfileLabel = if (onOpenProfile != null) {
+        stringResource(R.string.topic_open_profile_action)
+    } else {
+        null
+    }
+    val menuLabel = stringResource(R.string.topic_post_menu_action)
+    PostIdentityHeader(
+        author = post.author,
+        avatarUrl = post.avatarUrl,
+        dateText = post.date.asTopicDate(),
+        modifier = modifier,
+        onAvatarClick = onOpenProfile,
+        onAvatarClickLabel = openProfileLabel,
+        // #208 — the avatar carries the 48dp-compliant tap target; the pseudo is a convenience tap at
+        // its natural text height (the primitive omits the min-size box on the supplied pseudo slot).
+        pseudo = {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    // Aligned with the post body gutter (the pills now live on the card, below the
-                    // identity band rather than inside it). top/bottom give breathing room.
-                    .padding(start = m.cardBodyHorizontal, end = m.cardBodyHorizontal, top = 6.dp, bottom = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (citedCount > 0) {
-                    // #239 — sober pill: how many posts of THIS page cite this one. Page-scoped (cf.
-                    // citationCountsByNumreponse); jumping to the citing posts is a follow-up.
-                    // surfaceContainerHighest : a touch above the surfaceContainer card so the pill reads.
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        shape = MaterialTheme.shapes.small,
-                    ) {
-                        Text(
-                            text = pluralStringResource(
-                                R.plurals.topic_post_cited_count,
-                                citedCount,
-                                citedCount,
-                            ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                        )
-                    }
+                post.postIndex?.let { postIndex ->
+                    Text(
+                        text = stringResource(R.string.topic_post_index_prefix, postIndex),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
-                if (multiQuoteSelected) {
-                    // #436 — basket-membership pill. primaryContainer : echoes the primary multi-quote
-                    // border so the two marks read as one selection signal.
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = MaterialTheme.shapes.small,
-                    ) {
-                        Text(
-                            text = stringResource(
-                                R.string.topic_post_multiquote_selected,
-                            ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                val pseudoModifier = if (onOpenProfile != null) {
+                    Modifier
+                        .weight(weight = 1f, fill = false)
+                        .clickable(
+                            onClick = onOpenProfile,
+                            role = Role.Button,
+                            onClickLabel = openProfileLabel,
                         )
-                    }
+                } else {
+                    Modifier.weight(weight = 1f, fill = false)
                 }
+                // #221 — the RF2 creator's pseudo gets the gold sheen easter egg. remember() keyed on
+                // the author so canonicalizePseudo (NFC + char walk) runs once per author, not on every
+                // recomposition of this hot list row — same off-the-render-path stance as #509.
+                val isCreator = remember(post.author) { isRf2Creator(post.author) }
+                if (isCreator) {
+                    CreatorPseudoText(author = post.author, modifier = pseudoModifier)
+                } else {
+                    Text(
+                        text = post.author,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = pseudoModifier,
+                    )
+                }
+            }
+        },
+        // #483 — the compact « · édité » marker (beta feedback Azgor). The exact edit time stays in the
+        // « … » menu (PostMenuSheet « Édité le … »). Rendered INLINE to the right of the date (dateTrailing
+        // slot), same labelMedium / onSurfaceVariant style — identical to the pre-shell single-row layout.
+        dateTrailing = if (post.editedAt != null) {
+            {
+                val editedLabel = stringResource(R.string.topic_post_edited_inline)
+                Text(
+                    // « · » is a decorative separator — TalkBack reads the contentDescription
+                    // (« édité »), so the dot is never vocalised.
+                    text = "· $editedLabel",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.semantics { contentDescription = editedLabel },
+                )
+            }
+        } else {
+            null
+        },
+        // #362 — per-post contextual menu trigger, flush right of the header. A text glyph, not a
+        // Material icon (detekt ForbiddenImport blocks androidx.compose.material.*) — same pattern as
+        // PageFab/ReplyFab. Its 48dp touch target sits in the trailing slot, never inflating the pseudo.
+        trailing = {
+            Text(
+                text = "⋯",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .clickable(
+                        onClick = onOpenMenu,
+                        role = Role.Button,
+                        onClickLabel = menuLabel,
+                    )
+                    .semantics { contentDescription = menuLabel },
+            )
+        },
+    )
+}
+
+/**
+ * #239/#436/#476 — the citation + multi-quote pill strip rendered (via [PostCardShell]'s badges slot)
+ * on the neutral card surface just below the identity band, so a pill appearing/disappearing grows the
+ * card downward without resizing the tinted band. The call site renders this only when at least one
+ * pill is present (`null` badges slot otherwise), so the strip is never an empty row.
+ */
+@Composable
+private fun TopicPostBadges(
+    citedCount: Int,
+    multiQuoteSelected: Boolean,
+    horizontalPadding: Dp,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            // Aligned with the post body gutter; top/bottom give breathing room (unchanged from #476).
+            .padding(start = horizontalPadding, end = horizontalPadding, top = 6.dp, bottom = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (citedCount > 0) {
+            // #239 — sober pill: how many posts of THIS page cite this one. Page-scoped (cf.
+            // citationCountsByNumreponse); jumping to the citing posts is a follow-up.
+            // surfaceContainerHighest : a touch above the surfaceContainer card so the pill reads.
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                shape = MaterialTheme.shapes.small,
+            ) {
+                Text(
+                    text = pluralStringResource(R.plurals.topic_post_cited_count, citedCount, citedCount),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                )
             }
         }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                // #287 — post-body inner gutters from the density preset. Comfort = the lot A
-                // values (12/10/12/8) that buy the body ~24 dp of extra reading width per line;
-                // Compact tightens them for a denser feed.
-                .padding(
-                    start = m.cardBodyHorizontal,
-                    top = m.cardBodyTop,
-                    end = m.cardBodyHorizontal,
-                    bottom = m.cardBodyBottom,
-                ),
-            verticalArrangement = Arrangement.spacedBy(m.postSpacing),
-        ) {
-            // #281 — topic posts are selectable/copyable (opt-in; default is OFF in PostRenderer).
-            PostRenderer(content = post.content, selectable = true)
-            // #330 — the author signature (web parity), gated by the reading preference. Rendered
-            // with the shared PostRenderer (the signature is BBCode/HTML like the body) but in a
-            // subdued style: a divider separates it from the body and a reduced alpha makes it
-            // subordinate to the post content. No-op when the post carries no signature.
-            post.signature?.let { signature ->
-                if (showSignature) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    // #553 — drop the author's web-tuned `[color]` in the signature: on the app theme
-                    // (especially dark) those colours read as garish/illegible. The signature then
-                    // renders in the neutral subdued body colour (the reduced alpha keeps it
-                    // subordinate). Post bodies are unaffected (they don't provide this local).
-                    CompositionLocalProvider(LocalIgnoreInlineColors provides true) {
-                        PostRenderer(
-                            content = signature,
-                            modifier = Modifier.alpha(SIGNATURE_ALPHA),
-                        )
-                    }
-                }
+        if (multiQuoteSelected) {
+            // #436 — basket-membership pill. primaryContainer : echoes the primary multi-quote
+            // border so the two marks read as one selection signal.
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = MaterialTheme.shapes.small,
+            ) {
+                Text(
+                    text = stringResource(R.string.topic_post_multiquote_selected),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                )
             }
-            if (onQuote != null || onEdit != null || onToggleMultiQuote != null) {
-                // Actions row at the bottom of the post card, sober TextButtons
-                // so they stay subordinate to the post content. « Modifier »
-                // (Phase 2D, #147) appears only on the user's own editable posts
-                // when the topic is still postable. « Citer » (Phase 2C, #146)
-                // appears whenever the topic is postable, even when the per-post
-                // `quoteRef` link was obfuscated and parsed as null (#227).
-                // « Supprimer » (#292) moved to the contextual menu (#418).
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    if (onEdit != null) {
-                        TextButton(onClick = onEdit) {
-                            Text(text = stringResource(R.string.topic_post_edit))
-                        }
-                    }
-                    if (onToggleMultiQuote != null) {
-                        // #436 — per-post add/remove to the multi-quote basket (RF1
-                        // quote+/quote- parity), next to « Citer » (same gate). The glyph +
-                        // word switch on multiQuoteSelected, echoing the card border + pill.
-                        // The colour (muted onSurfaceVariant when absent, primary when present)
-                        // is a SECONDARY cue : the « + »/« ✓ » glyph and the word change carry
-                        // the state without relying on colour. TalkBack reads the long add/remove
-                        // label via contentDescription, not the terse glyph.
-                        val mqContentDesc = stringResource(
-                            if (multiQuoteSelected) {
-                                R.string.topic_post_menu_multi_quote_remove
-                            } else {
-                                R.string.topic_post_menu_multi_quote_add
-                            },
-                        )
-                        TextButton(
-                            onClick = onToggleMultiQuote,
-                            colors = if (multiQuoteSelected) {
-                                ButtonDefaults.textButtonColors()
-                            } else {
-                                ButtonDefaults.textButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            },
-                            // #436 — the contentDescription carries the ACTION (« Ajouter/Retirer
-                            // de la citation multiple »); `selected` carries the STATE so TalkBack
-                            // announces « sélectionné » independently of the action verb (a real
-                            // toggle, not a one-shot button). Sighted state stays non-colour-only
-                            // via the glyph + word + border + pill.
-                            modifier = Modifier.semantics {
-                                contentDescription = mqContentDesc
-                                selected = multiQuoteSelected
-                            },
-                        ) {
-                            Text(
-                                text = stringResource(
-                                    if (multiQuoteSelected) {
-                                        R.string.topic_post_multiquote_remove_short
-                                    } else {
-                                        R.string.topic_post_multiquote_add_short
-                                    },
-                                ),
-                            )
-                        }
-                    }
-                    if (onQuote != null) {
-                        TextButton(onClick = onQuote) {
-                            Text(text = stringResource(R.string.topic_post_quote))
-                        }
-                    }
-                }
+        }
+    }
+}
+
+/**
+ * #146/#147/#436 — the topic post card's footer actions (Modifier / multi-quote « + » / Citer),
+ * rendered (via [PostCardShell]'s footer slot) right-aligned and as sober TextButtons so they stay
+ * subordinate to the post content. The body↔footer gap and the card's bottom padding ride on
+ * [modifier] (reinjected by the call site). « Supprimer » (#292) moved to the contextual menu (#418).
+ */
+@Composable
+private fun TopicPostActions(
+    onQuote: (() -> Unit)?,
+    onEdit: (() -> Unit)?,
+    onToggleMultiQuote: (() -> Unit)?,
+    multiQuoteSelected: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        if (onEdit != null) {
+            TextButton(onClick = onEdit) {
+                Text(text = stringResource(R.string.topic_post_edit))
+            }
+        }
+        if (onToggleMultiQuote != null) {
+            // #436 — per-post add/remove to the multi-quote basket (RF1 quote+/quote- parity), next to
+            // « Citer » (same gate). The glyph + word switch on multiQuoteSelected, echoing the card
+            // border + pill. The colour (muted onSurfaceVariant when absent, primary when present) is a
+            // SECONDARY cue : the « + »/« ✓ » glyph and the word change carry the state without relying
+            // on colour. TalkBack reads the long add/remove label via contentDescription, not the glyph.
+            val mqContentDesc = stringResource(
+                if (multiQuoteSelected) {
+                    R.string.topic_post_menu_multi_quote_remove
+                } else {
+                    R.string.topic_post_menu_multi_quote_add
+                },
+            )
+            TextButton(
+                onClick = onToggleMultiQuote,
+                colors = if (multiQuoteSelected) {
+                    ButtonDefaults.textButtonColors()
+                } else {
+                    ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                // #436 — the contentDescription carries the ACTION (« Ajouter/Retirer de la citation
+                // multiple »); `selected` carries the STATE so TalkBack announces « sélectionné »
+                // independently of the action verb (a real toggle, not a one-shot button). Sighted
+                // state stays non-colour-only via the glyph + word + border + pill.
+                modifier = Modifier.semantics {
+                    contentDescription = mqContentDesc
+                    selected = multiQuoteSelected
+                },
+            ) {
+                Text(
+                    text = stringResource(
+                        if (multiQuoteSelected) {
+                            R.string.topic_post_multiquote_remove_short
+                        } else {
+                            R.string.topic_post_multiquote_add_short
+                        },
+                    ),
+                )
+            }
+        }
+        if (onQuote != null) {
+            TextButton(onClick = onQuote) {
+                Text(text = stringResource(R.string.topic_post_quote))
             }
         }
     }
