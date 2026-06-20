@@ -16,7 +16,11 @@ Phases de développement, de la fondation au polish.
 
 ## Vue d'ensemble
 
-Les phases sont **ordonnées par dépendances techniques**, pas datées. Le rythme réel dépend des contributeurs et des dépendances externes (ex. MPStorage2 dans hfr-redkit à finaliser avant la Phase 3). Cohérent avec la [méthodologie triple-hybride]({{ site.baseurl }}/specs/methodology) (prototype-driven).
+> **Les phases sont des ÉPICS THÉMATIQUES, pas une chronologie.** Elles regroupent le travail par thème (lecture, écriture, messages, extensions, polish), pas par ordre de livraison. **Le « quand » est porté par les releases** — l'historique réel des livraisons se lit dans les `CHANGELOG.md` (racine + `app/CHANGELOG.md`) et les `versionName` des bêtas/prod, pas dans la numérotation des phases. Une feature peut donc être livrée « en avance » sur sa phase (ex. la Blacklist, thème Phase 4, shippée en bêta 0.15.0 avant l'ouverture formelle de la Phase 4).
+>
+> Corollaire : **« Polish & UX » (ex-Phase 5) n'est pas une étape finale mais un backlog continu** alimenté tout au long du projet. Le milestone GitHub correspondant a été renommé en ce sens (« Polish & UX (backlog continu) »), et le label `phase-5` est devenu `polish`.
+
+Les phases gardent un **ordre de dépendances techniques** (on ne livre pas l'écriture avant la lecture), pas un calendrier. Le rythme réel dépend des contributeurs et des dépendances externes. Cohérent avec la [méthodologie triple-hybride]({{ site.baseurl }}/specs/methodology) (prototype-driven).
 
 Pour la liste des capabilities et des non-goals, voir le [scope fonctionnel]({{ site.baseurl }}/specs/scope).
 
@@ -27,9 +31,9 @@ Pour la liste des capabilities et des non-goals, voir le [scope fonctionnel]({{ 
 | **0 — Bootstrap** | Squelette qui compile, CI, thème, navigation | S | — | ✅ Livrée |
 | **1 — Core** | Lecture du forum (drapeaux, topics, forum, deep links) | XL | Phase 0 | ✅ Livrée (AAB `0.1.0-phase1.7` / `app-v38` / specs v0.8.4) |
 | **2 — Écriture** | Post / edit / quote / create topic / recherche / proxy alpha | L | Phase 1 | ✅ Livrée |
-| **3 — Messages** | MPs classiques + MultiMPs avec sync | M | Phase 2 + **MPStorage2** (hfr-redkit) | ✅ Livrée (fonctionnelle ; sync/écriture MPStorage reportée → #6, Phase 4) |
-| **4 — Extensions** | Bookmarks, Blacklist, Qualitay, Redflag | L | Phase 3 + **hfr-redflag Worker** | À faire |
-| **5 — Polish** | Animations, offline, thème dynamique, Play Store | M | Phases 2, 3, 4 | À faire |
+| **3 — Messages** | MPs classiques + MultiMPs (lecture + écriture + DT + sync de position) | M | Phase 2 | ✅ Livrée (clôture #598 ; sync MPStorage bidirectionnelle complète + cache Room reportés → #6, Phase 4) |
+| **4 — Extensions + refonte UI pré-1.0** | Bookmarks, Qualitay, Redflag + refonte Drapeaux (#603) / Topic (#604) + hygiène repo (#605) ; Blacklist déjà livrée | L | Phase 3 + **hfr-redflag Worker** | 🚧 En cours |
+| **Polish & UX** | Animations, offline, thème dynamique, Play Store, raffinements UX | — | continu | ♾️ Backlog continu (pas une étape finale) |
 
 **Taille** : S = petit sous-chantier, M = quelques composants, L = plusieurs features indépendantes, XL = écran majeur + parseurs + cache (ex. `PostRenderer` natif).
 
@@ -41,23 +45,26 @@ flowchart LR
     P1["Phase 1<br/>Core lecture"]
     P2["Phase 2<br/>Écriture"]
     P3["Phase 3<br/>Messages"]
-    P4["Phase 4<br/>Extensions"]
-    P5["Phase 5<br/>Polish"]
+    P4["Phase 4<br/>Extensions + refonte UI"]
+    POL["Polish & UX<br/>(backlog continu)"]
 
     MPS[("MPStorage2<br/>hfr-redkit")]
     RFL[("hfr-redflag<br/>CF Worker")]
 
-    P0 --> P1 --> P2 --> P3 --> P4 --> P5
-    MPS -.prérequis.-> P3
+    P0 --> P1 --> P2 --> P3 --> P4
+    MPS -.prérequis.-> P4
     RFL -.prérequis.-> P4
-    P2 --> P5
-    P3 --> P5
+    P2 -.alimente.-> POL
+    P3 -.alimente.-> POL
+    P4 -.alimente.-> POL
 
     classDef external fill:#fef3c7,stroke:#d97706
+    classDef continuous fill:#ede9fe,stroke:#7c3aed
     class MPS,RFL external
+    class POL continuous
 ```
 
-Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances externes** hors de ce repo — leur état bloque le démarrage de la phase qui les consomme.
+Les dépôts en cylindre (`MPStorage2`, `hfr-redflag`) sont des **dépendances externes** hors de ce repo — leur état bloque le démarrage de la phase qui les consomme. Note : la **lecture** MPStorage (positions DT) est livrée en Phase 3 **sans** dépendre de MPStorage2 (l'enveloppe v0.1 de facto a été adoptée, cf. [ADR-014]({{ site.baseurl }}/adr/014-mpstorage-v01-de-facto)) ; le prérequis MPStorage2 ne pèse plus que sur la **sync complète** de Phase 4 (#6). « Polish & UX » n'est pas une phase terminale : c'est un **backlog continu** alimenté par toutes les phases.
 
 ---
 
@@ -155,49 +162,74 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 - [x] Nouveau MP — création
 - [x] MultiMPs — liste avec vue drapeaux, lecture, reply, quote (onglet « DT » des Drapeaux listant les MultiMP + reprise de lecture MPStorage livré 2026-06-19, app-v166)
 - [x] Nouveau MultiMP — création (2+ destinataires)
-- [~] Intégration MPStorage — **lecture livrée** (découverte + parsing + seed des positions DT) ; **synchronisation/écriture + cache Room reportées → #6, Phase 4** (ADR-013 déc. 2/3 + ADR-014 §4). Mécanique d'écriture RMW guardée préparée (POST différé, non observé live, app-v168/dev).
+- [x] Intégration MPStorage — **lecture livrée** (découverte par scan inbox + parsing + seed des positions DT) **et écriture déclencheur de synchronisation de la position de lecture DT livrée** (`writeBackFlagIfPresent` UPDATE-ONLY, **opt-in OFF par défaut**, #593/#597 via PR #608, RMW guardé + verify-after-write + cap 64 KiB, POST `bdd.php cat=prive` non observé live). **Activation opt-in par défaut + cache Room du contenu + synchronisation bidirectionnelle = Phase 4 (#6/#577)** (ADR-013 déc. 2/3 + ADR-014 §4).
 - [x] Notifications MP (#313)
+- [x] Recherche intra-topic (#546/#576/#585) — `transsearch.php`, saut préc./suiv., filtre pseudo, tout-le-sujet
+- [x] Mode plein écran (#518)
+- [x] Onglet « DT » conditionnel dans les Drapeaux (réglage section DT, OFF par défaut)
 
-**Livrable :** gestion complète des MPs, y compris les MultiMPs avec état lu/non-lu.
+**Livrable :** gestion complète des MPs, y compris les MultiMPs (lecture, écriture, membres) et la reprise de position de lecture DT.
 
-> **Statut (2026-06-19)** : Phase 3 **fonctionnellement livrée et shippée**. Le seul reste est la
-> synchronisation/écriture MPStorage, explicitement reportée hors clôture Phase 3 (suivie par #6, Phase 4).
+> **Statut (2026-06-20) — Phase 3 ✅ Livrée (clôture #598).** L'épic Messages est livré et shippé :
+> MP lecture (#298), reply/quote MP (#301), nouveau MP + nouveau MultiMP, gestion des membres
+> MultiMP via `newdest` (#606/#612), onglet DT + reprise de position MPStorage, recherche
+> intra-topic (#546), plein écran (#518), parité des gestes de lecture topic↔MP (#351 a/b/c), et
+> le déclencheur de synchronisation de position de lecture DT (#597, UPDATE-ONLY opt-in OFF).
+>
+> **Reste explicitement reporté (hors clôture Phase 3)** :
+> - **Synchronisation MPStorage bidirectionnelle complète + activation opt-in par défaut + cache Room** → umbrella **#6**, requalifié **Phase 4** (questions de fond non tranchées : fréquence, conflits, format v1/v2, clé write-back).
+> - **#531** (réconcilier le lu/non-lu serveur des MP, re-unread best-effort) — **polish**, pas du fonctionnel manquant ; suivi en backlog **Polish & UX**, pas dans la clôture.
+>
 > Lancer `/spec-reality` pour figer l'alignement specs↔code avant un bump de version specs.
 
 ---
 
-## Phase 4 — Extensions communautaires
+## Phase 4 — Extensions communautaires + refonte UI pré-1.0 🚧 en cours
 
-**Objectif :** les features inspirées des userscripts HFR.
+**Objectif :** les features inspirées des userscripts HFR **et** la refonte UI avant la 1.0.
 
-- [ ] Architecture d'extensions (PostDecorator, TopicToolbarContributor)
+**Extensions communautaires :**
+- [ ] Architecture d'extensions (`PostDecorator`, `TopicToolbarContributor`) — **prospective**, `:core:extension` est encore une coquille vide (cf. [extensions.md]({{ site.baseurl }}/specs/extensions#architecture-dextensions))
 - [ ] Bookmarks — sauvegarder des posts
-- [ ] Blacklist — masquer des utilisateurs
+- [x] **Blacklist — masquer des utilisateurs** — ✅ **livrée par anticipation** (bêta 0.15.0, #509), hors module d'extension dédié (DataStore JSON + `:feature:settings`, cf. [extensions.md]({{ site.baseurl }}/specs/extensions#blacklist--livrée))
 - [ ] Alertes Qualitay — signaler un post remarquable
-- [ ] Redflag — alertes intelligentes sur topics suivis
+- [ ] Redflag — alertes intelligentes sur topics suivis (dépend du Worker `hfr-redflag`)
 
-**Livrable :** les features communautaires les plus demandées, intégrées nativement.
+**Synchronisation MPStorage (suite Phase 3, requalifiée ici) :**
+- [ ] Activation de l'écriture MPStorage opt-in par défaut + clé write-back tranchée (#597 reste OFF en attendant) — umbrella **#6** / **#577**
+- [ ] Cache Room du contenu MP (opt-in, ADR-013 étage 3) + synchronisation bidirectionnelle
+
+### Refonte UI pré-1.0
+
+Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
+- [ ] **Refonte de la vue Drapeaux** — #603
+- [ ] **Refonte de la vue Topic** — #604
+- [ ] **Hygiène repo / audit des dérives** — #605 (cadrage + audit + purge des branches `feature/*` obsolètes ; **à démarrer en premier**)
+
+**Livrable :** les features communautaires les plus demandées + une UI refondue prête pour la 1.0.
 
 ---
 
-## Phase 5 — Polish
+## Polish & UX — backlog continu ♾️
 
-**Objectif :** l'expérience utilisateur raffinée.
+> **Pas une étape finale.** Anciennement « Phase 5 ». Le milestone GitHub est renommé
+> « Polish & UX (backlog continu) » et le label `phase-5` est devenu `polish`. Les
+> raffinements sont livrés en continu tout au long du projet — beaucoup le sont déjà
+> (thème AMOLED #286, transitions, swipe de pages, ascenseur, etc.). L'historique de
+> livraison se lit dans les `CHANGELOG.md` (racine + `app/CHANGELOG.md`), pas ici.
 
-- [ ] Animations et transitions
+**Objectif :** l'expérience utilisateur raffinée, en continu.
+
+- [ ] Animations et transitions (raffinements continus)
 - [ ] Mode offline complet (lecture + file d'attente d'écriture)
 - [ ] Notifications push configurables
 - [ ] Thème dynamique (Material You)
 - [ ] Thème "HFR classique"
 - [ ] Widgets Android
 - [ ] Tests de performance (scroll, cold start, mémoire)
-- [ ] Release automation
-  - Signed release build (keystore en GitHub Secrets)
-  - Publication Play Store (arbitrage Fastlane vs Gradle Play Publisher)
-  - Beta testing (Play Console internal testing privilégié vs Firebase App Distribution)
-  - Création compte développeur ForumHFR si inexistant
+- [x] Release automation — pipeline bêta/prod live (Play open testing + F-Droid, signed AAB via `--init-script`, guard CI `versionName`)
 
-**Livrable :** une app prête pour le grand public.
+**Livrable :** une app continuellement raffinée pour le grand public.
 
 ---
 

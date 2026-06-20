@@ -6,18 +6,20 @@ nav_order: 14
 permalink: /adr/014-mpstorage-v01-de-facto
 ---
 
-# ADR-014 — MPStorage : adopter l'enveloppe v0.1 de facto (lecture d'abord, écriture différée)
+# ADR-014 — MPStorage : adopter l'enveloppe v0.1 de facto (lecture d'abord, écriture opt-in)
 
 ## Statut
 
-Accepté — 2026-06-12 (proposé 2026-06-11 ; révisé à l'acceptation après audit adversarial)
+Accepté — 2026-06-12 (proposé 2026-06-11 ; révisé à l'acceptation après audit adversarial ; **écriture opt-in livrée 2026-06-19/20, #593/#597**)
 
 Cette ADR formalise les verdicts de l'[exploration du format MPStorage réel](https://github.com/ForumHFR/redface2/issues/6#issuecomment-4673324560) (2026-06-10 : confrontation `MPStorage.user.js` / `DTCloud.user.js` / `multimp.user.js` / doc Wiripse) et des vérifications live du 2026-06-11 (découverte par recherche `cat=prive`, fixtures `mp_storage_search_*`). `models.md` § MPStorage porte la projection canonique de cette décision.
 
-État d'implémentation à l'acceptation :
+État d'implémentation (à jour clôture Phase 3, #598) :
 
-- **Livré** : décisions 1 à 3 (client lecture seule) — PR [#406](https://github.com/ForumHFR/redface2/pull/406), `DefaultMpStorageRepository` (pipeline 3 GET authentifiés, zéro écriture), `MpStorageDiscoveryParser`, `MpStorageParser` tolérant.
-- **À venir** : décision 4 (écriture différée — re-trancher le comportement premier-hit avant, cf. Décision 2), décision 5 (onglet DT, surface livrée PR #397, consommation MPStorage à câbler), cache DataStore des ids découverts (cf. Conséquences).
+- **Livré** : décisions 1 à 3 (client lecture) — `DefaultMpStorageRepository` (découverte par **scan de l'inbox**, cf. Addendum ; lecture du `content_form` ; `MpStorageParser` tolérant). NB : `MpStorageDiscoveryParser` (recherche par titre) **a été supprimé** par l'Addendum 2026-06-14 — la découverte par recherche serveur ne marchait pas sur un compte réel.
+- **Livré** : décision 5 — seed des positions DT (`MpStorageReadPositionSeeder`) + onglet « DT » câblé (réglage section DT, OFF par défaut).
+- **Livré (opt-in OFF)** : décision 4 — **écriture** RMW guardée (#593) + **déclencheur automatique de synchronisation de la position de lecture DT** (#597, mode `writeBackFlagIfPresent` UPDATE-ONLY). L'opt-in est **OFF par défaut** (`KEY_SYNC_PRIVATE_MESSAGES_WRITE_ENABLED ?: false`, `DataStoreUserPreferencesRepository`). Le POST `bdd.php cat=prive` **n'a pas été observé live** : l'implémentation est *fail-closed*.
+- **À venir (Phase 4, #6/#577)** : activation de l'opt-in par défaut (suppose l'arbitrage de la clé write-back tranché), cache Room du **contenu** MP, synchronisation bidirectionnelle complète.
 
 ## Contexte
 
@@ -41,7 +43,12 @@ Vérifications live 2026-06-11 (GET only, compte XaTriX) :
 1. **Geler le contrat sur l'enveloppe v0.1 de facto.** Pas de « MPStorage2 » côté Redface 2 : toute extension passe par de **nouvelles clés additives** dans l'entrée v0.1. Si un MPStorage2 émerge un jour dans `hfr-redkit`, il fera l'objet d'une nouvelle ADR (et le format v0.1 restera lu pour la migration).
 2. **Lecture d'abord.** Phase 3 livre un client **lecture seule** dans `:core:data` : découverte (recherche par sujet) → premier post (`numreponse` via la page de conversation) → formulaire d'édition → `content_form` → parsing **tolérant** (clés inconnues ignorées à la projection mais le JSON intégral est conservé dans `MpStorageDocument.rawEnvelope`). Si plusieurs conversations portent le sujet-hash, la découverte retient le **premier résultat** du listing tel qu'ordonné par `orderSearch=1` (`MpStorageDiscoveryParser.parseFirstThreadId`) — acceptable en lecture seule, mais ce choix devra être **re-tranché avant l'étape écriture** (écrire dans le mauvais document forkerait silencieusement le storage).
 3. **Jamais de reset destructif.** Un document illisible = échec de lecture explicite surfacé à l'UI ; aucune écriture de « réparation ».
-4. **Écriture différée et opt-in** (hors scope de cette ADR au-delà du principe) : read-modify-write immédiatement avant le POST `bdd.php`, déclenchée à la sortie d'une conversation DT — pas une édition par page vue comme DTCloud ; les clés tierces du `rawEnvelope` survivent au round-trip.
+4. **Écriture opt-in — LIVRÉE (OFF par défaut, #593/#597).** Read-modify-write pur immédiatement avant le POST `bdd.php cat=prive`, déclenché à la sortie d'une conversation DT — pas une édition par page vue comme DTCloud ; les clés tierces du `rawEnvelope` survivent au round-trip. Détail livré :
+   - **Deux modes** : `writeBackFlag` (manuel, *add-or-update* : crée l'entrée si absente) et `writeBackFlagIfPresent` (#597, **UPDATE-ONLY** : ne réécrit que si la conversation est déjà présente, sinon `SkippedNotPresent` et **aucun POST** — c'est le mode du déclencheur automatique, anti-pollution).
+   - **Verify-after-write** : relecture après POST ; restauration **bornée à la corruption réelle** (garde `isJsonEnvelope`), jamais un rollback aveugle.
+   - **Cap** : `MAX_CONTENT_FORM_BYTES = 64 KiB` ; dépassement ⇒ `TooLarge`, aucun POST (fail-closed, HFR tronque silencieusement).
+   - **Opt-in OFF par défaut** : gardé par le réglage `KEY_SYNC_PRIVATE_MESSAGES_WRITE_ENABLED` ; OFF ⇒ `DisabledByPreference`, aucune requête.
+   - **Arbitrage de clé write-back (#597)** : la clé d'identification d'une entrée (threadId du MP vs id de topic DT côté forum) comporte un risque résiduel d'écriture dans la mauvaise entrée. Il est **borné** par le mode UPDATE-ONLY (jamais de création silencieuse) mais **non nul** — à requalifier avant d'activer l'opt-in par défaut (Phase 4, #6/#577). Le contrat `bdd.php cat=prive` reste **non observé live**.
 5. **Surface UI** : l'onglet « DT » opt-in (PR #397) consommera `mpFlags` (liste des conversations DT avec position de reprise) ; fusion avec le drapal local ADR-013 étage 1 (local prioritaire, MPStorage = seed + sync).
 
 ## Conséquences
@@ -49,11 +56,13 @@ Vérifications live 2026-06-11 (GET only, compte XaTriX) :
 - `models.md` § MPStorage remplace les modèles inventés par `MpStorageDocument` / `MpStorageFlagEntry` et référence cette ADR.
 - Les ids découverts (mpId, numreponse du premier post) sont cachés **par compte** et purgés au logout (même règle de vie privée que #316) — **implémenté** (cf. Addendum 2026-06-14) : table Room `mp_storage_locations`, et non DataStore comme initialement envisagé, pour aligner la purge sur `mp_read_positions`/`uploaded_images` via `CacheInvalidator`.
 - Risques assumés et documentés : lost-update inter-outils (full overwrite sans condition), taille max du post MP inconnue (la `list` DTCloud n'est jamais prunée — la vérification de taille devra précéder toute écriture), dépendance au compte tiers `MultiMP`.
-- Trous de vérification restants avant l'étape écriture :
+- Trous de vérification restants (l'écriture #593/#597 est livrée *fail-closed* et **OFF par défaut** précisément parce que ces trous ne sont pas tous comblés — à lever avant d'activer l'opt-in par défaut) :
   - effet du GET du formulaire d'édition sur le dot du correspondant (non mesuré par #361) ;
-  - contrat `bdd.php cat=prive` en écriture (non capturé) ;
-  - round-trip JSON réel et découverte d'un **vrai** document storage, jamais observés (le compte de test n'a pas de MP storage — les fixtures `hit` proviennent d'un sujet ordinaire) ;
-  - sensibilité de la recherche aux paramètres de date (`daterange=2` + `jour/mois/annee` du jour) : si HFR les honorait autrement qu'observé, un faux `NotFound` deviendrait, à l'étape écriture, une **création de doublon** du MP storage — à requalifier avant d'écrire.
+  - contrat `bdd.php cat=prive` en écriture **toujours non capturé live** — le POST est codé selon le contrat de réponse mais jamais exercé contre HFR ;
+  - round-trip JSON réel post-écriture, jamais observé de bout en bout sur un vrai document ;
+  - arbitrage de la clé write-back (#597, cf. Décision 4) : risque borné par UPDATE-ONLY mais non nul.
+
+  > Note : la découverte par **recherche par titre** (et donc la sensibilité aux paramètres de date `daterange=2` + `jour/mois/annee`) n'est **plus** un trou : l'Addendum 2026-06-14 a remplacé la découverte par un **scan de l'inbox**, supprimant cette voie.
 
 ## Addendum — 2026-06-14 (découverte corrigée, cache, seed DT)
 
