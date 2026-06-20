@@ -79,6 +79,7 @@ import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.shouldRevealNavBar
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
@@ -120,6 +121,7 @@ import fr.forumhfr.redface2.feature.settings.SettingsScreen
 import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import fr.forumhfr.redface2.feature.topic.TopicScrollAnchor
+import java.time.Instant
 import kotlinx.serialization.Serializable
 import androidx.compose.material3.ExperimentalMaterial3Api
 
@@ -693,7 +695,13 @@ fun RedfaceApp(intent: Intent?) {
         val reportEmailSubject = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_report_email_subject)
         val reportNoEmailClient = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_no_email_client)
         val context = LocalContext.current
-        var readPrivateMessageThreadIds by remember { mutableStateOf(emptySet<Int>()) }
+        // #531 — optimistic « read » marks of the inbox, now keyed by the conversation DATE seen at
+        // open-time (was a bare Set<Int>). Storing the date lets a fresh page-1 network result RECONCILE
+        // the mark: HFR re-flagging a thread unread is only honoured when its server date is STRICTLY
+        // newer than the date recorded here (a true new MP), never on an identical date (an echo of the
+        // pre-read dot — see reconcileReadMarks). Same lifecycle as before: in-memory only, purged on
+        // every auth transition; membership (`threadId in map`) drives the list read-override.
+        var readPrivateMessageThreadIds by remember { mutableStateOf(emptyMap<Int, Instant>()) }
         // Ephemeral, in-memory only (NOT persisted in any Navigation route): threads the user
         // opened from the inbox as multi-recipient (MultiMP / "DT"). Lets the thread screen show
         // "Interlocuteurs multiples" even when the current page reveals a single other author.
@@ -706,6 +714,11 @@ fun RedfaceApp(intent: Intent?) {
         // it is private metadata (it reveals a conversation carried an unread message) and must never
         // outlive the session, hence it stays OUT of the opaque PrivateMessageThreadRoute.
         var unreadOnOpenThreadIds by remember { mutableStateOf(emptySet<Int>()) }
+        // #531 — conversation DATE captured at the moment a thread is opened from the inbox, used as
+        // the read-mark value once the thread loads (onThreadLoaded). The route is opaque (threadId +
+        // page only) and the date is private metadata, so it is held here in memory — purged on every
+        // auth transition like the hints above — rather than carried in PrivateMessageThreadRoute.
+        var openThreadDates by remember { mutableStateOf(emptyMap<Int, Instant>()) }
         // #301 follow-up — bumped when the new-conversation composer pops back after a successful
         // send. The MP list collects the signal and refreshes itself so the created conversation
         // appears at the top (its thread id is unknown — the bddpost success response of a new MP
@@ -748,9 +761,10 @@ fun RedfaceApp(intent: Intent?) {
             when (authState) {
                 null -> Unit
                 AuthState.Anonymous -> {
-                    readPrivateMessageThreadIds = emptySet()
+                    readPrivateMessageThreadIds = emptyMap()
                     multiRecipientThreadIds = emptySet()
                     unreadOnOpenThreadIds = emptySet()
+                    openThreadDates = emptyMap()
                     privateMessageSentSignal = null
                     // #291 — a write intention armed under another session must not survive the
                     // transition (Codex review: stale « Citer N » after logout/login).
@@ -758,9 +772,10 @@ fun RedfaceApp(intent: Intent?) {
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
                 }
                 is AuthState.Authenticated -> {
-                    readPrivateMessageThreadIds = emptySet()
+                    readPrivateMessageThreadIds = emptyMap()
                     multiRecipientThreadIds = emptySet()
                     unreadOnOpenThreadIds = emptySet()
+                    openThreadDates = emptyMap()
                     privateMessageSentSignal = null
                     multiQuoteBasket = null
                     resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
@@ -832,7 +847,9 @@ fun RedfaceApp(intent: Intent?) {
                             startReportEmail(context, reportEmailSubject, reportNoEmailClient)
                         },
                         privateMessageNavState = PrivateMessageNavState(
-                            readThreadIds = readPrivateMessageThreadIds,
+                            // #531 — the screen only needs membership, so it gets the marked thread ids;
+                            // the dates stay nav-internal, consumed by reconcileReadMarks below.
+                            readThreadIds = readPrivateMessageThreadIds.keys,
                             multiRecipientThreadIds = multiRecipientThreadIds,
                             onThreadLoaded = { threadId ->
                                 // #453 (Codex review) — decrement the badge ONLY when the conversation was
@@ -841,18 +858,32 @@ fun RedfaceApp(intent: Intent?) {
                                 val decrement = shouldDecrementUnreadBadge(
                                     threadId = threadId,
                                     unreadOnOpen = unreadOnOpenThreadIds,
-                                    alreadyRead = readPrivateMessageThreadIds,
+                                    alreadyRead = readPrivateMessageThreadIds.keys,
                                 )
                                 if (decrement) {
                                     mpBadgeViewModel.onThreadRead(threadId)
                                 }
-                                readPrivateMessageThreadIds = readPrivateMessageThreadIds + threadId
+                                // #531 — record the mark keyed by the conversation date captured at
+                                // open-time (openThreadDates). reconcileReadMarks later compares the
+                                // server date against it; a thread with no captured date (DT/deep-link
+                                // path) falls back to EPOCH so any later server date reconciles it.
+                                readPrivateMessageThreadIds = readPrivateMessageThreadIds
+                                    .withReadMark(threadId, openThreadDates)
+                            },
+                            // #531 — fresh page-1 network result: drop the marks HFR now reports as
+                            // genuinely unread again (server date strictly newer than the open-time date).
+                            onReconcileReadMarks = { conversations ->
+                                readPrivateMessageThreadIds =
+                                    readPrivateMessageThreadIds.withoutReconciled(conversations)
                             },
                             onThreadOpenedAsMulti = { threadId ->
                                 multiRecipientThreadIds = multiRecipientThreadIds + threadId
                             },
                             onThreadOpenedUnread = { threadId ->
                                 unreadOnOpenThreadIds = unreadOnOpenThreadIds + threadId
+                            },
+                            onThreadOpenedAt = { threadId, date ->
+                                openThreadDates = openThreadDates + (threadId to date)
                             },
                             sentSignal = privateMessageSentSignal,
                             onConversationSent = {
@@ -1082,6 +1113,11 @@ private const val DEV_CHANNEL: String = "dev"
  * @property onThreadOpenedAsMulti records that a thread was opened from a multi-recipient row.
  * @property onThreadOpenedUnread records that a thread was UNREAD when opened, so [onThreadLoaded]
  *   knows it may decrement the unread badge (an already-read conversation must not, #453).
+ * @property onThreadOpenedAt #531 — records the conversation date seen when a thread is opened from
+ *   the inbox; that date becomes the read mark's value so a later, strictly-newer server date can
+ *   reconcile (re-unread) it (see [reconcileReadMarks]).
+ * @property onReconcileReadMarks #531 — invoked once per fresh page-1 network result with the server
+ *   conversations; drops the optimistic read marks HFR now reports as genuinely unread again.
  */
 private data class PrivateMessageNavState(
     val readThreadIds: Set<Int>,
@@ -1089,6 +1125,8 @@ private data class PrivateMessageNavState(
     val onThreadLoaded: (Int) -> Unit,
     val onThreadOpenedAsMulti: (Int) -> Unit,
     val onThreadOpenedUnread: (Int) -> Unit = {},
+    val onThreadOpenedAt: (threadId: Int, date: Instant) -> Unit = { _, _ -> },
+    val onReconcileReadMarks: (List<PrivateMessageSummary>) -> Unit = {},
     /** #301 follow-up — last successful new-conversation send ; the MP list refreshes on change. */
     val sentSignal: Long? = null,
     /** #301 follow-up — bumps [sentSignal] when the composer reports a successful send. */
@@ -1107,6 +1145,58 @@ private fun shouldDecrementUnreadBadge(
     unreadOnOpen: Set<Int>,
     alreadyRead: Set<Int>,
 ): Boolean = threadId in unreadOnOpen && threadId !in alreadyRead
+
+/**
+ * #531 — reconciles the optimistic inbox read marks ([marks]: threadId → date seen at open-time)
+ * against a FRESH page-1 network result ([freshConversations]). Returns the set of marked thread ids
+ * to DROP: a conversation that the server still reports unread, that we had marked read, AND whose
+ * server date is STRICTLY after the recorded open-time date — i.e. a genuine new MP arrived after the
+ * user last read it, so the server's "unread" must win over our optimistic mark.
+ *
+ * Gating rationale (Codex): the comparison is `isAfter`, never `>=`. An identical date is the echo of
+ * the pre-read dot (the server response that motivated the read, observed again on refresh) — dropping
+ * the mark there would make a just-read thread re-blink unread (a regression). A conversation absent
+ * from [freshConversations] is never inferred unread (no page-1 entry, no decision). A conversation the
+ * server reports read (`!hasUnread`) leaves its mark untouched (it would be redundant anyway).
+ *
+ * Pure and Compose-free so it is unit-testable; the caller only runs it on a genuine network success
+ * (not a recomposition / cached page), driven by [MessagesUiState.networkLoadGeneration].
+ */
+internal fun reconcileReadMarks(
+    marks: Map<Int, Instant>,
+    freshConversations: List<PrivateMessageSummary>,
+): Set<Int> = freshConversations.asSequence()
+    .filter { conversation ->
+        conversation.hasUnread &&
+            marks[conversation.threadId]?.let { conversation.date.isAfter(it) } == true
+    }
+    .map { it.threadId }
+    .toSet()
+
+/**
+ * #531 — applies [reconcileReadMarks] to drop the now-genuinely-unread marks from this read-mark map.
+ * Returns the SAME instance when nothing is reconciled, so a routine page-1 refresh (the common case:
+ * no new MP) neither allocates a new map nor triggers a [RedfaceApp] recomposition. Folds the empty-set
+ * guard out of the composable to keep it under detekt's cyclomatic-complexity budget.
+ */
+internal fun Map<Int, Instant>.withoutReconciled(
+    freshConversations: List<PrivateMessageSummary>,
+): Map<Int, Instant> {
+    val stale = reconcileReadMarks(this, freshConversations)
+    return if (stale.isEmpty()) this else this - stale
+}
+
+/**
+ * #531 — adds an optimistic read mark for [threadId], keyed by the conversation date captured at
+ * open-time ([openDates]). A thread with no captured date (the DT / deep-link open path never records
+ * one) falls back to [Instant.EPOCH], so any later server date reconciles it (the conservative choice:
+ * a missing baseline never blocks a re-unread). Extracted to keep [RedfaceApp]'s Elvis out of its
+ * cyclomatic-complexity budget.
+ */
+internal fun Map<Int, Instant>.withReadMark(
+    threadId: Int,
+    openDates: Map<Int, Instant>,
+): Map<Int, Instant> = this + (threadId to (openDates[threadId] ?: Instant.EPOCH))
 
 /**
  * Bug fix (build 89) — per-topic title cache plumbed into [RedfaceNavHost]. A topic page change
@@ -1470,7 +1560,7 @@ private fun RedfaceNavHost(
             entry<MessagesRoute> {
                 MessagesScreen(
                     readThreadIds = privateMessageNavState.readThreadIds,
-                    onOpenThread = { threadId, isMultiRecipient, openAtPage, wasUnread ->
+                    onOpenThread = { threadId, isMultiRecipient, openAtPage, wasUnread, openedAtDate ->
                         // Record the multi-recipient hint in memory only; the route stays opaque.
                         if (isMultiRecipient) {
                             privateMessageNavState.onThreadOpenedAsMulti(threadId)
@@ -1480,6 +1570,9 @@ private fun RedfaceNavHost(
                         if (wasUnread) {
                             privateMessageNavState.onThreadOpenedUnread(threadId)
                         }
+                        // #531 — capture the conversation date seen now, so the read mark recorded on
+                        // load can later be reconciled against a strictly-newer server date.
+                        privateMessageNavState.onThreadOpenedAt(threadId, openedAtDate)
                         backStack.add(
                             PrivateMessageThreadRoute(
                                 threadId = threadId,
@@ -1490,6 +1583,7 @@ private fun RedfaceNavHost(
                             ),
                         )
                     },
+                    onReconcileReadMarks = privateMessageNavState.onReconcileReadMarks,
                     onComposeNew = { backStack.add(PrivateMessageComposeRoute()) },
                     sentSignal = privateMessageNavState.sentSignal,
                     topBarActions = accountMenu,
