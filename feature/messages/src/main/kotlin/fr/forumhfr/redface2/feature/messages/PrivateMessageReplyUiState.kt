@@ -46,6 +46,26 @@ data class PrivateMessageReplyUiState(
      * the editor, « Ignorer » deletes the cached row. Never silently applied nor lost.
      */
     val restorableDraft: String? = null,
+    /**
+     * #606 — true only when the loaded form is the OWNER's DT/MultiMP (HFR served the `newdest`
+     * field). Gates the member editor in the UI ; a simple participant / one-to-one MP keeps it
+     * false and never sees the editor.
+     */
+    val canManageRecipients: Boolean = false,
+    /**
+     * #606 — current working list of DT/MultiMP members (owner view), parsed from HFR's `newdest`
+     * CSV on form load and mutated by add / remove. Order, case, accents, `+` and internal spaces
+     * are preserved verbatim (« Bébé Yoda », « stitch+ ») ; only the leading / trailing whitespace
+     * of each CSV element is trimmed. Empty when [canManageRecipients] is false.
+     */
+    val recipients: List<String> = emptyList(),
+    /**
+     * #606 — true once the owner has actually added / removed a member. Until then the submit sends
+     * `recipientsOverride = null` so the repository forwards HFR's original `newdest` **verbatim**
+     * (a normal owner reply must never round-trip the member list through parse → join, which would
+     * normalise whitespace / drop entries and risk losing members). Only an explicit edit arms it.
+     */
+    val recipientsDirty: Boolean = false,
 ) {
     val canSubmit: Boolean
         get() = formAvailable && !isLoadingForm && !isSubmitting && draft.text.isNotBlank()

@@ -105,6 +105,7 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
         form: ReplyForm,
         bbcodeContent: String,
         options: ReplyFormOptions,
+        recipientsOverride: String?,
     ): ReplySubmitResult {
         guardAgainstInvalidSubmission(form, bbcodeContent)?.let { early ->
             diagnostics.record(
@@ -120,7 +121,7 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
             LOG_TAG,
             "POST MP reply post=${context.threadId} page=${context.page} bbcode.length=${bbcodeContent.length}",
         )
-        val formBody = buildFormBody(form, bbcodeContent, options)
+        val formBody = buildFormBody(form, bbcodeContent, options, recipientsOverride)
         return try {
             withContext(ioDispatcher) {
                 // Same endpoint as a topic reply: bddpost.php?config=hfr.inc. All MP routing
@@ -289,11 +290,19 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
      * as-is — it is NOT a quote reference), `subcat=0`, `page`, `sujet`, `pseudo`. `password` is never
      * relayed. This deliberately does not reuse [DefaultReplyRepository.buildFormBody], whose typed
      * `cat`/`numrep` overrides would corrupt the private-message contract.
+     *
+     * #606 — [recipientsOverride] mutates the DT/MultiMP member list **only when the form already
+     * carries a `newdest` key** (HFR serves it to the conversation's owner alone). The override
+     * value replaces HFR's prefilled `newdest` and the key is marked emitted up front, so the
+     * verbatim loop never appends a second `newdest`. Without that guard — a simple participant,
+     * a one-to-one MP, a topic reply — no `newdest` exists, the override is ignored, and any
+     * `newdest` HFR did send is forwarded verbatim (members unchanged).
      */
     private fun buildFormBody(
         form: ReplyForm,
         bbcodeContent: String,
         options: ReplyFormOptions,
+        recipientsOverride: String?,
     ): FormBody {
         val builder = FormBody.Builder(Charsets.UTF_8)
         builder.add("hash_check", form.hashCheck)
@@ -307,6 +316,13 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
         if (options.smileyDisabled) builder.add("smiley", "1")
         if (options.emailNotificationEnabled) builder.add("emaill", "1")
         val emitted = mutableSetOf("hash_check", "verifrequet", "content_form", "signature", "smiley", "emaill")
+        // #606 — owner-only member edit. The `newdest` key presence is the owner guard ; only then
+        // does a non-null override win over the prefill. Mark it emitted so the verbatim loop below
+        // can never duplicate it.
+        if (recipientsOverride != null && form.hiddenFields.containsKey("newdest")) {
+            builder.add("newdest", recipientsOverride)
+            emitted += "newdest"
+        }
         form.hiddenFields.forEach { (key, value) ->
             if (key in emitted) return@forEach
             // Belt-and-braces: ReplyFormParser already drops `password`, never relay it.

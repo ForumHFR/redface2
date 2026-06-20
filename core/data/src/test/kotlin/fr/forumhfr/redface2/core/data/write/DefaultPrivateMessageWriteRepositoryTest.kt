@@ -180,6 +180,81 @@ class DefaultPrivateMessageWriteRepositoryTest {
         assertEquals(0, server.requestCount)
     }
 
+    // #606 — owner manages DT/MultiMP members via a `newdest` override on the reply.
+
+    @Test
+    fun `submitReply forwards newdest verbatim when the owner passes no override`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+
+        val form = ReplyForm(
+            hashCheck = "h",
+            sujet = "s",
+            hiddenFields = mapOf(
+                "cat" to "prive",
+                "post" to "4242424",
+                "newdest" to "alice, bob, Administration",
+            ),
+            isAnonymous = false,
+        )
+        repository.submitReply(context, form, bbcodeContent = "hi") // recipientsOverride defaults to null
+
+        val raw = server.takeRequest().body.readUtf8()
+        val body = parseFormBody(raw)
+        // No edit → HFR's prefilled member list is reposted unchanged, exactly once.
+        assertEquals("alice, bob, Administration", body["newdest"])
+        assertEquals(1, raw.split('&').count { it.startsWith("newdest=") })
+    }
+
+    @Test
+    fun `submitReply ignores a recipientsOverride on a form without newdest (participant)`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+
+        // A simple participant's form has NO `newdest` key — the owner guard blocks the override.
+        val form = ReplyForm(
+            hashCheck = "h",
+            sujet = "s",
+            hiddenFields = mapOf("cat" to "prive", "post" to "4242424"),
+            isAnonymous = false,
+        )
+        repository.submitReply(
+            context,
+            form,
+            bbcodeContent = "hi",
+            recipientsOverride = "alice, intruder",
+        )
+
+        val body = parseFormBody(server.takeRequest().body.readUtf8())
+        assertFalse("a participant override must never introduce newdest", body.containsKey("newdest"))
+    }
+
+    @Test
+    fun `submitReply applies the owner override as a single modified newdest field`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+
+        val form = ReplyForm(
+            hashCheck = "h",
+            sujet = "s",
+            hiddenFields = mapOf(
+                "cat" to "prive",
+                "post" to "4242424",
+                "newdest" to "alice, bob, Administration",
+            ),
+            isAnonymous = false,
+        )
+        repository.submitReply(
+            context,
+            form,
+            bbcodeContent = "hi",
+            recipientsOverride = "bob, Bébé Yoda",
+        )
+
+        val raw = server.takeRequest().body.readUtf8()
+        val body = parseFormBody(raw)
+        // The override wins over the prefill, and exactly one `newdest` is emitted (no duplicate).
+        assertEquals("bob, Bébé Yoda", body["newdest"])
+        assertEquals(1, raw.split('&').count { it.startsWith("newdest=") })
+    }
+
     @Test
     fun `submitReply classifies the empty-message error response`() = runTest {
         server.enqueue(MockResponse().setBody(fixture("write_empty_message_error.html")))

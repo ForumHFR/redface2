@@ -75,7 +75,23 @@ data class ReplyForm(
      * unparseable forms — the repository falls back to `user_id=0`.
      */
     val userId: Int? = null,
-)
+) {
+    /**
+     * #606 — CSV of the DT/MultiMP members HFR prefills inside `<input name="newdest">`, served
+     * **only to the owner** of a group conversation (all current members minus the owner). `null`
+     * when the form has no `newdest` field — i.e. a one-to-one MP, a topic reply, or a group
+     * conversation where the logged-in user is a simple participant (not the owner).
+     *
+     * Read straight off [hiddenFields] (the parser already collects `newdest` in its `else`
+     * branch) rather than from any local source : the owner-only presence of the key is the
+     * single source of truth. The repository re-posts this value verbatim by default
+     * (members unchanged) ; an owner edit overrides it explicitly via `recipientsOverride`.
+     */
+    val manageableRecipients: String? get() = hiddenFields["newdest"]
+
+    /** #606 — true only when HFR served the owner-only `newdest` field (see [manageableRecipients]). */
+    val canManageRecipients: Boolean get() = manageableRecipients != null
+}
 
 /**
  * Per-post options HFR exposes as three checkboxes on the reply form. Captured

@@ -46,6 +46,31 @@ class PrivateMessageReplyFormParserTest {
         assertTrue("hidden fields should not be empty", form.hiddenFields.isNotEmpty())
     }
 
+    @Test
+    fun `a one-to-one MP form is not an owner-managed DT (no newdest)`() {
+        val form = parser.parse(fixture("private_message_thread.html")).getOrThrow()
+
+        // #606 — a regular conversation has no `newdest` field, so the user can't manage members.
+        assertFalse("a one-to-one MP exposes no member editor", form.canManageRecipients)
+        assertEquals(null, form.manageableRecipients)
+    }
+
+    @Test
+    fun `an owner DT form exposes the prefilled member CSV via newdest`() {
+        val form = parser.parse(fixture("private_message_dt_owner_reply_form.html")).getOrThrow()
+
+        assertFalse("authenticated owner form is never anonymous", form.isAnonymous)
+        // #606 — HFR serves `newdest` only to the owner ; the parser already collects it verbatim.
+        assertTrue("owner DT form must expose the member editor", form.canManageRecipients)
+        assertEquals(
+            "alice, bob, Bébé Yoda, stitch+, Administration",
+            form.manageableRecipients,
+        )
+        // The owner-only DT carries owntopic=1 and cat=prive, forwarded verbatim on POST.
+        assertEquals("prive", form.hiddenFields["cat"])
+        assertEquals("1", form.hiddenFields["owntopic"])
+    }
+
     private fun fixture(name: String): String {
         val stream = requireNotNull(
             PrivateMessageReplyFormParserTest::class.java.classLoader?.getResourceAsStream("fixtures/$name"),

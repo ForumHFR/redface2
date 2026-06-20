@@ -36,11 +36,20 @@ interface PrivateMessageWriteRepository {
 
     suspend fun fetchReplyForm(context: PrivateMessageReplyContext): ReplyForm
 
+    /**
+     * POSTs a reply to the conversation. [recipientsOverride] (#606) is honoured **only when the
+     * form is an owner's DT/MultiMP** — i.e. [ReplyForm.canManageRecipients] is true (HFR served
+     * the `newdest` field). When non-null on such a form, the new CSV replaces HFR's prefilled
+     * `newdest`, adding / removing members alongside the posted reply. On any other form (a simple
+     * participant, a one-to-one MP, a topic reply) the override is ignored and `newdest`, if any,
+     * is forwarded verbatim — the safe default that never mutates the member list.
+     */
     suspend fun submitReply(
         context: PrivateMessageReplyContext,
         form: ReplyForm,
         bbcodeContent: String,
         options: ReplyFormOptions = ReplyFormOptions(),
+        recipientsOverride: String? = null,
     ): ReplySubmitResult
 
     /**
