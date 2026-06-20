@@ -65,8 +65,23 @@ fun MessagesScreen(
     // wasUnread is the row's unread state at open-time (#453) : the nav host decrements the unread
     // badge only for a conversation that was actually unread. Not private metadata persisted in any
     // route — a transient signal consumed by the ephemeral nav state.
-    onOpenThread: (threadId: Int, isMultiRecipient: Boolean, openAtPage: Int, wasUnread: Boolean) -> Unit,
+    // openedAtDate is the conversation's last-activity date seen at open-time (#531) : the nav host
+    // keys the read mark on it so a strictly-newer server date can later reconcile (re-unread) it.
+    onOpenThread: (
+        threadId: Int,
+        isMultiRecipient: Boolean,
+        openAtPage: Int,
+        wasUnread: Boolean,
+        openedAtDate: Instant,
+    ) -> Unit,
     readThreadIds: Set<Int> = emptySet(),
+    // #531 — invoked on each fresh page-1 network result with the LOAD GENERATION and the server
+    // conversations, so the host can drop the optimistic read marks HFR now reports as genuinely
+    // unread again (gated by date). The generation lets the host dedupe out-of-composition: the
+    // effect below can refire for the SAME generation when the screen re-enters composition (e.g.
+    // returning from a thread on a stale page-1 Content), so the host ignores a generation it has
+    // already reconciled instead of relying on the effect key alone (Codex BLOCKER 1).
+    onReconcileReadMarks: (generation: Int, conversations: List<PrivateMessageSummary>) -> Unit = { _, _ -> },
     topBarActions: @Composable (() -> Unit)? = null,
     // #301 follow-up — opens the new-conversation composer. Null hides the button.
     onComposeNew: (() -> Unit)? = null,
@@ -81,6 +96,21 @@ fun MessagesScreen(
             // Page 1 always : the created conversation lands at the top of the inbox, and a
             // plain current-page refresh from page 2+ would never surface it.
             viewModel.showFreshInbox()
+        }
+    }
+    // #531 — reconcile optimistic read marks on a genuine page-1 network success. Keyed on the
+    // ViewModel's load generation (not the conversation list) so it fires once per fetch and never on
+    // a bare recomposition. The effect can still REFIRE for the same generation when the screen
+    // re-enters composition (thread → back lands on a stale page-1 Content), so the actual once-per-
+    // generation guarantee lives in the host (Codex BLOCKER 1): the generation is forwarded and the
+    // host ignores any generation it has already reconciled. Page 1 only: it is where HFR re-signals a
+    // thread unread, and a conversation appears on a single inbox page so reconciling elsewhere adds
+    // nothing.
+    val currentMode = state.mode
+    LaunchedEffect(state.networkLoadGeneration) {
+        val freshContent = currentMode as? MessagesUiState.Mode.Content
+        if (state.networkLoadGeneration > 0 && state.page == 1 && freshContent != null) {
+            onReconcileReadMarks(state.networkLoadGeneration, freshContent.conversations)
         }
     }
 
@@ -190,6 +220,9 @@ fun MessagesScreen(
                                 // effectiveConversation already folds the local read override, so a
                                 // re-opened (now read) row correctly reports wasUnread = false (#453).
                                 conversation.hasUnread,
+                                // #531 — the conversation's last-activity date seen now: the host keys
+                                // the read mark on it for the strictly-newer-date reconciliation.
+                                conversation.date,
                             )
                         },
                     )
