@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -97,17 +98,23 @@ class PostCardShellTest {
     }
 
     @Test
-    fun `identity band renders its content highlighted and not`() {
+    fun `identity band hosts its content under any caller-supplied tint`() {
         composeTestRule.setContent {
             RedfaceTheme {
-                PostIdentityBand(highlighted = true, content = { Text("highlighted band") })
-                PostIdentityBand(highlighted = false, content = { Text("normal band") })
+                // The tint is the call-site's decision (containerColor), not the band's: it hosts the
+                // content slot whatever colour it is given — the structural contract a non-pixel test pins.
+                PostIdentityBand(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    content = { Text("anchor band") },
+                )
+                PostIdentityBand(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    content = { Text("normal band") },
+                )
             }
         }
 
-        // The tint differs by `highlighted` (tertiaryContainer vs secondaryContainer); both states
-        // host their content slot, which is the structural contract a non-pixel test can pin.
-        composeTestRule.onNodeWithText("highlighted band").assertIsDisplayed()
+        composeTestRule.onNodeWithText("anchor band").assertIsDisplayed()
         composeTestRule.onNodeWithText("normal band").assertIsDisplayed()
     }
 }

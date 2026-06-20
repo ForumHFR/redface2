@@ -9,6 +9,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 
 /**
  * #351 — the neutral anatomy shared by the topic post card and the private-message thread card.
@@ -64,31 +65,27 @@ fun PostCardShell(
 }
 
 /**
- * #351/#104 — the topic's tinted identity strip: a full-width [Surface] across the top of the card
- * that hosts the [content] (a [PostIdentityHeader]). Extracted as its own primitive (per the Codex
- * framing) instead of a `highlighted` flag on [PostCardShell], so the band-less private-message card
- * never inherits a strip it does not use.
+ * #351/#104 — a tinted identity strip: a full-width [Surface] across the top of the card that hosts
+ * the [content] (a [PostIdentityHeader]). Extracted as its own primitive (per the Codex framing)
+ * instead of a flag on [PostCardShell], so the band-less private-message card never inherits a strip
+ * it does not use.
  *
- * The colour switches on [highlighted]: [MaterialTheme.colorScheme.tertiaryContainer] for the
- * scroll-anchor post (#104 — quote link / deep link / last-read landing, findable without the old
- * card+band double highlight), [MaterialTheme.colorScheme.secondaryContainer] otherwise. The `Surface`
- * sets `LocalContentColor` to the matching on-container colour for the header's pseudo, and the
+ * The tint is the call-site's decision, not `:core:ui`'s: [containerColor] is passed in (the topic
+ * supplies `tertiaryContainer` for the scroll-anchor post #104 — quote link / deep link / last-read
+ * landing — and `secondaryContainer` otherwise; that semantics lives in the feature, not here). The
+ * `Surface` derives `LocalContentColor` from [containerColor] for the header's pseudo, and the
  * enclosing `Card` clips the strip to its rounded corners. The strip's inner padding is the call-site's
  * job (the topic reads it from its density preset), so the band adds none.
  */
 @Composable
 fun PostIdentityBand(
     content: @Composable () -> Unit,
+    containerColor: Color,
     modifier: Modifier = Modifier,
-    highlighted: Boolean = false,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = if (highlighted) {
-            MaterialTheme.colorScheme.tertiaryContainer
-        } else {
-            MaterialTheme.colorScheme.secondaryContainer
-        },
+        color = containerColor,
     ) {
         content()
     }

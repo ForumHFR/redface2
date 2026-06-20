@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 
@@ -55,13 +56,15 @@ fun PostIdentityHeader(
     onAuthorClick: (() -> Unit)? = null,
     onAuthorClickLabel: String? = null,
     avatarContentDescription: String? = null,
+    avatarSpacing: Dp = DEFAULT_AVATAR_SPACING,
+    lineSpacing: Dp = DEFAULT_LINE_SPACING,
     pseudo: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
     subline: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(avatarSpacing),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val avatarModifier = if (onAvatarClick != null) {
@@ -83,7 +86,7 @@ fun PostIdentityHeader(
         )
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(lineSpacing),
         ) {
             if (pseudo != null) {
                 pseudo()
@@ -116,3 +119,9 @@ fun PostIdentityHeader(
         trailing?.invoke()
     }
 }
+
+/** Default avatar↔identity gap. Overridable by the call-site (#351 — density stays feature-owned). */
+private val DEFAULT_AVATAR_SPACING: Dp = 12.dp
+
+/** Default pseudo↔date gap. Overridable by the call-site (#351 — density stays feature-owned). */
+private val DEFAULT_LINE_SPACING: Dp = 2.dp
