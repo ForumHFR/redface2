@@ -169,6 +169,14 @@ data class PrivateMessageThreadRoute(
 data class PrivateMessageReplyRoute(
     val threadId: Int,
     val page: Int = 1,
+    /**
+     * #618 — when true, the reply composer auto-opens its « Gérer les destinataires » bottom sheet on
+     * mount (once the form has loaded and the owner-only member editor is available). Set by the
+     * « Gérer les destinataires » entry of the conversation's Participants sheet; `false` on the
+     * normal « Répondre » path. A plain serializable Boolean — kotlinx-serialization handles it with
+     * no custom NavType.
+     */
+    val openRecipientManager: Boolean = false,
 ) : RedfaceNavKey
 
 /**
@@ -1714,6 +1722,17 @@ private fun RedfaceNavHost(
                     onReply = { threadId, page ->
                         backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
                     },
+                    // #618 — owner-only « Gérer les destinataires » entry from the Participants sheet:
+                    // open the reply composer with its recipient-manager sheet auto-opened.
+                    onManageRecipients = { threadId, page ->
+                        backStack.add(
+                            PrivateMessageReplyRoute(
+                                threadId = threadId,
+                                page = page,
+                                openRecipientManager = true,
+                            ),
+                        )
+                    },
                     topBarActions = accountMenu,
                 )
             }
@@ -1722,6 +1741,7 @@ private fun RedfaceNavHost(
                     request = PrivateMessageReplyRequest(
                         threadId = route.threadId,
                         page = route.page,
+                        openRecipientManager = route.openRecipientManager,
                     ),
                     onSubmitSucceeded = { threadId, page ->
                         // Pop the editor, then replace the conversation entry with a fresh key

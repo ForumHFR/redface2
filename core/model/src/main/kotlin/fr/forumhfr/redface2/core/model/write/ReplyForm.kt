@@ -75,6 +75,22 @@ data class ReplyForm(
      * unparseable forms — the repository falls back to `user_id=0`.
      */
     val userId: Int? = null,
+    /**
+     * #618 — read-only roster CSV of a DT/MultiMP, surfaced for the « Participants » sheet of EVERY
+     * member, not just the owner. HFR exposes the full member list (minus the viewer) in two shapes
+     * on `message.php` :
+     *  - OWNER : the editable `<input name="newdest">` value → identical to [manageableRecipients].
+     *  - NON-OWNER : the read-only text of the « Destinataires » row (`<td class="repCase2">`'s
+     *    `<span>`), since HFR serves no `newdest` to a simple participant.
+     *
+     * `null` when the form carries no « Destinataires » row at all — a one-to-one MP or a topic
+     * reply. Defaulted to `null` so the dozens of [ReplyForm] construction sites (fakes, repository
+     * tests) keep compiling unchanged ; the parser is the single producer of a non-null value.
+     *
+     * [canManageRecipients] (the EDIT permission) stays tied to the owner-only `newdest` input — a
+     * non-owner gets a roster to read but never the member editor.
+     */
+    val recipientsRoster: String? = null,
 ) {
     /**
      * #606 — CSV of the DT/MultiMP members HFR prefills inside `<input name="newdest">`, served

@@ -9,8 +9,11 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -18,19 +21,24 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -358,6 +366,70 @@ private fun MessageOptionToggle(
             modifier = Modifier.padding(end = 16.dp),
         )
         Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+    }
+}
+
+/**
+ * #618 (Bug 1) — compact owner-only recipients summary shown in the reply composer in place of the
+ * old inline editor. « Destinataires : N » + a « Gérer » action; the tap opens the dedicated
+ * [RecipientManagerSheet] so the message body and the send bar stay reachable (the inline editor used
+ * to crowd them out, especially for a 29+-member DT). Gated by `canManageRecipients` at the call site.
+ */
+@Composable
+internal fun MessageRecipientsSummary(count: Int, onManage: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = stringResource(R.string.messages_recipients_summary, count),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(onClick = onManage) {
+            Text(text = stringResource(R.string.messages_recipients_manage))
+        }
+    }
+}
+
+/**
+ * #618 (Bug 1) — bottom sheet hosting the DT/MultiMP member editor, moved out of the composer flow.
+ * Wraps the existing [MessageRecipientsEditor] (chips + add field) in a height-capped, scrollable
+ * column so a 29+-member DT scrolls inside the sheet instead of pushing the composer off-screen. The
+ * change still ships with the reply (HFR mutates members only via a posted reply, #606 wiring
+ * unchanged) — closing the sheet just returns to the composer. `navigationBarsPadding()` + the sheet's
+ * own IME handling keep the add field above the keyboard.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+@Suppress("LongParameterList") // List + 2 edit callbacks + enabled + dismiss — each call-site distinct.
+internal fun RecipientManagerSheet(
+    recipients: List<String>,
+    enabled: Boolean,
+    onAddRecipient: (String) -> Unit,
+    onRemoveRecipient: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 480.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .imePadding()
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            MessageRecipientsEditor(
+                recipients = recipients,
+                enabled = enabled,
+                onAddRecipient = onAddRecipient,
+                onRemoveRecipient = onRemoveRecipient,
+            )
+        }
     }
 }
 

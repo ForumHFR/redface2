@@ -72,10 +72,18 @@
     <string name="messages_roster_title">Participants</string>
     <string name="messages_roster_loading">Chargement des participants…</string>
     <string name="messages_roster_unavailable_title">Liste indisponible</string>
-    <string name="messages_roster_unavailable_body">Seul le créateur de la discussion peut voir la liste complète des participants.</string>
+    <!-- #618 — n'apparaît plus que pour un MP individuel (pas de ligne « Destinataires ») : un
+         participant d'une discussion de groupe voit désormais la liste complète. -->
+    <string name="messages_roster_unavailable_body">Cette conversation ne comporte pas de liste de participants.</string>
     <string name="messages_roster_error">Impossible de charger les participants.</string>
+    <!-- #618 — entrée vers l'éditeur de membres, réservée au créateur. -->
+    <string name="messages_roster_manage">Gérer les destinataires</string>
     <plurals name="messages_roster_count">
         <item quantity="one">%1$d participant</item>
         <item quantity="other">%1$d participants</item>
     </plurals>
+
+    <!-- #618 — bouton compact « Destinataires : N — Gérer » au-dessus du corps du composer (créateur). -->
+    <string name="messages_recipients_summary">Destinataires : %1$d</string>
+    <string name="messages_recipients_manage">Gérer</string>
 </resources>

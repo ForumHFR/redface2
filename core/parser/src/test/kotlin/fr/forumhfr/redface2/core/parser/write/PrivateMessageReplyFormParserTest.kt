@@ -84,6 +84,29 @@ class PrivateMessageReplyFormParserTest {
         // The message.php form renders options as real checkboxes — signature is the checked default.
         assertTrue("signature is the checked default on the message.php form", form.options.signatureEnabled)
         assertEquals("1", form.msgIcon)
+        // #618 — the owner roster mirrors the editable newdest value verbatim.
+        assertEquals("alice, bob, Bébé Yoda, stitch+, Administration", form.recipientsRoster)
+    }
+
+    @Test
+    fun `a non-owner DT message_php form exposes the read-only roster but no member editor`() {
+        // #618 — a simple participant gets the « Destinataires » row as READ-ONLY text (a <span>),
+        // with NO <input name="newdest">. The roster is still readable for the « Participants » sheet,
+        // but the member editor stays owner-only.
+        val form = parser.parse(fixture("private_message_dt_participant_reply_form.html")).getOrThrow()
+
+        assertFalse("a non-owner has no editable newdest input", form.canManageRecipients)
+        assertEquals(null, form.manageableRecipients)
+        // The full roster (minus self) is parsed from the read-only span, trimmed.
+        assertEquals("TestOwner, alice, bob, Bébé Yoda, stitch+, Administration", form.recipientsRoster)
+    }
+
+    @Test
+    fun `a reply form without a Destinataires row exposes no roster`() {
+        // #618 — a one-to-one MP / topic reply has no « Destinataires » row at all → null roster.
+        val form = parser.parse(fixture("private_message_thread.html")).getOrThrow()
+
+        assertEquals(null, form.recipientsRoster)
     }
 
     private fun fixture(name: String): String {

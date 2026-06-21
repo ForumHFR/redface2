@@ -44,6 +44,9 @@ internal fun ParticipantRosterSheet(
     roster: PrivateMessageThreadUiState.Roster,
     onDismiss: () -> Unit,
     onRetry: () -> Unit,
+    // #618 — owner-only « Gérer les destinataires » entry. Closes the sheet then navigates to the
+    // reply composer with the recipient-manager sheet auto-opened. Null = entry not wired (defensive).
+    onManageRecipients: () -> Unit = {},
 ) {
     // Hidden = the sheet is closed; render nothing.
     if (roster is PrivateMessageThreadUiState.Roster.Hidden) return
@@ -66,7 +69,11 @@ internal fun ParticipantRosterSheet(
                 // Already handled by the early return, but the `when` must be exhaustive.
                 PrivateMessageThreadUiState.Roster.Hidden -> Unit
                 PrivateMessageThreadUiState.Roster.Loading -> RosterLoading()
-                is PrivateMessageThreadUiState.Roster.Loaded -> RosterList(members = roster.members)
+                is PrivateMessageThreadUiState.Roster.Loaded -> RosterList(
+                    members = roster.members,
+                    canManageRecipients = roster.canManageRecipients,
+                    onManageRecipients = onManageRecipients,
+                )
                 PrivateMessageThreadUiState.Roster.Unavailable -> RosterUnavailable()
                 is PrivateMessageThreadUiState.Roster.Error -> RosterError(roster = roster, onRetry = onRetry)
             }
@@ -89,7 +96,11 @@ private fun RosterLoading() {
 }
 
 @Composable
-private fun RosterList(members: List<String>) {
+private fun RosterList(
+    members: List<String>,
+    canManageRecipients: Boolean,
+    onManageRecipients: () -> Unit,
+) {
     Text(
         text = pluralStringResource(R.plurals.messages_roster_count, members.size, members.size),
         style = MaterialTheme.typography.labelLarge,
@@ -116,6 +127,13 @@ private fun RosterList(members: List<String>) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+    }
+    // #618 — owner-only entry to the member editor. A participant reads the roster but cannot edit it
+    // (HFR mutates members only via an owner reply), so the button is gated on canManageRecipients.
+    if (canManageRecipients) {
+        Button(onClick = onManageRecipients, modifier = Modifier.fillMaxWidth()) {
+            Text(text = stringResource(R.string.messages_roster_manage))
         }
     }
 }

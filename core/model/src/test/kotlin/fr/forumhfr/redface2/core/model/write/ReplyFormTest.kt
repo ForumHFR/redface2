@@ -40,4 +40,29 @@ class ReplyFormTest {
         assertTrue(replyForm.canManageRecipients)
         assertEquals("alice, bob, Bébé Yoda, stitch+, Administration", replyForm.manageableRecipients)
     }
+
+    @Test
+    fun `recipientsRoster defaults to null and is independent of canManageRecipients`() {
+        // #618 — recipientsRoster is the parser-supplied read-only roster; on a hand-built form it
+        // defaults to null and does NOT affect the owner-detection contract.
+        val replyForm = form(mapOf("newdest" to "alice, bob"))
+        assertNull(replyForm.recipientsRoster)
+        assertTrue("newdest still drives manageability", replyForm.canManageRecipients)
+    }
+
+    @Test
+    fun `a non-owner form can carry a roster without being manageable`() {
+        // #618 — the parser sets recipientsRoster from a read-only span for a participant: roster
+        // present, but no newdest → not manageable.
+        val replyForm = ReplyForm(
+            hashCheck = "h",
+            sujet = "s",
+            hiddenFields = mapOf("cat" to "prive", "post" to "4242424"),
+            isAnonymous = false,
+            recipientsRoster = "TestOwner, alice, bob",
+        )
+        assertEquals("TestOwner, alice, bob", replyForm.recipientsRoster)
+        assertFalse("no newdest input → cannot manage", replyForm.canManageRecipients)
+        assertNull(replyForm.manageableRecipients)
+    }
 }
