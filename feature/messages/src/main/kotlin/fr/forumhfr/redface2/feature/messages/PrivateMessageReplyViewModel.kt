@@ -156,7 +156,14 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         _state.update { it.copy(isLoadingForm = true, formError = false) }
         formJob = viewModelScope.launch {
             try {
-                val form = repository.fetchReplyForm(context)
+                // #618 — when the user came specifically to MANAGE recipients, the form MUST be the
+                // message.php one carrying `newdest` (owner) ; refuse the forum2.php quick-reply
+                // fallback (no newdest → no member editor → silently lands on a plain composer). A
+                // failed message.php GET then surfaces as a form error (retry) rather than a dead end.
+                val form = repository.fetchReplyForm(
+                    context,
+                    allowEmbeddedFallback = !request.openRecipientManager,
+                )
                 if (form.isAnonymous) {
                     // Session vanished between opening the thread and replying — treat like a form
                     // error so the user re-authenticates (the reply route is only reachable while

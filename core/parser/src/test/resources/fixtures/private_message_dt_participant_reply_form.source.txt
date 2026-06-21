@@ -1,0 +1,19 @@
+Provenance — private_message_dt_participant_reply_form.html (#618 / #612)
+
+STRUCTURE VÉRIFIÉE LIVE (capture authentifiée d'un DT dont le compte n'est PAS le créateur,
+2026-06-21). Le HTML de cette fixture est MODELÉ sur cette capture réelle puis SANITISÉ — il n'est
+pas une supposition.
+
+Fait structurel reproduit fidèlement (ce qui distingue le non-owner de l'owner) :
+- la ligne « Destinataires » du formulaire message.php d'un NON-OWNER est rendue en LECTURE SEULE :
+    <th class="repCase1">Destinataires</th>
+    <td class="repCase2"><span style="font-size:12px;">{liste CSV, hors soi}</span></td>
+  AUCUN <input name="newdest"> (réservé à l'owner, qui a un champ éditable au même endroit).
+- la liste exclut le lecteur (soi), exactement comme le `newdest` de l'owner.
+
+Le parser (ReplyFormParser.parseRecipientsRoster) résout la cellule par le label « Destinataires »
+du <th>, pas par un index positionnel — robuste aux colonnes voisines.
+
+SANITISATION : tous les pseudos sont bidons (TestOwner, alice, bob, « Bébé Yoda », « stitch+ »,
+Administration), hash_check = "TESTHASH", aucun contenu de message privé réel. Le brut de la capture
+live (pseudos + hash de session réels) n'est PAS conservé (PII).

@@ -322,6 +322,22 @@ class DefaultMpStorageRepository @Inject constructor(
         hfrClient.submitPrivateMessageEdit(postBody)
         diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, "writeBackFlag POSTed → verifying")
 
+        // IDENTITY GUARD (C2) — the POST suspends ; re-check before the verify re-read so the GET does
+        // not run under a switched session (it would re-read the wrong account's document with this
+        // thread's id and could mislabel the result). The write itself already happened under the right
+        // session ; if the account changed now, surface it loud rather than verify against the wrong one.
+        if (activePseudo() != pseudo) {
+            diagnostics.record(
+                DiagnosticsLog.Level.ERROR,
+                LOG_TAG,
+                "writeBackFlag: active account changed after POST, before verify → unverifiable",
+            )
+            return MpStorageWriteResult.VerificationFailedRestoreFailed(
+                mutatedBody.toByteArray(Charsets.UTF_8).size,
+                actualBytes = 0,
+            )
+        }
+
         val readBack = reReadContentForm(location)
         if (readBack == mutatedBody) {
             diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, "writeBackFlag verified OK")
