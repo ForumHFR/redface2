@@ -16,6 +16,33 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## v177 — `0.16.0` — `local` (beta) — 2026-06-20
+
+> Le `v177` est indicatif : le `versionCode` réel est alloué au dispatch par le registre de tags git
+> (`max(app-v*) + 1`). Statut `local` jusqu'au ship beta (→ `open`). versionName bumpé 0.15.0 → 0.16.0.
+
+Bêta **0.16.0** (open testing) — consolide le dev depuis la bêta 0.15.0 (`v174`). Revue 4-flavor
+(code-review + review holistique + superpowers + Codex, seuil >60, **0 bloquant**) avant le cut.
+
+**Nouveautés**
+
+- **DT/MultiMP — gérer les membres** (#606/#612) : le créateur d'un DT peut ajouter ou retirer des
+  destinataires (via un post de réponse) ; HFR ajoute un message « Modération ». Correctif décisif :
+  le formulaire de gestion est lu depuis `message.php` (le champ `newdest` y vit, pas dans la réponse
+  rapide) — sans quoi l'éditeur ne s'affichait jamais.
+- **DT — liste des participants** (#612) : bouton « Participants » → feuille déroulante (gère les gros DT).
+- **Synchro position de lecture DT** (#597) : remontée auto vers le stockage MPStorage partagé (DTCloud),
+  **en option, désactivée par défaut**, et seulement pour les DT déjà suivis (jamais de création/pollution).
+- **Emojis qui tronquaient un message** (#594/#114) : caractères non supportés par HFR retirés avant l'envoi.
+
+**Coulisses**
+
+- Réconciliation lu/non-lu des MP avec le serveur (#531, cas re-unread, best-effort, gaté par date).
+- Factorisation de la liste de posts topic↔MP (#351 c1/c2/c3 : `PostCardShell`/`PostListScaffold`/
+  `PostIdentityHeader` partagés) — aucun changement visible (diff topic strictement nul).
+
+---
+
 ## v174 — `0.15.0` — `open` (beta) — 2026-06-19
 
 Bêta **0.15.0** (open testing) — promotion de tout le dev depuis la bêta 0.14.0 (`v156`). Revue 4-flavor

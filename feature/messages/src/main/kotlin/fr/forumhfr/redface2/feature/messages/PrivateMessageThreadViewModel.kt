@@ -10,7 +10,12 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
+import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
+import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
+import fr.forumhfr.redface2.core.model.write.ReplyForm
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -35,6 +40,8 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private val repository: MessagesRepository,
     private val authRepository: AuthRepository,
     private val readPositionStore: PrivateMessageReadPositionStore,
+    private val mpStorageRepository: MpStorageRepository,
+    private val writeRepository: PrivateMessageWriteRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PrivateMessageThreadUiState.initial(request))
@@ -49,6 +56,12 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     // #430 — single in-flight position write, latest-wins (cf. savePosition).
     private var saveJob: Job? = null
     private var authenticatedPseudo: String? = null
+
+    // #612 — participant roster. Single in-flight fetch (dedup on rapid taps / recomposition) and a
+    // memory cache for the life of the screen: re-opening the sheet reuses the parsed list without a
+    // second network round-trip. `null` means « not yet loaded ».
+    private var rosterJob: Job? = null
+    private var cachedRosterForm: ReplyForm? = null
 
     init {
         viewModelScope.launch {
@@ -86,10 +99,110 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         load(current.page)
     }
 
+    /**
+     * #612 — open the « Participants » sheet. LAZY (Codex framing): the reply form is fetched here,
+     * on demand, never on screen entry — it is an owner-only, rarely-used GET that also carries a
+     * session `hash_check`. A cached form (from a previous open this screen-life) is reused, so
+     * re-opening is instant. The fetch is deduplicated: a tap while a load is already in flight is a
+     * no-op rather than a second round-trip.
+     */
+    fun openRoster() {
+        // Reuse the cached form if we already loaded it this screen-life (no second GET).
+        cachedRosterForm?.let { form ->
+            _state.update { it.copy(roster = form.toRoster(authenticatedPseudo)) }
+            return
+        }
+        if (rosterJob?.isActive == true) {
+            // A fetch is already running (e.g. a double tap) — just make sure the sheet is open.
+            _state.update { it.copy(roster = PrivateMessageThreadUiState.Roster.Loading) }
+            return
+        }
+        loadRoster()
+    }
+
+    /** #612 — retry a failed roster load, from the sheet's retry affordance. */
+    fun retryRoster() {
+        if (rosterJob?.isActive == true) return
+        loadRoster()
+    }
+
+    /** #612 — close the sheet. The cached form survives so the next open is instant. */
+    fun dismissRoster() {
+        // Cancel any in-flight load so a late response can't flip the roster back to Loaded/Error and
+        // reopen the just-dismissed sheet (Codex).
+        rosterJob?.cancel()
+        _state.update { it.copy(roster = PrivateMessageThreadUiState.Roster.Hidden) }
+    }
+
+    private fun loadRoster() {
+        if (authenticatedPseudo == null) {
+            clearPrivateState()
+            return
+        }
+        _state.update { it.copy(roster = PrivateMessageThreadUiState.Roster.Loading) }
+        rosterJob = viewModelScope.launch {
+            try {
+                val form = writeRepository.fetchReplyForm(
+                    PrivateMessageReplyContext(
+                        threadId = request.threadId,
+                        page = _state.value.page.coerceAtLeast(1),
+                    ),
+                    // The roster NEEDS newdest (message.php only); never degrade to the quick-reply
+                    // form on a follow-GET failure — surface it as Error+retry instead (Codex).
+                    allowEmbeddedFallback = false,
+                )
+                cachedRosterForm = form
+                _state.update { it.copy(roster = form.toRoster(authenticatedPseudo)) }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (
+                // #316 — the raw message can embed the private conversation URL: surface only the
+                // type-derived kind (classifyHfrError), never the throwable text.
+                @Suppress("TooGenericExceptionCaught") error: Exception,
+            ) {
+                _state.update {
+                    it.copy(roster = PrivateMessageThreadUiState.Roster.Error(classifyHfrError(error)))
+                }
+            }
+        }
+    }
+
+    /**
+     * #612 / #618 — maps a loaded reply form to a roster state. HFR ships the member list (MINUS the
+     * viewer — it never lists you in your own row) two ways on message.php:
+     *  - OWNER : the editable `newdest` input → `canManageRecipients` true, roster from
+     *    [ReplyForm.recipientsRoster] (falls back to [manageableRecipients] for a form built before
+     *    #618 / a test fake that only sets `newdest`).
+     *  - NON-OWNER : the read-only « Destinataires » span → `canManageRecipients` false, roster from
+     *    [ReplyForm.recipientsRoster].
+     *
+     * Either way the roster prepends [owner] so the sheet shows the FULL group including the viewer
+     * (Codex). Only a form with NO roster at all (a one-to-one MP) maps to
+     * [PrivateMessageThreadUiState.Roster.Unavailable]. The `canManageRecipients` flag is forwarded so
+     * the sheet offers the owner-only « Gérer les destinataires » entry to the owner alone.
+     */
+    private fun ReplyForm.toRoster(owner: String?): PrivateMessageThreadUiState.Roster {
+        val rosterCsv = recipientsRoster
+            ?: manageableRecipients
+            ?: return PrivateMessageThreadUiState.Roster.Unavailable
+        val members = RecipientCsv.parse(rosterCsv)
+        val full = if (owner != null && members.none { it == owner.trim() }) {
+            listOf(owner.trim()) + members
+        } else {
+            members
+        }
+        return PrivateMessageThreadUiState.Roster.Loaded(
+            members = full,
+            canManageRecipients = canManageRecipients,
+        )
+    }
+
     private fun clearPrivateState() {
         authenticatedPseudo = null
         loadJob?.cancel()
         saveJob?.cancel()
+        rosterJob?.cancel()
+        cachedRosterForm = null
         _state.value = PrivateMessageThreadUiState.initial(request)
             .copy(mode = PrivateMessageThreadUiState.Mode.RequiresLogin)
     }
@@ -168,7 +281,10 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                     isRefreshing = false,
                 )
             }
-            savePosition(thread.page, owner)
+            // The anchor of the LAST post on the landed page — the furthest the reader can have reached
+            // on it. Null when the page has no posts (defensive); the auto MPStorage update then keeps
+            // any existing anchor rather than nulling it.
+            savePosition(thread.page, owner, lastPostNumreponse = thread.messages.lastOrNull()?.numreponse)
         } catch (cancellation: CancellationException) {
             // Deliberately does NOT clear isRefreshing: a cancellation only comes from a
             // superseding load() (which owns the flag from its own start) or from
@@ -210,7 +326,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
      *   started; if the active session changed before this write fires, it is dropped (the
      *   store also re-resolves the active session and no-ops when none is left).
      */
-    private fun savePosition(page: Int, owner: String) {
+    private fun savePosition(page: Int, owner: String, lastPostNumreponse: Int?) {
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             if (owner != authenticatedPseudo) return@launch
@@ -221,6 +337,50 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
                 // Swallowed: the resume position is a nicety, never worth surfacing an error.
             }
+            syncMpStoragePosition(page, owner, lastPostNumreponse)
+        }
+    }
+
+    /**
+     * #597 — best-effort AUTO sync of the landed reading position to the shared MPStorage document,
+     * inside the SAME [saveJob] launch as the local save (so it shares its serialize-latest-wins and
+     * session guards) and AFTER it (the local write is the source of truth ; the remote sync is a
+     * bonus that must never delay or break the local save).
+     *
+     * UPDATE-ONLY ([MpStorageRepository.writeBackFlagIfPresent]) : it only refreshes a `threadId` the
+     * document ALREADY tracks (DTCloud's DT conversations) and NEVER adds a new entry from a passive
+     * page land (anti-pollution of the cross-userscript storage). The whole call is silent : the opt-in
+     * is OFF by default (no network then), and any failure — transport, session, an unwritable document —
+     * is swallowed. A null [numreponse] preserves the entry's existing anchor (the repository keeps it).
+     *
+     * Re-checks the session AFTER the local save's suspension point: the launch's initial
+     * `owner == authenticatedPseudo` guard only held when the job started, but `savePage` suspends, so
+     * the active account may have changed in between. We must never write the shared MPStorage document
+     * under a session other than the one that actually read this page (invariant: authenticated user only).
+     */
+    private suspend fun syncMpStoragePosition(page: Int, owner: String, numreponse: Int?) {
+        if (owner != authenticatedPseudo) return
+        try {
+            mpStorageRepository.writeBackFlagIfPresent(
+                MpStorageFlagEntry(
+                    threadId = request.threadId,
+                    page = page,
+                    numreponse = numreponse,
+                    // uri↔page coherence: only emit a fresh desktop uri when the anchor is known (so the
+                    // uri's #t<anchor> matches the page). With no anchor, pass null → the update-only path
+                    // PRESERVES both the existing href AND uri rather than minting an anchorless / stale uri.
+                    uri = numreponse?.let { buildDesktopUri(request.threadId, page, it) },
+                ),
+                // IDENTITY GUARD (C2) — the owner we snapshotted for THIS read. The repo re-resolves the
+                // active pseudo and refuses (no POST) if it switched since this VM's own session re-check
+                // above, closing the account-switch race across the repository's own suspension points.
+                expectedPseudo = owner,
+            )
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (@Suppress("TooGenericExceptionCaught") _: Exception) {
+            // Swallowed: the MPStorage sync is a bonus on top of the (already done) local save. A failure
+            // must never break the reading session — the local resume position is the source of truth.
         }
     }
 
@@ -229,3 +389,13 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         fun create(request: PrivateMessageThreadRequest): PrivateMessageThreadViewModel
     }
 }
+
+/**
+ * Rebuilds the canonical DTCloud desktop URI for an MPStorage `mpFlags.list[]` entry (#597) :
+ * `/forum2.php?config=hfr.inc&cat=prive&post=<threadId>&page=<page>#t<numreponse>`. This is the exact
+ * shape DTCloud stores (cf. the MpStorage parser fixtures) — relative path, the `t<numreponse>` anchor
+ * as a fragment. The caller only builds it when the anchor is known, so the `#t…` fragment always
+ * matches the page (uri↔page coherence); with no anchor the entry keeps its existing uri instead.
+ */
+internal fun buildDesktopUri(threadId: Int, page: Int, numreponse: Int): String =
+    "/forum2.php?config=hfr.inc&cat=prive&post=$threadId&page=$page#t$numreponse"

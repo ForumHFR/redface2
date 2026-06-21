@@ -176,6 +176,17 @@ class MpStorageInspectorViewModelTest {
             // Read-only inspector: a write must NEVER happen here — fail loudly if one slips in (Codex review).
             override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
                 error("Unexpected writeBackFlag call in the read-only inspector test")
+
+            override suspend fun writeBackFlagIfPresent(
+                entry: MpStorageFlagEntry,
+                expectedPseudo: String,
+            ): MpStorageWriteResult =
+                error("Unexpected writeBackFlagIfPresent call in the read-only inspector test")
+
+            override suspend fun previewWriteBackFlag(
+                entry: MpStorageFlagEntry,
+            ): fr.forumhfr.redface2.core.domain.mpstorage.MpStorageWritePreview =
+                error("Unexpected previewWriteBackFlag call in the read-only inspector test")
         }
         val auth = FakeAuthRepository(AuthState.Authenticated("Alice"))
         val viewModel = MpStorageInspectorViewModel(repo, FakeLocationStore(), auth)
@@ -225,6 +236,17 @@ class MpStorageInspectorViewModelTest {
         // Read-only inspector: a write must NEVER happen here — fail loudly if one slips in (Codex review).
         override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
             error("Unexpected writeBackFlag call in the read-only inspector test")
+
+        override suspend fun writeBackFlagIfPresent(
+            entry: MpStorageFlagEntry,
+            expectedPseudo: String,
+        ): MpStorageWriteResult =
+            error("Unexpected writeBackFlagIfPresent call in the read-only inspector test")
+
+        override suspend fun previewWriteBackFlag(
+            entry: MpStorageFlagEntry,
+        ): fr.forumhfr.redface2.core.domain.mpstorage.MpStorageWritePreview =
+            error("Unexpected previewWriteBackFlag call in the read-only inspector test")
     }
 
     private class FakeLocationStore(

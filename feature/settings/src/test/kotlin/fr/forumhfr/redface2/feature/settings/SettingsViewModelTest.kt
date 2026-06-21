@@ -1315,6 +1315,46 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `init hydrates the experimental MPStorage write opt-in from the persisted preference`() = runTest {
+        repository.emitSyncPrivateMessagesWriteEnabled(true)
+
+        val viewModel = newViewModel()
+
+        assertTrue(viewModel.state.value.syncPrivateMessagesWriteEnabled)
+        assertFalse(viewModel.state.value.syncPrivateMessagesWriteEnabledError)
+    }
+
+    @Test
+    fun `the MPStorage write opt-in is OFF by default and a flip persists`() = runTest {
+        val viewModel = newViewModel()
+        assertFalse(
+            "the experimental write opt-in must be off by default",
+            viewModel.state.value.syncPrivateMessagesWriteEnabled,
+        )
+
+        viewModel.submit(SettingsIntent.SyncPrivateMessagesWriteEnabledChanged(true))
+
+        assertTrue(viewModel.state.value.syncPrivateMessagesWriteEnabled)
+        assertFalse(viewModel.state.value.isUpdatingSyncPrivateMessagesWriteEnabled)
+        assertEquals(1, repository.syncPrivateMessagesWriteEnabledSetCalls)
+    }
+
+    @Test
+    fun `the MPStorage write opt-in reverts and raises the error flag on persist failure`() = runTest {
+        repository.failOnSyncPrivateMessagesWriteEnabledSet = true
+        val viewModel = newViewModel()
+
+        viewModel.submit(SettingsIntent.SyncPrivateMessagesWriteEnabledChanged(true))
+
+        assertFalse(
+            "must revert to the previous value on failure",
+            viewModel.state.value.syncPrivateMessagesWriteEnabled,
+        )
+        assertFalse(viewModel.state.value.isUpdatingSyncPrivateMessagesWriteEnabled)
+        assertTrue(viewModel.state.value.syncPrivateMessagesWriteEnabledError)
+    }
+
+    @Test
     fun `theme hydration race - a stale initial DataStore emission must not overwrite a local mode change`() =
         runTest {
             // Mirror of the ignoreTopicCache startup-race test for ThemeMode (#286, Codex nit): init
@@ -1925,6 +1965,25 @@ class SettingsViewModelTest {
 
         override suspend fun setShowDtSection(enabled: Boolean) {
             showDtSection.value = enabled
+        }
+
+        // #6 — experimental MPStorage write-back opt-in. Rich seam (set-call counter + fail flag +
+        // emit helper) so the Settings tests can assert hydration, the repo call, and revert-on-failure.
+        private val syncPrivateMessagesWriteEnabled = MutableStateFlow(false)
+        var syncPrivateMessagesWriteEnabledSetCalls: Int = 0
+            private set
+        var failOnSyncPrivateMessagesWriteEnabledSet: Boolean = false
+
+        override fun observeSyncPrivateMessagesWriteEnabled(): Flow<Boolean> = syncPrivateMessagesWriteEnabled
+
+        override suspend fun setSyncPrivateMessagesWriteEnabled(enabled: Boolean) {
+            syncPrivateMessagesWriteEnabledSetCalls += 1
+            check(!failOnSyncPrivateMessagesWriteEnabledSet) { "boom" }
+            syncPrivateMessagesWriteEnabled.value = enabled
+        }
+
+        fun emitSyncPrivateMessagesWriteEnabled(value: Boolean) {
+            syncPrivateMessagesWriteEnabled.value = value
         }
 
         // #378 — flags auto-refresh opt-out, same writable seam as showDtSection.

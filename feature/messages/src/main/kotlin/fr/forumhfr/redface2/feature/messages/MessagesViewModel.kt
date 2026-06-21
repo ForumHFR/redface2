@@ -138,6 +138,9 @@ class MessagesViewModel @Inject constructor(
                         page = result.page,
                         totalPages = result.totalPages,
                         isRefreshing = false,
+                        // #531 — a genuine network success (no cache layer here): bump the generation
+                        // so the screen reconciles the optimistic read marks exactly once per fetch.
+                        networkLoadGeneration = it.networkLoadGeneration + 1,
                     )
                 }
             } catch (cancellation: CancellationException) {

@@ -14,7 +14,11 @@ Accepté — 2026-06-12 (proposé 2026-06-10 ; révisé le 2026-06-12 après aud
 
 Cette ADR formalise les arbitrages rendus dans [#351](https://github.com/ForumHFR/redface2/issues/351) ([analyse code](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4662808989) + [addendum cache](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4663229671)) et [#361](https://github.com/ForumHFR/redface2/issues/361) ([investigation live du contrat serveur lu/non-lu](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132), 2026-06-09). Elle n'invente aucun verdict : chaque assertion factuelle sur HFR renvoie au commentaire d'issue qui l'a vérifiée.
 
-État d'implémentation à l'acceptation : la **décision 1 est livrée** (PR [#428](https://github.com/ForumHFR/redface2/pull/428) tranche a + [#429](https://github.com/ForumHFR/redface2/pull/429) tranche b, ainsi que le prérequis UI keep-content des Conséquences) ; les **décisions 2 et 3 restent à implémenter** (aucun drapal local, cache RAM ni cache Room MP dans le code — suivis par [#430](https://github.com/ForumHFR/redface2/issues/430) et [#6](https://github.com/ForumHFR/redface2/issues/6)).
+État d'implémentation (à jour clôture Phase 3, #598) :
+
+- **Décision 1 — livrée** (PR [#428](https://github.com/ForumHFR/redface2/pull/428) tranche a + [#429](https://github.com/ForumHFR/redface2/pull/429) tranche b, ainsi que le prérequis UI keep-content des Conséquences ; factorisation des primitives de liste/carte topic↔MP finalisée par [#351](https://github.com/ForumHFR/redface2/issues/351) c1/c2/c3).
+- **Décision 2 — étage 1 LIVRÉ** : la **position de lecture locale par conversation** existe — table Room `mp_read_positions` (`MpReadPositionEntity` / `MpReadPositionDao`), `RoomPrivateMessageReadPositionStore` (impl de `PrivateMessageReadPositionStore`), sauvegarde dans `PrivateMessageThreadViewModel`, et seed des positions DT depuis MPStorage (`DefaultMpStorageReadPositionSeeder`, ADR-014 §5). Suivi [#430](https://github.com/ForumHFR/redface2/issues/430)/[#6](https://github.com/ForumHFR/redface2/issues/6). Restent **à implémenter** : étage 2 (cache RAM de session) et étage 3 (cache Room du **contenu**, opt-in, **vérifié absent** du code).
+- **Décision 3 — à implémenter** : aucun prefetch MP intra-conversation dans le code à ce jour.
 
 ## Contexte
 
@@ -43,7 +47,7 @@ C'est le cas « (b) binaire » anticipé par #361, mais avec une observation cl�
 
 ## Décision
 
-> Les décisions 2 et 3 décrivent un état cible à implémenter ; la décision 1 est livrée (cf. Statut).
+> La décision 1 est livrée ; la décision 2 **étage 1 est livré** (position de lecture locale), les étages 2/3 et la décision 3 (prefetch MP) restent à implémenter (cf. Statut).
 
 ### 1. Partage topic↔MP à deux niveaux dans `:core:ui` — LIVRÉ (PR #428/#429)
 
@@ -54,7 +58,7 @@ C'est le cas « (b) binaire » anticipé par #361, mais avec une observation cl�
 
 ### 2. Cache MP à trois étages
 
-1. **Position de lecture locale par conversation** (« drapal local », esprit MPStorage) : retenue inconditionnellement. Ce n'est pas un nice-to-have : c'est la **seule** option possible, puisqu'il n'existe aucune position de lecture serveur pour les MP ([#361 Q3](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)). Format aligné sur l'enveloppe v0.1 de facto (`MpStorageFlagEntry`, [ADR-014]({{ site.baseurl }}/adr/014-mpstorage-v01-de-facto)) pour la sync future via [#6](https://github.com/ForumHFR/redface2/issues/6). Corrige au passage la restauration post process-death (la route reste figée sur la page d'ouverture, [bug relevé en #351](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4662808989) puis tracé [#430](https://github.com/ForumHFR/redface2/issues/430)) — mieux que `SavedStateHandle` : **survit au process death** (stockage local). **Purgé à la déconnexion** comme le reste de l'état privé : la perte des positions au logout est assumée, le filet étant la sync MPStorage future (différée et opt-in).
+1. **Position de lecture locale par conversation** (« drapal local », esprit MPStorage) — **LIVRÉE** : retenue inconditionnellement. Ce n'est pas un nice-to-have : c'est la **seule** option possible, puisqu'il n'existe aucune position de lecture serveur pour les MP ([#361 Q3](https://github.com/ForumHFR/redface2/issues/361#issuecomment-4663312132)). Implémentée en table Room `mp_read_positions` (`MpReadPositionEntity`/`MpReadPositionDao`/`RoomPrivateMessageReadPositionStore`), sauvegardée par `PrivateMessageThreadViewModel`, **seedée** depuis MPStorage pour les DT (`DefaultMpStorageReadPositionSeeder`, seed local-prioritaire, ADR-014 §5) pour la sync future via [#6](https://github.com/ForumHFR/redface2/issues/6). Corrige au passage la restauration post process-death (la route restait figée sur la page d'ouverture, [bug relevé en #351](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4662808989) puis tracé [#430](https://github.com/ForumHFR/redface2/issues/430)) — mieux que `SavedStateHandle` : **survit au process death** (stockage local). **Purgé à la déconnexion** via `CacheInvalidator` comme le reste de l'état privé : la perte des positions au logout est assumée, le filet étant la sync MPStorage (écriture opt-in OFF par défaut, #593/#597).
 2. **Cache RAM de session** : retenu. Purgé à la déconnexion, rien sur disque (et, étant en mémoire processus, il ne survit naturellement pas au process death). Donne les retours de page instantanés et permet de garder le contenu à l'écran pendant les chargements.
 3. **Cache Room du contenu** : **opt-in explicite uniquement** — toggle dans les réglages, **défaut OFF**, purge à la déconnexion. ([Décisions XaaT 2026-06-09, addendum #351](https://github.com/ForumHFR/redface2/issues/351#issuecomment-4663229671).)
 

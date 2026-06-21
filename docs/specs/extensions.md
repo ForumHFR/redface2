@@ -16,7 +16,7 @@ Catalogue des comportements de lecture inspirés des userscripts HFR. Les **modu
 > Cette page mélange deux catégories — chaque section précise sa phase :
 >
 > - **Comportements natifs Phase 1-2** : indicateurs lu/non-lu, ego quote, spoilers, drapeaux compacts. Implémentés directement dans `:core:ui` / `:feature:topic` quand le `PostRenderer` ou la liste des drapeaux les rendent triviaux. Listés ici parce que la communauté HFR les a popularisés via userscripts, pas parce qu'ils nécessitent un module séparé.
-> - **Modules d'extension Phase 4** : Bookmarks, Blacklist, Qualitay, Redflag, Color Tag, Imagehost, Gifpicker, Stats. Modules Gradle isolés enregistrés via Hilt `@IntoSet`, conformes à l'architecture `:core:extension` formalisée dans [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1).
+> - **Modules d'extension Phase 4** (prospectifs) : Bookmarks, Qualitay, Redflag, Color Tag, Imagehost, Gifpicker, Stats. Modules Gradle isolés enregistrés via Hilt `@IntoSet`, conformes à l'architecture `:core:extension` formalisée dans [ADR-001]({{ site.baseurl }}/adr/001-modules-gradle-v1) — **non encore implémentés** (`:core:extension` = coquille vide). La **Blacklist (#509) fait exception : livrée par anticipation en bêta 0.15.0**, hors module d'extension dédié (cf. § Blacklist).
 >
 > Pour l'inventaire complet des capabilities de base de l'app, voir le [scope fonctionnel]({{ site.baseurl }}/specs/scope).
 
@@ -234,15 +234,19 @@ Poster un GIF sur HFR demande aujourd'hui de quitter l'app, chercher le GIF aill
 
 ## Filtrage
 
-### Blacklist avancée
+### Blacklist — Livrée
 
 *Inspiré de : Bloque liste mod_r21 (pop. 16), Black List (pop. 15)*
 
-- Masquer les posts d'utilisateurs avec configuration fine
-- Filtrage par catégorie, par topic, ou global
-- Posts masqués avec option "afficher quand même"
-- Notes sur les pseudos bloqués (pourquoi bloqué)
-- Gestion des citations de bloqués dans les posts d'autres utilisateurs
+> **Livrée et shippée en bêta 0.15.0 (app-v174), issue #509**, **anticipée avant l'ouverture formelle de la Phase 4**. Livrée **hors module d'extension dédié** (`:core:extension`/`PostDecorator` n'existaient pas encore — cf. *Architecture d'extensions* ci-dessous).
+
+**Implémentation réelle livrée** :
+- **Modèle** : `BlacklistDocument` / `BlacklistEntry` (`:core:model/blacklist/Blacklist.kt`), avec canonicalisation des pseudos via `PseudoCanonicalizer` (`:core:domain/blacklist`).
+- **Persistance** : DataStore **JSON versionné** (`BlacklistDataStore`, `:core:data/blacklist`) — **pas** de table Room. `BlacklistRepository` est défini dans `:core:domain/blacklist` (impl `DefaultBlacklistRepository` dans `:core:data`).
+- **Réglages** : écran **Réglages > Blacklist** (`:feature:settings`, `SettingsBlacklistScreen` / `SettingsBlacklistViewModel`) pour ajouter/retirer des pseudos.
+- **Rendu** : masquage des posts des pseudos bloqués côté `:feature:topic` — placeholder repliable avec « afficher quand même ».
+
+**Non encore livré (backlog)** : filtrage fin par catégorie/topic, notes sur les pseudos bloqués, gestion des citations de bloqués dans les posts d'autrui.
 
 ### Filtre de contenu
 
@@ -321,9 +325,11 @@ MPStorage est une bibliothèque cross-plateforme (issue de hfr-redkit) qui utili
 
 ## Architecture d'extensions
 
-Pour supporter ces features (et les futures contributions de la communauté), Redface 2 utilise une architecture modulaire.
+> **Statut : PROSPECTIF, NON IMPLÉMENTÉ.** L'architecture décrite ci-dessous (`PostDecorator`, `TopicToolbarContributor`, `EditorToolbarContributor`, modules `:feature:bookmarks` / `:feature:blacklist` / …, enregistrement Hilt `@IntoSet`, `BlacklistDao` Room) reste un **contrat cible**. À ce jour, le module `:core:extension` ne contient qu'un `build.gradle.kts` (coquille vide, aucun code Kotlin) et aucune des interfaces de cette section n'existe dans le code. La **Blacklist (#509) a été livrée hors de ce schéma** (DataStore JSON + `:core:domain`/`:core:data`/`:feature:settings`, cf. § Blacklist ci-dessus) — l'exemple `BlacklistDecorator` ci-dessous est **illustratif**, ce n'est pas le code livré.
 
-Chaque feature communautaire est un **module Gradle isolé** :
+Pour supporter ces features (et les futures contributions de la communauté), Redface 2 prévoit une architecture modulaire.
+
+Chaque feature communautaire sera un **module Gradle isolé** :
 
 ```
 :feature:bookmarks
@@ -376,7 +382,8 @@ interface EditorToolbarContributor {
 Chaque décorateur est un `@Singleton` injecté par Hilt avec ses propres dépendances. L'enregistrement se fait via `@IntoSet` — ajouter une extension ne demande **aucune modification du code existant** :
 
 ```kotlin
-// Dans :feature:blacklist — exemple concret
+// ILLUSTRATIF (non livré) — futur :feature:blacklist via PostDecorator.
+// La Blacklist #509 réellement livrée n'utilise NI PostDecorator NI Room (cf. § Blacklist).
 @Singleton
 class BlacklistDecorator @Inject constructor(
     private val blacklistDao: BlacklistDao,

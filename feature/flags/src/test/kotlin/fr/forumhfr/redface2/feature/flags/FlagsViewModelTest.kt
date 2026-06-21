@@ -2364,6 +2364,10 @@ class FlagsViewModelTest {
 
         override suspend fun setShowDtSection(enabled: Boolean) = Unit
 
+        override fun observeSyncPrivateMessagesWriteEnabled(): Flow<Boolean> = MutableStateFlow(false)
+
+        override suspend fun setSyncPrivateMessagesWriteEnabled(enabled: Boolean) = Unit
+
         // #378 — writable so the auto-refresh tests can flip the opt-out.
         val flagsAutoRefresh = MutableStateFlow(true)
 
@@ -2477,10 +2481,20 @@ class FlagsViewModelTest {
             return result
         }
 
-        // The DT tab only READS MPStorage; the write path (#6, guarded) is never exercised here, so the
-        // fake stubs it. Added when chantier B extended MpStorageRepository with writeBackFlag (cross-module
-        // fake update the B build missed — its validation didn't compile :feature:flags tests).
+        // The DT tab only READS MPStorage; the write path (#6, opt-in OFF) is never exercised here, so the
+        // fake stubs the write entry points. The default opt-in OFF maps to DisabledByPreference.
         override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
-            MpStorageWriteResult.TargetNotFound
+            MpStorageWriteResult.DisabledByPreference
+
+        override suspend fun writeBackFlagIfPresent(
+            entry: MpStorageFlagEntry,
+            expectedPseudo: String,
+        ): MpStorageWriteResult =
+            MpStorageWriteResult.DisabledByPreference
+
+        override suspend fun previewWriteBackFlag(
+            entry: MpStorageFlagEntry,
+        ): fr.forumhfr.redface2.core.domain.mpstorage.MpStorageWritePreview =
+            fr.forumhfr.redface2.core.domain.mpstorage.MpStorageWritePreview.TargetNotFound
     }
 }

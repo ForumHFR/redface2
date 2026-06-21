@@ -289,6 +289,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeSyncPrivateMessagesWriteEnabled(): Flow<Boolean> =
+        dataStore.data
+            // Default `false` (#6, ADR-014 §4): the MPStorage write-back is experimental and opt-in —
+            // the write contract was never observed live, so it stays OFF until the user explicitly enables it.
+            .map { prefs -> prefs[KEY_SYNC_PRIVATE_MESSAGES_WRITE_ENABLED] ?: false }
+            .distinctUntilChanged()
+            .catch { emit(false) }
+
+    override suspend fun setSyncPrivateMessagesWriteEnabled(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_SYNC_PRIVATE_MESSAGES_WRITE_ENABLED] = enabled
+            }
+        }
+    }
+
     override fun observeFlagsAutoRefresh(): Flow<Boolean> =
         dataStore.data
             // Default `true`: the lists going stale is the #378 complaint — the toggle is an
@@ -736,6 +752,10 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // Opt-in « DT » placeholder tab on the Drapeaux screen (MPStorage sync lands later, #6).
         val KEY_FLAGS_SHOW_DT_SECTION = booleanPreferencesKey("flags_show_dt_section")
+
+        // #6, ADR-014 §4 — experimental opt-in for the MPStorage WRITE-BACK (default false; off = no write).
+        val KEY_SYNC_PRIVATE_MESSAGES_WRITE_ENABLED =
+            booleanPreferencesKey("sync_private_messages_write_enabled")
 
         // #378 — auto-refresh of the flags lists on landing (default ON; Settings opt-out).
         val KEY_FLAGS_AUTO_REFRESH = booleanPreferencesKey("flags_auto_refresh")

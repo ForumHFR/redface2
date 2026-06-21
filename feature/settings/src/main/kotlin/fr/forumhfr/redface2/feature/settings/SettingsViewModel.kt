@@ -150,6 +150,13 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(showDtSection = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeSyncPrivateMessagesWriteEnabled().first() },
+            isLocked = {
+                it.syncPrivateMessagesWriteEnabledTouchedLocally || it.isUpdatingSyncPrivateMessagesWriteEnabled
+            },
+            apply = { state, value -> state.copy(syncPrivateMessagesWriteEnabled = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeFlagsAutoRefresh().first() },
             isLocked = { it.flagsAutoRefreshTouchedLocally || it.isUpdatingFlagsAutoRefresh },
             apply = { state, value -> state.copy(flagsAutoRefresh = value) },
@@ -253,6 +260,8 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.ImmersiveBackButtonChanged -> updateImmersiveBackButton(intent.enabled)
             is SettingsIntent.ImmersiveNavBarRevealChanged -> updateImmersiveNavBarReveal(intent.mode)
             is SettingsIntent.ShowDtSectionChanged -> updateShowDtSection(intent.enabled)
+            is SettingsIntent.SyncPrivateMessagesWriteEnabledChanged ->
+                updateSyncPrivateMessagesWriteEnabled(intent.enabled)
             is SettingsIntent.ConfirmBeforePostingChanged -> updateConfirmBeforePosting(intent.enabled)
             is SettingsIntent.FlagsAutoRefreshChanged -> updateFlagsAutoRefresh(intent.enabled)
             is SettingsIntent.DisplayDensityChanged -> updateDisplayDensity(intent.density)
@@ -1033,6 +1042,36 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setShowDtSection,
+        )
+    }
+
+    private fun updateSyncPrivateMessagesWriteEnabled(desired: Boolean) {
+        val previous = _state.value.syncPrivateMessagesWriteEnabled
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    syncPrivateMessagesWriteEnabled = desired,
+                    isUpdatingSyncPrivateMessagesWriteEnabled = true,
+                    syncPrivateMessagesWriteEnabledError = false,
+                    syncPrivateMessagesWriteEnabledTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(
+                        syncPrivateMessagesWriteEnabled = desired,
+                        isUpdatingSyncPrivateMessagesWriteEnabled = false,
+                    )
+                } else {
+                    state.copy(
+                        syncPrivateMessagesWriteEnabled = previous,
+                        isUpdatingSyncPrivateMessagesWriteEnabled = false,
+                        syncPrivateMessagesWriteEnabledError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setSyncPrivateMessagesWriteEnabled,
         )
     }
 

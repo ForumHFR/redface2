@@ -139,6 +139,41 @@ class MessagesViewModelTest {
     }
 
     @Test
+    fun `networkLoadGeneration bumps on every successful network load`() = runTest {
+        // #531 — the inbox has no cache layer, so every successful Content is a fresh network result.
+        // The generation counter (which the screen keys its read-mark reconciliation on) must advance
+        // once per fetch: init (1), then refresh (2). It never advances on a failed load.
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageList(page = 1) } returns
+            PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1)))
+
+        val viewModel = viewModel(repository, FakeAuthRepository())
+        assertEquals(1, viewModel.state.value.networkLoadGeneration)
+
+        viewModel.refresh()
+        advanceUntilIdle()
+        assertEquals(2, viewModel.state.value.networkLoadGeneration)
+    }
+
+    @Test
+    fun `networkLoadGeneration does not advance on a failed refresh`() = runTest {
+        // #531 — a failed pull-to-refresh keeps the existing content and must NOT bump the generation
+        // (no fresh server data to reconcile against — reconciling on stale content could wrongly drop
+        // marks). The successful init load is generation 1; the failed refresh leaves it at 1.
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageList(page = 1) } returns
+            PrivateMessageListPage(page = 1, totalPages = 1, items = listOf(summary(1))) andThenThrows
+            IOException("offline")
+
+        val viewModel = viewModel(repository, FakeAuthRepository())
+        assertEquals(1, viewModel.state.value.networkLoadGeneration)
+
+        viewModel.refresh()
+        advanceUntilIdle()
+        assertEquals(1, viewModel.state.value.networkLoadGeneration)
+    }
+
+    @Test
     fun `selectPage loads the requested page`() = runTest {
         val repository = mockk<MessagesRepository>()
         coEvery { repository.getPrivateMessageList(page = 1) } returns

@@ -166,6 +166,12 @@ data class SettingsState(
     val isUpdatingShowDtSection: Boolean = false,
     val showDtSectionError: Boolean = false,
     val showDtSectionTouchedLocally: Boolean = false,
+    // #6, ADR-014 §4 — EXPERIMENTAL opt-in for the MPStorage write-back (sync DT en écriture). Same
+    // optimistic-flip + startup-race-guard machinery. Default FALSE (off = no write ever happens).
+    val syncPrivateMessagesWriteEnabled: Boolean = false,
+    val isUpdatingSyncPrivateMessagesWriteEnabled: Boolean = false,
+    val syncPrivateMessagesWriteEnabledError: Boolean = false,
+    val syncPrivateMessagesWriteEnabledTouchedLocally: Boolean = false,
     // Drapeaux — #378 auto-refresh on landing (app open / back from a topic). Same machinery.
     // Default TRUE: the staleness was the complaint, the toggle is the opt-out.
     val flagsAutoRefresh: Boolean = true,
@@ -293,6 +299,10 @@ data class SettingsState(
     val canToggleShowDtSection: Boolean
         get() = !isUpdatingShowDtSection
 
+    // #6 — the experimental MPStorage write-back toggle is gated only by its own write.
+    val canToggleSyncPrivateMessagesWriteEnabled: Boolean
+        get() = !isUpdatingSyncPrivateMessagesWriteEnabled
+
     // #378 — flags auto-refresh, gated only by its own write.
     val canToggleFlagsAutoRefresh: Boolean
         get() = !isUpdatingFlagsAutoRefresh
@@ -419,6 +429,9 @@ sealed interface SettingsIntent {
     // Drapeaux — opt-in « DT » placeholder tab (MPStorage sync #6 lands later). Optimistic-flip
     // contract, like the flags toggles: the boolean is the desired post-flip state.
     data class ShowDtSectionChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #6 — experimental opt-in for the MPStorage write-back (sync DT en écriture). */
+    data class SyncPrivateMessagesWriteEnabledChanged(val enabled: Boolean) : SettingsIntent
 
     // Drapeaux — #378 auto-refresh on landing. Optimistic-flip contract, like the flags
     // toggles: the boolean is the desired post-flip state.

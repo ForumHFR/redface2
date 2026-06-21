@@ -1,0 +1,66 @@
+<!--
+  #612 — SANITISED fixture : the dedicated `message.php` reply form HFR serves to the OWNER of a
+  DT / MultiMP (`message.php?config=hfr.inc&cat=prive&post=…&numrep=…&ref=0&page=…&…#formulaire`).
+  This is the form the write repository reaches by FOLLOWING the conversation page's « Ajouter une
+  réponse » link — NOT the bddpost.php quick-reply embedded in forum2.php (that one never carries
+  `newdest`, see private_message_thread_quick_reply.html).
+
+  HFR renders the owner-only « Destinataires » row with `<input name="newdest">` prefilled with the
+  CSV of all current members minus the owner. The form's `action` is `/bddpost.php` (where it POSTs)
+  even though the page itself is `message.php` — the same shape ReplyFormParser already parses.
+
+  Everything here is fake : bogus pseudos (alice, bob, "Bébé Yoda", "stitch+", Administration), no
+  real private content, no real hash_check (value="TESTHASH"). cf. /work/xaat/spec-dt-membership.md
+-->
+<html><body>
+<a name="formulaire"></a>
+<form name="hop" action="/bddpost.php?config=hfr.inc" method="post" onsubmit="document.hop.submit.style.visibility='hidden';">
+<input type="hidden" name="hash_check" value="TESTHASH" />
+<table class="main" cellspacing="0" cellpadding="4">
+  <tr class="cBackHeader fondForum2Title"><th class="padding" colspan="2">Répondre</th></tr>
+  <tr class="reponse">
+    <th class="repCase1">Destinataires</th>
+    <td class="repCase2"><input size="25" name="newdest" value="alice, bob, Bébé Yoda, stitch+, Administration" id="newdest" />
+     &nbsp;Vous pouvez ajouter ou supprimer des destinataires (un destinataire au minimum !)</td>
+  </tr>
+  <tr class="reponse">
+    <th class="repCase1">Votre message</th>
+    <td class="repCase2"><textarea rows="15" cols="75" name="content_form" id="content_form" accesskey="c"></textarea></td>
+  </tr>
+  <tr class="reponse">
+    <th class="repCase1">Ton du message</th>
+    <td class="repCase2">
+      <input type="radio" name="MsgIcon" value="20" id="MsgIcon20" />
+      <input type="radio" name="MsgIcon" value="1" id="MsgIcon1" checked="checked" />
+      <input type="radio" name="MsgIcon" value="16" id="MsgIcon16" />
+    </td>
+  </tr>
+  <tr class="reponse">
+    <th class="repCase1">Options</th>
+    <td class="repCase2">
+      <input class="checkbox" type="checkbox" name="signature" value="1" id="signature" checked="checked" /><label for="signature">Activer votre signature</label>
+      <input class="checkbox" type="checkbox" name="smiley" value="1" id="smiley" /><label for="smiley">Désactiver les smilies</label>
+      <input class="checkbox" type="checkbox" name="emaill" value="1" id="emaill" /><label for="emaill">Activer la notification par email du sujet</label>
+    </td>
+  </tr>
+</table>
+<input type="submit" accesskey="s" value="Valider votre message" name="submit" id="submitreprap"/>
+<input type="hidden" name="new" value="0" />
+<input type="hidden" name="post" value="4242424" />
+<input type="hidden" name="numrep" value="1990000111" />
+<input type="hidden" name="ref" value="0" />
+<input type="hidden" name="cat" value="prive" />
+<input type="hidden" name="subcat" value="0" />
+<input type="hidden" name="page" value="3" />
+<input type="hidden" name="verifrequet" value="1100" />
+<input type="hidden" name="p" value="1" />
+<input type="hidden" name="sondage" value="0" />
+<input type="hidden" name="cache" value="" />
+<input type="hidden" name="owntopic" value="1" />
+<input type="hidden" name="config" value="hfr.inc" />
+<input type="hidden" name="pseudo" value="TestOwner" />
+<input type="password" name="password" value="" />
+<input type="hidden" name="sujet" value="Discussion de groupe de test" />
+</form>
+<script type="text/javascript">find_smilies_timer('hfr.inc', 990123);</script>
+</body></html>

@@ -77,6 +77,7 @@ Quand `docs/specs/roadmap.md` tranche explicitement une phase, cette page s'alig
 
 - **Recherche globale** — mot-clé sur tout le forum. Phase 2.
 - **Recherche filtrée** — catégorie, auteur, fourchette de dates. Phase 2.
+- **Rechercher dans un topic (intra-topic)** — mot-clé dans le sujet courant, saut entre occurrences (préc./suiv.), filtre par pseudo, mode « tout le sujet ». Livré (#546/#576/#585, via `transsearch.php`).
 
 ### Personnalisation
 
@@ -90,14 +91,17 @@ Quand `docs/specs/roadmap.md` tranche explicitement une phase, cette page s'alig
 - **Prefetch** — pré-charger la page suivante d'un topic en requête **non authentifiée** (ne pas marquer les drapeaux comme lus). Phase 1.
 - **Cache local** — topics lus, MPs, paramètres stockés en Room. Phase 1.
 - **Preview + tap-to-full images** — auto-détection thumbs HFR, fullscreen au tap. Phase 1.
-- **Synchronisation MPStorage** — drapeaux MultiMP, bookmarks, préférences stockés dans un MP HFR dédié. Phase 3.
+- **Synchronisation MPStorage** — drapeaux MultiMP, bookmarks, préférences stockés dans un MP HFR dédié. **Lecture + seed des positions DT livrés (Phase 3)** ; **écriture v0.1 activable opt-in (OFF par défaut)** ; sync bidirectionnelle complète + cache Room = Phase 4 (#6).
+
+### Personnalisation (suite) — Blacklist
+
+- **Blacklist** — masquer les posts d'un utilisateur (placeholder « afficher quand même »). **Livrée** (bêta 0.15.0, #509) — DataStore JSON, écran Réglages > Blacklist, masquage côté lecture topic. Anticipée avant la Phase 4 (cf. [Extensions]({{ site.baseurl }}/specs/extensions#blacklist--livrée)).
 
 ### Extensions communautaires (Phase 4)
 
 Détails dans [Extensions]({{ site.baseurl }}/specs/extensions). Résumé :
 
 - **Bookmarks** — sauvegarder un post hors drapeaux.
-- **Blacklist** — masquer les posts d'un utilisateur.
 - **Qualitay** — signaler un post de qualité (canal communautaire).
 - **Redflag** — alertes intelligentes via Cloudflare Worker externe.
 - **Colortag** — colorer/annoter les pseudos.
@@ -108,6 +112,7 @@ Détails dans [Extensions]({{ site.baseurl }}/specs/extensions). Résumé :
 ### Plateforme & accessibilité
 
 - **Edge-to-edge** — UI sous la status bar + navigation bar (Android 15+). Phase 1.
+- **Mode plein écran** — masquage de la barre de navigation Android + bouton de retour flottant + révélation automatique. Livré (#518).
 - **Dark / light / system** — mode sombre/clair selon le système. Phase 1.
 - **Predictive back** — animation de retour anticipé (Compose + manifest). Phase 1.
 - **Tablette / pliable** — `ListDetailPaneScaffold` M3 Adaptive (liste drapeaux + topic en 2 panes). Phase 2.

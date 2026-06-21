@@ -235,7 +235,8 @@ class DefaultReplyRepository @Inject constructor(
         val overrides = buildMap {
             put("hash_check", form.hashCheck)
             put("verifrequet", HfrConstants.VERIF_REQUET)
-            put("content_form", bbcodeContent)
+            // #114 — strip non-BMP code points (emojis) HFR would silently truncate the post at.
+            put("content_form", sanitizeContentForm(bbcodeContent))
             put("numreponse", "")
             // Quote: HFR identifies the cited post via `numrep`. Reply: empty.
             // The form's own hidden `numrep` (if any) is already echoed correctly

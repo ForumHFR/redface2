@@ -19,9 +19,58 @@ data class PrivateMessageThreadUiState(
     val page: Int,
     val totalPages: Int,
     val isRefreshing: Boolean = false,
+    /**
+     * #612 — participant roster sheet state. Lazily loaded (only when the user opens the sheet, never
+     * on screen entry) and cached for the life of the screen. See [Roster].
+     */
+    val roster: Roster = Roster.Hidden,
 ) {
     val canGoPrevious: Boolean get() = page > 1
     val canGoNext: Boolean get() = page < totalPages
+
+    /**
+     * #612 — the « Participants » bottom sheet. Its own little state machine rather than a fragile
+     * boolean (Codex framing): the sheet is closed ([Hidden]) until the user taps the action, then
+     * [Loading] while the reply form is fetched, then [Loaded] (the full member list parsed from the
+     * owner-only `newdest`) or [Error] (kept open with a retry) or [Unavailable] (HFR served no
+     * `newdest` — the logged-in user is not the owner, so there is no authoritative roster).
+     *
+     * Source = `newdest` from the message.php reply form (#612 fix), the ONLY place HFR exposes the
+     * complete member list. The forum2.php page only shows authors who have posted, so a fallback on
+     * visible authors would be a misleading partial list — per Codex framing we deliberately do NOT
+     * offer it under the « Participants » label; a non-owner simply gets no roster button.
+     */
+    sealed interface Roster {
+        /** The sheet is closed. The action button is shown only while this allows it (see VM). */
+        data object Hidden : Roster
+
+        /** The sheet is open and the reply form GET is in flight. */
+        data object Loading : Roster
+
+        /**
+         * The full member list, parsed from the form's recipients roster (#618 — `newdest` for the
+         * owner, the read-only « Destinataires » span for a participant ; HFR's `, ` separator). The
+         * viewer is prepended so the sheet shows the whole group.
+         *
+         * [canManageRecipients] (#618) — true only for the owner (HFR served the editable `newdest`).
+         * Gates the « Gérer les destinataires » entry in the sheet: a participant reads the roster but
+         * cannot edit it (HFR mutates members only via an owner reply).
+         */
+        data class Loaded(
+            val members: List<String>,
+            val canManageRecipients: Boolean = false,
+        ) : Roster
+
+        /**
+         * The reply form loaded but exposed no roster at all (#618 — neither an editable `newdest`
+         * nor a read-only « Destinataires » row): a one-to-one MP. The sheet surfaces a sober « non
+         * disponible » note rather than a partial author list.
+         */
+        data object Unavailable : Roster
+
+        /** The reply form GET failed; the sheet stays open with a retry affordance. */
+        data class Error(val kind: HfrErrorKind = HfrErrorKind.Other) : Roster
+    }
 
     sealed interface Mode {
         data object RequiresLogin : Mode

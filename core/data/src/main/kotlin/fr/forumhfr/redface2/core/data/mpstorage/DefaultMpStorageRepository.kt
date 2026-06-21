@@ -7,6 +7,8 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocation
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageWritePreview
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageDocument
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
@@ -28,7 +30,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 
 /**
- * Default [MpStorageRepository] (#6, ADR-014) — read-only, zero writes.
+ * Default [MpStorageRepository] (#6, ADR-014) — read pipeline + the opt-in verify-after-write path.
  *
  * Discovery matches the de-facto userscript contract (`MPStorage.user.js` / DTCloud), NOT a
  * title search (HFR's subject index never returns the 32-hex hash, so the search-based discovery
@@ -47,9 +49,15 @@ import okhttp3.FormBody
  * original library's destructive reset-to-default trap). Diagnostics never log document content
  * (it aggregates private reading positions from every userscript) — only presence flags, sizes and
  * failure classes (#316 stance).
+ *
+ * The WRITE path ([writeBackFlag]) is the REAL, opt-in path : gated by
+ * [UserPreferencesRepository.observeSyncPrivateMessagesWriteEnabled] (default OFF), it locates the
+ * document, backs up its verbatim `content_form`, runs the pure read-modify-write, POSTs (with the
+ * active account's pseudo and the CONSTANT subject hash), then VERIFIES by re-reading — restoring the
+ * backup on a mismatch. NOT OBSERVED LIVE : the `bdd.php cat=prive` write contract is unconfirmed.
  */
 @Singleton
-// LongParameterList: one dep per pipeline stage (inbox/thread/edit parsers) + cache, auth, diagnostics, dispatcher.
+// LongParameterList: one dep per pipeline stage (inbox/thread/edit parsers) + cache, auth, prefs, diagnostics, disp.
 @Suppress("LongParameterList")
 class DefaultMpStorageRepository @Inject constructor(
     private val hfrClient: HfrClient,
@@ -60,6 +68,7 @@ class DefaultMpStorageRepository @Inject constructor(
     private val envelopeWriter: MpStorageEnvelopeWriter,
     private val locationStore: MpStorageLocationStore,
     private val authRepository: AuthRepository,
+    private val userPreferencesRepository: UserPreferencesRepository,
     private val diagnostics: DiagnosticsLog,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : MpStorageRepository {
@@ -126,50 +135,108 @@ class DefaultMpStorageRepository @Inject constructor(
     }
 
     /**
-     * WRITE path (#6, ADR-014 §4) — GUARDED, NOT OBSERVED LIVE.
+     * WRITE path (#6, ADR-014 §4) — REAL, opt-in (OFF by default), verify-after-write.
      *
-     * Locates the storage document (same deterministic discovery as [fetchStorage] : cached location,
-     * else inbox scan for the conversation whose subject is EXACTLY [MpStorageRepository.STORAGE_SUBJECT_HASH]),
-     * reads its first-post edit form, runs the read-modify-write on the RAW JSON tree
-     * ([MpStorageEnvelopeWriter] — third-party namespaces preserved), enforces the
-     * [MpStorageRepository.MAX_CONTENT_FORM_BYTES] cap, and builds the `bdd.php cat=prive` POST body.
+     * The 15-step flow (cf. the spec) : read the pref → if OFF return [MpStorageWriteResult.DisabledByPreference]
+     * (NO request) → resolve the active pseudo → GET the edit form + raw `content_form` → keep a VERBATIM backup
+     * → refuse an unreadable JSON ([MpStorageWriteResult.Unreadable]) → run the pure writer → if no-op return
+     * [MpStorageWriteResult.Success] (verified, no POST) → enforce the [MpStorageRepository.MAX_CONTENT_FORM_BYTES]
+     * cap ([MpStorageWriteResult.TooLarge]) → POST the mutated body → RE-GET → if it equals the mutated body
+     * [MpStorageWriteResult.Success] → otherwise re-POST the backup (restore) + re-GET, surfaced as
+     * [MpStorageWriteResult.VerificationFailedRestored] / [MpStorageWriteResult.VerificationFailedRestoreFailed].
      *
-     * GUARD (structural, Codex review) : the public [writeBackFlag] runs with [post] = `false` → the POST is
-     * NEVER sent (body built & validated only). The live POST is reachable ONLY through the module-internal,
-     * test-only [writeBackFlagLive] — it is NOT on the public interface, so app/prod code cannot flip it. The
-     * `bdd.php cat=prive` write contract is unconfirmed (device down). A located-but-unreadable document or a
-     * [MpStorageWriteResult.TargetNotFound] is surfaced, NEVER repaired / created (ADR-014 §3 : creating a
-     * fresh document would fork the cross-userscript storage).
+     * Both the POST and the restore POST go through the SAME guarded builder ([buildPrivateMessageEditBody]) :
+     * active-account pseudo + the CONSTANT subject hash, refusing to POST when the parsed form's subject is wrong.
+     * The discovery is the same deterministic exact-hash match as [fetchStorage] ; a miss is
+     * [MpStorageWriteResult.TargetNotFound], NEVER a creation (ADR-014 §3).
      */
     override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
-        runWriteBack(entry, post = false)
+        writeBack(entry, updateOnly = false, expectedPseudo = null)
 
     /**
-     * Module-INTERNAL, TEST-ONLY live POST path — deliberately NOT on the [MpStorageRepository] interface
-     * so app/prod code cannot reach it (Codex review : the guard is structural, not a default parameter).
-     * The `bdd.php cat=prive` write contract is unconfirmed — NOT OBSERVED LIVE.
+     * UPDATE-ONLY write path (#597) — the AUTO reading-position trigger. Same pipeline / gates as
+     * [writeBackFlag] but constrains the upsert to entries already present : an absent `threadId` is
+     * declined with [MpStorageWriteResult.SkippedNotPresent] (no POST), so a passive page land never
+     * pollutes the shared cross-userscript document with a Redface-2-invented entry (ADR-014 anti-doublon).
+     *
+     * IDENTITY GUARD (C2) — [expectedPseudo] is the account the caller decided to write under. After
+     * re-resolving the active pseudo here, the write is DECLINED ([MpStorageWriteResult.SessionChanged],
+     * no POST) when it no longer matches : the active account switched between the caller's check and
+     * this call.
      */
-    internal suspend fun writeBackFlagLive(entry: MpStorageFlagEntry): MpStorageWriteResult =
-        runWriteBack(entry, post = true)
+    override suspend fun writeBackFlagIfPresent(
+        entry: MpStorageFlagEntry,
+        expectedPseudo: String,
+    ): MpStorageWriteResult = writeBack(entry, updateOnly = true, expectedPseudo = expectedPseudo)
 
-    @Suppress("ReturnCount") // Guard clauses (auth / not-found / unreadable / oversize) + the prepared return.
-    private suspend fun runWriteBack(entry: MpStorageFlagEntry, post: Boolean): MpStorageWriteResult {
+    // ReturnCount: guard clauses (pref / auth / identity / not-found / unreadable / skip / no-op / oversize / unsafe).
+    @Suppress("ReturnCount")
+    private suspend fun writeBack(
+        entry: MpStorageFlagEntry,
+        updateOnly: Boolean,
+        expectedPseudo: String?,
+    ): MpStorageWriteResult {
         return withContext(ioDispatcher) {
-            val owner = activePseudo()
+            // 1-2. Opt-in gate FIRST — no network when OFF (the default), so a missing trigger is harmless.
+            if (!syncWriteEnabled()) {
+                diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, "writeBackFlag: opt-in OFF → no write")
+                return@withContext MpStorageWriteResult.DisabledByPreference
+            }
+
+            // 3. IDENTITY GUARD (C2) FIRST — resolve the active account, then refuse (SessionChanged,
+            // no POST) when it no longer matches the account the caller resolved and decided to write
+            // under. This INCLUDES the active session now being null (logged out) while the caller had
+            // one — the contract is « active != expected ⇒ SessionChanged », checked before any other
+            // not-found mapping.
+            val active = activePseudo()
+            if (expectedPseudo != null && active != expectedPseudo) {
+                diagnostics.record(
+                    DiagnosticsLog.Level.WARN,
+                    LOG_TAG,
+                    "writeBackFlag: active account changed since caller's check → no write",
+                )
+                return@withContext MpStorageWriteResult.SessionChanged
+            }
+            // No expected pseudo (manual / dev path) and no active session → nothing to write under.
+            val owner = active
                 ?: return@withContext MpStorageWriteResult.TargetNotFound
 
+            // 4. Locate + GET the edit form and parse the document.
             val location = locateForWrite(owner)
                 ?: return@withContext MpStorageWriteResult.TargetNotFound
             val read = readFormAndDocument(location)
                 ?: return@withContext MpStorageWriteResult.TargetNotFound
+            // 6. Refuse an unreadable document — never repaired (ADR-014 §3).
             val document = read.document
-                ?: return@withContext MpStorageWriteResult.TargetUnreadable
+                ?: return@withContext MpStorageWriteResult.Unreadable
 
-            when (val outcome = envelopeWriter.upsertFlag(document.rawEnvelope, entry)) {
+            // 5. Verbatim backup (the raw content_form BEFORE any mutation) for the restore path.
+            val backup = read.form.initialContent
+
+            // 7-9. Pure read-modify-write + skip / no-op short-circuit + cap.
+            when (val outcome = envelopeWriter.upsertFlag(document.rawEnvelope, entry, updateOnly = updateOnly)) {
                 MpStorageEnvelopeWriter.Outcome.NotJsonEnvelope ->
                     // Defensive : the parser already accepted it, so this should not happen — but if the
                     // raw text is somehow not a JSON object we surface it, never overwrite (ADR-014 §3).
-                    MpStorageWriteResult.TargetUnreadable
+                    MpStorageWriteResult.Unreadable
+
+                is MpStorageEnvelopeWriter.Outcome.SkippedNotPresent -> {
+                    // #597 UPDATE-ONLY : the threadId is not already tracked → never add it (anti-pollution
+                    // of the shared document). No POST; the document is left byte-fidèle.
+                    diagnostics.record(
+                        DiagnosticsLog.Level.INFO,
+                        LOG_TAG,
+                        "writeBackFlag: skipped (threadId not present, update-only)",
+                    )
+                    MpStorageWriteResult.SkippedNotPresent
+                }
+
+                is MpStorageEnvelopeWriter.Outcome.NoOp -> {
+                    // 8. The target position did not change : success WITHOUT a POST (the document is
+                    // left byte-fidèle ; writing an identical body would needlessly bump lastUpdate).
+                    diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, "writeBackFlag: no-op (position unchanged)")
+                    MpStorageWriteResult.Success(verified = true)
+                }
 
                 is MpStorageEnvelopeWriter.Outcome.TooLarge -> {
                     val cap = MpStorageRepository.MAX_CONTENT_FORM_BYTES
@@ -181,56 +248,216 @@ class DefaultMpStorageRepository @Inject constructor(
                     MpStorageWriteResult.TooLarge(outcome.sizeBytes)
                 }
 
+                MpStorageEnvelopeWriter.Outcome.UnsafeContent -> {
+                    // FAIL-CLOSED (C4) : the mutated body carries a non-BMP / lone-surrogate code point
+                    // HFR would truncate at — POSTing it would corrupt the shared third-party document.
+                    // Refuse the write (no POST) ; the document is left byte-fidèle (never stripped).
+                    diagnostics.record(
+                        DiagnosticsLog.Level.WARN,
+                        LOG_TAG,
+                        "writeBackFlag UNSAFE content (non-BMP / surrogate) → no write",
+                    )
+                    MpStorageWriteResult.UnsafeContent
+                }
+
                 is MpStorageEnvelopeWriter.Outcome.Mutated ->
-                    prepareAndMaybePost(location, read.form, outcome.body, post)
+                    postAndVerify(location, read.form, owner, mutatedBody = outcome.body, backupBody = backup)
+            }
+        }
+    }
+
+    override suspend fun previewWriteBackFlag(entry: MpStorageFlagEntry): MpStorageWritePreview {
+        return withContext(ioDispatcher) {
+            val owner = activePseudo() ?: return@withContext MpStorageWritePreview.TargetNotFound
+            val location = locateForWrite(owner) ?: return@withContext MpStorageWritePreview.TargetNotFound
+            val read = readFormAndDocument(location) ?: return@withContext MpStorageWritePreview.TargetNotFound
+            val document = read.document ?: return@withContext MpStorageWritePreview.Unreadable
+
+            // Preview is the MANUAL path : upsert add-or-update (updateOnly = false), so SkippedNotPresent
+            // is never produced here — mapped to Prepared(verbatim) for an exhaustive `when` regardless.
+            when (val outcome = envelopeWriter.upsertFlag(document.rawEnvelope, entry)) {
+                MpStorageEnvelopeWriter.Outcome.NotJsonEnvelope -> MpStorageWritePreview.Unreadable
+                is MpStorageEnvelopeWriter.Outcome.SkippedNotPresent -> MpStorageWritePreview.Prepared(outcome.body)
+                is MpStorageEnvelopeWriter.Outcome.NoOp -> MpStorageWritePreview.Prepared(outcome.body)
+                is MpStorageEnvelopeWriter.Outcome.TooLarge -> MpStorageWritePreview.TooLarge(outcome.sizeBytes)
+                MpStorageEnvelopeWriter.Outcome.UnsafeContent -> MpStorageWritePreview.UnsafeContent
+                is MpStorageEnvelopeWriter.Outcome.Mutated -> MpStorageWritePreview.Prepared(outcome.body)
             }
         }
     }
 
     /**
-     * Builds the `bdd.php cat=prive` [FormBody] from the mutated [body] and the parsed [form], then —
-     * ONLY when [post] is `true` (the internal test-only path) — POSTs it. From the public [writeBackFlag]
-     * ([post] = `false`) NO request is sent : the body is built and validated, and
-     * [MpStorageWriteResult.Prepared] carries `posted = false`. The live POST branch is NOT OBSERVED LIVE.
+     * 10-15. POSTs the mutated body, RE-READS the first post, and either confirms the write
+     * ([MpStorageWriteResult.Success]) or restores the [backupBody] and re-reads — surfacing
+     * [MpStorageWriteResult.VerificationFailedRestored] when the backup is back in place, or
+     * [MpStorageWriteResult.VerificationFailedRestoreFailed] (critical) when it could not be restored.
+     *
+     * Both POSTs use the same guarded builder (active pseudo + CONSTANT subject hash). The re-read
+     * comparison is on the raw `content_form` string : HFR may re-serialise, but the de-facto contract
+     * stores the textarea verbatim, so an exact match is the safe acceptance signal (NOT OBSERVED LIVE).
      */
-    private suspend fun prepareAndMaybePost(
+    @Suppress("ReturnCount") // Guard (wrong subject / session) + verified-OK early return + the restore tail.
+    private suspend fun postAndVerify(
         location: MpStorageLocation,
         form: ReplyForm,
-        body: String,
-        post: Boolean,
+        pseudo: String,
+        mutatedBody: String,
+        backupBody: String,
     ): MpStorageWriteResult {
-        val formBody = buildPrivateMessageEditBody(location, form, body)
-        if (!post) {
+        // IDENTITY GUARD (C2, Codex hardening) — the locate + GET above suspend ; re-resolve the active
+        // pseudo IMMEDIATELY before the POST and abort if the account switched in between, so neither
+        // the POST nor the restore can run under a different session than the one that read the document.
+        if (activePseudo() != pseudo) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "writeBackFlag: active account changed before POST → no write",
+            )
+            return MpStorageWriteResult.SessionChanged
+        }
+
+        val postBody = buildPrivateMessageEditBody(location, form, pseudo, mutatedBody)
+            ?: return MpStorageWriteResult.TargetNotFound // wrong subject → never POST (structural guard)
+
+        hfrClient.submitPrivateMessageEdit(postBody)
+        diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, "writeBackFlag POSTed → verifying")
+
+        // IDENTITY GUARD (C2) — the POST suspends ; re-check before the verify re-read so the GET does
+        // not run under a switched session (it would re-read the wrong account's document with this
+        // thread's id and could mislabel the result). The write itself already happened under the right
+        // session ; if the account changed now, surface it loud rather than verify against the wrong one.
+        if (activePseudo() != pseudo) {
+            diagnostics.record(
+                DiagnosticsLog.Level.ERROR,
+                LOG_TAG,
+                "writeBackFlag: active account changed after POST, before verify → unverifiable",
+            )
+            return MpStorageWriteResult.VerificationFailedRestoreFailed(
+                mutatedBody.toByteArray(Charsets.UTF_8).size,
+                actualBytes = 0,
+            )
+        }
+
+        val readBack = reReadContentForm(location)
+        if (readBack == mutatedBody) {
+            diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, "writeBackFlag verified OK")
+            return MpStorageWriteResult.Success(verified = true)
+        }
+
+        // Not byte-identical. Tell a HEALTHY document apart from a CORRUPTED one before deciding to
+        // restore (Codex review): a valid JSON envelope that merely differs means HFR re-encoded
+        // entities OR a concurrent client (DTCloud) wrote between our GET and this re-GET — restoring
+        // the backup there would CLOBBER a legitimate last-write-wins update. Only a null / non-JSON
+        // read-back is real corruption (the HFR non-UTF-8 truncation, #114) → that is what we restore.
+        if (readBack != null && envelopeWriter.isJsonEnvelope(readBack)) {
             diagnostics.record(
                 DiagnosticsLog.Level.INFO,
                 LOG_TAG,
-                "writeBackFlag dry-run: body built (${body.length} chars), POST skipped — not observed live",
+                "writeBackFlag: valid-but-different read-back (re-encoding / concurrent) — kept, not restored",
             )
-            return MpStorageWriteResult.Prepared(body = body, posted = false)
+            return MpStorageWriteResult.Success(verified = false)
         }
-        // GUARDED branch — reached only via the internal writeBackFlagLive (tests). The bdd.php cat=prive
-        // write contract is unconfirmed; the response is intentionally NOT parsed here (no live
-        // success/error capture). Surfaced as Prepared(posted = true).
-        hfrClient.submitPrivateMessageEdit(formBody)
-        diagnostics.record(DiagnosticsLog.Level.WARN, LOG_TAG, "writeBackFlag POSTED (live, unconfirmed contract)")
-        return MpStorageWriteResult.Prepared(body = body, posted = true)
+
+        val expectedBytes = mutatedBody.toByteArray(Charsets.UTF_8).size
+        val actualBytes = readBack?.toByteArray(Charsets.UTF_8)?.size ?: 0
+        diagnostics.record(
+            DiagnosticsLog.Level.WARN,
+            LOG_TAG,
+            "writeBackFlag verify CORRUPTION (expected=$expectedBytes actual=$actualBytes) → restoring backup",
+        )
+        return restoreBackup(location, form, pseudo, backupBody, expectedBytes, actualBytes)
     }
 
+    // ReturnCount: the session guard (C2), the build-failure guard, and the restored/failed outcome are
+    // three legitimate exits; splitting would obscure the restore's linear flow.
+    @Suppress("ReturnCount")
+    private suspend fun restoreBackup(
+        location: MpStorageLocation,
+        form: ReplyForm,
+        pseudo: String,
+        backupBody: String,
+        expectedBytes: Int,
+        actualBytes: Int,
+    ): MpStorageWriteResult {
+        // IDENTITY GUARD (C2) — the verify GET above suspended ; re-check before the restore POST so a
+        // mid-operation account switch can never POST the restore under a different session (it would
+        // hit the new account's storage). Declining is the lesser evil : we surface a possibly
+        // un-restored document (loud) rather than write it to the wrong place.
+        if (activePseudo() != pseudo) {
+            diagnostics.record(
+                DiagnosticsLog.Level.ERROR,
+                LOG_TAG,
+                "writeBackFlag: active account changed before restore → no restore POST (document may be inconsistent)",
+            )
+            return MpStorageWriteResult.VerificationFailedRestoreFailed(expectedBytes, actualBytes)
+        }
+
+        // Reuse the initial edit form: HFR's hash_check is session-stable (verified live, NOT rotated
+        // per-request), so the original form is valid for the restore. The guarded builder still
+        // refuses if its subject is not the storage hash.
+        val restoreBody = buildPrivateMessageEditBody(location, form, pseudo, backupBody)
+            ?: return MpStorageWriteResult.VerificationFailedRestoreFailed(expectedBytes, actualBytes)
+
+        hfrClient.submitPrivateMessageEdit(restoreBody)
+        val restored = reReadContentForm(location)
+        return if (restored == backupBody) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "writeBackFlag restored backup OK (write not applied)",
+            )
+            MpStorageWriteResult.VerificationFailedRestored(expectedBytes, actualBytes)
+        } else {
+            // CRITICAL : we could not bring the document back to its backup. Log loudly.
+            diagnostics.record(
+                DiagnosticsLog.Level.ERROR,
+                LOG_TAG,
+                "writeBackFlag RESTORE FAILED — storage may be inconsistent",
+            )
+            MpStorageWriteResult.VerificationFailedRestoreFailed(expectedBytes, actualBytes)
+        }
+    }
+
+    /** Re-fetches the full edit [ReplyForm] of the first post at [location] (null when unreadable). */
+    private suspend fun reReadForm(location: MpStorageLocation): ReplyForm? =
+        replyFormParser
+            .parse(hfrClient.getPrivateMessageEditForm(location.threadId, location.numreponse))
+            .getOrNull()
+            ?.takeUnless { it.isAnonymous }
+
+    /** Re-reads the raw `content_form` of the first post at [location] for verification (null when unreadable). */
+    private suspend fun reReadContentForm(location: MpStorageLocation): String? =
+        reReadForm(location)?.initialContent
+
     /**
-     * The `bdd.php cat=prive` POST body. Mirrors [fr.forumhfr.redface2.core.data.write.DefaultEditPostRepository]'s
-     * edit body, with TWO deliberate differences :
-     *  - `cat` is the String `"prive"` (the storage post lives under the private-message category ;
-     *    the public edit flow passes an Int) — this is the whole reason for the dedicated wire method ;
-     *  - `content_form` is the mutated JSON document, not user BBCode.
-     * `numreponse` targets the storage first post, `numrep` stays empty, `sujet` / `hash_check` /
-     * `verifrequet` / the preserved hidden fields come from the parsed edit form. `password` and
-     * `delete` are hard-denied (never resend the deletion checkbox).
+     * The `bdd.php cat=prive` POST body for the storage first post. TWO deliberate differences from
+     * [fr.forumhfr.redface2.core.data.write.DefaultEditPostRepository]'s edit body :
+     *  - `cat` is the String `"prive"` (the storage post lives under the private-message category) ;
+     *  - `content_form` is the mutated/backup JSON document, not user BBCode.
+     *
+     * SECURITY / CORRECTNESS guards (ADR-014 §4) :
+     *  - `sujet` is ALWAYS the CONSTANT [HfrConstants.MP_STORAGE_SUBJECT_HASH], NEVER `form.sujet` ;
+     *  - returns `null` (REFUSE TO POST) when the parsed [form]'s subject does not equal that constant —
+     *    a structural guard against writing into the wrong conversation ;
+     *  - `pseudo` is the ACTIVE account's pseudo, sent verbatim ;
+     *  - `password` and `delete` are hard-denied (never resend the deletion checkbox).
      */
     private fun buildPrivateMessageEditBody(
         location: MpStorageLocation,
         form: ReplyForm,
+        pseudo: String,
         contentForm: String,
-    ): FormBody {
+    ): FormBody? {
+        // Structural guard : never POST into a conversation whose subject is not the storage hash.
+        if (form.sujet != HfrConstants.MP_STORAGE_SUBJECT_HASH) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "writeBackFlag ABORT: form subject is not the storage hash → no POST",
+            )
+            return null
+        }
+
         val builder = FormBody.Builder(Charsets.UTF_8)
         val emitted = mutableSetOf<String>()
         val overrides = buildMap {
@@ -243,7 +470,9 @@ class DefaultMpStorageRepository @Inject constructor(
             put("cat", "prive")
             put("post", location.threadId.toString())
             put("page", "1")
-            put("sujet", form.sujet)
+            put("pseudo", pseudo)
+            // ALWAYS the constant hash — never form.sujet (the guard above also enforces they match).
+            put("sujet", HfrConstants.MP_STORAGE_SUBJECT_HASH)
             form.msgIcon?.let { put("MsgIcon", it) }
         }
         overrides.forEach { (key, value) ->
@@ -266,10 +495,10 @@ class DefaultMpStorageRepository @Inject constructor(
 
     /**
      * GETs and parses the storage first-post edit form at [location] for the WRITE path, returning the
-     * [ReplyForm] (for hash_check / sujet / hidden fields) plus the parsed [MpStorageDocument] (null when
-     * the body is not a readable v0.1 envelope — surfaced as unreadable, never repaired). Returns `null`
-     * when the edit form itself cannot be obtained (stale location). Throws [SessionExpiredException] on
-     * an anonymous composer.
+     * [ReplyForm] (for hash_check / sujet / hidden fields / the verbatim content_form) plus the parsed
+     * [MpStorageDocument] (null when the body is not a readable v0.1 envelope — surfaced as unreadable,
+     * never repaired). Returns `null` when the edit form itself cannot be obtained (stale location).
+     * Throws [SessionExpiredException] on an anonymous composer.
      */
     private suspend fun readFormAndDocument(location: MpStorageLocation): WriteRead? {
         val form = replyFormParser
@@ -407,6 +636,9 @@ class DefaultMpStorageRepository @Inject constructor(
 
     private suspend fun activePseudo(): String? =
         (authRepository.observeAuthState().first() as? AuthState.Authenticated)?.pseudo
+
+    private suspend fun syncWriteEnabled(): Boolean =
+        userPreferencesRepository.observeSyncPrivateMessagesWriteEnabled().first()
 
     private companion object {
         private const val LOG_TAG = "MpStorageRepository"

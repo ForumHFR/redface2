@@ -5,12 +5,21 @@ import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageWritePreview
+import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
+import fr.forumhfr.redface2.core.model.mpstorage.MpStorageWriteResult
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import java.io.IOException
+import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -52,7 +61,11 @@ class PrivateMessageThreadViewModelTest {
         repository: MessagesRepository,
         authRepository: AuthRepository = FakeAuthRepository(),
         readPositionStore: PrivateMessageReadPositionStore = FakeReadPositionStore(),
-    ) = PrivateMessageThreadViewModel(request, repository, authRepository, readPositionStore)
+        mpStorageRepository: MpStorageRepository = FakeMpStorageRepository(),
+        writeRepository: PrivateMessageWriteRepository = mockk(relaxed = true),
+    ) = PrivateMessageThreadViewModel(
+        request, repository, authRepository, readPositionStore, mpStorageRepository, writeRepository,
+    )
 
     @Test
     fun `loads the thread on init without private route metadata fallback`() = runTest {
@@ -83,6 +96,8 @@ class PrivateMessageThreadViewModelTest {
             repository = repository,
             authRepository = FakeAuthRepository(AuthState.Anonymous),
             readPositionStore = FakeReadPositionStore(),
+            mpStorageRepository = FakeMpStorageRepository(),
+            writeRepository = mockk(relaxed = true),
         )
 
         assertEquals(PrivateMessageThreadUiState.Mode.RequiresLogin, viewModel.state.value.mode)
@@ -267,6 +282,8 @@ class PrivateMessageThreadViewModelTest {
             repository = repository,
             authRepository = FakeAuthRepository(),
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 7)),
+            mpStorageRepository = FakeMpStorageRepository(),
+            writeRepository = mockk(relaxed = true),
         )
 
         coVerify(exactly = 1) {
@@ -288,6 +305,8 @@ class PrivateMessageThreadViewModelTest {
             repository = repository,
             authRepository = FakeAuthRepository(),
             readPositionStore = FakeReadPositionStore(initial = mapOf(42 to 3)),
+            mpStorageRepository = FakeMpStorageRepository(),
+            writeRepository = mockk(relaxed = true),
         )
 
         coVerify(exactly = 1) {
@@ -307,7 +326,10 @@ class PrivateMessageThreadViewModelTest {
         val store = FakeReadPositionStore()
 
         val viewModel =
-            PrivateMessageThreadViewModel(request, repository, FakeAuthRepository(), store)
+            PrivateMessageThreadViewModel(
+                request, repository, FakeAuthRepository(), store, FakeMpStorageRepository(),
+                mockk(relaxed = true),
+            )
         assertEquals(1, store.saved[42])
 
         viewModel.selectPage(5)
@@ -368,14 +390,293 @@ class PrivateMessageThreadViewModelTest {
         assertEquals(5, store.saved[42])
     }
 
-    private fun thread(page: Int, totalPages: Int) = PrivateMessageThread(
+    @Test
+    fun `a landed page triggers the update-only MPStorage sync with page, anchor and desktop uri (#597)`() = runTest {
+        // The auto trigger fires AFTER the local save, in the same launch. It builds the entry from the
+        // landed page + the last post's anchor and the canonical DTCloud desktop uri.
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 3, messages = listOf(post(1000), post(2784595)))
+        val mpStorage = FakeMpStorageRepository()
+
+        threadViewModel(repository, mpStorageRepository = mpStorage)
+        advanceUntilIdle()
+
+        assertEquals(1, mpStorage.ifPresentCalls.size)
+        val entry = mpStorage.ifPresentCalls.single()
+        assertEquals(42, entry.threadId)
+        assertEquals(1, entry.page)
+        // Anchor = the LAST post on the page (the furthest the reader reached).
+        assertEquals(2784595, entry.numreponse)
+        // Canonical DTCloud desktop uri, with the #t<anchor> fragment matching the page.
+        assertEquals("/forum2.php?config=hfr.inc&cat=prive&post=42&page=1#t2784595", entry.uri)
+        // C2 — the VM passes the owner it snapshotted for THIS read as expectedPseudo, so the repo can
+        // refuse the write if the active account switched across its own suspension points.
+        assertEquals("xaat", mpStorage.ifPresentPseudos.single())
+    }
+
+    @Test
+    fun `the MPStorage sync omits the uri and anchor when the page has no posts (#597)`() = runTest {
+        // No anchor available → numreponse null AND uri null, so the update-only path preserves the
+        // entry's existing href/uri rather than nulling them (the repository keeps the absent fields).
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1, messages = emptyList())
+        val mpStorage = FakeMpStorageRepository()
+
+        threadViewModel(repository, mpStorageRepository = mpStorage)
+        advanceUntilIdle()
+
+        val entry = mpStorage.ifPresentCalls.single()
+        assertEquals(null, entry.numreponse)
+        assertEquals(null, entry.uri)
+    }
+
+    @Test
+    fun `a failing MPStorage sync is swallowed and never breaks the local save (#597)`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1, messages = listOf(post(7)))
+        val store = FakeReadPositionStore()
+        val mpStorage = FakeMpStorageRepository(thrown = IOException("storage write down"))
+
+        val viewModel = threadViewModel(repository, readPositionStore = store, mpStorageRepository = mpStorage)
+        advanceUntilIdle()
+
+        // The thrown sync did not break the session: content is loaded and the local position is saved.
+        assertTrue(viewModel.state.value.mode is PrivateMessageThreadUiState.Mode.Content)
+        assertEquals(1, store.saved[42])
+        assertEquals(1, mpStorage.ifPresentCalls.size)
+    }
+
+    @Test
+    fun `an account switch seals the MPStorage sync to the reading session (#597 + #462)`() = runTest {
+        // The sync lives in the same saveJob/session guard as the local save: a save attributed to a
+        // session that changed before it fires is dropped before any MPStorage call.
+        val repository = mockk<MessagesRepository>()
+        val gate = CompletableDeferred<PrivateMessageThread>()
+        var calls = 0
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } coAnswers { if (calls++ == 0) gate.await() else thread(page = 1, totalPages = 1, messages = listOf(post(9))) }
+        val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
+        val mpStorage = FakeMpStorageRepository()
+
+        threadViewModel(repository, authRepository, mpStorageRepository = mpStorage)
+        authRepository.emit(AuthState.Authenticated("bob"))
+        advanceUntilIdle()
+        gate.complete(thread(page = 3, totalPages = 9, messages = listOf(post(123))))
+        advanceUntilIdle()
+
+        // Only bob's landing reached the MPStorage sync — alice's sealed (cancelled) job never did.
+        assertEquals(1, mpStorage.ifPresentCalls.size)
+        assertEquals(1, mpStorage.ifPresentCalls.single().page)
+        // C2 — and the expectedPseudo passed is bob's (the session that actually read the page), so
+        // the repo's identity guard compares against the right account.
+        assertEquals("bob", mpStorage.ifPresentPseudos.single())
+    }
+
+    // #612 — participant roster.
+
+    @Test
+    fun `openRoster lazily fetches the reply form and exposes the owner member list`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice, bob, Bébé Yoda")
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        // LAZY: no fetch on screen entry.
+        assertEquals(PrivateMessageThreadUiState.Roster.Hidden, viewModel.state.value.roster)
+
+        viewModel.openRoster()
+        advanceUntilIdle()
+
+        val roster = viewModel.state.value.roster
+        assertTrue("expected Loaded, got $roster", roster is PrivateMessageThreadUiState.Roster.Loaded)
+        // The owner (« xaat », the authenticated pseudo) is PREPENDED: HFR's `newdest` lists the members
+        // MINUS the creator, but the « Participants » sheet must show the full group including the viewer.
+        assertEquals(
+            listOf("xaat", "alice", "bob", "Bébé Yoda"),
+            (roster as PrivateMessageThreadUiState.Roster.Loaded).members,
+        )
+        coVerify(exactly = 1) { write.fetchReplyForm(any(), any()) }
+    }
+
+    @Test
+    fun `dismissing the roster mid-load cancels the fetch so a late response cannot reopen it`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        // Never resolves within the test: the dismiss must cancel it before it can answer.
+        coEvery { write.fetchReplyForm(any(), any()) } coAnswers { kotlinx.coroutines.awaitCancellation() }
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        viewModel.openRoster() // fetch in flight (not advanced)
+        viewModel.dismissRoster()
+        advanceUntilIdle()
+
+        assertEquals(PrivateMessageThreadUiState.Roster.Hidden, viewModel.state.value.roster)
+    }
+
+    @Test
+    fun `openRoster maps a one-to-one MP (no roster) to Unavailable`() = runTest {
+        // #618 — only a form with NO « Destinataires » row at all (recipientsRoster == null AND no
+        // newdest) maps to Unavailable: a one-to-one MP. A non-owner DT now resolves to Loaded.
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        // Neither newdest nor a read-only roster → a one-to-one MP.
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = null, roster = null)
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        viewModel.openRoster()
+        advanceUntilIdle()
+
+        assertEquals(PrivateMessageThreadUiState.Roster.Unavailable, viewModel.state.value.roster)
+    }
+
+    @Test
+    fun `openRoster exposes the full roster of a NON-owner DT and marks it non-manageable`() = runTest {
+        // #618 — a participant's message.php form carries the roster as a read-only span (no newdest).
+        // The sheet must still show the FULL group (viewer prepended), but flag it as not manageable.
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        // No newdest (not the owner) but a read-only roster CSV (minus the viewer « xaat »).
+        coEvery {
+            write.fetchReplyForm(any(), any())
+        } returns replyForm(newdest = null, roster = "alice, bob, TestOwner")
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        viewModel.openRoster()
+        advanceUntilIdle()
+
+        val roster = viewModel.state.value.roster
+        assertTrue("expected Loaded, got $roster", roster is PrivateMessageThreadUiState.Roster.Loaded)
+        roster as PrivateMessageThreadUiState.Roster.Loaded
+        assertEquals(listOf("xaat", "alice", "bob", "TestOwner"), roster.members)
+        assertFalse("a non-owner cannot manage the recipients", roster.canManageRecipients)
+    }
+
+    @Test
+    fun `openRoster marks the owner roster as manageable`() = runTest {
+        // #618 — an owner form (newdest present) → the roster is editable, so canManageRecipients=true
+        // and the « Gérer les destinataires » entry is offered.
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice, bob")
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        viewModel.openRoster()
+        advanceUntilIdle()
+
+        val roster = viewModel.state.value.roster
+        assertTrue("expected Loaded, got $roster", roster is PrivateMessageThreadUiState.Roster.Loaded)
+        assertTrue((roster as PrivateMessageThreadUiState.Roster.Loaded).canManageRecipients)
+    }
+
+    @Test
+    fun `re-opening the roster reuses the cached form without a second fetch`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice, bob")
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        viewModel.openRoster()
+        advanceUntilIdle()
+        viewModel.dismissRoster()
+        assertEquals(PrivateMessageThreadUiState.Roster.Hidden, viewModel.state.value.roster)
+
+        viewModel.openRoster()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.roster is PrivateMessageThreadUiState.Roster.Loaded)
+        // The cache served the second open — exactly one network fetch overall.
+        coVerify(exactly = 1) { write.fetchReplyForm(any(), any()) }
+    }
+
+    @Test
+    fun `a roster load failure surfaces an Error kept open for retry`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        coEvery { write.fetchReplyForm(any(), any()) } throws IOException("offline")
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        viewModel.openRoster()
+        advanceUntilIdle()
+
+        val roster = viewModel.state.value.roster
+        assertTrue("expected Error, got $roster", roster is PrivateMessageThreadUiState.Roster.Error)
+        // #316 — no raw message, only the type-derived kind.
+        assertEquals(HfrErrorKind.Network, (roster as PrivateMessageThreadUiState.Roster.Error).kind)
+
+        // Retry succeeds → Loaded.
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice")
+        viewModel.retryRoster()
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.roster is PrivateMessageThreadUiState.Roster.Loaded)
+    }
+
+    // #618 — `newdest` = the owner's editable input (drives canManageRecipients) ; `roster` = the
+    // read-only roster CSV the parser surfaces for EVERY member. An owner form sets both to the same
+    // value (parser reuses newdest) ; a non-owner form sets only `roster` (read-only span, no newdest).
+    private fun replyForm(newdest: String?, roster: String? = newdest) = ReplyForm(
+        hashCheck = "h",
+        sujet = "Sujet",
+        hiddenFields = buildMap {
+            put("cat", "prive")
+            put("post", "42")
+            if (newdest != null) put("newdest", newdest)
+        },
+        isAnonymous = false,
+        recipientsRoster = roster,
+    )
+
+    private fun thread(
+        page: Int,
+        totalPages: Int,
+        messages: List<Post> = emptyList(),
+    ) = PrivateMessageThread(
         threadId = 42,
         subject = "Sujet",
         correspondent = "Correspondant",
-        messages = emptyList(),
+        messages = messages,
         page = page,
         totalPages = totalPages,
         canReply = true,
+    )
+
+    private fun post(numreponse: Int) = Post(
+        numreponse = numreponse,
+        author = "auteur",
+        date = Instant.EPOCH,
+        content = PostContent(blocks = emptyList()),
+        avatarUrl = null,
+        isEditable = false,
+        isOwnPost = false,
+        quotedAuthors = emptyList(),
+        postIndex = null,
     )
 
     private class FakeAuthRepository(
@@ -419,5 +720,39 @@ class PrivateMessageThreadViewModelTest {
             lastSaveOwner = owner?.lowercase()
             saved[threadId] = page
         }
+    }
+
+    /**
+     * Fake [MpStorageRepository] for the #597 auto-sync trigger. Records every
+     * [writeBackFlagIfPresent] entry (so a test can assert the page/anchor/uri the trigger built),
+     * returns [result] (default = the opt-in-OFF nominal case), or throws [thrown] to prove the sync
+     * failure is swallowed. The read / manual-write paths are never exercised by the thread VM.
+     */
+    private class FakeMpStorageRepository(
+        private val result: MpStorageWriteResult = MpStorageWriteResult.DisabledByPreference,
+        private val thrown: Throwable? = null,
+    ) : MpStorageRepository {
+        val ifPresentCalls = mutableListOf<MpStorageFlagEntry>()
+
+        /** C2 — the `expectedPseudo` the VM snapshotted and passed for each call, in order. */
+        val ifPresentPseudos = mutableListOf<String>()
+
+        override suspend fun fetchStorage() = error("read path not used by the thread VM")
+
+        override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
+            error("the auto trigger uses writeBackFlagIfPresent, never writeBackFlag")
+
+        override suspend fun writeBackFlagIfPresent(
+            entry: MpStorageFlagEntry,
+            expectedPseudo: String,
+        ): MpStorageWriteResult {
+            ifPresentCalls += entry
+            ifPresentPseudos += expectedPseudo
+            thrown?.let { throw it }
+            return result
+        }
+
+        override suspend fun previewWriteBackFlag(entry: MpStorageFlagEntry): MpStorageWritePreview =
+            error("preview path not used by the thread VM")
     }
 }

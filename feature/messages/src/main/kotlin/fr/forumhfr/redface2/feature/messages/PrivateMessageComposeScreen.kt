@@ -211,8 +211,10 @@ private fun ComposeEditorBody(
             onValueChange = onRecipientsChanged,
             singleLine = true,
             enabled = !state.isSubmitting,
-            label = { Text(stringResource(R.string.messages_compose_recipients_label)) },
+            // #606 — clearer label + a one-liner that explains a CSV makes a group conversation.
+            label = { Text(stringResource(R.string.messages_compose_recipients_label_v2)) },
             placeholder = { Text(stringResource(R.string.messages_compose_recipients_placeholder)) },
+            supportingText = { Text(stringResource(R.string.messages_compose_recipients_help)) },
             modifier = Modifier.fillMaxWidth(),
         )
 

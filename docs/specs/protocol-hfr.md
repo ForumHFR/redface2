@@ -431,6 +431,19 @@ Contrat live capturé le 2026-05-22 (cf. `core/parser/src/test/resources/fixture
 - HFR upper-case la query echo dans le HTML retourné (`<input value="KOTLIN" name="search">`). Le match SQL est insensible à la casse — on n'a pas à se soucier de la casse côté UI.
 - Confidentialité : la query utilisateur apparaît en clair dans l'URL des résultats. Le repo logue uniquement la longueur (`queryLength=N`) et la présence d'une `cat`, et rebrande les `IOException` qui contiendraient l'URL complète avant propagation.
 
+### POST `/transsearch.php` — recherche intra-topic
+
+Recherche d'un mot-clé **à l'intérieur d'un seul topic** (#546/#576/#585), (distincte de la recherche globale `forum1.php?recherches=1` ci-dessus). Câblée par `HfrClient.searchInTopic` (`TopicSearch` / `TopicSearchRepository(Impl)`), parsée par `TopicSearchFormParser`. Contrat reverse-engineered live (cohérent avec la note interne `reference_hfr_transsearch_contract`).
+
+- **Authentifié par conception** : `transsearch.php` rejette un `hash_check` vide — la recherche intra-topic n'est donc disponible que connecté. C'est une **exception locale et bornée** à la règle « prefetch non authentifié » (ce n'est pas un prefetch : c'est une action utilisateur explicite).
+- Champs du POST : `hash_check` (anti-CSRF, requis — voir § Constantes anti-CSRF), `post` (= topic id), `cat`, `config=hfr.inc`, `p=1`, `sondage=0`, `owntopic`, `word` (le terme), `spseudo` (filtre par pseudo, vide = tout le monde), `filter` (= `1` **uniquement** en mode « occurrences correspondantes seules », absent sinon — `filter` absent ≠ `filter=0`), `dep=0`, `firstnum`, `currentnum`.
+- **Gestion du curseur** :
+  - `currentnum` = curseur de navigation géré côté JS par HFR. Le form statique **n'a pas** de `currentnum` ; on l'omet pour une recherche **fraîche**.
+  - `firstnum` = ancre de page attendue par HFR sur une recherche **fraîche** ; on la passe avec `dep=0`. Pour un **pas** (résultat suivant), `firstnum` **ET** `dep` sont **omis** : re-envoyer `firstnum` ré-ancre HFR sur la **première** occurrence et le curseur ne progresse jamais (bug de stepping vérifié live, #546). Pour balayer tout le sujet (mode « tout le sujet »), `firstnum` est omis.
+  - `fin` (= curseur de fin / sentinelle) est **absent** des posts → fin atteinte.
+- **Réponse** = une **page de topic re-parsée** (même HTML que `forum2.php`), positionnée sur l'occurrence courante ; la navigation next/prev rejoue le POST avec le curseur ajusté.
+- **NoResults vs erreur réseau** : « aucun résultat » est un état nominal (réponse valide sans occurrence — y compris la règle MyISAM « 50 % des lignes » de HFR qui renvoie « aucun résultat » sans que ce soit un bug), distinct d'une `IOException`. `word` et `spseudo` ne sont **jamais** loggés (même précédent que le POST de réponse).
+
 ---
 
 ## `listenumreponse` — optimisation JS inline
@@ -602,6 +615,29 @@ GET /user/nonlu.php?config=hfr.inc&cat=prive&subcat=0&post={threadId}&page={N}&p
 - **Granularité binaire, conversation entière** : le paramètre `page` n'encode aucune position — nonlu posé depuis la page 3 puis lecture de la seule page 2 → conversation entièrement « lue ». Pas d'état intermédiaire.
 - Séquence exercée live (post=3161381) : `nonlu` → NON-LU ; GET page 1 → lu ; `nonlu` → NON-LU ; GET page 3 → lu. État final identique à l'état initial : la compensation est **sans perte** précisément parce que l'état est binaire.
 - Conséquence ADR-013 : un « marquer comme non lu » manuel **suspend le prefetch** de la conversation jusqu'à sa réouverture (sinon le prefetch adjacent effacerait le non-lu que l'utilisateur vient de poser).
+
+### MP/DT — ajout/retrait de membres (`newdest`)
+
+Gestion des destinataires d'une conversation MultiMP / DT par son **owner** (#606/#612). Câblée par `PrivateMessageWriteRepository` / `HfrClient` (parser `PrivateMessageReplyFormParser`, champ porté par `ReplyForm`).
+
+- **Surface réelle** : le formulaire de réponse d'une conversation MP est embarqué dans la **page de conversation `message.php`** (PAS `forum2.php`). C'est de là que le champ `newdest` est lu et réémis.
+- **`newdest` ≠ `dest`** : `dest` est le destinataire d'une **nouvelle** composition (compose) ; `newdest` est la **liste CSV des membres actuels** d'une conversation existante, **prérempli par HFR** et **éditable uniquement par l'owner**. L'owner ajoute/retire un membre en modifiant cette CSV puis en envoyant un **POST de réponse** : la mutation de la liste de membres passe donc par le même POST que la réponse (`bddpost.php` `cat=prive`, `numrep` préservé), pas par un endpoint dédié.
+- Règles de validation (vérifiées) : au moins **1** membre conservé, **ordre et casse** préservés, le champ n'est honoré que si l'utilisateur courant est l'owner de la conversation (guard côté repo).
+- La mutation produit un **message système « Modération »** dans le fil (trace serveur de l'ajout/retrait).
+- Un non-owner ne voit pas `newdest` préempli : pour lui le POST de réponse ne touche pas la composition de la conversation.
+
+### Écriture MPStorage — read-modify-write `bdd.php cat=prive` (#593/#597)
+
+Écriture dans le document MPStorage (premier post du MP de stockage, cf. [models.md]({{ site.baseurl }}/specs/models#mpstorage) et [ADR-014]({{ site.baseurl }}/adr/014-mpstorage-v01-de-facto)). Câblée par `DefaultMpStorageRepository` / `MpStorageEnvelopeWriter`. **Le contrat `bdd.php cat=prive` en écriture n'a pas été observé live** — l'implémentation est *fail-closed* et restée **opt-in OFF par défaut**.
+
+- **Pipeline RMW pur** : GET du formulaire d'édition du premier post (`content_form`) → mutation de l'enveloppe JSON en mémoire → POST `bdd.php` `cat=prive` du `content_form` complet. C'est un **remplacement intégral** (last-write-wins, pas de verrou) ; les clés tierces du `rawEnvelope` survivent au round-trip (exigence de compatibilité userscripts non négociable).
+- **Verify-after-write** : relecture après POST ; restauration **bornée à la corruption réelle** (l'enveloppe relue n'est plus une enveloppe v0.1 valide, garde `isJsonEnvelope`), jamais un rollback aveugle.
+- **Cap de taille** : `MAX_CONTENT_FORM_BYTES = 64 KiB` (`MpStorageRepository`) ; dépassement ⇒ `MpStorageWriteResult.TooLarge`, **aucun POST** envoyé (fail-closed — HFR tronque silencieusement, ce qui corromprait le document ; la `list` DTCloud n'est jamais prunée par les userscripts).
+- **Deux modes d'écriture** :
+  - `writeBackFlag(entry)` — **manuel**, add-or-update : pose ou met à jour la position de reprise pour une conversation, créant l'entrée si absente.
+  - `writeBackFlagIfPresent(entry)` (#597) — **UPDATE-ONLY** : ne réécrit que si la conversation est **déjà présente** dans le document, sinon `MpStorageWriteResult.SkippedNotPresent` et **aucun POST**. C'est le mode du déclencheur automatique de synchronisation de la position de lecture DT — anti-pollution : on ne crée jamais d'entrée pour une conversation que MPStorage ne suit pas déjà.
+- **Opt-in** : l'écriture est gardée par le réglage `KEY_SYNC_PRIVATE_MESSAGES_WRITE_ENABLED` (`?: false`, **défaut OFF**, `DataStoreUserPreferencesRepository`) ; opt-in OFF ⇒ `MpStorageWriteResult.DisabledByPreference`, aucune requête.
+- **Arbitrage de clé write-back (#597)** : la clé d'identification d'une entrée (threadId du MP vs id de topic DT côté forum) comporte un risque résiduel d'écriture dans la mauvaise entrée ; il est **borné** par le mode UPDATE-ONLY (jamais de création silencieuse) mais **non nul** — à requalifier avant d'activer l'opt-in par défaut (suivi #6/#577).
 
 ---
 

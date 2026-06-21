@@ -8,13 +8,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -29,7 +26,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -40,17 +36,18 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.Post
-import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
-import fr.forumhfr.redface2.core.ui.list.LazyListScrollbar
+import fr.forumhfr.redface2.core.ui.list.ScrollToTopOnPageChange
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
+import fr.forumhfr.redface2.core.ui.post.PostCardShell
+import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
+import fr.forumhfr.redface2.core.ui.post.PostListScaffold
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import java.time.Instant
 import java.time.ZoneId
@@ -74,6 +71,9 @@ fun PrivateMessageThreadScreen(
     onLoaded: () -> Unit,
     onBack: () -> Unit,
     onReply: (threadId: Int, page: Int) -> Unit,
+    // #618 — owner-only entry to the recipient editor, from the « Participants » sheet. Navigates to
+    // the reply composer with the recipient-manager sheet auto-opened (member changes ship as a reply).
+    onManageRecipients: (threadId: Int, page: Int) -> Unit = { _, _ -> },
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel = hiltViewModel<PrivateMessageThreadViewModel, PrivateMessageThreadViewModel.Factory>(
@@ -154,27 +154,24 @@ fun PrivateMessageThreadScreen(
                         )
                     }
                 },
-                actions = { topBarActions?.invoke() },
+                actions = {
+                    // #612 — « Participants » action + the caller's slot. Extracted to keep the
+                    // screen host under detekt's cyclomatic-complexity threshold.
+                    ThreadTopBarActions(
+                        isMultiRecipient = (mode as? PrivateMessageThreadUiState.Mode.Content)
+                            ?.thread?.isMultiRecipient == true || isMultiRecipientHint,
+                        onOpenRoster = viewModel::openRoster,
+                        topBarActions = topBarActions,
+                    )
+                },
             )
         },
         floatingActionButton = {
-            // #301 — reply affordance, shown only once the page proved a reply form is available
-            // (`canReply`). Carries the page the user is viewing so the form HFR pre-fills (and its
-            // `numrep`) matches what's on screen.
-            val content = mode as? PrivateMessageThreadUiState.Mode.Content
-            if (content?.thread?.canReply == true) {
-                val replyLabel = stringResource(R.string.messages_reply)
-                ExtendedFloatingActionButton(
-                    text = { Text(replyLabel) },
-                    // #360 / ADR-015 — crayon en vector stroke unifié via le primitive :core:ui,
-                    // à la place du glyphe « ✎ » (poids optique aligné sur la flèche retour / les
-                    // chevrons). Pas de Material icons (detekt ForbiddenImport).
-                    icon = {
-                        RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_edit)
-                    },
-                    onClick = { onReply(request.threadId, state.page) },
-                )
-            }
+            ThreadReplyFab(
+                // #301 — reply affordance, shown only once the page proved a reply form is available.
+                canReply = (mode as? PrivateMessageThreadUiState.Mode.Content)?.thread?.canReply == true,
+                onReply = { onReply(request.threadId, state.page) },
+            )
         },
     ) { innerPadding ->
         Box(
@@ -226,6 +223,9 @@ fun PrivateMessageThreadScreen(
                 }
 
                 is PrivateMessageThreadUiState.Mode.Content -> {
+                    // #351c — moved to :core:ui (was a local copy here). Lands at the top when a NEW
+                    // page replaces the kept-on-screen one; the null guard on the first render keeps a
+                    // restored position on rotation/recreation.
                     ScrollToTopOnPageChange(listState = listState, renderedPage = mode.thread.page)
                     // #335/#351 — pull-to-refresh re-fetches the displayed page; the indicator also
                     // covers the keep-content page changes (same isRefreshing flag).
@@ -234,60 +234,94 @@ fun PrivateMessageThreadScreen(
                         onRefresh = viewModel::refresh,
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        // #300/#351 — same overlay layout as the topic page: the shared scrollbar
-                        // rides the right edge of the message list, OUTSIDE the swiped element so
-                        // it stays put while the page follows the finger.
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            ThreadMessages(
-                                messages = mode.thread.messages,
-                                page = state.page,
+                        // #300/#351c — the list overlay (LazyColumn + auto-hiding scrollbar) is now the
+                        // shared PostListScaffold; the swipe chain rides the inner list via listModifier
+                        // (so the scrollbar stays fixed while the page follows the finger) and the MP
+                        // density (16.dp padding, 12.dp gap) is passed unchanged.
+                        ThreadMessages(
+                            messages = mode.thread.messages,
+                            page = state.page,
+                            totalPages = state.totalPages,
+                            onSelectPage = viewModel::selectPage,
+                            // Codex review — gate the pager buttons with the same condition as
+                            // the swipe: re-tapping during a keep-content load would only cancel
+                            // and restart the round-trip (supersede), never advance faster.
+                            pagerEnabled = !state.isRefreshing,
+                            listState = listState,
+                            // #351b — horizontal swipe changes page in place (same thresholds
+                            // and feel as the topic via the shared :core:ui geometry).
+                            swipeModifier = rememberThreadSwipeModifier(
+                                renderedPage = mode.thread.page,
                                 totalPages = state.totalPages,
+                                isRefreshing = state.isRefreshing,
                                 onSelectPage = viewModel::selectPage,
-                                // Codex review — gate the pager buttons with the same condition as
-                                // the swipe: re-tapping during a keep-content load would only cancel
-                                // and restart the round-trip (supersede), never advance faster.
-                                pagerEnabled = !state.isRefreshing,
-                                listState = listState,
-                                // #351b — horizontal swipe changes page in place (same thresholds
-                                // and feel as the topic via the shared :core:ui geometry).
-                                swipeModifier = rememberThreadSwipeModifier(
-                                    renderedPage = mode.thread.page,
-                                    totalPages = state.totalPages,
-                                    isRefreshing = state.isRefreshing,
-                                    onSelectPage = viewModel::selectPage,
-                                ),
-                            )
-                            LazyListScrollbar(
-                                listState = listState,
-                                modifier = Modifier.align(Alignment.CenterEnd),
-                            )
-                        }
+                            ),
+                        )
                     }
                 }
             }
         }
     }
+
+    // #612 — participant roster sheet. Renders nothing while Hidden; the ViewModel drives the
+    // open / loading / loaded / unavailable / error states (lazy fetch + memory cache).
+    ParticipantRosterSheet(
+        roster = state.roster,
+        onDismiss = viewModel::dismissRoster,
+        onRetry = viewModel::retryRoster,
+        // #618 — close the roster sheet BEFORE navigating (Codex framing) so it does not reappear when
+        // the composer pops back, then open the composer with the recipient manager auto-opened.
+        onManageRecipients = {
+            viewModel.dismissRoster()
+            onManageRecipients(request.threadId, state.page)
+        },
+    )
 }
 
 /**
- * #351 — land at the top when a NEW page replaces the kept-on-screen previous one (in-place
- * pagination: the composition survives the page change, unlike the topic's route-driven model where
- * a fresh screen starts at the top for free). Keyed on the RENDERED page: a same-page refresh keeps
- * the read position. Only fires when a previous page was rendered in THIS composition and differs
- * (Codex review on the first cut): on the first Content render the guard is still null, so a
- * rotation / recreation with content already loaded keeps the position `rememberLazyListState` just
- * restored instead of being yanked back to the top. Extracted from the screen host to keep it under
- * detekt's cyclomatic-complexity threshold.
+ * #612 — the conversation top-bar actions: a « Participants » button (shown only for a
+ * multi-recipient conversation — a one-to-one MP has no roster) followed by the caller's optional
+ * slot. The owner-vs-participant resolution happens lazily when the sheet opens (the roster fetch),
+ * so the button is offered to every member of a DT; the sheet then shows the full list (owner) or a
+ * « non disponible » note (participant). Extracted from the screen host to keep it under detekt's
+ * cyclomatic-complexity threshold.
  */
 @Composable
-private fun ScrollToTopOnPageChange(listState: LazyListState, renderedPage: Int) {
-    val lastRenderedPage = remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(renderedPage) {
-        if (lastRenderedPage.value != null && lastRenderedPage.value != renderedPage) {
-            listState.scrollToItem(0)
+private fun ThreadTopBarActions(
+    isMultiRecipient: Boolean,
+    onOpenRoster: () -> Unit,
+    topBarActions: @Composable (() -> Unit)?,
+) {
+    if (isMultiRecipient) {
+        val rosterLabel = stringResource(R.string.messages_roster_action)
+        IconButton(
+            onClick = onOpenRoster,
+            modifier = Modifier.semantics { contentDescription = rosterLabel },
+        ) {
+            RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_group)
         }
-        lastRenderedPage.value = renderedPage
     }
+    topBarActions?.invoke()
+}
+
+/**
+ * #301 — reply FAB, extracted from the screen host (with [ThreadTopBarActions]) to keep it under
+ * detekt's cyclomatic-complexity threshold. Shown only once the page proved a writable reply form
+ * ([canReply]); [onReply] carries the page the user is viewing so HFR's prefilled `numrep` matches
+ * what is on screen.
+ */
+@Composable
+private fun ThreadReplyFab(canReply: Boolean, onReply: () -> Unit) {
+    if (!canReply) return
+    val replyLabel = stringResource(R.string.messages_reply)
+    ExtendedFloatingActionButton(
+        text = { Text(replyLabel) },
+        // #360 / ADR-015 — crayon en vector stroke unifié via le primitive :core:ui, à la place du
+        // glyphe « ✎ » (poids optique aligné sur la flèche retour / les chevrons). Pas de Material
+        // icons (detekt ForbiddenImport).
+        icon = { RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_edit) },
+        onClick = onReply,
+    )
 }
 
 /**
@@ -366,15 +400,17 @@ private fun ThreadMessages(
     listState: LazyListState,
     swipeModifier: Modifier = Modifier,
 ) {
-    LazyColumn(
-        state = listState,
-        // #351b — the swipe chain (edge glow + gesture + graphicsLayer follow) applies to the list
-        // itself, like the topic's LazyColumn: the scrollbar overlay outside stays fixed on screen.
-        modifier = Modifier
-            .fillMaxSize()
-            .then(swipeModifier),
+    // #351c — the shared list overlay (LazyColumn + auto-hiding scrollbar). The MP density stays
+    // feature-owned (16.dp padding, 12.dp gap, distinct from the topic's display-metrics preset) so
+    // it is passed explicitly. The swipe chain (edge glow + gesture + graphicsLayer follow) goes on
+    // the inner LazyColumn via [PostListScaffold.listModifier], like the topic's LazyColumn: the
+    // scrollbar overlay outside stays fixed on screen. [LocalShowScrollbar] (#105) is honoured by the
+    // scaffold's scrollbar, so the call leaves showScrollbar at its default.
+    PostListScaffold(
+        listState = listState,
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
+        listModifier = swipeModifier,
     ) {
         items(messages, key = { it.numreponse }) { message ->
             MessageCard(message = message)
@@ -410,46 +446,36 @@ private fun ThreadMessages(
     }
 }
 
+/**
+ * #351c — one private-message rendered onto the shared [PostCardShell]. Unlike the topic card it has
+ * no tinted [PostIdentityBand] (MP has no anchor/category tint), no badges, no footer (the « Répondre »
+ * affordance is the screen FAB #301, not a per-card action) and no multi-quote border. The MP density
+ * (16.dp around the card content, 8.dp between the identity header and the body) is feature-owned and
+ * reinjected via the slots' own padding — the shell adds none. The body stays NON-selectable (#281
+ * is a topic affordance; PostRenderer defaults selection OFF, the MP keeps it).
+ */
 @Composable
 private fun MessageCard(message: Post) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                RedfaceUserAvatar(
-                    avatarUrl = message.avatarUrl,
-                    author = message.author,
-                )
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        text = message.author,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = message.date.asMessageDate(),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            PostRenderer(content = message.content)
-        }
-    }
+    PostCardShell(
+        header = {
+            PostIdentityHeader(
+                author = message.author,
+                avatarUrl = message.avatarUrl,
+                dateText = message.date.asMessageDate(),
+                // MP density (#351c): 16.dp around the card content; the 8.dp gap to the body rides on
+                // the body slot's top padding so the header↔body spacing matches the pre-shell layout.
+                modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp),
+            )
+        },
+        body = {
+            // Body slot owns the side + bottom gutters (16.dp) and the 8.dp gap below the header, so the
+            // overall card padding/spacing is byte-identical to the pre-shell MessageCard.
+            PostRenderer(
+                content = message.content,
+                modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp),
+            )
+        },
+    )
 }
 
 // #351b — same blend as the topic edge glow (#282): a full-primary glow read as an imposing panel.

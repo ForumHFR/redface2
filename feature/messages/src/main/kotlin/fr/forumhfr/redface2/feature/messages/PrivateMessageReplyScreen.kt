@@ -19,6 +19,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +65,8 @@ fun PrivateMessageReplyScreen(
     }
     PrivateMessageReplyContent(
         state = state,
+        // #618 — auto-open the recipient-manager sheet when entered from the Participants sheet.
+        autoOpenRecipientManager = request.openRecipientManager,
         onBack = onBack,
         onContentChanged = viewModel::onContentChanged,
         onToolbarAction = viewModel::onToolbarAction,
@@ -78,6 +81,8 @@ fun PrivateMessageReplyScreen(
         onRetryFormLoad = viewModel::retryFormLoad,
         onDraftRestore = viewModel::onDraftRestoreRequested,
         onDraftDiscard = viewModel::onDraftDiscardRequested,
+        onAddRecipient = viewModel::onAddRecipient,
+        onRemoveRecipient = viewModel::onRemoveRecipient,
         smileyPicker = viewModel.smileyPicker,
         onSmileySelected = viewModel::onSmileySelected,
         modifier = modifier,
@@ -88,6 +93,7 @@ fun PrivateMessageReplyScreen(
 @Suppress("LongParameterList") // One callback per editor action — each is wired to a distinct VM method.
 private fun PrivateMessageReplyContent(
     state: PrivateMessageReplyUiState,
+    autoOpenRecipientManager: Boolean,
     onBack: () -> Unit,
     onContentChanged: (TextFieldValue) -> Unit,
     onToolbarAction: (BbcodeAction) -> Unit,
@@ -102,11 +108,27 @@ private fun PrivateMessageReplyContent(
     onRetryFormLoad: () -> Unit,
     onDraftRestore: () -> Unit,
     onDraftDiscard: () -> Unit,
+    onAddRecipient: (String) -> Unit,
+    onRemoveRecipient: (String) -> Unit,
     smileyPicker: SmileyPickerController,
     onSmileySelected: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var optionsSheetOpen by remember { mutableStateOf(false) }
+    // #618 — the « Gérer les destinataires » bottom sheet (Bug 1: the member editor no longer stacks
+    // inline above the composer). Opened by the compact summary button below, or auto-opened on entry
+    // from the conversation's Participants sheet.
+    var recipientManagerOpen by remember { mutableStateOf(false) }
+    // One-shot auto-open (Codex framing): fire once the form has loaded AND the owner-only editor is
+    // available, never before (canManageRecipients arrives after the async form GET). `autoOpened`
+    // survives recomposition / config changes so the sheet is never re-opened after the user closes it.
+    var autoOpened by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(autoOpenRecipientManager, state.canManageRecipients) {
+        if (autoOpenRecipientManager && state.canManageRecipients && !autoOpened) {
+            autoOpened = true
+            recipientManagerOpen = true
+        }
+    }
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             MessageEditorHeader(title = stringResource(R.string.messages_reply_title), onBack = onBack)
@@ -122,6 +144,7 @@ private fun PrivateMessageReplyContent(
                         onErrorDismissed = onErrorDismissed,
                         onDraftRestore = onDraftRestore,
                         onDraftDiscard = onDraftDiscard,
+                        onManageRecipients = { recipientManagerOpen = true },
                         modifier = Modifier.weight(1f),
                     )
                     MessageSubmitBar(
@@ -152,6 +175,17 @@ private fun PrivateMessageReplyContent(
                 )
             }
         }
+        // #618 — recipient manager bottom sheet (Bug 1: was an inline editor stacked above the body).
+        // Owner-only; the compact summary button can only arm it when canManageRecipients is true.
+        if (recipientManagerOpen && state.canManageRecipients) {
+            RecipientManagerSheet(
+                recipients = state.recipients,
+                enabled = !state.isSubmitting,
+                onAddRecipient = onAddRecipient,
+                onRemoveRecipient = onRemoveRecipient,
+                onDismiss = { recipientManagerOpen = false },
+            )
+        }
         // #387 — smiley picker sheet (Standard + Wiki), same component as the post editors.
         val pickerState by smileyPicker.state.collectAsStateWithLifecycle()
         (pickerState as? SmileyPickerState.Open)?.let { open ->
@@ -175,6 +209,7 @@ private fun ReplyEditorBody(
     onErrorDismissed: () -> Unit,
     onDraftRestore: () -> Unit,
     onDraftDiscard: () -> Unit,
+    onManageRecipients: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // No outer scroll : the draft field is weighted so it stretches down to the bar (same
@@ -186,6 +221,18 @@ private fun ReplyEditorBody(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // #618 (Bug 1) — owner-only COMPACT summary, replacing the inline member editor that used to
+        // stack above the body and crowd the composer (unscrollable for a 29+-member DT). A tap opens
+        // the dedicated RecipientManagerSheet; the body + send bar stay reachable. Hidden for a simple
+        // participant / one-to-one MP (canManageRecipients is false).
+        if (state.canManageRecipients) {
+            MessageRecipientsSummary(
+                count = state.recipients.size,
+                onManage = onManageRecipients,
+            )
+            HorizontalDivider()
+        }
+
         BbcodeToolbar(onAction = onToolbarAction)
 
         BbcodeTextField(

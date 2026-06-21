@@ -22,7 +22,6 @@
     <string name="messages_reply_title">Répondre</string>
     <string name="messages_compose_title">Nouveau message</string>
     <string name="messages_compose_new">Nouveau</string>
-    <string name="messages_compose_recipients_label">Destinataire(s)</string>
     <string name="messages_compose_recipients_placeholder">Pseudo(s), séparés par des virgules…</string>
     <string name="messages_compose_subject_label">Sujet</string>
     <string name="messages_compose_subject_counter">%1$d/%2$d</string>
@@ -54,4 +53,37 @@
     <string name="messages_draft_restore_message">Un brouillon non envoyé a été retrouvé.</string>
     <string name="messages_draft_restore">Restaurer</string>
     <string name="messages_draft_discard">Ignorer</string>
+
+    <!-- #606 — gestion des membres d'une discussion de groupe (réservé au créateur). -->
+    <string name="messages_members_title">Membres de la discussion</string>
+    <string name="messages_members_help">Vous êtes le créateur : vous pouvez ajouter ou retirer des membres (un destinataire au minimum). La modification est envoyée avec votre réponse.</string>
+    <string name="messages_members_add_label">Ajouter un membre</string>
+    <string name="messages_members_add_placeholder">Pseudo à ajouter…</string>
+    <string name="messages_members_add">Ajouter</string>
+    <string name="messages_members_remove">Retirer %1$s</string>
+    <string name="messages_members_admin_warning">Retirer « Administration » d\'une discussion de groupe est déconseillé.</string>
+
+    <!-- #606 — libellé du champ destinataires du nouveau message (compose). -->
+    <string name="messages_compose_recipients_label_v2">Pseudo des destinataires</string>
+    <string name="messages_compose_recipients_help">Plusieurs pseudos séparés par des virgules = discussion de groupe.</string>
+
+    <!-- #612 — liste des participants d'une discussion de groupe (bottom sheet). -->
+    <string name="messages_roster_action">Participants</string>
+    <string name="messages_roster_title">Participants</string>
+    <string name="messages_roster_loading">Chargement des participants…</string>
+    <string name="messages_roster_unavailable_title">Liste indisponible</string>
+    <!-- #618 — n'apparaît plus que pour un MP individuel (pas de ligne « Destinataires ») : un
+         participant d'une discussion de groupe voit désormais la liste complète. -->
+    <string name="messages_roster_unavailable_body">Cette conversation ne comporte pas de liste de participants.</string>
+    <string name="messages_roster_error">Impossible de charger les participants.</string>
+    <!-- #618 — entrée vers l'éditeur de membres, réservée au créateur. -->
+    <string name="messages_roster_manage">Gérer les destinataires</string>
+    <plurals name="messages_roster_count">
+        <item quantity="one">%1$d participant</item>
+        <item quantity="other">%1$d participants</item>
+    </plurals>
+
+    <!-- #618 — bouton compact « Destinataires : N — Gérer » au-dessus du corps du composer (créateur). -->
+    <string name="messages_recipients_summary">Destinataires : %1$d</string>
+    <string name="messages_recipients_manage">Gérer</string>
 </resources>

@@ -667,6 +667,18 @@ internal fun buildSettingsCatalogue(
                 errorRes = R.string.settings_mp_unread_badge_persist_failed.takeIf { state.mpUnreadBadgeError },
                 onCheckedChange = { onIntent(SettingsIntent.MpUnreadBadgeChanged(it)) },
             ),
+            // #6, ADR-014 §4 — experimental opt-in for the MPStorage write-back. OFF by default ; the
+            // description warns it is experimental (the write contract was never observed live).
+            toggleRow(
+                id = "sync_private_messages_write",
+                title = stringResource(R.string.settings_mp_sync_write_title),
+                description = stringResource(R.string.settings_mp_sync_write_description),
+                checked = state.syncPrivateMessagesWriteEnabled,
+                enabled = state.canToggleSyncPrivateMessagesWriteEnabled,
+                errorRes = R.string.settings_mp_sync_write_persist_failed
+                    .takeIf { state.syncPrivateMessagesWriteEnabledError },
+                onCheckedChange = { onIntent(SettingsIntent.SyncPrivateMessagesWriteEnabledChanged(it)) },
+            ),
             futureRow(
                 id = "future_mp_push",
                 title = stringResource(R.string.settings_future_mp_push),

@@ -81,8 +81,32 @@ class ReplyFormParser {
                 options = parseOptions(replyForm),
                 msgIcon = parseMsgIcon(replyForm),
                 userId = SmileyUserIdExtractor.extract(html),
+                recipientsRoster = parseRecipientsRoster(replyForm, collection.fields["newdest"]),
             ),
         )
+    }
+
+    /**
+     * #618 — read-only roster CSV for the « Participants » sheet of EVERY member of a DT/MultiMP.
+     *
+     * - OWNER : HFR serves the editable `<input name="newdest">`; we reuse its value (already in
+     *   [hiddenFields], passed as [newdest]) so the owner roster matches the editor exactly.
+     * - NON-OWNER : HFR serves no `newdest` but still renders the « Destinataires » row as read-only
+     *   text inside `<td class="repCase2">` (a `<span>`); we take that cell's text (entities decoded,
+     *   whitespace collapsed by Jsoup) trimmed.
+     * - Neither (one-to-one MP / topic reply) : `null`.
+     *
+     * The row is located by its `<th>` label rather than a structural index so an HFR layout shuffle
+     * does not silently grab the wrong cell.
+     */
+    private fun parseRecipientsRoster(replyForm: Element, newdest: String?): String? {
+        if (newdest != null) return newdest
+        // The owner branch above already handled the editable-input case; here the cell is read-only
+        // text. Resolve the « Destinataires » cell by its `<th>` label rather than a positional index.
+        val recipientsCell = replyForm.select("th.repCase1").firstOrNull { th ->
+            th.text().trim().equals(DESTINATAIRES_LABEL, ignoreCase = true)
+        }?.nextElementSibling()
+        return recipientsCell?.text()?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     /**
@@ -174,4 +198,9 @@ class ReplyFormParser {
         val fields: Map<String, String>,
         val hashCheck: String?,
     )
+
+    private companion object {
+        /** #618 — HFR's `<th class="repCase1">` label for the recipients row of a DT/MultiMP. */
+        private const val DESTINATAIRES_LABEL = "Destinataires"
+    }
 }

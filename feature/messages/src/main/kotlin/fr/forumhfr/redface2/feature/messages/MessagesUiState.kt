@@ -13,6 +13,15 @@ data class MessagesUiState(
     val page: Int = 1,
     val totalPages: Int = 1,
     val isRefreshing: Boolean = false,
+    /**
+     * #531 — monotonic counter bumped on every SUCCESSFUL network load of the inbox (initial,
+     * page change, retry, refresh). The inbox has no cache layer (#298 MVP), so each successful
+     * [Mode.Content] emission is a genuine fresh network result. The screen keys a `LaunchedEffect`
+     * on this value to run the read-mark reconciliation exactly once per fetch — not on every
+     * recomposition (a plain effect keyed on the conversation list could refire on unrelated state
+     * changes that re-emit the same list). Starts at `0` (no fetch yet); the screen ignores `0`.
+     */
+    val networkLoadGeneration: Int = 0,
 ) {
     /** `true` when a previous inbox page exists (enables the "Précédent" pager control). */
     val canGoPrevious: Boolean get() = page > 1
