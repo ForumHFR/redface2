@@ -13,15 +13,16 @@ Comment participer au projet.
 
 ---
 
-## Phase actuelle : Phase 1 — Core lecture
+## Phase actuelle : Phase 4 — UI & extensions
 
-Phase 0 (bootstrap Gradle multi-modules, CI, thème M3, navigation, Hilt) est livrée. Phase 1 — lecture du forum (drapeaux, topics, forum, deep links, `PostRenderer` Compose) est en cours, voir [roadmap]({{ site.baseurl }}/specs/roadmap). Les contributions utiles maintenant :
+Phases 0 à 3 sont livrées (bootstrap ; lecture du forum ; écriture : poster/citer/`[img]`/upload ; messages : MP + DT/MultiMP), bêta **0.16.0** publiée (Play open testing + F-Droid). Phase 4 en cours : refontes UI (vue Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603), vue Topic [#604](https://github.com/ForumHFR/redface2/issues/604)), aide & réglages, et architecture d'extensions ([#6](https://github.com/ForumHFR/redface2/issues/6), [#7](https://github.com/ForumHFR/redface2/issues/7)). Voir [roadmap]({{ site.baseurl }}/specs/roadmap). Les contributions utiles maintenant :
 
-- **Implémenter une issue Phase 1** ouverte (drapeaux, login HFR, écran forum, cache Room…)
+- **Implémenter une issue Phase 4** ouverte (refonte Drapeaux/Topic, extensions, polish UX)
 - **Proposer des features** : ouvrir une issue avec le label `feature`
 - **Signaler des oublis ou divergences spec/code** : skill `/spec-reality` ou commentaire d'issue
 - **Capturer des fixtures HFR réelles** via `hfr-mcp` (skill `/parse-fixture`)
-- **Proposer un nom** d'app : voir la [page nommage]({{ site.baseurl }}/guides/naming)
+
+> Ce guide est la **source canonique du workflow opérationnel** (environnement, tests, rendu visuel, Git). La *méthode* (quoi spécifier / prototyper / TDD) vit dans [methodology.md]({{ site.baseurl }}/specs/methodology) ; la *promotion / release* dans [release.md]({{ site.baseurl }}/guides/release). Ne pas dupliquer le cycle ailleurs.
 
 ---
 
@@ -227,9 +228,19 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 **Stratégie :**
 - **TDD sélectif** sur fonctions pures (parser, PostContent AST, ViewModels, helpers, mappers) — red → green → refactor
 - **Test-after** sur intégrations (repositories cache/network, deep linking)
-- **Pas de TDD** sur UI Compose (Compose Preview + review visuelle suffisent ; Roborazzi non retenu en MVP, à reconsidérer Phase 4+ si régressions visuelles multi-features)
+- **Pas de TDD red-green** sur UI Compose, mais **rendu visuel Roborazzi adopté en Phase 4** (cf. sous-section ci-dessous + [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing)) : Compose Preview pour le design, Roborazzi pour **capturer et inspecter** le rendu sans device.
 
-**Smoke test mensuel HFR (Phase 1 fin) :**
+**Rendu visuel (Roborazzi) :**
+
+Screenshot testing **JVM** (sur Robolectric, sans device) via Roborazzi 1.63, consommé comme artefact de test simple (pas le plugin Gradle), avec `roborazzi.test.record=true` forcé.
+
+- **Mode `record`** (par défaut ici) : un test `captureRoboImage` génère un PNG dans `<module>/build/outputs/roborazzi/` (non versionné) → **inspection visuelle** rapide (~40 s). Lancer via l'env Docker, ex. `./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest` (ou la tâche `recordRoborazzi`).
+- **Quand l'utiliser** : `record` est réservé aux **changements de rendu intentionnels** (PostRenderer, écrans refondus) — on régénère puis on regarde l'image. `verifyRoborazzi` (compare) existe mais les **baselines ne sont pas versionnées** en V1 (elles bougeraient à chaque itération des refontes #603/#604).
+- **Statut** : **recommandé** pour tout changement de rendu UI structurant, **pas encore un gate CI dur**. Le passage en `verify` + baselines committées + gate fera l'objet d'une décision dédiée une fois les refontes UI stabilisées.
+- **Couverture actuelle** : `:core:ui` (PostRenderer — code, smiley, citation) + `:feature:topic` + coquille réglages. Elle s'étend au cas par cas — **pas** d'obligation « tout écran doit avoir un snapshot ».
+- Décision et rationale : [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing).
+
+**Smoke test mensuel HFR (fin de phase de lecture) :**
 
 Workflow GitHub Actions (`cron: '0 2 1 * *'`, 1er du mois, 2h UTC) qui vérifie contre HFR réel :
 
