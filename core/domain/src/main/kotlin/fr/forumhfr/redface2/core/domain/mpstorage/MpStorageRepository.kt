@@ -69,8 +69,15 @@ interface MpStorageRepository {
      * existing anchor / uri of the matched entry rather than nulling it (the trigger always knows the
      * landed page but not always the current anchor). The MANUAL path ([writeBackFlag] / [previewWriteBackFlag])
      * keeps the historical add-or-update + null-erase behaviour, unchanged.
+     *
+     * IDENTITY GUARD (C2, 4-flavor MAJOR) — [expectedPseudo] is the account the CALLER resolved and
+     * decided to write under (snapshotted before its own suspension points). The repository re-resolves
+     * the active pseudo and, if it no longer equals [expectedPseudo], DECLINES the write
+     * ([MpStorageWriteResult.SessionChanged]) WITHOUT a POST : the active account switched between the
+     * caller's check and this call, so the shared MPStorage document must never be written under a
+     * different session than the one that actually read the page.
      */
-    suspend fun writeBackFlagIfPresent(entry: MpStorageFlagEntry): MpStorageWriteResult
+    suspend fun writeBackFlagIfPresent(entry: MpStorageFlagEntry, expectedPseudo: String): MpStorageWriteResult
 
     /**
      * DRY-RUN of [writeBackFlag] for tests / dev tooling : locates, mutates and validates the body but
@@ -110,4 +117,11 @@ sealed interface MpStorageWritePreview {
 
     /** The mutated body exceeds [MpStorageRepository.MAX_CONTENT_FORM_BYTES]. */
     data class TooLarge(val sizeBytes: Int) : MpStorageWritePreview
+
+    /**
+     * FAIL-CLOSED (C4) : the mutated body would carry a non-BMP / lone-surrogate code point HFR
+     * truncates at. The real write refuses to POST it ; the dry-run surfaces it so dev tooling can
+     * see the path would be declined (never stripped — the body is a shared third-party document).
+     */
+    data object UnsafeContent : MpStorageWritePreview
 }

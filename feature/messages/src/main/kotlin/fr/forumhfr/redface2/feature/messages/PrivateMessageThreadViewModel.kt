@@ -361,6 +361,10 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                     // PRESERVES both the existing href AND uri rather than minting an anchorless / stale uri.
                     uri = numreponse?.let { buildDesktopUri(request.threadId, page, it) },
                 ),
+                // IDENTITY GUARD (C2) — the owner we snapshotted for THIS read. The repo re-resolves the
+                // active pseudo and refuses (no POST) if it switched since this VM's own session re-check
+                // above, closing the account-switch race across the repository's own suspension points.
+                expectedPseudo = owner,
             )
         } catch (cancellation: CancellationException) {
             throw cancellation

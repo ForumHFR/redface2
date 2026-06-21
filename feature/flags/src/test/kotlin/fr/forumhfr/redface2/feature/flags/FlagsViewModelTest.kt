@@ -2486,7 +2486,10 @@ class FlagsViewModelTest {
         override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
             MpStorageWriteResult.DisabledByPreference
 
-        override suspend fun writeBackFlagIfPresent(entry: MpStorageFlagEntry): MpStorageWriteResult =
+        override suspend fun writeBackFlagIfPresent(
+            entry: MpStorageFlagEntry,
+            expectedPseudo: String,
+        ): MpStorageWriteResult =
             MpStorageWriteResult.DisabledByPreference
 
         override suspend fun previewWriteBackFlag(

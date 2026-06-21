@@ -87,6 +87,14 @@ sealed interface MpStorageWriteResult {
     data object SkippedNotPresent : MpStorageWriteResult
 
     /**
+     * IDENTITY GUARD (C2, 4-flavor MAJOR) : the active account no longer matches the `expectedPseudo`
+     * the caller decided to write under (an account switch happened between the caller's check and the
+     * repository's own re-resolution of the active pseudo). NO POST was sent — the shared MPStorage
+     * document is never written under a session other than the one that actually read the page.
+     */
+    data object SessionChanged : MpStorageWriteResult
+
+    /**
      * The target storage document could not be located (ADR-014 §3 : NEVER create or overwrite a
      * fresh document — that would fork the cross-userscript storage / spawn a duplicate). The
      * caller must surface this, not "repair" it.
@@ -103,6 +111,16 @@ sealed interface MpStorageWriteResult {
      * risk an uncontrolled / truncated POST. [sizeBytes] is the offending UTF-8 size. No POST is sent.
      */
     data class TooLarge(val sizeBytes: Int) : MpStorageWriteResult
+
+    /**
+     * FAIL-CLOSED (C4, 4-flavor MAJOR) : the mutated `content_form` would carry a code point HFR
+     * silently truncates at — an astral (non-BMP) scalar value or a lone UTF-16 surrogate. HFR stores
+     * a posted body only up to that first character (answering HTTP 200 anyway, #114), so POSTing it
+     * would CORRUPT the shared cross-userscript document. Unlike a user post (#114 STRIPS the emoji),
+     * MPStorage MUST NOT strip — the body is THIRD-PARTY data (DTCloud / HFR4K) — so the write is
+     * REFUSED instead, leaving the document byte-fidèle. NO POST is sent. NOT OBSERVED LIVE.
+     */
+    data object UnsafeContent : MpStorageWriteResult
 
     /**
      * The mutation was POSTed and the verify-after-write re-read confirmed the stored first post now

@@ -151,19 +151,31 @@ class DefaultMpStorageRepository @Inject constructor(
      * [MpStorageWriteResult.TargetNotFound], NEVER a creation (ADR-014 §3).
      */
     override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
-        writeBack(entry, updateOnly = false)
+        writeBack(entry, updateOnly = false, expectedPseudo = null)
 
     /**
      * UPDATE-ONLY write path (#597) — the AUTO reading-position trigger. Same pipeline / gates as
      * [writeBackFlag] but constrains the upsert to entries already present : an absent `threadId` is
      * declined with [MpStorageWriteResult.SkippedNotPresent] (no POST), so a passive page land never
      * pollutes the shared cross-userscript document with a Redface-2-invented entry (ADR-014 anti-doublon).
+     *
+     * IDENTITY GUARD (C2) — [expectedPseudo] is the account the caller decided to write under. After
+     * re-resolving the active pseudo here, the write is DECLINED ([MpStorageWriteResult.SessionChanged],
+     * no POST) when it no longer matches : the active account switched between the caller's check and
+     * this call.
      */
-    override suspend fun writeBackFlagIfPresent(entry: MpStorageFlagEntry): MpStorageWriteResult =
-        writeBack(entry, updateOnly = true)
+    override suspend fun writeBackFlagIfPresent(
+        entry: MpStorageFlagEntry,
+        expectedPseudo: String,
+    ): MpStorageWriteResult = writeBack(entry, updateOnly = true, expectedPseudo = expectedPseudo)
 
-    @Suppress("ReturnCount") // Guard clauses (pref / auth / not-found / unreadable / skip / no-op / oversize) + verify.
-    private suspend fun writeBack(entry: MpStorageFlagEntry, updateOnly: Boolean): MpStorageWriteResult {
+    // ReturnCount: guard clauses (pref / auth / identity / not-found / unreadable / skip / no-op / oversize / unsafe).
+    @Suppress("ReturnCount")
+    private suspend fun writeBack(
+        entry: MpStorageFlagEntry,
+        updateOnly: Boolean,
+        expectedPseudo: String?,
+    ): MpStorageWriteResult {
         return withContext(ioDispatcher) {
             // 1-2. Opt-in gate FIRST — no network when OFF (the default), so a missing trigger is harmless.
             if (!syncWriteEnabled()) {
@@ -174,6 +186,17 @@ class DefaultMpStorageRepository @Inject constructor(
             // 3. Active account → pseudo (sent verbatim in the POST body).
             val owner = activePseudo()
                 ?: return@withContext MpStorageWriteResult.TargetNotFound
+
+            // 3b. IDENTITY GUARD (C2) — refuse to write under an account different from the one the
+            // caller resolved and decided to write under (a switch since the caller's check). No POST.
+            if (expectedPseudo != null && owner != expectedPseudo) {
+                diagnostics.record(
+                    DiagnosticsLog.Level.WARN,
+                    LOG_TAG,
+                    "writeBackFlag: active account changed since caller's check → no write",
+                )
+                return@withContext MpStorageWriteResult.SessionChanged
+            }
 
             // 4. Locate + GET the edit form and parse the document.
             val location = locateForWrite(owner)
@@ -222,6 +245,18 @@ class DefaultMpStorageRepository @Inject constructor(
                     MpStorageWriteResult.TooLarge(outcome.sizeBytes)
                 }
 
+                MpStorageEnvelopeWriter.Outcome.UnsafeContent -> {
+                    // FAIL-CLOSED (C4) : the mutated body carries a non-BMP / lone-surrogate code point
+                    // HFR would truncate at — POSTing it would corrupt the shared third-party document.
+                    // Refuse the write (no POST) ; the document is left byte-fidèle (never stripped).
+                    diagnostics.record(
+                        DiagnosticsLog.Level.WARN,
+                        LOG_TAG,
+                        "writeBackFlag UNSAFE content (non-BMP / surrogate) → no write",
+                    )
+                    MpStorageWriteResult.UnsafeContent
+                }
+
                 is MpStorageEnvelopeWriter.Outcome.Mutated ->
                     postAndVerify(location, read.form, owner, mutatedBody = outcome.body, backupBody = backup)
             }
@@ -242,6 +277,7 @@ class DefaultMpStorageRepository @Inject constructor(
                 is MpStorageEnvelopeWriter.Outcome.SkippedNotPresent -> MpStorageWritePreview.Prepared(outcome.body)
                 is MpStorageEnvelopeWriter.Outcome.NoOp -> MpStorageWritePreview.Prepared(outcome.body)
                 is MpStorageEnvelopeWriter.Outcome.TooLarge -> MpStorageWritePreview.TooLarge(outcome.sizeBytes)
+                MpStorageEnvelopeWriter.Outcome.UnsafeContent -> MpStorageWritePreview.UnsafeContent
                 is MpStorageEnvelopeWriter.Outcome.Mutated -> MpStorageWritePreview.Prepared(outcome.body)
             }
         }
@@ -257,7 +293,7 @@ class DefaultMpStorageRepository @Inject constructor(
      * comparison is on the raw `content_form` string : HFR may re-serialise, but the de-facto contract
      * stores the textarea verbatim, so an exact match is the safe acceptance signal (NOT OBSERVED LIVE).
      */
-    @Suppress("ReturnCount") // Guard (wrong subject) + verified-OK early return + the restore tail.
+    @Suppress("ReturnCount") // Guard (wrong subject / session) + verified-OK early return + the restore tail.
     private suspend fun postAndVerify(
         location: MpStorageLocation,
         form: ReplyForm,
@@ -265,6 +301,18 @@ class DefaultMpStorageRepository @Inject constructor(
         mutatedBody: String,
         backupBody: String,
     ): MpStorageWriteResult {
+        // IDENTITY GUARD (C2, Codex hardening) — the locate + GET above suspend ; re-resolve the active
+        // pseudo IMMEDIATELY before the POST and abort if the account switched in between, so neither
+        // the POST nor the restore can run under a different session than the one that read the document.
+        if (activePseudo() != pseudo) {
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG,
+                "writeBackFlag: active account changed before POST → no write",
+            )
+            return MpStorageWriteResult.SessionChanged
+        }
+
         val postBody = buildPrivateMessageEditBody(location, form, pseudo, mutatedBody)
             ?: return MpStorageWriteResult.TargetNotFound // wrong subject → never POST (structural guard)
 

@@ -411,6 +411,9 @@ class PrivateMessageThreadViewModelTest {
         assertEquals(2784595, entry.numreponse)
         // Canonical DTCloud desktop uri, with the #t<anchor> fragment matching the page.
         assertEquals("/forum2.php?config=hfr.inc&cat=prive&post=42&page=1#t2784595", entry.uri)
+        // C2 — the VM passes the owner it snapshotted for THIS read as expectedPseudo, so the repo can
+        // refuse the write if the active account switched across its own suspension points.
+        assertEquals("xaat", mpStorage.ifPresentPseudos.single())
     }
 
     @Test
@@ -471,6 +474,9 @@ class PrivateMessageThreadViewModelTest {
         // Only bob's landing reached the MPStorage sync — alice's sealed (cancelled) job never did.
         assertEquals(1, mpStorage.ifPresentCalls.size)
         assertEquals(1, mpStorage.ifPresentCalls.single().page)
+        // C2 — and the expectedPseudo passed is bob's (the session that actually read the page), so
+        // the repo's identity guard compares against the right account.
+        assertEquals("bob", mpStorage.ifPresentPseudos.single())
     }
 
     // #612 — participant roster.
@@ -677,13 +683,20 @@ class PrivateMessageThreadViewModelTest {
     ) : MpStorageRepository {
         val ifPresentCalls = mutableListOf<MpStorageFlagEntry>()
 
+        /** C2 — the `expectedPseudo` the VM snapshotted and passed for each call, in order. */
+        val ifPresentPseudos = mutableListOf<String>()
+
         override suspend fun fetchStorage() = error("read path not used by the thread VM")
 
         override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
             error("the auto trigger uses writeBackFlagIfPresent, never writeBackFlag")
 
-        override suspend fun writeBackFlagIfPresent(entry: MpStorageFlagEntry): MpStorageWriteResult {
+        override suspend fun writeBackFlagIfPresent(
+            entry: MpStorageFlagEntry,
+            expectedPseudo: String,
+        ): MpStorageWriteResult {
             ifPresentCalls += entry
+            ifPresentPseudos += expectedPseudo
             thrown?.let { throw it }
             return result
         }

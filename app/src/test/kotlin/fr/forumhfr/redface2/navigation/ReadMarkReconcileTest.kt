@@ -185,30 +185,83 @@ class ReadMarkReconcileTest {
     }
 
     @Test
-    fun `the open-time date is consumed on load so a re-open without a fresh date falls back to MAX`() {
+    fun `the open-time date is consumed on load (a fresh open with no pending and no mark falls back to MAX)`() {
         // #531 (Codex MAJOR 3) — the date captured at open-time is a PER-OPEN pending : onThreadLoaded
-        // reads it to build the mark, then removes it from openThreadDates. A later re-open of the same
-        // thread WITHOUT a fresh inbox date must therefore NOT reuse the old date — it falls back to the
-        // MAX sentinel. This models the host's onThreadLoaded sequence with the pure helpers.
+        // reads it to build the mark, then removes it from openThreadDates. (W1, 4-flavor MAJOR) — the
+        // earlier revision of this test wrongly modelled the SECOND onThreadLoaded as building the mark
+        // from an EMPTY marks map, so it expected MAX. In the real host the first load has ALREADY
+        // stored the mark, so the only way to reach the MAX fallback is when there is neither a fresh
+        // open date NOR an existing real mark (a genuine first-ever read via DT / deep-link). That is
+        // what this test now models.
 
-        // 1st open from the inbox : the row date is recorded as a pending open date.
-        var openDates = mapOf(10 to opened)
+        // First-ever read with no captured open date (DT / deep-link, marks still empty for this id).
+        var openDates = emptyMap<Int, Instant>()
         var marks = emptyMap<Int, Instant>()
 
-        // onThreadLoaded #1 : build the mark from the captured date, THEN consume the date.
         marks = marks.withReadMark(10, openDates)
         openDates = openDates - 10
-        assertEquals("first load keys the mark on the captured open date", opened, marks[10])
-        assertTrue("the open date is consumed after load", openDates.isEmpty())
-
-        // 2nd open of the SAME thread NOT from the inbox (deep-link / DT) : no fresh date captured.
-        // onThreadLoaded #2 : with the pending consumed, the mark falls back to the MAX sentinel.
-        marks = marks.withReadMark(10, openDates)
-        assertEquals("a re-open without a fresh date must not reuse the stale date", Instant.MAX, marks[10])
+        assertEquals("no pending and no existing mark falls back to the MAX sentinel", Instant.MAX, marks[10])
 
         // And that MAX-baseline mark is never reconciled, even if the server still shows it unread.
         val fresh = listOf(conversation(threadId = 10, date = opened.plusSeconds(120), hasUnread = true))
-        assertTrue("the re-keyed MAX mark must survive reconcile", reconcileReadMarks(marks, fresh).isEmpty())
+        assertTrue("the MAX mark must survive reconcile", reconcileReadMarks(marks, fresh).isEmpty())
+    }
+
+    @Test
+    fun `W1 - a re-fired onThreadLoaded in the same visit keeps the real captured baseline`() {
+        // (W1, 4-flavor MAJOR) — onThreadLoaded re-fires for every Content emission (page change, PTR),
+        // not once per visit, and the per-open date is consumed after the FIRST fire. A later re-fire in
+        // the SAME visit must NOT clobber the real baseline already stored on the first fire : the real
+        // date has to survive, otherwise reconcileReadMarks loses its baseline and can never re-flag a
+        // genuinely new MP (the reconcile-to-unread path is silently neutralised).
+
+        // 1st fire : capture the real inbox date, build the mark, then consume the pending open date.
+        var openDates = mapOf(10 to opened)
+        var marks = emptyMap<Int, Instant>()
+        marks = marks.withReadMark(10, openDates)
+        openDates = openDates - 10
+        assertEquals("first fire keys the mark on the captured open date", opened, marks[10])
+        assertTrue("the open date is consumed after the first fire", openDates.isEmpty())
+
+        // 2nd fire SAME visit (page change / PTR) : pending already consumed → withReadMark must reuse
+        // the already-stored REAL baseline, NOT the MAX sentinel.
+        marks = marks.withReadMark(10, openDates)
+        assertEquals("a re-fired load must preserve the real baseline, not clobber it with MAX", opened, marks[10])
+
+        // Proof the reconcile-to-unread path still works : a genuinely-newer server date drops the mark.
+        val newMp = listOf(conversation(threadId = 10, date = opened.plusSeconds(30), hasUnread = true))
+        assertEquals("the kept baseline still reconciles a new MP", setOf(10), reconcileReadMarks(marks, newMp))
+    }
+
+    @Test
+    fun `C1 - a re-open does not re-decrement the badge once the unread-on-open flag is consumed`() {
+        // (C1, 4-flavor MAJOR) — unreadOnOpenThreadIds is a PER-OPEN pending : onThreadLoaded consumes
+        // it once the decrement decision is made. Without that, after #531 drops the read mark a re-open
+        // would keep `threadId in unreadOnOpen` and re-decrement the badge from a stale unread state.
+        // This models the host's shouldDecrementUnreadBadge + consume sequence with the pure helpers.
+        val threadId = 10
+
+        // 1st open : the thread was unread on open and not yet read → it decrements.
+        var unreadOnOpen = setOf(threadId)
+        var alreadyRead = emptySet<Int>()
+        val decrement1 = shouldDecrementUnreadBadge(threadId, unreadOnOpen, alreadyRead)
+        assertTrue("first read of an unread thread decrements", decrement1)
+        // Consume the per-open pending (C1) and record the read.
+        unreadOnOpen = unreadOnOpen - threadId
+        alreadyRead = alreadyRead + threadId
+
+        // #531 later reconciles the mark away (server still reports it unread on a stale echo path): the
+        // thread is no longer in alreadyRead, but the per-open unread pending has been consumed.
+        alreadyRead = alreadyRead - threadId
+
+        // Re-open / re-fire WITHOUT a genuine unread signal : must NOT decrement again.
+        val decrement2 = shouldDecrementUnreadBadge(threadId, unreadOnOpen, alreadyRead)
+        assertTrue("a stale re-open must not re-decrement once the unread pending is consumed", !decrement2)
+
+        // A genuinely-unread re-open rearms via onThreadOpenedUnread and decrements again, as intended.
+        unreadOnOpen = unreadOnOpen + threadId
+        val decrement3 = shouldDecrementUnreadBadge(threadId, unreadOnOpen, alreadyRead)
+        assertTrue("a genuinely-unread re-open rearms the decrement", decrement3)
     }
 
     @Test

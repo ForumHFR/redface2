@@ -66,7 +66,9 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
         diagnostics.record(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
-            "GET MP reply form post=${context.threadId} page=${context.page} fallback=$allowEmbeddedFallback",
+            // #316 (C3) — never log post=threadId / page : a private-conversation id reconstructs the
+            // private URL. Operation + the non-identifying fallback flag only.
+            "GET MP reply form fallback=$allowEmbeddedFallback",
         )
         return try {
             withContext(ioDispatcher) {
@@ -185,7 +187,9 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
         diagnostics.record(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
-            "POST MP reply post=${context.threadId} page=${context.page} bbcode.length=${bbcodeContent.length}",
+            // #316 (C3) — never log post=threadId / page (reconstructs the private URL). Operation +
+            // the non-identifying content length only.
+            "POST MP reply bbcode.length=${bbcodeContent.length}",
         )
         val formBody = buildFormBody(form, bbcodeContent, options, recipientsOverride)
         return try {
