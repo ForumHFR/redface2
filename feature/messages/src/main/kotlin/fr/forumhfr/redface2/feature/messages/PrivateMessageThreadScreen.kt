@@ -71,6 +71,9 @@ fun PrivateMessageThreadScreen(
     onLoaded: () -> Unit,
     onBack: () -> Unit,
     onReply: (threadId: Int, page: Int) -> Unit,
+    // #618 — owner-only entry to the recipient editor, from the « Participants » sheet. Navigates to
+    // the reply composer with the recipient-manager sheet auto-opened (member changes ship as a reply).
+    onManageRecipients: (threadId: Int, page: Int) -> Unit = { _, _ -> },
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel = hiltViewModel<PrivateMessageThreadViewModel, PrivateMessageThreadViewModel.Factory>(
@@ -266,6 +269,12 @@ fun PrivateMessageThreadScreen(
         roster = state.roster,
         onDismiss = viewModel::dismissRoster,
         onRetry = viewModel::retryRoster,
+        // #618 — close the roster sheet BEFORE navigating (Codex framing) so it does not reappear when
+        // the composer pops back, then open the composer with the recipient manager auto-opened.
+        onManageRecipients = {
+            viewModel.dismissRoster()
+            onManageRecipients(request.threadId, state.page)
+        },
     )
 }
 

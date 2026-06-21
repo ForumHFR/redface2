@@ -527,20 +527,67 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
-    fun `openRoster maps a non-owner form to Unavailable`() = runTest {
+    fun `openRoster maps a one-to-one MP (no roster) to Unavailable`() = runTest {
+        // #618 — only a form with NO « Destinataires » row at all (recipientsRoster == null AND no
+        // newdest) maps to Unavailable: a one-to-one MP. A non-owner DT now resolves to Loaded.
         val repository = mockk<MessagesRepository>()
         coEvery {
             repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
         } returns thread(page = 1, totalPages = 1)
         val write = mockk<PrivateMessageWriteRepository>()
-        // No newdest → a simple participant, not the owner.
-        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = null)
+        // Neither newdest nor a read-only roster → a one-to-one MP.
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = null, roster = null)
 
         val viewModel = threadViewModel(repository, writeRepository = write)
         viewModel.openRoster()
         advanceUntilIdle()
 
         assertEquals(PrivateMessageThreadUiState.Roster.Unavailable, viewModel.state.value.roster)
+    }
+
+    @Test
+    fun `openRoster exposes the full roster of a NON-owner DT and marks it non-manageable`() = runTest {
+        // #618 — a participant's message.php form carries the roster as a read-only span (no newdest).
+        // The sheet must still show the FULL group (viewer prepended), but flag it as not manageable.
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        // No newdest (not the owner) but a read-only roster CSV (minus the viewer « xaat »).
+        coEvery {
+            write.fetchReplyForm(any(), any())
+        } returns replyForm(newdest = null, roster = "alice, bob, TestOwner")
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        viewModel.openRoster()
+        advanceUntilIdle()
+
+        val roster = viewModel.state.value.roster
+        assertTrue("expected Loaded, got $roster", roster is PrivateMessageThreadUiState.Roster.Loaded)
+        roster as PrivateMessageThreadUiState.Roster.Loaded
+        assertEquals(listOf("xaat", "alice", "bob", "TestOwner"), roster.members)
+        assertFalse("a non-owner cannot manage the recipients", roster.canManageRecipients)
+    }
+
+    @Test
+    fun `openRoster marks the owner roster as manageable`() = runTest {
+        // #618 — an owner form (newdest present) → the roster is editable, so canManageRecipients=true
+        // and the « Gérer les destinataires » entry is offered.
+        val repository = mockk<MessagesRepository>()
+        coEvery {
+            repository.getPrivateMessageThread(threadId = 42, page = 1, fallbackCorrespondent = null)
+        } returns thread(page = 1, totalPages = 1)
+        val write = mockk<PrivateMessageWriteRepository>()
+        coEvery { write.fetchReplyForm(any(), any()) } returns replyForm(newdest = "alice, bob")
+
+        val viewModel = threadViewModel(repository, writeRepository = write)
+        viewModel.openRoster()
+        advanceUntilIdle()
+
+        val roster = viewModel.state.value.roster
+        assertTrue("expected Loaded, got $roster", roster is PrivateMessageThreadUiState.Roster.Loaded)
+        assertTrue((roster as PrivateMessageThreadUiState.Roster.Loaded).canManageRecipients)
     }
 
     @Test
@@ -591,7 +638,10 @@ class PrivateMessageThreadViewModelTest {
         assertTrue(viewModel.state.value.roster is PrivateMessageThreadUiState.Roster.Loaded)
     }
 
-    private fun replyForm(newdest: String?) = ReplyForm(
+    // #618 — `newdest` = the owner's editable input (drives canManageRecipients) ; `roster` = the
+    // read-only roster CSV the parser surfaces for EVERY member. An owner form sets both to the same
+    // value (parser reuses newdest) ; a non-owner form sets only `roster` (read-only span, no newdest).
+    private fun replyForm(newdest: String?, roster: String? = newdest) = ReplyForm(
         hashCheck = "h",
         sujet = "Sujet",
         hiddenFields = buildMap {
@@ -600,6 +650,7 @@ class PrivateMessageThreadViewModelTest {
             if (newdest != null) put("newdest", newdest)
         },
         isAnonymous = false,
+        recipientsRoster = roster,
     )
 
     private fun thread(

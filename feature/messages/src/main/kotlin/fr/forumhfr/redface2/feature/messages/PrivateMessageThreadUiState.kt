@@ -47,13 +47,24 @@ data class PrivateMessageThreadUiState(
         /** The sheet is open and the reply form GET is in flight. */
         data object Loading : Roster
 
-        /** The owner's full member list, parsed from `newdest` (HFR's `, ` separator). */
-        data class Loaded(val members: List<String>) : Roster
+        /**
+         * The full member list, parsed from the form's recipients roster (#618 — `newdest` for the
+         * owner, the read-only « Destinataires » span for a participant ; HFR's `, ` separator). The
+         * viewer is prepended so the sheet shows the whole group.
+         *
+         * [canManageRecipients] (#618) — true only for the owner (HFR served the editable `newdest`).
+         * Gates the « Gérer les destinataires » entry in the sheet: a participant reads the roster but
+         * cannot edit it (HFR mutates members only via an owner reply).
+         */
+        data class Loaded(
+            val members: List<String>,
+            val canManageRecipients: Boolean = false,
+        ) : Roster
 
         /**
-         * The reply form loaded but carried no `newdest` — the user is a participant, not the owner.
-         * HFR has no authoritative roster to show; the sheet surfaces a sober « non disponible »
-         * note rather than a partial author list.
+         * The reply form loaded but exposed no roster at all (#618 — neither an editable `newdest`
+         * nor a read-only « Destinataires » row): a one-to-one MP. The sheet surfaces a sober « non
+         * disponible » note rather than a partial author list.
          */
         data object Unavailable : Roster
 

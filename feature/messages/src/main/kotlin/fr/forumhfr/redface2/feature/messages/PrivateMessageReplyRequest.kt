@@ -11,4 +11,10 @@ package fr.forumhfr.redface2.feature.messages
 data class PrivateMessageReplyRequest(
     val threadId: Int,
     val page: Int = 1,
+    /**
+     * #618 — when true, the screen auto-opens the « Gérer les destinataires » bottom sheet once the
+     * form has loaded and the owner-only member editor is available. Carried from
+     * `PrivateMessageReplyRoute.openRecipientManager`; `false` on the normal « Répondre » path.
+     */
+    val openRecipientManager: Boolean = false,
 )

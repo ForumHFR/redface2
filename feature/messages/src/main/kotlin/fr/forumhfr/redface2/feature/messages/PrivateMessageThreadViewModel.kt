@@ -168,24 +168,34 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     }
 
     /**
-     * #612 — maps a loaded reply form to a roster state. An owner form carries `newdest` (the member
-     * list MINUS the owner — HFR never lists the creator in their own `newdest`) → the roster prepends
-     * [owner] so the « Participants » sheet shows the FULL group including the viewer (Codex). Otherwise
-     * the user is a simple participant and HFR exposes no authoritative roster →
-     * [PrivateMessageThreadUiState.Roster.Unavailable] (no misleading partial list of visible authors).
+     * #612 / #618 — maps a loaded reply form to a roster state. HFR ships the member list (MINUS the
+     * viewer — it never lists you in your own row) two ways on message.php:
+     *  - OWNER : the editable `newdest` input → `canManageRecipients` true, roster from
+     *    [ReplyForm.recipientsRoster] (falls back to [manageableRecipients] for a form built before
+     *    #618 / a test fake that only sets `newdest`).
+     *  - NON-OWNER : the read-only « Destinataires » span → `canManageRecipients` false, roster from
+     *    [ReplyForm.recipientsRoster].
+     *
+     * Either way the roster prepends [owner] so the sheet shows the FULL group including the viewer
+     * (Codex). Only a form with NO roster at all (a one-to-one MP) maps to
+     * [PrivateMessageThreadUiState.Roster.Unavailable]. The `canManageRecipients` flag is forwarded so
+     * the sheet offers the owner-only « Gérer les destinataires » entry to the owner alone.
      */
-    private fun ReplyForm.toRoster(owner: String?): PrivateMessageThreadUiState.Roster =
-        if (canManageRecipients) {
-            val members = RecipientCsv.parse(manageableRecipients)
-            val full = if (owner != null && members.none { it == owner.trim() }) {
-                listOf(owner.trim()) + members
-            } else {
-                members
-            }
-            PrivateMessageThreadUiState.Roster.Loaded(full)
+    private fun ReplyForm.toRoster(owner: String?): PrivateMessageThreadUiState.Roster {
+        val rosterCsv = recipientsRoster
+            ?: manageableRecipients
+            ?: return PrivateMessageThreadUiState.Roster.Unavailable
+        val members = RecipientCsv.parse(rosterCsv)
+        val full = if (owner != null && members.none { it == owner.trim() }) {
+            listOf(owner.trim()) + members
         } else {
-            PrivateMessageThreadUiState.Roster.Unavailable
+            members
         }
+        return PrivateMessageThreadUiState.Roster.Loaded(
+            members = full,
+            canManageRecipients = canManageRecipients,
+        )
+    }
 
     private fun clearPrivateState() {
         authenticatedPseudo = null
