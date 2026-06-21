@@ -183,13 +183,13 @@ class DefaultMpStorageRepository @Inject constructor(
                 return@withContext MpStorageWriteResult.DisabledByPreference
             }
 
-            // 3. Active account → pseudo (sent verbatim in the POST body).
-            val owner = activePseudo()
-                ?: return@withContext MpStorageWriteResult.TargetNotFound
-
-            // 3b. IDENTITY GUARD (C2) — refuse to write under an account different from the one the
-            // caller resolved and decided to write under (a switch since the caller's check). No POST.
-            if (expectedPseudo != null && owner != expectedPseudo) {
+            // 3. IDENTITY GUARD (C2) FIRST — resolve the active account, then refuse (SessionChanged,
+            // no POST) when it no longer matches the account the caller resolved and decided to write
+            // under. This INCLUDES the active session now being null (logged out) while the caller had
+            // one — the contract is « active != expected ⇒ SessionChanged », checked before any other
+            // not-found mapping.
+            val active = activePseudo()
+            if (expectedPseudo != null && active != expectedPseudo) {
                 diagnostics.record(
                     DiagnosticsLog.Level.WARN,
                     LOG_TAG,
@@ -197,6 +197,9 @@ class DefaultMpStorageRepository @Inject constructor(
                 )
                 return@withContext MpStorageWriteResult.SessionChanged
             }
+            // No expected pseudo (manual / dev path) and no active session → nothing to write under.
+            val owner = active
+                ?: return@withContext MpStorageWriteResult.TargetNotFound
 
             // 4. Locate + GET the edit form and parse the document.
             val location = locateForWrite(owner)
@@ -349,6 +352,9 @@ class DefaultMpStorageRepository @Inject constructor(
         return restoreBackup(location, form, pseudo, backupBody, expectedBytes, actualBytes)
     }
 
+    // ReturnCount: the session guard (C2), the build-failure guard, and the restored/failed outcome are
+    // three legitimate exits; splitting would obscure the restore's linear flow.
+    @Suppress("ReturnCount")
     private suspend fun restoreBackup(
         location: MpStorageLocation,
         form: ReplyForm,
@@ -357,6 +363,19 @@ class DefaultMpStorageRepository @Inject constructor(
         expectedBytes: Int,
         actualBytes: Int,
     ): MpStorageWriteResult {
+        // IDENTITY GUARD (C2) — the verify GET above suspended ; re-check before the restore POST so a
+        // mid-operation account switch can never POST the restore under a different session (it would
+        // hit the new account's storage). Declining is the lesser evil : we surface a possibly
+        // un-restored document (loud) rather than write it to the wrong place.
+        if (activePseudo() != pseudo) {
+            diagnostics.record(
+                DiagnosticsLog.Level.ERROR,
+                LOG_TAG,
+                "writeBackFlag: active account changed before restore → no restore POST (document may be inconsistent)",
+            )
+            return MpStorageWriteResult.VerificationFailedRestoreFailed(expectedBytes, actualBytes)
+        }
+
         // Reuse the initial edit form: HFR's hash_check is session-stable (verified live, NOT rotated
         // per-request), so the original form is valid for the restore. The guarded builder still
         // refuses if its subject is not the storage hash.
