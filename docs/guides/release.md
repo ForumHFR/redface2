@@ -112,6 +112,8 @@ Plus besoin de bumper `versionCode` à la main ni de publier une Release : le di
 
 Inputs : `channel` (`dev` par défaut) et `ref` (défaut = ref courant, pour builder une branche). Les artefacts sont aussi téléchargeables depuis le run Actions (30 j) pour le sideload.
 
+> ⚠️ **Toujours passer `--ref dev` ET `-f ref=dev` pour un build dev.** L'input `ref` vaut par défaut le *ref courant du dispatch* : lancer `channel=dev` depuis `main` **sans** `ref=dev` build alors **`main`**, pas `dev` (piège vécu sur `app-v105`). Commande sûre : `gh workflow run release.yml -R ForumHFR/redface2 --ref dev -f channel=dev -f ref=dev`, puis **vérifier le `headBranch` du run** juste après le dispatch.
+
 ## Flux prod — production (différé)
 
 **Mis de côté pour l'instant** (#302/#304). Le workflow ne propose plus que `beta`/`dev`. Quand on voudra (re)brancher la production (gate d'approbation `production` + track `production` en `draft`), repartir de la conception conservée dans l'historique git du workflow et dans le draft `drafts/claude-cd-channels-labels-fdroid-design.md`.
@@ -125,6 +127,22 @@ Le `versionCode` est strictement croissant et **géré automatiquement** par le 
 | Ship beta ou dev | **rien à faire** côté `versionCode` : la CD alloue le suivant depuis le registre et tague `app-v<N>`. |
 | Montée de version marketing (Phase N+1, milestone) | bumper le `versionName` dans `app/build.gradle.kts` + `app/CHANGELOG.md` via PR. Le `versionCode` reste piloté par le registre. |
 | Plancher `versionCode` de `build.gradle.kts` | ne le baisser jamais ; il sert de borne basse de sécurité. Le bumper est inutile en régime normal (le registre est au-dessus). |
+
+## Préparer une bêta : `dev` → `main` (séquence Git préalable)
+
+> Le workflow `release.yml` reste la **source de vérité** du comportement ; cette section documente les **commandes sûres et les vérifications humaines** autour du dispatch, pas la logique du workflow.
+
+Le step `resolve-target` **exige que `channel=beta` builde depuis `main`** (erreur sinon). Il faut donc d'abord amener le code de `dev` sur `main`, dans cet ordre :
+
+1. **Bump `versionName` + entrée `app/CHANGELOG.md` sur `dev`** via PR (le guard CI refuse une bêta au même `versionName` que la précédente — cf. ⚠️ du § Flux beta).
+2. **Sync `main` → `dev` d'abord** (merge, **pas** squash) pour récupérer d'éventuelles divergences de `main`. ⚠️ Piège vécu (0.10.0, PR #454) : `main` et `dev` avaient divergé (CHANGELOG + gradle) et la promotion a échoué tant que ce merge `main→dev` n'avait pas été fait. Le faire **avant** d'ouvrir la PR de promotion.
+3. **PR `dev` → `main` en `--no-ff`** (pas de squash : on préserve l'historique des commits de `dev`). Le merge **`--admin`** est acceptable : `main` est protégée et, en mono-maintainer sous pseudonyme, il n'y a pas de 2ᵉ reviewer « sûr » (cf. règle de review d'`AGENTS.md`) — justifier l'`--admin` dans le message de merge.
+4. **Dispatcher la bêta depuis `main`** : `gh workflow run release.yml -R ForumHFR/redface2 --ref main -f channel=beta -f ref=main`, puis **vérifier le `headBranch`** du run.
+5. **Vérifier l'aval** : Play track `beta` « committed », notification F-Droid `.beta`, Release GitHub `app-v<N>`.
+
+**Bêta cassée ?** Ne jamais réutiliser un `versionCode` (Play le rejette sur tous les tracks). Corriger sur `dev`, re-cut (étapes 1→5) : le registre alloue un `app-v<N+1>` et le `versionName` doit re-changer (guard).
+
+> **Côté F-Droid** : le dépôt **séparé** `redface2-fdroid` a sa propre doc/outillage — notamment le pin `androguard==4.1.3` (`4.1.4` casse `fdroid update`). La référence vit dans ce dépôt, pas ici.
 
 ## Promotion entre tracks
 
