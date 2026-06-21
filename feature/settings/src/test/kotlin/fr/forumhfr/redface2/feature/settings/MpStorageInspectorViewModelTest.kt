@@ -177,7 +177,10 @@ class MpStorageInspectorViewModelTest {
             override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
                 error("Unexpected writeBackFlag call in the read-only inspector test")
 
-            override suspend fun writeBackFlagIfPresent(entry: MpStorageFlagEntry): MpStorageWriteResult =
+            override suspend fun writeBackFlagIfPresent(
+                entry: MpStorageFlagEntry,
+                expectedPseudo: String,
+            ): MpStorageWriteResult =
                 error("Unexpected writeBackFlagIfPresent call in the read-only inspector test")
 
             override suspend fun previewWriteBackFlag(
@@ -234,7 +237,10 @@ class MpStorageInspectorViewModelTest {
         override suspend fun writeBackFlag(entry: MpStorageFlagEntry): MpStorageWriteResult =
             error("Unexpected writeBackFlag call in the read-only inspector test")
 
-        override suspend fun writeBackFlagIfPresent(entry: MpStorageFlagEntry): MpStorageWriteResult =
+        override suspend fun writeBackFlagIfPresent(
+            entry: MpStorageFlagEntry,
+            expectedPseudo: String,
+        ): MpStorageWriteResult =
             error("Unexpected writeBackFlagIfPresent call in the read-only inspector test")
 
         override suspend fun previewWriteBackFlag(

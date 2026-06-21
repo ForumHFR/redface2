@@ -309,7 +309,7 @@ class DefaultMpStorageRepositoryTest {
         locationStore.saved[OWNER] = MpStorageLocation(threadId = 9100200, numreponse = 7)
 
         val entry = MpStorageFlagEntry(threadId = 1, page = 1, numreponse = 1, uri = null)
-        val result = repository.writeBackFlagIfPresent(entry)
+        val result = repository.writeBackFlagIfPresent(entry, expectedPseudo = OWNER)
 
         assertEquals(MpStorageWriteResult.DisabledByPreference, result)
         assertEquals(0, server.requestCount)
@@ -331,7 +331,7 @@ class DefaultMpStorageRepositoryTest {
         server.enqueue(MockResponse().setBody(storageEditFormHtml(raw)))
 
         val entry = MpStorageFlagEntry(threadId = 42, page = 2, numreponse = 5, uri = "/u")
-        val result = repository.writeBackFlagIfPresent(entry)
+        val result = repository.writeBackFlagIfPresent(entry, expectedPseudo = OWNER)
 
         assertEquals(MpStorageWriteResult.SkippedNotPresent, result)
         // GET the form only — no POST: the absent threadId is never appended (anti-doublon, ADR-014 §3).
@@ -362,7 +362,7 @@ class DefaultMpStorageRepositoryTest {
         server.enqueue(MockResponse().setBody("<html><body>ok</body></html>")) // POST bdd.php
         server.enqueue(MockResponse().setBody(storageEditFormHtml(mutated))) // RE-GET verify
 
-        val result = repository.writeBackFlagIfPresent(entry)
+        val result = repository.writeBackFlagIfPresent(entry, expectedPseudo = OWNER)
 
         assertEquals(MpStorageWriteResult.Success(verified = true), result)
         assertEquals(3, server.requestCount)
@@ -371,6 +371,51 @@ class DefaultMpStorageRepositoryTest {
         assertEquals("prive", body["cat"])
         assertTrue(body["content_form"]!!.contains("\"page\":2"))
     }
+
+    @Test
+    fun `writeBackFlagIfPresent declines (SessionChanged, no POST) when the active account differs from expected`() =
+        runTest {
+            // C2 — the active account (OWNER) is not the one the caller snapshotted and asked to write
+            // under (expectedPseudo = "alice"). The repo must refuse BEFORE any POST so the shared
+            // MPStorage document is never written under a session other than the one that read the page.
+            preferences.enabled.value = true
+            locationStore.saved[OWNER] = STORAGE_LOCATION
+
+            val entry = MpStorageFlagEntry(threadId = 42, page = 2, numreponse = 5, uri = "/u")
+            val result = repository.writeBackFlagIfPresent(entry, expectedPseudo = "alice")
+
+            assertEquals(MpStorageWriteResult.SessionChanged, result)
+            // The guard fires after the opt-in + active-pseudo resolution but BEFORE locating / GETting.
+            assertEquals(0, server.requestCount)
+        }
+
+    @Test
+    fun `writeBackFlagIfPresent fails closed (UnsafeContent, no POST) when the mutated body has an astral char`() =
+        runTest {
+            // C4 — a third-party key in the located document holds an emoji (astral code point). The
+            // mutation re-emits it ; HFR would truncate the POST there (#114) and corrupt the shared
+            // document. The repo must map the writer's UnsafeContent to MpStorageWriteResult.UnsafeContent
+            // and send NO POST (GET the edit form only) — never strip third-party data.
+            val raw = """{ "data": [ { "version": "0.1", "hfr4k": "note 😀", "mpFlags": { "list": [
+                { "post": 42, "page": 1, "href": "t1" }
+            ] } } ] }"""
+            repository = buildRepository(
+                replyFormParser = mockk {
+                    every { parse(any()) } returns Result.success(storageForm(initialContent = raw))
+                },
+            )
+            preferences.enabled.value = true
+            locationStore.saved[OWNER] = STORAGE_LOCATION
+            server.enqueue(MockResponse().setBody(storageEditFormHtml(raw)))
+
+            val entry = MpStorageFlagEntry(threadId = 42, page = 2, numreponse = 5, uri = "/u")
+            val result = repository.writeBackFlagIfPresent(entry, expectedPseudo = OWNER)
+
+            assertEquals(MpStorageWriteResult.UnsafeContent, result)
+            // GET the edit form only — the unsafe re-emit is refused before any POST.
+            assertEquals(1, server.requestCount)
+            assertEquals("GET", server.takeRequest().method)
+        }
 
     @Test
     fun `writeBackFlag POSTs the mutated body with cat=prive, the active pseudo and the hash subject`() = runTest {

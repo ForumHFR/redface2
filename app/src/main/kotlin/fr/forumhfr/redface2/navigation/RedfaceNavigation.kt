@@ -877,12 +877,20 @@ fun RedfaceApp(intent: Intent?) {
                                 if (decrement) {
                                     mpBadgeViewModel.onThreadRead(threadId)
                                 }
+                                // (C1, 4-flavor MAJOR) the per-open unread flag is a PER-OPEN pending
+                                // too: CONSUME it here once the decrement decision is made. Without
+                                // this, a later re-fire / re-open keeps `threadId in unreadOnOpen`,
+                                // and after #531 drops the read mark the thread re-decrements the
+                                // badge from a stale unread state. A genuinely-unread re-open rearms
+                                // it via onThreadOpenedUnread.
+                                unreadOnOpenThreadIds = unreadOnOpenThreadIds - threadId
                                 // #531 — record the mark keyed by the conversation date captured at
                                 // open-time (openThreadDates). reconcileReadMarks later compares the
                                 // server date against it. (Codex MAJOR 3) the open-time date is a
                                 // PER-OPEN pending: CONSUME it here so a later re-open of the same
                                 // thread WITHOUT a fresh inbox date can't reuse this stale baseline —
-                                // it falls back to the MAX sentinel (never reconciled) instead.
+                                // (W1) but withReadMark now preserves an already-stored real baseline
+                                // before falling back to the MAX sentinel.
                                 readPrivateMessageThreadIds = readPrivateMessageThreadIds
                                     .withReadMark(threadId, openThreadDates)
                                 openThreadDates = openThreadDates - threadId
@@ -1168,9 +1176,10 @@ private data class PrivateMessageNavState(
  * when that thread was actually unread when opened ([unreadOnOpen]). Opening an already-read
  * conversation subtracts nothing, and re-opening one ([alreadyRead]) must not subtract twice.
  * Extracted from [onThreadLoaded] so the boolean connective stays out of RedfaceApp's cyclomatic
- * complexity budget.
+ * complexity budget. `internal` (like the other nav-state helpers) so the [ReadMarkReconcileTest]
+ * can model the C1 consume-on-load sequence without a Compose host.
  */
-private fun shouldDecrementUnreadBadge(
+internal fun shouldDecrementUnreadBadge(
     threadId: Int,
     unreadOnOpen: Set<Int>,
     alreadyRead: Set<Int>,
@@ -1264,11 +1273,18 @@ private val NO_RECONCILE_BASELINE: Instant = Instant.MAX
  * open-time ([openDates]). A thread with no captured date falls back to [NO_RECONCILE_BASELINE]
  * ([Instant.MAX]), so it is never reconciled back to unread (see that constant). Extracted to keep
  * [RedfaceApp]'s Elvis out of its cyclomatic-complexity budget.
+ *
+ * (W1, 4-flavor MAJOR) — `onThreadLoaded` re-fires for EVERY Content emission (page change, PTR),
+ * not once per visit, and the per-open [openDates] entry is consumed after the first fire. A later
+ * re-fire in the SAME visit must NOT clobber a real baseline already stored for this thread: prefer
+ * an existing real mark ([this] [threadId]) before falling back to the MAX sentinel. Order:
+ * fresh open-time date → already-stored mark → sentinel.
  */
 internal fun Map<Int, Instant>.withReadMark(
     threadId: Int,
     openDates: Map<Int, Instant>,
-): Map<Int, Instant> = this + (threadId to (openDates[threadId] ?: NO_RECONCILE_BASELINE))
+): Map<Int, Instant> =
+    this + (threadId to (openDates[threadId] ?: this[threadId] ?: NO_RECONCILE_BASELINE))
 
 /**
  * Bug fix (build 89) — per-topic title cache plumbed into [RedfaceNavHost]. A topic page change

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.data.mpstorage
 
+import fr.forumhfr.redface2.core.data.write.containsUnstorableContent
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import java.time.Clock
@@ -74,6 +75,14 @@ class MpStorageEnvelopeWriter @Inject constructor(
 
         data object NotJsonEnvelope : Outcome
         data class TooLarge(val sizeBytes: Int) : Outcome
+
+        /**
+         * FAIL-CLOSED (C4) : the mutated body holds a code point HFR truncates at (astral / lone
+         * surrogate, #114). The caller must NOT POST it — the shared third-party document would be
+         * corrupted — and must NOT strip it either (that would destroy third-party data). The document
+         * is left byte-fidèle.
+         */
+        data object UnsafeContent : Outcome
     }
 
     /**
@@ -123,6 +132,14 @@ class MpStorageEnvelopeWriter @Inject constructor(
 
         val stamped = stampLastWriter(withFlag)
         val body = json.encodeToString(JsonObject.serializer(), stamped)
+
+        // FAIL-CLOSED (C4) : the re-emitted JSON can carry an astral / lone-surrogate code point HFR
+        // silently truncates at (e.g. a third-party value the source escaped as \uXXXX, re-emitted as a
+        // real character). POSTing it would corrupt the shared document ; stripping it would destroy
+        // third-party data. Refuse the write instead — the document stays byte-fidèle.
+        if (containsUnstorableContent(body)) {
+            return Outcome.UnsafeContent
+        }
 
         val sizeBytes = body.toByteArray(Charsets.UTF_8).size
         if (sizeBytes > MpStorageRepository.MAX_CONTENT_FORM_BYTES) {

@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.core.data.write
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -92,5 +94,30 @@ class ContentFormSanitizerTest {
     fun `string made only of astral code points becomes empty`() {
         // U+1F600 + U+1F601, nothing else.
         assertEquals("", sanitizeContentForm(cp(0x1F600) + cp(0x1F601)))
+    }
+
+    // --- containsUnstorableContent : the DETECTION twin used by MPStorage's fail-closed path (C4) ----
+
+    @Test
+    fun `containsUnstorableContent is false for pure-BMP content (no truncation vector)`() {
+        // Same BMP scope sanitizeContentForm preserves: BBCode, accents, high-BMP selectors → all safe.
+        assertFalse(containsUnstorableContent("café [b]œuvre[/b] ! 12345"))
+        val highBmp = "a" + cp(0xE000) + cp(0xFE0F) + cp(0xFF21) + cp(0x2764) + "b"
+        assertFalse(containsUnstorableContent(highBmp))
+        assertFalse(containsUnstorableContent(""))
+    }
+
+    @Test
+    fun `containsUnstorableContent is true for an astral code point (emoji)`() {
+        // U+1F600 — the exact vector HFR truncates at. MPStorage fails closed rather than strip it.
+        assertTrue(containsUnstorableContent("note " + cp(0x1F600) + " end"))
+        assertTrue(containsUnstorableContent(cp(0x1F642) + cp(0xFE0F))) // astral base + BMP selector
+    }
+
+    @Test
+    fun `containsUnstorableContent is true for a lone unpaired surrogate`() {
+        // A lone high surrogate (U+D800) is < U+10000 yet never a valid scalar value — must be detected,
+        // mirroring sanitizeContentForm's explicit surrogate-range test.
+        assertTrue(containsUnstorableContent("x" + cp(0xD800) + "y"))
     }
 }

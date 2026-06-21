@@ -363,6 +363,36 @@ class MpStorageEnvelopeWriterTest {
         assertNull(item["uri"]!!.jsonPrimitive.contentOrNullSafe())
     }
 
+    @Test
+    fun `C4 - a mutated body carrying an astral code point fails closed (UnsafeContent, no Mutated)`() {
+        // C4 — a third-party key holds an emoji (an astral, non-BMP code point). HFR silently truncates
+        // a posted body at the first such character (#114), so POSTing the re-emitted document would
+        // CORRUPT the shared cross-userscript storage. MPStorage must NOT strip (third-party data) →
+        // the writer fails closed with UnsafeContent so the caller refuses the POST and leaves the
+        // document byte-fidèle.
+        val raw = """{ "data": [ { "version": "0.1", "hfr4k": "note 😀", "mpFlags": { "list": [
+            { "post": 42, "page": 1, "href": "t1" }
+        ] } } ] }"""
+
+        // A real change (page 1 → 2) so the writer reaches the re-emit + detection, not the no-op path.
+        val outcome = mutate(raw, MpStorageFlagEntry(threadId = 42, page = 2, numreponse = 5, uri = null))
+
+        assertEquals(MpStorageEnvelopeWriter.Outcome.UnsafeContent, outcome)
+    }
+
+    @Test
+    fun `C4 - a pure-BMP body (accents, BBCode) is never flagged unsafe`() {
+        // Belt-and-braces: the detection must not over-trigger on legitimate BMP content (accented
+        // Latin, high-BMP private-use chars) — only astral / lone surrogates fail closed.
+        val raw = """{ "data": [ { "version": "0.1", "hfr4k": "café œuvre ", "mpFlags": { "list": [
+            { "post": 42, "page": 1, "href": "t1" }
+        ] } } ] }"""
+
+        val outcome = mutate(raw, MpStorageFlagEntry(threadId = 42, page = 2, numreponse = 5, uri = null))
+
+        assertTrue("pure-BMP content must mutate normally", outcome is MpStorageEnvelopeWriter.Outcome.Mutated)
+    }
+
     /** `JsonPrimitive.content` is "null" for a literal null — distinguish it from the string "null". */
     private fun JsonPrimitive.contentOrNullSafe(): String? =
         if (this is kotlinx.serialization.json.JsonNull) null else content

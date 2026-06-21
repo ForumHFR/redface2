@@ -55,6 +55,29 @@ internal fun sanitizeContentForm(content: String): String {
     }
 }
 
+/**
+ * DETECTION twin of [sanitizeContentForm] (#114 logic, #C4) — reports whether [content] holds any
+ * code point HFR would silently truncate at : an astral (non-BMP, `>= U+10000`) scalar value OR a
+ * lone / unpaired UTF-16 surrogate. Returns `false` for any pure-BMP string (BBCode, accented Latin,
+ * high-BMP chars `U+E000..U+FFFF`, CR/LF, tabs).
+ *
+ * This is the NON-DESTRUCTIVE companion : where [sanitizeContentForm] STRIPS the offending code
+ * points from a freshly-typed user post (losing an emoji beats losing the whole post), this only
+ * DETECTS them. The MPStorage write path (ADR-014) must NOT strip — the body is a SHARED third-party
+ * document — so it uses this to FAIL CLOSED (refuse the POST) instead, leaving the document untouched.
+ *
+ * Pure and side-effect-free (unit-tested in `ContentFormSanitizerTest`). Shares the exact code-unit
+ * scan / boundary semantics of [sanitizeContentForm] so the two never disagree on what HFR truncates.
+ */
+internal fun containsUnstorableContent(content: String): Boolean {
+    // Fast path: every astral pair AND every lone surrogate has at least one code unit >= 0xD800, so
+    // the absence of any such unit proves the string is pure BMP — nothing HFR truncates on. The
+    // common ASCII/Latin/BBCode body returns false without a code-point walk. Otherwise scan the code
+    // units: any unit in the surrogate range is either an astral pair's half or a lone surrogate, and
+    // both are unstorable (same boundary semantics as sanitizeContentForm, which drops exactly these).
+    return content.any { it.code in SURROGATE_RANGE_START..SURROGATE_RANGE_END }
+}
+
 /** First code point of the astral planes (UTF-16 surrogate-pair territory). */
 private const val ASTRAL_PLANE_START = 0x10000
 
