@@ -16,13 +16,14 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
-## v177 — `0.16.0` — `local` (beta) — 2026-06-20
+## v179 — `0.16.0` — `open` (beta) — 2026-06-21
 
-> Le `v177` est indicatif : le `versionCode` réel est alloué au dispatch par le registre de tags git
-> (`max(app-v*) + 1`). Statut `local` jusqu'au ship beta (→ `open`). versionName bumpé 0.15.0 → 0.16.0.
+> Shippé en bêta (Play open testing « committed » + F-Droid .beta) le 2026-06-21, tag `app-v179`.
+> versionName bumpé 0.15.0 → 0.16.0 ; versionCode alloué au dispatch par le registre de tags git.
 
-Bêta **0.16.0** (open testing) — consolide le dev depuis la bêta 0.15.0 (`v174`). Revue 4-flavor
-(code-review + review holistique + superpowers + Codex, seuil >60, **0 bloquant**) avant le cut.
+Bêta **0.16.0** (open testing) — consolide le dev depuis la bêta 0.15.0 (`v174`). Double review
+pré-promotion (Codex + workflow multi-flavors, 2 passes, **3 MAJOR corrigés**) ; chaque PR du payload
+déjà review Codex + CI verte.
 
 **Nouveautés**
 
