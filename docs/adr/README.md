@@ -43,3 +43,4 @@ Les numéros `004` à `007` sont volontairement laissés libres pour des décisi
 | [ADR-013]({{ site.baseurl }}/adr/013-mp-lecture-cache-prefetch) | Lecture MP : partage topic↔MP, cache à trois étages, prefetch borné |
 | [ADR-014]({{ site.baseurl }}/adr/014-mpstorage-v01-de-facto) | MPStorage : enveloppe v0.1 de facto, lecture d'abord, écriture opt-in (OFF par défaut) |
 | [ADR-015]({{ site.baseurl }}/adr/015-iconographie-boutons-icones) | Iconographie des boutons-icônes : vector drawables stroke locaux, primitive `RedfaceVectorIcon` |
+| [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing) | Roborazzi pour le rendu visuel (screenshot testing JVM), mode record en Phase 4 |

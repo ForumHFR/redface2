@@ -17,7 +17,7 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 
 ## Projet
 
-- Phase actuelle : **Phase 1 — Core lecture** ([roadmap](docs/specs/roadmap.md)). Phase 0 bootstrap livrée (Gradle multi-modules, CI, thème M3, navigation, Hilt). Slice topic fixe + AST `PostContent` + `PostRenderer` Compose en cours d'intégration.
+- Phase actuelle : **Phase 4 — UI & hygiène + Extensions** ([roadmap](docs/specs/roadmap.md)). Phases 0 à 3 livrées (bootstrap ; lecture du forum ; écriture poster/citer/upload ; messages MP + DT/MultiMP), bêta **0.16.0** publiée (Play open testing + F-Droid). En cours : refontes UI (vue Drapeaux #603, vue Topic #604), aide & réglages, architecture d'extensions (#6 MPStorage, #7).
 - Licence : GPL-3.0-only
 - Documentation : GitHub Pages via `docs/` (Jekyll + just-the-docs)
 - Langue : code en anglais, issues et docs en francais
