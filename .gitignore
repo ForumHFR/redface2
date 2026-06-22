@@ -18,3 +18,7 @@ core/parser/src/test/resources/fixtures/*_files/
 # Console / shared out-of-band.
 *.apk
 *.aab
+
+# Debug-only canonical key INTENTIONALLY committed (stable `adb install -r` across envs, BUILD-03).
+# Future-proof against a `*.keystore`/`*.jks` rule being added later.
+!config/signing/redface2-debug.keystore

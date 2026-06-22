@@ -61,6 +61,20 @@ android {
         manifestPlaceholders["appLabel"] = cliAppLabel ?: "@string/app_name"
     }
 
+    // Canonical DEBUG signing (BUILD-03): a committed debug-only key so every debug build —
+    // CLI, Docker (any UID), Android Studio, CI — signs identically. Without it AGP generates a
+    // per-ANDROID_USER_HOME debug.keystore, so `adb install -r` fails with
+    // INSTALL_FAILED_UPDATE_INCOMPATIBLE across environments. DEBUG ONLY (insecure by design,
+    // package suffixed `.debug`, never published to Play/F-Droid). Cf. docs/guides/contributing.md.
+    signingConfigs {
+        create("redfaceDebug") {
+            storeFile = rootProject.file("config/signing/redface2-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     if (hasCiSigningConfig) {
         signingConfigs {
             create("upload") {
@@ -82,6 +96,9 @@ android {
         // a release build ; this just makes the icon legible on the device. Release keeps
         // `@string/app_name`.
         manifestPlaceholders["appLabel"] = "Redface 2 ADB"
+
+        // Canonical debug signing — see the `redfaceDebug` signingConfig above (BUILD-03).
+        signingConfig = signingConfigs.getByName("redfaceDebug")
 
         // Stamp the exact build into versionName so a sideloaded dogfood APK is identifiable:
         // every debug build otherwise shares the release versionName (e.g. 0.3.28), which made

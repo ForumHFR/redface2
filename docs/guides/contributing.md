@@ -56,6 +56,22 @@ Exemples :
 
 Le script monte le repo dans `/workspace`, persiste les caches Gradle / Android dans `.gradle-user/` et exécute le container avec l'UID/GID de l'utilisateur hôte pour éviter les fichiers root-owned sur Linux. En rootless Podman, `--userns keep-id` est ajouté automatiquement pour garder le mapping d'identité.
 
+#### Signature debug canonique et `adb install -r`
+
+Les builds **debug** sont signés par une clé canonique committée (`config/signing/redface2-debug.keystore` — debug-only, password `android`, alias `androiddebugkey`), câblée sur `buildTypes.debug` dans `app/build.gradle.kts`. Objectif : **tout** build debug — CLI, Docker (n'importe quel UID), Android Studio, CI — signe à l'identique, donc `adb install -r` fonctionne entre environnements.
+
+Sans cette clé, AGP génère un `debug.keystore` par `ANDROID_USER_HOME` : un APK debug buildé sous un environnement (ex. Docker UID 1000) ne peut pas remplacer (`-r`) une install signée ailleurs → `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+
+Empreintes : `SHA-1 E2:C6:9D:12:DC:99:D2:06:B9:E3:7D:15:EA:B6:80:44:C1:A5:DC:22`, `SHA-256 55:E9:56:A9:BD:1C:99:E8:F0:C4:55:C3:C5:8B:7C:55:C0:7A:B9:D9:7C:D8:22:CF:62:0E:F8:A3:26:73:2A:26` (vérif : `keytool -list -v -keystore config/signing/redface2-debug.keystore -storepass android`).
+
+**Migration unique** : si `fr.forumhfr.redface2.debug` est déjà installé avec une ancienne clé, le désinstaller une fois avant le premier `install -r` :
+
+```bash
+adb uninstall fr.forumhfr.redface2.debug
+```
+
+⚠️ Clé **debug uniquement** (insecure by design, package suffixé `.debug`) — jamais acceptée par Play/F-Droid pour publier. La signature release/upload est séparée (secrets CI `UPLOAD_*` + `.gradle-user/signing/`), non concernée par ce changement.
+
 #### Dogfood : installer en parallèle d'une release Play
 
 Pour installer un build local **à côté** d'une version Redface 2 déjà publiée (alpha / closed testing) sans clobber l'existant, créer un init-script Gradle **gitignored** sous `.gradle-user/dogfood.init.gradle` :
