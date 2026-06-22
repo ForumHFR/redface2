@@ -56,6 +56,20 @@ jobs:
       - name: ${{ matrix.task.name }}
         run: ./gradlew ${{ matrix.task.gradle }}
 
+  # Repo hygiene guards (no Gradle/SDK needed — pure bash). Fixture provenance is BLOCKING;
+  # the large-file report is advisory (writes to the job summary, never fails). Wired into the
+  # required aggregate check below so the guard is actually enforced on `main` (dev→main promotion).
+  repo-guards:
+    name: repo-guards
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Fixture provenance (blocking)
+        run: bash scripts/check-fixtures-provenance.sh
+      - name: Large production files report (advisory)
+        run: bash scripts/report-large-files.sh
+
   # Single aggregate check whose name is the one `main`'s branch protection requires
   # ("Build, lint and test"). Green iff every `verify` matrix entry succeeded, so the fan-out stays
   # compatible with the existing required-status-check on `main` (dev→main promotion) without having
@@ -63,14 +77,15 @@ jobs:
   build-lint-and-test:
     name: Build, lint and test
     if: always()
-    needs: [verify]
+    needs: [verify, repo-guards]
     runs-on: ubuntu-24.04
     steps:
-      - name: Require all verify jobs to pass
+      - name: Require all required jobs to pass
         run: |
-          result='${{ needs.verify.result }}'
-          echo "verify matrix result: $result"
-          if [ "$result" != "success" ]; then
-            echo "::error::One or more verify jobs did not succeed ($result)."
+          verify='${{ needs.verify.result }}'
+          guards='${{ needs.repo-guards.result }}'
+          echo "verify matrix result: $verify | repo-guards result: $guards"
+          if [ "$verify" != "success" ] || [ "$guards" != "success" ]; then
+            echo "::error::A required job did not succeed (verify=$verify, repo-guards=$guards)."
             exit 1
           fi
