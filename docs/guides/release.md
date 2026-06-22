@@ -105,14 +105,14 @@ Plus besoin de bumper `versionCode` à la main ni de publier une Release : le di
 
 ## Flux dev — Play internal + F-Droid `.dev` (rapide)
 
-**GitHub → Actions → Release → Run workflow → `channel = dev`** (défaut ; ou `gh workflow run release.yml -f channel=dev -f ref=<branche>`). Identique au flux beta mais :
+**GitHub → Actions → Release → Run workflow → `channel = dev`** (défaut ; ou `gh workflow run release.yml --ref dev -f channel=dev`). Identique au flux beta mais :
 
 - Play : track **`internal`** au lieu de `beta`, label « Redface 2 dev ».
 - F-Droid : `:app:assembleDevRelease` → package `fr.forumhfr.redface2.dev`.
 
-Inputs : `channel` (`dev` par défaut) et `ref` (défaut = ref courant, pour builder une branche). Les artefacts sont aussi téléchargeables depuis le run Actions (30 j) pour le sideload.
+Inputs : `channel` (`dev` par défaut) et `ref` (optionnel). **Pour `channel=dev`, le ref par défaut est désormais `dev`** (garde `resolve-target`), plus le ref courant ; un `ref` explicite ≠ `dev` est refusé. Pour `channel=beta`, le build vient de `main` (garde existante). Les artefacts sont aussi téléchargeables depuis le run Actions (30 j) pour le sideload.
 
-> ⚠️ **Toujours passer `--ref dev` ET `-f ref=dev` pour un build dev.** L'input `ref` vaut par défaut le *ref courant du dispatch* : lancer `channel=dev` depuis `main` **sans** `ref=dev` build alors **`main`**, pas `dev` (piège vécu sur `app-v105`). Commande sûre : `gh workflow run release.yml -R ForumHFR/redface2 --ref dev -f channel=dev -f ref=dev`, puis **vérifier le `headBranch` du run** juste après le dispatch.
+> ✅ **`channel=dev` builde désormais `dev` par défaut** (garde `resolve-target`) : plus besoin de forcer `-f ref=dev`, et un `ref` explicite autre que `dev` est **refusé** — fini le piège `app-v105` (`channel=dev` depuis `main` buildait `main`). Commande : `gh workflow run release.yml -R ForumHFR/redface2 --ref dev -f channel=dev`. Vérifier le `headBranch` du run reste une bonne hygiène.
 
 ## Flux prod — production (différé)
 
