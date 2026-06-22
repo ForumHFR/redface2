@@ -67,6 +67,23 @@ jobs:
         uses: actions/checkout@v6
       - name: Fixture provenance (blocking)
         run: bash scripts/check-fixtures-provenance.sh
+      - name: Changelog updated on versionName bump (PR, blocking)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin "$BASE_REF"
+          old=$(git show "FETCH_HEAD:app/build.gradle.kts" 2>/dev/null | grep -E '^[[:space:]]+versionName[[:space:]]*=' | head -1 | sed -E 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/' || true)
+          new=$(grep -E '^[[:space:]]+versionName[[:space:]]*=' app/build.gradle.kts | head -1 | sed -E 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')
+          echo "versionName base='${old:-?}' head='${new:-?}'"
+          if [[ -n "$new" && "$new" != "$old" ]]; then
+            echo "versionName bumpé (${old:-?} -> $new) -> entrée app/CHANGELOG.md requise"
+            bash scripts/check-changelog-entry.sh "$new"
+          else
+            echo "versionName inchangé -> pas de check changelog requis"
+          fi
       - name: Large production files report (advisory)
         run: bash scripts/report-large-files.sh
 
