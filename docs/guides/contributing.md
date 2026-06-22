@@ -211,13 +211,13 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 
 **Enforcement au build (Phase 0) :**
 - **Konsist** — règles d'architecture (imports inter-modules, `:core:extension` limité à `topic/editor`, tokens M3 centralisés dans `:core:ui`). Voir [architecture.md]({{ site.baseurl }}/specs/architecture) pour les règles. La règle `@AnonymousClient` sur prefetch sera activée dès que le code réseau/prefetch existera réellement.
-- **Detekt** — style Kotlin + deprecations (`runBlocking`, `GlobalScope`, `LiveData`, imports dépréciés).
-- **Android Lint** — a11y + i18n + correctness. `MissingContentDescription`, `TouchTargetSizeCheck`, `HardcodedText` en `error` (abort build). Config `lintOptions` dans `build.gradle.kts`.
+- **Detekt** — style Kotlin + imports interdits (`ForbiddenImport` : `GlobalScope`, `LiveData`, `material.*`). NB : `runBlocking` n'est **pas** attrapé par Detekt aujourd'hui. L'interdiction de **nouveaux** `runBlocking` en prod (allow-list des 2 sites existants : `DataStoreUserPreferencesRepository.kt`, `PersistentCookieJar.kt`) est une garde dédiée à ajouter, pas un défaut Detekt.
+- **Android Lint** — a11y + i18n + correctness. Lint tourne avec `abortOnError = true` (convention plugin dans `build-logic/`). NB : `MissingContentDescription`/`TouchTargetSizeCheck`/`HardcodedText` restent à leur **sévérité par défaut (warning)** — ils ne font pas échouer le build tant qu'ils ne sont pas promus en `error` (`lint { error += listOf(...) }`), ce qui n'est pas le cas actuellement.
 
 **CI Phase 0 :**
 - workflow GitHub Actions sur push `main` et PR
 - exécution dans le même env Docker de référence, épinglé par digest
-- pipeline actuelle : `detektAll`, `lintDebug`, `testDebugUnitTest` (inclut les checks Konsist), `:app:assembleDebug`
+- pipeline actuelle (CI) : `detektAll`, `lintDebug` + `:app:lintProdDebug`, `test` + `testDebugUnitTest` (inclut les checks Konsist), `:app:assembleProdDebug` — le `:app:assembleDebug` **non flavoré ne résout plus** (variantes `dev`/`prod`, [#233](https://github.com/ForumHFR/redface2/issues/233))
 - **Dependabot** configuré pour `gradle` et `github-actions`
 
 **Couverture (hybride différenciée) :**
@@ -234,7 +234,7 @@ Cette page décrit **comment** contribuer ; elle ne redéfinit pas la méthode d
 
 Screenshot testing **JVM** (sur Robolectric, sans device) via Roborazzi 1.63, consommé comme artefact de test simple (pas le plugin Gradle), avec `roborazzi.test.record=true` forcé.
 
-- **Mode `record`** (par défaut ici) : un test `captureRoboImage` génère un PNG dans `<module>/build/outputs/roborazzi/` (non versionné) → **inspection visuelle** rapide (~40 s). Lancer via l'env Docker, ex. `./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest` (ou la tâche `recordRoborazzi`).
+- **Mode `record`** (par défaut ici) : un test `captureRoboImage` génère un PNG dans `<module>/build/outputs/roborazzi/` (non versionné) → **inspection visuelle** rapide (~40 s). Lancer via l'env Docker, ex. `./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest`. (Il n'existe **pas** de tâche `recordRoborazzi` : le plugin Gradle Roborazzi n'est pas appliqué — record forcé via `roborazzi.test.record=true`.)
 - **Quand l'utiliser** : `record` est réservé aux **changements de rendu intentionnels** (PostRenderer, écrans refondus) — on régénère puis on regarde l'image. `verifyRoborazzi` (compare) existe mais les **baselines ne sont pas versionnées** en V1 (elles bougeraient à chaque itération des refontes #603/#604).
 - **Statut** : **recommandé** pour tout changement de rendu UI structurant, **pas encore un gate CI dur**. Le passage en `verify` + baselines committées + gate fera l'objet d'une décision dédiée une fois les refontes UI stabilisées.
 - **Couverture actuelle** : `:core:ui` (PostRenderer — code, smiley, citation) + `:feature:topic` + coquille réglages. Elle s'étend au cas par cas — **pas** d'obligation « tout écran doit avoir un snapshot ».
@@ -242,7 +242,7 @@ Screenshot testing **JVM** (sur Robolectric, sans device) via Roborazzi 1.63, co
 
 **Smoke test mensuel HFR (fin de phase de lecture) :**
 
-Workflow GitHub Actions (`cron: '0 2 1 * *'`, 1er du mois, 2h UTC) qui vérifie contre HFR réel :
+**Prévu — pas encore implémenté** (aucun workflow `cron` n'existe à ce jour dans `.github/workflows/`). Conception : un workflow GitHub Actions (`cron: '0 2 1 * *'`, 1er du mois, 2h UTC) qui vérifierait, **sans authentification** (cf. règle prefetch non-authentifié), contre HFR réel :
 
 - Sélecteurs CSS critiques (`HfrSelectors`) matchent toujours
 - Liste catégories + sous-catégories (`HfrCategories.ALL` hardcodée) matche le HTML de la page d'accueil — détecte les ajouts/renommages HFR rares mais impactants
@@ -365,7 +365,7 @@ Mêmes règles que les fixtures HTML : capturées live, **jamais inventées**, n
 - Exception contrôlée : les pseudos et profils des comptes de test dédiés publics (`XaTelitte` / `xatelitte`, profil HFR `1214571`) peuvent rester en clair pour conserver la fidélité parser. Ne jamais appliquer cette exception à un compte personnel non dédié.
 - Ne pas reformatter les fixtures HTML : elles doivent rester proches de la réponse HFR. Un nettoyage minimal des fins de ligne/trailing whitespace est acceptable pour satisfaire `git diff --check`, sans modifier la structure DOM.
 - Quand un bug de parsing est corrigé, le HTML problématique est ajouté aux fixtures avec un test de non-régression.
-- Un **smoke test CI mensuel** (cf. cron `0 2 1 * *` ci-dessus) vérifie que les sélecteurs CSS critiques matchent toujours sur une vraie page HFR publique.
+- Un **smoke test CI mensuel** (cf. cron `0 2 1 * *` ci-dessus, **prévu**) vérifiera que les sélecteurs CSS critiques matchent toujours sur une vraie page HFR publique.
 
 ---
 
