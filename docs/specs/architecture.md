@@ -503,13 +503,13 @@ Interceptor OkHttp avec détection des réponses HTTP 429 et des patterns de blo
 
 ### Breakage du parser
 
-`HfrParser` wrappe chaque méthode dans `runCatching`. Sur échec, le HTML brut est loggé en mode debug pour diagnostic. Un smoke test CI hebdomadaire vérifie que les sélecteurs CSS critiques (`HfrSelectors`) matchent toujours sur une vraie page HFR publique.
+`HfrParser` wrappe chaque méthode dans `runCatching`. Sur échec, le HTML brut est loggé en mode debug pour diagnostic. Un smoke test CI (mensuel, cf. [contributing.md]({{ site.baseurl }}/guides/contributing#tests)) est **prévu** — il vérifierait que les sélecteurs CSS critiques (`HfrSelectors`) matchent toujours sur une vraie page HFR publique. **Pas encore implémenté** (aucun workflow `cron` à ce jour).
 
 ---
 
 ## Enforcement architecture au build
 
-Les règles d'architecture décrites plus haut (3 couches strictes, features → `:core:domain` + `:core:ui` uniquement, tokens M3 centralisés dans `:core:ui`) sont **enforcées mécaniquement** par **[Konsist](https://docs.konsist.lemonappdev.com/)** (Kotlin-first, AST parsing) — pas par une convention markdown.
+Une **partie** des règles d'architecture décrites plus haut est **enforcée mécaniquement** par **[Konsist](https://docs.konsist.lemonappdev.com/)** (Kotlin-first, AST parsing) — pas par une simple convention markdown. Couverture actuelle (6 règles) : la garde « features → pas de couche d'implémentation `:core:*` » (slice `/feature/`), les tokens M3 instanciés hors `:core:ui` (imports nommés `ColorScheme`/`Typography`/`Shapes`), `:core:extension` limité à `topic`/`editor`. **Non couverts à ce jour** : les dépendances autorisées **inter-`core`**, le module `:app`, et l'instanciation M3 via fabriques (`lightColorScheme()`) ou usage pleinement qualifié. À étendre (cf. charte méthodo) — la prose ne doit pas affirmer plus que ce que Konsist vérifie réellement.
 
 Choix Konsist plutôt que ArchUnit :
 - Konsist voit les spécificités Kotlin : `sealed`/`data`/`internal`/`object`, extensions, expect/actual KMP.
