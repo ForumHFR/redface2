@@ -411,8 +411,7 @@ data class SettingsCategoryRoute(val categoryId: String) : RedfaceNavKey
  * the accepted MVP trade-off; no shared ViewModel or caching across the two entry points
  * is implemented yet.
  *
- * TODO(profile): caching follow-up — open a dedicated issue (none filed yet to keep this
- * PR scope-bound) and link it here. Candidate approaches: (a) shared `Singleton` Room-
+ * Caching follow-up (tracked by #625). Candidate approaches: (a) shared `Singleton` Room-
  * backed cache keyed by `userId`, (b) repository-level in-memory `Cache<Int, UserProfile>`
  * with a short TTL, (c) hoisting the ViewModel to a `LocalViewModelStoreOwner` shared by
  * the sheet and the page.
