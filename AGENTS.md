@@ -104,16 +104,14 @@ Codex n'a pas de runner CI : c'est une **discipline**, signalée (pas imposée) 
 - **Validation séparée** (cf. § Charte anti-derive) : Codex est le validateur distinct par défaut ;
   ses verdicts se recoupent au code, ils ne font pas autorité seuls.
 
-### Pipeline de développement `[advisory]`
+### Pipeline de développement
 
-`choix techno → (roborazzi baseline si refonte) → développement → validation → (roborazzi verify si refonte) → review`
-- **Neuf** : techno → dev → validation → review. **Refonte d'écran existant** : capturer le rendu
-  Roborazzi *avant* (baseline) et le vérifier *après*.
-- **Choix techno** : sur une API incertaine, vérifier la doc officielle actuelle (Context7/Docfork,
-  « stable release ») ; ADR seulement pour une décision structurante.
-- **Validation** : reproduire la CI — `:app:assembleProdDebug test testDebugUnitTest lintDebug :app:lintProdDebug detektAll` ;
-  **jamais `:app:testDevDebugUnitTest` seul** (il compile mais n'exécute pas les tests des modules `feature`/`core`).
-- **Review** : Codex (cf. cadence) + `/code-review`.
+Le pipeline canonique (`choix techno → … → review`, `[advisory]`) est défini dans
+**`docs/specs/methodology.md` § Pipeline de développement** (source canonique) — `AGENTS.md` ne le
+redéfinit pas. Conséquences opérationnelles pour les agents :
+- **Validation** = reproduire la CI via le skill **`/validate`** ; **jamais `:app:testDevDebugUnitTest`
+  seul** (il compile mais n'exécute pas les tests des modules `feature`/`core`).
+- **Review** = Codex (cf. § Cadence Codex ci-dessus) + `/code-review`.
 
 ---
 
