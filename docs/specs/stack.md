@@ -33,7 +33,7 @@ Chaque choix a été évalué, comparé et verrouillé. Voici le détail.
 | Enforcement archi | **Konsist** | ArchUnit | Kotlin-first, voit les sealed/data/internal ; ArchUnit = bytecode-only, perd la finesse Kotlin |
 | Style + deprecations | **Detekt** | ktlint | Plus riche, règles custom possibles |
 | A11y + i18n + correctness | **Android Lint** (natif) | — | Déjà présent, config `lintOptions` |
-| Screenshot testing | **Non retenu MVP** (Roborazzi reconsidéré Phase 4+) | — | Compose Preview + review manuelle suffisent en Phase 1-3 |
+| Screenshot testing | **Roborazzi adopté (Phase 4)** | [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing) | JVM via Robolectric, sans device ; **record-only** (record + inspection, pas de `verify` sous AGP 9) ; Compose Preview pour le design |
 | minSdk | **29** | 26, 31 | Android 10 : Scoped Storage, TLS 1.3, dark thème natif, ~88-90% parc 04/2026 |
 
 > **Versions précises** : le Gradle version catalog `gradle/libs.versions.toml` sera créé en Phase 0 comme source de vérité unique. Ce tableau garde les versions **major.minor** quand elles sont structurelles (Material 3 Adaptive 1.2+ pour les canonical layouts, Compose Navigation 3 pour les back stacks en state, OkHttp 5 pour le client HTTP + `CookieJar`). Les patches stables 2026 sont à résoudre via Context7/Docfork quand on interroge les docs officielles (cf. [#19](https://github.com/ForumHFR/redface2/issues/19)).

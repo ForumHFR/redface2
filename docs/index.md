@@ -71,7 +71,7 @@ graph TB
 
 ## État du projet
 
-Phase courante : **Phase 4 — Extensions** ([roadmap]({{ site.baseurl }}/specs/roadmap)). Phases 1 (lecture), 2 (écriture) et 3 (messages) sont **livrées** : login, drapeaux, forum, topics, cache, deep links, recherche, écriture/édition/citation/création, MPs classiques et MultiMPs (lecture, reply, quote, onglet DT). Seule la synchronisation/écriture MPStorage reste reportée (#6, Phase 4). Le dev (canal interne) accumule en `0.14.0` avant la prochaine bêta.
+Phase courante : **Phase 4 — Extensions + refonte UI** ([roadmap]({{ site.baseurl }}/specs/roadmap)). Phases 1 (lecture), 2 (écriture) et 3 (messages) sont **livrées** : login, drapeaux, forum, topics, cache, deep links, recherche, écriture/édition/citation/création, MPs classiques et MultiMPs (lecture, reply, quote, onglet DT), MPStorage lecture **et écriture** (opt-in). La **bêta 0.16.0** (clôture Phase 3) est publiée (Play open testing + F-Droid) ; seule la sync MPStorage bidirectionnelle complète reste reportée (#6). En cours : refonte UI Drapeaux (#603) / Topic (#604).
 
 Les specs restent la source de vérité du projet, mais elles doivent désormais refléter le code réel : tout écart entre une page canonique et le repo est traité comme un bug de spec, pas comme une dette future. Voir [`/spec-reality`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/spec-reality/SKILL.md) pour la procédure d'audit cross-fichier.
 
