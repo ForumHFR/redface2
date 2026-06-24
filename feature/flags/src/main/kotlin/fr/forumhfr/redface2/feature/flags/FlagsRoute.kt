@@ -12,10 +12,8 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -33,13 +31,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -56,13 +52,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -82,6 +78,7 @@ import fr.forumhfr.redface2.core.ui.FlagMetadata
 import fr.forumhfr.redface2.core.ui.ForumListRow
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
+import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 import kotlinx.coroutines.launch
 
 /**
@@ -255,6 +252,16 @@ fun FlagsRoute(
         }
     }
 
+    // #603 PR2 — client-side search over the loaded flags + the app-bar tab picker. The query is
+    // hoisted here (the app bar edits it, the body filters with it) and reset on a tab change so a
+    // query never carries silently from one tab to another.
+    var searchQuery by remember { mutableStateOf("") }
+    var searchActive by remember { mutableStateOf(false) }
+    LaunchedEffect(selectedTab) {
+        searchQuery = ""
+        searchActive = false
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.surface,
@@ -273,13 +280,28 @@ fun FlagsRoute(
                     .statusBarsPadding()
                     .navigationBarsPadding(),
             ) {
-                FlagsHeader(
-                    topBarActions = topBarActions,
+                FlagsSearchAppBar(
+                    state = FlagsAppBarState(
+                        currentTabColor = flagTabColor(selectedTab),
+                        tabs = flagAppBarTabs(
+                            authState = authState,
+                            showDtTab = showDtTab,
+                            cyanShowsRead = cyanShowsRead,
+                            dtShowsRead = dtShowsRead,
+                        ),
+                        searchEnabled = canConfigureView,
+                        query = searchQuery,
+                        searchActive = searchActive,
+                    ),
+                    onSelectTab = viewModel::selectTab,
+                    onQueryChange = { searchQuery = it },
+                    onSearchActiveChange = { searchActive = it },
                     onOpenViewSettings = if (canConfigureView) {
                         { showViewSettingsSheet = true }
                     } else {
                         null
                     },
+                    accountMenu = { topBarActions?.invoke() },
                 )
 
                 // Render nothing while authState is null (cookie jar warming up). Same
@@ -299,6 +321,7 @@ fun FlagsRoute(
                                 dtListState = dtListState,
                                 dtShowsRead = dtShowsRead,
                                 dtIsRefreshing = dtIsRefreshing,
+                                searchQuery = searchQuery,
                             ),
                             actions = AuthenticatedActions(
                                 onSelectTab = viewModel::selectTab,
@@ -392,51 +415,6 @@ private fun flagTypeLabel(type: FlagType): Int = when (type) {
     FlagType.CYAN -> R.string.flags_tab_my_topics
     FlagType.RED -> R.string.flags_type_read_only
     FlagType.FAVORITE -> R.string.flags_tab_favorite
-}
-
-@Composable
-private fun FlagsHeader(
-    topBarActions: @Composable (() -> Unit)?,
-    onOpenViewSettings: (() -> Unit)?,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            text = stringResource(R.string.flags_title),
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        // Refresh moved to a PullToRefreshBox (swipe down) on the list — the header now carries the
-        // display-settings trigger (#309) and the global account menu slot.
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            onOpenViewSettings?.let { open ->
-                // Gear glyph instead of the « Affichage » text label (dogfooding v102: the word
-                // crowded the header). Text glyph because ForbiddenImport bans material icons
-                // (cf. the Text("←") precedent); U+FE0E pins the monochrome text rendition over
-                // the emoji one. The wording survives as the TalkBack label.
-                val viewSettingsLabel = stringResource(R.string.flags_view_settings_action)
-                IconButton(
-                    onClick = open,
-                    modifier = Modifier.semantics { contentDescription = viewSettingsLabel },
-                ) {
-                    Text(
-                        text = "\u2699\uFE0E",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            topBarActions?.invoke()
-        }
-    }
 }
 
 /**
@@ -594,6 +572,83 @@ private fun flagTabLabel(tab: FlagTab): Int = when (tab) {
     FlagTab.Dt -> R.string.flags_tab_dt
 }
 
+// #603 PR2 — flag color of the current tab for the app-bar indicator glyph; the Super/DT placeholders
+// have no flag color so they fall back to a neutral on-surface tint.
+@Composable
+private fun flagTabColor(tab: FlagTab): Color = when (tab.flagType) {
+    FlagType.CYAN -> FlagPalette.Cyan
+    FlagType.RED -> FlagPalette.Red
+    FlagType.FAVORITE -> FlagPalette.Favorite
+    null -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+// #603 PR2 — app-bar tab entries, or an empty list when anonymous (no flags ⇒ the flag glyph is a
+// static indicator with no picker). Extracted so the auth branch stays out of FlagsRoute's
+// cyclomatic-complexity budget.
+@Composable
+private fun flagAppBarTabs(
+    authState: AuthState?,
+    showDtTab: Boolean,
+    cyanShowsRead: Boolean,
+    dtShowsRead: Boolean,
+): List<FlagTabEntry> = if (authState is AuthState.Authenticated) {
+    flagTabEntries(showDtTab = showDtTab, cyanShowsRead = cyanShowsRead, dtShowsRead = dtShowsRead)
+} else {
+    emptyList()
+}
+
+// #603 PR2 — the entries of the app-bar tab picker (FlagsSearchAppBar). Labels carry the « +lus »
+// suffix exactly like the retired tab row; order MUST match the swipe `tabs` list in AuthenticatedBody.
+@Composable
+private fun flagTabEntries(
+    showDtTab: Boolean,
+    cyanShowsRead: Boolean,
+    dtShowsRead: Boolean,
+): List<FlagTabEntry> {
+    val readSuffix = stringResource(R.string.flags_tab_cyan_read_shown_suffix)
+    val neutral = MaterialTheme.colorScheme.onSurfaceVariant
+    return buildList {
+        add(
+            FlagTabEntry(
+                FlagTab.Cyan,
+                stringResource(R.string.flags_tab_my_topics) + if (cyanShowsRead) readSuffix else "",
+                FlagPalette.Cyan,
+            ),
+        )
+        add(FlagTabEntry(FlagTab.Red, stringResource(R.string.flags_tab_read_only), FlagPalette.Red))
+        add(FlagTabEntry(FlagTab.Favorite, stringResource(R.string.flags_tab_favorite), FlagPalette.Favorite))
+        if (showDtTab) {
+            add(
+                FlagTabEntry(
+                    FlagTab.Dt,
+                    stringResource(R.string.flags_tab_dt) + if (dtShowsRead) readSuffix else "",
+                    neutral,
+                ),
+            )
+        }
+        add(FlagTabEntry(FlagTab.Super, stringResource(R.string.flags_tab_super), neutral))
+    }
+}
+
+// #603 PR2 — empty state of an active search with no match. Scrollable so the surrounding
+// PullToRefreshBox keeps a swipe target on this listless state (#229).
+@Composable
+private fun NoFlagsSearchResults(query: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = stringResource(R.string.flags_search_no_results, query),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 @Composable
 private fun AnonymousBody(onLoginRequested: () -> Unit) {
     Column(
@@ -626,58 +681,21 @@ private fun ColumnScope.AuthenticatedBody(
     listState: LazyListState,
 ) {
     val selectedTab = state.selectedTab
-    val cyanShowsRead = state.cyanShowsRead
-    val dtShowsRead = state.dtShowsRead
+    // #603 PR2 — the text PrimaryTabRow is gone: the app-bar flag picker (FlagsSearchAppBar) now
+    // both indicates the current tab and switches it, and the « +lus » re-tap survives there
+    // (re-selecting Cyan/DT routes through the same onSelectTab). This list is kept ONLY to map the
+    // committed horizontal-swipe index back to a FlagTab (placeholders included, so a swipe can
+    // leave Super/DT too). Its order MUST match the picker's (flagTabEntries).
     val tabs = buildList {
-        add(FlagTab.Cyan to stringResource(R.string.flags_tab_my_topics))
-        add(FlagTab.Red to stringResource(R.string.flags_tab_read_only))
-        add(FlagTab.Favorite to stringResource(R.string.flags_tab_favorite))
-        // Opt-in placeholder (Settings toggle) — sits before Super : DT is closer to the
-        // real flag lists it will eventually join (MPStorage sync, #6).
-        if (state.showDtTab) add(FlagTab.Dt to stringResource(R.string.flags_tab_dt))
-        add(FlagTab.Super to stringResource(R.string.flags_tab_super))
+        add(FlagTab.Cyan)
+        add(FlagTab.Red)
+        add(FlagTab.Favorite)
+        if (state.showDtTab) add(FlagTab.Dt)
+        add(FlagTab.Super)
     }
-    val selectedIndex = tabs.indexOfFirst { it.first == selectedTab }.coerceAtLeast(0)
-    // Discreet « +lus » suffix on the Cyan label so the user knows read participated topics
-    // are currently shown — re-tapping the (already selected) Cyan tab toggles it. #546 directive
-    // XaTriX — the SAME suffix marks the DT tab when its read conversations are shown (mirror).
-    val readSuffix = stringResource(R.string.flags_tab_cyan_read_shown_suffix)
+    val selectedIndex = tabs.indexOf(selectedTab).coerceAtLeast(0)
 
-    PrimaryTabRow(selectedTabIndex = selectedIndex) {
-        tabs.forEachIndexed { index, (tab, label) ->
-            val displayLabel = when {
-                tab == FlagTab.Cyan && cyanShowsRead -> label + readSuffix
-                tab == FlagTab.Dt && dtShowsRead -> label + readSuffix
-                else -> label
-            }
-            // Low-level `content` overload INSTEAD of the `text` slot : the text slot pads a
-            // non-configurable 16 dp each side, which left « Mes sujets » with exactly its own
-            // measured width in a 4-tab equal-width PrimaryTabRow — wrapping it to two lines
-            // on a density-dependent pixel boundary. 8 dp gutters + single line + ellipsis
-            // (the « +lus » suffixed label ellipsizes by design — arbitrage XaTriX 2026-06-12).
-            // Colors are passed explicitly because this overload defaults BOTH states to
-            // LocalContentColor (no selected/unselected distinction out of the box).
-            Tab(
-                selected = index == selectedIndex,
-                onClick = { actions.onSelectTab(tab) },
-                selectedContentColor = MaterialTheme.colorScheme.primary,
-                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ) {
-                Text(
-                    text = displayLabel,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .height(48.dp)
-                        .wrapContentHeight()
-                        .padding(horizontal = 8.dp),
-                )
-            }
-        }
-    }
-
-    // #457 — horizontal swipe between flag tabs, carried by the whole body under the tab row
+    // #457 — horizontal swipe between flag tabs, carried by the whole body under the app bar
     // (placeholders included, so a swipe can leave Super/DT too). The committed target INDEX is
     // mapped back to a FlagTab against the same `tabs` list the row renders — read through
     // rememberUpdatedState because the gesture is keyed on Unit and never restarts, while the
@@ -692,7 +710,7 @@ private fun ColumnScope.AuthenticatedBody(
             haptics = haptics,
             onSelectTab = { index ->
                 updatedTabs.value.getOrNull(index)
-                    ?.let { (tab, _) -> updatedActions.value.onSelectTab(tab) }
+                    ?.let { tab -> updatedActions.value.onSelectTab(tab) }
             },
         )
     }
@@ -793,22 +811,32 @@ private fun FlagListBody(
                 }
             }
 
-            is FlagsListUiState.Success -> when (val content = current.content) {
-                is FlagsContent.Grouped -> CategorySectionedFlagList(
-                    sections = content.sections,
-                    selectedTab = selectedTab,
-                    removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
-                    actions = actions,
-                    listState = listState,
-                )
+            is FlagsListUiState.Success -> {
+                // #603 PR2 — apply the client-side search filter (no-op on a blank query) before
+                // rendering. An active query that matches nothing shows a scrollable empty state so
+                // the pull-to-refresh still has a target (#229).
+                val content = current.content.filteredBy(state.searchQuery)
+                if (state.searchQuery.isNotBlank() && content.isEmpty()) {
+                    NoFlagsSearchResults(query = state.searchQuery)
+                } else {
+                    when (content) {
+                        is FlagsContent.Grouped -> CategorySectionedFlagList(
+                            sections = content.sections,
+                            selectedTab = selectedTab,
+                            removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
+                            actions = actions,
+                            listState = listState,
+                        )
 
-                is FlagsContent.Flat -> FlatFlagList(
-                    flags = content.flags,
-                    selectedTab = selectedTab,
-                    removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
-                    actions = actions,
-                    listState = listState,
-                )
+                        is FlagsContent.Flat -> FlatFlagList(
+                            flags = content.flags,
+                            selectedTab = selectedTab,
+                            removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
+                            actions = actions,
+                            listState = listState,
+                        )
+                    }
+                }
             }
         }
     }
@@ -1505,6 +1533,8 @@ private data class FlagsBodyState(
     val dtShowsRead: Boolean,
     /** #546 — toggled around the DT pull-to-refresh round-trip (anchors the indicator). */
     val dtIsRefreshing: Boolean,
+    /** #603 PR2 — active client-side search query; empty = no filtering. */
+    val searchQuery: String = "",
 )
 
 private data class AuthenticatedActions(

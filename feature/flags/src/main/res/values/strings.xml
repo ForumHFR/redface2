@@ -17,6 +17,15 @@
          déjà lus sont affichés (re-tap de l'onglet Cyan déjà sélectionné). -->
     <string name="flags_tab_cyan_read_shown_suffix"> · +lus</string>
 
+    <!-- #603 PR2 — search app bar (façon Réglages) qui remplace l'ancien header + le tab row texte. -->
+    <string name="flags_search_placeholder">Rechercher dans les drapeaux</string>
+    <!-- a11y : l'icône drapeau colorée à gauche indique l'onglet courant et ouvre le sélecteur d'onglet. -->
+    <string name="flags_appbar_tab_picker">Onglet courant — changer d\'onglet</string>
+    <!-- a11y : action d'effacement du champ de recherche. -->
+    <string name="flags_search_clear">Effacer la recherche</string>
+    <!-- État vide d'une recherche sans résultat. %1$s = la requête saisie. -->
+    <string name="flags_search_no_results">Aucun drapeau ne correspond à « %1$s »</string>
+
     <!-- Onglet « Super » : écran placeholder M3, futurs super favoris. Pas de fetch réseau. -->
     <string name="flags_super_placeholder_title">Super favoris — à venir</string>
     <string name="flags_super_placeholder_body">Les « super favoris » permettront d\'épingler les sujets les plus importants. Cette vue arrivera dans une prochaine version.</string>
