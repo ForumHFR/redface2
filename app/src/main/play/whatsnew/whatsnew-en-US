@@ -1,11 +1,11 @@
-Redface 2 v0.17.1 — dev.
+Redface 2 v0.17.2 — dev.
 
 Drapeaux view polish:
-- Colours match HFR exactly (pure cyan/red/yellow) + DT in fuchsia.
-- Drapeaux menu icon is now the Redface 2 flag.
-- Single-line search.
-- Display menu: one entry point (re-tap the Drapeaux tab).
-- No more central spinner — the thin top bar covers it.
-- Colour bar spans the row height.
+- Colours retuned (less garish): lime favourite, fuchsia DT, softer cyan/red.
+- Drapeaux menu icon cleaned up.
+- Fix: the quick-config menu no longer opens by itself when switching category.
+- Cleaner « +lus » label.
+- Subtle border around the account avatar.
+- Slightly tighter category bands, correctly-sized chevron.
 
 Bugs: via dev or GitHub.

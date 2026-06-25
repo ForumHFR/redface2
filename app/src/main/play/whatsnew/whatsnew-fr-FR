@@ -1,11 +1,11 @@
-Redface 2 v0.17.1 — dev.
+Redface 2 v0.17.2 — dev.
 
 Finitions de la vue Drapeaux :
-- Couleurs alignées sur HFR (cyan/rouge/jaune purs) + DT en fuchsia.
-- Icône du menu Drapeaux = le drapeau de Redface 2.
-- Recherche sur une seule ligne.
-- Menu d'affichage : un seul accès (re-tape l'onglet Drapeaux).
-- Plus de rond de chargement : la barre fine du haut suffit.
-- La barre de couleur épouse la hauteur de la ligne.
+- Couleurs revues (moins criardes) : favori vert-lime, DT fuchsia, cyan/rouge adoucis.
+- Icône du menu Drapeaux remise au propre.
+- Correction : le menu de config rapide ne s'ouvre plus tout seul en changeant de catégorie.
+- Libellé « +lus » nettoyé.
+- Liseré discret autour de l'avatar.
+- Bandes de catégorie un peu plus compactes, flèche à la bonne taille.
 
 Bugs : via le canal dev ou GitHub.
