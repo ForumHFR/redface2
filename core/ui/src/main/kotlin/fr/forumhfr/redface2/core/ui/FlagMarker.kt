@@ -36,6 +36,9 @@ private const val PASTILLE_BG_ALPHA = 0.18f
  * read); only the SHAPE varies with [style]:
  *
  * - [MarkerStyle.STRIPE] — a thin vertical color bar (the default, frees the most title width).
+ *   IMPORTANT: STRIPE uses `fillMaxHeight` to span the row, so it MUST sit in a bounded-height parent
+ *   (e.g. [ForumListRow]'s `IntrinsicSize.Min` Row). In an unbounded-height context it would stretch
+ *   to fill all available height — wrap it in `Modifier.height(IntrinsicSize.Min)` or give it a height.
  * - [MarkerStyle.PASTILLE] — a tonal circle carrying the category glyph ([categoryIconRes]).
  * - [MarkerStyle.DOT] — the legacy minimal colored dot.
  *

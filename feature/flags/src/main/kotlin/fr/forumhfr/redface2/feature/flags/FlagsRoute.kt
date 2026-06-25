@@ -328,6 +328,7 @@ fun FlagsRoute(
                 FlagsLoadingBar(
                     loading = flagsLoadingBarVisible(
                         selectedTab = selectedTab,
+                        isAuthenticated = authState is AuthState.Authenticated,
                         flagsState = flagsState,
                         isRefreshing = isRefreshing,
                         dtListState = dtListState,
@@ -736,14 +737,21 @@ private fun QuickConfigRequestEffect(request: Int, canConfigure: Boolean, onOpen
 // cyclomatic complexity in budget.
 private fun flagsLoadingBarVisible(
     selectedTab: FlagTab,
+    isAuthenticated: Boolean,
     flagsState: FlagsListUiState?,
     isRefreshing: Boolean,
     dtListState: DtListUiState,
     dtIsRefreshing: Boolean,
-): Boolean = when (selectedTab) {
-    FlagTab.Dt -> dtIsRefreshing || dtListState is DtListUiState.Loading
-    FlagTab.Super -> false
-    else -> isRefreshing || flagsState == null || flagsState == FlagsListUiState.Loading
+): Boolean {
+    // Authenticated-screen affordance only: when anonymous, flagsState stays null and the AnonymousBody
+    // (login prompt) is shown — without this gate `flagsState == null` would keep the bar up forever on
+    // the « Se connecter » screen (Codex review #648).
+    if (!isAuthenticated) return false
+    return when (selectedTab) {
+        FlagTab.Dt -> dtIsRefreshing || dtListState is DtListUiState.Loading
+        FlagTab.Super -> false
+        else -> isRefreshing || flagsState == null || flagsState == FlagsListUiState.Loading
+    }
 }
 
 @Composable
