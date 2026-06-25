@@ -16,6 +16,21 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.2` — `internal` (dev) — 2026-06-25
+
+> Polish #2 de la vue Drapeaux suite au dogfood 0.17.1 (#651). Build dev ; versionCode au dispatch.
+> versionName 0.17.1 → 0.17.2. Bug du menu rapide analysé + corrigé (Codex). CI verte.
+
+**Finitions (#651)**
+
+- **Couleurs retonées** (les valeurs HFR pures étaient criardes) : favori → vert-lime `#CDDC39`, DT →
+  fuchsia `#D500F9`, cyan/rouge reviennent aux tons Material.
+- **Icône du menu Drapeaux** : retour au glyphe propre (le drapeau pixel-art était trop brut à petite taille).
+- **Bug corrigé** : le menu de config rapide s'ouvrait tout seul en changeant de catégorie ou au retour.
+- « +lus » : libellé nettoyé (plus de point médian).
+- Liseré discret autour de l'avatar du compte.
+- Bandes de catégorie un peu moins hautes ; flèche « › » de catégorie à la bonne taille (était un bug).
+
 ## `0.17.1` — `internal` (dev) — 2026-06-25
 
 > Polish de la vue Drapeaux suite au dogfood (#648). Build dev ; versionCode alloué au dispatch.
