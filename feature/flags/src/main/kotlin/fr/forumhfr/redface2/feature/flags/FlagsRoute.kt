@@ -77,6 +77,7 @@ import fr.forumhfr.redface2.core.ui.FlagItemDivider
 import fr.forumhfr.redface2.core.ui.FlagItemLongPress
 import fr.forumhfr.redface2.core.ui.FlagMetadata
 import fr.forumhfr.redface2.core.ui.ForumListRow
+import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
@@ -126,6 +127,9 @@ fun FlagsRoute(
     // #603 PR6 — bumped by the host on each re-tap of the already-selected Drapeaux bottom-bar icon;
     // opens the quick-config sheet (LaunchedEffect below).
     quickConfigRequest: Int = 0,
+    // #603 — reset the host's quick-config counter once handled, so a re-mount (return from a category/
+    // topic) does not re-open the sheet with a stale request (bug fix, Codex review).
+    onQuickConfigConsumed: () -> Unit = {},
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel: FlagsViewModel = hiltViewModel()
@@ -228,6 +232,7 @@ fun FlagsRoute(
         request = quickConfigRequest,
         canConfigure = canConfigureView,
         onOpen = { showViewSettingsSheet = true },
+        onConsumed = onQuickConfigConsumed,
     )
 
     DtTabFallbackEffect(
@@ -727,9 +732,22 @@ private fun flagTabEntries(
 // composition) and it only opens when the screen is configurable. Extracted to keep FlagsRoute's
 // cyclomatic complexity in budget.
 @Composable
-private fun QuickConfigRequestEffect(request: Int, canConfigure: Boolean, onOpen: () -> Unit) {
+private fun QuickConfigRequestEffect(
+    request: Int,
+    canConfigure: Boolean,
+    onOpen: () -> Unit,
+    onConsumed: () -> Unit,
+) {
     LaunchedEffect(request) {
-        if (request > 0 && canConfigure) onOpen()
+        // One-shot CONSUMED event: the host counter persists across FlagsRoute re-mounts (return from a
+        // category/topic), so an unconsumed request > 0 would re-open the sheet on every recompose (the
+        // reported bug, confirmed by Codex). Consume on ANY request > 0 — even when not configurable
+        // (Super tab) — so a stale event can't fire later; only open when the screen is configurable.
+        // onConsumed() resets the host counter to 0 → recompose → LaunchedEffect(0) no-ops (no loop).
+        if (request > 0) {
+            if (canConfigure) onOpen()
+            onConsumed()
+        }
     }
 }
 
@@ -1126,10 +1144,10 @@ private fun CategorySectionedFlagList(
  * `onSurfaceVariant` from the theme (no hardcoded color) so it reads as a sticky header over
  * the scrolling rows without bleed-through.
  *
- * #414 — the whole band is tappable and opens the category's topic listing (RF1 parity); the
- * trailing « › » glyph (same vector-text pattern as the page FABs, #283) is the affordance.
- * Foundation [clickable] does not enforce the 48dp Material touch-target minimum, hence the
- * explicit [heightIn].
+ * #414 — the whole band is tappable and opens the category's topic listing (RF1 parity); the trailing
+ * chevron vector (`ic_chevron_right`) is the affordance (the former « › » text glyph rendered far too
+ * small — a bug). Foundation [clickable] does not enforce a Material touch-target minimum, hence the
+ * explicit [heightIn] (44 dp — a hair tighter than 48 dp, still an acceptable target).
  */
 @Composable
 private fun CategoryHeaderBand(catId: Int, label: String, onClick: () -> Unit) {
@@ -1138,11 +1156,11 @@ private fun CategoryHeaderBand(catId: Int, label: String, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .heightIn(min = 48.dp)
+            .heightIn(min = 44.dp)
             .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) {
                 onClick()
             }
-            .padding(horizontal = 24.dp, vertical = 8.dp),
+            .padding(horizontal = 24.dp, vertical = 6.dp),
     ) {
         // #603 — Material Symbols glyph per category (spike 4, ADR-017); decorative (the label carries
         // the name), so no contentDescription. Generic forum glyph for unknown categories.
@@ -1158,10 +1176,12 @@ private fun CategoryHeaderBand(catId: Int, label: String, onClick: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
-        Text(
-            text = "›",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        // Trailing chevron — a proper vector icon (the former Text("›") at titleSmall was far too
+        // small, the reported bug); decorative, the band's onClickLabel carries the affordance.
+        RedfaceVectorIcon(
+            resId = CoreUiR.drawable.ic_chevron_right,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            size = 20.dp,
         )
     }
 }

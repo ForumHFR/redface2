@@ -15,7 +15,7 @@
 
     <!-- Indicateur discret sur l'onglet Cyan : suffixe ajouté au libellé quand les cyans
          déjà lus sont affichés (re-tap de l'onglet Cyan déjà sélectionné). -->
-    <string name="flags_tab_cyan_read_shown_suffix"> · +lus</string>
+    <string name="flags_tab_cyan_read_shown_suffix"> (+lus)</string>
 
     <!-- #603 PR2 — search app bar (façon Réglages) qui remplace l'ancien header + le tab row texte. -->
     <string name="flags_search_placeholder">Rechercher dans les drapeaux</string>

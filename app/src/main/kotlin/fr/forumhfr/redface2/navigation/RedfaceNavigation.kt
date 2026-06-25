@@ -893,6 +893,9 @@ fun RedfaceApp(intent: Intent?) {
                         backStack = activeBackStack,
                         accountMenu = accountMenu,
                         flagsQuickConfigRequest = flagsQuickConfigRequest,
+                        // #603 bug fix — reset the counter once FlagsRoute handled it, so a re-mount
+                        // (return from a category/topic) does not replay the sheet open (Codex review).
+                        onFlagsQuickConfigConsumed = { flagsQuickConfigRequest = 0 },
                         onReportContent = {
                             startReportEmail(context, reportEmailSubject, reportNoEmailClient)
                         },
@@ -1519,6 +1522,9 @@ private fun RedfaceNavHost(
     accountMenu: @Composable () -> Unit,
     // #603 PR6 — increments on each Drapeaux-tab re-tap; FlagsRoute opens its quick-config sheet on change.
     flagsQuickConfigRequest: Int,
+    // #603 bug fix — FlagsRoute calls this once it has handled a request, resetting the counter to 0 so a
+    // re-mount under the back stack does not re-open the sheet with a stale value (Codex review).
+    onFlagsQuickConfigConsumed: () -> Unit,
     // #494 — the « Signaler un contenu » row of the settings Account/About sub-page reuses the same
     // report-email flow as the account menu (which owns `context` + the report strings).
     onReportContent: () -> Unit,
@@ -1606,6 +1612,7 @@ private fun RedfaceNavHost(
                         backStack.add(PrivateMessageThreadRoute(threadId = threadId, page = page))
                     },
                     quickConfigRequest = flagsQuickConfigRequest,
+                    onQuickConfigConsumed = onFlagsQuickConfigConsumed,
                     topBarActions = accountMenu,
                 )
             }

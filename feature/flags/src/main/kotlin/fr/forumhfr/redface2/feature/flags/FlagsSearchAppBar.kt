@@ -118,9 +118,9 @@ private fun FlagTabPickerButton(
             enabled = tabs.isNotEmpty(),
             modifier = Modifier.semantics { contentDescription = pickerLabel },
         ) {
-            // #603 polish — the RF2 brand flag (drapeau cyan du launcher, vectorisé) instead of the
-            // generic Material flag glyph; tinted with the current tab color (cyan/red/favori/fuchsia).
-            RedfaceVectorIcon(resId = CoreUiR.drawable.ic_rf2_flag, tint = currentTabColor)
+            // Flag glyph of the current tab, tinted with its color (cyan/red/favori/fuchsia). (The
+            // pixel-art RF2 brand flag was rolled back — too crude at 24dp ; awaiting a proper vector.)
+            RedfaceVectorIcon(resId = CoreUiR.drawable.ic_ms_flag, tint = currentTabColor)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             tabs.forEach { entry ->
