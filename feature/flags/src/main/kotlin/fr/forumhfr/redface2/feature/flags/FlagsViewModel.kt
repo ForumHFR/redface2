@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
@@ -60,6 +61,7 @@ class FlagsViewModel @Inject constructor(
     private val flagRepository: FlagRepository,
     private val forumRepository: ForumRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val superFavoriteRepository: SuperFavoriteRepository,
     private val messagesRepository: MessagesRepository,
     private val mpStorageRepository: MpStorageRepository,
     private val clock: Clock,
@@ -101,6 +103,25 @@ class FlagsViewModel @Inject constructor(
             started = SharingStarted.Eagerly,
             initialValue = false,
         )
+
+    /**
+     * #603 PR5 — local « super favori » topic ids (ADR-017 decision 5), a client-side pin distinct
+     * from the server `isFavorite`. Eager so the long-press sheet reflects the current state without a
+     * subscription warm-up. Backed by [SuperFavoriteRepository] (its own store, not user prefs).
+     */
+    val superFavoriteTopicIds: StateFlow<Set<Int>> =
+        superFavoriteRepository.observeSuperFavoriteTopicIds()
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.Eagerly,
+                initialValue = emptySet(),
+            )
+
+    /** Toggles the local super-favorite mark of [flag] (long-press sheet). */
+    fun toggleSuperFavorite(flag: Flag) {
+        val enabled = flag.topicId !in superFavoriteTopicIds.value
+        viewModelScope.launch { superFavoriteRepository.setSuperFavorite(flag.topicId, enabled) }
+    }
 
     /**
      * #6 — UI state for the « DT » tab: the user's MultiMP conversations (inbox `cat=prive`,
