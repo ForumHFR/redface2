@@ -3,8 +3,10 @@ package fr.forumhfr.redface2.core.ui
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -57,8 +59,11 @@ fun FlagMarker(
     val color = if (hasUnread) base else base.copy(alpha = READ_ALPHA)
     when (style) {
         MarkerStyle.STRIPE -> Box(
+            // #603 — the bar spans the row's content height (fillMaxHeight within ForumListRow's
+            // IntrinsicSize.Min) instead of a fixed 32 dp that fell short on 2-line titles.
             modifier = modifier
-                .size(width = 4.dp, height = 32.dp)
+                .fillMaxHeight()
+                .width(4.dp)
                 .clip(RoundedCornerShape(2.dp))
                 .background(color),
         )

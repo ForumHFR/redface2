@@ -112,9 +112,8 @@
     <string name="flags_retry">Réessayer</string>
 
 
-    <!-- #309 — Menu d'affichage des drapeaux (bottom sheet M3 ouvert depuis l'en-tête). Reflète et
-         modifie les réglages d'affichage de l'onglet courant (ou globaux selon « par onglet »). -->
-    <string name="flags_view_settings_action">Affichage</string>
+    <!-- #309 — Menu d'affichage des drapeaux (bottom sheet M3 ouvert via re-tap de l'onglet
+         Drapeaux de la barre du bas, #603 PR6). -->
     <string name="flags_view_settings_title">Affichage des drapeaux</string>
     <!-- Portée affichée sous le titre : globale, ou onglet courant. %1$s = libellé de l'onglet. -->
     <string name="flags_view_settings_scope_global">S\'applique à tous les onglets</string>
