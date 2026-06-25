@@ -4,10 +4,10 @@ import androidx.compose.ui.graphics.Color
 import fr.forumhfr.redface2.core.model.FlagType
 
 /**
- * Drapeau bucket palette. The colors are the EXACT fill values of the legacy HFR flag gifs
- * (`flag1.gif` cyan `#00FFFF` / `flag0.gif` red `#FF0000` / `favoris.gif` yellow `#F0F83F`, relevés
- * sur les gifs réels), so a user reading the forum on the web and on Redface 2 sees the same colors,
- * not just the same hue mapping :
+ * Drapeau bucket palette. Material-toned colors that keep the HFR flag HUE family (cyan / red /
+ * lime-yellow). The pure gif fills (`#00FFFF` / `#FF0000` / `#F0F83F`) read garish on screen, so we use
+ * the matching Material tones — Cyan 500, Red 700, Lime 500 — which keep the bucket instantly
+ * recognisable without the neon :
  *
  * - [FlagType.CYAN] → cyan, sujets participés
  * - [FlagType.RED] → rouge, lus uniquement
@@ -21,17 +21,17 @@ import fr.forumhfr.redface2.core.model.FlagType
  */
 object FlagPalette {
 
-    val Cyan: Color = Color(0xFF00FFFF)
-    val Red: Color = Color(0xFFFF0000)
-    val Favorite: Color = Color(0xFFF0F83F)
+    val Cyan: Color = Color(0xFF00BCD4)
+    val Red: Color = Color(0xFFD32F2F)
+    val Favorite: Color = Color(0xFFCDDC39)
 
     /**
-     * #603 — the « DT » (MultiMP) bucket marker. Fuchsia completes the pure cyan/red trio with the
-     * CGA/EGA magenta primary (`#FF00FF`), assorti aux fills purs des gifs HFR. DT is NOT a [FlagType]
-     * (it is an opt-in tab fed by MPStorage #6), so this color is read directly by the app-bar tab
-     * indicator / picker, never via [colorFor].
+     * #603 — the « DT » (MultiMP) bucket marker, in a Material-toned fuchsia (`#D500F9`, Material
+     * Purple A400) that completes the cyan/red/favori set without the neon of a pure magenta. DT is
+     * NOT a [FlagType] (it is an opt-in tab fed by MPStorage #6), so this color is read directly by
+     * the app-bar tab indicator / picker, never via [colorFor].
      */
-    val Dt: Color = Color(0xFFFF00FF)
+    val Dt: Color = Color(0xFFD500F9)
 
     /**
      * Resolves the bucket color for a non-null [FlagType]. Plain Kotlin function — not

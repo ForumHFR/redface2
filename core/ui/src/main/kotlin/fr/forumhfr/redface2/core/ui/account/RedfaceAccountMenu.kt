@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.account
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -177,6 +178,8 @@ private fun AccountBadge(
         shape = RoundedCornerShape(BADGE_CORNER_RADIUS),
         color = containerColor,
         contentColor = contentColor,
+        // Subtle hairline so the badge reads as a distinct element against the app-bar surface.
+        border = BorderStroke(BADGE_BORDER_WIDTH, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
             .minimumInteractiveComponentSize()
             .size(BADGE_SIZE)
@@ -208,6 +211,8 @@ private fun AvatarBadge(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(BADGE_CORNER_RADIUS),
+        // Subtle hairline so the avatar reads as a distinct element against the app-bar surface.
+        border = BorderStroke(BADGE_BORDER_WIDTH, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier
             .minimumInteractiveComponentSize()
             .size(BADGE_SIZE)
@@ -249,4 +254,5 @@ private fun AccountStatusHeader(authState: AuthState?) {
 // inject that minimum on its own (cf. M3 docs, Codex rereview on PR #207).
 private val BADGE_SIZE = 40.dp
 private val BADGE_CORNER_RADIUS = 8.dp
+private val BADGE_BORDER_WIDTH = 1.dp
 private val HEADER_PADDING = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
