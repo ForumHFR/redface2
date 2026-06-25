@@ -14,6 +14,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
@@ -2044,6 +2045,7 @@ private class FakeUserPreferencesRepository(
     override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
 
     override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
+    override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
 
     override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
 

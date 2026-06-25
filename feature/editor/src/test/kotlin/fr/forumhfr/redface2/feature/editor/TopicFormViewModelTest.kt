@@ -17,6 +17,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
@@ -1361,6 +1362,7 @@ class TopicFormViewModelTest {
         override suspend fun setFlagsGroupByCategoryForType(type: FlagType, enabled: Boolean) = Unit
         override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
         override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
+        override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
         override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
         override suspend fun setThemeMode(mode: ThemeMode) = Unit
         override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)

@@ -31,4 +31,7 @@ data class FlagsViewSettings(
     val groupByCategory: Boolean = true,
     val hideReadCategories: Boolean = false,
     val unreadOnly: Boolean = false,
+    // #603 PR6 — left-marker shape. GLOBAL (not subject to the per-tab override): one shape for every
+    // tab. Default STRIPE (ADR-017, soberest option). Carried on every resolution path.
+    val markerStyle: MarkerStyle = MarkerStyle.STRIPE,
 )
