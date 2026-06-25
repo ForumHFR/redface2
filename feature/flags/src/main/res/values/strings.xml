@@ -87,15 +87,6 @@
     <string name="flags_session_expired">Session HFR expirée. Reconnecte-toi pour recharger tes drapeaux.</string>
     <string name="flags_retry">Réessayer</string>
 
-    <!-- Footer metadata formats. The `*_at` variants (#325) carry the last-reply timestamp
-         already formatted web-style by :core:ui (`01-05-2026 à 17:07`), placed LAST so that
-         on narrow screens the ellipsis eats the added data first and never the pre-existing
-         read-progress « p.X/Y » (review #325):
-         "Shaad · 69017 rép. · p.1725/1726 · 01-05-2026 à 17:07". The timestamp-less variants
-         remain as fallbacks when REST omits `last_post_date`. Without author (HFR returns no
-         last replier on brand new topics): "69017 rép. · p.1/1". -->
-    <string name="flags_item_metadata_with_author">%1$s · p.%2$d/%3$d</string>
-    <string name="flags_item_metadata_no_author">p.%1$d/%2$d</string>
 
     <!-- #309 — Menu d'affichage des drapeaux (bottom sheet M3 ouvert depuis l'en-tête). Reflète et
          modifie les réglages d'affichage de l'onglet courant (ou globaux selon « par onglet »). -->

@@ -78,6 +78,8 @@ import fr.forumhfr.redface2.core.ui.FlagMetadata
 import fr.forumhfr.redface2.core.ui.ForumListRow
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
+import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
+import fr.forumhfr.redface2.core.ui.icon.categoryIcon
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 import kotlinx.coroutines.launch
 
@@ -943,6 +945,7 @@ private fun CategorySectionedFlagList(
             // recycles a row slot for a row instead of recreating the node from a header slot.
             stickyHeader(key = "cat-${section.catId}-header", contentType = CONTENT_TYPE_HEADER) {
                 CategoryHeaderBand(
+                    catId = section.catId,
                     label = section.catName
                         ?: stringResource(R.string.flags_category_fallback, section.catId),
                     // #414 — parité RF1 : the band navigates to the category's topic listing.
@@ -994,7 +997,7 @@ private fun CategorySectionedFlagList(
  * explicit [heightIn].
  */
 @Composable
-private fun CategoryHeaderBand(label: String, onClick: () -> Unit) {
+private fun CategoryHeaderBand(catId: Int, label: String, onClick: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -1006,6 +1009,14 @@ private fun CategoryHeaderBand(label: String, onClick: () -> Unit) {
             }
             .padding(horizontal = 24.dp, vertical = 8.dp),
     ) {
+        // #603 — Material Symbols glyph per category (spike 4, ADR-017); decorative (the label carries
+        // the name), so no contentDescription. Generic forum glyph for unknown categories.
+        RedfaceVectorIcon(
+            resId = categoryIcon(catId),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            size = 20.dp,
+            modifier = Modifier.padding(end = 12.dp),
+        )
         Text(
             text = label,
             style = MaterialTheme.typography.titleSmall,
@@ -1566,29 +1577,12 @@ private data class FlagsViewSettingsActions(
 )
 
 /**
- * Builds the two-segment footer of a drapeau row ([FlagMetadata]). Dogfooding feedback on
- * v102: the single-string footer (`author · N rép. · p.X/Y · timestamp`) truncated its
- * tail — the #325 timestamp — on narrow screens. `start` is `author · p.X/Y` (the only
- * segment allowed to ellipsise; the reply count is dropped, redundant with the page count
- * for a quick scan) and `end` is the last-reply timestamp, formatted web-style
- * (`01-05-2026 à 17:07`) by [formatLastReplyTimestamp] from the raw REST string — rendered
- * end-aligned and never truncated by [FlagItem]. Blank when REST omits it.
+ * Builds the two-segment footer of a drapeau row ([FlagMetadata]). #603 refonte (ADR-017): `start`
+ * is the last poster (the only segment allowed to ellipsise) and `end` is the last-reply timestamp,
+ * formatted web-style (`01-05-2026 à 17:07`) by [formatLastReplyTimestamp], end-aligned and never
+ * truncated by [FlagItem]. The page position (« p.X/Y ») left the footer: the pages-à-lire count is
+ * now the trailing [fr.forumhfr.redface2.core.ui.PagesToReadPill] of the row. Blank when REST omits
+ * a field.
  */
-@Composable
-private fun flagRowMetadata(flag: Flag): FlagMetadata {
-    val start = if (flag.lastReplyAuthor.isNotBlank()) {
-        stringResource(
-            R.string.flags_item_metadata_with_author,
-            flag.lastReplyAuthor,
-            flag.lastReadPage,
-            flag.totalPages,
-        )
-    } else {
-        stringResource(
-            R.string.flags_item_metadata_no_author,
-            flag.lastReadPage,
-            flag.totalPages,
-        )
-    }
-    return FlagMetadata(start = start, end = formatLastReplyTimestamp(flag.lastReplyAt))
-}
+private fun flagRowMetadata(flag: Flag): FlagMetadata =
+    FlagMetadata(start = flag.lastReplyAuthor, end = formatLastReplyTimestamp(flag.lastReplyAt))
