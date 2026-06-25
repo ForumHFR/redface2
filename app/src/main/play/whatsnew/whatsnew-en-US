@@ -1,10 +1,10 @@
-Redface 2 v0.16.0 — beta.
+Redface 2 v0.17.0 — dev.
 
-New:
-- DT/MultiMP: the creator can add or remove participants (via a reply).
-- DT: participant list ("Participants" button).
-- Sync DT reading position to MPStorage (optional, off by default).
+Drapeaux view redesign:
+- Search app bar + tab picker.
+- Refonted rows: colour-bar marker (bar/pill/dot), pages-to-read pill, category icons.
+- Long-press sheet: topic metadata, actions, local super-favourite.
+- Thin loading bar (manual and auto refresh).
+- Quick-config: re-tap the Drapeaux tab.
 
-Fix: emojis that truncated a message on send.
-
-Bugs: via the beta or GitHub.
+Bugs: via dev or GitHub.
