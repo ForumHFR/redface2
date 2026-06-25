@@ -21,6 +21,7 @@ import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
+import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
@@ -1994,6 +1995,23 @@ class FlagsViewModelTest {
         override fun instant(): Instant = now
     }
 
+    @Test
+    fun `toggleSuperFavorite adds then removes the topic in the local store`() = runTest {
+        val flags = FakeFlagRepository()
+        val forum = FakeForumRepository()
+        val auth = FakeAuthRepository(AuthState.Anonymous, flagRepository = flags)
+        val vm = viewModel(auth, flags, forum)
+        val flag = stubFlag(42, FlagType.CYAN)
+
+        vm.toggleSuperFavorite(flag)
+        advanceUntilIdle()
+        assertTrue(42 in vm.superFavoriteTopicIds.value)
+
+        vm.toggleSuperFavorite(flag)
+        advanceUntilIdle()
+        assertFalse(42 in vm.superFavoriteTopicIds.value)
+    }
+
     @Suppress("LongParameterList") // test fake-builder: each repo fake is an independent collaborator
     private fun viewModel(
         auth: FakeAuthRepository,
@@ -2002,7 +2020,8 @@ class FlagsViewModelTest {
         prefs: FakeUserPreferencesRepository = FakeUserPreferencesRepository(),
         messages: FakeMessagesRepository = FakeMessagesRepository(),
         mpStorage: FakeMpStorageRepository = FakeMpStorageRepository(),
-    ): FlagsViewModel = FlagsViewModel(auth, flags, forum, prefs, messages, mpStorage, fixedClock)
+        superFavorite: SuperFavoriteRepository = FakeSuperFavoriteRepository(),
+    ): FlagsViewModel = FlagsViewModel(auth, flags, forum, prefs, superFavorite, messages, mpStorage, fixedClock)
 
     /** Builds a ViewModel with a custom [clock] for the #378 throttle tests; everything else is a
      * fresh default fake. */
@@ -2015,10 +2034,20 @@ class FlagsViewModelTest {
         flags,
         FakeForumRepository(),
         FakeUserPreferencesRepository(),
+        FakeSuperFavoriteRepository(),
         FakeMessagesRepository(),
         FakeMpStorageRepository(),
         clock,
     )
+
+    /** In-memory [SuperFavoriteRepository] (#603 PR5) — the local super-favorite set. */
+    private class FakeSuperFavoriteRepository : SuperFavoriteRepository {
+        private val ids = MutableStateFlow<Set<Int>>(emptySet())
+        override fun observeSuperFavoriteTopicIds(): Flow<Set<Int>> = ids.asStateFlow()
+        override suspend fun setSuperFavorite(topicId: Int, enabled: Boolean) {
+            ids.value = if (enabled) ids.value + topicId else ids.value - topicId
+        }
+    }
 
     /** Flattens whatever content shape into the topics order for assertions on flag content. */
     private fun flatTopics(state: FlagsListUiState.Success): List<Flag> =

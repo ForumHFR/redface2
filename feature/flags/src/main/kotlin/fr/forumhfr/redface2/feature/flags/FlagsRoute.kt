@@ -130,6 +130,7 @@ fun FlagsRoute(
     val removeFlagEvent by viewModel.removeFlagEvent.collectAsStateWithLifecycle()
     val flagsViewSettings by viewModel.flagsViewSettings.collectAsStateWithLifecycle()
     val flagsPerTabOverride by viewModel.flagsPerTabOverride.collectAsStateWithLifecycle()
+    val superFavoriteIds by viewModel.superFavoriteTopicIds.collectAsStateWithLifecycle()
 
     // « +lus » suffix on the Cyan tab: shown when the Cyan tab is selected and CYAN's « non-lus
     // uniquement » filter is off (read participated topics are visible). The ViewModel derives this
@@ -201,13 +202,18 @@ fun FlagsRoute(
     // is only offered when there is a real list to configure (authenticated AND a real FlagType tab,
     // i.e. not the Super placeholder).
     var showViewSettingsSheet by remember { mutableStateOf(false) }
+    // #603 PR5 — the flag whose long-press actions sheet is open (null = closed).
+    var sheetFlag by remember { mutableStateOf<Flag?>(null) }
     val canConfigureView = authState is AuthState.Authenticated && selectedTab.flagType != null
 
     // If the screen stops being configurable while the sheet is open (session expired, or the user
     // lands on the Super tab), clear the flag so the sheet can't silently reappear on the next
     // configurable tab/re-auth.
     LaunchedEffect(canConfigureView) {
-        if (!canConfigureView) showViewSettingsSheet = false
+        if (!canConfigureView) {
+            showViewSettingsSheet = false
+            sheetFlag = null
+        }
     }
 
     DtTabFallbackEffect(
@@ -262,6 +268,7 @@ fun FlagsRoute(
     LaunchedEffect(selectedTab) {
         searchQuery = ""
         searchActive = false
+        sheetFlag = null
     }
 
     Scaffold(
@@ -336,7 +343,7 @@ fun FlagsRoute(
                                 },
                                 onRefresh = viewModel::refresh,
                                 onLoginRequested = onLoginRequested,
-                                onRequestRemoveFlag = viewModel::requestRemoveFlag,
+                                onLongPressFlag = { sheetFlag = it },
                                 onOpenCategory = onOpenCategory,
                                 onOpenMultiMp = onOpenMultiMp,
                                 onRefreshDt = viewModel::refreshDt,
@@ -366,6 +373,24 @@ fun FlagsRoute(
             ),
         )
     }
+
+    // #603 PR5 — long-press actions sheet: API metadata + quick actions + local super-favorite +
+    // removal (which still routes through the existing confirmation dialog). No color picker.
+    FlagActionsSheetHost(
+        flag = sheetFlag,
+        superFavoriteIds = superFavoriteIds,
+        onOpen = {
+            sheetFlag = null
+            viewModel.onFlagOpened()
+            onOpenFlag(it)
+        },
+        onToggleSuperFavorite = viewModel::toggleSuperFavorite,
+        onRemove = {
+            sheetFlag = null
+            viewModel.requestRemoveFlag(it)
+        },
+        onDismiss = { sheetFlag = null },
+    )
 
     // Confirmation gate before any network call (#99). The dialog renders only while the
     // ViewModel is in the Confirming state ; confirming moves to Removing (action disabled)
@@ -980,7 +1005,7 @@ private fun CategorySectionedFlagList(
                         metadata = flagRowMetadata(flag),
                         removalInFlight = removalInFlight,
                         onClick = { actions.onOpenFlag(flag) },
-                        onRequestRemove = { actions.onRequestRemoveFlag(flag) },
+                        onLongPress = { actions.onLongPressFlag(flag) },
                     )
                     FlagItemDivider()
                 }
@@ -1087,7 +1112,7 @@ private fun FlatFlagList(
                     metadata = flagRowMetadata(flag),
                     removalInFlight = removalInFlight,
                     onClick = { actions.onOpenFlag(flag) },
-                    onRequestRemove = { actions.onRequestRemoveFlag(flag) },
+                    onLongPress = { actions.onLongPressFlag(flag) },
                 )
                 FlagItemDivider()
             }
@@ -1105,14 +1130,46 @@ private fun flatEmptyLabel(tab: FlagTab): Int = when (tab) {
     else -> R.string.flags_list_empty
 }
 
+// #603 PR5 — hosts the long-press actions sheet; the null-check lives here (not in FlagsRoute) to keep
+// the route's cyclomatic complexity in budget. `flag == null` ⇒ nothing composed (sheet closed).
+@Composable
+@Suppress("LongParameterList") // host: the sheet flag + super-favorite set + 4 action callbacks.
+private fun FlagActionsSheetHost(
+    flag: Flag?,
+    superFavoriteIds: Set<Int>,
+    onOpen: (Flag) -> Unit,
+    onToggleSuperFavorite: (Flag) -> Unit,
+    onRemove: (Flag) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (flag == null) return
+    FlagActionsSheet(
+        flag = flag,
+        categoryName = flagCategoryName(flag.cat),
+        isSuperFavorite = flag.topicId in superFavoriteIds,
+        actions = FlagSheetActions(
+            onOpen = { onOpen(flag) },
+            onToggleSuperFavorite = { onToggleSuperFavorite(flag) },
+            onRemove = { onRemove(flag) },
+            onDismiss = onDismiss,
+        ),
+    )
+}
+
+// #603 PR5 — canonical category name for the sheet header, fallback « Catégorie N » for unknown ids.
+@Composable
+private fun flagCategoryName(catId: Int): String =
+    FALLBACK_CATEGORY_ORDER.firstOrNull { it.id == catId }?.name
+        ?: stringResource(R.string.flags_category_fallback, catId)
+
 /**
  * One removable flag row. The « Retirer » affordance went swipe-to-dismiss (#99) → **long-press**
  * (#457): the horizontal swipe now changes the flag tab, and a row-level `SwipeToDismissBox`
- * would consume the horizontal drag first and steal the tab gesture. The long-press only
- * *raises* the existing confirmation dialog via [onRequestRemove] — the actual removal still
- * happens after the user confirms (the repository then evicts the item from the cache, which
- * recomposes the list away). Arbitrage XaTriX (#457): the swipe-to-remove may come back later
- * in another form.
+ * would consume the horizontal drag first and steal the tab gesture. #603 PR5: the long-press now
+ * opens the rich actions sheet ([FlagActionsSheet]) via [onLongPress] — removal is one action inside
+ * it and still goes through the existing confirmation dialog (the repository then evicts the item
+ * from the cache, which recomposes the list away). Arbitrage XaTriX (#457): the swipe-to-remove may
+ * come back later in another form.
  *
  * The long-press being invisible, the row keeps the TalkBack/switch-access `customActions`
  * entry (#99) in addition to the `onLongClickLabel` semantics. While a removal is in flight
@@ -1125,23 +1182,23 @@ private fun RemovableFlagItem(
     metadata: FlagMetadata,
     removalInFlight: Boolean,
     onClick: () -> Unit,
-    onRequestRemove: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
-    val removeLabel = stringResource(R.string.flags_remove_action)
+    val actionsLabel = stringResource(R.string.flags_row_actions_label)
 
     FlagItem(
         flag = flag,
         metadata = metadata,
         onClick = onClick,
-        longPress = FlagItemLongPress(label = removeLabel) {
-            if (!removalInFlight) onRequestRemove()
+        longPress = FlagItemLongPress(label = actionsLabel) {
+            if (!removalInFlight) onLongPress()
         },
         modifier = Modifier
             .background(MaterialTheme.colorScheme.surface)
             .semantics {
                 customActions = listOf(
-                    CustomAccessibilityAction(removeLabel) {
-                        onRequestRemove()
+                    CustomAccessibilityAction(actionsLabel) {
+                        if (!removalInFlight) onLongPress()
                         true
                     },
                 )
@@ -1556,7 +1613,8 @@ private data class AuthenticatedActions(
     val onOpenFlag: (Flag) -> Unit,
     val onRefresh: () -> Unit,
     val onLoginRequested: () -> Unit,
-    val onRequestRemoveFlag: (Flag) -> Unit,
+    /** #603 PR5 — long-press opens the rich actions sheet ([FlagActionsSheet]); removal moved inside it. */
+    val onLongPressFlag: (Flag) -> Unit,
     /** #414 — tap on a category band opens that category's topic listing. */
     val onOpenCategory: (Int) -> Unit,
     /** #6 — open a DT conversation (threadId, last inbox page, unread-on-open for the badge). */

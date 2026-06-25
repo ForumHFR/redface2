@@ -26,6 +26,30 @@
     <!-- État vide d'une recherche sans résultat. %1$s = la requête saisie. -->
     <string name="flags_search_no_results">Aucun drapeau ne correspond à « %1$s »</string>
 
+    <!-- #603 PR5 — bottom sheet d'appui-long sur un drapeau (métadonnées + actions + super-favori). -->
+    <!-- Libellé a11y / long-press de la ligne : ouvre le sheet d'actions (remplace le « Retirer » direct). -->
+    <string name="flags_row_actions_label">Actions du sujet</string>
+    <string name="flags_sheet_open">Ouvrir le sujet</string>
+    <string name="flags_sheet_super_favorite_add">Ajouter aux super-favoris</string>
+    <string name="flags_sheet_super_favorite_remove">Retirer des super-favoris</string>
+    <string name="flags_sheet_copy_link">Copier le lien</string>
+    <string name="flags_sheet_open_browser">Ouvrir dans le navigateur</string>
+    <string name="flags_sheet_remove">Retirer le drapeau</string>
+    <string name="flags_sheet_link_copied">Lien copié</string>
+    <string name="flags_sheet_browser_failed">Aucune application pour ouvrir ce lien</string>
+    <!-- Bloc métadonnées (clés). -->
+    <string name="flags_sheet_meta_category">Catégorie</string>
+    <string name="flags_sheet_meta_author">Créé par</string>
+    <string name="flags_sheet_meta_last_reply">Dernier message</string>
+    <string name="flags_sheet_meta_position">Position</string>
+    <string name="flags_sheet_meta_replies">Réponses</string>
+    <!-- Valeurs métadonnées. %1$s auteur · %2$s date. -->
+    <string name="flags_sheet_meta_last_reply_value">%1$s — %2$s</string>
+    <!-- %1$d page lue · %2$d total. -->
+    <string name="flags_sheet_meta_position_value">page %1$d / %2$d</string>
+    <!-- Suffixe pages à lire, %1$d = nb. -->
+    <string name="flags_sheet_meta_pages_to_read">+%1$d à lire</string>
+
     <!-- Onglet « Super » : écran placeholder M3, futurs super favoris. Pas de fetch réseau. -->
     <string name="flags_super_placeholder_title">Super favoris — à venir</string>
     <string name="flags_super_placeholder_body">Les « super favoris » permettront d\'épingler les sujets les plus importants. Cette vue arrivera dans une prochaine version.</string>
@@ -107,9 +131,8 @@
     <string name="flags_view_settings_unread_only_description">N\'affiche que les sujets avec un message non lu. Propre à cet onglet.</string>
     <string name="flags_view_settings_done">Fermer</string>
 
-    <!-- #99 — Retirer un drapeau (delflag). Action sur chaque ligne + dialog de confirmation
-         obligatoire avant l'appel réseau, puis snackbar de résultat. -->
-    <string name="flags_remove_action">Retirer</string>
+    <!-- #99 — Retirer un drapeau (delflag) : action du sheet d'appui-long (#603 PR5) + dialog de
+         confirmation obligatoire avant l'appel réseau, puis snackbar de résultat. -->
     <string name="flags_remove_dialog_title">Retirer le drapeau ?</string>
     <!-- %1$s = titre du topic, %2$s = libellé du type de drapeau (Mes sujets / Lus uniquement / Favoris). -->
     <string name="flags_remove_dialog_message">Retirer le drapeau « %2$s » sur « %1$s » ? Cette action est définitive depuis l\'app.</string>
