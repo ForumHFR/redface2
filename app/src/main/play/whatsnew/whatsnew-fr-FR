@@ -1,11 +1,7 @@
-Redface 2 v0.17.2 — dev.
+Redface 2 v0.17.3 — dev.
 
-Finitions de la vue Drapeaux :
-- Couleurs revues (moins criardes) : favori vert-lime, DT fuchsia, cyan/rouge adoucis.
-- Icône du menu Drapeaux remise au propre.
-- Correction : le menu de config rapide ne s'ouvre plus tout seul en changeant de catégorie.
-- Libellé « +lus » nettoyé.
-- Liseré discret autour de l'avatar.
-- Bandes de catégorie un peu plus compactes, flèche à la bonne taille.
+Vue Drapeaux :
+- Nouvelle option « titre sur une seule ligne » (menu d'affichage) : titres tronqués à une ligne au lieu de deux.
+- Bande de catégorie allégée (vue par catégorie) : un sous-titre discret au lieu du bandeau plein.
 
 Bugs : via le canal dev ou GitHub.

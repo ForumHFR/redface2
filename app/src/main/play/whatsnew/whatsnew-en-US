@@ -1,11 +1,7 @@
-Redface 2 v0.17.2 — dev.
+Redface 2 v0.17.3 — dev.
 
-Drapeaux view polish:
-- Colours retuned (less garish): lime favourite, fuchsia DT, softer cyan/red.
-- Drapeaux menu icon cleaned up.
-- Fix: the quick-config menu no longer opens by itself when switching category.
-- Cleaner « +lus » label.
-- Subtle border around the account avatar.
-- Slightly tighter category bands, correctly-sized chevron.
+Drapeaux view:
+- New "single-line titles" option (display menu): topic titles trimmed to one line instead of two.
+- Lighter category band (by-category view): a discreet subhead instead of the full block.
 
 Bugs: via dev or GitHub.
