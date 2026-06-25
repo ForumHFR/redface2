@@ -16,6 +16,32 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.0` — `internal` (dev) — 2026-06-25
+
+> Build dev (Play internal « Redface 2 dev » + F-Droid .dev) ; versionCode alloué au dispatch par le
+> registre de tags git. versionName bumpé 0.16.0 → 0.17.0. Chaque PR du payload : review Codex + CI
+> verte ; passe de revue à 4 agents (opus) sur le code mergé, corrections appliquées (#643).
+
+Refonte complète de la **vue Drapeaux** (#603, ADR-017) — 8 PRs.
+
+**Nouveautés**
+
+- **Search app bar** « façon Réglages » : icône drapeau de l'onglet courant (sélecteur d'onglet),
+  barre de recherche (filtre client des drapeaux), photo de profil. Remplace l'ancien header + tab row.
+- **Liste refondue** : marqueur gauche configurable (**barre de couleur** par défaut, pastille à icône,
+  ou point), pastille « pages à lire », en-têtes de catégorie à vraies icônes Material Symbols.
+- **Appui long** sur un drapeau → **bottom sheet** : métadonnées du sujet (créateur, dernier répondant,
+  dates, position, réponses, catégorie), actions (ouvrir, copier le lien, navigateur), **super-favori
+  local**, retrait. Plus de choix de couleur.
+- **Barre de progression** M3 fine sous l'app bar pendant un chargement (manuel **et** auto-refresh).
+- **Menu de config rapide** : re-tap de l'onglet Drapeaux de la barre du bas → réglages d'affichage
+  (groupement, masquer lus, non-lus, **forme du marqueur**).
+
+**Interne** : modèle de présentation pur testé en `:core:model` ; ADR-017 + rapport des 4 spikes.
+
+**Différé** : hide-on-scroll, onglets configurables, densités avancées, indicateur « cité » (aucune
+source serveur — jamais simulé).
+
 ## v179 — `0.16.0` — `open` (beta) — 2026-06-21
 
 > Shippé en bêta (Play open testing « committed » + F-Droid .beta) le 2026-06-21, tag `app-v179`.
