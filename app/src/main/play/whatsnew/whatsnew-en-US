@@ -1,10 +1,11 @@
-Redface 2 v0.17.0 — dev.
+Redface 2 v0.17.1 — dev.
 
-Drapeaux view redesign:
-- Search app bar + tab picker.
-- Refonted rows: colour-bar marker (bar/pill/dot), pages-to-read pill, category icons.
-- Long-press sheet: topic metadata, actions, local super-favourite.
-- Thin loading bar (manual and auto refresh).
-- Quick-config: re-tap the Drapeaux tab.
+Drapeaux view polish:
+- Colours match HFR exactly (pure cyan/red/yellow) + DT in fuchsia.
+- Drapeaux menu icon is now the Redface 2 flag.
+- Single-line search.
+- Display menu: one entry point (re-tap the Drapeaux tab).
+- No more central spinner — the thin top bar covers it.
+- Colour bar spans the row height.
 
 Bugs: via dev or GitHub.

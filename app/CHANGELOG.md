@@ -16,6 +16,24 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.1` — `internal` (dev) — 2026-06-25
+
+> Polish de la vue Drapeaux suite au dogfood (#648). Build dev ; versionCode alloué au dispatch.
+> versionName bumpé 0.17.0 → 0.17.1 (évite le doublon F-Droid). Codex GO + CI verte.
+
+**Finitions (#648)**
+
+- **Couleurs des drapeaux** alignées sur les valeurs exactes des gifs HFR : cyan `#00FFFF`, rouge
+  `#FF0000`, favori `#F0F83F` (jaune-lime) ; nouveau **DT en fuchsia** `#FF00FF`.
+- **Icône d'ouverture du menu Drapeaux** = le drapeau de Redface 2 (vectorisé, teinté selon l'onglet),
+  à la place du glyphe Material générique.
+- **Barre de recherche sur une seule ligne** (plus de retour à la ligne du contenu).
+- **Suppression du bouton d'affichage en double** dans l'app bar — le menu s'ouvre en re-tapant
+  l'onglet Drapeaux de la barre du bas.
+- **Suppression du rond de chargement central** : la barre fine du haut couvre désormais aussi le
+  chargement initial.
+- La **barre de couleur épouse la hauteur de la ligne** (correct sur les titres 2 lignes).
+
 ## `0.17.0` — `internal` (dev) — 2026-06-25
 
 > Build dev (Play internal « Redface 2 dev » + F-Droid .dev) ; versionCode alloué au dispatch par le
