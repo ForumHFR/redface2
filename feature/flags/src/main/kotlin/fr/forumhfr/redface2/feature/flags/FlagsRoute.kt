@@ -41,6 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -77,6 +78,7 @@ import fr.forumhfr.redface2.core.ui.FlagItemDivider
 import fr.forumhfr.redface2.core.ui.FlagItemLongPress
 import fr.forumhfr.redface2.core.ui.FlagMetadata
 import fr.forumhfr.redface2.core.ui.ForumListRow
+import fr.forumhfr.redface2.core.ui.LocalForumRowTitleMaxLines
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
@@ -349,7 +351,13 @@ fun FlagsRoute(
                 authState?.let { state ->
                     when (state) {
                         AuthState.Anonymous -> AnonymousBody(onLoginRequested)
-                        is AuthState.Authenticated -> AuthenticatedBody(
+                        is AuthState.Authenticated -> CompositionLocalProvider(
+                            // #603 — single-line topic titles when enabled (GLOBAL pref); the leaf
+                            // ForumListRow reads this local, so no threading through list composables.
+                            LocalForumRowTitleMaxLines provides
+                                flagTitleMaxLines(flagsViewSettings.singleLineTitle),
+                        ) {
+                            AuthenticatedBody(
                             state = FlagsBodyState(
                                 selectedTab = selectedTab,
                                 flagsState = flagsState,
@@ -380,7 +388,8 @@ fun FlagsRoute(
                                 onRefreshDt = viewModel::refreshDt,
                             ),
                             listState = flagsListState,
-                        )
+                            )
+                        }
                     }
                 }
             }
@@ -401,6 +410,7 @@ fun FlagsRoute(
                 onHideReadCategoriesChange = viewModel::setFlagsHideReadCategories,
                 onUnreadOnlyChange = viewModel::setFlagsUnreadOnly,
                 onMarkerStyleChange = viewModel::setFlagsMarkerStyle,
+                onSingleLineTitleChange = viewModel::setFlagsSingleLineTitle,
                 onDismiss = { showViewSettingsSheet = false },
             ),
         )
@@ -595,6 +605,15 @@ private fun FlagsViewSettingsSheet(
                 )
             }
 
+            // #603 — GLOBAL « single-line topic titles » toggle (not per-tab, like the marker shape).
+            ViewSettingsSwitchRow(
+                title = stringResource(R.string.flags_view_settings_single_line_title_title),
+                description = stringResource(R.string.flags_view_settings_single_line_title_description),
+                checked = settings.singleLineTitle,
+                enabled = true,
+                onCheckedChange = actions.onSingleLineTitleChange,
+            )
+
             TextButton(
                 // Animate the sheet out (M3 stable pattern) before removing it from composition,
                 // instead of an abrupt `if`-driven teardown. Swipe/scrim dismissals already animate
@@ -769,6 +788,9 @@ private fun flagsLoadingBarVisible(
     FlagTab.Super -> false
     else -> isRefreshing || flagsState == null || flagsState == FlagsListUiState.Loading
 }
+
+// #603 — extracted so the single-line-title branch doesn't count against FlagsRoute's cyclomatic budget.
+private fun flagTitleMaxLines(singleLineTitle: Boolean): Int = if (singleLineTitle) 1 else 2
 
 @Composable
 private fun FlagsLoadingBar(loading: Boolean) {
@@ -1769,6 +1791,7 @@ private data class FlagsViewSettingsActions(
     val onHideReadCategoriesChange: (Boolean) -> Unit,
     val onUnreadOnlyChange: (Boolean) -> Unit,
     val onMarkerStyleChange: (MarkerStyle) -> Unit,
+    val onSingleLineTitleChange: (Boolean) -> Unit,
     val onDismiss: () -> Unit,
 )
 

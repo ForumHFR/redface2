@@ -188,6 +188,15 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override suspend fun setFlagsSingleLineTitle(enabled: Boolean) {
+        // #603 — GLOBAL toggle, a single key (mirrors the marker shape).
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_SINGLE_LINE_TITLE] = enabled
+            }
+        }
+    }
+
     override fun observeThemeMode(): Flow<ThemeMode> =
         dataStore.data
             // Default SYSTEM: follow the OS dark-mode setting unless the user picked otherwise (#286).
@@ -699,12 +708,15 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // #603 PR6 — marker shape is GLOBAL: resolved once, added to both return paths regardless of
         // the per-tab override.
         val markerStyle = readMarkerStyle(prefs)
+        // #603 — GLOBAL « single-line titles » toggle: resolved once, added to both return paths.
+        val singleLineTitle = prefs[KEY_FLAGS_SINGLE_LINE_TITLE] ?: false
         if (prefs[KEY_FLAGS_PER_TAB_OVERRIDE] != true) {
             return FlagsViewSettings(
                 groupByCategory = globalGroup,
                 hideReadCategories = globalHide,
                 unreadOnly = unreadOnly,
                 markerStyle = markerStyle,
+                singleLineTitle = singleLineTitle,
             )
         }
         return FlagsViewSettings(
@@ -712,6 +724,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             hideReadCategories = prefs[flagsHideReadCategoriesKey(type)] ?: globalHide,
             unreadOnly = unreadOnly,
             markerStyle = markerStyle,
+            singleLineTitle = singleLineTitle,
         )
     }
 
@@ -752,6 +765,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         // #603 PR6 — GLOBAL Drapeaux marker shape (MarkerStyle.name, defensively parsed). No per-type
         // variant: one shape for every tab, independent of the #309 per-tab override.
         val KEY_FLAGS_MARKER_STYLE = stringPreferencesKey("flags_marker_style")
+        // #603 — GLOBAL « single-line topic titles » toggle (one for every tab).
+        val KEY_FLAGS_SINGLE_LINE_TITLE = booleanPreferencesKey("flags_single_line_title")
         // #309 — per-tab display override. The master switch plus one nullable key per FlagType for
         // each toggle; absence of a per-type key means « fall back to the global value ». Keys are
         // derived from the stable enum name (cyan/red/favorite), e.g. `flags_group_by_category_cyan`.

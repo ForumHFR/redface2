@@ -131,6 +131,9 @@
     <!-- #603 PR6 — Forme du marqueur de gauche (barre / pastille / point). Réglage GLOBAL (tous onglets). -->
     <string name="flags_view_settings_marker_title">Marqueur</string>
     <string name="flags_view_settings_marker_description">Forme de l\'indicateur de couleur à gauche de chaque drapeau. S\'applique à tous les onglets.</string>
+    <!-- #603 — bascule GLOBALE : titre des sujets sur une seule ligne (tronqué) plutôt que deux. -->
+    <string name="flags_view_settings_single_line_title_title">Titre sur une seule ligne</string>
+    <string name="flags_view_settings_single_line_title_description">Tronque le titre des sujets à une ligne au lieu de deux. S\'applique à tous les onglets.</string>
     <string name="flags_view_settings_marker_stripe">Barre</string>
     <string name="flags_view_settings_marker_pastille">Pastille</string>
     <string name="flags_view_settings_marker_dot">Point</string>

@@ -2046,6 +2046,7 @@ private class FakeUserPreferencesRepository(
 
     override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
     override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
+    override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
 
     override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
 

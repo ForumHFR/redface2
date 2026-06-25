@@ -2338,6 +2338,8 @@ class FlagsViewModelTest {
             markerStyle.value = style
         }
 
+        override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
+
         // #286 — theme prefs are irrelevant to FlagsViewModel; stubbed at their defaults.
         override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
 

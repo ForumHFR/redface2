@@ -538,6 +538,7 @@ class TopicRepositoryImplTest {
 
         override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
         override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
+        override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
 
         // #286 — theme prefs are irrelevant to TopicRepositoryImpl; stubbed at their defaults.
         override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
