@@ -13,6 +13,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -27,6 +28,14 @@ import fr.forumhfr.redface2.core.model.pagesToRead
 import fr.forumhfr.redface2.core.ui.icon.categoryIcon
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
+
+/**
+ * #603 — GLOBAL « single-line topic titles » preference, surfaced as a CompositionLocal so the leaf
+ * [ForumListRow] reads it WITHOUT threading the flag through every list composable. Default 2 (the
+ * historical 2-line wrap); FlagsRoute provides 1 when the user enables single-line titles. Other
+ * [ForumListRow] consumers (forum / search / DT) keep the default unless they provide their own.
+ */
+val LocalForumRowTitleMaxLines = compositionLocalOf { 2 }
 
 /**
  * Renders one row of the user's drapeaux list.
@@ -172,7 +181,8 @@ fun ForumListRow(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = if (emphasized) FontWeight.SemiBold else FontWeight.Normal,
-                maxLines = 2,
+                // #603 — GLOBAL single-line-title pref via CompositionLocal (default = 2-line wrap).
+                maxLines = LocalForumRowTitleMaxLines.current,
                 overflow = TextOverflow.Ellipsis,
             )
             // #376 — shared two-segment metadata line (start truncatable + end pinned right),

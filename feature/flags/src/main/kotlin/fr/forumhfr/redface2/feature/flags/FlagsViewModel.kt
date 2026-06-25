@@ -674,6 +674,11 @@ class FlagsViewModel @Inject constructor(
         viewModelScope.launch { userPreferencesRepository.setFlagsMarkerStyle(style) }
     }
 
+    /** Bottom-sheet write for the GLOBAL « single-line topic titles » toggle (#603). */
+    fun setFlagsSingleLineTitle(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsSingleLineTitle(enabled) }
+    }
+
     fun refresh() {
         // Super is a placeholder with no backing FlagType — pull-to-refresh is a no-op there.
         val type = _selectedTab.value.flagType ?: return

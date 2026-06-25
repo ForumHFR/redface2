@@ -117,6 +117,13 @@ interface UserPreferencesRepository {
     suspend fun setFlagsMarkerStyle(style: MarkerStyle)
 
     /**
+     * Persists the GLOBAL « single-line topic titles » toggle (#603). Like [setFlagsMarkerStyle] it is
+     * NOT subject to [observeFlagsPerTabOverride]; surfaced through [observeFlagsViewSettings]
+     * ([FlagsViewSettings.singleLineTitle]). Defaults to `false` (2-line wrap) until the first call.
+     */
+    suspend fun setFlagsSingleLineTitle(enabled: Boolean)
+
+    /**
      * App theme selection (#286): [ThemeMode.SYSTEM] (default) follows the OS dark-mode setting;
      * [ThemeMode.LIGHT] / [ThemeMode.DARK] force the app theme regardless of the OS. Observed at the
      * app root ([fr.forumhfr.redface2.navigation.RedfaceApp]) to compute the effective dark theme

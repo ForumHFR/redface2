@@ -2022,6 +2022,7 @@ class SettingsViewModelTest {
 
         override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
         override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
+        override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
 
         fun emit(value: ProxyConfig) {
             config.value = value

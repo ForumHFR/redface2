@@ -34,4 +34,7 @@ data class FlagsViewSettings(
     // #603 PR6 — left-marker shape. GLOBAL (not subject to the per-tab override): one shape for every
     // tab. Default STRIPE (ADR-017, soberest option). Carried on every resolution path.
     val markerStyle: MarkerStyle = MarkerStyle.STRIPE,
+    // #603 — GLOBAL: keep topic titles on a single (ellipsised) line instead of wrapping to 2. Default
+    // false = the historical 2-line wrap. Not subject to the per-tab override (like [markerStyle]).
+    val singleLineTitle: Boolean = false,
 )

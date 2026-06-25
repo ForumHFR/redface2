@@ -1963,6 +1963,7 @@ class PostEditorViewModelTest {
         override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
         override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
         override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
+        override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
         override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
         override suspend fun setThemeMode(mode: ThemeMode) = Unit
         override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)
