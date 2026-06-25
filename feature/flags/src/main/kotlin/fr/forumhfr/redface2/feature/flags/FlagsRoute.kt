@@ -28,6 +28,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -311,6 +312,15 @@ fun FlagsRoute(
                         null
                     },
                     accountMenu = { topBarActions?.invoke() },
+                )
+
+                // #603 PR4 — thin, flat (non-wavy) M3 progress bar under the app bar, shown during any
+                // load of the current tab: manual pull-to-refresh AND auto-refresh — the auto-refresh
+                // finally gets a visual (ADR-017 decision 7; signal = the existing isRefreshing).
+                FlagsLoadingBar(
+                    selectedTab = selectedTab,
+                    isRefreshing = isRefreshing,
+                    dtIsRefreshing = dtIsRefreshing,
                 )
 
                 // Render nothing while authState is null (cookie jar warming up). Same
@@ -654,6 +664,17 @@ private fun flagTabEntries(
             )
         }
         add(FlagTabEntry(FlagTab.Super, stringResource(R.string.flags_tab_super), neutral))
+    }
+}
+
+// #603 PR4 — thin flat M3 linear progress bar shown only while [loading] (manual or auto refresh of
+// the current tab). Flat (non-wavy) indeterminate indicator; only rendered when loading — the brief
+// appearance under the app bar is the intended cue (ADR-017 decision 7).
+@Composable
+private fun FlagsLoadingBar(selectedTab: FlagTab, isRefreshing: Boolean, dtIsRefreshing: Boolean) {
+    val loading = if (selectedTab == FlagTab.Dt) dtIsRefreshing else isRefreshing
+    if (loading) {
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
     }
 }
 
