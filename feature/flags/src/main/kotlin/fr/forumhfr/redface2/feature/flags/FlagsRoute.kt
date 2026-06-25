@@ -26,7 +26,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -320,21 +319,23 @@ fun FlagsRoute(
                     onSelectTab = viewModel::selectTab,
                     onQueryChange = { searchQuery = it },
                     onSearchActiveChange = { searchActive = it },
-                    onOpenViewSettings = if (canConfigureView) {
-                        { showViewSettingsSheet = true }
-                    } else {
-                        null
-                    },
                     accountMenu = { topBarActions?.invoke() },
                 )
 
-                // #603 PR4 — thin, flat (non-wavy) M3 progress bar under the app bar, shown during any
-                // load of the current tab: manual pull-to-refresh AND auto-refresh — the auto-refresh
-                // finally gets a visual (ADR-017 decision 7; signal = the existing isRefreshing).
+                // #603 — thin, flat (non-wavy) M3 progress bar under the app bar, shown during any load
+                // of the current tab: manual pull-to-refresh, auto-refresh AND the initial cold load —
+                // it is now the single loading cue (the central spinner was retired). ADR-017 decision 7.
                 FlagsLoadingBar(
-                    selectedTab = selectedTab,
-                    isRefreshing = isRefreshing,
-                    dtIsRefreshing = dtIsRefreshing,
+                    // Anonymous gate: when not authenticated, flagsState stays null and we must NOT show
+                    // the bar over the « Se connecter » prompt (Codex review #648) — short-circuit here
+                    // so the helper stays at 5 params (detekt LongParameterList).
+                    loading = authState is AuthState.Authenticated && flagsLoadingBarVisible(
+                        selectedTab = selectedTab,
+                        flagsState = flagsState,
+                        isRefreshing = isRefreshing,
+                        dtListState = dtListState,
+                        dtIsRefreshing = dtIsRefreshing,
+                    ),
                 )
 
                 // Render nothing while authState is null (cookie jar warming up). Same
@@ -659,14 +660,15 @@ private fun flagTabLabel(tab: FlagTab): Int = when (tab) {
     FlagTab.Dt -> R.string.flags_tab_dt
 }
 
-// #603 PR2 — flag color of the current tab for the app-bar indicator glyph; the Super/DT placeholders
-// have no flag color so they fall back to a neutral on-surface tint.
+// #603 PR2 — flag color of the current tab for the app-bar indicator glyph. DT (MultiMP) uses fuchsia
+// (#603 polish, the 4th flag color); only the Super placeholder falls back to a neutral on-surface tint.
 @Composable
-private fun flagTabColor(tab: FlagTab): Color = when (tab.flagType) {
-    FlagType.CYAN -> FlagPalette.Cyan
-    FlagType.RED -> FlagPalette.Red
-    FlagType.FAVORITE -> FlagPalette.Favorite
-    null -> MaterialTheme.colorScheme.onSurfaceVariant
+private fun flagTabColor(tab: FlagTab): Color = when (tab) {
+    FlagTab.Cyan -> FlagPalette.Cyan
+    FlagTab.Red -> FlagPalette.Red
+    FlagTab.Favorite -> FlagPalette.Favorite
+    FlagTab.Dt -> FlagPalette.Dt
+    FlagTab.Super -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 // #603 PR2 — app-bar tab entries, or an empty list when anonymous (no flags ⇒ the flag glyph is a
@@ -709,7 +711,7 @@ private fun flagTabEntries(
                 FlagTabEntry(
                     FlagTab.Dt,
                     stringResource(R.string.flags_tab_dt) + if (dtShowsRead) readSuffix else "",
-                    neutral,
+                    FlagPalette.Dt,
                 ),
             )
         }
@@ -731,9 +733,27 @@ private fun QuickConfigRequestEffect(request: Int, canConfigure: Boolean, onOpen
     }
 }
 
+// #603 — the top loading bar is shown during a refresh OR the INITIAL load (no content yet) of the
+// current tab, so the central CircularProgressIndicator could be retired: the bar is the single loading
+// cue (manual + auto refresh + cold load). Plain function (no composition) — keeps FlagsRoute's
+// cyclomatic complexity in budget.
+// NB: the anonymous gate (`authState is Authenticated`) lives at the CALL SITE — when anonymous,
+// flagsState stays null and this would otherwise keep the bar up forever over the « Se connecter »
+// prompt (Codex review #648). Kept at 5 params here (detekt LongParameterList threshold = 6).
+private fun flagsLoadingBarVisible(
+    selectedTab: FlagTab,
+    flagsState: FlagsListUiState?,
+    isRefreshing: Boolean,
+    dtListState: DtListUiState,
+    dtIsRefreshing: Boolean,
+): Boolean = when (selectedTab) {
+    FlagTab.Dt -> dtIsRefreshing || dtListState is DtListUiState.Loading
+    FlagTab.Super -> false
+    else -> isRefreshing || flagsState == null || flagsState == FlagsListUiState.Loading
+}
+
 @Composable
-private fun FlagsLoadingBar(selectedTab: FlagTab, isRefreshing: Boolean, dtIsRefreshing: Boolean) {
-    val loading = if (selectedTab == FlagTab.Dt) dtIsRefreshing else isRefreshing
+private fun FlagsLoadingBar(loading: Boolean) {
     if (loading) {
         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
     }
@@ -874,13 +894,13 @@ private fun FlagListBody(
     ) {
         when (val current = state.flagsState) {
             null, FlagsListUiState.Loading -> Box(
+                // #603 — central spinner retired: the top FlagsLoadingBar is now the single loading cue
+                // (it covers the initial load too). An empty but scrollable box keeps the surrounding
+                // PullToRefreshBox a swipe target (#229).
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(vertical = 32.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
-            }
+                    .verticalScroll(rememberScrollState()),
+            )
 
             is FlagsListUiState.Failure -> Column(
                 // #229 — scrollable so the PullToRefreshBox still captures a swipe-to-refresh
@@ -1403,13 +1423,12 @@ private fun DtListBody(state: DtListUiState, isRefreshing: Boolean, actions: Aut
 private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions) {
     when (state) {
         DtListUiState.Loading -> Box(
+            // #603 — central spinner retired (cf. FlagListBody); the top FlagsLoadingBar covers the DT
+            // initial load too. Empty but scrollable so the PullToRefreshBox keeps a target (#229).
             modifier = Modifier
                 .fillMaxSize()
-                .padding(vertical = 32.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            CircularProgressIndicator()
-        }
+                .verticalScroll(rememberScrollState()),
+        )
 
         DtListUiState.Empty -> DtMessageBody(text = stringResource(R.string.flags_dt_empty))
 

@@ -2,8 +2,10 @@ package fr.forumhfr.redface2.core.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -56,7 +58,11 @@ class FlagItemRefonteRoborazziTest {
             FlagItemDivider()
             // The three marker styles on the same unread cyan topic.
             Row(
-                modifier = Modifier.padding(16.dp),
+                // #603 — STRIPE marker is now fillMaxHeight; bound it with IntrinsicSize.Min so the
+                // standalone showcase row sizes to the tallest marker (PASTILLE), not the screen.
+                modifier = Modifier
+                    .padding(16.dp)
+                    .height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(24.dp),
             ) {
                 MarkerStyle.entries.forEach { style ->

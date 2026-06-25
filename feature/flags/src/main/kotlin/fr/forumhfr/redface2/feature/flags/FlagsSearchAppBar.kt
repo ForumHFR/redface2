@@ -35,6 +35,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
@@ -52,21 +53,21 @@ data class FlagTabEntry(val tab: FlagTab, val label: String, val color: Color)
  *   exactly like the old re-tap, since it routes back through the same `onSelectTab`.
  * - **center** : a search pill that expands to an inline filter of the loaded flags
  *   ([filterFlagsByQuery]) — HFR has no server search, the flags are already in hand.
- * - **right** : the display-settings action (when configurable) + the shared account menu (whose
- *   avatar doubles as the « photo de profil » of the vision).
+ * - **right** : the shared account menu (whose avatar doubles as the « photo de profil » of the
+ *   vision). The display-settings gear was retired (#603 polish) — the quick-config sheet is now
+ *   opened by re-tapping the Drapeaux bottom-bar icon (#603 PR6), so a duplicate header trigger is gone.
  *
  * The scroll-coupled translucency (elevated app bar + content gliding underneath) is intentionally
  * NOT wired here: it belongs to the deferred scroll-chrome work (cf. the hide-on-scroll deferral),
  * so PR2 keeps the simple top-of-column layout and ships the structure + interactions first.
  */
 @Composable
-@Suppress("LongParameterList") // App-bar API: state + 3 callbacks + optional action + the @Composable account slot.
+@Suppress("LongParameterList") // App-bar API: state + 3 callbacks + the @Composable account slot + modifier.
 fun FlagsSearchAppBar(
     state: FlagsAppBarState,
     onSelectTab: (FlagTab) -> Unit,
     onQueryChange: (String) -> Unit,
     onSearchActiveChange: (Boolean) -> Unit,
-    onOpenViewSettings: (() -> Unit)?,
     accountMenu: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -89,22 +90,6 @@ fun FlagsSearchAppBar(
                 onActiveChange = onSearchActiveChange,
                 modifier = Modifier.weight(1f),
             )
-            onOpenViewSettings?.let { open ->
-                val viewSettingsLabel = stringResource(R.string.flags_view_settings_action)
-                IconButton(
-                    onClick = open,
-                    modifier = Modifier.semantics { contentDescription = viewSettingsLabel },
-                ) {
-                    // U+FE0E pins the monochrome gear glyph (ForbiddenImport bans material icons),
-                    // matching the legacy header's affordance until it migrates to the bottom-bar
-                    // quick-config (#603 PR6).
-                    Text(
-                        text = "⚙︎",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
             accountMenu()
         }
     }
@@ -133,7 +118,9 @@ private fun FlagTabPickerButton(
             enabled = tabs.isNotEmpty(),
             modifier = Modifier.semantics { contentDescription = pickerLabel },
         ) {
-            RedfaceVectorIcon(resId = CoreUiR.drawable.ic_ms_flag, tint = currentTabColor)
+            // #603 polish — the RF2 brand flag (drapeau cyan du launcher, vectorisé) instead of the
+            // generic Material flag glyph; tinted with the current tab color (cyan/red/favori/fuchsia).
+            RedfaceVectorIcon(resId = CoreUiR.drawable.ic_rf2_flag, tint = currentTabColor)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             tabs.forEach { entry ->
@@ -224,6 +211,11 @@ private fun SearchField(
                     } else {
                         MaterialTheme.colorScheme.onSurface
                     },
+                    // No wrap in the search pill — a long query/placeholder stays on one line and
+                    // ellipsises instead of pushing the bar to a second row.
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

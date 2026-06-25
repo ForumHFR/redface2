@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- RF2 brand flag (drapeau cyan du launcher), pixel-art silhouette vectorisée pour
+     l'icône du picker d'onglet Drapeaux (#603). Mono-couleur => tintable (tint = couleur d'onglet). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="22"
+    android:viewportHeight="22">
+    <path android:fillColor="#FF000000" android:pathData="M0,0h4v1h-4zM9,0h4v1h-4zM0,1h4v1h-4zM9,1h4v1h-4zM0,2h22v1h-22zM0,3h22v1h-22zM2,4h18v1h-18zM2,5h18v1h-18zM2,6h18v1h-18zM2,7h16v1h-16zM2,8h16v1h-16zM4,9h11v1h-11zM4,10h11v1h-11zM4,11h7v1h-7zM4,12h7v1h-7zM6,13h3v1h-3zM6,14h3v1h-3zM6,15h3v1h-3zM6,16h3v1h-3zM7,17h2v1h-2zM9,18h2v1h-2zM9,19h2v1h-2zM9,20h2v1h-2zM9,21h2v1h-2z" />
+</vector>

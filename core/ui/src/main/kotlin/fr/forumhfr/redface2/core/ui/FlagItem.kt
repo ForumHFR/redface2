@@ -4,8 +4,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -144,6 +146,10 @@ fun ForumListRow(
         modifier = modifier
             .fillMaxWidth()
             .then(rowInteraction)
+            // #603 — IntrinsicSize.Min lets a fillMaxHeight leading marker (the STRIPE « barre de
+            // couleur ») span the row's content height (1- or 2-line title) instead of a fixed 32 dp
+            // that fell short on 2-line titles. Per-row intrinsic pass, negligible cost.
+            .height(IntrinsicSize.Min)
             .padding(horizontal = 16.dp, vertical = m.listRowVertical),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
