@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -2020,6 +2021,7 @@ class SettingsViewModelTest {
         override suspend fun setFlagsHideReadCategoriesForType(type: FlagType, enabled: Boolean) = Unit
 
         override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
+        override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
 
         fun emit(value: ProxyConfig) {
             config.value = value

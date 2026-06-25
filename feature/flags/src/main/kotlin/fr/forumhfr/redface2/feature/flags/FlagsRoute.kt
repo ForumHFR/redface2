@@ -68,6 +68,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
@@ -81,6 +82,8 @@ import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 import fr.forumhfr.redface2.core.ui.formatLastReplyTimestamp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.icon.categoryIcon
+import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
+import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 import kotlinx.coroutines.launch
 
@@ -111,6 +114,7 @@ import kotlinx.coroutines.launch
 // justified inline at the content lambda usage.
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
+@Suppress("LongParameterList") // Screen route: 4 host nav callbacks + the quick-config trigger + the account slot.
 fun FlagsRoute(
     onOpenFlag: (Flag) -> Unit,
     onLoginRequested: () -> Unit,
@@ -120,6 +124,9 @@ fun FlagsRoute(
     // host decrement the MP unread badge on first read, mirroring the Messages tab's onOpenThread
     // (badge regression: the DT path never reported it, so the badge stayed stuck high).
     onOpenMultiMp: (threadId: Int, page: Int, wasUnread: Boolean) -> Unit = { _, _, _ -> },
+    // #603 PR6 — bumped by the host on each re-tap of the already-selected Drapeaux bottom-bar icon;
+    // opens the quick-config sheet (LaunchedEffect below).
+    quickConfigRequest: Int = 0,
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel: FlagsViewModel = hiltViewModel()
@@ -216,6 +223,13 @@ fun FlagsRoute(
             sheetFlag = null
         }
     }
+
+    // #603 PR6 — open the quick-config sheet on each re-tap of the Drapeaux bottom-bar icon.
+    QuickConfigRequestEffect(
+        request = quickConfigRequest,
+        canConfigure = canConfigureView,
+        onOpen = { showViewSettingsSheet = true },
+    )
 
     DtTabFallbackEffect(
         showDtTab = showDtTab,
@@ -341,6 +355,7 @@ fun FlagsRoute(
                                 dtShowsRead = dtShowsRead,
                                 dtIsRefreshing = dtIsRefreshing,
                                 searchQuery = searchQuery,
+                                markerStyle = flagsViewSettings.markerStyle,
                             ),
                             actions = AuthenticatedActions(
                                 onSelectTab = viewModel::selectTab,
@@ -379,6 +394,7 @@ fun FlagsRoute(
                 onGroupByCategoryChange = viewModel::setFlagsGroupByCategory,
                 onHideReadCategoriesChange = viewModel::setFlagsHideReadCategories,
                 onUnreadOnlyChange = viewModel::setFlagsUnreadOnly,
+                onMarkerStyleChange = viewModel::setFlagsMarkerStyle,
                 onDismiss = { showViewSettingsSheet = false },
             ),
         )
@@ -539,6 +555,40 @@ private fun FlagsViewSettingsSheet(
                 onCheckedChange = actions.onUnreadOnlyChange,
             )
 
+            // #603 PR6 — GLOBAL marker shape selector (segmented). Shown regardless of the per-tab
+            // override (the shape is global); the write routes through the ViewModel and the list
+            // re-renders live underneath.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(R.string.flags_view_settings_marker_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(R.string.flags_view_settings_marker_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                RedfaceSettingsChoiceGroup(
+                    options = listOf(
+                        RedfaceSettingsChoice(
+                            MarkerStyle.STRIPE,
+                            stringResource(R.string.flags_view_settings_marker_stripe),
+                        ),
+                        RedfaceSettingsChoice(
+                            MarkerStyle.PASTILLE,
+                            stringResource(R.string.flags_view_settings_marker_pastille),
+                        ),
+                        RedfaceSettingsChoice(
+                            MarkerStyle.DOT,
+                            stringResource(R.string.flags_view_settings_marker_dot),
+                        ),
+                    ),
+                    selected = settings.markerStyle,
+                    onSelected = actions.onMarkerStyleChange,
+                )
+            }
+
             TextButton(
                 // Animate the sheet out (M3 stable pattern) before removing it from composition,
                 // instead of an abrupt `if`-driven teardown. Swipe/scrim dismissals already animate
@@ -670,6 +720,17 @@ private fun flagTabEntries(
 // #603 PR4 — thin flat M3 linear progress bar shown only while [loading] (manual or auto refresh of
 // the current tab). Flat (non-wavy) indeterminate indicator; only rendered when loading — the brief
 // appearance under the app bar is the intended cue (ADR-017 decision 7).
+// #603 PR6 — opens the quick-config sheet when [request] increments (a Drapeaux bottom-bar re-tap).
+// Keyed on the counter so each re-tap re-fires; the initial 0 is skipped (no pop on fresh
+// composition) and it only opens when the screen is configurable. Extracted to keep FlagsRoute's
+// cyclomatic complexity in budget.
+@Composable
+private fun QuickConfigRequestEffect(request: Int, canConfigure: Boolean, onOpen: () -> Unit) {
+    LaunchedEffect(request) {
+        if (request > 0 && canConfigure) onOpen()
+    }
+}
+
 @Composable
 private fun FlagsLoadingBar(selectedTab: FlagTab, isRefreshing: Boolean, dtIsRefreshing: Boolean) {
     val loading = if (selectedTab == FlagTab.Dt) dtIsRefreshing else isRefreshing
@@ -875,6 +936,7 @@ private fun FlagListBody(
                             sections = content.sections,
                             selectedTab = selectedTab,
                             removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
+                            markerStyle = state.markerStyle,
                             actions = actions,
                             listState = listState,
                         )
@@ -883,6 +945,7 @@ private fun FlagListBody(
                             flags = content.flags,
                             selectedTab = selectedTab,
                             removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
+                            markerStyle = state.markerStyle,
                             actions = actions,
                             listState = listState,
                         )
@@ -960,10 +1023,12 @@ private const val CONTENT_TYPE_DT_FOOTER = "dt_scan_note"
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
+@Suppress("LongParameterList") // List composable: sections + tab + removal flag + marker + actions + listState.
 private fun CategorySectionedFlagList(
     sections: List<FlagCategorySection>,
     selectedTab: FlagTab,
     removalInFlight: Boolean,
+    markerStyle: MarkerStyle,
     actions: AuthenticatedActions,
     listState: LazyListState,
 ) {
@@ -1025,6 +1090,7 @@ private fun CategorySectionedFlagList(
                         flag = flag,
                         metadata = flagRowMetadata(flag),
                         removalInFlight = removalInFlight,
+                        markerStyle = markerStyle,
                         onClick = { actions.onOpenFlag(flag) },
                         onLongPress = { actions.onLongPressFlag(flag) },
                     )
@@ -1100,10 +1166,12 @@ private fun emptySectionLabel(tab: FlagTab): Int = when (tab) {
  * and accessibility action behave identically to the grouped view.
  */
 @Composable
+@Suppress("LongParameterList") // List composable: flags + tab + removal flag + marker + actions + listState.
 private fun FlatFlagList(
     flags: List<Flag>,
     selectedTab: FlagTab,
     removalInFlight: Boolean,
+    markerStyle: MarkerStyle,
     actions: AuthenticatedActions,
     listState: LazyListState,
 ) {
@@ -1132,6 +1200,7 @@ private fun FlatFlagList(
                     flag = flag,
                     metadata = flagRowMetadata(flag),
                     removalInFlight = removalInFlight,
+                    markerStyle = markerStyle,
                     onClick = { actions.onOpenFlag(flag) },
                     onLongPress = { actions.onLongPressFlag(flag) },
                 )
@@ -1198,10 +1267,12 @@ private fun flagCategoryName(catId: Int): String =
  * `Removing` is only the brief confirm→result window.
  */
 @Composable
+@Suppress("LongParameterList") // Row binding: flag + metadata + removalInFlight + marker style + 2 callbacks.
 private fun RemovableFlagItem(
     flag: Flag,
     metadata: FlagMetadata,
     removalInFlight: Boolean,
+    markerStyle: MarkerStyle,
     onClick: () -> Unit,
     onLongPress: () -> Unit,
 ) {
@@ -1211,6 +1282,7 @@ private fun RemovableFlagItem(
         flag = flag,
         metadata = metadata,
         onClick = onClick,
+        markerStyle = markerStyle,
         longPress = FlagItemLongPress(label = actionsLabel) {
             if (!removalInFlight) onLongPress()
         },
@@ -1627,6 +1699,8 @@ private data class FlagsBodyState(
     val dtIsRefreshing: Boolean,
     /** #603 PR2 — active client-side search query; empty = no filtering. */
     val searchQuery: String = "",
+    /** #603 PR6 — GLOBAL marker shape for the rows (from FlagsViewSettings). */
+    val markerStyle: MarkerStyle = MarkerStyle.STRIPE,
 )
 
 private data class AuthenticatedActions(
@@ -1655,6 +1729,7 @@ private data class FlagsViewSettingsActions(
     val onGroupByCategoryChange: (Boolean) -> Unit,
     val onHideReadCategoriesChange: (Boolean) -> Unit,
     val onUnreadOnlyChange: (Boolean) -> Unit,
+    val onMarkerStyleChange: (MarkerStyle) -> Unit,
     val onDismiss: () -> Unit,
 )
 

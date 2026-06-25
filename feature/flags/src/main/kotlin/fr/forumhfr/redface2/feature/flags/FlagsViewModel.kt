@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
@@ -665,6 +666,12 @@ class FlagsViewModel @Inject constructor(
             userPreferencesRepository.setFlagsPerTabOverride(enabled)
             pendingPerTabOverride.compareAndSet(expect = enabled, update = null)
         }
+    }
+
+    /** Bottom-sheet write for the GLOBAL marker shape (#603 PR6) — one shape for every tab, so no
+     *  per-tab routing (ignores [flagsPerTabOverride]). */
+    fun setFlagsMarkerStyle(style: MarkerStyle) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsMarkerStyle(style) }
     }
 
     fun refresh() {

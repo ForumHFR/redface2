@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
@@ -379,6 +380,41 @@ class DataStoreUserPreferencesRepositoryTest {
         // FAVORITE untouched → still its type-aware default (false).
         repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
             assertFalse("FAVORITE keeps its default, no cross-type leak", awaitItem().unreadOnly)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `markerStyle defaults to STRIPE on an empty store`() = runTest(dispatcher) {
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(MarkerStyle.STRIPE, awaitItem().markerStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsMarkerStyle persists and round-trips PASTILLE then DOT for every tab`() = runTest(dispatcher) {
+        // GLOBAL: written once, observed on any tab type.
+        repository.setFlagsMarkerStyle(MarkerStyle.PASTILLE)
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            assertEquals(MarkerStyle.PASTILLE, awaitItem().markerStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.setFlagsMarkerStyle(MarkerStyle.DOT)
+        repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+            assertEquals(MarkerStyle.DOT, awaitItem().markerStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt flags_marker_style value falls back to STRIPE instead of crashing`() = runTest(dispatcher) {
+        // A value from an older build / manual edit that no longer maps to a MarkerStyle must not
+        // crash observeFlagsViewSettings on MarkerStyle.valueOf — it degrades to STRIPE.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("flags_marker_style")] = "WAVY" }
+
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(MarkerStyle.STRIPE, awaitItem().markerStyle)
             cancelAndIgnoreRemainingEvents()
         }
     }

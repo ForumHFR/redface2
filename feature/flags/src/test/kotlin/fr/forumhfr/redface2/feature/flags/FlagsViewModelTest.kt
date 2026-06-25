@@ -20,6 +20,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -2248,6 +2249,8 @@ class FlagsViewModelTest {
         // #317 — per-type « non-lus uniquement », null = unset → type-aware default applied at read.
         private val perTypeUnread: Map<FlagType, MutableStateFlow<Boolean?>> =
             FlagType.entries.associateWith { MutableStateFlow<Boolean?>(null) }
+        // #603 PR6 — GLOBAL marker shape (not per-type), surfaced through observeFlagsViewSettings.
+        private val markerStyle = MutableStateFlow(MarkerStyle.STRIPE)
 
         /** When set, holds the persisted master write so a test can prove routing uses the
          * OPTIMISTIC value (the persisted `perTab` never updates while gated). */
@@ -2297,8 +2300,12 @@ class FlagsViewModelTest {
                     global to globalHide
                 }
             }
-            return combine(layout, perTypeUnread.getValue(type)) { (group, hide), unread ->
-                FlagsViewSettings(group, hide, unread ?: defaultUnreadOnly(type))
+            return combine(
+                layout,
+                perTypeUnread.getValue(type),
+                markerStyle,
+            ) { (group, hide), unread, marker ->
+                FlagsViewSettings(group, hide, unread ?: defaultUnreadOnly(type), marker)
             }
         }
 
@@ -2325,6 +2332,10 @@ class FlagsViewModelTest {
                 blockUnreadOnlySetUntil?.await()
             }
             perTypeUnread.getValue(type).value = enabled
+        }
+
+        override suspend fun setFlagsMarkerStyle(style: MarkerStyle) {
+            markerStyle.value = style
         }
 
         // #286 — theme prefs are irrelevant to FlagsViewModel; stubbed at their defaults.

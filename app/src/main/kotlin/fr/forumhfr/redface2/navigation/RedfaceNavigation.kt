@@ -445,6 +445,18 @@ private fun StartScreenChoice.toTopLevelDestination(): TopLevelDestination = whe
     StartScreenChoice.MESSAGES -> TopLevelDestination.Messages
 }
 
+// #603 PR6 — a re-tap of the already-selected Drapeaux tab opens its quick-config sheet
+// ([onReselectFlags]); every other tap switches destination ([onSwitch]). Extracted from RedfaceApp's
+// bottom-bar item onClick to keep that composable's cyclomatic complexity in budget.
+private fun onTopLevelTap(
+    tapped: TopLevelDestination,
+    current: TopLevelDestination,
+    onReselectFlags: () -> Unit,
+    onSwitch: () -> Unit,
+) {
+    if (current == tapped && tapped == TopLevelDestination.Flags) onReselectFlags() else onSwitch()
+}
+
 /** #313 — badge cap : beyond this the badge shows « 9+ » (page-1 proxy, cf. MpUnreadBadgeViewModel). */
 private const val MAX_BADGE_COUNT = 9
 
@@ -648,6 +660,13 @@ fun RedfaceApp(intent: Intent?) {
             mutableStateOf(startScreen.screen.toTopLevelDestination())
         }
 
+        // #603 PR6 — re-tap of the already-selected Drapeaux tab raises this counter; threaded to
+        // FlagsRoute, which opens its quick-config sheet on each increment. Deliberately a plain
+        // `remember` (NOT rememberSaveable): a saved non-zero counter would re-open the sheet after a
+        // config change without a new tap (Codex review). Resetting to 0 on recreation is the safe
+        // event semantics — a tap mid-rotation is a negligible loss.
+        var flagsQuickConfigRequest by remember { mutableStateOf(0) }
+
         // Phase 2 finish (#208) — profile bottom sheet state, hoisted to `:app` so that
         // `:feature:topic` never depends on `:feature:profile`. The sheet is opened from
         // any TopicScreen tap on an avatar/author with a non-null profileId.
@@ -827,7 +846,16 @@ fun RedfaceApp(intent: Intent?) {
                 TopLevelDestination.entries.forEach { destination ->
                     item(
                         selected = currentDestination == destination,
-                        onClick = { currentDestination = destination },
+                        onClick = {
+                            // #603 PR6 — re-tap of the already-selected Drapeaux tab opens its
+                            // quick-config sheet (counter bump); any other tap switches destination.
+                            onTopLevelTap(
+                                tapped = destination,
+                                current = currentDestination,
+                                onReselectFlags = { flagsQuickConfigRequest++ },
+                                onSwitch = { currentDestination = destination },
+                            )
+                        },
                         icon = {
                             TopLevelDestinationIcon(
                                 destination = destination,
@@ -864,6 +892,7 @@ fun RedfaceApp(intent: Intent?) {
                     RedfaceNavHost(
                         backStack = activeBackStack,
                         accountMenu = accountMenu,
+                        flagsQuickConfigRequest = flagsQuickConfigRequest,
                         onReportContent = {
                             startReportEmail(context, reportEmailSubject, reportNoEmailClient)
                         },
@@ -1488,6 +1517,8 @@ internal fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: Str
 private fun RedfaceNavHost(
     backStack: NavBackStack<NavKey>,
     accountMenu: @Composable () -> Unit,
+    // #603 PR6 — increments on each Drapeaux-tab re-tap; FlagsRoute opens its quick-config sheet on change.
+    flagsQuickConfigRequest: Int,
     // #494 — the « Signaler un contenu » row of the settings Account/About sub-page reuses the same
     // report-email flow as the account menu (which owns `context` + the report strings).
     onReportContent: () -> Unit,
@@ -1574,6 +1605,7 @@ private fun RedfaceNavHost(
                         }
                         backStack.add(PrivateMessageThreadRoute(threadId = threadId, page = page))
                     },
+                    quickConfigRequest = flagsQuickConfigRequest,
                     topBarActions = accountMenu,
                 )
             }

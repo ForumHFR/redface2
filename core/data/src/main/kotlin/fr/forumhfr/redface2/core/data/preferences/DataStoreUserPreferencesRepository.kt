@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenChoice
@@ -174,6 +175,15 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         persist {
             dataStore.edit { prefs ->
                 prefs[flagsUnreadOnlyKey(type)] = enabled
+            }
+        }
+    }
+
+    override suspend fun setFlagsMarkerStyle(style: MarkerStyle) {
+        // #603 PR6 — GLOBAL: a single key, no per-type variant. Persisted by name, read defensively.
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_MARKER_STYLE] = style.name
             }
         }
     }
@@ -686,19 +696,34 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val globalHide = prefs[KEY_FLAGS_HIDE_READ_CATEGORIES] ?: false
         // #317 — unreadOnly is always per-type with a type-aware default (CYAN actionable by default).
         val unreadOnly = prefs[flagsUnreadOnlyKey(type)] ?: defaultUnreadOnly(type)
+        // #603 PR6 — marker shape is GLOBAL: resolved once, added to both return paths regardless of
+        // the per-tab override.
+        val markerStyle = readMarkerStyle(prefs)
         if (prefs[KEY_FLAGS_PER_TAB_OVERRIDE] != true) {
             return FlagsViewSettings(
                 groupByCategory = globalGroup,
                 hideReadCategories = globalHide,
                 unreadOnly = unreadOnly,
+                markerStyle = markerStyle,
             )
         }
         return FlagsViewSettings(
             groupByCategory = prefs[flagsGroupByCategoryKey(type)] ?: globalGroup,
             hideReadCategories = prefs[flagsHideReadCategoriesKey(type)] ?: globalHide,
             unreadOnly = unreadOnly,
+            markerStyle = markerStyle,
         )
     }
+
+    /**
+     * Reads [KEY_FLAGS_MARKER_STYLE] defensively (#603 PR6): an unknown / corrupt stored value falls
+     * back to [MarkerStyle.STRIPE] instead of crashing on `MarkerStyle.valueOf` — same stance as the
+     * theme / density / accent enum reads.
+     */
+    private fun readMarkerStyle(prefs: Preferences): MarkerStyle =
+        prefs[KEY_FLAGS_MARKER_STYLE]
+            ?.let { stored -> runCatching { MarkerStyle.valueOf(stored) }.getOrNull() }
+            ?: MarkerStyle.STRIPE
 
     /**
      * Type-aware default for the #317 « non-lus uniquement » filter: CYAN (« Mes sujets ») shows the
@@ -724,6 +749,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_IGNORE_TOPIC_CACHE = booleanPreferencesKey("ignore_topic_cache")
         val KEY_FLAGS_GROUP_BY_CATEGORY = booleanPreferencesKey("flags_group_by_category")
         val KEY_FLAGS_HIDE_READ_CATEGORIES = booleanPreferencesKey("flags_hide_read_categories")
+        // #603 PR6 — GLOBAL Drapeaux marker shape (MarkerStyle.name, defensively parsed). No per-type
+        // variant: one shape for every tab, independent of the #309 per-tab override.
+        val KEY_FLAGS_MARKER_STYLE = stringPreferencesKey("flags_marker_style")
         // #309 — per-tab display override. The master switch plus one nullable key per FlagType for
         // each toggle; absence of a per-type key means « fall back to the global value ». Keys are
         // derived from the stable enum name (cyan/red/favorite), e.g. `flags_group_by_category_cyan`.

@@ -129,6 +129,12 @@
          onglet » ci-dessus). Activé par défaut sur « Mes sujets », désactivé sur Lu et Favoris. -->
     <string name="flags_view_settings_unread_only_title">Non-lus uniquement</string>
     <string name="flags_view_settings_unread_only_description">N\'affiche que les sujets avec un message non lu. Propre à cet onglet.</string>
+    <!-- #603 PR6 — Forme du marqueur de gauche (barre / pastille / point). Réglage GLOBAL (tous onglets). -->
+    <string name="flags_view_settings_marker_title">Marqueur</string>
+    <string name="flags_view_settings_marker_description">Forme de l\'indicateur de couleur à gauche de chaque drapeau. S\'applique à tous les onglets.</string>
+    <string name="flags_view_settings_marker_stripe">Barre</string>
+    <string name="flags_view_settings_marker_pastille">Pastille</string>
+    <string name="flags_view_settings_marker_dot">Point</string>
     <string name="flags_view_settings_done">Fermer</string>
 
     <!-- #99 — Retirer un drapeau (delflag) : action du sheet d'appui-long (#603 PR5) + dialog de
