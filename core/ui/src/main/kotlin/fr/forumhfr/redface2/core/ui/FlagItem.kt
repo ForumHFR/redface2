@@ -20,6 +20,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.model.Flag
+import fr.forumhfr.redface2.core.model.effectiveFlagColor
+import fr.forumhfr.redface2.core.model.pagesToRead
 import fr.forumhfr.redface2.core.ui.icon.categoryIcon
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
@@ -65,9 +67,10 @@ fun FlagItem(
     // slot is now the configurable [FlagMarker] (default barre de couleur, ADR-017) and the trailing
     // slot a « pages à lire » pill when the topic is unread with pages left. DT (and any future forum
     // list) keeps rendering through the SAME row primitive — change the row once, every list follows.
-    // pagesToRead mirrors feature/flags' Flag.pagesToRead() (the pure VM-side source of truth).
-    val pagesToRead = (flag.totalPages - flag.lastReadPage).coerceAtLeast(0)
-    val accent = if (flag.isFavorite) FlagPalette.Favorite else FlagPalette.colorFor(flag.type)
+    // pagesToRead / effective color come from the single source of truth in :core:model (shared with
+    // FlagMarker and the VM mapper) — no per-layer recomputation that could silently diverge.
+    val pagesToRead = flag.pagesToRead()
+    val accent = FlagPalette.colorFor(flag.effectiveFlagColor())
     ForumListRow(
         title = flag.title,
         metadata = metadata,
