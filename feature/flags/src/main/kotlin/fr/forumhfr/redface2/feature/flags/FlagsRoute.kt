@@ -326,9 +326,11 @@ fun FlagsRoute(
                 // of the current tab: manual pull-to-refresh, auto-refresh AND the initial cold load —
                 // it is now the single loading cue (the central spinner was retired). ADR-017 decision 7.
                 FlagsLoadingBar(
-                    loading = flagsLoadingBarVisible(
+                    // Anonymous gate: when not authenticated, flagsState stays null and we must NOT show
+                    // the bar over the « Se connecter » prompt (Codex review #648) — short-circuit here
+                    // so the helper stays at 5 params (detekt LongParameterList).
+                    loading = authState is AuthState.Authenticated && flagsLoadingBarVisible(
                         selectedTab = selectedTab,
-                        isAuthenticated = authState is AuthState.Authenticated,
                         flagsState = flagsState,
                         isRefreshing = isRefreshing,
                         dtListState = dtListState,
@@ -735,23 +737,19 @@ private fun QuickConfigRequestEffect(request: Int, canConfigure: Boolean, onOpen
 // current tab, so the central CircularProgressIndicator could be retired: the bar is the single loading
 // cue (manual + auto refresh + cold load). Plain function (no composition) — keeps FlagsRoute's
 // cyclomatic complexity in budget.
+// NB: the anonymous gate (`authState is Authenticated`) lives at the CALL SITE — when anonymous,
+// flagsState stays null and this would otherwise keep the bar up forever over the « Se connecter »
+// prompt (Codex review #648). Kept at 5 params here (detekt LongParameterList threshold = 6).
 private fun flagsLoadingBarVisible(
     selectedTab: FlagTab,
-    isAuthenticated: Boolean,
     flagsState: FlagsListUiState?,
     isRefreshing: Boolean,
     dtListState: DtListUiState,
     dtIsRefreshing: Boolean,
-): Boolean {
-    // Authenticated-screen affordance only: when anonymous, flagsState stays null and the AnonymousBody
-    // (login prompt) is shown — without this gate `flagsState == null` would keep the bar up forever on
-    // the « Se connecter » screen (Codex review #648).
-    if (!isAuthenticated) return false
-    return when (selectedTab) {
-        FlagTab.Dt -> dtIsRefreshing || dtListState is DtListUiState.Loading
-        FlagTab.Super -> false
-        else -> isRefreshing || flagsState == null || flagsState == FlagsListUiState.Loading
-    }
+): Boolean = when (selectedTab) {
+    FlagTab.Dt -> dtIsRefreshing || dtListState is DtListUiState.Loading
+    FlagTab.Super -> false
+    else -> isRefreshing || flagsState == null || flagsState == FlagsListUiState.Loading
 }
 
 @Composable
