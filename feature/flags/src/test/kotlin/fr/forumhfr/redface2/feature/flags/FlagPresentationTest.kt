@@ -9,64 +9,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 100% coverage of the pure presentation helpers introduced for the #603 Drapeaux refonte
- * (ADR-017): [pagesToRead], [effectiveFlagColor] and [toFlagRowUiModel]. No Android dependency —
- * raw [Flag] in, plain values out, so the list/marker rendering (PR3) never recomputes them in
- * composition.
+ * Covers the VM-side bundle [toFlagRowUiModel] (#603, ADR-017). The pure per-flag derivations it
+ * relies on ([Flag.pagesToRead], [Flag.effectiveFlagColor]) are tested in `:core:model`
+ * (`FlagDerivationsTest`) where they now live; here we only assert the bundle wiring.
  */
 class FlagPresentationTest {
-
-    // --- pagesToRead -------------------------------------------------------------------------
-
-    @Test
-    fun `pagesToRead is the number of pages after the last read one`() {
-        assertEquals(3, baseFlag.copy(totalPages = 10, lastReadPage = 7).pagesToRead())
-    }
-
-    @Test
-    fun `pagesToRead is zero when the topic is fully read`() {
-        assertEquals(0, baseFlag.copy(totalPages = 10, lastReadPage = 10).pagesToRead())
-    }
-
-    @Test
-    fun `pagesToRead clamps to zero when lastReadPage exceeds totalPages (stale data)`() {
-        // Defensive: a stale cache could carry a lastReadPage past a shrunk totalPages.
-        assertEquals(0, baseFlag.copy(totalPages = 5, lastReadPage = 8).pagesToRead())
-    }
-
-    @Test
-    fun `pagesToRead on a barely-read long topic`() {
-        assertEquals(40, baseFlag.copy(totalPages = 41, lastReadPage = 1).pagesToRead())
-    }
-
-    @Test
-    fun `pagesToRead with an unset last-read page (0) returns the full page count`() {
-        // Defensive boundary: REST defaults lastReadPage to 1, but a missing marker (0) must not
-        // over-count — totalPages - 0 = totalPages, never more.
-        assertEquals(7, baseFlag.copy(totalPages = 7, lastReadPage = 0).pagesToRead())
-    }
-
-    // --- effectiveFlagColor ------------------------------------------------------------------
-
-    @Test
-    fun `effective color is the bucket type when the topic is not a favorite`() {
-        assertEquals(FlagType.CYAN, baseFlag.copy(type = FlagType.CYAN, isFavorite = false).effectiveFlagColor())
-        assertEquals(FlagType.RED, baseFlag.copy(type = FlagType.RED, isFavorite = false).effectiveFlagColor())
-    }
-
-    @Test
-    fun `effective color is FAVORITE when the topic is favorited regardless of bucket`() {
-        // #384/dev v118 parity: a favorited topic listed under « Mes sujets » keeps its yellow marker.
-        assertEquals(FlagType.FAVORITE, baseFlag.copy(type = FlagType.CYAN, isFavorite = true).effectiveFlagColor())
-        assertEquals(FlagType.FAVORITE, baseFlag.copy(type = FlagType.RED, isFavorite = true).effectiveFlagColor())
-    }
-
-    @Test
-    fun `effective color of a FAVORITE bucket flag is FAVORITE`() {
-        assertEquals(FlagType.FAVORITE, baseFlag.copy(type = FlagType.FAVORITE).effectiveFlagColor())
-    }
-
-    // --- toFlagRowUiModel --------------------------------------------------------------------
 
     @Test
     fun `row ui model bundles the derived presentation values`() {

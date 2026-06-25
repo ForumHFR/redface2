@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.effectiveFlagColor
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
 
@@ -40,7 +41,7 @@ private const val PASTILLE_BG_ALPHA = 0.18f
  */
 @Composable
 // Marker primitive: shape + the 3 flag fields that drive its color/state + the category glyph +
-// modifier — kept as primitives (not a [Flag]) so non-drapeau rows can reuse it without core/model.
+// modifier — kept as primitives (not a [Flag]) so non-drapeau rows can reuse it.
 @Suppress("LongParameterList")
 fun FlagMarker(
     style: MarkerStyle,
@@ -50,7 +51,9 @@ fun FlagMarker(
     @DrawableRes categoryIconRes: Int,
     modifier: Modifier = Modifier,
 ) {
-    val base = if (isFavorite) FlagPalette.Favorite else FlagPalette.colorFor(type)
+    // Favori-wins resolved by the single source of truth in :core:model (shared with FlagItem and the
+    // VM mapper) so the rule can't silently diverge per layer.
+    val base = FlagPalette.colorFor(effectiveFlagColor(type, isFavorite))
     val color = if (hasUnread) base else base.copy(alpha = READ_ALPHA)
     when (style) {
         MarkerStyle.STRIPE -> Box(

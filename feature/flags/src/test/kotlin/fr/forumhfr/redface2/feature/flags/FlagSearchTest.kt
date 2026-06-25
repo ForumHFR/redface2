@@ -3,6 +3,8 @@ package fr.forumhfr.redface2.feature.flags
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -92,6 +94,55 @@ class FlagSearchTest {
         // « Carte mère » + « CPU » match in Hardware ; nothing in Programmation/Discussions → dropped.
         assertEquals(listOf(1), filtered.sections.map { it.catId })
         assertEquals(listOf("Carte mère", "CPU"), filtered.sections.single().topics.map { it.title })
+    }
+
+    // --- FlagsContent.isEmpty ----------------------------------------------------------------
+
+    @Test
+    fun `isEmpty is true for a flat content with no flags`() {
+        assertTrue(FlagsContent.Flat(emptyList()).isEmpty())
+    }
+
+    @Test
+    fun `isEmpty is false for a flat content with flags`() {
+        assertFalse(FlagsContent.Flat(listOf(flag("A"))).isEmpty())
+    }
+
+    @Test
+    fun `isEmpty is true for a grouped content whose sections are all empty`() {
+        val content = FlagsContent.Grouped(
+            listOf(
+                FlagCategorySection(1, "Hardware", emptyList()),
+                FlagCategorySection(10, "Programmation", emptyList()),
+            ),
+        )
+        assertTrue(content.isEmpty())
+    }
+
+    @Test
+    fun `isEmpty is false for a grouped content with at least one topic`() {
+        val content = FlagsContent.Grouped(
+            listOf(
+                FlagCategorySection(1, "Hardware", emptyList()),
+                FlagCategorySection(10, "Programmation", listOf(flag("Kotlin"))),
+            ),
+        )
+        assertFalse(content.isEmpty())
+    }
+
+    @Test
+    fun `a grouped query matching nothing drops every section and is empty`() {
+        val content = FlagsContent.Grouped(
+            listOf(
+                FlagCategorySection(1, "Hardware", listOf(flag("CPU"))),
+                FlagCategorySection(10, "Programmation", listOf(flag("Kotlin"))),
+            ),
+        )
+
+        val filtered = content.filteredBy("zzz")
+
+        assertEquals(emptyList<FlagCategorySection>(), (filtered as FlagsContent.Grouped).sections)
+        assertTrue("all sections dropped → empty (the NoFlagsSearchResults path)", filtered.isEmpty())
     }
 
     private fun flag(title: String): Flag = Flag(

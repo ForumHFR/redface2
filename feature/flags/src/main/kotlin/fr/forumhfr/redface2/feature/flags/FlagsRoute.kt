@@ -816,8 +816,11 @@ private fun FlagListBody(
             is FlagsListUiState.Success -> {
                 // #603 PR2 — apply the client-side search filter (no-op on a blank query) before
                 // rendering. An active query that matches nothing shows a scrollable empty state so
-                // the pull-to-refresh still has a target (#229).
-                val content = current.content.filteredBy(state.searchQuery)
+                // the pull-to-refresh still has a target (#229). `remember`-ised on (content, query)
+                // so the filter does not re-run/re-allocate on every recomposition (ADR-017 review).
+                val content = remember(current.content, state.searchQuery) {
+                    current.content.filteredBy(state.searchQuery)
+                }
                 if (state.searchQuery.isNotBlank() && content.isEmpty()) {
                     NoFlagsSearchResults(query = state.searchQuery)
                 } else {
