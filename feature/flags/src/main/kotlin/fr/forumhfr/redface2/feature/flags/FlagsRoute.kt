@@ -61,6 +61,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -1162,49 +1163,49 @@ private fun CategorySectionedFlagList(
 }
 
 /**
- * Opaque category separator band for the grouped list (#179). Uses `surfaceVariant` /
- * `onSurfaceVariant` from the theme (no hardcoded color) so it reads as a sticky header over
- * the scrolling rows without bleed-through.
+ * Category separator band for the grouped list (#179). #603 — minimal SUBHEAD style: an OPAQUE
+ * `surface` background (matches the list, so the sticky header never bleeds the scrolling rows through,
+ * but reads as a light subhead rather than the former heavy `surfaceVariant` block), an uppercase
+ * letter-spaced category name, and a hairline divider below it.
  *
  * #414 — the whole band is tappable and opens the category's topic listing (RF1 parity); the trailing
- * chevron vector (`ic_chevron_right`) is the affordance (the former « › » text glyph rendered far too
- * small — a bug). Foundation [clickable] does not enforce a Material touch-target minimum, hence the
- * explicit [heightIn] (44 dp — a hair tighter than 48 dp, still an acceptable target).
+ * chevron vector (`ic_chevron_right`) is the affordance. Foundation [clickable] does not enforce a
+ * Material touch-target minimum, hence the explicit [heightIn] (44 dp — still an acceptable target).
  */
 @Composable
 private fun CategoryHeaderBand(catId: Int, label: String, onClick: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .heightIn(min = 44.dp)
-            .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) {
-                onClick()
-            }
-            .padding(horizontal = 24.dp, vertical = 6.dp),
-    ) {
-        // #603 — Material Symbols glyph per category (spike 4, ADR-017); decorative (the label carries
-        // the name), so no contentDescription. Generic forum glyph for unknown categories.
-        RedfaceVectorIcon(
-            resId = categoryIcon(catId),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            size = 20.dp,
-            modifier = Modifier.padding(end = 12.dp),
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
-        )
-        // Trailing chevron — a proper vector icon (the former Text("›") at titleSmall was far too
-        // small, the reported bug); decorative, the band's onClickLabel carries the affordance.
-        RedfaceVectorIcon(
-            resId = CoreUiR.drawable.ic_chevron_right,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            size = 20.dp,
-        )
+    Column(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 44.dp)
+                .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) {
+                    onClick()
+                }
+                .padding(horizontal = 24.dp, vertical = 6.dp),
+        ) {
+            // Decorative category glyph (the label carries the name); generic forum glyph if unknown.
+            RedfaceVectorIcon(
+                resId = categoryIcon(catId),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                size = 18.dp,
+                modifier = Modifier.padding(end = 10.dp),
+            )
+            Text(
+                text = label.uppercase(),
+                style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.08.em),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            // Trailing chevron — decorative; the band's onClickLabel carries the open affordance.
+            RedfaceVectorIcon(
+                resId = CoreUiR.drawable.ic_chevron_right,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                size = 18.dp,
+            )
+        }
+        FlagItemDivider()
     }
 }
 
