@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.3` — `internal` (dev) — 2026-06-25
+
+> Suite du dogfood 0.17.2 (#653 + #654). Build dev ; versionCode au dispatch. versionName 0.17.2 → 0.17.3.
+
+**Finitions (#653, #654)**
+
+- **Option « titre sur une seule ligne »** dans le menu d'affichage des Drapeaux : tronque le titre des
+  sujets à une ligne au lieu de deux (réglage global, via CompositionLocal).
+- **Bande de catégorie allégée** (vue groupée « par catégorie ») : sous-titre minimal (nom en capitales
+  espacées + filet fin) au lieu du bloc plein `surfaceVariant`, moins lourd.
+
 ## `0.17.2` — `internal` (dev) — 2026-06-25
 
 > Polish #2 de la vue Drapeaux suite au dogfood 0.17.1 (#651). Build dev ; versionCode au dispatch.
