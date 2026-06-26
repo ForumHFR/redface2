@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
@@ -677,6 +678,11 @@ class FlagsViewModel @Inject constructor(
     /** Bottom-sheet write for the GLOBAL « single-line topic titles » toggle (#603). */
     fun setFlagsSingleLineTitle(enabled: Boolean) {
         viewModelScope.launch { userPreferencesRepository.setFlagsSingleLineTitle(enabled) }
+    }
+
+    /** Bottom-sheet write for the GLOBAL grouped-view category band style (#603). */
+    fun setFlagsCategoryBandStyle(style: CategoryBandStyle) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsCategoryBandStyle(style) }
     }
 
     fun refresh() {

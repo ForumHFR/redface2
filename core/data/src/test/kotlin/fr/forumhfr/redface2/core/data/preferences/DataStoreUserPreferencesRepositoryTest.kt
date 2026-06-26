@@ -9,6 +9,7 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
@@ -415,6 +416,41 @@ class DataStoreUserPreferencesRepositoryTest {
 
         repository.observeFlagsViewSettings(FlagType.CYAN).test {
             assertEquals(MarkerStyle.STRIPE, awaitItem().markerStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `categoryBandStyle defaults to MINIMAL on an empty store`() = runTest(dispatcher) {
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(CategoryBandStyle.MINIMAL, awaitItem().categoryBandStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsCategoryBandStyle persists and round-trips SOFT then BULLET for every tab`() = runTest(dispatcher) {
+        // GLOBAL: written once, observed on any tab type.
+        repository.setFlagsCategoryBandStyle(CategoryBandStyle.SOFT)
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            assertEquals(CategoryBandStyle.SOFT, awaitItem().categoryBandStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.setFlagsCategoryBandStyle(CategoryBandStyle.BULLET)
+        repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+            assertEquals(CategoryBandStyle.BULLET, awaitItem().categoryBandStyle)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt flags_category_band_style value falls back to MINIMAL instead of crashing`() = runTest(dispatcher) {
+        // A value from an older build / manual edit that no longer maps to a CategoryBandStyle must
+        // not crash observeFlagsViewSettings on CategoryBandStyle.valueOf — it degrades to MINIMAL.
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("flags_category_band_style")] = "RAINBOW" }
+
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(CategoryBandStyle.MINIMAL, awaitItem().categoryBandStyle)
             cancelAndIgnoreRemainingEvents()
         }
     }

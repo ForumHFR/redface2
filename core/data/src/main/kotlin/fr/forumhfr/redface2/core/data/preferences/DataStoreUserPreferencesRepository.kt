@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
@@ -193,6 +194,15 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         persist {
             dataStore.edit { prefs ->
                 prefs[KEY_FLAGS_SINGLE_LINE_TITLE] = enabled
+            }
+        }
+    }
+
+    override suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle) {
+        // #603 — GLOBAL: a single key, no per-type variant. Persisted by name, read defensively.
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_CATEGORY_BAND_STYLE] = style.name
             }
         }
     }
@@ -710,6 +720,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val markerStyle = readMarkerStyle(prefs)
         // #603 — GLOBAL « single-line titles » toggle: resolved once, added to both return paths.
         val singleLineTitle = prefs[KEY_FLAGS_SINGLE_LINE_TITLE] ?: false
+        // #603 — GLOBAL category band style: resolved once (defensively), added to both return paths.
+        val categoryBandStyle = readCategoryBandStyle(prefs)
         if (prefs[KEY_FLAGS_PER_TAB_OVERRIDE] != true) {
             return FlagsViewSettings(
                 groupByCategory = globalGroup,
@@ -717,6 +729,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
                 unreadOnly = unreadOnly,
                 markerStyle = markerStyle,
                 singleLineTitle = singleLineTitle,
+                categoryBandStyle = categoryBandStyle,
             )
         }
         return FlagsViewSettings(
@@ -725,6 +738,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             unreadOnly = unreadOnly,
             markerStyle = markerStyle,
             singleLineTitle = singleLineTitle,
+            categoryBandStyle = categoryBandStyle,
         )
     }
 
@@ -737,6 +751,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         prefs[KEY_FLAGS_MARKER_STYLE]
             ?.let { stored -> runCatching { MarkerStyle.valueOf(stored) }.getOrNull() }
             ?: MarkerStyle.STRIPE
+
+    /**
+     * Reads [KEY_FLAGS_CATEGORY_BAND_STYLE] defensively (#603): an unknown / corrupt stored value
+     * falls back to [CategoryBandStyle.MINIMAL] instead of crashing on `CategoryBandStyle.valueOf` —
+     * same stance as [readMarkerStyle].
+     */
+    private fun readCategoryBandStyle(prefs: Preferences): CategoryBandStyle =
+        prefs[KEY_FLAGS_CATEGORY_BAND_STYLE]
+            ?.let { stored -> runCatching { CategoryBandStyle.valueOf(stored) }.getOrNull() }
+            ?: CategoryBandStyle.MINIMAL
 
     /**
      * Type-aware default for the #317 « non-lus uniquement » filter: CYAN (« Mes sujets ») shows the
@@ -767,6 +791,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FLAGS_MARKER_STYLE = stringPreferencesKey("flags_marker_style")
         // #603 — GLOBAL « single-line topic titles » toggle (one for every tab).
         val KEY_FLAGS_SINGLE_LINE_TITLE = booleanPreferencesKey("flags_single_line_title")
+        // #603 — GLOBAL grouped-view category band style (CategoryBandStyle.name, defensively parsed).
+        val KEY_FLAGS_CATEGORY_BAND_STYLE = stringPreferencesKey("flags_category_band_style")
         // #309 — per-tab display override. The master switch plus one nullable key per FlagType for
         // each toggle; absence of a per-type key means « fall back to the global value ». Keys are
         // derived from the stable enum name (cyan/red/favorite), e.g. `flags_group_by_category_cyan`.
