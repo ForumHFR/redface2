@@ -454,16 +454,40 @@ private fun StartScreenChoice.toTopLevelDestination(): TopLevelDestination = whe
     StartScreenChoice.MESSAGES -> TopLevelDestination.Messages
 }
 
-// #603 PR6 — a re-tap of the already-selected Drapeaux tab opens its quick-config sheet
-// ([onReselectFlags]); every other tap switches destination ([onSwitch]). Extracted from RedfaceApp's
-// bottom-bar item onClick to keep that composable's cyclomatic complexity in budget.
-private fun onTopLevelTap(
+// #603 PR6 / #679 — what a bottom-bar tap should do, given the tapped tab, the current tab and the
+// Drapeaux stack depth. Pure (no callbacks → no LongParameterList, fully testable); the host maps the
+// result to an action via [runTopLevelTap].
+internal enum class TopLevelTapAction { ReselectFlags, PopFlagsToRoot, Switch }
+
+// A tap on a DIFFERENT tab switches. A re-tap of the already-selected Drapeaux tab depends on its stack:
+//   - at the tab ROOT ([flagsAtRoot]) → open the quick-config sheet (ReselectFlags) ;
+//   - from a SUB-SCREEN (a topic opened from the list) → pop the tab back to its root (PopFlagsToRoot),
+//     NOT arm the sheet. #679: arming from a sub-screen made the sheet pop open on return to the list.
+// A re-tap of any other already-selected tab is a plain Switch (no special-case).
+internal fun topLevelTapAction(
     tapped: TopLevelDestination,
     current: TopLevelDestination,
+    flagsAtRoot: Boolean,
+): TopLevelTapAction {
+    val reselectFlags = current == tapped && tapped == TopLevelDestination.Flags
+    return when {
+        reselectFlags && flagsAtRoot -> TopLevelTapAction.ReselectFlags
+        reselectFlags -> TopLevelTapAction.PopFlagsToRoot
+        else -> TopLevelTapAction.Switch
+    }
+}
+
+// #679 — dispatch a [topLevelTapAction] to the host's side effects. Kept out of RedfaceApp's body so the
+// `when` does not count against its cyclomatic-complexity budget (at detekt's ceiling).
+private fun runTopLevelTap(
+    action: TopLevelTapAction,
     onReselectFlags: () -> Unit,
+    onPopFlagsToRoot: () -> Unit,
     onSwitch: () -> Unit,
-) {
-    if (current == tapped && tapped == TopLevelDestination.Flags) onReselectFlags() else onSwitch()
+) = when (action) {
+    TopLevelTapAction.ReselectFlags -> onReselectFlags()
+    TopLevelTapAction.PopFlagsToRoot -> onPopFlagsToRoot()
+    TopLevelTapAction.Switch -> onSwitch()
 }
 
 /**
@@ -1062,14 +1086,19 @@ fun RedfaceApp(intent: Intent?) {
         // (see navSuiteContentInsetModifier). Read in composable scope, branch lives in the helper.
         val contentInsetModifier = navSuiteContentInsetModifier(navLayoutType, WindowInsets.navigationBars)
 
-        // #603 PR6 — re-tap of the already-selected Drapeaux tab opens its quick-config sheet (counter
-        // bump); any other tap switches destination. Hoisted to a val so the per-item onClick in
-        // RedfaceBottomNavigationSuite carries no extra branch and RedfaceApp stays under detekt's ceiling.
+        // #603 PR6 / #679 — bottom-bar tap routing (see [topLevelTapAction]). Hoisted to a val so the per-item
+        // onClick in RedfaceBottomNavigationSuite carries no extra branch and RedfaceApp stays under detekt's
+        // ceiling. `flagsAtRoot` is read at tap time (current stack depth), so a re-tap from a sub-screen
+        // pops the tab to its root instead of arming the quick-config sheet (#679).
         val onNavItemClick: (TopLevelDestination) -> Unit = { destination ->
-            onTopLevelTap(
-                tapped = destination,
-                current = currentDestination,
+            runTopLevelTap(
+                action = topLevelTapAction(
+                    tapped = destination,
+                    current = currentDestination,
+                    flagsAtRoot = flagsBackStack.size <= 1,
+                ),
                 onReselectFlags = { flagsQuickConfigRequest++ },
+                onPopFlagsToRoot = { popToRoot(flagsBackStack) },
                 onSwitch = { switchTab(destination) },
             )
         }
@@ -2633,6 +2662,15 @@ private fun resetStack(
     backStack.add(root)
     if (route != root) {
         backStack.add(route)
+    }
+}
+
+// #679 — pop a tab's back stack down to its root, KEEPING the root entry instance (so its state is not
+// lost, unlike [resetStack] which clears and re-adds a fresh root). Removes from the top, the same idiom
+// the host uses for a single back-pop ([NavBackStack.removeAt] at lastIndex).
+private fun popToRoot(backStack: NavBackStack<NavKey>) {
+    while (backStack.size > 1) {
+        backStack.removeAt(backStack.lastIndex)
     }
 }
 
