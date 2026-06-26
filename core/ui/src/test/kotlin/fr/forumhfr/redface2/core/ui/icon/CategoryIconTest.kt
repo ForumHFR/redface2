@@ -18,6 +18,7 @@ class CategoryIconTest {
         assertEquals(R.drawable.ic_ms_terminal, categoryIcon(11)) // Linux et OS Alternatifs
         assertEquals(R.drawable.ic_ms_shopping_cart, categoryIcon(6)) // Achats & Ventes
         assertEquals(R.drawable.ic_ms_forum, categoryIcon(13)) // Discussions
+        assertEquals(R.drawable.ic_ms_smart_toy, categoryIcon(32)) // Intelligence Artificielle
     }
 
     @Test
@@ -29,7 +30,7 @@ class CategoryIconTest {
 
     @Test
     fun `every public category resolves to a non-zero drawable`() {
-        val publicCats = listOf(1, 16, 15, 2, 30, 23, 25, 3, 14, 5, 4, 22, 21, 11, 10, 12, 6, 8, 13)
+        val publicCats = listOf(1, 16, 15, 2, 30, 23, 25, 3, 14, 5, 4, 22, 21, 11, 10, 12, 6, 8, 13, 32)
         publicCats.forEach { catId ->
             assertEquals(
                 "cat $catId must resolve",

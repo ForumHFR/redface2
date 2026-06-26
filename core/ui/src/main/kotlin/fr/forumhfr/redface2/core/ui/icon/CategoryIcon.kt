@@ -5,8 +5,9 @@ import fr.forumhfr.redface2.core.ui.R
 
 /**
  * Maps an HFR forum category id to its Material Symbols drawable (#603, ADR-017, spike 4). The set is
- * the 19 public categories captured from the REST catalogue; any unknown id (e.g. Blabla `24`, or a
- * future category) falls back to [R.drawable.ic_ms_forum].
+ * the public categories captured from the REST catalogue (20 as of 2026-06, incl. Intelligence
+ * Artificielle `32`); any unknown id (e.g. Blabla `24`, which 403s on REST, or a future category)
+ * falls back to [R.drawable.ic_ms_forum].
  *
  * Pure (returns a `@DrawableRes` id), so it is unit-testable and callable from `remember {}` blocks.
  * Icons are local vector drawables tinted at render time (ADR-015 / `RedfaceVectorIcon`) — Material
@@ -37,4 +38,5 @@ private val CATEGORY_ICONS: Map<Int, Int> = mapOf(
     6 to R.drawable.ic_ms_shopping_cart, // Achats & Ventes
     8 to R.drawable.ic_ms_work, // Emploi & Etudes
     13 to R.drawable.ic_ms_forum, // Discussions
+    32 to R.drawable.ic_ms_smart_toy, // Intelligence Artificielle
 )
