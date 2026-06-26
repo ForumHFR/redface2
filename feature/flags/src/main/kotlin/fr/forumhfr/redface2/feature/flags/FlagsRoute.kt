@@ -146,9 +146,6 @@ fun FlagsRoute(
     val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
     val flagsState by viewModel.flagsState.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
-    // #603 — drives ONLY the circular PullToRefreshBox indicator (manual gesture); an auto-refresh
-    // keeps just the top linear bar via [isRefreshing], so no second rond pops on landing.
-    val isManualRefreshing by viewModel.isManualRefreshing.collectAsStateWithLifecycle()
     val removeFlagState by viewModel.removeFlagState.collectAsStateWithLifecycle()
     val removeFlagEvent by viewModel.removeFlagEvent.collectAsStateWithLifecycle()
     val flagsViewSettings by viewModel.flagsViewSettings.collectAsStateWithLifecycle()
@@ -373,7 +370,6 @@ fun FlagsRoute(
                                 flagsState = flagsState,
                                 cyanShowsRead = cyanShowsRead,
                                 isRefreshing = isRefreshing,
-                                isManualRefreshing = isManualRefreshing,
                                 removeFlagState = removeFlagState,
                                 showDtTab = showDtTab,
                                 dtListState = dtListState,
@@ -979,11 +975,14 @@ private fun FlagListBody(
     // Pull-to-refresh (swipe down) replaces the legacy header « Actualiser » button, matching
     // feature/forum. It wraps the whole flag body so the indicator stays anchored over the
     // existing content during the refresh round-trip (Material 3 stable, cf. Context7).
-    // #603 — the circular indicator is gated on the MANUAL refresh only: an auto-refresh (landing /
-    // tab switch / resume) surfaces just the top linear bar, no second rond over the list.
+    // #603 — no circular indicator: the thin top FlagsLoadingBar is the single loading cue for manual,
+    // auto AND initial loads (XaTriX dogfood — the rond was redundant with the bar). `indicator = {}`
+    // keeps the pull gesture (onRefresh still fires) but draws nothing; `isRefreshing` still drives the
+    // box state so a pull during an in-flight refresh doesn't double-trigger.
     PullToRefreshBox(
-        isRefreshing = state.isManualRefreshing,
+        isRefreshing = state.isRefreshing,
         onRefresh = actions.onRefresh,
+        indicator = {},
         modifier = Modifier.fillMaxSize(),
     ) {
         when (val current = state.flagsState) {
@@ -1646,11 +1645,13 @@ private fun DtTabOpenEffect(
 @Composable
 private fun DtListBody(state: DtListUiState, isRefreshing: Boolean, actions: AuthenticatedActions) {
     // #546 directive XaTriX — pull-to-refresh (swipe down) on the DT list, like the flag tabs. Wraps
-    // the whole body (every branch) so the indicator stays anchored over the existing content during
-    // the refresh round-trip and the gesture has a target even on the listless states (#229 pattern).
+    // the whole body (every branch) so the gesture has a target even on the listless states (#229).
+    // #603 — no circular indicator (`indicator = {}`), consistent with the flag tabs: the top
+    // FlagsLoadingBar (driven by dtIsRefreshing / DtListUiState.Loading) is the single loading cue.
     PullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = actions.onRefreshDt,
+        indicator = {},
         modifier = Modifier.fillMaxSize(),
     ) {
         DtListContent(state = state, actions = actions)
@@ -1949,10 +1950,8 @@ private data class FlagsBodyState(
     val flagsState: FlagsListUiState?,
     /** Whether the Cyan tab currently shows read topics (« +lus » suffix), #317. */
     val cyanShowsRead: Boolean,
-    /** Any refresh in flight (manual OR auto) — drives the top linear bar. */
+    /** Any refresh in flight (manual OR auto) — drives the top linear bar (single loading cue). */
     val isRefreshing: Boolean,
-    /** #603 — only a MANUAL refresh (pull/retry) — drives the circular PullToRefreshBox indicator. */
-    val isManualRefreshing: Boolean = false,
     val removeFlagState: RemoveFlagState,
     /** Whether the opt-in « DT » tab is shown (Settings toggle). */
     val showDtTab: Boolean,

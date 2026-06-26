@@ -490,22 +490,13 @@ class FlagsViewModel @Inject constructor(
 
     /**
      * Toggled around ANY refresh round-trip of a flag tab — manual [refresh] AND auto
-     * [maybeAutoRefresh] — so the top [FlagsLoadingBar] (the single load cue, #603/#648) shows for
-     * both. The circular `PullToRefreshBox` indicator is driven separately by [isManualRefreshing] so
-     * an auto-refresh does NOT pop a second (circular) cue over the list. Same pattern as
-     * `ForumViewModel.isRefreshing`.
+     * [maybeAutoRefresh]. Drives the top [FlagsLoadingBar], which is the SINGLE loading cue
+     * (#603/#648): the central spinner was retired and the circular `PullToRefreshBox` indicator is
+     * hidden (`indicator = {}`), so the thin top bar is the only cue for manual, auto and initial
+     * loads. Same pattern as `ForumViewModel.isRefreshing`.
      */
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
-
-    /**
-     * Toggled ONLY around the user-driven [refresh] round-trip (pull-to-refresh / retry), so the
-     * Material 3 `PullToRefreshBox` shows its circular indicator for the manual GESTURE alone. An
-     * auto-refresh ([maybeAutoRefresh]) leaves this `false` — it surfaces only the top linear bar via
-     * [isRefreshing] (#603: the central/circular cue was retired; the auto rond was the regression).
-     */
-    private val _isManualRefreshing = MutableStateFlow(false)
-    val isManualRefreshing: StateFlow<Boolean> = _isManualRefreshing.asStateFlow()
 
     /**
      * #546 — one-shot signal raised when a LANDING auto-refresh commits (app open, tab switch,
@@ -703,16 +694,10 @@ class FlagsViewModel @Inject constructor(
         // call would only duplicate the fan-out on the next landing — consume them (#378 follow-up).
         flagOpenedGenerationConsumed = flagOpenedGeneration
         viewModelScope.launch {
-            // Manual gesture: raise BOTH — the top bar ([_isRefreshing]) and the circular
-            // PullToRefreshBox indicator ([_isManualRefreshing], the gesture's own affordance).
             _isRefreshing.value = true
-            _isManualRefreshing.value = true
             try {
                 flagRepository.refresh(type)
             } finally {
-                // Drop the manual (circular) flag FIRST: were it the reverse, a frame with
-                // isRefreshing=false / isManualRefreshing=true could flash the rond alone (Codex nit).
-                _isManualRefreshing.value = false
                 _isRefreshing.value = false
             }
         }

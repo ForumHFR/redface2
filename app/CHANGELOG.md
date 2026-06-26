@@ -16,6 +16,18 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.5` — `internal` (dev) — 2026-06-26
+
+> Suite dogfood v184 : le rond de chargement persistait sur le pull-to-refresh manuel. Build dev ;
+> versionCode au dispatch. versionName 0.17.4 → 0.17.5. Codex GO + CI verte.
+
+**Drapeaux (#603, #659)**
+
+- **Plus aucun rond de chargement** : l'indicateur circulaire du pull-to-refresh est retiré
+  (`indicator = {}`) sur les onglets drapeaux ET DT. La fine barre de progression en haut devient
+  l'unique repère de chargement (manuel, auto et initial). Le geste swipe-down déclenche toujours le
+  refresh. Retrait du flag `isManualRefreshing` introduit en v184 (devenu inutile).
+
 ## `0.17.4` — `internal` (dev) — 2026-06-26
 
 > Vue Drapeaux : 4 styles de bande de catégorie au choix (#656) + correction du rond de chargement à

@@ -1,7 +1,6 @@
-Redface 2 v0.17.4 — dev.
+Redface 2 v0.17.5 — dev.
 
 Vue Drapeaux :
-- Styles de bande de catégorie au choix (menu d'affichage) : Sobre, Bloc, Accent, Puce.
-- Correctif : plus de rond de chargement pendant l'auto-refresh (seule la barre du haut reste) ; le pull-to-refresh manuel garde le sien.
+- Plus de rond de chargement : seule la fine barre du haut indique le rafraîchissement (manuel, auto et initial). Le swipe-down déclenche toujours le refresh.
 
 Bugs : via le canal dev ou GitHub.
