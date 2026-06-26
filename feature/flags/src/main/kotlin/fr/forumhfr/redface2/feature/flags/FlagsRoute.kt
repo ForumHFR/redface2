@@ -522,6 +522,12 @@ private fun FlagsViewSettingsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                // #673 — the sheet grew (override + grouper + masquer lues + non-lus + marqueur + titre
+                // 1 ligne + style de bande + Fermer) and overflowed without scrolling, hiding the bottom
+                // options (band-style selector) on short screens. Make the content scrollable so every
+                // option stays reachable; navigationBarsPadding scrolls with it so the last row clears
+                // the system bar.
+                .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 24.dp),

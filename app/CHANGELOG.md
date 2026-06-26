@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.7` — `internal` (dev) — 2026-06-26
+
+> Hotfix dogfood : le menu de réglages rapides ne défilait pas, rendant le sélecteur de style de bande
+> inaccessible. Build dev ; versionCode au dispatch. versionName 0.17.6 → 0.17.7.
+
+**Drapeaux (#603, #673)**
+
+- **Menu de réglages rapides scrollable** : le bottom sheet a grossi (marqueur, titre 1 ligne, style de
+  bande…) et débordait sans défiler — les options du bas (dont le style de bande) étaient injoignables sur
+  petits écrans. Le contenu défile désormais ; tout reste accessible.
+
 ## `0.17.6` — `internal` (dev) — 2026-06-26
 
 > Suite dogfood : la barre de chargement décalait le contenu, et les états vides étaient hétérogènes.
