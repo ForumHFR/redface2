@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -24,9 +25,12 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -70,50 +74,25 @@ fun FlagActionsSheet(
                 .navigationBarsPadding()
                 .padding(bottom = 12.dp),
         ) {
-            SheetHeader(flag = flag, categoryName = categoryName)
+            SheetHeader(flag = flag)
+            // #676 (mockup F2) — the actions live on a SINGLE row of icon buttons (they used to be a
+            // vertical list — « mal disposé »). « Retirer » is the 5th, error-tinted ; it still routes
+            // through the existing removal confirmation dialog (actions.onRemove), so a mis-tap is
+            // recoverable. The « catégorie · position » lives in the metadata block right below.
+            QuickActionsBar(
+                isSuperFavorite = isSuperFavorite,
+                actions = actions,
+                onCopyLink = { copyTopicLink(context, flagTopicUrl(flag), linkCopied) },
+                onOpenBrowser = { openTopicInBrowser(context, flagTopicUrl(flag), browserFailed) },
+            )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             FlagMetadataBlock(flag = flag, categoryName = categoryName)
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-
-            SheetActionRow(
-                iconRes = CoreUiR.drawable.ic_ms_forum,
-                label = stringResource(R.string.flags_sheet_open),
-                onClick = actions.onOpen,
-            )
-            SheetActionRow(
-                iconRes = CoreUiR.drawable.ic_ms_star,
-                label = stringResource(
-                    if (isSuperFavorite) {
-                        R.string.flags_sheet_super_favorite_remove
-                    } else {
-                        R.string.flags_sheet_super_favorite_add
-                    },
-                ),
-                onClick = actions.onToggleSuperFavorite,
-                contentColor = if (isSuperFavorite) FlagPalette.Favorite else MaterialTheme.colorScheme.onSurface,
-            )
-            SheetActionRow(
-                iconRes = CoreUiR.drawable.ic_ms_content_copy,
-                label = stringResource(R.string.flags_sheet_copy_link),
-                onClick = { copyTopicLink(context, flagTopicUrl(flag), linkCopied) },
-            )
-            SheetActionRow(
-                iconRes = CoreUiR.drawable.ic_ms_open_in_new,
-                label = stringResource(R.string.flags_sheet_open_browser),
-                onClick = { openTopicInBrowser(context, flagTopicUrl(flag), browserFailed) },
-            )
-            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            SheetActionRow(
-                iconRes = CoreUiR.drawable.ic_ms_delete,
-                label = stringResource(R.string.flags_sheet_remove),
-                onClick = actions.onRemove,
-                contentColor = MaterialTheme.colorScheme.error,
-            )
         }
     }
 }
 
 @Composable
-private fun SheetHeader(flag: Flag, categoryName: String) {
+private fun SheetHeader(flag: Flag) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -128,25 +107,104 @@ private fun SheetHeader(flag: Flag, categoryName: String) {
             hasUnread = flag.hasUnread,
             categoryIconRes = categoryIcon(flag.cat),
         )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = flag.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            val position = stringResource(
-                R.string.flags_sheet_meta_position_value,
-                flag.lastReadPage,
-                flag.totalPages,
-            )
-            Text(
-                text = "$categoryName · $position",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        // #676 (F2) — title only. The « catégorie · p.X/Y » subtitle was dropped: it duplicated the
+        // metadata block right below, which already lists the category and the read position.
+        Text(
+            text = flag.title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/**
+ * #676 (mockup F2) — the five topic actions on a single row of icon buttons (replaces the old vertical
+ * list). « Retirer » is the last button, error-tinted: removal still goes through the existing
+ * confirmation dialog ([FlagSheetActions.onRemove]), so its placement here is not a one-tap destruction.
+ * Takes the whole [actions] bundle (rather than four separate lambdas) to stay under the parameter cap.
+ */
+@Composable
+private fun QuickActionsBar(
+    isSuperFavorite: Boolean,
+    actions: FlagSheetActions,
+    onCopyLink: () -> Unit,
+    onOpenBrowser: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        // Each button takes an equal share of the row (weight 1f) so the five fit edge-to-edge and never
+        // clip on a narrow screen (~320dp), rather than a fixed width that could overflow.
+        QuickActionButton(
+            modifier = Modifier.weight(1f),
+            iconRes = CoreUiR.drawable.ic_ms_forum,
+            label = stringResource(R.string.flags_sheet_quick_open),
+            onClick = actions.onOpen,
+        )
+        QuickActionButton(
+            modifier = Modifier.weight(1f),
+            iconRes = CoreUiR.drawable.ic_ms_star,
+            label = stringResource(R.string.flags_sheet_quick_super_favorite),
+            onClick = actions.onToggleSuperFavorite,
+            tint = if (isSuperFavorite) FlagPalette.Favorite else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        QuickActionButton(
+            modifier = Modifier.weight(1f),
+            iconRes = CoreUiR.drawable.ic_ms_content_copy,
+            label = stringResource(R.string.flags_sheet_quick_copy),
+            onClick = onCopyLink,
+        )
+        QuickActionButton(
+            modifier = Modifier.weight(1f),
+            iconRes = CoreUiR.drawable.ic_ms_open_in_new,
+            label = stringResource(R.string.flags_sheet_quick_browser),
+            onClick = onOpenBrowser,
+        )
+        QuickActionButton(
+            modifier = Modifier.weight(1f),
+            iconRes = CoreUiR.drawable.ic_ms_delete,
+            label = stringResource(R.string.flags_sheet_quick_remove),
+            onClick = actions.onRemove,
+            tint = MaterialTheme.colorScheme.error,
+        )
+    }
+}
+
+@Composable
+private fun QuickActionButton(
+    @DrawableRes iconRes: Int,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 2.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        // The icon carries no contentDescription: the visible [label] below is the button's accessible
+        // name (TalkBack reads the whole clickable Column, announced as a button via role), so a separate
+        // icon description would double-read.
+        RedfaceVectorIcon(resId = iconRes, contentDescription = null, tint = tint)
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = tint,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -199,26 +257,6 @@ private fun MetaRow(key: String, value: String) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
-    }
-}
-
-@Composable
-private fun SheetActionRow(
-    @DrawableRes iconRes: Int,
-    label: String,
-    onClick: () -> Unit,
-    contentColor: Color = MaterialTheme.colorScheme.onSurface,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 24.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        RedfaceVectorIcon(resId = iconRes, tint = contentColor)
-        Text(text = label, style = MaterialTheme.typography.bodyLarge, color = contentColor)
     }
 }
 

@@ -33,12 +33,13 @@
     <!-- #603 PR5 — bottom sheet d'appui-long sur un drapeau (métadonnées + actions + super-favori). -->
     <!-- Libellé a11y / long-press de la ligne : ouvre le sheet d'actions (remplace le « Retirer » direct). -->
     <string name="flags_row_actions_label">Actions du sujet</string>
-    <string name="flags_sheet_open">Ouvrir le sujet</string>
-    <string name="flags_sheet_super_favorite_add">Ajouter aux super-favoris</string>
-    <string name="flags_sheet_super_favorite_remove">Retirer des super-favoris</string>
-    <string name="flags_sheet_copy_link">Copier le lien</string>
-    <string name="flags_sheet_open_browser">Ouvrir dans le navigateur</string>
-    <string name="flags_sheet_remove">Retirer le drapeau</string>
+    <!-- #676 (mockup F2) — libellés courts des 5 boutons d'action sur une ligne (remplace l'ancienne
+         liste verticale). « Retirer » passe toujours par le dialog de confirmation de retrait. -->
+    <string name="flags_sheet_quick_open">Ouvrir</string>
+    <string name="flags_sheet_quick_super_favorite">Super favori</string>
+    <string name="flags_sheet_quick_copy">Copier</string>
+    <string name="flags_sheet_quick_browser">Navigateur</string>
+    <string name="flags_sheet_quick_remove">Retirer</string>
     <string name="flags_sheet_link_copied">Lien copié</string>
     <string name="flags_sheet_browser_failed">Aucune application pour ouvrir ce lien</string>
     <!-- Bloc métadonnées (clés). -->
