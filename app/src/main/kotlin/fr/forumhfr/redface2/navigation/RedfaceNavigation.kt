@@ -41,6 +41,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -457,6 +458,60 @@ private fun onTopLevelTap(
     if (current == tapped && tapped == TopLevelDestination.Flags) onReselectFlags() else onSwitch()
 }
 
+/** #667 — target tab + remaining history when back is pressed at a secondary tab's root. */
+internal data class TabBackResult(
+    val target: TopLevelDestination,
+    val history: List<TopLevelDestination>,
+)
+
+/**
+ * #667 — visited-tab history (MRU stack of top-level tabs, most-recently-left LAST, excluding the
+ * current tab). New history after switching the active tab from [current] to [target]: a reselect
+ * (target == current) is a no-op; otherwise the left tab becomes the most-recent previous and any
+ * stale occurrence of either tab is dropped so the history stays a deduplicated MRU. Pure → tested.
+ */
+internal fun tabHistoryOnSwitch(
+    history: List<TopLevelDestination>,
+    current: TopLevelDestination,
+    target: TopLevelDestination,
+): List<TopLevelDestination> =
+    if (target == current) {
+        history
+    } else {
+        history.filterNot { it == current || it == target } + current
+    }
+
+/**
+ * #667 — target + remaining history when back is pressed at a secondary tab's root: pop the
+ * most-recent visited tab (the popped tab is NOT re-pushed — back is a pop, not a forward nav, which
+ * is what avoids the ping-pong Codex flagged), or [fallback] (Flags) when the history is empty.
+ */
+internal fun tabBackTarget(
+    history: List<TopLevelDestination>,
+    fallback: TopLevelDestination,
+): TabBackResult =
+    if (history.isEmpty()) {
+        TabBackResult(fallback, emptyList())
+    } else {
+        TabBackResult(history.last(), history.dropLast(1))
+    }
+
+/**
+ * #667 — back at a secondary tab's root returns to the previous tab instead of letting the system
+ * finish the Activity. Extracted from [RedfaceApp] to keep it under detekt's complexity threshold.
+ * Enabled only at the ROOT (size == 1) of a tab other than the home Flags tab.
+ */
+@Composable
+private fun TabRootBackHandler(
+    currentDestination: TopLevelDestination,
+    activeBackStackSize: Int,
+    onRootBack: () -> Unit,
+) {
+    BackHandler(
+        enabled = currentDestination != TopLevelDestination.Flags && activeBackStackSize == 1,
+    ) { onRootBack() }
+}
+
 /** #313 — badge cap : beyond this the badge shows « 9+ » (page-1 proxy, cf. MpUnreadBadgeViewModel). */
 private const val MAX_BADGE_COUNT = 9
 
@@ -660,6 +715,18 @@ fun RedfaceApp(intent: Intent?) {
             mutableStateOf(startScreen.screen.toTopLevelDestination())
         }
 
+        // #667 — visited-tab history (MRU) so back at a secondary tab's root returns to the previously
+        // visited tab instead of falling through to the system (which closed the app). Saveable across
+        // rotation/process death; stored as enum names.
+        var tabHistory by rememberSaveable(
+            stateSaver = listSaver(
+                save = { it.map(TopLevelDestination::name) },
+                // Defensive restore (Codex review): drop names that no longer resolve so a renamed/removed
+                // tab in a future version cannot crash the process-death restore.
+                restore = { names -> names.mapNotNull { runCatching { TopLevelDestination.valueOf(it) }.getOrNull() } },
+            ),
+        ) { mutableStateOf(emptyList<TopLevelDestination>()) }
+
         // #603 PR6 — re-tap of the already-selected Drapeaux tab raises this counter; threaded to
         // FlagsRoute, which opens its quick-config sheet on each increment. Deliberately a plain
         // `remember` (NOT rememberSaveable): a saved non-zero counter would re-open the sheet after a
@@ -692,9 +759,23 @@ fun RedfaceApp(intent: Intent?) {
             )
         }
 
+        // #667 — single entry point for every tab change (tap, deep link, root-back) so the visited-tab
+        // history stays consistent. A reselect of the current tab leaves the history untouched.
+        val switchTab: (TopLevelDestination) -> Unit = { target ->
+            tabHistory = tabHistoryOnSwitch(tabHistory, currentDestination, target)
+            currentDestination = target
+        }
+        // #667 — back at a secondary tab's root: pop the most-recent visited tab (fallback Flags). A pop,
+        // NOT a forward switch (no re-push), so successive backs walk the history out without oscillating.
+        val onRootTabBack: () -> Unit = {
+            val result = tabBackTarget(tabHistory, TopLevelDestination.Flags)
+            tabHistory = result.history
+            currentDestination = result.target
+        }
+
         LaunchedEffect(intent) {
             val parsed = intent?.data?.let(::parseHfrDeepLink) ?: return@LaunchedEffect
-            currentDestination = parsed.destination
+            switchTab(parsed.destination)
             resetStack(
                 backStack = backStacks.getValue(parsed.destination),
                 root = parsed.destination.rootRoute,
@@ -853,7 +934,7 @@ fun RedfaceApp(intent: Intent?) {
                                 tapped = destination,
                                 current = currentDestination,
                                 onReselectFlags = { flagsQuickConfigRequest++ },
-                                onSwitch = { currentDestination = destination },
+                                onSwitch = { switchTab(destination) },
                             )
                         },
                         icon = {
@@ -873,6 +954,17 @@ fun RedfaceApp(intent: Intent?) {
             // for the theme background/elevation; only its horizontal padding was removed.
             // #529 — consumes the bottom nav-bar inset under a bottom-bar layout (no-op otherwise).
             val activeBackStack = backStacks.getValue(currentDestination)
+            // #667 — at a secondary tab's ROOT, NavDisplay's own back handler is disabled (size == 1)
+            // and the back would finish the Activity (bug). Intercept here to return to the previous
+            // tab instead; Flags (home) keeps the default exit. Composed ABOVE NavDisplay, so NavDisplay
+            // still wins while it can pop (size > 1); the immersive back FAB (#518) routes through the
+            // same dispatcher, so it is covered. RedfaceNavHost.onRootBack is a belt-and-suspenders for a
+            // future nav3 that might invoke onBack at the root.
+            TabRootBackHandler(
+                currentDestination = currentDestination,
+                activeBackStackSize = activeBackStack.size,
+                onRootBack = onRootTabBack,
+            )
             Box(modifier = Modifier.fillMaxSize()) {
                 Surface(modifier = contentInsetModifier) {
                     val accountMenu: @Composable () -> Unit = {
@@ -891,6 +983,9 @@ fun RedfaceApp(intent: Intent?) {
                     }
                     RedfaceNavHost(
                         backStack = activeBackStack,
+                        // #667 — invoked if NavDisplay ever calls onBack at the root (defensive; the
+                        // parent BackHandler above handles it in the current nav3 where it does not).
+                        onRootBack = onRootTabBack,
                         accountMenu = accountMenu,
                         flagsQuickConfigRequest = flagsQuickConfigRequest,
                         // #603 bug fix — reset the counter once FlagsRoute handled it, so a re-mount
@@ -1519,6 +1614,10 @@ internal fun Map<TopicTitleKey, String>.withTitle(key: TopicTitleKey, title: Str
 // without reducing complexity. Param count: each nav-state bundle has a distinct owner/call-site.
 private fun RedfaceNavHost(
     backStack: NavBackStack<NavKey>,
+    // #667 — called when back is pressed at the active tab's root (size == 1). Defensive: in the current
+    // nav3 NavDisplay disables its own back handler at the root, so RedfaceApp's parent BackHandler
+    // fires instead; this keeps the behaviour correct if a future nav3 invokes onBack at the root.
+    onRootBack: () -> Unit,
     accountMenu: @Composable () -> Unit,
     // #603 PR6 — increments on each Drapeaux-tab re-tap; FlagsRoute opens its quick-config sheet on change.
     flagsQuickConfigRequest: Int,
@@ -1547,6 +1646,8 @@ private fun RedfaceNavHost(
         onBack = {
             if (backStack.size > 1) {
                 backStack.removeAt(backStack.lastIndex)
+            } else {
+                onRootBack()
             }
         },
         // Transitions (Claude + Codex, remplace le crossfade 700 ms global) : shared-axis X léger pour le

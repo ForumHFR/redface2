@@ -22,7 +22,6 @@ import fr.forumhfr.redface2.core.ui.pager.swipeArmed
 import fr.forumhfr.redface2.core.ui.pager.swipeCommitDirection
 import fr.forumhfr.redface2.core.ui.pager.swipeCommitDistancePx
 import fr.forumhfr.redface2.core.ui.pager.swipeFollowOffset
-import fr.forumhfr.redface2.core.ui.pager.swipeTargetPage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -35,14 +34,14 @@ import kotlinx.coroutines.launch
  * swiping the content left commits to the tab on the right, exactly like turning to the next
  * page. The tab row itself is NOT part of the gesture surface — it already has taps.
  *
- * In-place mechanics mirror the thread gesture (the composition survives the tab change, so a
- * committed swipe springs back to rest while the new tab's content swaps in — instantly on a
- * cache hit, behind the existing loading state otherwise):
+ * In-place mechanics (the composition survives the tab change). On commit the offset is snapped to
+ * rest and the new tab's content swaps in centred — #660: springing back from the released drag
+ * offset made the incoming tab slide in from the wrong side. Only a sub-threshold drag springs back:
  *
  * - **Commit → [FlagsTabSwipeHandlers.onSelectTab]** with the target index; the caller maps it
  *   back to a `FlagTab` (the DT tab is conditional, so the index↔tab mapping lives where the tab
  *   list is built). The ViewModel's re-tap toggle (Cyan « +lus ») is unreachable by construction:
- *   [swipeTargetPage] never returns the current index.
+ *   [swipeTargetIndex] never returns the current index (≥2 tabs).
  * - [currentIndex] and [tabCount] are lambdas: the selected tab changes UNDER this live
  *   composition (gesture keyed on `Unit`, never re-keyed), both must be read fresh per frame.
  * - No re-entrance latch and no enabled-gate: a tab switch is local state + cached list, there
@@ -51,7 +50,8 @@ import kotlinx.coroutines.launch
  * Coexistence contract: horizontal slop only — the vertical list scroll and the pull-to-refresh
  * nested-scroll are never stolen. This gesture only became possible once the rows' horizontal
  * `SwipeToDismissBox` (#99) was retired in this same change: a child consuming the horizontal
- * drag first cancels ours. Edges (first/last tab) are a damped no-op wall.
+ * drag first cancels ours. Tabs are cyclic (#663): swiping past the last tab wraps to the first and
+ * vice-versa, so there is no edge wall (every direction has a target).
  */
 internal fun Modifier.flagsTabSwipe(
     currentIndex: () -> Int,
@@ -101,6 +101,7 @@ internal fun Modifier.flagsTabSwipe(
                     armed = nowArmed
                     change.consume()
                 }
+                var committed = false
                 if (completed) {
                     val velocityX = velocityTracker.calculateVelocity().x
                     val forward =
@@ -109,13 +110,23 @@ internal fun Modifier.flagsTabSwipe(
                     if (forward != null && target != null) {
                         handlers.haptics.performHapticFeedback(HapticFeedbackType.Confirm)
                         handlers.onSelectTab(target)
+                        committed = true
                     }
                 }
-                // ALWAYS spring back — commit included: the composition is kept, the new tab's
-                // content swaps in at rest (cache hit = instant, otherwise the loading state).
-                releaseJob = animationScope.launch {
-                    release.snapTo(dragOffset.floatValue)
-                    release.animateTo(0f, TAB_SPRING_BACK) { dragOffset.floatValue = value }
+                if (committed) {
+                    // #660 — on commit, snap straight to rest: the new tab swaps in centred. The old
+                    // code sprang `dragOffset` back to 0 from the RELEASED offset, but that offset was
+                    // the OUTGOING tab's displacement — so the INCOMING tab rode it and slid in from
+                    // the wrong side (swipe left → next tab entered from the left). The drag-follow
+                    // already conveyed the direction; the swap itself needs no slide.
+                    dragOffset.floatValue = 0f
+                } else {
+                    // Sub-threshold drag (no commit): spring the current tab back so the damped
+                    // over-pull settles to rest.
+                    releaseJob = animationScope.launch {
+                        release.snapTo(dragOffset.floatValue)
+                        release.animateTo(0f, TAB_SPRING_BACK) { dragOffset.floatValue = value }
+                    }
                 }
             }
         }
@@ -141,11 +152,21 @@ internal class FlagsTabSwipeHandlers(
 )
 
 /**
- * The shared pager geometry speaks 1-based pages; tabs are 0-based indices. Shift by one for
- * [swipeTargetPage] so its `1..totalPages` bounds check becomes a `0..tabCount-1` check.
+ * Cyclic tab target (#663): flag tabs form a ring, so a forward swipe past the last tab lands on the
+ * first and a backward swipe before the first lands on the last. This deliberately does NOT reuse the
+ * shared `core.ui.pager.swipeTargetPage` geometry: the topic/MP pagers are hard-bounded (a topic must
+ * never wrap page N → page 1), tabs wrap. Returns `null` only when there is nowhere to go (0 or 1
+ * tab); with ≥2 tabs the result is never [currentIndex] (so the re-tap «+lus» toggle stays unreachable
+ * by swipe, by construction).
  */
-private fun swipeTargetIndex(currentIndex: Int, tabCount: Int, forward: Boolean): Int? =
-    swipeTargetPage(currentIndex + 1, tabCount, forward)?.minus(1)
+internal fun swipeTargetIndex(currentIndex: Int, tabCount: Int, forward: Boolean): Int? {
+    if (tabCount <= 1) return null
+    return if (forward) {
+        (currentIndex + 1) % tabCount
+    } else {
+        (currentIndex - 1 + tabCount) % tabCount
+    }
+}
 
 private fun tabFollowOffset(
     totalDx: Float,
