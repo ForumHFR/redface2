@@ -680,6 +680,27 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeNavBarLabels defaults to true then persists false and true`() = runTest(dispatcher) {
+        // #666 — labels under the bottom-nav icons are the historical M3 behaviour; hiding them is the opt-out.
+        repository.observeNavBarLabels().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setNavBarLabels(false)
+        repository.observeNavBarLabels().test {
+            assertFalse(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setNavBarLabels(true)
+        repository.observeNavBarLabels().test {
+            assertTrue(awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeConfirmBeforePosting defaults to false then persists true and false`() = runTest(dispatcher) {
         // #312 — publishing stays one-tap by default; the guard is strictly opt-in.
         repository.observeConfirmBeforePosting().test {

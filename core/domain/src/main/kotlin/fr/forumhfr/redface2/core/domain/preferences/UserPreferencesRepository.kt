@@ -287,6 +287,15 @@ interface UserPreferencesRepository {
     suspend fun setShowScrollbar(enabled: Boolean)
 
     /**
+     * #666 — show the text labels under the bottom navigation bar icons. Default `true` (labels shown,
+     * the historical Material 3 behaviour); the toggle is the opt-out to an icon-only bar.
+     */
+    fun observeNavBarLabels(): Flow<Boolean>
+
+    /** Persists [observeNavBarLabels]. Default `true` until the first call. */
+    suspend fun setNavBarLabels(enabled: Boolean)
+
+    /**
      * #458 — which top-level tab (and optional Forum category) a cold start opens on. Default
      * [StartScreenChoice.FLAGS] (historical behaviour). The navigation reads the SYNCHRONOUS
      * [StartScreenBootstrapStore] mirror at cold start; this flow is the source of truth and

@@ -458,6 +458,15 @@ private fun onTopLevelTap(
     if (current == tapped && tapped == TopLevelDestination.Flags) onReselectFlags() else onSwitch()
 }
 
+/**
+ * #666 — the bottom-nav item label, or null (icon-only) when the user turned labels off. A plain
+ * helper (not in [RedfaceApp]) so the toggle adds no branch to the host's cyclomatic-complexity budget.
+ */
+private fun navItemLabel(
+    show: Boolean,
+    content: @Composable () -> Unit,
+): (@Composable () -> Unit)? = content.takeIf { show }
+
 /** #667 — target tab + remaining history when back is pressed at a secondary tab's root. */
 internal data class TabBackResult(
     val target: TopLevelDestination,
@@ -616,6 +625,8 @@ fun RedfaceApp(intent: Intent?) {
     val foldLongQuotes by themeViewModel.foldLongQuotes.collectAsStateWithLifecycle()
     // #105 — « afficher l'ascenseur » reading preference, provided to the reading scrollbar via RedfaceTheme.
     val showScrollbar by themeViewModel.showScrollbar.collectAsStateWithLifecycle()
+    // #666 — show/hide the labels under the bottom-nav icons (resolved at the shell for the suite below).
+    val navBarLabels by themeViewModel.navBarLabels.collectAsStateWithLifecycle()
     // #445 — debug bounds overlay preference (the dev-channel gate + render live in
     // [DevDebugBoundsOverlay], emitted last so it paints over everything; off by default).
     val debugBoundsOverlay by themeViewModel.debugBoundsOverlay.collectAsStateWithLifecycle()
@@ -943,7 +954,11 @@ fun RedfaceApp(intent: Intent?) {
                                 mpUnreadCount = mpUnreadCount,
                             )
                         },
-                        label = { Text(text = stringResource(destination.labelRes)) },
+                        // #666 — null label = icon-only bar when the user disabled labels. The helper
+                        // (via takeIf) keeps this off RedfaceApp's cyclomatic-complexity budget.
+                        label = navItemLabel(navBarLabels) {
+                            Text(text = stringResource(destination.labelRes))
+                        },
                     )
                 }
             },

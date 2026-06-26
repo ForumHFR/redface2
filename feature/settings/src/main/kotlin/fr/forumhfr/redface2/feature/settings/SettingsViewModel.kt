@@ -120,6 +120,11 @@ class SettingsViewModel @Inject constructor(
             apply = { state, value -> state.copy(showScrollbar = value) },
         )
         hydratePreference(
+            read = { userPreferencesRepository.observeNavBarLabels().first() },
+            isLocked = { it.navBarLabelsTouchedLocally || it.isUpdatingNavBarLabels },
+            apply = { state, value -> state.copy(navBarLabels = value) },
+        )
+        hydratePreference(
             read = { userPreferencesRepository.observeHideSystemNavBar().first() },
             isLocked = { it.hideSystemNavBarTouchedLocally || it.isUpdatingHideSystemNavBar },
             apply = { state, value -> state.copy(hideSystemNavBar = value) },
@@ -256,6 +261,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.TopicSignaturesChanged -> updateTopicSignatures(intent.enabled)
             is SettingsIntent.FoldLongQuotesChanged -> updateFoldLongQuotes(intent.enabled)
             is SettingsIntent.ShowScrollbarChanged -> updateShowScrollbar(intent.enabled)
+            is SettingsIntent.NavBarLabelsChanged -> updateNavBarLabels(intent.enabled)
             is SettingsIntent.HideSystemNavBarChanged -> updateHideSystemNavBar(intent.enabled)
             is SettingsIntent.ImmersiveBackButtonChanged -> updateImmersiveBackButton(intent.enabled)
             is SettingsIntent.ImmersiveNavBarRevealChanged -> updateImmersiveNavBarReveal(intent.mode)
@@ -874,6 +880,33 @@ class SettingsViewModel @Inject constructor(
                 }
             },
             persist = userPreferencesRepository::setShowScrollbar,
+        )
+    }
+
+    private fun updateNavBarLabels(desired: Boolean) {
+        val previous = _state.value.navBarLabels
+        updateBooleanPreference(
+            desired = desired,
+            optimistic = {
+                it.copy(
+                    navBarLabels = desired,
+                    isUpdatingNavBarLabels = true,
+                    navBarLabelsError = false,
+                    navBarLabelsTouchedLocally = true,
+                )
+            },
+            onSettled = { state, result ->
+                if (result.isSuccess) {
+                    state.copy(navBarLabels = desired, isUpdatingNavBarLabels = false)
+                } else {
+                    state.copy(
+                        navBarLabels = previous,
+                        isUpdatingNavBarLabels = false,
+                        navBarLabelsError = true,
+                    )
+                }
+            },
+            persist = userPreferencesRepository::setNavBarLabels,
         )
     }
 
