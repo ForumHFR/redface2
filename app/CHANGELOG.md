@@ -16,6 +16,18 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.12` — `internal` (dev) — 2026-06-26
+
+> Fix dogfood : l'amorce du pull-to-refresh ne « repop » plus en fin de chargement. Build dev ;
+> versionCode au dispatch. versionName 0.17.11 → 0.17.12.
+
+**Drapeaux (#603)**
+
+- **Amorce pull-to-refresh — plus de re-pop en fin de load** : à la fin d'un rechargement, l'indicateur
+  rond réapparaissait brièvement (puis disparaissait) pendant que la liste revenait à sa position de
+  repos — `isRefreshing` repassait à `false` alors que la distance de tirage n'était pas encore revenue
+  à 0. Une garde « settling » masque l'amorce jusqu'au retour complet au repos (signalé par XaTriX).
+
 ## `0.17.11` — `internal` (dev) — 2026-06-26
 
 > Polish dogfood : retour visuel au tirage du swipe-to-refresh. Build dev ; versionCode au dispatch.
