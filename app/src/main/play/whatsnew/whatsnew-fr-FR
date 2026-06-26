@@ -1,6 +1,6 @@
-Redface 2 v0.17.12 — dev.
+Redface 2 v0.17.13 — dev.
 
-Vue Drapeaux :
-- Correctif : l'indicateur du swipe-to-refresh ne réapparaît plus brièvement à la fin du rechargement (il restait jusqu'au retour complet de la liste au repos).
+Barre de navigation :
+- Masquer les libellés (Réglages > Affichage) raccourcit maintenant vraiment la barre du bas, qui passe en icônes seules — sur téléphone.
 
 Bugs : via le canal dev ou GitHub.

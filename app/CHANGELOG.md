@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.13` — `internal` (dev) — 2026-06-27
+
+> Suite #666 : la barre du bas raccourcit réellement (icônes seules, 56 dp) quand les libellés sont
+> masqués — auparavant elle conservait la hauteur réservée aux libellés. Build dev ; versionCode au
+> dispatch. versionName 0.17.12 → 0.17.13.
+
+**Réglages / Navigation (#666)**
+
+- **Barre du bas plus courte sans les libellés** : libellés masqués (*Réglages > Affichage > Barre de
+  navigation*), la barre du bas passe à 56 dp en icônes seules au lieu de garder les ~64 dp réservés à la
+  rangée de libellés (téléphone uniquement ; rail / tiroir des écrans larges inchangés). Cible tactile
+  conservée ≥ 48 dp. Le « short bar » expressif Material 3 étant `internal` dans le BOM courant, la barre
+  compacte est bâtie sur le `NavigationBarItem` stable. Signalé par XaTriX.
+
 ## `0.17.12` — `internal` (dev) — 2026-06-26
 
 > Fix dogfood : l'amorce du pull-to-refresh ne « repop » plus en fin de chargement. Build dev ;

@@ -21,6 +21,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.NavigationBarDefaults
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,18 +46,24 @@ import androidx.compose.ui.unit.dp
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
-import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuite
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldLayout
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
@@ -200,7 +208,7 @@ private fun NavKey?.hidesNavigationSuite(): Boolean =
         this is PrivateMessageComposeRoute
 
 /**
- * #494 — type de barre de navigation à passer au [NavigationSuiteScaffold]. Sur téléphone l'adaptatif
+ * #494 — type de barre de navigation à passer au [NavigationSuiteScaffoldLayout]. Sur téléphone l'adaptatif
  * renvoie `NavigationBar` (80dp) ; on lui substitue `ShortNavigationBarCompact` (M3 Expressive, ~64dp,
  * icône au-dessus du label, labels conservés, cible tactile ≥48dp). Les autres formes (rail/drawer sur
  * largeur medium/expanded) restent telles quelles ; la navigation est masquée (`None`) sur les routes
@@ -218,7 +226,7 @@ private fun resolveNavLayoutType(
 }
 
 /**
- * #529 — modifier appliqué au CONTENU du [NavigationSuiteScaffold]. Quand la suite est une barre du
+ * #529 — modifier appliqué au CONTENU du [NavigationSuiteScaffoldLayout]. Quand la suite est une barre du
  * BAS (téléphone), cette barre possède déjà `WindowInsets.navigationBars` : on consomme l'inset pour
  * le sous-arbre de contenu, de sorte que les `.navigationBarsPadding()` des écrans (toujours requis
  * pour les dispositions rail/drawer, où la suite est sur le côté et laisse l'inset bas) se résolvent
@@ -466,6 +474,128 @@ private fun navItemLabel(
     show: Boolean,
     content: @Composable () -> Unit,
 ): (@Composable () -> Unit)? = content.takeIf { show }
+
+/**
+ * #666 follow-up — height of the icon-only compact bottom bar. The adaptive
+ * [NavigationSuiteType.ShortNavigationBarCompact] keeps reserving the label-row height (~64 dp) even with
+ * labels hidden, so the bar looked needlessly tall in icon-only mode (« ça sert à rien », XaTriX). Dropping
+ * to a label-less bar at this height reclaims that band while staying ≥ 48 dp (Material's minimum touch
+ * target). Phone bottom-bar + labels-off only; rail / drawer / None layouts are untouched.
+ */
+private val CompactIconBarHeight = 56.dp
+
+/**
+ * #666 follow-up — true only for the phone bottom-bar layout ([NavigationSuiteType.ShortNavigationBarCompact])
+ * with the labels hidden; that is the single case where the suite is swapped for the shorter icon-only bar.
+ * Every other layout (rail / drawer on wide windows, or labels still on) keeps the adaptive suite. Pure →
+ * unit-tested (`ShouldUseCompactIconBarTest`).
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+internal fun shouldUseCompactIconBar(
+    navBarLabels: Boolean,
+    navLayoutType: NavigationSuiteType,
+): Boolean = !navBarLabels && navLayoutType == NavigationSuiteType.ShortNavigationBarCompact
+
+/**
+ * #666 follow-up — the bottom navigation suite slot. When the phone bottom-bar layout has its labels turned
+ * off (see [shouldUseCompactIconBar]) it renders the shorter icon-only [IconOnlyBottomBar]; every other case defers to
+ * the adaptive [NavigationSuite] (bottom bar with labels on phones, rail / drawer on wider windows),
+ * preserving the previous behaviour exactly. Extracted from [RedfaceApp] so the extra branch stays off that
+ * composable's cyclomatic-complexity budget (it sits at detekt's ceiling).
+ *
+ * NB — the icon-only bar is built from the **stable** [NavigationBarItem] (not the expressive
+ * `ShortNavigationBar`): in the compose-bom 2026.05.01 the whole `ExperimentalMaterial3ExpressiveApi`
+ * surface is `internal`, so the expressive short bar cannot be opted into from app code (same gotcha as
+ * `PullToRefreshDefaults.LoadingIndicator`). The labels-on branch keeps the adaptive suite's short bar.
+ */
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@Composable
+private fun RedfaceBottomNavigationSuite(
+    navLayoutType: NavigationSuiteType,
+    navBarLabels: Boolean,
+    currentDestination: TopLevelDestination,
+    mpUnreadCount: Int?,
+    onItemClick: (TopLevelDestination) -> Unit,
+) {
+    val compactIconOnly = shouldUseCompactIconBar(navBarLabels, navLayoutType)
+    if (compactIconOnly) {
+        IconOnlyBottomBar(
+            currentDestination = currentDestination,
+            mpUnreadCount = mpUnreadCount,
+            onItemClick = onItemClick,
+        )
+    } else {
+        NavigationSuite(layoutType = navLayoutType) {
+            TopLevelDestination.entries.forEach { destination ->
+                item(
+                    selected = currentDestination == destination,
+                    onClick = { onItemClick(destination) },
+                    icon = {
+                        TopLevelDestinationIcon(
+                            destination = destination,
+                            mpUnreadCount = mpUnreadCount,
+                        )
+                    },
+                    // #666 — null label = icon-only items when labels are off (helper keeps this off
+                    // RedfaceApp's cyclomatic-complexity budget via takeIf).
+                    label = navItemLabel(navBarLabels) {
+                        Text(text = stringResource(destination.labelRes))
+                    },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * #666 follow-up — the label-less compact bottom bar, [CompactIconBarHeight] tall. Phone + labels-off only.
+ * Built from the stable [NavigationBarItem] laid out in a fixed-height [Row] (the standard
+ * [androidx.compose.material3.NavigationBar] hard-codes its own ~80 dp height, and the expressive short bar
+ * is `internal` in this bom — see [RedfaceBottomNavigationSuite]). Window-inset handling mirrors the
+ * standard suite so #529 (no dark band) still holds: the [Surface] paints the container colour across the
+ * whole region — including behind the system navigation bar — while the [Row] is pushed above the system
+ * insets via [windowInsetsPadding] (bottom + horizontal: a landscape / multi-window side bar also reports a
+ * horizontal inset). [selectableGroup] keeps the items a single a11y tab group (as the real nav bar does).
+ */
+@Composable
+private fun IconOnlyBottomBar(
+    currentDestination: TopLevelDestination,
+    mpUnreadCount: Int?,
+    onItemClick: (TopLevelDestination) -> Unit,
+) {
+    Surface(
+        color = NavigationBarDefaults.containerColor,
+        tonalElevation = NavigationBarDefaults.Elevation,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(
+                    WindowInsets.navigationBars.only(
+                        WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom,
+                    ),
+                )
+                .height(CompactIconBarHeight)
+                .selectableGroup(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TopLevelDestination.entries.forEach { destination ->
+                NavigationBarItem(
+                    selected = currentDestination == destination,
+                    onClick = { onItemClick(destination) },
+                    icon = {
+                        TopLevelDestinationIcon(
+                            destination = destination,
+                            mpUnreadCount = mpUnreadCount,
+                        )
+                    },
+                    label = null,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
 
 /** #667 — target tab + remaining history when back is pressed at a secondary tab's root. */
 internal data class TabBackResult(
@@ -932,36 +1062,31 @@ fun RedfaceApp(intent: Intent?) {
         // (see navSuiteContentInsetModifier). Read in composable scope, branch lives in the helper.
         val contentInsetModifier = navSuiteContentInsetModifier(navLayoutType, WindowInsets.navigationBars)
 
-        NavigationSuiteScaffold(
-            layoutType = navLayoutType,
-            navigationSuiteItems = {
-                TopLevelDestination.entries.forEach { destination ->
-                    item(
-                        selected = currentDestination == destination,
-                        onClick = {
-                            // #603 PR6 — re-tap of the already-selected Drapeaux tab opens its
-                            // quick-config sheet (counter bump); any other tap switches destination.
-                            onTopLevelTap(
-                                tapped = destination,
-                                current = currentDestination,
-                                onReselectFlags = { flagsQuickConfigRequest++ },
-                                onSwitch = { switchTab(destination) },
-                            )
-                        },
-                        icon = {
-                            TopLevelDestinationIcon(
-                                destination = destination,
-                                mpUnreadCount = mpUnreadCount,
-                            )
-                        },
-                        // #666 — null label = icon-only bar when the user disabled labels. The helper
-                        // (via takeIf) keeps this off RedfaceApp's cyclomatic-complexity budget.
-                        label = navItemLabel(navBarLabels) {
-                            Text(text = stringResource(destination.labelRes))
-                        },
-                    )
-                }
+        // #603 PR6 — re-tap of the already-selected Drapeaux tab opens its quick-config sheet (counter
+        // bump); any other tap switches destination. Hoisted to a val so the per-item onClick in
+        // RedfaceBottomNavigationSuite carries no extra branch and RedfaceApp stays under detekt's ceiling.
+        val onNavItemClick: (TopLevelDestination) -> Unit = { destination ->
+            onTopLevelTap(
+                tapped = destination,
+                current = currentDestination,
+                onReselectFlags = { flagsQuickConfigRequest++ },
+                onSwitch = { switchTab(destination) },
+            )
+        }
+        // #666 follow-up — NavigationSuiteScaffoldLayout (not the higher-level NavigationSuiteScaffold) so
+        // the navigationSuite slot can swap a shorter icon-only bar in when labels are off (Option A). The
+        // content slot below is unchanged (#529 content-inset handling stays put).
+        NavigationSuiteScaffoldLayout(
+            navigationSuite = {
+                RedfaceBottomNavigationSuite(
+                    navLayoutType = navLayoutType,
+                    navBarLabels = navBarLabels,
+                    currentDestination = currentDestination,
+                    mpUnreadCount = mpUnreadCount,
+                    onItemClick = onNavItemClick,
+                )
             },
+            layoutType = navLayoutType,
         ) {
             // #398 — no global side gutter here. Each screen owns its own lateral rhythm
             // (listings keep their 16/24 dp content padding, readers compensate explicitly),
