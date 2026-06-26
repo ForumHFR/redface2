@@ -1,6 +1,6 @@
-Redface 2 v0.17.10 — dev.
+Redface 2 v0.17.11 — dev.
 
-Settings:
-- New Display > Navigation bar setting: show or hide the labels under the bottom-bar icons (icon-only, more compact).
+Flags view:
+- Swipe-to-refresh cue: pulling the list down shows an indicator again during the gesture, which fades as the refresh starts (the top bar takes over).
 
 Bugs: via dev or GitHub.
