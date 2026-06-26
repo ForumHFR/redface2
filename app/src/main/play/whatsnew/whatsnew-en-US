@@ -1,6 +1,6 @@
-Redface 2 v0.17.12 — dev.
+Redface 2 v0.17.13 — dev.
 
-Flags view:
-- Fix: the swipe-to-refresh indicator no longer briefly re-appears at the end of a refresh (it lingered until the list fully settled back).
+Navigation bar:
+- Hiding the labels (Settings > Display) now actually shortens the bottom bar, which switches to icons only — on phones.
 
 Bugs: via dev or GitHub.
