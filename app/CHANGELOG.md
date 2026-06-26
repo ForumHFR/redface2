@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.8` — `internal` (dev) — 2026-06-26
+
+> Polish dogfood : resserrage de l'espacement entre la barre de recherche et les bandes de catégorie
+> (preset D « minimal » validé par XaTriX sur l'inspecteur d'espacement). Build dev ; versionCode au
+> dispatch. versionName 0.17.7 → 0.17.8.
+
+**Drapeaux (#603)**
+
+- **Espacement resserré (vue groupée)** : l'air au-dessus et autour des bandes de catégorie était jugé
+  trop grand. Slot de la barre de chargement 10 → 4 dp, marge basse de la barre de recherche 8 → 2 dp
+  (la bande remonte sous la barre), hauteur min des bandes 44 → 34 dp et padding vertical → 4 dp.
+  La cible tactile de la bande passe sous la reco Material 48 dp / WCAG AAA 44 dp mais reste au-dessus
+  du plancher WCAG 2.2 AA (24 dp) — compromis densité assumé.
+
 ## `0.17.7` — `internal` (dev) — 2026-06-26
 
 > Hotfix dogfood : le menu de réglages rapides ne défilait pas, rendant le sélecteur de style de bande

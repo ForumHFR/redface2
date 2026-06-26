@@ -1,6 +1,6 @@
-Redface 2 v0.17.7 — dev.
+Redface 2 v0.17.8 — dev.
 
 Flags view:
-- The quick-settings menu now scrolls: every option (including the category band style) stays reachable, even on small screens.
+- Tighter spacing between the search bar and the category bands: less air above and around categories, denser list (the "minimal" preset).
 
 Bugs: via dev or GitHub.

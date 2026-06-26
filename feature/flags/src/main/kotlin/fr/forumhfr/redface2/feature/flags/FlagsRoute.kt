@@ -848,10 +848,10 @@ private fun flagTitleMaxLines(singleLineTitle: Boolean): Int = if (singleLineTit
 
 // #603 — height of the always-present loading-bar SLOT. Reserving it unconditionally (rather than
 // rendering the bar with `if (loading)`) stops the list + sticky category bands from jumping by the
-// bar's height each time a load starts/ends (XaTriX dogfood). Slightly taller than the ~4dp M3 bar so
-// it doubles as a deliberate breathing gap between the search app bar and the list; the bar sits flush
-// at the top of the slot, the gap falls between it and the first row / category band.
-private val LOADING_BAR_SLOT_HEIGHT = 10.dp
+// bar's height each time a load starts/ends (XaTriX dogfood). Sized to the ~4dp M3 bar itself with no
+// extra air (preset D, XaTriX): the bar sits flush at the top of the slot and the list/first band follow
+// immediately, so the slot costs no visible gap when idle.
+private val LOADING_BAR_SLOT_HEIGHT = 4.dp
 
 @Composable
 private fun FlagsLoadingBar(loading: Boolean) {
@@ -1242,8 +1242,9 @@ private fun CategorySectionedFlagList(
  *
  * #414 — the whole band is tappable and opens the category's topic listing (RF1 parity); the trailing
  * chevron vector (`ic_chevron_right`) is the affordance. Foundation [clickable] does not enforce a
- * Material touch-target minimum, hence the explicit [heightIn] (44 dp — still an acceptable target) on
- * every leaf.
+ * Material touch-target minimum, hence the explicit [heightIn] on every leaf. #603 (preset D, XaTriX)
+ * trimmed that min to 34 dp for a denser band: below Material's 48 dp / WCAG AAA 44 dp recommendation
+ * but still above the WCAG 2.2 AA 24 dp floor — a deliberate density-over-target-size trade-off.
  */
 @Composable
 private fun CategoryHeaderBand(catId: Int, label: String, style: CategoryBandStyle, onClick: () -> Unit) {
@@ -1276,9 +1277,9 @@ private fun CategoryBandMinimal(catId: Int, label: String, onClick: () -> Unit) 
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 44.dp)
+                .heightIn(min = 34.dp)
                 .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) { onClick() }
-                .padding(horizontal = 24.dp, vertical = 6.dp),
+                .padding(horizontal = 24.dp, vertical = 4.dp),
         ) {
             RedfaceVectorIcon(
                 resId = categoryIcon(catId),
@@ -1309,9 +1310,9 @@ private fun CategoryBandSoft(catId: Int, label: String, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceContainer)
-            .heightIn(min = 44.dp)
+            .heightIn(min = 34.dp)
             .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) { onClick() }
-            .padding(horizontal = 24.dp, vertical = 8.dp),
+            .padding(horizontal = 24.dp, vertical = 4.dp),
     ) {
         RedfaceVectorIcon(
             resId = categoryIcon(catId),
@@ -1354,8 +1355,8 @@ private fun CategoryBandAccent(catId: Int, label: String, onClick: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 44.dp)
-                    .padding(horizontal = 20.dp, vertical = 6.dp),
+                    .heightIn(min = 34.dp)
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
             ) {
                 RedfaceVectorIcon(
                     resId = categoryIcon(catId),
@@ -1389,9 +1390,9 @@ private fun CategoryBandBullet(catId: Int, label: String, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface)
-            .heightIn(min = 44.dp)
+            .heightIn(min = 34.dp)
             .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) { onClick() }
-            .padding(horizontal = 20.dp, vertical = 6.dp),
+            .padding(horizontal = 20.dp, vertical = 4.dp),
     ) {
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
