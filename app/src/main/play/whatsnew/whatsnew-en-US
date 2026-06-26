@@ -1,7 +1,6 @@
-Redface 2 v0.17.6 — dev.
+Redface 2 v0.17.7 — dev.
 
 Flags view:
-- The loading bar no longer shifts the list down (reserved slot under the top bar).
-- Harmonised empty-list messages.
+- The quick-settings menu now scrolls: every option (including the category band style) stays reachable, even on small screens.
 
 Bugs: via dev or GitHub.

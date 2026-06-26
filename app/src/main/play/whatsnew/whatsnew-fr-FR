@@ -1,7 +1,6 @@
-Redface 2 v0.17.6 — dev.
+Redface 2 v0.17.7 — dev.
 
 Vue Drapeaux :
-- La barre de chargement ne décale plus la liste (espace réservé sous la barre du haut).
-- Messages « liste vide » harmonisés.
+- Le menu de réglages rapides défile désormais : toutes les options (dont le style de bande) restent accessibles, même sur petit écran.
 
 Bugs : via le canal dev ou GitHub.
