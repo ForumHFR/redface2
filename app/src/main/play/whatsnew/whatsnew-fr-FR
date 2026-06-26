@@ -1,6 +1,7 @@
-Redface 2 v0.17.5 — dev.
+Redface 2 v0.17.6 — dev.
 
 Vue Drapeaux :
-- Plus de rond de chargement : seule la fine barre du haut indique le rafraîchissement (manuel, auto et initial). Le swipe-down déclenche toujours le refresh.
+- La barre de chargement ne décale plus la liste (espace réservé sous la barre du haut).
+- Messages « liste vide » harmonisés.
 
 Bugs : via le canal dev ou GitHub.

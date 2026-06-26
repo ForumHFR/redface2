@@ -1,6 +1,7 @@
-Redface 2 v0.17.5 — dev.
+Redface 2 v0.17.6 — dev.
 
 Flags view:
-- No more loading spinner: only the thin top bar signals a refresh (manual, auto and initial). Swipe-down still triggers the refresh.
+- The loading bar no longer shifts the list down (reserved slot under the top bar).
+- Harmonised empty-list messages.
 
 Bugs: via dev or GitHub.
