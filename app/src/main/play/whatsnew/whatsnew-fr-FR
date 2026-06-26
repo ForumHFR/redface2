@@ -1,10 +1,6 @@
-Redface 2 v0.17.9 — dev.
+Redface 2 v0.17.10 — dev.
 
-Vue Drapeaux :
-- Swipe entre onglets corrigé (le nouvel onglet n'arrive plus du mauvais côté) et désormais cyclique (du dernier au premier).
-- Icône dédiée pour la catégorie Intelligence Artificielle.
-
-Navigation :
-- Le retour depuis les Réglages (ou un autre onglet) revient à l'onglet précédent au lieu de fermer l'appli.
+Réglages :
+- Nouveau réglage Affichage > Barre de navigation : afficher ou masquer les libellés sous les icônes de la barre du bas (barre à icônes seules, plus compacte).
 
 Bugs : via le canal dev ou GitHub.

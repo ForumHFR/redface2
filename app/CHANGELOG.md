@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.10` — `internal` (dev) — 2026-06-26
+
+> Lot 1 dogfood (4 sur 4) : le réglage des libellés de la barre du bas, dernier item du lot. Build dev ;
+> versionCode au dispatch. versionName 0.17.9 → 0.17.10.
+
+**Réglages / Navigation (#666)**
+
+- **Afficher / masquer les libellés de la barre du bas** : nouveau réglage dans *Réglages > Affichage >
+  Barre de navigation* (activé par défaut). Désactivé, la barre du bas n'affiche que les icônes (plus
+  compacte). Réglage global, persistant.
+
 ## `0.17.9` — `internal` (dev) — 2026-06-26
 
 > Lot 1 dogfood (3 sur 4) : bugs swipe + navigation et icône de catégorie. Le réglage des libellés de
