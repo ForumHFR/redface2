@@ -57,6 +57,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -97,6 +98,7 @@ import fr.forumhfr.redface2.core.ui.icon.categoryIcon
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -978,16 +980,34 @@ private fun ColumnScope.AuthenticatedBody(
     }
 }
 
+// #603 (XaTriX dogfood) — distance under which the pull is considered back at rest. The post-refresh
+// settle animates distanceFraction → 0; the amorce stays suppressed until it lands at ~rest.
+private const val AMORCE_REST_EPSILON = 0.001f
+
+/**
+ * Pure visibility predicate for the pull « amorce ». Shows the indicator ONLY while the user is
+ * actively pulling (`!isRefreshing && distanceFraction > 0`) AND not in the post-refresh settle
+ * ([settling]). The [settling] guard fixes the « ça repop en fin de load » bug (XaTriX): when a
+ * refresh ends, `isRefreshing` clears while `distanceFraction` is still animating back to 0, which
+ * without the guard re-pops the indicator for a frame before it dismisses.
+ */
+internal fun shouldShowPullAmorce(
+    isRefreshing: Boolean,
+    distanceFraction: Float,
+    settling: Boolean,
+): Boolean = !isRefreshing && !settling && distanceFraction > 0f
+
 /**
  * #603 (XaTriX) — « amorce seule » pull-to-refresh cue: the standard [PullToRefreshDefaults.Indicator]
- * shown ONLY while the user is actively pulling (`!isRefreshing && distanceFraction > 0`). Once the
- * refresh starts it renders NOTHING, so the thin top [FlagsLoadingBar] is the single loading cue (no
- * double indicator). The whole wrapper is gated, not just the content, per Codex (an indicator left
- * with empty content can keep its container visible). Shared by both pull-to-refresh surfaces.
+ * shown ONLY while the user is actively pulling, then NOTHING once the refresh starts so the thin top
+ * [FlagsLoadingBar] is the single loading cue (no double indicator). The whole wrapper is gated, not
+ * just the content, per Codex (an indicator left with empty content can keep its container visible).
+ * Shared by both pull-to-refresh surfaces.
  *
- * Passing `isRefreshing = false` keeps the indicator in its determinate pull state — it never reaches
- * the persistent circular spin here (the M3-expressive `LoadingIndicator` is `internal` in this BOM,
- * so the determinate default Indicator is the amorce visual).
+ * The [settling] state keeps the indicator hidden through the post-refresh return-to-rest (see
+ * [shouldShowPullAmorce]). Passing `isRefreshing = false` keeps the indicator in its determinate pull
+ * state — it never reaches the persistent circular spin here (the M3-expressive `LoadingIndicator` is
+ * `internal` in this BOM, so the determinate default Indicator is the amorce visual).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -996,7 +1016,20 @@ private fun FlagsPullAmorce(
     isRefreshing: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    if (!isRefreshing && state.distanceFraction > 0f) {
+    var settling by remember { mutableStateOf(false) }
+    LaunchedEffect(isRefreshing) {
+        if (isRefreshing) {
+            // A refresh started: suppress the amorce until the pull settles back to rest.
+            settling = true
+        } else {
+            // Refresh ended (or never started): re-arm only once distanceFraction has animated home,
+            // so the indicator doesn't re-pop while it slides back. On first composition df is already
+            // ~0 so this resolves immediately.
+            snapshotFlow { state.distanceFraction }.first { it <= AMORCE_REST_EPSILON }
+            settling = false
+        }
+    }
+    if (shouldShowPullAmorce(isRefreshing, state.distanceFraction, settling)) {
         PullToRefreshDefaults.Indicator(
             state = state,
             isRefreshing = false,

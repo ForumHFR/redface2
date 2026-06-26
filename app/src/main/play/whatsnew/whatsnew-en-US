@@ -1,6 +1,6 @@
-Redface 2 v0.17.11 — dev.
+Redface 2 v0.17.12 — dev.
 
 Flags view:
-- Swipe-to-refresh cue: pulling the list down shows an indicator again during the gesture, which fades as the refresh starts (the top bar takes over).
+- Fix: the swipe-to-refresh indicator no longer briefly re-appears at the end of a refresh (it lingered until the list fully settled back).
 
 Bugs: via dev or GitHub.
