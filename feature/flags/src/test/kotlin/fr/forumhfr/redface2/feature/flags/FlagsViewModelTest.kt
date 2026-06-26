@@ -222,39 +222,21 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `a manual refresh raises BOTH isRefreshing and isManualRefreshing then clears them`() = runTest {
-        val flags = FakeFlagRepository()
-        flags.refreshGate = kotlinx.coroutines.CompletableDeferred()
-        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = viewModel(auth, flags, FakeForumRepository())
-
-        vm.refresh()
-        // Suspended at the gate: the manual gesture shows the top bar AND the circular indicator.
-        assertEquals(true, vm.isRefreshing.value)
-        assertEquals(true, vm.isManualRefreshing.value)
-
-        flags.refreshGate!!.complete(Unit)
-        assertEquals(false, vm.isRefreshing.value)
-        assertEquals(false, vm.isManualRefreshing.value)
-    }
-
-    @Test
-    fun `an auto-refresh raises isRefreshing only, never isManualRefreshing (no circular cue on landing)`() = runTest {
-        // #603 regression guard: the auto rond. maybeAutoRefresh must surface ONLY the top linear bar
-        // (isRefreshing) so the PullToRefreshBox circular indicator (isManualRefreshing) stays hidden.
+    fun `maybeAutoRefresh raises isRefreshing for the round-trip then clears it`() = runTest {
+        // #603 — isRefreshing is the SINGLE loading cue (it drives the top bar; the PullToRefreshBox
+        // circular indicator is hidden via indicator = {}). An auto-refresh must raise it during the
+        // round-trip and clear it after, exactly like a manual refresh.
         val flags = FakeFlagRepository()
         flags.refreshGate = kotlinx.coroutines.CompletableDeferred()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
         val vm = viewModel(auth, flags, FakeForumRepository())
 
         vm.maybeAutoRefresh()
-        // Suspended at the gate: top bar up, but NO circular indicator.
+        // Suspended at the gate: the loading cue (top bar) is up.
         assertEquals(true, vm.isRefreshing.value)
-        assertEquals(false, vm.isManualRefreshing.value)
 
         flags.refreshGate!!.complete(Unit)
         assertEquals(false, vm.isRefreshing.value)
-        assertEquals(false, vm.isManualRefreshing.value)
     }
 
     @Test
@@ -2179,8 +2161,8 @@ class FlagsViewModelTest {
 
         /**
          * Optional gate to suspend a [refresh] round-trip so a test can assert the intermediate
-         * indicator state (isRefreshing / isManualRefreshing) before the call resolves. Null = the
-         * refresh returns immediately (the default for every test that doesn't need the gate).
+         * `isRefreshing` state before the call resolves. Null = the refresh returns immediately (the
+         * default for every test that doesn't need the gate).
          */
         var refreshGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
 

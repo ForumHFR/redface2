@@ -1,7 +1,6 @@
-Redface 2 v0.17.4 — dev.
+Redface 2 v0.17.5 — dev.
 
 Flags view:
-- Selectable category band styles (display menu): Minimal, Block, Accent, Chip.
-- Fix: no loading spinner during auto-refresh (only the top bar remains); manual pull-to-refresh keeps its own.
+- No more loading spinner: only the thin top bar signals a refresh (manual, auto and initial). Swipe-down still triggers the refresh.
 
 Bugs: via dev or GitHub.
