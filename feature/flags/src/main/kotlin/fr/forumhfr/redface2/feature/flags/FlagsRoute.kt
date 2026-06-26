@@ -146,6 +146,9 @@ fun FlagsRoute(
     val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
     val flagsState by viewModel.flagsState.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    // #603 — drives ONLY the circular PullToRefreshBox indicator (manual gesture); an auto-refresh
+    // keeps just the top linear bar via [isRefreshing], so no second rond pops on landing.
+    val isManualRefreshing by viewModel.isManualRefreshing.collectAsStateWithLifecycle()
     val removeFlagState by viewModel.removeFlagState.collectAsStateWithLifecycle()
     val removeFlagEvent by viewModel.removeFlagEvent.collectAsStateWithLifecycle()
     val flagsViewSettings by viewModel.flagsViewSettings.collectAsStateWithLifecycle()
@@ -370,6 +373,7 @@ fun FlagsRoute(
                                 flagsState = flagsState,
                                 cyanShowsRead = cyanShowsRead,
                                 isRefreshing = isRefreshing,
+                                isManualRefreshing = isManualRefreshing,
                                 removeFlagState = removeFlagState,
                                 showDtTab = showDtTab,
                                 dtListState = dtListState,
@@ -975,8 +979,10 @@ private fun FlagListBody(
     // Pull-to-refresh (swipe down) replaces the legacy header « Actualiser » button, matching
     // feature/forum. It wraps the whole flag body so the indicator stays anchored over the
     // existing content during the refresh round-trip (Material 3 stable, cf. Context7).
+    // #603 — the circular indicator is gated on the MANUAL refresh only: an auto-refresh (landing /
+    // tab switch / resume) surfaces just the top linear bar, no second rond over the list.
     PullToRefreshBox(
-        isRefreshing = state.isRefreshing,
+        isRefreshing = state.isManualRefreshing,
         onRefresh = actions.onRefresh,
         modifier = Modifier.fillMaxSize(),
     ) {
@@ -1943,7 +1949,10 @@ private data class FlagsBodyState(
     val flagsState: FlagsListUiState?,
     /** Whether the Cyan tab currently shows read topics (« +lus » suffix), #317. */
     val cyanShowsRead: Boolean,
+    /** Any refresh in flight (manual OR auto) — drives the top linear bar. */
     val isRefreshing: Boolean,
+    /** #603 — only a MANUAL refresh (pull/retry) — drives the circular PullToRefreshBox indicator. */
+    val isManualRefreshing: Boolean = false,
     val removeFlagState: RemoveFlagState,
     /** Whether the opt-in « DT » tab is shown (Settings toggle). */
     val showDtTab: Boolean,
