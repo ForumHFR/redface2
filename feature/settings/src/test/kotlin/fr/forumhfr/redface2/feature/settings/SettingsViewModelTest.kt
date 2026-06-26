@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.settings
 import fr.forumhfr.redface2.core.domain.cache.ImageCacheMaintenance
 import fr.forumhfr.redface2.core.domain.cache.TopicCacheMaintenance
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -2023,6 +2024,7 @@ class SettingsViewModelTest {
         override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
         override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
         override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
+        override suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle) = Unit
 
         fun emit(value: ProxyConfig) {
             config.value = value

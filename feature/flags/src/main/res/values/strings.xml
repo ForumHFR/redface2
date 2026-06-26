@@ -137,6 +137,14 @@
     <string name="flags_view_settings_marker_stripe">Barre</string>
     <string name="flags_view_settings_marker_pastille">Pastille</string>
     <string name="flags_view_settings_marker_dot">Point</string>
+    <!-- #603 — Style de la bande de catégorie (vue groupée) : sous-titre sobre / bloc tonal /
+         accent latéral / pastille en puce. Réglage GLOBAL (tous onglets), sans effet en vue à plat. -->
+    <string name="flags_view_settings_band_title">Bande de catégorie</string>
+    <string name="flags_view_settings_band_description">Style de l\'en-tête de catégorie dans la vue groupée. S\'applique à tous les onglets.</string>
+    <string name="flags_view_settings_band_minimal">Sobre</string>
+    <string name="flags_view_settings_band_soft">Bloc</string>
+    <string name="flags_view_settings_band_accent">Accent</string>
+    <string name="flags_view_settings_band_bullet">Puce</string>
     <string name="flags_view_settings_done">Fermer</string>
 
     <!-- #99 — Retirer un drapeau (delflag) : action du sheet d'appui-long (#603 PR5) + dialog de

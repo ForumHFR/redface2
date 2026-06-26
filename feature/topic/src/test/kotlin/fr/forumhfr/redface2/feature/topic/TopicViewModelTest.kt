@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -2047,6 +2048,7 @@ private class FakeUserPreferencesRepository(
     override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
     override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
     override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
+    override suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle) = Unit
 
     override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
 

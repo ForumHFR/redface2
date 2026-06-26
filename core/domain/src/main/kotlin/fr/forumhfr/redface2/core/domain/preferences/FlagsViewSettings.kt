@@ -37,4 +37,8 @@ data class FlagsViewSettings(
     // #603 — GLOBAL: keep topic titles on a single (ellipsised) line instead of wrapping to 2. Default
     // false = the historical 2-line wrap. Not subject to the per-tab override (like [markerStyle]).
     val singleLineTitle: Boolean = false,
+    // #603 — GLOBAL: visual treatment of the grouped-view category band. Default MINIMAL (the look
+    // shipped in 0.17.3). Not subject to the per-tab override (like [markerStyle]). Carried on every
+    // resolution path.
+    val categoryBandStyle: CategoryBandStyle = CategoryBandStyle.MINIMAL,
 )

@@ -10,9 +10,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -60,6 +64,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -68,6 +73,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.model.AuthState
@@ -371,6 +377,7 @@ fun FlagsRoute(
                                 dtIsRefreshing = dtIsRefreshing,
                                 searchQuery = searchQuery,
                                 markerStyle = flagsViewSettings.markerStyle,
+                                categoryBandStyle = flagsViewSettings.categoryBandStyle,
                             ),
                             actions = AuthenticatedActions(
                                 onSelectTab = viewModel::selectTab,
@@ -412,6 +419,7 @@ fun FlagsRoute(
                 onUnreadOnlyChange = viewModel::setFlagsUnreadOnly,
                 onMarkerStyleChange = viewModel::setFlagsMarkerStyle,
                 onSingleLineTitleChange = viewModel::setFlagsSingleLineTitle,
+                onCategoryBandStyleChange = viewModel::setFlagsCategoryBandStyle,
                 onDismiss = { showViewSettingsSheet = false },
             ),
         )
@@ -614,6 +622,45 @@ private fun FlagsViewSettingsSheet(
                 enabled = true,
                 onCheckedChange = actions.onSingleLineTitleChange,
             )
+
+            // #603 — GLOBAL grouped-view category band style selector (segmented). Only takes visual
+            // effect in the grouped view (the band is the per-category sticky header); it's disabled
+            // while « grouper par catégorie » is off so the control reflects when it actually applies.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(R.string.flags_view_settings_band_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = stringResource(R.string.flags_view_settings_band_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                RedfaceSettingsChoiceGroup(
+                    options = listOf(
+                        RedfaceSettingsChoice(
+                            CategoryBandStyle.MINIMAL,
+                            stringResource(R.string.flags_view_settings_band_minimal),
+                        ),
+                        RedfaceSettingsChoice(
+                            CategoryBandStyle.SOFT,
+                            stringResource(R.string.flags_view_settings_band_soft),
+                        ),
+                        RedfaceSettingsChoice(
+                            CategoryBandStyle.ACCENT,
+                            stringResource(R.string.flags_view_settings_band_accent),
+                        ),
+                        RedfaceSettingsChoice(
+                            CategoryBandStyle.BULLET,
+                            stringResource(R.string.flags_view_settings_band_bullet),
+                        ),
+                    ),
+                    selected = settings.categoryBandStyle,
+                    onSelected = actions.onCategoryBandStyleChange,
+                    enabled = settings.groupByCategory,
+                )
+            }
 
             TextButton(
                 // Animate the sheet out (M3 stable pattern) before removing it from composition,
@@ -998,6 +1045,7 @@ private fun FlagListBody(
                             selectedTab = selectedTab,
                             removalInFlight = state.removeFlagState is RemoveFlagState.Removing,
                             markerStyle = state.markerStyle,
+                            categoryBandStyle = state.categoryBandStyle,
                             actions = actions,
                             listState = listState,
                         )
@@ -1084,12 +1132,13 @@ private const val CONTENT_TYPE_DT_FOOTER = "dt_scan_note"
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-@Suppress("LongParameterList") // List composable: sections + tab + removal flag + marker + actions + listState.
+@Suppress("LongParameterList") // List composable: sections + tab + removal + marker + band + actions + listState.
 private fun CategorySectionedFlagList(
     sections: List<FlagCategorySection>,
     selectedTab: FlagTab,
     removalInFlight: Boolean,
     markerStyle: MarkerStyle,
+    categoryBandStyle: CategoryBandStyle,
     actions: AuthenticatedActions,
     listState: LazyListState,
 ) {
@@ -1123,6 +1172,7 @@ private fun CategorySectionedFlagList(
                     catId = section.catId,
                     label = section.catName
                         ?: stringResource(R.string.flags_category_fallback, section.catId),
+                    style = categoryBandStyle,
                     // #414 — parité RF1 : the band navigates to the category's topic listing.
                     onClick = { actions.onOpenCategory(section.catId) },
                 )
@@ -1163,29 +1213,52 @@ private fun CategorySectionedFlagList(
 }
 
 /**
- * Category separator band for the grouped list (#179). #603 — minimal SUBHEAD style: an OPAQUE
- * `surface` background (matches the list, so the sticky header never bleeds the scrolling rows through,
- * but reads as a light subhead rather than the former heavy `surfaceVariant` block), an uppercase
- * letter-spaced category name, and a hairline divider below it.
+ * Category separator band for the grouped list (#179). #603 — the visual treatment is user-selectable
+ * ([CategoryBandStyle], display sheet) ; this dispatches to the chosen leaf. ALL leaves render on an
+ * OPAQUE base background because the band is a `stickyHeader`: a transparent background would let the
+ * scrolling rows bleed through (the two originally-transparent mockups, ACCENT and BULLET, are
+ * therefore opacified — XaTriX-approved).
  *
  * #414 — the whole band is tappable and opens the category's topic listing (RF1 parity); the trailing
  * chevron vector (`ic_chevron_right`) is the affordance. Foundation [clickable] does not enforce a
- * Material touch-target minimum, hence the explicit [heightIn] (44 dp — still an acceptable target).
+ * Material touch-target minimum, hence the explicit [heightIn] (44 dp — still an acceptable target) on
+ * every leaf.
  */
 @Composable
-private fun CategoryHeaderBand(catId: Int, label: String, onClick: () -> Unit) {
+private fun CategoryHeaderBand(catId: Int, label: String, style: CategoryBandStyle, onClick: () -> Unit) {
+    when (style) {
+        CategoryBandStyle.MINIMAL -> CategoryBandMinimal(catId, label, onClick)
+        CategoryBandStyle.SOFT -> CategoryBandSoft(catId, label, onClick)
+        CategoryBandStyle.ACCENT -> CategoryBandAccent(catId, label, onClick)
+        CategoryBandStyle.BULLET -> CategoryBandBullet(catId, label, onClick)
+    }
+}
+
+/** Trailing decorative chevron shared by the band styles; the open affordance is the band's onClickLabel. */
+@Composable
+private fun CategoryBandChevron() {
+    RedfaceVectorIcon(
+        resId = CoreUiR.drawable.ic_chevron_right,
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        size = 18.dp,
+    )
+}
+
+/**
+ * MINIMAL (default, #654) — an opaque `surface` subhead: uppercase letter-spaced name in
+ * `onSurfaceVariant` + a hairline divider below. Reads as a light subhead, not a heavy block.
+ */
+@Composable
+private fun CategoryBandMinimal(catId: Int, label: String, onClick: () -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 44.dp)
-                .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) {
-                    onClick()
-                }
+                .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) { onClick() }
                 .padding(horizontal = 24.dp, vertical = 6.dp),
         ) {
-            // Decorative category glyph (the label carries the name); generic forum glyph if unknown.
             RedfaceVectorIcon(
                 resId = categoryIcon(catId),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1198,14 +1271,135 @@ private fun CategoryHeaderBand(catId: Int, label: String, onClick: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
-            // Trailing chevron — decorative; the band's onClickLabel carries the open affordance.
-            RedfaceVectorIcon(
-                resId = CoreUiR.drawable.ic_chevron_right,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                size = 18.dp,
-            )
+            CategoryBandChevron()
         }
         FlagItemDivider()
+    }
+}
+
+/**
+ * SOFT — a soft tonal block (`surfaceContainer`, opaque), normal-case `titleSmall` name in
+ * `onSurface`, no divider: the tonal block itself is the separator.
+ */
+@Composable
+private fun CategoryBandSoft(catId: Int, label: String, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .heightIn(min = 44.dp)
+            .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) { onClick() }
+            .padding(horizontal = 24.dp, vertical = 8.dp),
+    ) {
+        RedfaceVectorIcon(
+            resId = categoryIcon(catId),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            size = 18.dp,
+            modifier = Modifier.padding(end = 10.dp),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        CategoryBandChevron()
+    }
+}
+
+/**
+ * ACCENT — a full-height left accent bar (`primary`) + a `primary`-tinted icon, on an opaque `surface`
+ * base, uppercase name + hairline divider. The bar uses `fillMaxHeight`, so the row is measured at its
+ * min intrinsic height (the bounded-height-parent contract the marker stripe relies on).
+ */
+@Composable
+private fun CategoryBandAccent(catId: Int, label: String, onClick: () -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+                .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) { onClick() },
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(3.dp)
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp)
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
+            ) {
+                RedfaceVectorIcon(
+                    resId = categoryIcon(catId),
+                    tint = MaterialTheme.colorScheme.primary,
+                    size = 18.dp,
+                    modifier = Modifier.padding(end = 10.dp),
+                )
+                Text(
+                    text = label.uppercase(),
+                    style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.08.em),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                CategoryBandChevron()
+            }
+        }
+        FlagItemDivider()
+    }
+}
+
+/**
+ * BULLET — the category name carried in a tonal pill chip (`surfaceContainerHigh`) on an opaque
+ * `surface` base, chevron pushed to the trailing edge. The chip wraps its content; the chip + base
+ * give the originally-transparent mockup an opaque sticky-safe ground.
+ */
+@Composable
+private fun CategoryBandBullet(catId: Int, label: String, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .heightIn(min = 44.dp)
+            .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) { onClick() }
+            .padding(horizontal = 20.dp, vertical = 6.dp),
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = CircleShape,
+            // weight(fill = false): the chip hugs a short name (chevron stays right via SpaceBetween)
+            // but is capped at the available width for a long one, so it can never push the chevron off
+            // (Codex review) — the label then ellipsises inside.
+            modifier = Modifier.weight(1f, fill = false),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                RedfaceVectorIcon(
+                    resId = categoryIcon(catId),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    size = 16.dp,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        CategoryBandChevron()
     }
 }
 
@@ -1763,6 +1957,8 @@ private data class FlagsBodyState(
     val searchQuery: String = "",
     /** #603 PR6 — GLOBAL marker shape for the rows (from FlagsViewSettings). */
     val markerStyle: MarkerStyle = MarkerStyle.STRIPE,
+    /** #603 — GLOBAL category band style for the grouped view (from FlagsViewSettings). */
+    val categoryBandStyle: CategoryBandStyle = CategoryBandStyle.MINIMAL,
 )
 
 private data class AuthenticatedActions(
@@ -1793,6 +1989,7 @@ private data class FlagsViewSettingsActions(
     val onUnreadOnlyChange: (Boolean) -> Unit,
     val onMarkerStyleChange: (MarkerStyle) -> Unit,
     val onSingleLineTitleChange: (Boolean) -> Unit,
+    val onCategoryBandStyleChange: (CategoryBandStyle) -> Unit,
     val onDismiss: () -> Unit,
 )
 

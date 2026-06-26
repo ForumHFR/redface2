@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.AccentColor
@@ -1964,6 +1965,7 @@ class PostEditorViewModelTest {
         override suspend fun setFlagsUnreadOnlyForType(type: FlagType, enabled: Boolean) = Unit
         override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
         override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
+        override suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle) = Unit
         override fun observeThemeMode(): Flow<ThemeMode> = MutableStateFlow(ThemeMode.SYSTEM)
         override suspend fun setThemeMode(mode: ThemeMode) = Unit
         override fun observeAmoledEnabled(): Flow<Boolean> = MutableStateFlow(false)

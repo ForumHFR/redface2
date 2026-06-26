@@ -124,6 +124,14 @@ interface UserPreferencesRepository {
     suspend fun setFlagsSingleLineTitle(enabled: Boolean)
 
     /**
+     * Persists the GLOBAL grouped-view category band style (#603). Like [setFlagsMarkerStyle] it is
+     * NOT subject to [observeFlagsPerTabOverride]; surfaced through [observeFlagsViewSettings]
+     * ([FlagsViewSettings.categoryBandStyle]). Defaults to [CategoryBandStyle.MINIMAL] until the
+     * first call.
+     */
+    suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle)
+
+    /**
      * App theme selection (#286): [ThemeMode.SYSTEM] (default) follows the OS dark-mode setting;
      * [ThemeMode.LIGHT] / [ThemeMode.DARK] force the app theme regardless of the OS. Observed at the
      * app root ([fr.forumhfr.redface2.navigation.RedfaceApp]) to compute the effective dark theme
