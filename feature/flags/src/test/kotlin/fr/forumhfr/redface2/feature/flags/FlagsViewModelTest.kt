@@ -222,6 +222,42 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `a manual refresh raises BOTH isRefreshing and isManualRefreshing then clears them`() = runTest {
+        val flags = FakeFlagRepository()
+        flags.refreshGate = kotlinx.coroutines.CompletableDeferred()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        vm.refresh()
+        // Suspended at the gate: the manual gesture shows the top bar AND the circular indicator.
+        assertEquals(true, vm.isRefreshing.value)
+        assertEquals(true, vm.isManualRefreshing.value)
+
+        flags.refreshGate!!.complete(Unit)
+        assertEquals(false, vm.isRefreshing.value)
+        assertEquals(false, vm.isManualRefreshing.value)
+    }
+
+    @Test
+    fun `an auto-refresh raises isRefreshing only, never isManualRefreshing (no circular cue on landing)`() = runTest {
+        // #603 regression guard: the auto rond. maybeAutoRefresh must surface ONLY the top linear bar
+        // (isRefreshing) so the PullToRefreshBox circular indicator (isManualRefreshing) stays hidden.
+        val flags = FakeFlagRepository()
+        flags.refreshGate = kotlinx.coroutines.CompletableDeferred()
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
+        val vm = viewModel(auth, flags, FakeForumRepository())
+
+        vm.maybeAutoRefresh()
+        // Suspended at the gate: top bar up, but NO circular indicator.
+        assertEquals(true, vm.isRefreshing.value)
+        assertEquals(false, vm.isManualRefreshing.value)
+
+        flags.refreshGate!!.complete(Unit)
+        assertEquals(false, vm.isRefreshing.value)
+        assertEquals(false, vm.isManualRefreshing.value)
+    }
+
+    @Test
     fun `selecting the Super tab is a placeholder with no fetch and null state`() = runTest {
         val flags = FakeFlagRepository()
         val forum = FakeForumRepository(catIds = listOf(1))
@@ -2141,8 +2177,16 @@ class FlagsViewModelTest {
         override fun observe(type: FlagType): Flow<FlagsResult> =
             perType.getValue(type).asSharedFlow()
 
+        /**
+         * Optional gate to suspend a [refresh] round-trip so a test can assert the intermediate
+         * indicator state (isRefreshing / isManualRefreshing) before the call resolves. Null = the
+         * refresh returns immediately (the default for every test that doesn't need the gate).
+         */
+        var refreshGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
         override suspend fun refresh(type: FlagType) {
             refreshCalls = refreshCalls + type
+            refreshGate?.await()
         }
 
         override fun clearSessionCache() {
