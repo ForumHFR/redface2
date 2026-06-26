@@ -1,7 +1,7 @@
-Redface 2 v0.17.3 — dev.
+Redface 2 v0.17.4 — dev.
 
 Vue Drapeaux :
-- Nouvelle option « titre sur une seule ligne » (menu d'affichage) : titres tronqués à une ligne au lieu de deux.
-- Bande de catégorie allégée (vue par catégorie) : un sous-titre discret au lieu du bandeau plein.
+- Styles de bande de catégorie au choix (menu d'affichage) : Sobre, Bloc, Accent, Puce.
+- Correctif : plus de rond de chargement pendant l'auto-refresh (seule la barre du haut reste) ; le pull-to-refresh manuel garde le sien.
 
 Bugs : via le canal dev ou GitHub.

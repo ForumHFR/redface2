@@ -16,6 +16,19 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.4` — `internal` (dev) — 2026-06-26
+
+> Vue Drapeaux : 4 styles de bande de catégorie au choix (#656) + correction du rond de chargement à
+> l'auto-refresh (#657). Build dev ; versionCode au dispatch. versionName 0.17.3 → 0.17.4. Codex GO + CI verte.
+
+**Drapeaux (#603)**
+
+- **Styles de bande de catégorie au choix** (menu d'affichage, vue groupée) : Sobre (défaut, = l'actuel),
+  Bloc (bloc tonal), Accent (barre latérale + icône teintée), Puce (nom dans une pastille). Réglage global ;
+  les 2 styles d'origine transparents sont opacifiés pour le sticky header.
+- **Bug corrigé** : le rond de chargement (pull-to-refresh) ne s'affiche plus pendant l'auto-refresh
+  (atterrissage / changement d'onglet / retour) — seule la barre du haut reste. Le geste manuel garde son rond.
+
 ## `0.17.3` — `internal` (dev) — 2026-06-25
 
 > Suite du dogfood 0.17.2 (#653 + #654). Build dev ; versionCode au dispatch. versionName 0.17.2 → 0.17.3.
