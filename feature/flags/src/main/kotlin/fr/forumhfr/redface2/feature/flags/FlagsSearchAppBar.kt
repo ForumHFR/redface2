@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
@@ -62,12 +63,13 @@ data class FlagTabEntry(val tab: FlagTab, val label: String, val color: Color)
  * so PR2 keeps the simple top-of-column layout and ships the structure + interactions first.
  */
 @Composable
-@Suppress("LongParameterList") // App-bar API: state + 3 callbacks + the @Composable account slot + modifier.
+@Suppress("LongParameterList") // App-bar API: state + 4 callbacks + the @Composable account slot + modifier.
 fun FlagsSearchAppBar(
     state: FlagsAppBarState,
     onSelectTab: (FlagTab) -> Unit,
     onQueryChange: (String) -> Unit,
     onSearchActiveChange: (Boolean) -> Unit,
+    onOpenViewSettings: () -> Unit,
     accountMenu: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -83,9 +85,9 @@ fun FlagsSearchAppBar(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             FlagTabPickerButton(
-                currentTabColor = state.currentTabColor,
-                tabs = state.tabs,
+                state = state,
                 onSelectTab = onSelectTab,
+                onOpenViewSettings = onOpenViewSettings,
             )
             SearchField(
                 state = SearchFieldState(state.searchEnabled, state.query, state.searchActive),
@@ -105,34 +107,93 @@ data class FlagsAppBarState(
     val searchEnabled: Boolean,
     val query: String,
     val searchActive: Boolean,
+    /** #661 — the active tab, so the picker can offer the contextual « +lus » toggle. */
+    val currentTab: FlagTab,
+    /**
+     * #661 — whether the active tab currently shows read items (« +lus ») : `true`/`false` on the tabs
+     * that have the toggle (Cyan / DT), `null` on the others (Red / Favori / Super) → no « +lus » entry.
+     */
+    val readFilterShowsRead: Boolean?,
 )
+
+/**
+ * #661 — read-filter state for the picker's contextual « +lus » entry: `null` when the active tab has
+ * no such toggle (Red / Favori / Super), otherwise whether read items are currently shown (Cyan / DT).
+ * Pure → unit-tested.
+ */
+internal fun flagsReadFilterShowsRead(
+    tab: FlagTab,
+    cyanShowsRead: Boolean,
+    dtShowsRead: Boolean,
+): Boolean? = when (tab) {
+    FlagTab.Cyan -> cyanShowsRead
+    FlagTab.Dt -> dtShowsRead
+    else -> null
+}
 
 @Composable
 private fun FlagTabPickerButton(
-    currentTabColor: Color,
-    tabs: List<FlagTabEntry>,
+    state: FlagsAppBarState,
     onSelectTab: (FlagTab) -> Unit,
+    onOpenViewSettings: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val pickerLabel = stringResource(R.string.flags_appbar_tab_picker)
     Box {
         IconButton(
-            onClick = { if (tabs.isNotEmpty()) expanded = true },
-            enabled = tabs.isNotEmpty(),
+            onClick = { if (state.tabs.isNotEmpty()) expanded = true },
+            enabled = state.tabs.isNotEmpty(),
             modifier = Modifier.semantics { contentDescription = pickerLabel },
         ) {
             // Flag glyph of the current tab, tinted with its color (cyan/red/favori/fuchsia). (The
             // pixel-art RF2 brand flag was rolled back — too crude at 24dp ; awaiting a proper vector.)
-            RedfaceVectorIcon(resId = CoreUiR.drawable.ic_ms_flag, tint = currentTabColor)
+            RedfaceVectorIcon(resId = CoreUiR.drawable.ic_ms_flag, tint = state.currentTabColor)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            tabs.forEach { entry ->
+            state.tabs.forEach { entry ->
                 DropdownMenuItem(
                     text = { Text(entry.label) },
                     leadingIcon = { ColorDot(entry.color) },
                     onClick = {
                         expanded = false
                         onSelectTab(entry.tab)
+                    },
+                )
+            }
+            // #661 — discoverability: the « +lus » toggle (otherwise reachable only by re-tapping a tab)
+            // and the display-settings sheet (otherwise only via the bottom-bar re-tap — the header gear
+            // was retired, #648) get explicit entries under a divider.
+            val showsRead = state.readFilterShowsRead
+            if (showsRead != null || state.searchEnabled) {
+                HorizontalDivider()
+            }
+            if (showsRead != null) {
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            stringResource(
+                                if (showsRead) {
+                                    R.string.flags_appbar_menu_hide_read
+                                } else {
+                                    R.string.flags_appbar_menu_show_read
+                                },
+                            ),
+                        )
+                    },
+                    // Re-selecting the active Cyan/DT tab toggles its « +lus » filter — the same path as a
+                    // tab re-tap (FlagsViewModel.selectTab -> handleReTap).
+                    onClick = {
+                        expanded = false
+                        onSelectTab(state.currentTab)
+                    },
+                )
+            }
+            if (state.searchEnabled) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.flags_appbar_menu_display_settings)) },
+                    onClick = {
+                        expanded = false
+                        onOpenViewSettings()
                     },
                 )
             }

@@ -21,6 +21,10 @@
     <string name="flags_search_placeholder">Rechercher dans les drapeaux</string>
     <!-- a11y : l'icône drapeau colorée à gauche indique l'onglet courant et ouvre le sélecteur d'onglet. -->
     <string name="flags_appbar_tab_picker">Onglet courant — changer d\'onglet</string>
+    <!-- #661 — entrées de découvrabilité du menu déroulant du sélecteur d'onglet. -->
+    <string name="flags_appbar_menu_display_settings">Réglages d\'affichage</string>
+    <string name="flags_appbar_menu_show_read">Afficher les lus</string>
+    <string name="flags_appbar_menu_hide_read">Masquer les lus</string>
     <!-- a11y : action d'effacement du champ de recherche. -->
     <string name="flags_search_clear">Effacer la recherche</string>
     <!-- État vide d'une recherche sans résultat. %1$s = la requête saisie. -->
