@@ -1,7 +1,7 @@
-Redface 2 v0.17.3 — dev.
+Redface 2 v0.17.4 — dev.
 
-Drapeaux view:
-- New "single-line titles" option (display menu): topic titles trimmed to one line instead of two.
-- Lighter category band (by-category view): a discreet subhead instead of the full block.
+Flags view:
+- Selectable category band styles (display menu): Minimal, Block, Accent, Chip.
+- Fix: no loading spinner during auto-refresh (only the top bar remains); manual pull-to-refresh keeps its own.
 
 Bugs: via dev or GitHub.
