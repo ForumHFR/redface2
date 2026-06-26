@@ -16,6 +16,19 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.6` — `internal` (dev) — 2026-06-26
+
+> Suite dogfood : la barre de chargement décalait le contenu, et les états vides étaient hétérogènes.
+> Build dev ; versionCode au dispatch. versionName 0.17.5 → 0.17.6.
+
+**Drapeaux (#603)**
+
+- **Barre de chargement** (#671) : un slot de hauteur fixe lui est réservé sous la barre du haut — elle
+  n'apparaît/disparaît plus en décalant la liste et les bandes de catégorie. Le slot fait aussi office
+  d'espace dédié entre la search bar et le début de la liste.
+- **Messages d'état vide homogénéisés** (#662) : forme courte uniforme (« Aucun(e)… », sans point ni
+  instruction collée) ; le « Aucune conversation non lue » du DT ne traîne plus son rappel « re-tape ».
+
 ## `0.17.5` — `internal` (dev) — 2026-06-26
 
 > Suite dogfood v184 : le rond de chargement persistait sur le pull-to-refresh manuel. Build dev ;

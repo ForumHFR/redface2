@@ -840,10 +840,20 @@ private fun flagsLoadingBarVisible(
 // #603 — extracted so the single-line-title branch doesn't count against FlagsRoute's cyclomatic budget.
 private fun flagTitleMaxLines(singleLineTitle: Boolean): Int = if (singleLineTitle) 1 else 2
 
+// #603 — height of the always-present loading-bar SLOT. Reserving it unconditionally (rather than
+// rendering the bar with `if (loading)`) stops the list + sticky category bands from jumping by the
+// bar's height each time a load starts/ends (XaTriX dogfood). Slightly taller than the ~4dp M3 bar so
+// it doubles as a deliberate breathing gap between the search app bar and the list; the bar sits flush
+// at the top of the slot, the gap falls between it and the first row / category band.
+private val LOADING_BAR_SLOT_HEIGHT = 10.dp
+
 @Composable
 private fun FlagsLoadingBar(loading: Boolean) {
-    if (loading) {
-        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    // The SLOT is always laid out; only the bar inside is conditional → toggling never reflows the list.
+    Box(modifier = Modifier.fillMaxWidth().height(LOADING_BAR_SLOT_HEIGHT)) {
+        if (loading) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter))
+        }
     }
 }
 
