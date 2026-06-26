@@ -429,6 +429,22 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeNavBarLabels(): Flow<Boolean> =
+        dataStore.data
+            // Default `true` (#666): labels under the bottom-nav icons are the historical M3
+            // behaviour; hiding them is the opt-out to an icon-only bar.
+            .map { prefs -> prefs[KEY_NAV_BAR_LABELS] ?: true }
+            .distinctUntilChanged()
+            .catch { emit(true) }
+
+    override suspend fun setNavBarLabels(enabled: Boolean) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_NAV_BAR_LABELS] = enabled
+            }
+        }
+    }
+
     override fun observeStartScreen(): Flow<StartScreenPreference> =
         dataStore.data
             .map(::readStartScreen)
@@ -842,6 +858,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
 
         // #105 — show the intra-page reading scrollbar (default true = historical; opt-out).
         val KEY_SHOW_SCROLLBAR = booleanPreferencesKey("show_scrollbar")
+
+        // #666 — show the labels under the bottom-nav icons (default true = historical; opt-out).
+        val KEY_NAV_BAR_LABELS = booleanPreferencesKey("nav_bar_labels")
 
         // #458 — cold-start tab (StartScreenChoice.name, defensively parsed) + optional Forum
         // category id (absent unless screen == FORUM and a category was picked).

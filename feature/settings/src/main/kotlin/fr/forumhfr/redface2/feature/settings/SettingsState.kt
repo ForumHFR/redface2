@@ -133,6 +133,12 @@ data class SettingsState(
     val isUpdatingShowScrollbar: Boolean = false,
     val showScrollbarError: Boolean = false,
     val showScrollbarTouchedLocally: Boolean = false,
+    // #666 — afficher les libellés sous les icônes de la barre du bas. Même machinerie optimistic-flip
+    // + garde de course. Default TRUE (libellés affichés = comportement M3 historique) : l'opt-out.
+    val navBarLabels: Boolean = true,
+    val isUpdatingNavBarLabels: Boolean = false,
+    val navBarLabelsError: Boolean = false,
+    val navBarLabelsTouchedLocally: Boolean = false,
     // #518 — masquer la barre de navigation système Android (plein écran immersif). Même machinerie
     // optimistic-flip + garde de course. Default FALSE (opt-in).
     val hideSystemNavBar: Boolean = false,
@@ -279,6 +285,10 @@ data class SettingsState(
     val canToggleShowScrollbar: Boolean
         get() = !isUpdatingShowScrollbar
 
+    // #666 — the nav-bar-labels toggle is gated only by its own write.
+    val canToggleNavBarLabels: Boolean
+        get() = !isUpdatingNavBarLabels
+
     // #518 — the hide-system-nav-bar toggle is gated only by its own write.
     val canToggleHideSystemNavBar: Boolean
         get() = !isUpdatingHideSystemNavBar
@@ -412,6 +422,9 @@ sealed interface SettingsIntent {
 
     /** #105 — afficher l'ascenseur de lecture (sujets et MP). */
     data class ShowScrollbarChanged(val enabled: Boolean) : SettingsIntent
+
+    /** #666 — afficher les libellés sous les icônes de la barre du bas. */
+    data class NavBarLabelsChanged(val enabled: Boolean) : SettingsIntent
 
     /** #518 — masquer la barre de navigation système Android (plein écran immersif). */
     data class HideSystemNavBarChanged(val enabled: Boolean) : SettingsIntent

@@ -73,6 +73,12 @@ class AppThemeViewModel @Inject constructor(
         userPreferencesRepository.observeShowScrollbar()
             .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    // #666 — show the labels under the bottom-nav icons. Eagerly collected at the shell so the
+    // NavigationSuiteScaffold can drop the labels. No bootstrap mirror; seed = the `true` default.
+    val navBarLabels: StateFlow<Boolean> =
+        userPreferencesRepository.observeNavBarLabels()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
     // #445 — debug bounds overlay toggle (dev channel only; the channel gate lives in RedfaceApp).
     // No bootstrap mirror: it does not paint the pre-first-frame window, so the seed is the `false`
     // default and DataStore resolves on the first Eagerly read.

@@ -1880,6 +1880,24 @@ class SettingsViewModelTest {
             showScrollbar.value = value
         }
 
+        // #666 — afficher les libellés de la barre du bas. Même seam optimistic-flip ; default TRUE.
+        private val navBarLabels = MutableStateFlow(true)
+        var navBarLabelsSetCalls: Int = 0
+            private set
+        var failOnNavBarLabelsSet: Boolean = false
+
+        override fun observeNavBarLabels(): Flow<Boolean> = navBarLabels
+
+        override suspend fun setNavBarLabels(enabled: Boolean) {
+            navBarLabelsSetCalls += 1
+            check(!failOnNavBarLabelsSet) { "boom" }
+            navBarLabels.value = enabled
+        }
+
+        fun emitNavBarLabels(value: Boolean) {
+            navBarLabels.value = value
+        }
+
         // #458 — start screen lives on its own StartScreenSettingsViewModel; this fake only
         // satisfies the interface for the main Settings ViewModel under test.
         override fun observeStartScreen(): Flow<StartScreenPreference> =
