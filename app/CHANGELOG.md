@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.11` — `internal` (dev) — 2026-06-26
+
+> Polish dogfood : retour visuel au tirage du swipe-to-refresh. Build dev ; versionCode au dispatch.
+> versionName 0.17.10 → 0.17.11.
+
+**Drapeaux (#603)**
+
+- **Amorce au pull-to-refresh** : tirer la liste vers le bas affiche de nouveau un indicateur pendant
+  le geste (il avait été retiré), puis il s'efface dès que le rechargement démarre — la fine barre du
+  haut prend le relais (plus de double indicateur). Vaut pour les onglets de drapeaux et la liste DT.
+
 ## `0.17.10` — `internal` (dev) — 2026-06-26
 
 > Lot 1 dogfood (4 sur 4) : le réglage des libellés de la barre du bas, dernier item du lot. Build dev ;

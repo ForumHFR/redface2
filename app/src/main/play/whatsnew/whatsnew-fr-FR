@@ -1,6 +1,6 @@
-Redface 2 v0.17.10 — dev.
+Redface 2 v0.17.11 — dev.
 
-Réglages :
-- Nouveau réglage Affichage > Barre de navigation : afficher ou masquer les libellés sous les icônes de la barre du bas (barre à icônes seules, plus compacte).
+Vue Drapeaux :
+- Amorce au swipe-to-refresh : tirer la liste vers le bas réaffiche un indicateur pendant le geste, qui s'efface dès le rechargement (la barre du haut prend le relais).
 
 Bugs : via le canal dev ou GitHub.
