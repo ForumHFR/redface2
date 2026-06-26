@@ -496,6 +496,22 @@ internal fun tabBackTarget(
         TabBackResult(history.last(), history.dropLast(1))
     }
 
+/**
+ * #667 — back at a secondary tab's root returns to the previous tab instead of letting the system
+ * finish the Activity. Extracted from [RedfaceApp] to keep it under detekt's complexity threshold.
+ * Enabled only at the ROOT (size == 1) of a tab other than the home Flags tab.
+ */
+@Composable
+private fun TabRootBackHandler(
+    currentDestination: TopLevelDestination,
+    activeBackStackSize: Int,
+    onRootBack: () -> Unit,
+) {
+    BackHandler(
+        enabled = currentDestination != TopLevelDestination.Flags && activeBackStackSize == 1,
+    ) { onRootBack() }
+}
+
 /** #313 — badge cap : beyond this the badge shows « 9+ » (page-1 proxy, cf. MpUnreadBadgeViewModel). */
 private const val MAX_BADGE_COUNT = 9
 
@@ -705,7 +721,9 @@ fun RedfaceApp(intent: Intent?) {
         var tabHistory by rememberSaveable(
             stateSaver = listSaver(
                 save = { it.map(TopLevelDestination::name) },
-                restore = { it.map(TopLevelDestination::valueOf) },
+                // Defensive restore (Codex review): drop names that no longer resolve so a renamed/removed
+                // tab in a future version cannot crash the process-death restore.
+                restore = { names -> names.mapNotNull { runCatching { TopLevelDestination.valueOf(it) }.getOrNull() } },
             ),
         ) { mutableStateOf(emptyList<TopLevelDestination>()) }
 
@@ -942,9 +960,11 @@ fun RedfaceApp(intent: Intent?) {
             // still wins while it can pop (size > 1); the immersive back FAB (#518) routes through the
             // same dispatcher, so it is covered. RedfaceNavHost.onRootBack is a belt-and-suspenders for a
             // future nav3 that might invoke onBack at the root.
-            BackHandler(
-                enabled = currentDestination != TopLevelDestination.Flags && activeBackStack.size == 1,
-            ) { onRootTabBack() }
+            TabRootBackHandler(
+                currentDestination = currentDestination,
+                activeBackStackSize = activeBackStack.size,
+                onRootBack = onRootTabBack,
+            )
             Box(modifier = Modifier.fillMaxSize()) {
                 Surface(modifier = contentInsetModifier) {
                     val accountMenu: @Composable () -> Unit = {
