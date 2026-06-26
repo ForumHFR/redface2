@@ -1,6 +1,10 @@
-Redface 2 v0.17.8 — dev.
+Redface 2 v0.17.9 — dev.
 
 Flags view:
-- Tighter spacing between the search bar and the category bands: less air above and around categories, denser list (the "minimal" preset).
+- Tab swipe fixed (the new tab no longer slides in from the wrong side) and now cyclic (last wraps to first).
+- Dedicated icon for the Intelligence Artificielle category.
+
+Navigation:
+- Back from Settings (or another tab) returns to the previous tab instead of closing the app.
 
 Bugs: via dev or GitHub.

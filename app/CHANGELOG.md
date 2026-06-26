@@ -16,6 +16,25 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.9` — `internal` (dev) — 2026-06-26
+
+> Lot 1 dogfood (3 sur 4) : bugs swipe + navigation et icône de catégorie. Le réglage des libellés de
+> la barre du bas (#666) suivra dans une release dédiée. Build dev ; versionCode au dispatch.
+> versionName 0.17.8 → 0.17.9.
+
+**Drapeaux (#603)**
+
+- **Swipe entre onglets — animation du bon côté (#660)** : au changement d'onglet validé, le nouvel
+  onglet apparaît centré net au lieu de glisser depuis le mauvais côté.
+- **Swipe cyclique (#663)** : balayer au-delà du dernier onglet revient au premier (et inversement).
+- **Icône Intelligence Artificielle (#664)** : la catégorie IA (nouvelle sur HFR) a enfin son icône au
+  lieu du glyphe générique.
+
+**Navigation (#667)**
+
+- **Retour depuis un onglet secondaire** : à la racine des Réglages (ou Forum/Recherche/Messages), le
+  bouton retour revient à l'onglet précédent au lieu de fermer l'application.
+
 ## `0.17.8` — `internal` (dev) — 2026-06-26
 
 > Polish dogfood : resserrage de l'espacement entre la barre de recherche et les bandes de catégorie
