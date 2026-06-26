@@ -43,6 +43,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshState
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -976,6 +979,33 @@ private fun ColumnScope.AuthenticatedBody(
 }
 
 /**
+ * #603 (XaTriX) — « amorce seule » pull-to-refresh cue: the standard [PullToRefreshDefaults.Indicator]
+ * shown ONLY while the user is actively pulling (`!isRefreshing && distanceFraction > 0`). Once the
+ * refresh starts it renders NOTHING, so the thin top [FlagsLoadingBar] is the single loading cue (no
+ * double indicator). The whole wrapper is gated, not just the content, per Codex (an indicator left
+ * with empty content can keep its container visible). Shared by both pull-to-refresh surfaces.
+ *
+ * Passing `isRefreshing = false` keeps the indicator in its determinate pull state — it never reaches
+ * the persistent circular spin here (the M3-expressive `LoadingIndicator` is `internal` in this BOM,
+ * so the determinate default Indicator is the amorce visual).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FlagsPullAmorce(
+    state: PullToRefreshState,
+    isRefreshing: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (!isRefreshing && state.distanceFraction > 0f) {
+        PullToRefreshDefaults.Indicator(
+            state = state,
+            isRefreshing = false,
+            modifier = modifier,
+        )
+    }
+}
+
+/**
  * The real flag-list body of a [FlagTab] with a backend (Cyan/Red/Favorite) — extracted from
  * [AuthenticatedBody] when the #457 tab-swipe wrapper landed, so the swipe surface (placeholders
  * included) and the pull-to-refresh surface stay two distinct layers.
@@ -991,14 +1021,18 @@ private fun FlagListBody(
     // Pull-to-refresh (swipe down) replaces the legacy header « Actualiser » button, matching
     // feature/forum. It wraps the whole flag body so the indicator stays anchored over the
     // existing content during the refresh round-trip (Material 3 stable, cf. Context7).
-    // #603 — no circular indicator: the thin top FlagsLoadingBar is the single loading cue for manual,
-    // auto AND initial loads (XaTriX dogfood — the rond was redundant with the bar). `indicator = {}`
-    // keeps the pull gesture (onRefresh still fires) but draws nothing; `isRefreshing` still drives the
-    // box state so a pull during an in-flight refresh doesn't double-trigger.
+    // #603 — « amorce seule » (XaTriX): a pull cue while dragging, then NOTHING during the refresh —
+    // the thin top FlagsLoadingBar is the single loading cue (manual, auto and initial loads), so no
+    // double indicator. The pull gesture still fires onRefresh; isRefreshing drives the box state so a
+    // pull mid-refresh doesn't double-trigger.
+    val pullState = rememberPullToRefreshState()
     PullToRefreshBox(
         isRefreshing = state.isRefreshing,
         onRefresh = actions.onRefresh,
-        indicator = {},
+        state = pullState,
+        indicator = {
+            FlagsPullAmorce(pullState, state.isRefreshing, Modifier.align(Alignment.TopCenter))
+        },
         modifier = Modifier.fillMaxSize(),
     ) {
         when (val current = state.flagsState) {
@@ -1663,12 +1697,16 @@ private fun DtTabOpenEffect(
 private fun DtListBody(state: DtListUiState, isRefreshing: Boolean, actions: AuthenticatedActions) {
     // #546 directive XaTriX — pull-to-refresh (swipe down) on the DT list, like the flag tabs. Wraps
     // the whole body (every branch) so the gesture has a target even on the listless states (#229).
-    // #603 — no circular indicator (`indicator = {}`), consistent with the flag tabs: the top
+    // #603 — « amorce seule » (XaTriX): pull cue while dragging, nothing during the refresh; the top
     // FlagsLoadingBar (driven by dtIsRefreshing / DtListUiState.Loading) is the single loading cue.
+    val pullState = rememberPullToRefreshState()
     PullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = actions.onRefreshDt,
-        indicator = {},
+        state = pullState,
+        indicator = {
+            FlagsPullAmorce(pullState, isRefreshing, Modifier.align(Alignment.TopCenter))
+        },
         modifier = Modifier.fillMaxSize(),
     ) {
         DtListContent(state = state, actions = actions)
