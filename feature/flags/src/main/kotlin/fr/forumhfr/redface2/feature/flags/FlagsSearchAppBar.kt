@@ -75,7 +75,10 @@ fun FlagsSearchAppBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
+                // Asymmetric vertical padding (#603, XaTriX preset D): the bottom is trimmed to 2.dp so
+                // the category band tucks up close under the search bar; the top keeps 8.dp of breathing
+                // room below the status bar.
+                .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {

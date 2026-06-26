@@ -1,6 +1,6 @@
-Redface 2 v0.17.7 — dev.
+Redface 2 v0.17.8 — dev.
 
 Vue Drapeaux :
-- Le menu de réglages rapides défile désormais : toutes les options (dont le style de bande) restent accessibles, même sur petit écran.
+- Espacement resserré entre la barre de recherche et les bandes de catégorie : moins d'air au-dessus et autour des catégories, liste plus dense (preset « minimal »).
 
 Bugs : via le canal dev ou GitHub.
