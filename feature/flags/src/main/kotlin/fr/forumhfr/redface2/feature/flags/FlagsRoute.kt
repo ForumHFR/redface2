@@ -334,10 +334,20 @@ fun FlagsRoute(
                         searchEnabled = canConfigureView,
                         query = searchQuery,
                         searchActive = searchActive,
+                        // #661 — the picker dropdown surfaces a contextual « +lus » toggle (Cyan/DT) and
+                        // the display-settings sheet for discoverability.
+                        currentTab = selectedTab,
+                        readFilterShowsRead = flagsReadFilterShowsRead(
+                            tab = selectedTab,
+                            cyanShowsRead = cyanShowsRead,
+                            dtShowsRead = dtShowsRead,
+                        ),
                     ),
                     onSelectTab = viewModel::selectTab,
                     onQueryChange = { searchQuery = it },
                     onSearchActiveChange = { searchActive = it },
+                    // #661 — open the quick-config sheet from the picker (same sheet as the bottom-bar re-tap).
+                    onOpenViewSettings = { showViewSettingsSheet = true },
                     accountMenu = { topBarActions?.invoke() },
                 )
 
