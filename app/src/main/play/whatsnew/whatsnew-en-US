@@ -1,8 +1,5 @@
-Redface 2 v0.17.14 — dev.
+Redface 2 v0.17.15 — dev.
 
 Flags view:
-- The tab picker menu now offers "Show/Hide read" and the display settings.
-- Re-tapping the Flags tab from a topic returns to the list.
-- Long-press on a topic: 5 actions on a single row.
-
-Bugs: via dev or GitHub.
+- More compact bottom bar (52 dp) when labels are hidden, with the active tab indicator and tab names announced for accessibility.
+- Slightly roomier category bands (preset C).

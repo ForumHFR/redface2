@@ -16,6 +16,23 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.15` — `internal` (dev) — 2026-06-27
+
+> Refonte de la vue Drapeaux (#603), polish : la barre du bas en mode icônes seules passe à 52 dp avec
+> un item dédié (14 dp d'air autour de l'icône, indicateur M3 actif, nom accessible des onglets corrigé),
+> et l'espacement des bandes de catégorie passe du preset D au preset C (les bandes paraissaient trop
+> serrées) (#671). Build dev ; versionCode au dispatch. versionName 0.17.14 → 0.17.15.
+
+**Drapeaux — vue (#603)**
+
+- **Barre du bas icônes seules à 52 dp (suite #666)** : quand les libellés sont masqués, la barre du bas
+  passe de 56 à 52 dp, construite à partir d'un item dédié — l'icône 24 dp est centrée avec 14 dp d'air
+  au-dessus et en dessous, l'indicateur actif (pilule M3) revient derrière l'icône sélectionnée. Corrige
+  au passage un manque d'accessibilité : en mode icônes seules les onglets n'avaient pas de nom annoncé.
+- **Espacement des bandes de catégorie — preset C (#671)** : l'air autour des bandes de catégorie passe
+  du preset D (trop serré pour la hauteur des bandes) au preset C ; un réglage utilisateur dédié arrivera
+  plus tard.
+
 ## `0.17.14` — `internal` (dev) — 2026-06-27
 
 > Refonte de la vue Drapeaux (#603), lot suivant : le menu déroulant du sélecteur d'onglet expose
