@@ -1319,9 +1319,10 @@ private fun CategorySectionedFlagList(
  *
  * #414 — the whole band is tappable and opens the category's topic listing (RF1 parity); the trailing
  * chevron vector (`ic_chevron_right`) is the affordance. Foundation [clickable] does not enforce a
- * Material touch-target minimum, hence the explicit [heightIn] on every leaf. #603 (preset D, XaTriX)
- * trimmed that min to 34 dp for a denser band: below Material's 48 dp / WCAG AAA 44 dp recommendation
- * but still above the WCAG 2.2 AA 24 dp floor — a deliberate density-over-target-size trade-off.
+ * Material touch-target minimum, hence the explicit [heightIn] on every leaf. #603 / #671 — preset C
+ * (XaTriX, after preset D's 34 dp felt too cramped for the band height) sets that min to 38 dp: still
+ * below Material's 48 dp / WCAG AAA 44 dp recommendation but above the WCAG 2.2 AA 24 dp floor — a
+ * deliberate density-over-target-size trade-off. A per-category band height setting is a future option.
  */
 @Composable
 private fun CategoryHeaderBand(catId: Int, label: String, style: CategoryBandStyle, onClick: () -> Unit) {
@@ -1354,9 +1355,9 @@ private fun CategoryBandMinimal(catId: Int, label: String, onClick: () -> Unit) 
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 34.dp)
+                .heightIn(min = 38.dp)
                 .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) { onClick() }
-                .padding(horizontal = 24.dp, vertical = 4.dp),
+                .padding(horizontal = 24.dp, vertical = 5.dp),
         ) {
             RedfaceVectorIcon(
                 resId = categoryIcon(catId),
@@ -1387,9 +1388,9 @@ private fun CategoryBandSoft(catId: Int, label: String, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceContainer)
-            .heightIn(min = 34.dp)
+            .heightIn(min = 38.dp)
             .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) { onClick() }
-            .padding(horizontal = 24.dp, vertical = 4.dp),
+            .padding(horizontal = 24.dp, vertical = 5.dp),
     ) {
         RedfaceVectorIcon(
             resId = categoryIcon(catId),
@@ -1432,8 +1433,8 @@ private fun CategoryBandAccent(catId: Int, label: String, onClick: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .weight(1f)
-                    .heightIn(min = 34.dp)
-                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                    .heightIn(min = 38.dp)
+                    .padding(horizontal = 20.dp, vertical = 5.dp),
             ) {
                 RedfaceVectorIcon(
                     resId = categoryIcon(catId),
@@ -1467,9 +1468,9 @@ private fun CategoryBandBullet(catId: Int, label: String, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface)
-            .heightIn(min = 34.dp)
+            .heightIn(min = 38.dp)
             .clickable(onClickLabel = stringResource(R.string.flags_category_open_label)) { onClick() }
-            .padding(horizontal = 20.dp, vertical = 4.dp),
+            .padding(horizontal = 20.dp, vertical = 5.dp),
     ) {
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
