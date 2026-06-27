@@ -323,6 +323,32 @@ class RestFlagMappersTest {
         assertEquals(0, flag.replyCount)
     }
 
+    @Test
+    fun `toStickyFlags keeps only sticky rows routed by flag_owntopic - 251`() {
+        // #251 — the cat 32 « IA » topics/last fixture: a single STICKY (id=1, flag_owntopic=1,
+        // is_read=false) plus many NON-sticky flagged topics. toStickyFlags must keep ONLY the
+        // sticky, and only when its flag_owntopic routes to the requested type.
+        val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(
+            fixture("rest_cat32_topics_last_sticky.json"),
+        )
+
+        val cyan = RestFlagMappers.toStickyFlags(envelope = envelope, type = FlagType.CYAN, fallbackCat = 32)
+        assertEquals("only the cyan-flagged sticky is kept (non-sticky flagged topics excluded)", 1, cyan.size)
+        val flag = cyan.single()
+        assertEquals(1, flag.topicId)
+        assertEquals(32, flag.cat)
+        assertEquals(FlagType.CYAN, flag.type)
+        assertTrue("is_read=false ⇒ unread", flag.hasUnread)
+
+        // flag_owntopic=1 routes to CYAN only — the sticky must NOT leak into RED or FAVORITE.
+        assertTrue(
+            RestFlagMappers.toStickyFlags(envelope = envelope, type = FlagType.RED, fallbackCat = 32).isEmpty(),
+        )
+        assertTrue(
+            RestFlagMappers.toStickyFlags(envelope = envelope, type = FlagType.FAVORITE, fallbackCat = 32).isEmpty(),
+        )
+    }
+
     private fun fixture(name: String): String {
         val resource = requireNotNull(javaClass.classLoader?.getResourceAsStream("fixtures/$name")) {
             "fixture missing: $name"

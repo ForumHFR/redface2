@@ -21,6 +21,7 @@ import fr.forumhfr.redface2.core.parser.write.FlagDeleteResponseParser
 import java.util.EnumMap
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -297,9 +298,20 @@ class DefaultFlagRepository @Inject constructor(
             // are up to date. If one cat REST call throws, all siblings are cancelled and
             // [FlagsResult.Failure] propagates with the original cause.
             coroutineScope {
-                cats.map { category ->
+                val bucketFlags = cats.map { category ->
                     async { fetchAllPages(cat = category.id, bucket = bucket, type = type) }
                 }.awaitAll().flatten()
+                // #251 — the per-cat flag buckets DROP flagged STICKY topics in categories with no
+                // subcategory (proven on cat 32 « IA »). Supplement from `topics/last` for those cats
+                // only (cheap: ~1-3 cats) and merge, deduplicated, BEFORE the global sort + cache so
+                // the sticky survives the next refresh. Best-effort by design (see
+                // [fetchStickyFlagSupplement]) — a marginal sticky must not fail the whole screen.
+                val stickySupplement = fetchStickyFlagSupplement(
+                    cats = cats.filter { it.subcategoryCount == 0 },
+                    type = type,
+                    alreadyPresent = bucketFlags,
+                )
+                (bucketFlags + stickySupplement)
                     // Per-category fan-out concatenates results in cat-iteration order — without a
                     // global sort the screen would group by cat (Discussions block, then Tech block,
                     // …) instead of showing the most recent activity first. `lastReplyAt` is the REST
@@ -428,6 +440,57 @@ class DefaultFlagRepository @Inject constructor(
             )
         }
         return accumulated
+    }
+
+    /**
+     * #251 — best-effort supplement for flagged STICKY topics the per-cat flag buckets drop in
+     * categories WITHOUT a subcategory (proven on cat 32 « IA »: its sticky « Règles » topic carries
+     * a cyan flag but is absent from `topics/participated/`, present in `topics/last/`). For each such
+     * [cats] entry, reads page 1 of `categories/{cat}/topics/last/` (authenticated — `flag_owntopic`
+     * and `is_read` are per-user) and keeps the sticky rows whose flag routes to [type]
+     * ([RestFlagMappers.toStickyFlags]). Rows already in [alreadyPresent] (same `(cat, topicId)`) are
+     * dropped to avoid duplicates with the bucket fan-out.
+     *
+     * Best-effort (#251 Codex gate): although it runs in the SAME `coroutineScope` as the bucket
+     * fan-out, each cat's `topics/last` call is wrapped in its own `runCatching`, so a network/JSON
+     * failure logs and yields nothing rather than failing the whole refresh — recovering a marginal
+     * sticky is not worth turning the screen into a "Réessayer" error. (A `CancellationException` is
+     * rethrown, not swallowed, to keep structured concurrency intact.) Page 1 only:
+     * stickies always head the listing, so deeper pages would be pure network noise for this fix.
+     * Scoped to no-subcategory cats only, where the drop is proven; a [Category.subcategoryCount]
+     * filter at the call site keeps the cost to ~1-3 extra REST GETs per refresh.
+     */
+    private suspend fun fetchStickyFlagSupplement(
+        cats: List<Category>,
+        type: FlagType,
+        alreadyPresent: List<Flag>,
+    ): List<Flag> {
+        if (cats.isEmpty()) return emptyList()
+        val present = alreadyPresent.mapTo(mutableSetOf()) { it.cat to it.topicId }
+        return coroutineScope {
+            cats.map { category ->
+                async {
+                    runCatching {
+                        val body = apiClient.getTopicList(
+                            cat = category.id,
+                            subcat = null,
+                            page = 1,
+                            resultsPerPage = DEFAULT_RESULTS_PER_PAGE,
+                            useAuth = true,
+                        )
+                        val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(body)
+                        RestFlagMappers.toStickyFlags(envelope = envelope, type = type, fallbackCat = category.id)
+                    }.getOrElse { throwable ->
+                        // Never swallow a coroutine cancellation as a best-effort "miss" — rethrow it so
+                        // structured concurrency stays intact (#251 Codex review). Only network/JSON
+                        // failures degrade to an empty supplement.
+                        if (throwable is CancellationException) throw throwable
+                        Log.w(LOG_TAG, "Sticky flag supplement failed for cat=${category.id} (best-effort)", throwable)
+                        emptyList()
+                    }
+                }
+            }.awaitAll().flatten().filter { (it.cat to it.topicId) !in present }
+        }
     }
 
     private fun FlagType.toBucket(): HfrRestFlagBucket = when (this) {
