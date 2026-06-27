@@ -1257,10 +1257,6 @@ private const val CONTENT_TYPE_HEADER = "category_header"
 private const val CONTENT_TYPE_EMPTY = "empty_section"
 private const val CONTENT_TYPE_ROW = "flag_row"
 
-// #6 — the DT scan-note footer is a distinct, non-row item (not a clickable ForumListRow), so it
-// keeps its own recycling pool and never reuses a row slot.
-private const val CONTENT_TYPE_DT_FOOTER = "dt_scan_note"
-
 /**
  * Category-grouped flag list (#179). Renders one sticky band per [FlagCategorySection] in the
  * canonical category order the ViewModel produced, with the rows under each band. Empty sections
@@ -1974,9 +1970,9 @@ private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions, f
         DtListUiState.NoUnread -> ScrollableFlagsEmptyState(
             iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_mail,
             title = stringResource(R.string.flags_dt_no_unread),
-            // #662 — restore the page-1 scan caveat the old footer (flags_dt_scan_note) carried in this
-            // state; the « +lus » discoverability stays deferred to #661.
-            subtitle = stringResource(R.string.flags_dt_no_unread_subtitle),
+            // #662 (demande XaTriX) — pas de sous-texte : le caveat de balayage vit dans la description du
+            // réglage « Section DT » (settings), plus dans la vue. La découvrabilité « +lus » reste #661.
+            subtitle = null,
             funny = funny,
         )
 
@@ -1999,16 +1995,9 @@ private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions, f
                 DtRow(item = item, onOpenMultiMp = actions.onOpenMultiMp)
                 FlagItemDivider()
             }
-            // Scan-note footer (#6): the list only covers inbox PAGE 1 + what the DT sync knows;
-            // older inbox pages are deliberately not swept. A discreet, non-clickable trailing item.
-            item(key = "dt-scan-note", contentType = CONTENT_TYPE_DT_FOOTER) {
-                Text(
-                    text = stringResource(R.string.flags_dt_scan_note),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
-                )
-            }
+            // #662 (demande XaTriX) — le caveat de balayage (« seule la page 1 est listée ») a quitté la
+            // vue : il vit désormais dans la description du réglage « Section DT » (settings), au niveau de
+            // l'activation. Plus de footer scan-note ici.
         }
     }
 }

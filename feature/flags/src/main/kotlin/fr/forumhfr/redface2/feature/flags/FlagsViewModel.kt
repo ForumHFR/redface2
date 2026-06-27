@@ -833,8 +833,9 @@ class FlagsViewModel @Inject constructor(
      *
      * [DtListUiState.Empty] iff the inbox PAGE 1 has no MultiMP AND MPStorage has no orphan entry.
      * Scope (#6): only inbox PAGE 1 is scanned + whatever MPStorage already knows ; a full multi-page
-     * inbox sweep stays DEFERRED, so older pages are not covered — the UI carries a scan note footer
-     * (`flags_dt_scan_note`) and the empty-state copy (`flags_dt_empty_subtitle`) assumes that semantics.
+     * inbox sweep stays DEFERRED, so older pages are not covered — the scan caveat lives in the « Section
+     * DT » settings toggle description (`settings_flags_show_dt_section_description`, #662), and the
+     * empty-state copy (`flags_dt_empty_subtitle`) assumes that semantics.
      */
     private fun loadDt(isRefresh: Boolean) {
         dtFetchStarted = true
@@ -1199,7 +1200,7 @@ sealed interface DtListUiState {
     /**
      * The DT union: inbox PAGE 1 MultiMP rows ∪ orphan MPStorage entries, deduplicated by
      * `threadId` and ordered inbox-first then `mpFlags.list` order (#6). The multi-page inbox limit
-     * remains — surfaced by the scan-note footer (`flags_dt_scan_note`).
+     * remains — surfaced in the « Section DT » settings toggle description (#662).
      */
     data class Content(val items: List<DtListItem>) : DtListUiState
 

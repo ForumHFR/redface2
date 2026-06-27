@@ -75,13 +75,9 @@
     <!-- #546 — état « non-lus uniquement » actif mais aucune conversation non lue (l'union n'est pas
          vide, juste filtrée). Re-taper l'onglet DT affiche aussi les lues (« +lus »). Distinct de
          flags_dt_empty (aucune conversation du tout). #662 — wording aligné sur les autres états vides
-         (forme courte « Aucun(e)… », sans point ni instruction collée ; la découvrabilité du « +lus »
-         est traitée à part, #661). -->
+         (forme courte « Aucun(e)… », sans sous-texte : le caveat de balayage vit désormais dans la
+         description du réglage « Section DT », pas dans la vue — demande XaTriX). -->
     <string name="flags_dt_no_unread">Aucune conversation non lue</string>
-    <!-- #662 — sous-texte de l'état vide DT « aucune non-lue » : porte le caveat du balayage (la note
-         de bas de liste flags_dt_scan_note ne s'affiche que sous une liste peuplée), forme courte pour
-         tenir sous le titre. Ne traite PAS la découvrabilité « +lus » (déléguée à #661). -->
-    <string name="flags_dt_no_unread_subtitle">Les conversations plus anciennes ne sont pas balayées.</string>
     <!-- Description a11y d'une ligne DT : état lu/non-lu, annoncé par TalkBack (le point coloré
          est purement décoratif). %1$s = sujet de la conversation. -->
     <string name="flags_dt_row_unread">Non lu : %1$s</string>
@@ -93,9 +89,6 @@
     <!-- #6 — Description a11y d'une ligne DT orpheline (hors inbox) : l'état lu/non-lu est INCONNU,
          on n'annonce donc ni « Lu » ni « Non lu ». %1$s = titre placeholder de la conversation. -->
     <string name="flags_dt_row_state_unknown">État inconnu : %1$s</string>
-    <!-- #6 — Note de bas de liste DT : la liste ne couvre que la page 1 de la boîte + ce que la
-         synchro DT connaît ; les pages plus anciennes ne sont pas balayées (balayage différé). -->
-    <string name="flags_dt_scan_note">Seules les conversations de la première page de la boîte et celles connues de la synchro DT sont listées. Les pages plus anciennes ne sont pas balayées.</string>
     <!-- Échec du chargement de la liste DT (boîte de réception). La lecture MPStorage, best-effort,
          n'atteint jamais cet état (elle se dégrade en « pas de badge »). -->
     <string name="flags_dt_error">Impossible de charger les conversations. Vérifie ta connexion ou réessaie.</string>
