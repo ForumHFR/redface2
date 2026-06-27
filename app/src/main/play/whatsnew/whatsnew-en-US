@@ -1,6 +1,8 @@
-Redface 2 v0.17.13 — dev.
+Redface 2 v0.17.14 — dev.
 
-Navigation bar:
-- Hiding the labels (Settings > Display) now actually shortens the bottom bar, which switches to icons only — on phones.
+Flags view:
+- The tab picker menu now offers "Show/Hide read" and the display settings.
+- Re-tapping the Flags tab from a topic returns to the list.
+- Long-press on a topic: 5 actions on a single row.
 
 Bugs: via dev or GitHub.
