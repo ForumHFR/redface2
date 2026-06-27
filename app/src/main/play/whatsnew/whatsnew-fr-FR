@@ -1,8 +1,5 @@
-Redface 2 v0.17.14 — dev.
+Redface 2 v0.17.15 — dev.
 
 Vue Drapeaux :
-- Le menu du sélecteur d'onglet propose maintenant « Afficher/Masquer les lus » et les réglages d'affichage.
-- Re-taper l'onglet Drapeaux depuis un sujet revient à la liste.
-- Appui long sur un sujet : 5 actions sur une seule ligne.
-
-Bugs : via le canal dev ou GitHub.
+- Barre du bas plus compacte (52 dp) quand les libellés sont masqués, avec l'indicateur d'onglet actif et le nom des onglets annoncé pour l'accessibilité.
+- Bandes de catégorie un peu plus aérées (preset C).
