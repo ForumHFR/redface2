@@ -699,6 +699,11 @@ class FlagsViewModel @Inject constructor(
         viewModelScope.launch { userPreferencesRepository.setFlagsCategoryBandStyle(style) }
     }
 
+    /** Bottom-sheet write for the GLOBAL « marker outline » toggle (#690) — one value for every tab. */
+    fun setFlagsMarkerBorder(enabled: Boolean) {
+        viewModelScope.launch { userPreferencesRepository.setFlagsMarkerBorder(enabled) }
+    }
+
     fun refresh() {
         // Super is a placeholder with no backing FlagType — pull-to-refresh is a no-op there.
         val type = _selectedTab.value.flagType ?: return
@@ -829,7 +834,7 @@ class FlagsViewModel @Inject constructor(
      * [DtListUiState.Empty] iff the inbox PAGE 1 has no MultiMP AND MPStorage has no orphan entry.
      * Scope (#6): only inbox PAGE 1 is scanned + whatever MPStorage already knows ; a full multi-page
      * inbox sweep stays DEFERRED, so older pages are not covered — the UI carries a scan note footer
-     * (`flags_dt_scan_note`) and the empty-state copy (`flags_dt_empty`) assumes that semantics.
+     * (`flags_dt_scan_note`) and the empty-state copy (`flags_dt_empty_subtitle`) assumes that semantics.
      */
     private fun loadDt(isRefresh: Boolean) {
         dtFetchStarted = true

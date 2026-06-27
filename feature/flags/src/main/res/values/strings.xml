@@ -66,17 +66,22 @@
     <!-- Badge discret de reprise de lecture, alimenté par MPStorage (mpFlags). %1$d = page de reprise.
          C'est une POSITION de lecture, PAS un état lu/non-lu (le point non-lu vient de l'inbox). -->
     <string name="flags_dt_resume_badge">reprise p.%1$d</string>
-    <!-- État vide DT. La liste = PAGE 1 de la boîte de réception (les conversations les plus
-         récentes) ∪ entrées connues de la synchro DT (MPStorage) — un balayage multi-pages est
-         différé (cf. DT_INBOX_PAGE). Le wording assume « récente » pour ne pas affirmer qu'AUCUNE
-         MultiMP n'existe ailleurs (ni en page 1, ni connue de la synchro DT). -->
-    <string name="flags_dt_empty">Aucune conversation multi-destinataires récente</string>
+    <!-- État vide DT (#662 — état vide visuel : titre + sous-texte). La liste = PAGE 1 de la boîte de
+         réception (les conversations les plus récentes) ∪ entrées connues de la synchro DT (MPStorage)
+         — un balayage multi-pages est différé (cf. DT_INBOX_PAGE). Le sous-texte assume « récente »
+         pour ne pas affirmer qu'AUCUNE MultiMP n'existe ailleurs. -->
+    <string name="flags_dt_empty_title">Aucune conversation</string>
+    <string name="flags_dt_empty_subtitle">Aucune discussion à interlocuteurs multiples récente.</string>
     <!-- #546 — état « non-lus uniquement » actif mais aucune conversation non lue (l'union n'est pas
          vide, juste filtrée). Re-taper l'onglet DT affiche aussi les lues (« +lus »). Distinct de
          flags_dt_empty (aucune conversation du tout). #662 — wording aligné sur les autres états vides
          (forme courte « Aucun(e)… », sans point ni instruction collée ; la découvrabilité du « +lus »
          est traitée à part, #661). -->
     <string name="flags_dt_no_unread">Aucune conversation non lue</string>
+    <!-- #662 — sous-texte de l'état vide DT « aucune non-lue » : porte le caveat du balayage (la note
+         de bas de liste flags_dt_scan_note ne s'affiche que sous une liste peuplée), forme courte pour
+         tenir sous le titre. Ne traite PAS la découvrabilité « +lus » (déléguée à #661). -->
+    <string name="flags_dt_no_unread_subtitle">Les conversations plus anciennes ne sont pas balayées.</string>
     <!-- Description a11y d'une ligne DT : état lu/non-lu, annoncé par TalkBack (le point coloré
          est purement décoratif). %1$s = sujet de la conversation. -->
     <string name="flags_dt_row_unread">Non lu : %1$s</string>
@@ -156,6 +161,10 @@
     <string name="flags_view_settings_marker_stripe">Barre</string>
     <string name="flags_view_settings_marker_pastille">Pastille</string>
     <string name="flags_view_settings_marker_dot">Point</string>
+    <!-- #690 — bascule GLOBALE : fin contour sombre (0,5 dp) autour du marqueur, pour que l\'ambre
+         des favoris ressorte mieux sur fond clair. -->
+    <string name="flags_view_settings_marker_border_title">Contour du marqueur</string>
+    <string name="flags_view_settings_marker_border_description">Ajoute un fin liseré sombre autour de l\'indicateur de couleur, pour mieux le détacher du fond clair. S\'applique à tous les onglets.</string>
     <!-- #603 — Style de la bande de catégorie (vue groupée) : sous-titre sobre / bloc tonal /
          accent latéral / pastille en puce. Réglage GLOBAL (tous onglets), sans effet en vue à plat. -->
     <string name="flags_view_settings_band_title">Bande de catégorie</string>

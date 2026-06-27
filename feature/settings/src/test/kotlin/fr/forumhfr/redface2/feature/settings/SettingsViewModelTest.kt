@@ -2072,6 +2072,7 @@ class SettingsViewModelTest {
         override suspend fun setFlagsMarkerStyle(style: MarkerStyle) = Unit
         override suspend fun setFlagsSingleLineTitle(enabled: Boolean) = Unit
         override suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle) = Unit
+        override suspend fun setFlagsMarkerBorder(enabled: Boolean) = Unit
 
         fun emit(value: ProxyConfig) {
             config.value = value

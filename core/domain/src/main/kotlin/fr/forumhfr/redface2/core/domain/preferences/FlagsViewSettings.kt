@@ -41,4 +41,8 @@ data class FlagsViewSettings(
     // shipped in 0.17.3). Not subject to the per-tab override (like [markerStyle]). Carried on every
     // resolution path.
     val categoryBandStyle: CategoryBandStyle = CategoryBandStyle.MINIMAL,
+    // #690 — GLOBAL: draw a thin (0.5 dp) dark outline around the colored marker so the amber FAVORITE
+    // (#FFB300) reads cleanly on a light background. Default false (no border). Not subject to the
+    // per-tab override (like [markerStyle]). Carried on every resolution path.
+    val markerBorder: Boolean = false,
 )

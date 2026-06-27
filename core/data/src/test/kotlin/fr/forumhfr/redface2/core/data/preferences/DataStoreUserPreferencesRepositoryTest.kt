@@ -421,6 +421,29 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `markerBorder defaults to false on an empty store`() = runTest(dispatcher) {
+        repository.observeFlagsViewSettings(FlagType.CYAN).test {
+            assertEquals(false, awaitItem().markerBorder)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setFlagsMarkerBorder persists and round-trips for every tab`() = runTest(dispatcher) {
+        // #690 GLOBAL: written once, observed on any tab type.
+        repository.setFlagsMarkerBorder(true)
+        repository.observeFlagsViewSettings(FlagType.RED).test {
+            assertEquals(true, awaitItem().markerBorder)
+            cancelAndIgnoreRemainingEvents()
+        }
+        repository.setFlagsMarkerBorder(false)
+        repository.observeFlagsViewSettings(FlagType.FAVORITE).test {
+            assertEquals(false, awaitItem().markerBorder)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `categoryBandStyle defaults to MINIMAL on an empty store`() = runTest(dispatcher) {
         repository.observeFlagsViewSettings(FlagType.CYAN).test {
             assertEquals(CategoryBandStyle.MINIMAL, awaitItem().categoryBandStyle)
