@@ -207,6 +207,15 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override suspend fun setFlagsMarkerBorder(enabled: Boolean) {
+        // #690 — GLOBAL toggle, a single key (mirrors the marker shape).
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_MARKER_BORDER] = enabled
+            }
+        }
+    }
+
     override fun observeThemeMode(): Flow<ThemeMode> =
         dataStore.data
             // Default SYSTEM: follow the OS dark-mode setting unless the user picked otherwise (#286).
@@ -754,6 +763,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val singleLineTitle = prefs[KEY_FLAGS_SINGLE_LINE_TITLE] ?: false
         // #603 — GLOBAL category band style: resolved once (defensively), added to both return paths.
         val categoryBandStyle = readCategoryBandStyle(prefs)
+        // #690 — GLOBAL « marker outline » toggle: resolved once, added to both return paths.
+        val markerBorder = prefs[KEY_FLAGS_MARKER_BORDER] ?: false
         if (prefs[KEY_FLAGS_PER_TAB_OVERRIDE] != true) {
             return FlagsViewSettings(
                 groupByCategory = globalGroup,
@@ -762,6 +773,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
                 markerStyle = markerStyle,
                 singleLineTitle = singleLineTitle,
                 categoryBandStyle = categoryBandStyle,
+                markerBorder = markerBorder,
             )
         }
         return FlagsViewSettings(
@@ -771,6 +783,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             markerStyle = markerStyle,
             singleLineTitle = singleLineTitle,
             categoryBandStyle = categoryBandStyle,
+            markerBorder = markerBorder,
         )
     }
 
@@ -825,6 +838,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_FLAGS_SINGLE_LINE_TITLE = booleanPreferencesKey("flags_single_line_title")
         // #603 — GLOBAL grouped-view category band style (CategoryBandStyle.name, defensively parsed).
         val KEY_FLAGS_CATEGORY_BAND_STYLE = stringPreferencesKey("flags_category_band_style")
+        // #690 — GLOBAL « marker outline » toggle (thin dark border around the marker).
+        val KEY_FLAGS_MARKER_BORDER = booleanPreferencesKey("flags_marker_border")
         // #662 — « états vides humoristiques » opt-in (smiley empty state instead of the sober icon).
         val KEY_FLAGS_FUNNY_EMPTY_STATE = booleanPreferencesKey("flags_funny_empty_state")
         // #309 — per-tab display override. The master switch plus one nullable key per FlagType for

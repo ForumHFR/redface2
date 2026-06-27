@@ -1,5 +1,6 @@
-Redface 2 v0.17.18 — dev.
+Redface 2 v0.17.19 — dev.
 
 Flags view:
-- Empty tabs now show a real visual empty state (icon + per-tab message), with an optional "funny empty states" toggle that shows a HFR perso smiley instead.
-- Cyan flags on sticky topics of categories without a subcategory (e.g. "IA") show up again.
+- DT and Super Favorites tabs now also show a visual empty state (icon/smiley + message).
+- The "funny empty states" smiley is no longer pixelated.
+- New "Marker outline" option: a thin dark border around the color indicator, so the amber favorite stands out on a light background.

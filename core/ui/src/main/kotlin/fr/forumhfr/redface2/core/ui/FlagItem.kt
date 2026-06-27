@@ -38,6 +38,14 @@ import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 val LocalForumRowTitleMaxLines = compositionLocalOf { 2 }
 
 /**
+ * #690 — GLOBAL « marker outline » preference, surfaced as a CompositionLocal so the leaf [FlagMarker]
+ * reads it WITHOUT threading the flag through every list composable (same pattern as
+ * [LocalForumRowTitleMaxLines]). Default `false` (no border); FlagsRoute provides `true` when the user
+ * enables the thin outline. Other [FlagMarker] consumers keep the default unless they provide their own.
+ */
+val LocalFlagMarkerBorder = compositionLocalOf { false }
+
+/**
  * Renders one row of the user's drapeaux list.
  *
  * Visual hierarchy mirrors what HFR users have spent ~20 years training their eyes on:

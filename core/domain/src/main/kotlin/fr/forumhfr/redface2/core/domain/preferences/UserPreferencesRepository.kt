@@ -132,6 +132,15 @@ interface UserPreferencesRepository {
     suspend fun setFlagsCategoryBandStyle(style: CategoryBandStyle)
 
     /**
+     * Persists the GLOBAL « marker outline » toggle (#690): a thin 0.5 dp dark border around the
+     * Drapeaux marker so the amber FAVORITE colour reads cleanly on a light background. Like
+     * [setFlagsMarkerStyle] it is NOT subject to [observeFlagsPerTabOverride]; surfaced through
+     * [observeFlagsViewSettings] ([FlagsViewSettings.markerBorder]). Defaults to `false` (no border)
+     * until the first call.
+     */
+    suspend fun setFlagsMarkerBorder(enabled: Boolean)
+
+    /**
      * App theme selection (#286): [ThemeMode.SYSTEM] (default) follows the OS dark-mode setting;
      * [ThemeMode.LIGHT] / [ThemeMode.DARK] force the app theme regardless of the OS. Observed at the
      * app root ([fr.forumhfr.redface2.navigation.RedfaceApp]) to compute the effective dark theme

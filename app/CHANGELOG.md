@@ -16,6 +16,27 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.17.19` — `internal` (dev) — 2026-06-27
+
+> Vue Drapeaux (#603) — finitions sur retour dogfood : les états vides visuels (#662) couvrent
+> maintenant aussi les onglets **DT** et **Super Favoris**, le smiley de l'option humoristique n'est
+> plus pixelisé (#662), et le drapeau favori ambre (#690) gagne une **option de contour** (fin liseré
+> sombre) pour mieux ressortir sur fond clair. versionName 0.17.18 → 0.17.19.
+
+**Drapeaux — vue (#603)**
+
+- **États vides DT & Super Favoris (#662)** : les onglets DT et Super Favoris affichent désormais le
+  même état vide visuel (icône/smiley + titre + sous-texte) que les onglets de drapeaux, au lieu d'un
+  simple libellé. L'état DT « aucune non-lue » conserve le caveat de balayage (seules les conversations
+  récentes sont listées) en sous-texte.
+- **Smiley de l'option humoristique dé-pixelisé (#662)** : le smiley perso `[:eric le looser]` est une
+  petite photo (~47×50 px), pas du pixel-art — l'agrandissement « net » précédent le transformait en
+  blocs. Filtrage lissé + taille réduite : il reste propre.
+- **Option « Contour du marqueur » (#690)** : nouvelle bascule GLOBALE (réglages d'affichage des
+  Drapeaux, désactivée par défaut) qui dessine un fin liseré sombre (0,5 dp) autour de l'indicateur de
+  couleur, pour mieux détacher l'ambre des favoris sur fond clair. S'applique à toutes les formes de
+  marqueur (barre / pastille / point) et à tous les onglets.
+
 ## `0.17.18` — `internal` (dev) — 2026-06-27
 
 > Vue Drapeaux (#603) : les onglets vides ont enfin un vrai état visuel (icône + message par onglet,

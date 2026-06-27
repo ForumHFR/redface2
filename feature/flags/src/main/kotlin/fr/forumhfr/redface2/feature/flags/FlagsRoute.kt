@@ -63,7 +63,6 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
@@ -94,6 +93,7 @@ import fr.forumhfr.redface2.core.ui.FlagItemDivider
 import fr.forumhfr.redface2.core.ui.FlagItemLongPress
 import fr.forumhfr.redface2.core.ui.FlagMetadata
 import fr.forumhfr.redface2.core.ui.ForumListRow
+import fr.forumhfr.redface2.core.ui.LocalFlagMarkerBorder
 import fr.forumhfr.redface2.core.ui.LocalForumRowTitleMaxLines
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
@@ -389,6 +389,9 @@ fun FlagsRoute(
                             // ForumListRow reads this local, so no threading through list composables.
                             LocalForumRowTitleMaxLines provides
                                 flagTitleMaxLines(flagsViewSettings.singleLineTitle),
+                            // #690 — marker outline (GLOBAL pref); the leaf FlagMarker reads this local,
+                            // same no-threading pattern as the single-line titles above.
+                            LocalFlagMarkerBorder provides flagsViewSettings.markerBorder,
                         ) {
                             AuthenticatedBody(
                             state = FlagsBodyState(
@@ -446,6 +449,7 @@ fun FlagsRoute(
                 onHideReadCategoriesChange = viewModel::setFlagsHideReadCategories,
                 onUnreadOnlyChange = viewModel::setFlagsUnreadOnly,
                 onMarkerStyleChange = viewModel::setFlagsMarkerStyle,
+                onMarkerBorderChange = viewModel::setFlagsMarkerBorder,
                 onSingleLineTitleChange = viewModel::setFlagsSingleLineTitle,
                 onCategoryBandStyleChange = viewModel::setFlagsCategoryBandStyle,
                 onDismiss = { showViewSettingsSheet = false },
@@ -647,6 +651,16 @@ private fun FlagsViewSettingsSheet(
                     onSelected = actions.onMarkerStyleChange,
                 )
             }
+
+            // #690 — GLOBAL « marker outline » toggle (not per-tab, like the marker shape). A thin
+            // 0.5 dp dark border so the amber FAVORITE reads cleanly on a light background.
+            ViewSettingsSwitchRow(
+                title = stringResource(R.string.flags_view_settings_marker_border_title),
+                description = stringResource(R.string.flags_view_settings_marker_border_description),
+                checked = settings.markerBorder,
+                enabled = true,
+                onCheckedChange = actions.onMarkerBorderChange,
+            )
 
             // #603 — GLOBAL « single-line topic titles » toggle (not per-tab, like the marker shape).
             ViewSettingsSwitchRow(
@@ -990,13 +1004,14 @@ private fun ColumnScope.AuthenticatedBody(
     ) {
         when (selectedTab) {
             // Super has no backend, no fetch, no pull-to-refresh (cf. its KDoc).
-            FlagTab.Super -> SuperPlaceholderBody()
+            FlagTab.Super -> SuperPlaceholderBody(funny = state.funnyEmptyState)
             // #6 — DT is a real list now: the user's MultiMP conversations, enriched best-effort
             // with the MPStorage reading positions.
             FlagTab.Dt -> DtListBody(
                 state = state.dtListState,
                 isRefreshing = state.dtIsRefreshing,
                 actions = actions,
+                funny = state.funnyEmptyState,
             )
             else -> FlagListBody(state = state, actions = actions, listState = listState)
         }
@@ -1664,13 +1679,14 @@ private fun FlagsEmptyState(
         if (funny) {
             AsyncImage(
                 model = FUNNY_EMPTY_SMILEY_URL,
-                // Decorative: the title/subtitle below carry the meaning (a11y). FilterQuality.None
-                // keeps the pixel-art smiley crisp (same stance as the smiley picker, #236). The
-                // app-wide ImageLoader registers AnimatedImageDecoder, so the .gif animates.
+                // Decorative: the title/subtitle below carry the meaning (a11y). The perso smiley is a
+                // ~47×50 px PHOTO (not pixel-art), so the previous FilterQuality.None upscaled it into
+                // visible blocks (#662 feedback, rejected). Use smooth (default) filtering and a modest
+                // size so it stays clean. The app-wide ImageLoader registers AnimatedImageDecoder, so
+                // the .gif animates.
                 contentDescription = null,
-                modifier = Modifier.size(72.dp),
+                modifier = Modifier.size(48.dp),
                 contentScale = ContentScale.Fit,
-                filterQuality = FilterQuality.None,
             )
         } else {
             RedfaceVectorIcon(
@@ -1727,6 +1743,30 @@ private fun emptyStateSubtitle(tab: FlagTab): Int? = when (tab) {
 // perso filename is percent-encoded so the request URL is well-formed.
 private const val FUNNY_EMPTY_SMILEY_URL =
     "https://forum-images.hardware.fr/images/perso/eric%20le%20looser.gif"
+
+/**
+ * #662 — [FlagsEmptyState] wrapped in a scrollable, centred container for the non-lazy bodies (the DT
+ * tab states). Unlike the flag tabs (a lazy `item` using `fillParentMaxSize`), these sit directly
+ * under a `PullToRefreshBox`, so the body itself must stay vertically scrollable to anchor the pull
+ * gesture (#229) — even when the empty content is shorter than the viewport.
+ */
+@Composable
+private fun ScrollableFlagsEmptyState(
+    iconRes: Int,
+    title: String,
+    subtitle: String?,
+    funny: Boolean,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .verticalScroll(rememberScrollState()),
+        contentAlignment = Alignment.Center,
+    ) {
+        FlagsEmptyState(iconRes = iconRes, title = title, subtitle = subtitle, funny = funny)
+    }
+}
 
 // #603 PR5 — hosts the long-press actions sheet; the null-check lives here (not in FlagsRoute) to keep
 // the route's cyclomatic complexity in budget. `flag == null` ⇒ nothing composed (sheet closed).
@@ -1812,24 +1852,16 @@ private fun RemovableFlagItem(
  * network call — just an explanatory message until the feature ships.
  */
 @Composable
-private fun SuperPlaceholderBody() {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.flags_super_placeholder_title),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            text = stringResource(R.string.flags_super_placeholder_body),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+private fun SuperPlaceholderBody(funny: Boolean) {
+    // #662 — same visual empty state as the flag tabs (icon/smiley + title + subtitle). No
+    // pull-to-refresh here (Super has no backend), so a plain centered, non-scrollable body is fine.
+    FlagsEmptyState(
+        iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_star,
+        title = stringResource(R.string.flags_super_placeholder_title),
+        subtitle = stringResource(R.string.flags_super_placeholder_body),
+        funny = funny,
+        modifier = Modifier.fillMaxSize(),
+    )
 }
 
 /**
@@ -1889,7 +1921,12 @@ private fun DtTabOpenEffect(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DtListBody(state: DtListUiState, isRefreshing: Boolean, actions: AuthenticatedActions) {
+private fun DtListBody(
+    state: DtListUiState,
+    isRefreshing: Boolean,
+    actions: AuthenticatedActions,
+    funny: Boolean,
+) {
     // #546 directive XaTriX — pull-to-refresh (swipe down) on the DT list, like the flag tabs. Wraps
     // the whole body (every branch) so the gesture has a target even on the listless states (#229).
     // #603 — « amorce seule » (XaTriX): pull cue while dragging, nothing during the refresh; the top
@@ -1904,7 +1941,7 @@ private fun DtListBody(state: DtListUiState, isRefreshing: Boolean, actions: Aut
         },
         modifier = Modifier.fillMaxSize(),
     ) {
-        DtListContent(state = state, actions = actions)
+        DtListContent(state = state, actions = actions, funny = funny)
     }
 }
 
@@ -1914,7 +1951,7 @@ private fun DtListBody(state: DtListUiState, isRefreshing: Boolean, actions: Aut
  * vertically scrollable so the surrounding `PullToRefreshBox` keeps a target (#229).
  */
 @Composable
-private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions) {
+private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions, funny: Boolean) {
     when (state) {
         DtListUiState.Loading -> Box(
             // #603 — central spinner retired (cf. FlagListBody); the top FlagsLoadingBar covers the DT
@@ -1924,11 +1961,24 @@ private fun DtListContent(state: DtListUiState, actions: AuthenticatedActions) {
                 .verticalScroll(rememberScrollState()),
         )
 
-        DtListUiState.Empty -> DtMessageBody(text = stringResource(R.string.flags_dt_empty))
+        // #662 — visual empty state (icon/smiley + message) for the DT tab, like the flag tabs.
+        DtListUiState.Empty -> ScrollableFlagsEmptyState(
+            iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_mail,
+            title = stringResource(R.string.flags_dt_empty_title),
+            subtitle = stringResource(R.string.flags_dt_empty_subtitle),
+            funny = funny,
+        )
 
         // #546 — the union is non-empty but « non-lus uniquement » hid every row: a dedicated message
         // (not the « aucune conversation » empty copy). Re-tapping the DT tab reveals « +lus ».
-        DtListUiState.NoUnread -> DtNoUnreadBody()
+        DtListUiState.NoUnread -> ScrollableFlagsEmptyState(
+            iconRes = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_mail,
+            title = stringResource(R.string.flags_dt_no_unread),
+            // #662 — restore the page-1 scan caveat the old footer (flags_dt_scan_note) carried in this
+            // state; the « +lus » discoverability stays deferred to #661.
+            subtitle = stringResource(R.string.flags_dt_no_unread_subtitle),
+            funny = funny,
+        )
 
         is DtListUiState.Error -> DtErrorBody(cause = state.cause, actions = actions)
 
@@ -2007,56 +2057,6 @@ internal fun dtRowWasUnread(item: DtListItem): Boolean = when (item) {
     is DtListItem.StorageOnly -> false
 }
 
-/**
- * #546 directive XaTriX — body for the « filtered to no unread » state ([DtListUiState.NoUnread]):
- * the union holds conversations but none is unread. Shows a discreet « aucune conversation non lue »
- * message and keeps the scan-note footer visible (the user can re-tap the DT tab for « +lus »).
- * Scrollable so the surrounding `PullToRefreshBox` keeps a swipe target (#229).
- */
-@Composable
-private fun DtNoUnreadBody() {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 24.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text(
-            text = stringResource(R.string.flags_dt_no_unread),
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = stringResource(R.string.flags_dt_scan_note),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-/**
- * Single-line message body (DT empty state), sharing the surface background. Vertically scrollable
- * so the surrounding [PullToRefreshBox] keeps a swipe target on this listless state (#229) — a
- * non-scrollable body would give the pull-to-refresh gesture nothing to anchor on.
- */
-@Composable
-private fun DtMessageBody(text: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface)
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
 
 /**
  * Error body for the DT list, mirroring the flag-list failure branch: a session-expired cause
@@ -2254,6 +2254,7 @@ private data class FlagsViewSettingsActions(
     val onHideReadCategoriesChange: (Boolean) -> Unit,
     val onUnreadOnlyChange: (Boolean) -> Unit,
     val onMarkerStyleChange: (MarkerStyle) -> Unit,
+    val onMarkerBorderChange: (Boolean) -> Unit,
     val onSingleLineTitleChange: (Boolean) -> Unit,
     val onCategoryBandStyleChange: (CategoryBandStyle) -> Unit,
     val onDismiss: () -> Unit,

@@ -1,5 +1,6 @@
-Redface 2 v0.17.18 — dev.
+Redface 2 v0.17.19 — dev.
 
 Vue Drapeaux :
-- Les onglets vides ont un vrai état visuel (icône + message par onglet), avec une option « états vides humoristiques » qui affiche un smiley perso HFR.
-- Les drapeaux cyan des sujets épinglés des catégories sans sous-catégorie (ex. « IA ») réapparaissent.
+- Les onglets DT et Super Favoris ont aussi un état vide visuel (icône/smiley + message).
+- Le smiley de l'option « états vides humoristiques » n'est plus pixelisé.
+- Nouvelle option « Contour du marqueur » : un fin liseré sombre autour de l'indicateur de couleur, pour mieux détacher l'ambre des favoris sur fond clair.

@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.ui
 
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.padding
@@ -16,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
@@ -29,6 +31,12 @@ private const val READ_ALPHA = 0.35f
 
 /** Background alpha of the tonal PASTILLE behind the category glyph. */
 private const val PASTILLE_BG_ALPHA = 0.18f
+
+/** #690 — width of the optional dark outline drawn around the marker ([LocalFlagMarkerBorder]). */
+private val MARKER_BORDER_WIDTH = 0.5.dp
+
+/** #690 — opacity of the marker outline; dimmed by [READ_ALPHA] on read rows to match the fill. */
+private const val MARKER_BORDER_ALPHA = 0.5f
 
 /**
  * The left-hand marker of a Drapeaux row (#603, ADR-017). Encodes the flag color (cyan / red / favori,
@@ -60,6 +68,13 @@ fun FlagMarker(
     // VM mapper) so the rule can't silently diverge per layer.
     val base = FlagPalette.colorFor(effectiveFlagColor(type, isFavorite))
     val color = if (hasUnread) base else base.copy(alpha = READ_ALPHA)
+    // #690 — optional thin dark outline (GLOBAL pref read from the CompositionLocal, no threading). The
+    // border is dimmed on read rows so it tracks the desaturated fill instead of drawing a crisp ring
+    // around a faded marker.
+    val drawBorder = LocalFlagMarkerBorder.current
+    val borderColor = Color.Black.copy(
+        alpha = if (hasUnread) MARKER_BORDER_ALPHA else MARKER_BORDER_ALPHA * READ_ALPHA,
+    )
     when (style) {
         MarkerStyle.STRIPE -> Box(
             // #603 — the bar spans the row's content height (fillMaxHeight within ForumListRow's
@@ -68,27 +83,38 @@ fun FlagMarker(
                 .fillMaxHeight()
                 .width(4.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(color),
+                .background(color)
+                .markerOutline(drawBorder, borderColor, RoundedCornerShape(2.dp)),
         )
 
         MarkerStyle.DOT -> Box(
             modifier = modifier
                 .size(12.dp)
                 .clip(CircleShape)
-                .background(color),
+                .background(color)
+                .markerOutline(drawBorder, borderColor, CircleShape),
         )
 
         MarkerStyle.PASTILLE -> Box(
             modifier = modifier
                 .size(30.dp)
                 .clip(CircleShape)
-                .background(color.copy(alpha = if (hasUnread) PASTILLE_BG_ALPHA else PASTILLE_BG_ALPHA / 2)),
+                .background(color.copy(alpha = if (hasUnread) PASTILLE_BG_ALPHA else PASTILLE_BG_ALPHA / 2))
+                .markerOutline(drawBorder, borderColor, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             RedfaceVectorIcon(resId = categoryIconRes, tint = color, size = 18.dp)
         }
     }
 }
+
+/**
+ * #690 — applies the optional [MARKER_BORDER_WIDTH] outline ([color]) clipped to [shape], or returns the
+ * receiver unchanged when [enabled] is false. Kept as a private extension so each marker shape stays a
+ * single readable modifier chain.
+ */
+private fun Modifier.markerOutline(enabled: Boolean, color: Color, shape: Shape): Modifier =
+    if (enabled) border(MARKER_BORDER_WIDTH, color, shape) else this
 
 /**
  * Trailing « pages à lire » pill of a Drapeaux row (#603) — shown only when the topic is unread and
