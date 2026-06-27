@@ -340,7 +340,7 @@ fun FlagsRoute(
                     .statusBarsPadding()
                     .navigationBarsPadding(),
             ) {
-                FlagsSearchAppBar(
+                FlagsTopBar(
                     state = FlagsAppBarState(
                         currentTabColor = flagTabColor(selectedTab),
                         tabs = flagAppBarTabs(
@@ -813,7 +813,7 @@ private fun flagAppBarTabs(
     emptyList()
 }
 
-// #603 PR2 — the entries of the app-bar tab picker (FlagsSearchAppBar). Labels carry the « +lus »
+// #603 PR2 — the entries of the app-bar tab picker (FlagsTopBar). Labels carry the « +lus »
 // suffix exactly like the retired tab row; order MUST match the swipe `tabs` list in AuthenticatedBody.
 @Composable
 private fun flagTabEntries(
@@ -963,7 +963,7 @@ private fun ColumnScope.AuthenticatedBody(
     listStates: FlagTabListStates,
 ) {
     val selectedTab = state.selectedTab
-    // #603 PR2 — the text PrimaryTabRow is gone: the app-bar flag picker (FlagsSearchAppBar) now
+    // #603 PR2 — the text PrimaryTabRow is gone: the app-bar flag picker (FlagsTopBar) now
     // both indicates the current tab and switches it, and the « +lus » re-tap survives there
     // (re-selecting Cyan/DT routes through the same onSelectTab). This list is kept ONLY to map the
     // committed horizontal-swipe index back to a FlagTab (placeholders included, so a swipe can
