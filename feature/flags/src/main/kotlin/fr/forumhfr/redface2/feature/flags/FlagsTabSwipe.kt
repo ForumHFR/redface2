@@ -1,8 +1,14 @@
 package fr.forumhfr.redface2.feature.flags
 
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
@@ -15,6 +21,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.pager.FLING_VELOCITY_THRESHOLD
 import fr.forumhfr.redface2.core.ui.pager.MIN_COMMIT_DISTANCE
@@ -34,14 +41,19 @@ import kotlinx.coroutines.launch
  * swiping the content left commits to the tab on the right, exactly like turning to the next
  * page. The tab row itself is NOT part of the gesture surface — it already has taps.
  *
- * In-place mechanics (the composition survives the tab change). On commit the offset is snapped to
- * rest and the new tab's content swaps in centred — #660: springing back from the released drag
- * offset made the incoming tab slide in from the wrong side. Only a sub-threshold drag springs back:
+ * In-place mechanics (the composition survives the tab change). On commit the new tab's content is
+ * brought in by the body's Shared Axis X [androidx.compose.animation.AnimatedContent] (see
+ * [flagsTabSlide]) — it enters from the direction of travel, the old one leaves the opposite way —
+ * while the residual drag offset always springs back to rest. #660 history: the first version sprang
+ * the offset back WITHOUT that transition, so the incoming tab rode the released offset and slid in
+ * from the wrong side; the interim fix snapped straight to rest (an abrupt « pop », styx42). With the
+ * transition owning the entry side, springing the offset back is both correct and smooth.
  *
- * - **Commit → [FlagsTabSwipeHandlers.onSelectTab]** with the target index; the caller maps it
- *   back to a `FlagTab` (the DT tab is conditional, so the index↔tab mapping lives where the tab
- *   list is built). The ViewModel's re-tap toggle (Cyan « +lus ») is unreachable by construction:
- *   [swipeTargetIndex] never returns the current index (≥2 tabs).
+ * - **Commit → [FlagsTabSwipeHandlers.onSelectTab]** with the target index AND the swipe direction;
+ *   the caller maps the index back to a `FlagTab` (the DT tab is conditional, so the index↔tab
+ *   mapping lives where the tab list is built) and feeds the direction to the transition via
+ *   [flagsTabSlideForward]. The ViewModel's re-tap toggle (Cyan « +lus ») is unreachable by
+ *   construction: [swipeTargetIndex] never returns the current index (≥2 tabs).
  * - [currentIndex] and [tabCount] are lambdas: the selected tab changes UNDER this live
  *   composition (gesture keyed on `Unit`, never re-keyed), both must be read fresh per frame.
  * - No re-entrance latch and no enabled-gate: a tab switch is local state + cached list, there
@@ -101,7 +113,6 @@ internal fun Modifier.flagsTabSwipe(
                     armed = nowArmed
                     change.consume()
                 }
-                var committed = false
                 if (completed) {
                     val velocityX = velocityTracker.calculateVelocity().x
                     val forward =
@@ -109,24 +120,17 @@ internal fun Modifier.flagsTabSwipe(
                     val target = forward?.let { swipeTargetIndex(currentIndex(), tabCount(), it) }
                     if (forward != null && target != null) {
                         handlers.haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                        handlers.onSelectTab(target)
-                        committed = true
+                        handlers.onSelectTab(target, forward)
                     }
                 }
-                if (committed) {
-                    // #660 — on commit, snap straight to rest: the new tab swaps in centred. The old
-                    // code sprang `dragOffset` back to 0 from the RELEASED offset, but that offset was
-                    // the OUTGOING tab's displacement — so the INCOMING tab rode it and slid in from
-                    // the wrong side (swipe left → next tab entered from the left). The drag-follow
-                    // already conveyed the direction; the swap itself needs no slide.
-                    dragOffset.floatValue = 0f
-                } else {
-                    // Sub-threshold drag (no commit): spring the current tab back so the damped
-                    // over-pull settles to rest.
-                    releaseJob = animationScope.launch {
-                        release.snapTo(dragOffset.floatValue)
-                        release.animateTo(0f, TAB_SPRING_BACK) { dragOffset.floatValue = value }
-                    }
+                // #660 — always settle the drag-follow back to rest with a spring, committed or not.
+                // The committed tab's entrance is owned by the Shared Axis X AnimatedContent transition
+                // (it brings the new tab in from the direction of travel), so this residual offset only
+                // damps out — it no longer dictates the entry side. A sub-threshold drag settles the
+                // same way (the damped over-pull returns to rest).
+                releaseJob = animationScope.launch {
+                    release.snapTo(dragOffset.floatValue)
+                    release.animateTo(0f, TAB_SPRING_BACK) { dragOffset.floatValue = value }
                 }
             }
         }
@@ -144,11 +148,13 @@ internal fun Modifier.flagsTabSwipe(
 /**
  * Non-per-frame inputs of [flagsTabSwipe], bundled (same shape as `ThreadSwipeHandlers`) so the
  * gesture's parameter list stays within the project's limit. [onSelectTab] receives the target
- * **tab index** in the currently displayed tab list.
+ * **tab index** in the currently displayed tab list AND the swipe direction (`forward = true` when
+ * swiping the content left, toward the next tab) — the latter drives the Shared Axis slide side via
+ * [flagsTabSlideForward], so a cyclic wrap (#663) still enters from the correct edge.
  */
 internal class FlagsTabSwipeHandlers(
     val haptics: HapticFeedback,
-    val onSelectTab: (Int) -> Unit,
+    val onSelectTab: (index: Int, forward: Boolean) -> Unit,
 )
 
 /**
@@ -178,9 +184,41 @@ private fun tabFollowOffset(
     return swipeFollowOffset(totalDx, commitDistancePx, hasTarget)
 }
 
+/**
+ * #660 — direction of the Shared Axis X tab transition (`true` = the new tab enters from the right,
+ * the « forward » side). A swipe carries an authoritative [swipeForward] (it knows the gesture
+ * direction, so the cyclic wrap last↔first lands on the correct side — the very edge case the
+ * original bug got wrong). A tab tap has no swipe direction (`swipeForward = null`); it falls back to
+ * the tabs' visual order, sliding forward when moving to a later tab.
+ */
+internal fun flagsTabSlideForward(fromIndex: Int, toIndex: Int, swipeForward: Boolean?): Boolean =
+    swipeForward ?: (toIndex >= fromIndex)
+
+/**
+ * #660 — the committed tab transition: Material « Shared Axis X » (the prototype's chosen variant,
+ * styx42). The incoming tab slides in from the [forward] side while the outgoing one slides out the
+ * opposite way, no fade (the panes never overlap), with the prototype's emphasized-decelerate easing.
+ * Pure builder so the body's `AnimatedContent` stays declarative; the parent must `clipToBounds()` so
+ * the panes don't draw past the viewport mid-slide.
+ */
+internal fun flagsTabSlide(forward: Boolean): ContentTransform {
+    val spec = tween<IntOffset>(
+        durationMillis = TAB_SLIDE_DURATION_MS,
+        easing = TAB_SLIDE_EASING,
+    )
+    val direction = if (forward) 1 else -1
+    return slideInHorizontally(spec) { fullWidth -> direction * fullWidth } togetherWith
+        slideOutHorizontally(spec) { fullWidth -> -direction * fullWidth }
+}
+
 private const val TAB_COMMIT_SHADOW_ELEVATION_DP = 8f
 
 private val TAB_SPRING_BACK = spring<Float>(
     dampingRatio = Spring.DampingRatioNoBouncy,
     stiffness = Spring.StiffnessMedium,
 )
+
+// #660 — the prototype's chosen « slide au commit » timing: emphasized-decelerate
+// cubic-bezier(.2, .8, .2, 1) over 280 ms (matches `flags-603-swipe-anim`).
+private const val TAB_SLIDE_DURATION_MS = 280
+private val TAB_SLIDE_EASING = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
