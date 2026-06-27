@@ -69,6 +69,12 @@ internal object RestFlagMappers {
      */
     private const val FLAG_OWNTOPIC_FAVORITE = 3
 
+    // #251 — `flag_owntopic` routing for the STICKY supplement read off `topics/last` (mirrors the
+    // legacy `owntopic` filter, same mapping as RestForumMappers.toFlagType): 1 = participated (CYAN),
+    // 2 = read-only (RED), 3 = favorite (FAVORITE).
+    private const val FLAG_OWNTOPIC_PARTICIPATED = 1
+    private const val FLAG_OWNTOPIC_READ = 2
+
     private val CAT_FROM_HREF = Regex("/categories/(\\d+)/")
     private val SUBCAT_FROM_HREF = Regex("/categories/\\d+/subcategories/(\\d+)/")
 
@@ -78,6 +84,33 @@ internal object RestFlagMappers {
         fallbackCat: Int? = null,
     ): List<Flag> = envelope.resource.resources.mapNotNull { dto ->
         toFlag(dto, type, fallbackCat)
+    }
+
+    /**
+     * #251 — supplement for flagged STICKY topics that the per-cat REST flag buckets DROP (observed
+     * in categories with no subcategory, e.g. cat 32 « IA » : the sticky « Règles » topic carries a
+     * cyan flag yet is absent from `topics/participated/`, present in `topics/last/`). Reads a
+     * `categories/{cat}/topics/last/` envelope and keeps ONLY the sticky rows whose own
+     * `flag_owntopic` routes to [type], mapped with [type] as the bucket.
+     *
+     * Unlike the bucket path (where `flag_owntopic` is the « strongest flag », NOT bucket membership —
+     * #384), on the listing endpoint `flag_owntopic` IS the routing signal: it reports the topic's own
+     * flag. A sticky participated-AND-favorited topic (`flag_owntopic = 3`) therefore surfaces only in
+     * FAVORITE — an accepted edge of an edge (REST exposes no richer per-topic flag set).
+     */
+    fun toStickyFlags(
+        envelope: RestListEnvelope<RestTopic>,
+        type: FlagType,
+        fallbackCat: Int,
+    ): List<Flag> = envelope.resource.resources
+        .filter { it.isSticky && flagOwntopicToType(it.flagOwntopic) == type }
+        .mapNotNull { toFlag(it, type, fallbackCat) }
+
+    private fun flagOwntopicToType(rawFlagOwntopic: Int?): FlagType? = when (rawFlagOwntopic) {
+        FLAG_OWNTOPIC_PARTICIPATED -> FlagType.CYAN
+        FLAG_OWNTOPIC_READ -> FlagType.RED
+        FLAG_OWNTOPIC_FAVORITE -> FlagType.FAVORITE
+        else -> null
     }
 
     private fun toFlag(

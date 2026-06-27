@@ -1,0 +1,17 @@
+Source: forum.hardware.fr — REST API (authentifié)
+Captured endpoint: GET /webservices/rest_api.php?uri=forums/hardwarefr/categories/32/topics/last/&page=1&results_per_page=50
+Captured: 2026-06-27 avec cookies md_user/md_passs/md_id (compte XaTriX, session LECTURE SEULE)
+Type: listing « derniers sujets » de la catégorie 32 « IA » (slug /hfr/ia/), authentifié.
+
+Pourquoi cette fixture (#251) :
+- La catégorie 32 « IA » n'a AUCUNE sous-catégorie (number_of_subcategories=0).
+- Les endpoints de bucket de drapeaux REST (categories/32/topics/{participated,read,favorites}/)
+  EXCLUENT les topics STICKY flaggés : le sticky id=1 « [Règles de la catégorie IA] » porte un
+  drapeau cyan (flag_owntopic=1) non-lu (is_read=false) mais est ABSENT du bucket participated.
+- Il est en revanche PRÉSENT ici, dans topics/last, avec is_sticky=true + flag_owntopic=1 + is_read=false.
+- C'est la donnée qui prouve le bug #251 et alimente le supplément REST-only
+  DefaultFlagRepository.fetchStickyFlagSupplement (route flag_owntopic 1→CYAN/2→RED/3→FAVORITE).
+
+Reformaté en indent=4 / ensure_ascii (comme les autres fixtures REST) ; données non modifiées.
+Aucune PII : pas d'email, pas de hash_check, pas de cookie/session token dans le payload ; is_read
+et flag_owntopic sont des champs per-user sans identité ; les liens d'auteur portent des userId publics.

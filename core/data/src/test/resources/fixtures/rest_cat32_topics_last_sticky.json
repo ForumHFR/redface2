@@ -1,0 +1,1166 @@
+{
+    "resource": {
+        "page": 1,
+        "results_count": 25,
+        "results_per_page": 50,
+        "resources": [
+            {
+                "id": 1,
+                "title": "[R\u00e8gles de la cat\u00e9gorie IA]",
+                "last_post_date": "2026-06-27 16:08",
+                "is_closed": false,
+                "is_sticky": true,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/1/posts/?page=5&results_per_page=40",
+                        "count": 172
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Implosion du Sord",
+                        "tns3": "mesdiscussions-1110115.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "TotalRecall"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/1/",
+                "is_read": false,
+                "flag_owntopic": 1,
+                "last_position": 171,
+                "last_post_read_id": 40563
+            },
+            {
+                "id": 19,
+                "title": "Le topic des agents IA",
+                "last_post_date": "2026-06-27 18:19",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/19/posts/?page=2&results_per_page=40",
+                        "count": 524
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "MeMaster",
+                        "tns3": "mesdiscussions-241619.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "LibreArbitre",
+                        "tns3": "mesdiscussions-259393.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/19/",
+                "is_read": false,
+                "flag_owntopic": 0,
+                "last_position": 72,
+                "last_post_read_id": 37665
+            },
+            {
+                "id": 27,
+                "title": "Beta test priv\u00e9 tamag0 (team d'agents \u00e9volutifs avec m\u00e9moire)",
+                "last_post_date": "2026-06-27 16:31",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/27/posts/?page=1&results_per_page=40",
+                        "count": 23
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "joce"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "joce"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/27/",
+                "is_read": false,
+                "flag_owntopic": 0,
+                "last_position": 6,
+                "last_post_read_id": 39813
+            },
+            {
+                "id": 31,
+                "title": "meilleure IA pour g\u00e9n\u00e9rer des mod\u00e8les 3D au format STL",
+                "last_post_date": "2026-06-27 16:25",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/31/posts/?page=1&results_per_page=40",
+                        "count": 1
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "calagan57",
+                        "tns3": "mesdiscussions-101824.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "calagan57",
+                        "tns3": "mesdiscussions-101824.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/31/",
+                "is_read": false,
+                "last_position": 0,
+                "last_post_read_id": 0
+            },
+            {
+                "id": 3,
+                "title": "[Topic unique] IA g\u00e9n\u00e9rative de texte, ChatGPT, Copilot, Gemini & co",
+                "last_post_date": "2026-06-27 16:16",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/3/posts/?page=422&results_per_page=40",
+                        "count": 16842
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "bulldozer_fusion",
+                        "tns3": "mesdiscussions-802171.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "fils_de_la_lumiere",
+                        "tns3": "mesdiscussions-16665.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/3/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 16842,
+                "last_post_read_id": 40565
+            },
+            {
+                "id": 4,
+                "title": "Infra IA : aide au choix et troubleshot de LLM locaux",
+                "last_post_date": "2026-06-27 12:43",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/4/posts/?page=21&results_per_page=40",
+                        "count": 801
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "MeMaster",
+                        "tns3": "mesdiscussions-241619.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "neo world",
+                        "tns3": "mesdiscussions-412752.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/4/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 801,
+                "last_post_read_id": 40555
+            },
+            {
+                "id": 20,
+                "title": "[Topic unique] D\u00e9veloppement via IA",
+                "last_post_date": "2026-06-27 11:52",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/20/posts/?page=44&results_per_page=40",
+                        "count": 1741
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Nr13"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "LibreArbitre",
+                        "tns3": "mesdiscussions-259393.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/20/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 1741,
+                "last_post_read_id": 40551
+            },
+            {
+                "id": 10,
+                "title": "[Topic unique] Veille IA - Actu, lectures, podcasts & documentaires",
+                "last_post_date": "2026-06-27 09:39",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/10/posts/?page=1&results_per_page=40",
+                        "count": 34
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Quich",
+                        "tns3": "mesdiscussions-377914.png"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "speedboyz30",
+                        "tns3": "mesdiscussions-568952.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/10/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 34,
+                "last_post_read_id": 40539
+            },
+            {
+                "id": 16,
+                "title": "Claude Code & Codex: les kings de la CLI agentic",
+                "last_post_date": "2026-06-27 09:39",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/16/posts/?page=2&results_per_page=40",
+                        "count": 43
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Quich",
+                        "tns3": "mesdiscussions-377914.png"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "XaTriX",
+                        "tns3": "mesdiscussions-54596.png"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/16/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 43,
+                "last_post_read_id": 40538
+            },
+            {
+                "id": 28,
+                "title": "Communaut\u00e9 de l'IA",
+                "last_post_date": "2026-06-27 08:38",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/28/posts/?page=2&results_per_page=40",
+                        "count": 60
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "joce"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "XaTriX",
+                        "tns3": "mesdiscussions-54596.png"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/28/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 60,
+                "last_post_read_id": 40534
+            },
+            {
+                "id": 8,
+                "title": "Les images/vid\u00e9os g\u00e9n\u00e9r\u00e9es en IA: Midjourney Dall-e StableDiffusion...",
+                "last_post_date": "2026-06-27 06:14",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/8/posts/?page=224&results_per_page=40",
+                        "count": 8953
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "crepator4",
+                        "tns3": "mesdiscussions-10619.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "benj63",
+                        "tns3": "mesdiscussions-61411.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/8/",
+                "is_read": false,
+                "flag_owntopic": 0,
+                "last_position": 8932,
+                "last_post_read_id": 39676
+            },
+            {
+                "id": 9,
+                "title": "Intelligence artificielle",
+                "last_post_date": "2026-06-26 23:30",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/9/posts/?page=86&results_per_page=40",
+                        "count": 3407
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "joce"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Sangel",
+                        "tns3": "mesdiscussions-1051448.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/9/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 3407,
+                "last_post_read_id": 40517
+            },
+            {
+                "id": 14,
+                "title": "OpenClaw : L'assistant IA personnel et open-source (et Hermes Agent)",
+                "last_post_date": "2026-06-26 16:34",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/14/posts/?page=41&results_per_page=40",
+                        "count": 1610
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "the_fennec",
+                        "tns3": "mesdiscussions-87715.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "LibreArbitre",
+                        "tns3": "mesdiscussions-259393.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/14/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 1610,
+                "last_post_read_id": 40454
+            },
+            {
+                "id": 24,
+                "title": "Les m\u00e9tiers disparus du fait de l'IA",
+                "last_post_date": "2026-06-25 07:38",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/24/posts/?page=1&results_per_page=40",
+                        "count": 8
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Klins",
+                        "tns3": "mesdiscussions-657240.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "klins",
+                        "tns3": "mesdiscussions-657240.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/24/",
+                "is_read": false,
+                "last_position": 0,
+                "last_post_read_id": 0
+            },
+            {
+                "id": 7,
+                "title": "[Topic Unique] Claude by Anthropic",
+                "last_post_date": "2026-06-24 09:29",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/7/posts/?page=9&results_per_page=40",
+                        "count": 355
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "jix",
+                        "tns3": "mesdiscussions-24190.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Rasthor",
+                        "tns3": "mesdiscussions-64975.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/7/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 355,
+                "last_post_read_id": 40259
+            },
+            {
+                "id": 2,
+                "title": "s\u00e9curit\u00e9 de l'IA / agentique et des Devs en roue libre",
+                "last_post_date": "2026-06-23 12:19",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/2/posts/?page=3&results_per_page=40",
+                        "count": 89
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "bulldozer_fusion",
+                        "tns3": "mesdiscussions-802171.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "neo world",
+                        "tns3": "mesdiscussions-412752.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/2/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 89,
+                "last_post_read_id": 40175
+            },
+            {
+                "id": 29,
+                "title": "La location de GPU pour IA - le mining 2.0",
+                "last_post_date": "2026-06-22 20:19",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/29/posts/?page=1&results_per_page=40",
+                        "count": 5
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Olivie",
+                        "tns3": "mesdiscussions-563008.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "croustx",
+                        "tns3": "mesdiscussions-620576.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/29/",
+                "is_read": false,
+                "last_position": 0,
+                "last_post_read_id": 0
+            },
+            {
+                "id": 12,
+                "title": "Les anti IA",
+                "last_post_date": "2026-06-20 10:34",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/12/posts/?page=3&results_per_page=40",
+                        "count": 108
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "HumanRAGE",
+                        "tns3": "mesdiscussions-21931.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "XaTriX",
+                        "tns3": "mesdiscussions-54596.png"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/12/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 108,
+                "last_post_read_id": 39900
+            },
+            {
+                "id": 21,
+                "title": "HFR AI Factory",
+                "last_post_date": "2026-06-18 09:43",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/21/posts/?page=5&results_per_page=40",
+                        "count": 169
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "bulldozer_fusion",
+                        "tns3": "mesdiscussions-802171.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "LibreArbitre",
+                        "tns3": "mesdiscussions-259393.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/21/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 169,
+                "last_post_read_id": 39686
+            },
+            {
+                "id": 13,
+                "title": "AI et vie courante (bricolage , recettes de cuisine, aide a l achat )",
+                "last_post_date": "2026-06-15 11:17",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/13/posts/?page=1&results_per_page=40",
+                        "count": 17
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "raph0ux",
+                        "tns3": "mesdiscussions-645968.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "dante2002",
+                        "tns3": "mesdiscussions-79515.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/13/",
+                "is_read": false,
+                "last_position": 0,
+                "last_post_read_id": 0
+            },
+            {
+                "id": 26,
+                "title": "La communaut\u00e9 de l'IA",
+                "last_post_date": "2026-06-13 22:12",
+                "is_closed": true,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/26/posts/?page=1&results_per_page=40",
+                        "count": 10
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "TotalRecall"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "XaTriX",
+                        "tns3": "mesdiscussions-54596.png"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/26/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 10,
+                "last_post_read_id": 39315
+            },
+            {
+                "id": 23,
+                "title": "liste des agr\u00e9gateurs d'AI et apps d'IA Local:",
+                "last_post_date": "2026-06-10 15:18",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/23/posts/?page=1&results_per_page=40",
+                        "count": 3
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "lapin"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "lapin"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/23/",
+                "is_read": false,
+                "last_position": 0,
+                "last_post_read_id": 0
+            },
+            {
+                "id": 11,
+                "title": "L'IA et ses implications soci\u00e9tales : droit d'auteur, \u00e9thique, d\u00e9rives",
+                "last_post_date": "2026-06-09 10:00",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/11/posts/?page=1&results_per_page=40",
+                        "count": 18
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "LibreArbitre",
+                        "tns3": "mesdiscussions-259393.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Dintr-un lemn",
+                        "tns3": "mesdiscussions-1151811.png"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/11/",
+                "is_read": false,
+                "last_position": 0,
+                "last_post_read_id": 0
+            },
+            {
+                "id": 22,
+                "title": "Quel(s) mod\u00e8le(s) vous privil\u00e9giez sur Perplexity Pro ?",
+                "last_post_date": "2026-06-06 19:46",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/22/posts/?page=1&results_per_page=40",
+                        "count": 1
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Le Matou",
+                        "tns3": "mesdiscussions-140086.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Le Matou",
+                        "tns3": "mesdiscussions-140086.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/22/",
+                "is_read": false,
+                "last_position": 0,
+                "last_post_read_id": 0
+            },
+            {
+                "id": 15,
+                "title": "[Topic Unique] Machine Learning & Data Science",
+                "last_post_date": "2026-05-31 09:03",
+                "is_closed": false,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/15/posts/?page=1&results_per_page=40",
+                        "count": 5487
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "fazero",
+                        "tns3": "mesdiscussions-879766.png"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Rontgen",
+                        "tns3": "mesdiscussions-696818.jpg"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/15/",
+                "is_read": false,
+                "flag_owntopic": 0,
+                "last_position": 38,
+                "last_post_read_id": 30023
+            },
+            {
+                "id": 6,
+                "title": "blabla\u00a0@ ia",
+                "last_post_date": "2026-05-26 15:00",
+                "is_closed": true,
+                "is_sticky": false,
+                "links": {
+                    "forum": {
+                        "linked_type": "forum",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+                    },
+                    "category": {
+                        "linked_type": "forum_category",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/"
+                    },
+                    "posts": {
+                        "linked_type": "list",
+                        "type": "link",
+                        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/6/posts/?page=1&results_per_page=40",
+                        "count": 8
+                    },
+                    "last_author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "Wolfman",
+                        "tns3": "mesdiscussions-54374.jpg"
+                    },
+                    "author": {
+                        "linked_type": "user",
+                        "type": "link",
+                        "href": null,
+                        "title": "XaTriX",
+                        "tns3": "mesdiscussions-54596.png"
+                    }
+                },
+                "type": "topic",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/6/",
+                "is_read": true,
+                "flag_owntopic": 1,
+                "last_position": 8,
+                "last_post_read_id": 16233
+            }
+        ],
+        "list_type": "topic",
+        "type": "list",
+        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/32/topics/last/?page=1&results_per_page=50"
+    }
+}
